@@ -79,16 +79,19 @@ Current `main` already admits these benchmark-relevant surfaces:
   - `random_next_i32(lo: i32, hi: i32) -> i32` — deterministic bounded value in `[lo, hi)`
   - xorshift64 (period 2⁶⁴−1); range computed through `i64` to handle the full `i32` span
   - SemCode format: `SEMCOD15`, capability `CAP_PRNG = 1 << 16`
+- same-family `i32` relational operators: `>`, `<`, `>=`, `<=` (pre-program, confirmed PR-B1 audit)
+- same-family `i32` arithmetic: `+`, `-`, `*`, unary `-` (pre-program, confirmed PR-B1 audit)
+- `let mut` mutable locals (pre-program, confirmed PR-B1 audit)
+- plain reassignment (pre-program, confirmed PR-B1 audit)
+- statement `while` (pre-program, confirmed PR-B1 audit)
+- statement `loop`, bare `break`, `continue` (pre-program, confirmed PR-B1 audit)
+  - bare `break`/`continue` outside a loop correctly rejected with E0201
 
 Current `main` still fails this benchmark family at the following points:
 
-- public integer arithmetic as a normal `i32` / `u32` application surface
-- `let mut`
-- plain reassignment
-- statement `while`
-- statement `loop` with bare `break;` and `continue`
-- text concatenation / minimal formatting for traces
-- a narrow admitted stdout experiment surface
+- `i32` division `/` and modulo `%` (remaining arithmetic gap; PR-B2)
+- text concatenation / minimal formatting for traces (PR-E1)
+- a narrow admitted stdout experiment surface (PR-E2)
 
 ## Program Rules
 
@@ -135,27 +138,32 @@ Current `main` still fails this benchmark family at the following points:
 
 ### B — Imperative Core Completion
 
-- `PR-B1` [required]
-  Title: `frontend/types: admit same-family i32 relational operators`
+- `PR-B1` [landed]
+  Title: `docs/tests: audit same-family i32 relational baseline`
+  Landed:
+  - confirms same-family `i32` relational operators: `>`, `<`, `>=`, `<=`
+  - adds `positive_i32_arithmetic.sm` for already-admitted `+`, `-`, `*`, unary `-`
+  - adds `negative_i32_div.sm` to freeze the remaining division gap
   Goal:
-  - allow ordinary grid/comparison logic in application programs
+  - remove stale application-completeness drift around already-admitted imperative surfaces
   Scope:
-  - admit `>`, `<`, `>=`, `<=` for plain same-family `i32` operands only
-  - do not widen `u32`, `f64`, `fx`, or measured numeric relationals in this PR
-  Files:
-  - frontend/type/spec/tests layers as required
+  - truth-sync and fixture coverage only
+  - no parser/runtime/VM changes
   Gate:
-  - `cargo test -q`
-  - `cargo test -q --test public_api_contracts`
-  - targeted operator tests green
+  - `cargo test -q --test snake_benchmark_gap_matrix`
+  - `git diff --check`
   - CI green
 
 - `PR-B2` [required]
-  Title: `frontend/runtime: complete public integer arithmetic surface`
+  Title: `frontend/runtime: admit remaining i32 division and modulo`
   Goal:
-  - make `i32` / `u32` arithmetic usable for ordinary application state updates
+  - complete the remaining same-family `i32` arithmetic gap needed by application programs
   Scope:
-  - explicit same-family integer arithmetic only
+  - `i32 / i32`
+  - `i32 % i32`
+  - divide-by-zero runtime contract
+  - modulo-by-zero runtime contract
+  - do not widen `u32`, `f64`, `fx`, or measured numeric arithmetic in this PR
   Files:
   - frontend/lowering/VM/spec/tests layers as required
   Gate:
@@ -164,52 +172,20 @@ Current `main` still fails this benchmark family at the following points:
   - targeted integer-arithmetic tests green
   - CI green
 
-- `PR-B3` [required]
+- `PR-B3` [pre-program landed]
   Title: `frontend/control: admit mutable locals and reassignment`
-  Goal:
-  - enable normal evolving application state
-  Scope:
-  - `let mut`
-  - plain reassignment
-  - compound assignment over mutable bindings
-  Files:
-  - parser/sema/lowering/spec/tests layers as required
-  Gate:
-  - `cargo test -q`
-  - `cargo test -q --test public_api_contracts`
-  - targeted mutability tests green
-  - CI green
+  Note:
+  - confirmed by PR-B1 audit; no new implementation required in this program
 
-- `PR-B4` [required]
+- `PR-B4` [pre-program landed]
   Title: `frontend/control: admit statement while`
-  Goal:
-  - support ordinary condition-driven loops honestly
-  Scope:
-  - statement `while`
-  Files:
-  - parser/sema/lowering/spec/tests layers as required
-  Gate:
-  - `cargo test -q`
-  - `cargo test -q --test public_api_contracts`
-  - targeted `while` tests green
-  - CI green
+  Note:
+  - confirmed by PR-B1 audit; no new implementation required in this program
 
-- `PR-B4.5` [required]
+- `PR-B4.5` [pre-program landed]
   Title: `frontend/control: admit statement loop and control exits`
-  Goal:
-  - support long-running application/training loops honestly after landed
-    `while`
-  Scope:
-  - statement `loop`
-  - bare `break;`
-  - `continue`
-  Files:
-  - parser/sema/lowering/spec/tests layers as required
-  Gate:
-  - `cargo test -q`
-  - `cargo test -q --test public_api_contracts`
-  - targeted loop/control tests green
-  - CI green
+  Note:
+  - confirmed by PR-B1 audit; no new implementation required in this program
 
 - `PR-B5` [required]
   Title: `docs/spec/tests: freeze imperative core benchmark surface`
