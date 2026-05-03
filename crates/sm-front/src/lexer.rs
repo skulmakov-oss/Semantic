@@ -221,6 +221,15 @@ fn tokenize_line(
                     i += 1;
                 }
             }
+            b'%' => {
+                if i + 1 < bytes.len() && bytes[i + 1] == b'=' {
+                    push_tok(out, TokenKind::PercentAssign, "%=", abs_pos, line_no, col);
+                    i += 2;
+                } else {
+                    push_tok(out, TokenKind::Percent, "%", abs_pos, line_no, col);
+                    i += 1;
+                }
+            }
             b'/' => {
                 if i + 1 < bytes.len() && bytes[i + 1] == b'=' {
                     push_tok(out, TokenKind::SlashAssign, "/=", abs_pos, line_no, col);

@@ -557,6 +557,42 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                     }
                 }
             }
+            IrInstr::DivI32 { dst, lhs, rhs } => {
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::I32(a)), Some(ConstVal::I32(b))) => {
+                        if let Some(q) = a.checked_div(b) {
+                            rewrites = rewrites.saturating_add(1);
+                            cst.insert(dst, ConstVal::I32(q));
+                            out.push(IrInstr::LoadI32 { dst, val: q });
+                        } else {
+                            cst.remove(&dst);
+                            out.push(IrInstr::DivI32 { dst, lhs, rhs });
+                        }
+                    }
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::DivI32 { dst, lhs, rhs });
+                    }
+                }
+            }
+            IrInstr::ModI32 { dst, lhs, rhs } => {
+                match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
+                    (Some(ConstVal::I32(a)), Some(ConstVal::I32(b))) => {
+                        if let Some(rem) = a.checked_rem(b) {
+                            rewrites = rewrites.saturating_add(1);
+                            cst.insert(dst, ConstVal::I32(rem));
+                            out.push(IrInstr::LoadI32 { dst, val: rem });
+                        } else {
+                            cst.remove(&dst);
+                            out.push(IrInstr::ModI32 { dst, lhs, rhs });
+                        }
+                    }
+                    _ => {
+                        cst.remove(&dst);
+                        out.push(IrInstr::ModI32 { dst, lhs, rhs });
+                    }
+                }
+            }
             IrInstr::AddF64 { dst, lhs, rhs } => {
                 match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
                     (Some(ConstVal::F64(a)), Some(ConstVal::F64(b))) => {

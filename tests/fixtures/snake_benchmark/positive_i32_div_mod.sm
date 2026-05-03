@@ -1,0 +1,19 @@
+fn main() {
+    let q: i32 = 10 / 3;
+    assert(q == 3);
+
+    let r: i32 = 10 % 3;
+    assert(r == 1);
+
+    let exact: i32 = 12 / 4;
+    assert(exact == 3);
+
+    let zero_rem: i32 = 12 % 4;
+    assert(zero_rem == 0);
+
+    let neg_div: i32 = -10 / 3;
+    assert(neg_div == -3);
+
+    let neg_mod: i32 = -10 % 3;
+    assert(neg_mod == -1);
+}

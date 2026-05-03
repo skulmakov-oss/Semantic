@@ -3009,7 +3009,7 @@ fn infer_expr_type(
                         })
                     }
                 }
-                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                     if matches!(lt, Type::Sequence(_)) || matches!(rt, Type::Sequence(_)) {
                         return Err(FrontendError {
                             pos: 0,
@@ -3033,13 +3033,11 @@ fn infer_expr_type(
                     }
                     if lt == Type::I32 && rt == Type::I32 {
                         return match op {
-                            BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul => Ok(Type::I32),
-                            BinaryOp::Div => Err(FrontendError {
-                                pos: 0,
-                                message:
-                                    "same-family i32 arithmetic currently admits only unary -, +, -, and *"
-                                        .to_string(),
-                            }),
+                            BinaryOp::Add
+                            | BinaryOp::Sub
+                            | BinaryOp::Mul
+                            | BinaryOp::Div
+                            | BinaryOp::Mod => Ok(Type::I32),
                             _ => unreachable!("covered arithmetic operator arms"),
                         };
                     }
@@ -3064,10 +3062,10 @@ fn infer_expr_type(
                                     message: fx_measured_arithmetic_gap_message().to_string(),
                                 })
                             }
-                            BinaryOp::Mul | BinaryOp::Div => Err(FrontendError {
+                            BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => Err(FrontendError {
                                 pos: 0,
                                 message:
-                                    "*, / on unit-carrying values are rejected in the first-wave units surface"
+                                    "*, /, % on unit-carrying values are rejected in the first-wave units surface"
                                         .to_string(),
                             }),
                             _ => Err(FrontendError {
@@ -3077,10 +3075,22 @@ fn infer_expr_type(
                         };
                     }
                     if lt == Type::Fx && rt == Type::Fx {
-                        return Ok(Type::Fx);
+                        return match op {
+                            BinaryOp::Mod => Err(FrontendError {
+                                pos: 0,
+                                message: format!("operator % unsupported for {:?}", lt),
+                            }),
+                            _ => Ok(Type::Fx),
+                        };
                     }
                     if lt == Type::F64 && rt == Type::F64 {
-                        Ok(Type::F64)
+                        match op {
+                            BinaryOp::Mod => Err(FrontendError {
+                                pos: 0,
+                                message: format!("operator % unsupported for {:?}", lt),
+                            }),
+                            _ => Ok(Type::F64),
+                        }
                     } else {
                         Err(FrontendError {
                             pos: 0,
@@ -4305,21 +4315,18 @@ mod tests {
     }
 
     #[test]
-    fn i32_division_remains_rejected_in_first_wave() {
+    fn i32_division_and_modulo_typecheck_for_same_family_i32() {
         let src = r#"
             fn main() {
                 let a: i32 = 4;
                 let b: i32 = 2;
                 let q: i32 = a / b;
+                let r: i32 = a % b;
                 return;
             }
         "#;
 
-        let err = typecheck_source(src).expect_err("i32 division must remain deferred");
-        assert!(
-            err.message
-                .contains("same-family i32 arithmetic currently admits only unary -, +, -, and *")
-        );
+        typecheck_source(src).expect("i32 division and modulo should typecheck");
     }
 
     #[test]
@@ -6256,7 +6263,7 @@ mod tests {
     }
 
     #[test]
-    fn units_of_measure_reject_mul_and_div_in_first_wave() {
+    fn units_of_measure_reject_mul_div_and_mod_in_first_wave() {
         let src = r#"
             fn main() {
                 let distance: f64[m] = 1.0;
@@ -6267,10 +6274,10 @@ mod tests {
         "#;
 
         let err = typecheck_source(src)
-            .expect_err("mul/div on unit-carrying values must reject in first wave");
+            .expect_err("mul/div/mod on unit-carrying values must reject in first wave");
         assert!(err
             .message
-            .contains("*, / on unit-carrying values are rejected in the first-wave units surface"));
+            .contains("*, /, % on unit-carrying values are rejected in the first-wave units surface"));
     }
 
     // ── M9.1 Wave 3: generic call-site substitution ──────────────────────────

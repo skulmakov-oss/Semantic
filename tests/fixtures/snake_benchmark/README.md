@@ -12,7 +12,7 @@ Current landed positive baseline includes:
 - same-family text equality
 - enum/control-flow basics
 - same-family plain `i32` relational operators
-- same-family plain `i32` unary `-` and binary `+`, `-`, `*`
+- same-family plain `i32` unary `-` and binary `+`, `-`, `*`, `/`, `%`
 - `let mut`, plain reassignment, and compound assignment over mutable locals
 - `while condition { ... }` statement loops with `bool` conditions
 - statement `loop`, bare `break;`, and `continue;` for admitted control-flow
