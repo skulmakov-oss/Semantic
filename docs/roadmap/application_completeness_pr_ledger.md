@@ -80,7 +80,8 @@ Current `main` already admits these benchmark-relevant surfaces:
   - xorshift64 (period 2⁶⁴−1); range computed through `i64` to handle the full `i32` span
   - SemCode format: `SEMCOD15`, capability `CAP_PRNG = 1 << 16`
 - same-family `i32` relational operators: `>`, `<`, `>=`, `<=` (pre-program, confirmed PR-B1 audit)
-- same-family `i32` arithmetic: `+`, `-`, `*`, `/`, `%`, unary `-` (pre-program, confirmed PR-B1 audit)
+- same-family `i32` arithmetic: `+`, `-`, `*`, unary `-` (pre-program, confirmed PR-B1 audit)
+- same-family `i32` division and modulo: `/`, `%` (landed PR-B2)
 - `let mut` mutable locals (pre-program, confirmed PR-B1 audit)
 - plain reassignment (pre-program, confirmed PR-B1 audit)
 - statement `while` (pre-program, confirmed PR-B1 audit)
