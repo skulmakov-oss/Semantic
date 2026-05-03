@@ -292,7 +292,7 @@ Current `main` still fails this benchmark family at the following points:
 - `PR-D2` [landed]
   Title: `frontend/runtime: admit first-wave Map(K, V)`
   Landed:
-  - PR #404, 2026-05-03, merge SHA `6bcb1f62` (squash)
+  - PR #404, 2026-05-03, merge SHA `0eca4d60` (squash)
   Goal:
   - support Q-tables and visit counters directly in Semantic
   Scope:
@@ -328,8 +328,10 @@ Current `main` still fails this benchmark family at the following points:
   - deterministic PRNG tests green
   - CI green
 
-- `PR-D4` [required]
+- `PR-D4` [landed]
   Title: `docs/spec/tests: freeze map and PRNG benchmark baseline`
+  Landed:
+  - `docs/roadmap/d_wave_baseline.md` (PR #406, 2026-05-03)
   Goal:
   - close the state/random wave explicitly
   Scope:
@@ -338,8 +340,8 @@ Current `main` still fails this benchmark family at the following points:
   - `PR-D2` ✓ landed PR #404
   - `PR-D3` ✓ landed PR #405
   Gate:
-  - `cargo test -q`
-  - `cargo test -q --test public_api_contracts`
+  - docs-only
+  - `git diff --check`
   - CI green
 
 ### E — Observation Boundary
