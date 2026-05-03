@@ -1,0 +1,35 @@
+fn main() {
+    // Addition
+    let a: i32 = 10 + 3;
+    assert(a == 13);
+
+    // Subtraction
+    let b: i32 = 10 - 3;
+    assert(b == 7);
+
+    // Multiplication
+    let c: i32 = 4 * 5;
+    assert(c == 20);
+
+    // Unary negation
+    let neg: i32 = -7;
+    assert(neg == -7);
+
+    // Reassignment / evolving value
+    let mut x: i32 = 0;
+    x = x + 1;
+    assert(x == 1);
+
+    x = x + 9;
+    assert(x == 10);
+
+    x = x - 3;
+    assert(x == 7);
+
+    x = x * 2;
+    assert(x == 14);
+
+    // Precedence
+    let y: i32 = 3 + 4 * 2;
+    assert(y == 11);
+}
