@@ -6,6 +6,17 @@ All notable changes to this project are documented in this file.
 
 ### Added (post-v1.1.1 language-maturity subtracks)
 
+- **D-wave baseline** (application-completeness program, D-wave):
+  - `Map(K, V)` persistent lookup tables — PR #404, 2026-05-03
+    - `map_empty()`, `map_contains`, `map_get`, `map_set` (functional update)
+    - admitted key types: `i32`, `u32`, `bool`, `text`, `quad`
+    - SemCode format `SEMCOD14`, capability `CAP_MAP_VALUES = 1 << 15`
+  - deterministic seeded PRNG — PR #405, 2026-05-03
+    - `random_seed(seed: i32)` — seeds the VM PRNG
+    - `random_next_i32(lo: i32, hi: i32) -> i32` — deterministic bounded value in `[lo, hi)`
+    - xorshift64 algorithm (period 2⁶⁴−1); range computed through `i64` to handle full `i32` span
+    - SemCode format `SEMCOD15`, capability `CAP_PRNG = 1 << 16`
+
 - **M9.4 Richer Pattern Surface**: five new pattern forms across owner layer, parser, and typecheck.
   - `MatchPattern::Wildcard` — bare `_` matches any scrutinee, binds nothing
   - `MatchPattern::Or(alts)` — pipe-separated alternatives `P1 | P2 | P3`

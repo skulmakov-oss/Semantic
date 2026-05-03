@@ -67,6 +67,18 @@ Current `main` already admits these benchmark-relevant surfaces:
 - `pop(sequence) -> Sequence(T)` (landed PR #398)
 - first-class closures with immutable capture
 - the separate desktop UI boundary as a landed post-stable track
+- `Map(K, V)` persistent lookup tables with scalar key families (landed PR #404)
+  - `map_empty()` — contextual empty map; requires `let q: Map(K, V) = map_empty()`
+  - `map_contains(m, k) -> bool`
+  - `map_get(m, k, default) -> V`
+  - `map_set(m, k, v) -> Map(K, V)` — functional update; returns new map
+  - admitted key types: `i32`, `u32`, `bool`, `text`, `quad`
+  - SemCode format: `SEMCOD14`, capability `CAP_MAP_VALUES = 1 << 15`
+- deterministic seeded PRNG (landed PR #405)
+  - `random_seed(seed: i32)` — seeds the VM PRNG; valid as a statement
+  - `random_next_i32(lo: i32, hi: i32) -> i32` — deterministic bounded value in `[lo, hi)`
+  - xorshift64 (period 2⁶⁴−1); range computed through `i64` to handle the full `i32` span
+  - SemCode format: `SEMCOD15`, capability `CAP_PRNG = 1 << 16`
 
 Current `main` still fails this benchmark family at the following points:
 
@@ -75,8 +87,6 @@ Current `main` still fails this benchmark family at the following points:
 - plain reassignment
 - statement `while`
 - statement `loop` with bare `break;` and `continue`
-- a first-wave map/dictionary family for Q-tables and visit counts
-- a deterministic seeded pseudo-random source
 - text concatenation / minimal formatting for traces
 - a narrow admitted stdout experiment surface
 
@@ -279,8 +289,10 @@ Current `main` still fails this benchmark family at the following points:
   - `git diff --check`
   - CI green
 
-- `PR-D2` [required]
+- `PR-D2` [landed]
   Title: `frontend/runtime: admit first-wave Map(K, V)`
+  Landed:
+  - PR #404, 2026-05-03, merge SHA `0eca4d60` (squash)
   Goal:
   - support Q-tables and visit counters directly in Semantic
   Scope:
@@ -299,8 +311,10 @@ Current `main` still fails this benchmark family at the following points:
   - targeted map tests green
   - CI green
 
-- `PR-D3` [required]
+- `PR-D3` [landed]
   Title: `stdlib/random: admit deterministic seeded PRNG`
+  Landed:
+  - PR #405, 2026-05-03, merge SHA `a586fc93` (squash)
   Goal:
   - support food spawning and exploration without host randomness
   Scope:
@@ -314,18 +328,20 @@ Current `main` still fails this benchmark family at the following points:
   - deterministic PRNG tests green
   - CI green
 
-- `PR-D4` [required]
+- `PR-D4` [landed]
   Title: `docs/spec/tests: freeze map and PRNG benchmark baseline`
+  Landed:
+  - `docs/roadmap/d_wave_baseline.md` (PR #406, 2026-05-03)
   Goal:
   - close the state/random wave explicitly
   Scope:
   - docs/spec/tests freeze only
   Depends on:
-  - `PR-D2`
-  - `PR-D3`
+  - `PR-D2` ✓ landed PR #404
+  - `PR-D3` ✓ landed PR #405
   Gate:
-  - `cargo test -q`
-  - `cargo test -q --test public_api_contracts`
+  - docs-only
+  - `git diff --check`
   - CI green
 
 ### E — Observation Boundary
