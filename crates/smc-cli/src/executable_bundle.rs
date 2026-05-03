@@ -561,6 +561,11 @@ fn render_type(arena: &AstArena, ty: &Type) -> String {
         Type::Bool => "bool".to_string(),
         Type::Text => "text".to_string(),
         Type::Sequence(sequence) => format!("Sequence({})", render_type(arena, &sequence.item)),
+        Type::Map(map) => format!(
+            "Map({}, {})",
+            render_type(arena, &map.key),
+            render_type(arena, &map.val)
+        ),
         Type::Closure(closure) => format!(
             "fn({}) -> {}",
             render_type(arena, &closure.param),

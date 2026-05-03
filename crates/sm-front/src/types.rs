@@ -11,6 +11,7 @@ pub enum Type {
     Bool,
     Text,
     Sequence(SequenceType),
+    Map(MapType),
     Closure(ClosureType),
     I32,
     U32,
@@ -39,6 +40,10 @@ impl Type {
             Type::Sequence(sequence) => Type::Sequence(SequenceType {
                 family: sequence.family,
                 item: Box::new(sequence.item.erase_units()),
+            }),
+            Type::Map(map) => Type::Map(MapType {
+                key: Box::new(map.key.erase_units()),
+                val: Box::new(map.val.erase_units()),
             }),
             Type::Closure(closure) => Type::Closure(ClosureType {
                 family: closure.family,
@@ -130,6 +135,12 @@ pub enum SequenceCollectionFamily {
 pub struct SequenceType {
     pub family: SequenceCollectionFamily,
     pub item: Box<Type>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MapType {
+    pub key: Box<Type>,
+    pub val: Box<Type>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

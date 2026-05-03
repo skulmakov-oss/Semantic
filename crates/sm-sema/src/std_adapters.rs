@@ -41,6 +41,7 @@ impl From<Type> for SemanticType {
             Type::Result(_, _) => SemanticType::Unknown,
             Type::Record(_) => SemanticType::Unknown,
             Type::Adt(_) => SemanticType::Unknown,
+            Type::Map(_) => SemanticType::Unknown,
             // TypeVar is an owner-layer marker; semantic type is unknown until
             // monomorphisation substitutes the variable (M9.1 Wave 2).
             Type::TypeVar(_) => SemanticType::Unknown,

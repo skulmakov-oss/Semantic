@@ -242,6 +242,14 @@ fn display_generated_wire_type(ty: &Type, arena: &AstArena) -> Result<String, Fr
                         .to_string(),
             })
         }
+        Type::Map(_) => {
+            return Err(FrontendError {
+                pos: 0,
+                message:
+                    "Map types are not part of the current Wave 1 generated wire-contract surface"
+                        .to_string(),
+            })
+        }
         Type::Option(item) => format!("Option({})", display_generated_wire_type(item, arena)?),
         Type::Result(ok_ty, err_ty) => format!(
             "Result({}, {})",

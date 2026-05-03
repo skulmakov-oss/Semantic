@@ -79,6 +79,7 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
         "tests/fixtures/snake_benchmark/positive_push_prepend.sm",
         "tests/fixtures/snake_benchmark/positive_closure_capture.sm",
         "tests/fixtures/snake_benchmark/positive_pop.sm",
+        "tests/fixtures/snake_benchmark/positive_map_basic.sm",
     ] {
         check_run_compile_verify(rel);
     }
@@ -88,9 +89,9 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
 fn snake_benchmark_negative_gap_suite_reports_current_blockers() {
     let cases = [
         (
-            "tests/fixtures/snake_benchmark/negative_map_surface.sm",
-            "E0000",
-            "Map(text, i32)",
+            "tests/fixtures/snake_benchmark/negative_map_no_type_annotation.sm",
+            "E0201",
+            "map_empty() requires a contextual Map(K, V) type",
         ),
         (
             "tests/fixtures/snake_benchmark/negative_text_concatenation.sm",

@@ -8,7 +8,7 @@ use sm_emit::{
     header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8,
     Opcode, SemcodeFormatError, SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_DEBUG_SYMBOLS,
     CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE,
-    CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_SEQUENCE_ITERATION,
+    CAP_MAP_VALUES, CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_SEQUENCE_ITERATION,
     CAP_SEQUENCE_VALUES,
     CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_TEXT_VALUES, CAP_CLOSURE_VALUES,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
@@ -782,6 +782,54 @@ fn decode_operands(
             mark_reg(src);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
+        }
+        Opcode::MapEmpty => {
+            let dst = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-empty dst register"))?;
+            mark_reg(dst);
+            refs.required_capabilities |= CAP_MAP_VALUES;
+        }
+        Opcode::MapContains => {
+            let dst = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-contains dst register"))?;
+            let map = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-contains map register"))?;
+            let key = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-contains key register"))?;
+            mark_reg(dst);
+            mark_reg(map);
+            mark_reg(key);
+            refs.required_capabilities |= CAP_MAP_VALUES;
+        }
+        Opcode::MapGet => {
+            let dst = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-get dst register"))?;
+            let map = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-get map register"))?;
+            let key = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-get key register"))?;
+            let default_val = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-get default register"))?;
+            mark_reg(dst);
+            mark_reg(map);
+            mark_reg(key);
+            mark_reg(default_val);
+            refs.required_capabilities |= CAP_MAP_VALUES;
+        }
+        Opcode::MapSet => {
+            let dst = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-set dst register"))?;
+            let map = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-set map register"))?;
+            let key = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-set key register"))?;
+            let val = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated map-set val register"))?;
+            mark_reg(dst);
+            mark_reg(map);
+            mark_reg(key);
+            mark_reg(val);
+            refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MakeClosure => {
             let dst = read_u16_le(code, cursor)

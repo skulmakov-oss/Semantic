@@ -396,6 +396,7 @@ fn validate_value_against_type(
         Type::Option(_)
         | Type::Result(_, _)
         | Type::Sequence(_)
+        | Type::Map(_)
         | Type::Closure(_)
         | Type::Tuple(_)
         | Type::Adt(_)
@@ -511,6 +512,11 @@ fn display_config_type(ty: &Type, contract: &ConfigContract) -> String {
         Type::Sequence(sequence) => {
             format!("ordered-sequence<{}>", display_config_type(sequence.item.as_ref(), contract))
         }
+        Type::Map(map) => format!(
+            "Map({}, {})",
+            display_config_type(map.key.as_ref(), contract),
+            display_config_type(map.val.as_ref(), contract)
+        ),
         Type::Closure(_) => "closure".to_string(),
         Type::Option(item) => format!("Option({})", display_config_type(item, contract)),
         Type::Result(ok_ty, err_ty) => format!(
