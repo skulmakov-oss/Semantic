@@ -2350,6 +2350,256 @@ fn infer_expr_type(
                     }),
                 };
             }
+            // builtin map_empty() — requires contextual Map type; handled in
+            // infer_expr_type_with_expected. If we reach here, context is absent.
+            if resolve_symbol_name(arena, *name)? == "map_empty" {
+                return Err(FrontendError {
+                    pos: 0,
+                    message:
+                        "map_empty() requires a contextual Map(K, V) type; \
+                         use 'let q: Map(K, V) = map_empty()'"
+                            .to_string(),
+                });
+            }
+            // builtin map_contains(Map(K, V), K) -> bool
+            if resolve_symbol_name(arena, *name)? == "map_contains" {
+                if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: "builtin 'map_contains' takes exactly two positional arguments"
+                            .to_string(),
+                    });
+                }
+                let map_ty = infer_expr_type(
+                    args[0].value,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty.clone(),
+                    loop_stack,
+                    impl_list,
+                )?;
+                let Type::Map(ref map_type) = map_ty else {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_contains' first argument must be Map, got {:?}",
+                            map_ty
+                        ),
+                    });
+                };
+                let key_ty = map_type.key.as_ref().clone();
+                match &key_ty {
+                    Type::I32 | Type::U32 | Type::Bool | Type::Text | Type::Quad => {}
+                    other => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "builtin 'map_contains' does not support key type {:?}; \
+                                 admitted key types are i32, u32, bool, text, quad",
+                                other
+                            ),
+                        });
+                    }
+                }
+                let actual_key_ty = infer_expr_type(
+                    args[1].value,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    loop_stack,
+                    impl_list,
+                )?;
+                if actual_key_ty != key_ty {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_contains' key type {:?} does not match map key type {:?}",
+                            actual_key_ty, key_ty
+                        ),
+                    });
+                }
+                return Ok(Type::Bool);
+            }
+            // builtin map_get(Map(K, V), K, V) -> V
+            if resolve_symbol_name(arena, *name)? == "map_get" {
+                if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message:
+                            "builtin 'map_get' takes exactly three positional arguments (map, key, default)"
+                                .to_string(),
+                    });
+                }
+                let map_ty = infer_expr_type(
+                    args[0].value,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty.clone(),
+                    loop_stack,
+                    impl_list,
+                )?;
+                let Type::Map(ref map_type) = map_ty else {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_get' first argument must be Map, got {:?}",
+                            map_ty
+                        ),
+                    });
+                };
+                let key_ty = map_type.key.as_ref().clone();
+                let val_ty = map_type.val.as_ref().clone();
+                match &key_ty {
+                    Type::I32 | Type::U32 | Type::Bool | Type::Text | Type::Quad => {}
+                    other => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "builtin 'map_get' does not support key type {:?}; \
+                                 admitted key types are i32, u32, bool, text, quad",
+                                other
+                            ),
+                        });
+                    }
+                }
+                let actual_key_ty = infer_expr_type(
+                    args[1].value,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty.clone(),
+                    loop_stack,
+                    impl_list,
+                )?;
+                if actual_key_ty != key_ty {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_get' key type {:?} does not match map key type {:?}",
+                            actual_key_ty, key_ty
+                        ),
+                    });
+                }
+                let actual_default_ty = infer_expr_type(
+                    args[2].value,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    loop_stack,
+                    impl_list,
+                )?;
+                if actual_default_ty != val_ty {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_get' default type {:?} does not match map value type {:?}",
+                            actual_default_ty, val_ty
+                        ),
+                    });
+                }
+                return Ok(val_ty);
+            }
+            // builtin map_set(Map(K, V), K, V) -> Map(K, V)
+            if resolve_symbol_name(arena, *name)? == "map_set" {
+                if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message:
+                            "builtin 'map_set' takes exactly three positional arguments (map, key, value)"
+                                .to_string(),
+                    });
+                }
+                let map_ty = infer_expr_type(
+                    args[0].value,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty.clone(),
+                    loop_stack,
+                    impl_list,
+                )?;
+                let Type::Map(ref map_type) = map_ty else {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_set' first argument must be Map, got {:?}",
+                            map_ty
+                        ),
+                    });
+                };
+                let key_ty = map_type.key.as_ref().clone();
+                let val_ty = map_type.val.as_ref().clone();
+                match &key_ty {
+                    Type::I32 | Type::U32 | Type::Bool | Type::Text | Type::Quad => {}
+                    other => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "builtin 'map_set' does not support key type {:?}; \
+                                 admitted key types are i32, u32, bool, text, quad",
+                                other
+                            ),
+                        });
+                    }
+                }
+                let actual_key_ty = infer_expr_type(
+                    args[1].value,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty.clone(),
+                    loop_stack,
+                    impl_list,
+                )?;
+                if actual_key_ty != key_ty {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_set' key type {:?} does not match map key type {:?}",
+                            actual_key_ty, key_ty
+                        ),
+                    });
+                }
+                let actual_val_ty = infer_expr_type(
+                    args[2].value,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    loop_stack,
+                    impl_list,
+                )?;
+                if actual_val_ty != val_ty {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_set' value type {:?} does not match map value type {:?}",
+                            actual_val_ty, val_ty
+                        ),
+                    });
+                }
+                return Ok(map_ty);
+            }
             let sig = if let Some(s) = table.get(name) {
                 s.clone()
             } else if let Some(s) = builtin_sig(resolve_symbol_name(arena, *name)?) {
@@ -7881,6 +8131,18 @@ fn substitute_trait_self_type(
                 concrete_self,
             )),
         }),
+        Type::Map(map) => Type::Map(crate::types::MapType {
+            key: Box::new(substitute_trait_self_type(
+                map.key.as_ref(),
+                self_type_var,
+                concrete_self,
+            )),
+            val: Box::new(substitute_trait_self_type(
+                map.val.as_ref(),
+                self_type_var,
+                concrete_self,
+            )),
+        }),
         Type::Closure(closure) => Type::Closure(crate::types::ClosureType {
             family: closure.family,
             capture: closure.capture,
@@ -8524,6 +8786,10 @@ fn ensure_type_resolved(
             arena,
             context,
         ),
+        Type::Map(map) => {
+            ensure_type_resolved(map.key.as_ref(), record_table, adt_table, arena, context.clone())?;
+            ensure_type_resolved(map.val.as_ref(), record_table, adt_table, arena, context)
+        }
         Type::Result(ok_ty, err_ty) => {
             ensure_type_resolved(ok_ty, record_table, adt_table, arena, context.clone())?;
             ensure_type_resolved(err_ty, record_table, adt_table, arena, context)
@@ -8546,6 +8812,10 @@ fn ensure_executable_type_supported(
         }
         Type::Sequence(sequence) => {
             ensure_executable_type_supported(sequence.item.as_ref(), arena, context)
+        }
+        Type::Map(map) => {
+            ensure_executable_type_supported(map.key.as_ref(), arena, context.clone())?;
+            ensure_executable_type_supported(map.val.as_ref(), arena, context)
         }
         Type::Measured(base, _) => ensure_executable_type_supported(base, arena, context),
         Type::Option(item) => ensure_executable_type_supported(item, arena, context),
@@ -8581,6 +8851,10 @@ fn ensure_storage_type_supported(
         }
         Type::Sequence(sequence) => {
             ensure_storage_type_supported(sequence.item.as_ref(), arena, context)
+        }
+        Type::Map(map) => {
+            ensure_storage_type_supported(map.key.as_ref(), arena, context.clone())?;
+            ensure_storage_type_supported(map.val.as_ref(), arena, context)
         }
         Type::Measured(base, _) => ensure_storage_type_supported(base, arena, context),
         Type::Option(item) => ensure_storage_type_supported(item, arena, context),
@@ -8781,6 +9055,7 @@ fn supports_stable_equality_type_inner(
         }
         Type::Closure(_) => Ok(false),
         Type::Adt(_) => Ok(false),
+        Type::Map(_) => Ok(false),
         // TypeVar is an owner-layer marker; equality support is unknown until
         // monomorphisation substitutes the variable (Wave 2).
         Type::TypeVar(_) => Ok(false),
@@ -9280,6 +9555,40 @@ fn infer_expr_type_with_expected(
             loop_stack,
         impl_list,
         ),
+        Expr::Call(name, args) => {
+            // Special case: map_empty() uses contextual type
+            if let Ok("map_empty") = resolve_symbol_name(arena, *name).as_deref() {
+                if args.is_empty() {
+                    match expected.as_ref() {
+                        Some(ty @ Type::Map(_)) => return Ok(ty.clone()),
+                        _ => {
+                            return Err(FrontendError {
+                                pos: 0,
+                                message:
+                                    "map_empty() requires a contextual Map(K, V) type; \
+                                     use 'let q: Map(K, V) = map_empty()'"
+                                        .to_string(),
+                            })
+                        }
+                    }
+                }
+            }
+            let actual = infer_expr_type(
+                expr_id,
+                arena,
+                env,
+                table,
+                record_table,
+                adt_table,
+                ret_ty,
+                loop_stack,
+            impl_list,
+            )?;
+            Ok(
+                lift_literal_to_expected_type(expected.as_ref(), &actual, expr_id, arena)
+                    .unwrap_or(actual),
+            )
+        }
         _ => {
             let actual = infer_expr_type(
                 expr_id,

@@ -1,4 +1,6 @@
 source: crates/sm-vm/src/semcode_vm.rs
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MapKey {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClosureValue {
 pub function_name: String,

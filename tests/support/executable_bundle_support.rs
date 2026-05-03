@@ -528,6 +528,11 @@ fn render_type(arena: &AstArena, ty: &Type) -> String {
             render_type(arena, ok),
             render_type(arena, err)
         ),
+        Type::Map(map) => format!(
+            "Map({}, {})",
+            render_type(arena, &map.key),
+            render_type(arena, &map.val)
+        ),
         Type::Record(name) | Type::Adt(name) | Type::TypeVar(name) => {
             arena.symbol_name(*name).to_string()
         }

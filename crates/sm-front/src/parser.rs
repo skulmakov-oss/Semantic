@@ -8,7 +8,7 @@ use crate::types::{
     MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl, RecordField,
     RecordFieldExpr, RecordInitField, RecordLiteralExpr, RecordPatternItem, RecordPatternTarget,
     RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole, SchemaShape, SchemaVariant,
-    SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral, SequenceType,
+    SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral, SequenceType, MapType,
     Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind, TraitBound,
     TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
 };
@@ -2693,6 +2693,28 @@ impl<'a> Parser<'a> {
                     Type::Sequence(SequenceType {
                         family: SequenceCollectionFamily::OrderedSequence,
                         item: Box::new(item),
+                    })
+                } else {
+                    let record_name = self.expect_symbol()?;
+                    Type::Record(record_name)
+                }
+            } else if t == "Map" {
+                let lookahead = self.next_non_layout_idx_from(self.next_non_layout_idx() + 1);
+                if self
+                    .tokens
+                    .get(lookahead)
+                    .map(|tok| tok.kind == TokenKind::LParen)
+                    .unwrap_or(false)
+                {
+                    let _ = self.advance();
+                    self.expect(TokenKind::LParen, "expected '(' after Map type name")?;
+                    let key = self.parse_type()?;
+                    self.expect(TokenKind::Comma, "expected ',' between Map key and value types")?;
+                    let val = self.parse_type()?;
+                    self.expect(TokenKind::RParen, "expected ')' after Map type arguments")?;
+                    Type::Map(MapType {
+                        key: Box::new(key),
+                        val: Box::new(val),
                     })
                 } else {
                     let record_name = self.expect_symbol()?;

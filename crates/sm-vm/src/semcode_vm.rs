@@ -22,6 +22,20 @@ const MAX_STRINGS_PER_FUNCTION: usize = 4096;
 const MAX_STRING_LEN: usize = 8192;
 const MAX_DEBUG_SYMBOLS_PER_FUNCTION: usize = 8192;
 
+/// Scalar key type for Map values.
+///
+/// Only scalar types that support deterministic equality are admitted as map keys.
+/// This mirrors the type-checker's key guard (i32|u32|bool|text|quad) and avoids
+/// making `Value` universally hashable or ordered.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MapKey {
+    I32(i32),
+    U32(u32),
+    Bool(bool),
+    Text(String),
+    Quad(u8),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClosureValue {
     pub function_name: String,
@@ -34,6 +48,7 @@ pub enum Value {
     Bool(bool),
     Text(String),
     Sequence(Vec<Value>),
+    Map(Vec<(MapKey, Value)>),
     Closure(ClosureValue),
     I32(i32),
     F64(f64),
@@ -665,6 +680,26 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
             Opcode::SequencePop => {
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            }
+            Opcode::MapEmpty => {
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            }
+            Opcode::MapContains => {
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            }
+            Opcode::MapGet => {
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            }
+            Opcode::MapSet => {
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
@@ -1451,6 +1486,65 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
                 set_reg(vm, frame_idx, dst, Value::Sequence(new_items))?;
                 next_pc = cur - f.instr_start;
             }
+            Opcode::MapEmpty => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                set_reg(vm, frame_idx, dst, Value::Map(Vec::new()))?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::MapContains => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let map_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let key_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let map_val = get_reg(vm, frame_idx, map_reg)?;
+                let Value::Map(pairs) = map_val else {
+                    return Err(RuntimeError::TypeMismatchRuntime(
+                        "MAP_CONTAINS first argument must be a map".to_string(),
+                    ));
+                };
+                let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
+                let found = pairs.iter().any(|(k, _)| k == &key);
+                set_reg(vm, frame_idx, dst, Value::Bool(found))?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::MapGet => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let map_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let key_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let default_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let map_val = get_reg(vm, frame_idx, map_reg)?;
+                let Value::Map(pairs) = map_val else {
+                    return Err(RuntimeError::TypeMismatchRuntime(
+                        "MAP_GET first argument must be a map".to_string(),
+                    ));
+                };
+                let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
+                let result = pairs
+                    .iter()
+                    .find(|(k, _)| k == &key)
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_else(|| get_reg(vm, frame_idx, default_reg).unwrap_or(Value::Unit));
+                set_reg(vm, frame_idx, dst, result)?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::MapSet => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let map_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let key_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let val_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let map_val = get_reg(vm, frame_idx, map_reg)?;
+                let Value::Map(pairs) = map_val else {
+                    return Err(RuntimeError::TypeMismatchRuntime(
+                        "MAP_SET first argument must be a map".to_string(),
+                    ));
+                };
+                let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
+                let val = get_reg(vm, frame_idx, val_reg)?;
+                let mut new_pairs: Vec<(MapKey, Value)> =
+                    pairs.iter().filter(|(k, _)| k != &key).cloned().collect();
+                new_pairs.push((key, val));
+                set_reg(vm, frame_idx, dst, Value::Map(new_pairs))?;
+                next_pc = cur - f.instr_start;
+            }
             Opcode::LoadVar => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -1769,6 +1863,9 @@ fn value_to_abi(value: Value) -> Result<AbiValue, RuntimeError> {
         Value::Sequence(_) => Err(RuntimeError::TypeMismatchRuntime(
             "sequence values are not part of the PROMETHEUS host ABI surface".to_string(),
         )),
+        Value::Map(_) => Err(RuntimeError::TypeMismatchRuntime(
+            "map values are not part of the PROMETHEUS host ABI surface".to_string(),
+        )),
         Value::Closure(_) => Err(RuntimeError::TypeMismatchRuntime(
             "closure values are not part of the PROMETHEUS host ABI surface".to_string(),
         )),
@@ -1970,6 +2067,20 @@ fn as_fx(v: Value) -> Result<i32, RuntimeError> {
     }
 }
 
+fn map_key_from_value(v: Value) -> Result<MapKey, RuntimeError> {
+    match v {
+        Value::I32(x) => Ok(MapKey::I32(x)),
+        Value::U32(x) => Ok(MapKey::U32(x)),
+        Value::Bool(x) => Ok(MapKey::Bool(x)),
+        Value::Text(x) => Ok(MapKey::Text(x)),
+        Value::Quad(q) => Ok(MapKey::Quad(quad_to_u8(q))),
+        other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "map key must be a scalar (i32, u32, bool, text, or quad), got {:?}",
+            other
+        ))),
+    }
+}
+
 fn fx_add_raw(lhs: i32, rhs: i32) -> Result<i32, RuntimeError> {
     i32::try_from(i64::from(lhs) + i64::from(rhs))
         .map_err(|_| RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))
@@ -2041,6 +2152,9 @@ fn value_eq(a: &Value, b: &Value) -> Result<bool, RuntimeError> {
             }
             Ok(true)
         }
+        (Value::Map(_), Value::Map(_)) => Err(RuntimeError::TypeMismatchRuntime(
+            "Map values are not comparable with == / !=".to_string(),
+        )),
         (Value::Closure(_), Value::Closure(_)) => Err(RuntimeError::TypeMismatchRuntime(
             "closure values are not comparable with CmpEq/CmpNe".to_string(),
         )),
@@ -2352,6 +2466,30 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
             let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             let s = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             format!("SEQUENCE_POP r{}, r{}", d, s)
+        }
+        Opcode::MapEmpty => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("MAP_EMPTY r{}", d)
+        }
+        Opcode::MapContains => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let m = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let k = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("MAP_CONTAINS r{}, r{}, r{}", d, m, k)
+        }
+        Opcode::MapGet => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let m = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let k = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let dv = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("MAP_GET r{}, r{}, r{}, r{}", d, m, k, dv)
+        }
+        Opcode::MapSet => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let m = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let k = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let v = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("MAP_SET r{}, r{}, r{}, r{}", d, m, k, v)
         }
         Opcode::ClosureCall => {
             let has_dst = read_u8(&f.code, &mut cur).map_err(map_format_err)? != 0;

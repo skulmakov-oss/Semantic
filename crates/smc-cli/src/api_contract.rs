@@ -270,6 +270,14 @@ fn display_generated_api_type(
                         .to_string(),
             })
         }
+        Type::Map(_) => {
+            return Err(FrontendError {
+                pos: 0,
+                message:
+                    "Map types are not part of the current Wave 1 generated API contract surface"
+                        .to_string(),
+            })
+        }
         Type::Option(item) => format!("Option({})", display_generated_api_type(item, arena)?),
         Type::Result(ok_ty, err_ty) => format!(
             "Result({}, {})",

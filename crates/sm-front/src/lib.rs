@@ -23,7 +23,7 @@ pub use types::{
     MatchExpr, MatchExprArm, IterableLoopDesugaring, Program, QuadVal, RecordDecl, RecordField, RecordFieldExpr,
     RecordInitField, RecordLiteralExpr, RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole,
     SchemaShape, SchemaVariant, SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr,
-    SequenceLiteral, SequenceType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token,
+    SequenceLiteral, SequenceType, MapType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token,
     TokenKind, TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem, Type,
     UnaryOp, ValidationCheck, ValidationFieldPlan, ValidationPlan, ValidationShapePlan,
     ValidationVariantPlan,
@@ -499,6 +499,20 @@ pub fn canonicalize_declared_type(
                 arena,
             )?),
         })),
+        Type::Map(map) => Ok(Type::Map(MapType {
+            key: Box::new(canonicalize_declared_type(
+                map.key.as_ref(),
+                record_table,
+                adt_table,
+                arena,
+            )?),
+            val: Box::new(canonicalize_declared_type(
+                map.val.as_ref(),
+                record_table,
+                adt_table,
+                arena,
+            )?),
+        })),
         Type::Measured(base, unit) => {
             let canonical_base = canonicalize_declared_type(base, record_table, adt_table, arena)?;
             if !canonical_base.is_core_numeric_scalar() {
@@ -605,6 +619,14 @@ pub fn canonicalize_declared_type_generic(
             family: sequence.family,
             item: Box::new(canonicalize_declared_type_generic(
                 sequence.item.as_ref(), record_table, adt_table, arena, type_params,
+            )?),
+        })),
+        Type::Map(map) => Ok(Type::Map(MapType {
+            key: Box::new(canonicalize_declared_type_generic(
+                map.key.as_ref(), record_table, adt_table, arena, type_params,
+            )?),
+            val: Box::new(canonicalize_declared_type_generic(
+                map.val.as_ref(), record_table, adt_table, arena, type_params,
             )?),
         })),
         Type::Measured(base, unit) => {

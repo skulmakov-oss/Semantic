@@ -1,0 +1,23 @@
+fn main() {
+    let m: Map(i32, bool) = map_empty();
+    // map_contains on empty map returns false
+    assert(map_contains(m, 1) == false);
+    // map_set returns a new map; original is unchanged
+    let m2: Map(i32, bool) = map_set(m, 1, true);
+    assert(map_contains(m2, 1) == true);
+    assert(map_contains(m, 1) == false);
+    // map_get with present key
+    assert(map_get(m2, 1, false) == true);
+    // map_get with absent key returns default
+    assert(map_get(m2, 42, false) == false);
+    // overwrite an existing key
+    let m3: Map(i32, bool) = map_set(m2, 1, false);
+    assert(map_get(m3, 1, true) == false);
+    // multiple keys
+    let m4: Map(i32, bool) = map_set(m3, 2, true);
+    let m5: Map(i32, bool) = map_set(m4, 3, true);
+    assert(map_contains(m5, 1) == true);
+    assert(map_contains(m5, 2) == true);
+    assert(map_contains(m5, 3) == true);
+    assert(map_contains(m5, 4) == false);
+}

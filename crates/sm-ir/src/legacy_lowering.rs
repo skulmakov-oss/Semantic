@@ -2,6 +2,7 @@ use super::*;
 use crate::semcode_format::{
     write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC2,
     MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, MAGIC10, MAGIC11, MAGIC12, MAGIC13,
+    MAGIC14,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG,
@@ -78,6 +79,26 @@ pub enum IrInstr {
     SequencePop {
         dst: u16,
         src: u16,
+    },
+    MapEmpty {
+        dst: u16,
+    },
+    MapContains {
+        dst: u16,
+        map: u16,
+        key: u16,
+    },
+    MapGet {
+        dst: u16,
+        map: u16,
+        key: u16,
+        default_val: u16,
+    },
+    MapSet {
+        dst: u16,
+        map: u16,
+        key: u16,
+        val: u16,
     },
     MakeClosure {
         dst: u16,
@@ -985,7 +1006,10 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // require_ownership_section: whenever the chosen header includes CAP_OWNERSHIP_PATHS,
     // every function must have an OWN0 section (even if empty) so the verifier check passes.
     let require_ownership_section;
-    if has_v13_sequence_iter_instr(funcs) {
+    if has_v14_map_instr(funcs) {
+        out.extend_from_slice(&MAGIC14);
+        require_ownership_section = true;
+    } else if has_v13_sequence_iter_instr(funcs) {
         out.extend_from_slice(&MAGIC13);
         require_ownership_section = true;
     } else if has_v12_record_field_ownership_events(funcs) {
@@ -1069,7 +1093,11 @@ fn emit_semcode_function(
             | IrInstr::SequenceContains { .. }
             | IrInstr::SequencePush { .. }
             | IrInstr::SequencePrepend { .. }
-            | IrInstr::SequencePop { .. } => {}
+            | IrInstr::SequencePop { .. }
+            | IrInstr::MapEmpty { .. }
+            | IrInstr::MapContains { .. }
+            | IrInstr::MapGet { .. }
+            | IrInstr::MapSet { .. } => {}
             IrInstr::MakeClosure { name, .. } => {
                 let _ = interner.id(name)?;
             }
@@ -1197,6 +1225,10 @@ fn encoded_size(instr: &IrInstr) -> Option<usize> {
         IrInstr::SequencePush { .. } => 1 + 2 + 2 + 2,
         IrInstr::SequencePrepend { .. } => 1 + 2 + 2 + 2,
         IrInstr::SequencePop { .. } => 1 + 2 + 2,
+        IrInstr::MapEmpty { .. } => 1 + 2,
+        IrInstr::MapContains { .. } => 1 + 2 + 2 + 2,
+        IrInstr::MapGet { .. } => 1 + 2 + 2 + 2 + 2,
+        IrInstr::MapSet { .. } => 1 + 2 + 2 + 2 + 2,
         IrInstr::MakeClosure { captures, .. } => 1 + 2 + 2 + 2 + (captures.len() * 2),
         IrInstr::SequenceGet { .. } => 1 + 2 + 2 + 2,
         IrInstr::ClosureCall { .. } => 1 + 1 + 2 + 2 + 2,
@@ -1356,6 +1388,30 @@ fn emit_instr(
             out.push(Opcode::SequencePop.byte());
             write_u16_le(out, *dst);
             write_u16_le(out, *src);
+        }
+        IrInstr::MapEmpty { dst } => {
+            out.push(Opcode::MapEmpty.byte());
+            write_u16_le(out, *dst);
+        }
+        IrInstr::MapContains { dst, map, key } => {
+            out.push(Opcode::MapContains.byte());
+            write_u16_le(out, *dst);
+            write_u16_le(out, *map);
+            write_u16_le(out, *key);
+        }
+        IrInstr::MapGet { dst, map, key, default_val } => {
+            out.push(Opcode::MapGet.byte());
+            write_u16_le(out, *dst);
+            write_u16_le(out, *map);
+            write_u16_le(out, *key);
+            write_u16_le(out, *default_val);
+        }
+        IrInstr::MapSet { dst, map, key, val } => {
+            out.push(Opcode::MapSet.byte());
+            write_u16_le(out, *dst);
+            write_u16_le(out, *map);
+            write_u16_le(out, *key);
+            write_u16_le(out, *val);
         }
         IrInstr::SequenceGet { dst, src, index } => {
             out.push(Opcode::SequenceGet.byte());
@@ -1695,6 +1751,20 @@ fn has_v13_sequence_iter_instr(funcs: &[IrFunction]) -> bool {
                     | IrInstr::SequencePush { .. }
                     | IrInstr::SequencePrepend { .. }
                     | IrInstr::SequencePop { .. }
+            )
+        })
+    })
+}
+
+fn has_v14_map_instr(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.instrs.iter().any(|i| {
+            matches!(
+                i,
+                IrInstr::MapEmpty { .. }
+                    | IrInstr::MapContains { .. }
+                    | IrInstr::MapGet { .. }
+                    | IrInstr::MapSet { .. }
             )
         })
     })
@@ -3157,6 +3227,151 @@ fn lower_expr_with_expected(
                         ),
                     }),
                 };
+            }
+            // builtin map_empty() — contextual type required
+            if resolve_symbol_name(arena, *name)? == "map_empty" {
+                if !args.is_empty() {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: "builtin 'map_empty' takes no arguments".to_string(),
+                    });
+                }
+                // map_empty requires a contextual Map(K,V) type from the let annotation.
+                // We must NOT fall back to a sentinel — if expected is missing or not a Map,
+                // typecheck should have already rejected the program before lowering runs.
+                let map_ty = match expected {
+                    Some(ref t @ Type::Map(_)) => t.clone(),
+                    Some(ref other) => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "map_empty() requires a Map(K, V) contextual type, got {:?}",
+                                other
+                            ),
+                        })
+                    }
+                    None => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message:
+                                "map_empty() requires a contextual Map(K, V) type; \
+                                 use 'let q: Map(K, V) = map_empty()'"
+                                    .to_string(),
+                        })
+                    }
+                };
+                let dst = alloc(next);
+                out.push(IrInstr::MapEmpty { dst });
+                return Ok((dst, map_ty));
+            }
+            // builtin map_contains(Map(K, V), K) -> bool
+            if resolve_symbol_name(arena, *name)? == "map_contains" {
+                if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: "builtin 'map_contains' takes exactly two positional arguments"
+                            .to_string(),
+                    });
+                }
+                let (map_reg, map_ty) = lower_expr_with_expected(
+                    args[0].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    None, ret_ty.clone(), closure_state,
+                )?;
+                let Type::Map(ref map_type) = map_ty else {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_contains' first argument must be Map, got {:?}", map_ty
+                        ),
+                    });
+                };
+                let key_ty = map_type.key.as_ref().clone();
+                let (key_reg, _) = lower_expr_with_expected(
+                    args[1].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    Some(key_ty), ret_ty, closure_state,
+                )?;
+                let dst = alloc(next);
+                out.push(IrInstr::MapContains { dst, map: map_reg, key: key_reg });
+                return Ok((dst, Type::Bool));
+            }
+            // builtin map_get(Map(K, V), K, V) -> V
+            if resolve_symbol_name(arena, *name)? == "map_get" {
+                if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message:
+                            "builtin 'map_get' takes exactly three positional arguments".to_string(),
+                    });
+                }
+                let (map_reg, map_ty) = lower_expr_with_expected(
+                    args[0].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    None, ret_ty.clone(), closure_state,
+                )?;
+                let Type::Map(ref map_type) = map_ty else {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_get' first argument must be Map, got {:?}", map_ty
+                        ),
+                    });
+                };
+                let key_ty = map_type.key.as_ref().clone();
+                let val_ty = map_type.val.as_ref().clone();
+                let (key_reg, _) = lower_expr_with_expected(
+                    args[1].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    Some(key_ty), ret_ty.clone(), closure_state,
+                )?;
+                let (default_reg, _) = lower_expr_with_expected(
+                    args[2].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    Some(val_ty.clone()), ret_ty, closure_state,
+                )?;
+                let dst = alloc(next);
+                out.push(IrInstr::MapGet { dst, map: map_reg, key: key_reg, default_val: default_reg });
+                return Ok((dst, val_ty));
+            }
+            // builtin map_set(Map(K, V), K, V) -> Map(K, V)
+            if resolve_symbol_name(arena, *name)? == "map_set" {
+                if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message:
+                            "builtin 'map_set' takes exactly three positional arguments".to_string(),
+                    });
+                }
+                let (map_reg, map_ty) = lower_expr_with_expected(
+                    args[0].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    None, ret_ty.clone(), closure_state,
+                )?;
+                let Type::Map(ref map_type) = map_ty else {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'map_set' first argument must be Map, got {:?}", map_ty
+                        ),
+                    });
+                };
+                let key_ty = map_type.key.as_ref().clone();
+                let val_ty = map_type.val.as_ref().clone();
+                let (key_reg, _) = lower_expr_with_expected(
+                    args[1].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    Some(key_ty), ret_ty.clone(), closure_state,
+                )?;
+                let (val_reg, _) = lower_expr_with_expected(
+                    args[2].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    Some(val_ty), ret_ty, closure_state,
+                )?;
+                let dst = alloc(next);
+                let ret_map_ty = map_ty.clone();
+                out.push(IrInstr::MapSet { dst, map: map_reg, key: key_reg, val: val_reg });
+                return Ok((dst, ret_map_ty));
             }
             let sig = if let Some(s) = fn_table.get(name) {
                 s.clone()
@@ -8026,6 +8241,123 @@ fn lower_expr_stmt_with_parts(
                     ),
                 }),
             };
+        }
+        // builtin map_empty() as statement — rejected; result must be bound to a Map variable
+        if resolve_symbol_name(arena, *name)? == "map_empty" {
+            return Err(FrontendError {
+                pos: 0,
+                message: "map_empty() requires a contextual Map(K, V) type and cannot be \
+                          used as a statement; use 'let q: Map(K, V) = map_empty()'"
+                    .to_string(),
+            });
+        }
+        // builtin map_contains(Map(K,V), K) as statement
+        if resolve_symbol_name(arena, *name)? == "map_contains" {
+            if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "builtin 'map_contains' takes exactly two positional arguments"
+                        .to_string(),
+                });
+            }
+            let (map_reg, map_ty) = lower_expr_with_expected(
+                args[0].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                None, ret_ty.clone(), closure_state,
+            )?;
+            let Type::Map(ref map_type) = map_ty else {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "builtin 'map_contains' first argument must be Map, got {:?}", map_ty
+                    ),
+                });
+            };
+            let key_ty = map_type.key.as_ref().clone();
+            let (key_reg, _) = lower_expr_with_expected(
+                args[1].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                Some(key_ty), ret_ty, closure_state,
+            )?;
+            let dst = alloc(next);
+            out.push(IrInstr::MapContains { dst, map: map_reg, key: key_reg });
+            return Ok(());
+        }
+        // builtin map_get(Map(K,V), K, V) as statement
+        if resolve_symbol_name(arena, *name)? == "map_get" {
+            if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "builtin 'map_get' takes exactly three positional arguments"
+                        .to_string(),
+                });
+            }
+            let (map_reg, map_ty) = lower_expr_with_expected(
+                args[0].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                None, ret_ty.clone(), closure_state,
+            )?;
+            let Type::Map(ref map_type) = map_ty else {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "builtin 'map_get' first argument must be Map, got {:?}", map_ty
+                    ),
+                });
+            };
+            let key_ty = map_type.key.as_ref().clone();
+            let val_ty = map_type.val.as_ref().clone();
+            let (key_reg, _) = lower_expr_with_expected(
+                args[1].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                Some(key_ty), ret_ty.clone(), closure_state,
+            )?;
+            let (default_reg, _) = lower_expr_with_expected(
+                args[2].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                Some(val_ty), ret_ty, closure_state,
+            )?;
+            let dst = alloc(next);
+            out.push(IrInstr::MapGet { dst, map: map_reg, key: key_reg, default_val: default_reg });
+            return Ok(());
+        }
+        // builtin map_set(Map(K,V), K, V) as statement
+        if resolve_symbol_name(arena, *name)? == "map_set" {
+            if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "builtin 'map_set' takes exactly three positional arguments"
+                        .to_string(),
+                });
+            }
+            let (map_reg, map_ty) = lower_expr_with_expected(
+                args[0].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                None, ret_ty.clone(), closure_state,
+            )?;
+            let Type::Map(ref map_type) = map_ty else {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "builtin 'map_set' first argument must be Map, got {:?}", map_ty
+                    ),
+                });
+            };
+            let key_ty = map_type.key.as_ref().clone();
+            let val_ty = map_type.val.as_ref().clone();
+            let (key_reg, _) = lower_expr_with_expected(
+                args[1].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                Some(key_ty), ret_ty.clone(), closure_state,
+            )?;
+            let (val_reg, _) = lower_expr_with_expected(
+                args[2].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                Some(val_ty), ret_ty, closure_state,
+            )?;
+            let dst = alloc(next);
+            out.push(IrInstr::MapSet { dst, map: map_reg, key: key_reg, val: val_reg });
+            return Ok(());
         }
         let sig = if let Some(s) = fn_table.get(name) {
             s.clone()
