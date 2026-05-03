@@ -36,6 +36,7 @@ pub callstack: Vec<Frame>,
 pub config: ExecutionConfig,
 pub effect_calls: usize,
 pub symbols: RuntimeSymbolTable,
+pub prng_state: u64,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
 pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {

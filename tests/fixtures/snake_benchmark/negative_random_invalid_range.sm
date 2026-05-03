@@ -1,0 +1,4 @@
+fn main() {
+    random_seed(1);
+    let x: i32 = random_next_i32(10, 10);
+}

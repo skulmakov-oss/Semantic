@@ -1,0 +1,33 @@
+fn main() {
+    // Seeded PRNG is deterministic: same seed → same first output
+    random_seed(42);
+    let a: i32 = random_next_i32(0, 1000);
+    random_seed(42);
+    let b: i32 = random_next_i32(0, 1000);
+    assert(a == b);
+
+    // Output is within [lo, hi)
+    random_seed(1337);
+    let x: i32 = random_next_i32(10, 20);
+    assert(x >= 10);
+    assert(x < 20);
+
+    // random_seed is valid as a statement (discards Unit result)
+    random_seed(0);
+    let y: i32 = random_next_i32(0, 100);
+    assert(y >= 0);
+    assert(y < 100);
+
+    // Consecutive calls advance state
+    random_seed(7);
+    let p: i32 = random_next_i32(0, 1000000);
+    let q: i32 = random_next_i32(0, 1000000);
+    assert(p != q);
+
+    // Large cross-zero range: hi - lo = 4000000000 which overflows i32 arithmetic
+    // but must work correctly when range is computed through i64.
+    random_seed(1);
+    let full: i32 = random_next_i32(-2000000000, 2000000000);
+    assert(full >= -2000000000);
+    assert(full < 2000000000);
+}

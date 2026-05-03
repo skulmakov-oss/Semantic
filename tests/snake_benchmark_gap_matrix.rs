@@ -80,8 +80,30 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
         "tests/fixtures/snake_benchmark/positive_closure_capture.sm",
         "tests/fixtures/snake_benchmark/positive_pop.sm",
         "tests/fixtures/snake_benchmark/positive_map_basic.sm",
+        "tests/fixtures/snake_benchmark/positive_random_seeded.sm",
     ] {
         check_run_compile_verify(rel);
+    }
+}
+
+#[test]
+fn snake_benchmark_runtime_negative_reports_contract_violations() {
+    // These fixtures pass smc check but fail at smc run with a specific error message.
+    let cases = [(
+        "tests/fixtures/snake_benchmark/negative_random_invalid_range.sm",
+        "lo (10) must be strictly less than hi (10)",
+    )];
+
+    for (rel, needle) in cases {
+        let input = repo_path(rel);
+        let err = cli_err(
+            vec!["run".to_string(), input.clone()],
+            &format!("smc run for {input}"),
+        );
+        assert!(
+            err.contains(needle),
+            "expected runtime error containing '{needle}' for {rel}, got: {err}"
+        );
     }
 }
 
