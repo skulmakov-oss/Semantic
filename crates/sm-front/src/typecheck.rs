@@ -2600,6 +2600,66 @@ fn infer_expr_type(
                 }
                 return Ok(map_ty);
             }
+            // builtin random_seed(seed: i32) -> ()
+            if resolve_symbol_name(arena, *name)? == "random_seed" {
+                if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message:
+                            "builtin 'random_seed' takes exactly one positional argument (seed: i32)"
+                                .to_string(),
+                    });
+                }
+                let seed_ty = infer_expr_type(
+                    args[0].value,
+                    arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+                )?;
+                if seed_ty != Type::I32 {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'random_seed' expects i32 seed, got {:?}", seed_ty
+                        ),
+                    });
+                }
+                return Ok(Type::Unit);
+            }
+            // builtin random_next_i32(lo: i32, hi: i32) -> i32
+            if resolve_symbol_name(arena, *name)? == "random_next_i32" {
+                if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message:
+                            "builtin 'random_next_i32' takes exactly two positional arguments (lo: i32, hi: i32)"
+                                .to_string(),
+                    });
+                }
+                let lo_ty = infer_expr_type(
+                    args[0].value,
+                    arena, env, table, record_table, adt_table, ret_ty.clone(), loop_stack, impl_list,
+                )?;
+                let hi_ty = infer_expr_type(
+                    args[1].value,
+                    arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+                )?;
+                if lo_ty != Type::I32 {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'random_next_i32' lo must be i32, got {:?}", lo_ty
+                        ),
+                    });
+                }
+                if hi_ty != Type::I32 {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'random_next_i32' hi must be i32, got {:?}", hi_ty
+                        ),
+                    });
+                }
+                return Ok(Type::I32);
+            }
             let sig = if let Some(s) = table.get(name) {
                 s.clone()
             } else if let Some(s) = builtin_sig(resolve_symbol_name(arena, *name)?) {

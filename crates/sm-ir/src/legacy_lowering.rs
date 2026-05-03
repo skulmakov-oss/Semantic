@@ -2,7 +2,7 @@ use super::*;
 use crate::semcode_format::{
     write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC2,
     MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, MAGIC10, MAGIC11, MAGIC12, MAGIC13,
-    MAGIC14,
+    MAGIC14, MAGIC15,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG,
@@ -99,6 +99,15 @@ pub enum IrInstr {
         map: u16,
         key: u16,
         val: u16,
+    },
+    RngSeed {
+        dst: u16,
+        seed: u16,
+    },
+    RngNextI32 {
+        dst: u16,
+        lo: u16,
+        hi: u16,
     },
     MakeClosure {
         dst: u16,
@@ -1006,7 +1015,10 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // require_ownership_section: whenever the chosen header includes CAP_OWNERSHIP_PATHS,
     // every function must have an OWN0 section (even if empty) so the verifier check passes.
     let require_ownership_section;
-    if has_v14_map_instr(funcs) {
+    if has_v15_prng_instr(funcs) {
+        out.extend_from_slice(&MAGIC15);
+        require_ownership_section = true;
+    } else if has_v14_map_instr(funcs) {
         out.extend_from_slice(&MAGIC14);
         require_ownership_section = true;
     } else if has_v13_sequence_iter_instr(funcs) {
@@ -1097,7 +1109,9 @@ fn emit_semcode_function(
             | IrInstr::MapEmpty { .. }
             | IrInstr::MapContains { .. }
             | IrInstr::MapGet { .. }
-            | IrInstr::MapSet { .. } => {}
+            | IrInstr::MapSet { .. }
+            | IrInstr::RngSeed { .. }
+            | IrInstr::RngNextI32 { .. } => {}
             IrInstr::MakeClosure { name, .. } => {
                 let _ = interner.id(name)?;
             }
@@ -1229,6 +1243,8 @@ fn encoded_size(instr: &IrInstr) -> Option<usize> {
         IrInstr::MapContains { .. } => 1 + 2 + 2 + 2,
         IrInstr::MapGet { .. } => 1 + 2 + 2 + 2 + 2,
         IrInstr::MapSet { .. } => 1 + 2 + 2 + 2 + 2,
+        IrInstr::RngSeed { .. } => 1 + 2 + 2,
+        IrInstr::RngNextI32 { .. } => 1 + 2 + 2 + 2,
         IrInstr::MakeClosure { captures, .. } => 1 + 2 + 2 + 2 + (captures.len() * 2),
         IrInstr::SequenceGet { .. } => 1 + 2 + 2 + 2,
         IrInstr::ClosureCall { .. } => 1 + 1 + 2 + 2 + 2,
@@ -1412,6 +1428,17 @@ fn emit_instr(
             write_u16_le(out, *map);
             write_u16_le(out, *key);
             write_u16_le(out, *val);
+        }
+        IrInstr::RngSeed { dst, seed } => {
+            out.push(Opcode::RngSeed.byte());
+            write_u16_le(out, *dst);
+            write_u16_le(out, *seed);
+        }
+        IrInstr::RngNextI32 { dst, lo, hi } => {
+            out.push(Opcode::RngNextI32.byte());
+            write_u16_le(out, *dst);
+            write_u16_le(out, *lo);
+            write_u16_le(out, *hi);
         }
         IrInstr::SequenceGet { dst, src, index } => {
             out.push(Opcode::SequenceGet.byte());
@@ -1766,6 +1793,14 @@ fn has_v14_map_instr(funcs: &[IrFunction]) -> bool {
                     | IrInstr::MapGet { .. }
                     | IrInstr::MapSet { .. }
             )
+        })
+    })
+}
+
+fn has_v15_prng_instr(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.instrs.iter().any(|i| {
+            matches!(i, IrInstr::RngSeed { .. } | IrInstr::RngNextI32 { .. })
         })
     })
 }
@@ -3372,6 +3407,48 @@ fn lower_expr_with_expected(
                 let ret_map_ty = map_ty.clone();
                 out.push(IrInstr::MapSet { dst, map: map_reg, key: key_reg, val: val_reg });
                 return Ok((dst, ret_map_ty));
+            }
+            // builtin random_seed(seed: i32) -> ()
+            if resolve_symbol_name(arena, *name)? == "random_seed" {
+                if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: "builtin 'random_seed' takes exactly one positional argument (seed: i32)"
+                            .to_string(),
+                    });
+                }
+                let (seed_reg, _) = lower_expr_with_expected(
+                    args[0].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    Some(Type::I32), ret_ty, closure_state,
+                )?;
+                let dst = alloc(next);
+                out.push(IrInstr::RngSeed { dst, seed: seed_reg });
+                return Ok((dst, Type::Unit));
+            }
+            // builtin random_next_i32(lo: i32, hi: i32) -> i32
+            if resolve_symbol_name(arena, *name)? == "random_next_i32" {
+                if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message:
+                            "builtin 'random_next_i32' takes exactly two positional arguments (lo: i32, hi: i32)"
+                                .to_string(),
+                    });
+                }
+                let (lo_reg, _) = lower_expr_with_expected(
+                    args[0].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    Some(Type::I32), ret_ty.clone(), closure_state,
+                )?;
+                let (hi_reg, _) = lower_expr_with_expected(
+                    args[1].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    Some(Type::I32), ret_ty, closure_state,
+                )?;
+                let dst = alloc(next);
+                out.push(IrInstr::RngNextI32 { dst, lo: lo_reg, hi: hi_reg });
+                return Ok((dst, Type::I32));
             }
             let sig = if let Some(s) = fn_table.get(name) {
                 s.clone()
@@ -8357,6 +8434,49 @@ fn lower_expr_stmt_with_parts(
             )?;
             let dst = alloc(next);
             out.push(IrInstr::MapSet { dst, map: map_reg, key: key_reg, val: val_reg });
+            return Ok(());
+        }
+        // builtin random_seed(seed: i32) as statement — valid (discards Unit result)
+        if resolve_symbol_name(arena, *name)? == "random_seed" {
+            if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message:
+                        "builtin 'random_seed' takes exactly one positional argument (seed: i32)"
+                            .to_string(),
+                });
+            }
+            let (seed_reg, _) = lower_expr_with_expected(
+                args[0].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                Some(Type::I32), ret_ty, closure_state,
+            )?;
+            let dst = alloc(next);
+            out.push(IrInstr::RngSeed { dst, seed: seed_reg });
+            return Ok(());
+        }
+        // builtin random_next_i32(lo, hi) as statement — valid (discards i32 result)
+        if resolve_symbol_name(arena, *name)? == "random_next_i32" {
+            if args.len() != 2 || args.iter().any(|a| a.name.is_some()) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message:
+                        "builtin 'random_next_i32' takes exactly two positional arguments (lo: i32, hi: i32)"
+                            .to_string(),
+                });
+            }
+            let (lo_reg, _) = lower_expr_with_expected(
+                args[0].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                Some(Type::I32), ret_ty.clone(), closure_state,
+            )?;
+            let (hi_reg, _) = lower_expr_with_expected(
+                args[1].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                Some(Type::I32), ret_ty, closure_state,
+            )?;
+            let dst = alloc(next);
+            out.push(IrInstr::RngNextI32 { dst, lo: lo_reg, hi: hi_reg });
             return Ok(());
         }
         let sig = if let Some(s) = fn_table.get(name) {

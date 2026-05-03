@@ -8,8 +8,8 @@ use sm_emit::{
     header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8,
     Opcode, SemcodeFormatError, SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_DEBUG_SYMBOLS,
     CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE,
-    CAP_MAP_VALUES, CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_SEQUENCE_ITERATION,
-    CAP_SEQUENCE_VALUES,
+    CAP_MAP_VALUES, CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_PRNG,
+    CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES,
     CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_TEXT_VALUES, CAP_CLOSURE_VALUES,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
@@ -830,6 +830,27 @@ fn decode_operands(
             mark_reg(key);
             mark_reg(val);
             refs.required_capabilities |= CAP_MAP_VALUES;
+        }
+        Opcode::RngSeed => {
+            let dst = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated rng-seed dst register"))?;
+            let seed = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated rng-seed seed register"))?;
+            mark_reg(dst);
+            mark_reg(seed);
+            refs.required_capabilities |= CAP_PRNG;
+        }
+        Opcode::RngNextI32 => {
+            let dst = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated rng-next-i32 dst register"))?;
+            let lo = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated rng-next-i32 lo register"))?;
+            let hi = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated rng-next-i32 hi register"))?;
+            mark_reg(dst);
+            mark_reg(lo);
+            mark_reg(hi);
+            refs.required_capabilities |= CAP_PRNG;
         }
         Opcode::MakeClosure => {
             let dst = read_u16_le(code, cursor)

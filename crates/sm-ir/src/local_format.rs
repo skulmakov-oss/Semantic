@@ -13,6 +13,7 @@ pub const MAGIC11: [u8; 8] = *b"SEMCOD11";
 pub const MAGIC12: [u8; 8] = *b"SEMCOD12";
 pub const MAGIC13: [u8; 8] = *b"SEMCOD13";
 pub const MAGIC14: [u8; 8] = *b"SEMCOD14";
+pub const MAGIC15: [u8; 8] = *b"SEMCOD15";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -30,6 +31,7 @@ pub const CAP_OWNERSHIP_PATHS: u32 = 1 << 12;
 pub const CAP_OWNERSHIP_FIELD_PATHS: u32 = 1 << 13;
 pub const CAP_SEQUENCE_ITERATION: u32 = 1 << 14;
 pub const CAP_MAP_VALUES: u32 = 1 << 15;
+pub const CAP_PRNG: u32 = 1 << 16;
 
 pub const OWNERSHIP_SECTION_TAG: [u8; 4] = *b"OWN0";
 pub const OWNERSHIP_EVENT_KIND_BORROW: u8 = 0;
@@ -260,10 +262,34 @@ pub const HEADER_V14: SemcodeHeaderSpec = SemcodeHeaderSpec {
         | CAP_MAP_VALUES,
 };
 
+pub const HEADER_V15: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC15,
+    epoch: 0,
+    rev: 16,
+    capabilities: CAP_DEBUG_SYMBOLS
+        | CAP_F64_MATH
+        | CAP_GATE_SURFACE
+        | CAP_FX_VALUES
+        | CAP_FX_MATH
+        | CAP_STATE_QUERY
+        | CAP_STATE_UPDATE
+        | CAP_EVENT_POST
+        | CAP_CLOCK_READ
+        | CAP_TEXT_VALUES
+        | CAP_SEQUENCE_VALUES
+        | CAP_CLOSURE_VALUES
+        | CAP_OWNERSHIP_PATHS
+        | CAP_OWNERSHIP_FIELD_PATHS
+        | CAP_SEQUENCE_ITERATION
+        | CAP_MAP_VALUES
+        | CAP_PRNG,
+};
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
+        HEADER_V15,
     ]
 }
 
@@ -334,6 +360,8 @@ pub enum Opcode {
     MapContains = 0x71,
     MapGet = 0x72,
     MapSet = 0x73,
+    RngSeed = 0x74,
+    RngNextI32 = 0x75,
     GateRead = 0x60,
     GateWrite = 0x61,
     PulseEmit = 0x62,
@@ -426,6 +454,8 @@ impl Opcode {
             x if x == Self::MapContains as u8 => Ok(Self::MapContains),
             x if x == Self::MapGet as u8 => Ok(Self::MapGet),
             x if x == Self::MapSet as u8 => Ok(Self::MapSet),
+            x if x == Self::RngSeed as u8 => Ok(Self::RngSeed),
+            x if x == Self::RngNextI32 as u8 => Ok(Self::RngNextI32),
             x if x == Self::GateRead as u8 => Ok(Self::GateRead),
             x if x == Self::GateWrite as u8 => Ok(Self::GateWrite),
             x if x == Self::PulseEmit as u8 => Ok(Self::PulseEmit),

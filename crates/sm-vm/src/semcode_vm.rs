@@ -97,6 +97,8 @@ pub struct VM {
     pub config: ExecutionConfig,
     pub effect_calls: usize,
     pub symbols: RuntimeSymbolTable,
+    /// PRNG state for random_seed / random_next_i32 (xorshift64; 0 = unseeded).
+    pub prng_state: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,6 +247,7 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config<
         config,
         effect_calls: 0,
         symbols,
+        prng_state: 0,
     };
     push_frame(&mut vm, entry, Vec::new(), None)?;
     let mut bridge = PrometheusVmHost { host, capabilities };
@@ -275,6 +278,7 @@ pub fn run_verified_semcode_with_ui_capabilities<
         config: ExecutionConfig::for_context(ExecutionContext::KernelBound),
         effect_calls: 0,
         symbols,
+        prng_state: 0,
     };
     push_frame(&mut vm, "main", Vec::new(), None)?;
     let mut bridge = PrometheusUiVmHost { host, capabilities, ui_capabilities };
@@ -293,6 +297,7 @@ pub fn run_semcode_with_entry_and_config(
         config,
         effect_calls: 0,
         symbols,
+        prng_state: 0,
     };
     push_frame(&mut vm, entry, Vec::new(), None)?;
     let mut host = LegacyVmHost;
@@ -699,6 +704,15 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
             }
             Opcode::MapSet => {
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            }
+            Opcode::RngSeed => {
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            }
+            Opcode::RngNextI32 => {
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -1545,6 +1559,49 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
                 set_reg(vm, frame_idx, dst, Value::Map(new_pairs))?;
                 next_pc = cur - f.instr_start;
             }
+            Opcode::RngSeed => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let seed_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let seed_val = get_reg(vm, frame_idx, seed_reg)?;
+                let Value::I32(seed) = seed_val else {
+                    return Err(RuntimeError::TypeMismatchRuntime(
+                        "RNG_SEED seed argument must be i32".to_string(),
+                    ));
+                };
+                // Map i32 seed to a non-zero u64.  seed==0 becomes 1 to avoid
+                // the xorshift64 zero fixed-point.
+                let raw = seed as u64;
+                vm.prng_state = if raw == 0 { 1 } else { raw };
+                set_reg(vm, frame_idx, dst, Value::Unit)?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::RngNextI32 => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let lo_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let hi_reg = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let lo_val = get_reg(vm, frame_idx, lo_reg)?;
+                let hi_val = get_reg(vm, frame_idx, hi_reg)?;
+                let (Value::I32(lo), Value::I32(hi)) = (lo_val, hi_val) else {
+                    return Err(RuntimeError::TypeMismatchRuntime(
+                        "RNG_NEXT_I32 lo and hi must be i32".to_string(),
+                    ));
+                };
+                if lo >= hi {
+                    return Err(RuntimeError::TypeMismatchRuntime(format!(
+                        "random_next_i32: lo ({lo}) must be strictly less than hi ({hi})"
+                    )));
+                }
+                // Compute range through i64 to handle the full i32 span without
+                // overflow (e.g. lo=i32::MIN, hi=i32::MAX gives range=4294967295).
+                let range = i64::from(hi) - i64::from(lo);
+                let raw = xorshift64_step(&mut vm.prng_state);
+                let offset = (raw % (range as u64)) as i64;
+                let result = i64::from(lo) + offset;
+                let result = i32::try_from(result)
+                    .map_err(|_| RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))?;
+                set_reg(vm, frame_idx, dst, Value::I32(result))?;
+                next_pc = cur - f.instr_start;
+            }
             Opcode::LoadVar => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -2081,6 +2138,20 @@ fn map_key_from_value(v: Value) -> Result<MapKey, RuntimeError> {
     }
 }
 
+/// Advance the xorshift64 PRNG state by one step and return the new raw value.
+/// If state is 0 (unseeded), treat it as seed 1 to avoid the zero fixed point.
+fn xorshift64_step(state: &mut u64) -> u64 {
+    if *state == 0 {
+        *state = 1;
+    }
+    let mut x = *state;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    *state = x;
+    x
+}
+
 fn fx_add_raw(lhs: i32, rhs: i32) -> Result<i32, RuntimeError> {
     i32::try_from(i64::from(lhs) + i64::from(rhs))
         .map_err(|_| RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))
@@ -2490,6 +2561,17 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
             let k = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             let v = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             format!("MAP_SET r{}, r{}, r{}, r{}", d, m, k, v)
+        }
+        Opcode::RngSeed => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let s = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("RNG_SEED r{}, r{}", d, s)
+        }
+        Opcode::RngNextI32 => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let lo = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let hi = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("RNG_NEXT_I32 r{}, r{}, r{}", d, lo, hi)
         }
         Opcode::ClosureCall => {
             let has_dst = read_u8(&f.code, &mut cur).map_err(map_format_err)? != 0;
@@ -3038,6 +3120,7 @@ mod tests {
             config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
             effect_calls: 0,
             symbols,
+            prng_state: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
@@ -3062,6 +3145,7 @@ mod tests {
             config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
             effect_calls: 0,
             symbols,
+            prng_state: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push main");
@@ -3092,6 +3176,7 @@ mod tests {
             config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
             effect_calls: 0,
             symbols,
+            prng_state: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
@@ -3115,6 +3200,7 @@ mod tests {
             config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
             effect_calls: 0,
             symbols,
+            prng_state: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push main");

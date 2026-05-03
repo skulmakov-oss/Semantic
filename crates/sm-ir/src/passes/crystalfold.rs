@@ -260,6 +260,14 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                 cst.remove(&dst);
                 out.push(IrInstr::MapSet { dst, map, key, val });
             }
+            IrInstr::RngSeed { dst, seed } => {
+                cst.remove(&dst);
+                out.push(IrInstr::RngSeed { dst, seed });
+            }
+            IrInstr::RngNextI32 { dst, lo, hi } => {
+                cst.remove(&dst);
+                out.push(IrInstr::RngNextI32 { dst, lo, hi });
+            }
             IrInstr::LoadVar { dst, name } => {
                 cst.remove(&dst);
                 out.push(IrInstr::LoadVar { dst, name });
