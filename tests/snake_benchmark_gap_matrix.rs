@@ -94,6 +94,11 @@ fn snake_benchmark_negative_gap_suite_reports_current_blockers() {
             "map_empty() requires a contextual Map(K, V) type",
         ),
         (
+            "tests/fixtures/snake_benchmark/negative_map_empty_as_statement.sm",
+            "E0201",
+            "map_empty() requires a contextual Map(K, V) type",
+        ),
+        (
             "tests/fixtures/snake_benchmark/negative_text_concatenation.sm",
             "E0201",
             "text concatenation is not part of the current M8.1 Wave 2 contract",

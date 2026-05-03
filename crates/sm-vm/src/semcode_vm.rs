@@ -22,6 +22,20 @@ const MAX_STRINGS_PER_FUNCTION: usize = 4096;
 const MAX_STRING_LEN: usize = 8192;
 const MAX_DEBUG_SYMBOLS_PER_FUNCTION: usize = 8192;
 
+/// Scalar key type for Map values.
+///
+/// Only scalar types that support deterministic equality are admitted as map keys.
+/// This mirrors the type-checker's key guard (i32|u32|bool|text|quad) and avoids
+/// making `Value` universally hashable or ordered.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MapKey {
+    I32(i32),
+    U32(u32),
+    Bool(bool),
+    Text(String),
+    Quad(u8),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClosureValue {
     pub function_name: String,
@@ -34,7 +48,7 @@ pub enum Value {
     Bool(bool),
     Text(String),
     Sequence(Vec<Value>),
-    Map(Vec<(Value, Value)>),
+    Map(Vec<(MapKey, Value)>),
     Closure(ClosureValue),
     I32(i32),
     F64(f64),
@@ -1487,8 +1501,8 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
                         "MAP_CONTAINS first argument must be a map".to_string(),
                     ));
                 };
-                let key = get_reg(vm, frame_idx, key_reg)?;
-                let found = pairs.iter().any(|(k, _)| value_eq(k, &key).unwrap_or(false));
+                let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
+                let found = pairs.iter().any(|(k, _)| k == &key);
                 set_reg(vm, frame_idx, dst, Value::Bool(found))?;
                 next_pc = cur - f.instr_start;
             }
@@ -1503,10 +1517,10 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
                         "MAP_GET first argument must be a map".to_string(),
                     ));
                 };
-                let key = get_reg(vm, frame_idx, key_reg)?;
+                let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
                 let result = pairs
                     .iter()
-                    .find(|(k, _)| value_eq(k, &key).unwrap_or(false))
+                    .find(|(k, _)| k == &key)
                     .map(|(_, v)| v.clone())
                     .unwrap_or_else(|| get_reg(vm, frame_idx, default_reg).unwrap_or(Value::Unit));
                 set_reg(vm, frame_idx, dst, result)?;
@@ -1523,13 +1537,10 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
                         "MAP_SET first argument must be a map".to_string(),
                     ));
                 };
-                let key = get_reg(vm, frame_idx, key_reg)?;
+                let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
                 let val = get_reg(vm, frame_idx, val_reg)?;
-                let mut new_pairs: Vec<(Value, Value)> = pairs
-                    .iter()
-                    .filter(|(k, _)| !value_eq(k, &key).unwrap_or(false))
-                    .cloned()
-                    .collect();
+                let mut new_pairs: Vec<(MapKey, Value)> =
+                    pairs.iter().filter(|(k, _)| k != &key).cloned().collect();
                 new_pairs.push((key, val));
                 set_reg(vm, frame_idx, dst, Value::Map(new_pairs))?;
                 next_pc = cur - f.instr_start;
@@ -2056,6 +2067,20 @@ fn as_fx(v: Value) -> Result<i32, RuntimeError> {
     }
 }
 
+fn map_key_from_value(v: Value) -> Result<MapKey, RuntimeError> {
+    match v {
+        Value::I32(x) => Ok(MapKey::I32(x)),
+        Value::U32(x) => Ok(MapKey::U32(x)),
+        Value::Bool(x) => Ok(MapKey::Bool(x)),
+        Value::Text(x) => Ok(MapKey::Text(x)),
+        Value::Quad(q) => Ok(MapKey::Quad(quad_to_u8(q))),
+        other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "map key must be a scalar (i32, u32, bool, text, or quad), got {:?}",
+            other
+        ))),
+    }
+}
+
 fn fx_add_raw(lhs: i32, rhs: i32) -> Result<i32, RuntimeError> {
     i32::try_from(i64::from(lhs) + i64::from(rhs))
         .map_err(|_| RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))
@@ -2128,7 +2153,7 @@ fn value_eq(a: &Value, b: &Value) -> Result<bool, RuntimeError> {
             Ok(true)
         }
         (Value::Map(_), Value::Map(_)) => Err(RuntimeError::TypeMismatchRuntime(
-            "map values are not comparable with CmpEq/CmpNe".to_string(),
+            "Map values are not comparable with == / !=".to_string(),
         )),
         (Value::Closure(_), Value::Closure(_)) => Err(RuntimeError::TypeMismatchRuntime(
             "closure values are not comparable with CmpEq/CmpNe".to_string(),

@@ -10,7 +10,6 @@ use crate::semcode_format::{
 use sm_front::types::{
     AdtCtorExpr, AdtPatternItem, ClosureCapturePolicy, ClosureLiteral, ClosureType,
     ClosureValueFamily,
-    MapType,
     MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget,
     SequenceCollectionFamily, SequenceType,
 };
@@ -3237,20 +3236,27 @@ fn lower_expr_with_expected(
                         message: "builtin 'map_empty' takes no arguments".to_string(),
                     });
                 }
-                // map_empty in expression context needs contextual type from expected_ty
-                // In the lowering path the expected_ty should have been propagated by the
-                // let binding. We rely on the typecheck pass having already validated this.
-                let map_ty = match ret_ty {
-                    ref t @ Type::Map(_) => t.clone(),
-                    _ => {
-                        // Try from expected context — this branch handles when expected_ty
-                        // was not the return type but a let annotation. We use a sentinel
-                        // empty map and trust typecheck already accepted this.
-                        // Lowering receives the contextual type via lower_expr_with_expected.
-                        // If we are here without a Map context, typecheck should have caught it.
-                        Type::Map(MapType {
-                            key: Box::new(Type::I32),
-                            val: Box::new(Type::I32),
+                // map_empty requires a contextual Map(K,V) type from the let annotation.
+                // We must NOT fall back to a sentinel — if expected is missing or not a Map,
+                // typecheck should have already rejected the program before lowering runs.
+                let map_ty = match expected {
+                    Some(ref t @ Type::Map(_)) => t.clone(),
+                    Some(ref other) => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "map_empty() requires a Map(K, V) contextual type, got {:?}",
+                                other
+                            ),
+                        })
+                    }
+                    None => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message:
+                                "map_empty() requires a contextual Map(K, V) type; \
+                                 use 'let q: Map(K, V) = map_empty()'"
+                                    .to_string(),
                         })
                     }
                 };
@@ -8236,11 +8242,14 @@ fn lower_expr_stmt_with_parts(
                 }),
             };
         }
-        // builtin map_empty() as statement (result discarded — unusual but allowed)
+        // builtin map_empty() as statement — rejected; result must be bound to a Map variable
         if resolve_symbol_name(arena, *name)? == "map_empty" {
-            let dst = alloc(next);
-            out.push(IrInstr::MapEmpty { dst });
-            return Ok(());
+            return Err(FrontendError {
+                pos: 0,
+                message: "map_empty() requires a contextual Map(K, V) type and cannot be \
+                          used as a statement; use 'let q: Map(K, V) = map_empty()'"
+                    .to_string(),
+            });
         }
         // builtin map_contains(Map(K,V), K) as statement
         if resolve_symbol_name(arena, *name)? == "map_contains" {
