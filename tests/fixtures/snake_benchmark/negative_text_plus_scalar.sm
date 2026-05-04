@@ -1,0 +1,5 @@
+fn main() {
+    // text + i32 is not admitted — only text + text is allowed.
+    // Expected: Error [E0201] text concatenation currently admits only text + text operands
+    let label: text = "score=" + 10;
+}
