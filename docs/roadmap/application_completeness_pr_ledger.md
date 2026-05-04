@@ -328,15 +328,35 @@ Current `main` still fails this benchmark family at the following points:
 
 ### E — Observation Boundary
 
-- `PR-E1` [required]
-  Title: `stdlib/text: admit concatenation and minimal formatting`
+- `PR-E1` [scoped]
+  Title: `docs/scope: define text observation contract`
+  Scope doc:
+  - `docs/roadmap/text_observation_contract.md`
   Goal:
-  - allow human-readable experiment traces without pretending full text
-    processing already exists
+  - define the minimal text surface needed for benchmark traces before
+    implementation
   Scope:
-  - text concatenation
-  - minimal formatting for benchmark-relevant scalar families
-  - no broad formatting engine
+  - `text + text`
+  - explicit scalar `to_text(...)`
+  - strict separation of user-facing `to_text` from internal `debug_render`
+  - no stdout
+  - no interpolation/templates/full formatting
+  Gate:
+  - docs-only
+  - `git diff --check`
+  - CI green
+
+- `PR-E1a` [required]
+  Title: `stdlib/text: admit first-wave text concatenation and scalar to_text`
+  Depends on:
+  - `PR-E1`
+  Goal:
+  - admit the first-wave text observation surface after the contract is frozen
+  Scope:
+  - `text + text`
+  - explicit scalar `to_text(...)`
+  - no stdout
+  - no interpolation/templates/full formatting
   Files:
   - text owner/spec/tests layers as required
   Gate:
