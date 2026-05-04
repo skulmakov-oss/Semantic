@@ -192,22 +192,23 @@ Current `main` still fails this benchmark family at the following points:
   Note:
   - confirmed by PR-B1 audit; no new implementation required in this program
 
-- `PR-B5` [required]
+- `PR-B5` [landed]
   Title: `docs/spec/tests: freeze imperative core benchmark surface`
+  Landed:
+  - `docs/roadmap/b_wave_baseline.md` (PR-B5)
   Goal:
   - close the imperative-core wave as one explicit contract
   Scope:
-  - docs/spec/tests sync only
+  - docs/spec/tests freeze only
   Depends on:
-  - `PR-B1`
-  - `PR-B2`
-  - `PR-B3`
-  - `PR-B4`
-  - `PR-B4.5`
+  - `PR-B1` ✓ landed PR #407
+  - `PR-B2` ✓ landed PR #408
+  - `PR-B3` ✓ pre-program landed
+  - `PR-B4` ✓ pre-program landed
+  - `PR-B4.5` ✓ pre-program landed
   Gate:
-  - docs/spec/tests sync only
-  - `cargo test -q`
-  - `cargo test -q --test public_api_contracts`
+  - docs-only
+  - `git diff --check`
   - CI green
 
 ### C — Sequence Utility Layer

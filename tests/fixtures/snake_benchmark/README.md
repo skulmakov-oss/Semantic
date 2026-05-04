@@ -1,4 +1,4 @@
-Snake benchmark gap matrix fixtures for `PR-A2`.
+Snake benchmark gap matrix fixtures for the application-completeness program.
 
 Purpose:
 
@@ -24,23 +24,35 @@ Current landed positive baseline includes:
 - persistent `prepend(sequence, value) -> Sequence(T)`
 - persistent `pop(sequence) -> Sequence(T)`
 - first-class closure capture
+- persistent `Map(K, V)` lookup tables with scalar key families
+- deterministic seeded PRNG through `random_seed` and `random_next_i32`
 
 The sequence update helpers are functional/persistent. They do not mutate a
 sequence in place; benchmark code should assign the returned sequence when
 evolving state.
 
-This fixture pack intentionally does not yet freeze syntax for two blocker
-families:
+The map update helper is also functional/persistent. `map_set` returns a new
+`Map(K, V)` value; benchmark code should assign the returned map when evolving
+Q-tables or visit counters.
 
-- seeded deterministic pseudo-random source
+Current runtime-negative baseline includes:
+
+- invalid PRNG range (`lo >= hi`)
+- `i32` division by zero
+- `i32` modulo by zero
+
+Current static-negative baseline includes:
+
+- `map_empty()` without contextual `Map(K, V)` type
+- discarded statement-form `map_empty();`
+- text concatenation before PR-E1
+- bare `break;` outside `while` / statement `loop`
+- `continue;` outside `while` / statement `loop`
+
+Remaining benchmark blocker families:
+
+- text concatenation / minimal formatting for traces
 - narrow stdout experiment surface
 
-Reason:
-
-- current `main` and the application-completeness ledger define those blocker
-  families, but they do not yet define one canonical source spelling
-- this PR must not invent fake API names just to make the matrix look more
-  complete
-
-Those two gaps remain part of the benchmark blocker set and should be frozen in
-tests only after their scope PRs choose the public source forms.
+Those remaining gaps should be frozen in tests only after their scope PRs choose
+the public source forms.
