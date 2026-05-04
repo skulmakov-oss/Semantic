@@ -67,6 +67,7 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
         "tests/fixtures/snake_benchmark/positive_enum_match.sm",
         "tests/fixtures/snake_benchmark/positive_i32_relational.sm",
         "tests/fixtures/snake_benchmark/positive_i32_arithmetic.sm",
+        "tests/fixtures/snake_benchmark/positive_i32_div_mod.sm",
         "tests/fixtures/snake_benchmark/positive_let_mut.sm",
         "tests/fixtures/snake_benchmark/positive_reassignment.sm",
         "tests/fixtures/snake_benchmark/positive_while_loop.sm",
@@ -92,6 +93,14 @@ fn snake_benchmark_runtime_negative_reports_contract_violations() {
     let cases = [(
         "tests/fixtures/snake_benchmark/negative_random_invalid_range.sm",
         "lo (10) must be strictly less than hi (10)",
+    ),
+    (
+        "tests/fixtures/snake_benchmark/negative_i32_div_zero.sm",
+        "DivisionByZero",
+    ),
+    (
+        "tests/fixtures/snake_benchmark/negative_i32_mod_zero.sm",
+        "DivisionByZero",
     )];
 
     for (rel, needle) in cases {
@@ -124,11 +133,6 @@ fn snake_benchmark_negative_gap_suite_reports_current_blockers() {
             "tests/fixtures/snake_benchmark/negative_text_concatenation.sm",
             "E0201",
             "text concatenation is not part of the current M8.1 Wave 2 contract",
-        ),
-        (
-            "tests/fixtures/snake_benchmark/negative_i32_div.sm",
-            "E0201",
-            "same-family i32 arithmetic currently admits only",
         ),
         (
             "tests/fixtures/snake_benchmark/negative_loop_break.sm",

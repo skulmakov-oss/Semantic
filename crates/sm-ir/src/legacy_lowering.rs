@@ -258,6 +258,16 @@ pub enum IrInstr {
         lhs: u16,
         rhs: u16,
     },
+    DivI32 {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    ModI32 {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
     AddF64 {
         dst: u16,
         lhs: u16,
@@ -1269,6 +1279,8 @@ fn encoded_size(instr: &IrInstr) -> Option<usize> {
         | IrInstr::AddI32 { .. }
         | IrInstr::SubI32 { .. }
         | IrInstr::MulI32 { .. }
+        | IrInstr::DivI32 { .. }
+        | IrInstr::ModI32 { .. }
         | IrInstr::AddF64 { .. }
         | IrInstr::SubF64 { .. }
         | IrInstr::MulF64 { .. }
@@ -1567,6 +1579,8 @@ fn emit_instr(
         IrInstr::AddI32 { dst, lhs, rhs } => emit_3reg(Opcode::AddI32, *dst, *lhs, *rhs, out),
         IrInstr::SubI32 { dst, lhs, rhs } => emit_3reg(Opcode::SubI32, *dst, *lhs, *rhs, out),
         IrInstr::MulI32 { dst, lhs, rhs } => emit_3reg(Opcode::MulI32, *dst, *lhs, *rhs, out),
+        IrInstr::DivI32 { dst, lhs, rhs } => emit_3reg(Opcode::DivI32, *dst, *lhs, *rhs, out),
+        IrInstr::ModI32 { dst, lhs, rhs } => emit_3reg(Opcode::ModI32, *dst, *lhs, *rhs, out),
         IrInstr::AddF64 { dst, lhs, rhs } => emit_3reg(Opcode::AddF64, *dst, *lhs, *rhs, out),
         IrInstr::SubF64 { dst, lhs, rhs } => emit_3reg(Opcode::SubF64, *dst, *lhs, *rhs, out),
         IrInstr::MulF64 { dst, lhs, rhs } => emit_3reg(Opcode::MulF64, *dst, *lhs, *rhs, out),
@@ -3862,7 +3876,7 @@ fn lower_expr_with_expected(
                         return Err(FrontendError {
                             pos: 0,
                             message:
-                                "*, / on unit-carrying values are rejected in the first-wave units surface"
+                                "*, /, % on unit-carrying values are rejected in the first-wave units surface"
                                     .to_string(),
                         });
                     }
@@ -3879,8 +3893,24 @@ fn lower_expr_with_expected(
                     });
                     return Ok((dst, Type::F64));
                 }
-                BinaryOp::Div => {
-                    if lt == Type::Fx {
+                BinaryOp::Div | BinaryOp::Mod => {
+                    if lt == Type::I32 {
+                        if *op == BinaryOp::Div {
+                            out.push(IrInstr::DivI32 {
+                                dst,
+                                lhs: lr,
+                                rhs: rr,
+                            });
+                        } else {
+                            out.push(IrInstr::ModI32 {
+                                dst,
+                                lhs: lr,
+                                rhs: rr,
+                            });
+                        }
+                        return Ok((dst, Type::I32));
+                    }
+                    if lt == Type::Fx && *op == BinaryOp::Div {
                         out.push(IrInstr::DivFx {
                             dst,
                             lhs: lr,
@@ -3892,14 +3922,18 @@ fn lower_expr_with_expected(
                         return Err(FrontendError {
                             pos: 0,
                             message:
-                                "*, / on unit-carrying values are rejected in the first-wave units surface"
+                                "*, /, % on unit-carrying values are rejected in the first-wave units surface"
                                     .to_string(),
                         });
                     }
-                    if lt != Type::F64 {
+                    if lt != Type::F64 || *op == BinaryOp::Mod {
                         return Err(FrontendError {
                             pos: 0,
-                            message: format!("operator / unsupported for {:?}", lt),
+                            message: format!(
+                                "operator {} unsupported for {:?}",
+                                if *op == BinaryOp::Div { "/" } else { "%" },
+                                lt
+                            ),
                         });
                     }
                     out.push(IrInstr::DivF64 {

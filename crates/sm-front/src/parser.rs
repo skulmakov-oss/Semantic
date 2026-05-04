@@ -1235,6 +1235,7 @@ impl<'a> Parser<'a> {
             TokenKind::MinusAssign => Some(BinaryOp::Sub),
             TokenKind::StarAssign => Some(BinaryOp::Mul),
             TokenKind::SlashAssign => Some(BinaryOp::Div),
+            TokenKind::PercentAssign => Some(BinaryOp::Mod),
             TokenKind::AndAndAssign => Some(BinaryOp::AndAnd),
             TokenKind::OrOrAssign => Some(BinaryOp::OrOr),
             _ => None,
@@ -1426,6 +1427,13 @@ impl<'a> Parser<'a> {
                 left = self
                     .arena
                     .alloc_expr(Expr::Binary(left, BinaryOp::Div, right));
+                continue;
+            }
+            if self.eat(TokenKind::Percent) {
+                let right = self.parse_unary()?;
+                left = self
+                    .arena
+                    .alloc_expr(Expr::Binary(left, BinaryOp::Mod, right));
                 continue;
             }
             break;

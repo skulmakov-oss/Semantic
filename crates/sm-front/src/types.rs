@@ -105,6 +105,7 @@ pub enum BinaryOp {
     Sub,
     Mul,
     Div,
+    Mod,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -931,10 +932,12 @@ pub enum TokenKind {
     MinusAssign,
     StarAssign,
     SlashAssign,
+    PercentAssign,
     Plus,
     Minus,
     Star,
     Slash,
+    Percent,
     Bang,
     Arrow,
     Implies,

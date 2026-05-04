@@ -1,5 +1,0 @@
-fn main() {
-    // Division is not yet admitted in the current wave.
-    // Expected: Error [E0201] same-family i32 arithmetic currently admits only unary -, +, -, and *
-    let q: i32 = 10 / 3;
-}

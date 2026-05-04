@@ -81,6 +81,7 @@ Current `main` already admits these benchmark-relevant surfaces:
   - SemCode format: `SEMCOD15`, capability `CAP_PRNG = 1 << 16`
 - same-family `i32` relational operators: `>`, `<`, `>=`, `<=` (pre-program, confirmed PR-B1 audit)
 - same-family `i32` arithmetic: `+`, `-`, `*`, unary `-` (pre-program, confirmed PR-B1 audit)
+- same-family `i32` division and modulo: `/`, `%` (landed PR-B2)
 - `let mut` mutable locals (pre-program, confirmed PR-B1 audit)
 - plain reassignment (pre-program, confirmed PR-B1 audit)
 - statement `while` (pre-program, confirmed PR-B1 audit)
@@ -89,7 +90,6 @@ Current `main` already admits these benchmark-relevant surfaces:
 
 Current `main` still fails this benchmark family at the following points:
 
-- `i32` division `/` and modulo `%` (remaining arithmetic gap; PR-B2)
 - text concatenation / minimal formatting for traces (PR-E1)
 - a narrow admitted stdout experiment surface (PR-E2)
 
@@ -154,10 +154,15 @@ Current `main` still fails this benchmark family at the following points:
   - `git diff --check`
   - CI green
 
-- `PR-B2` [required]
+- `PR-B2` [landed]
   Title: `frontend/runtime: admit remaining i32 division and modulo`
+  Landed:
+  - `i32 / i32`
+  - `i32 % i32`
+  - divide-by-zero runtime contract
+  - modulo-by-zero runtime contract
   Goal:
-  - complete the remaining same-family `i32` arithmetic gap needed by application programs
+  - close the remaining same-family `i32` arithmetic gap
   Scope:
   - `i32 / i32`
   - `i32 % i32`

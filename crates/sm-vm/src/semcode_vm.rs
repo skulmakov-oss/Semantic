@@ -570,7 +570,7 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
-            Opcode::SubI32 | Opcode::MulI32 => {
+            Opcode::SubI32 | Opcode::MulI32 | Opcode::DivI32 | Opcode::ModI32 => {
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -1183,6 +1183,26 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
                 let l = as_i32(get_reg(vm, frame_idx, lhs)?)?;
                 let r = as_i32(get_reg(vm, frame_idx, rhs)?)?;
                 let out = l.wrapping_mul(r);
+                set_reg(vm, frame_idx, dst, Value::I32(out))?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::DivI32 => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let rhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let l = as_i32(get_reg(vm, frame_idx, lhs)?)?;
+                let r = as_i32(get_reg(vm, frame_idx, rhs)?)?;
+                let out = i32_div_raw(l, r)?;
+                set_reg(vm, frame_idx, dst, Value::I32(out))?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::ModI32 => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let rhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let l = as_i32(get_reg(vm, frame_idx, lhs)?)?;
+                let r = as_i32(get_reg(vm, frame_idx, rhs)?)?;
+                let out = i32_mod_raw(l, r)?;
                 set_reg(vm, frame_idx, dst, Value::I32(out))?;
                 next_pc = cur - f.instr_start;
             }
@@ -2175,6 +2195,22 @@ fn fx_div_raw(lhs: i32, rhs: i32) -> Result<i32, RuntimeError> {
     i32::try_from(scaled).map_err(|_| RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))
 }
 
+fn i32_div_raw(lhs: i32, rhs: i32) -> Result<i32, RuntimeError> {
+    if rhs == 0 {
+        return Err(RuntimeError::Trap(RuntimeTrap::DivisionByZero));
+    }
+    lhs.checked_div(rhs)
+        .ok_or(RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))
+}
+
+fn i32_mod_raw(lhs: i32, rhs: i32) -> Result<i32, RuntimeError> {
+    if rhs == 0 {
+        return Err(RuntimeError::Trap(RuntimeTrap::DivisionByZero));
+    }
+    lhs.checked_rem(rhs)
+        .ok_or(RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow))
+}
+
 fn quad_to_u8(q: QuadVal) -> u8 {
     match q {
         QuadVal::N => 0,
@@ -2359,6 +2395,18 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
             let l = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             format!("MUL_I32 r{}, r{}, r{}", d, l, r)
+        }
+        Opcode::DivI32 => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let l = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("DIV_I32 r{}, r{}, r{}", d, l, r)
+        }
+        Opcode::ModI32 => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let l = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("MOD_I32 r{}, r{}, r{}", d, l, r)
         }
         Opcode::LoadU32 => {
             let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -2618,8 +2666,11 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
                 Opcode::BoolOr => "BOOL_OR",
                 Opcode::CmpI32Lt => "CMP_I32_LT",
                 Opcode::CmpI32Le => "CMP_I32_LE",
+                Opcode::AddI32 => "ADD_I32",
                 Opcode::SubI32 => "SUB_I32",
                 Opcode::MulI32 => "MUL_I32",
+                Opcode::DivI32 => "DIV_I32",
+                Opcode::ModI32 => "MOD_I32",
                 Opcode::AddF64 => "ADD_F64",
                 Opcode::SubF64 => "SUB_F64",
                 Opcode::MulF64 => "MUL_F64",

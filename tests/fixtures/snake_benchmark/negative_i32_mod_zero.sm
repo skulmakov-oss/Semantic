@@ -1,0 +1,4 @@
+fn main() {
+    // Modulo by zero is a runtime error.
+    let x: i32 = 10 % 0;
+}
