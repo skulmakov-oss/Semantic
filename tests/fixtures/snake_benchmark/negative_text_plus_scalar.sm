@@ -1,0 +1,3 @@
+fn main() {
+    let label: text = "score=" + 10;
+}

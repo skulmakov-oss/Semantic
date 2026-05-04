@@ -10,6 +10,8 @@ Purpose:
 Current landed positive baseline includes:
 
 - same-family text equality
+- same-family text concatenation
+- explicit scalar `to_text(...)` for benchmark trace values
 - enum/control-flow basics
 - same-family plain `i32` relational operators
 - same-family plain `i32` unary `-` and binary `+`, `-`, `*`, `/`, `%`
@@ -45,13 +47,13 @@ Current static-negative baseline includes:
 
 - `map_empty()` without contextual `Map(K, V)` type
 - discarded statement-form `map_empty();`
-- text concatenation before PR-E1
+- text scalar coercion in `+` remains rejected
+- unsupported `to_text(record)` conversion remains rejected
 - bare `break;` outside `while` / statement `loop`
 - `continue;` outside `while` / statement `loop`
 
 Remaining benchmark blocker families:
 
-- text concatenation / minimal formatting for traces
 - narrow stdout experiment surface
 
 Those remaining gaps should be frozen in tests only after their scope PRs choose

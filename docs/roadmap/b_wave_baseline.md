@@ -109,7 +109,6 @@ B-wave does not add or claim:
 After B-wave, the active blockers for the benchmark family are outside the
 imperative core:
 
-- text concatenation / minimal formatting for traces;
 - narrow admitted stdout experiment surface;
 - canonical benchmark examples and close-out evidence.
 

@@ -1,9 +1,8 @@
 use crate::semcode_format::{
     header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8,
-    supported_headers, Opcode, SemcodeFormatError, SemcodeHeaderSpec,
-    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG,
+    supported_headers, Opcode, SemcodeFormatError, SemcodeHeaderSpec, OWNERSHIP_EVENT_KIND_BORROW,
+    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
 use crate::QuadVal;
 use prom_abi::{AbiError, AbiValue, HostCallId, PrometheusHostAbi};
@@ -104,10 +103,16 @@ pub struct VM {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
     BadHeader,
-    UnsupportedBytecodeVersion { found: String, supported: String },
+    UnsupportedBytecodeVersion {
+        found: String,
+        supported: String,
+    },
     BadFormat(String),
     UnknownFunction(String),
-    InvalidJumpAddress { func: String, addr: usize },
+    InvalidJumpAddress {
+        func: String,
+        addr: usize,
+    },
     TypeMismatchRuntime(String),
     StackUnderflow,
     StackOverflow,
@@ -281,7 +286,11 @@ pub fn run_verified_semcode_with_ui_capabilities<
         prng_state: 0,
     };
     push_frame(&mut vm, "main", Vec::new(), None)?;
-    let mut bridge = PrometheusUiVmHost { host, capabilities, ui_capabilities };
+    let mut bridge = PrometheusUiVmHost {
+        host,
+        capabilities,
+        ui_capabilities,
+    };
     exec_loop(&mut vm, &mut bridge)
 }
 
@@ -739,6 +748,11 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
+            Opcode::ConcatText => {
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            }
             Opcode::QAnd
             | Opcode::QOr
             | Opcode::QImpl
@@ -979,9 +993,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
         self.capabilities
             .require_call(HostCallId::EventPost)
             .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .event_post(signal)
-            .map_err(RuntimeError::HostAbi)
+        self.host.event_post(signal).map_err(RuntimeError::HostAbi)
     }
 
     fn clock_read(&mut self) -> Result<Value, RuntimeError> {
@@ -1058,9 +1070,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker, U: UiCapabilityChecker> VmH
         self.capabilities
             .require_call(HostCallId::EventPost)
             .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .event_post(signal)
-            .map_err(RuntimeError::HostAbi)
+        self.host.event_post(signal).map_err(RuntimeError::HostAbi)
     }
 
     fn clock_read(&mut self) -> Result<Value, RuntimeError> {
@@ -1227,8 +1237,17 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
             Opcode::LoadText => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let value = lookup_str(&f, sid)?.to_string();
+                let value = decode_text_literal(lookup_str(&f, sid)?);
                 set_reg(vm, frame_idx, dst, Value::Text(value))?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::ConcatText => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let rhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let mut out = as_text(get_reg(vm, frame_idx, lhs)?)?;
+                out.push_str(&as_text(get_reg(vm, frame_idx, rhs)?)?);
+                set_reg(vm, frame_idx, dst, Value::Text(out))?;
                 next_pc = cur - f.instr_start;
             }
             Opcode::MakeSequence => {
@@ -2045,6 +2064,13 @@ fn lookup_str<'a>(f: &'a FunctionBytecode, sid: u16) -> Result<&'a str, RuntimeE
         .ok_or(RuntimeError::InvalidStringId(sid))
 }
 
+fn decode_text_literal(raw: &str) -> String {
+    raw.strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(raw)
+        .to_string()
+}
+
 fn lookup_symbol(f: &FunctionBytecode, sid: u16) -> Result<SymbolId, RuntimeError> {
     f.symbol_ids
         .get(sid as usize)
@@ -2123,6 +2149,40 @@ fn as_i32(v: Value) -> Result<i32, RuntimeError> {
         Err(RuntimeError::TypeMismatchRuntime(
             "expected i32".to_string(),
         ))
+    }
+}
+
+fn as_text(v: Value) -> Result<String, RuntimeError> {
+    if let Value::Text(x) = v {
+        Ok(x)
+    } else {
+        Err(RuntimeError::TypeMismatchRuntime(
+            "expected text".to_string(),
+        ))
+    }
+}
+
+fn value_to_text(v: Value) -> Result<String, RuntimeError> {
+    match v {
+        Value::Text(x) => Ok(x),
+        Value::Bool(b) => Ok(if b {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        }),
+        Value::I32(x) => Ok(x.to_string()),
+        Value::U32(x) => Ok(x.to_string()),
+        Value::Quad(q) => Ok(match q {
+            QuadVal::N => "N",
+            QuadVal::F => "F",
+            QuadVal::T => "T",
+            QuadVal::S => "S",
+        }
+        .to_string()),
+        other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin 'to_text' currently supports text, bool, i32, u32, and quad; got {:?}",
+            other
+        ))),
     }
 }
 
@@ -2327,6 +2387,7 @@ fn try_eval_builtin_call(name: &str, args: &[Value]) -> Result<Option<Value>, Ru
             let (lhs, rhs) = expect_builtin_binary_f64(name, args)?;
             Value::F64(lhs.powf(rhs))
         }
+        "to_text" => Value::Text(value_to_text(expect_builtin_to_text_arg(name, args)?)?),
         _ => return Ok(None),
     };
     Ok(Some(value))
@@ -2352,6 +2413,16 @@ fn expect_builtin_binary_f64(name: &str, args: &[Value]) -> Result<(f64, f64), R
     Ok((as_f64(args[0].clone())?, as_f64(args[1].clone())?))
 }
 
+fn expect_builtin_to_text_arg(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    if args.len() != 1 {
+        return Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin '{name}' expects 1 argument, got {}",
+            args.len()
+        )));
+    }
+    Ok(args[0].clone())
+}
+
 fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), RuntimeError> {
     let mut cur = f.instr_start + pc;
     let opcode = Opcode::from_byte(read_u8(&f.code, &mut cur).map_err(map_format_err)?)
@@ -2372,6 +2443,12 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
             let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             let text = lookup_str(f, sid)?;
             format!("LOAD_TEXT r{}, {:?}", d, text)
+        }
+        Opcode::ConcatText => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let l = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("CONCAT_TEXT r{}, r{}, r{}", d, l, r)
         }
         Opcode::LoadI32 => {
             let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -3051,6 +3128,34 @@ mod tests {
     }
 
     #[test]
+    fn vm_runs_text_concat_and_to_text_path() {
+        let src = r#"
+            fn main() {
+                let score: i32 = 10;
+                let count: u32 = 7u32;
+                let flag: bool = true;
+                let marker: quad = T;
+                let label: text = "score=" + to_text(score);
+                let count_label: text = to_text(count);
+                let flag_label: text = to_text(flag);
+                let marker_label: text = to_text(marker);
+                let copy_label: text = to_text("done");
+                assert(label == "score=10");
+                assert(count_label == "7");
+                assert(flag_label == "true");
+                assert(marker_label == "T");
+                assert(copy_label == "done");
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let disasm = disasm_semcode(&bytes).expect("disasm");
+        assert!(disasm.contains("CONCAT_TEXT"));
+        assert!(disasm.contains("CALL"));
+        run_semcode(&bytes).expect("run");
+    }
+
+    #[test]
     fn vm_runs_sequence_literal_index_and_equality_path() {
         let src = r#"
             fn main() {
@@ -3183,7 +3288,10 @@ mod tests {
             frame.borrowed_paths[0].components,
             vec![PathComponent::TupleIndex(0)]
         );
-        assert_eq!(vm.symbols.resolve(frame.borrowed_paths[0].root), Some("pair"));
+        assert_eq!(
+            vm.symbols.resolve(frame.borrowed_paths[0].root),
+            Some("pair")
+        );
     }
 
     #[test]
@@ -4162,12 +4270,7 @@ mod tests {
             root,
             borrowed_components,
         );
-        append_ownership_event(
-            &mut out,
-            OWNERSHIP_EVENT_KIND_WRITE,
-            root,
-            write_components,
-        );
+        append_ownership_event(&mut out, OWNERSHIP_EVENT_KIND_WRITE, root, write_components);
         out
     }
 

@@ -90,7 +90,6 @@ Current `main` already admits these benchmark-relevant surfaces:
 
 Current `main` still fails this benchmark family at the following points:
 
-- text concatenation / minimal formatting for traces (PR-E1)
 - a narrow admitted stdout experiment surface (PR-E2)
 
 ## Program Rules
@@ -328,17 +327,36 @@ Current `main` still fails this benchmark family at the following points:
 
 ### E — Observation Boundary
 
-- `PR-E1` [required]
-  Title: `stdlib/text: admit concatenation and minimal formatting`
+- `PR-E1` [scoped]
+  Title: `docs/scope: define text observation contract`
+  Scope doc:
+  - `docs/roadmap/text_observation_contract.md`
   Goal:
-  - allow human-readable experiment traces without pretending full text
-    processing already exists
+  - define the minimal text surface needed for benchmark traces before
+    implementation
   Scope:
-  - text concatenation
-  - minimal formatting for benchmark-relevant scalar families
-  - no broad formatting engine
-  Files:
-  - text owner/spec/tests layers as required
+  - `text + text`
+  - explicit scalar `to_text(...)`
+  - strict separation of user-facing `to_text` from internal `debug_render`
+  - no stdout
+  - no interpolation/templates/full formatting
+  Gate:
+  - docs-only
+  - `git diff --check`
+  - CI green
+
+- `PR-E1a` [landed]
+  Title: `stdlib/text: admit concatenation and scalar to_text`
+  Landed:
+  - `text + text -> text`
+  - explicit scalar `to_text(...)`
+  - `text`, `bool`, `i32`, `u32`, and `quad` observation helpers
+  Goal:
+  - admit the first-wave text observation surface needed for benchmark traces
+  Scope:
+  - `text + text`
+  - scalar `to_text(...)`
+  - no stdout
   Gate:
   - `cargo test -q`
   - `cargo test -q --test public_api_contracts`

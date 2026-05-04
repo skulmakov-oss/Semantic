@@ -1,0 +1,4 @@
+fn main() {
+    let label: text = "score=" + "10";
+    assert(label == "score=10");
+}

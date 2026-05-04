@@ -152,6 +152,10 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                 cst.remove(&dst);
                 out.push(IrInstr::LoadText { dst, val });
             }
+            IrInstr::ConcatText { dst, lhs, rhs } => {
+                cst.remove(&dst);
+                out.push(IrInstr::ConcatText { dst, lhs, rhs });
+            }
             IrInstr::MakeSequence { dst, items } => {
                 cst.remove(&dst);
                 out.push(IrInstr::MakeSequence { dst, items });
@@ -252,9 +256,19 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                 cst.remove(&dst);
                 out.push(IrInstr::MapContains { dst, map, key });
             }
-            IrInstr::MapGet { dst, map, key, default_val } => {
+            IrInstr::MapGet {
+                dst,
+                map,
+                key,
+                default_val,
+            } => {
                 cst.remove(&dst);
-                out.push(IrInstr::MapGet { dst, map, key, default_val });
+                out.push(IrInstr::MapGet {
+                    dst,
+                    map,
+                    key,
+                    default_val,
+                });
             }
             IrInstr::MapSet { dst, map, key, val } => {
                 cst.remove(&dst);
@@ -687,10 +701,14 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             out.push(IrInstr::AddFx { dst, lhs, rhs });
                         }
                     }
-                    _ if dst == lhs && matches!(cst.get(&rhs), Some(ConstVal::Fx(v)) if *v == 0) => {
+                    _ if dst == lhs
+                        && matches!(cst.get(&rhs), Some(ConstVal::Fx(v)) if *v == 0) =>
+                    {
                         rewrites = rewrites.saturating_add(1);
                     }
-                    _ if dst == rhs && matches!(cst.get(&lhs), Some(ConstVal::Fx(v)) if *v == 0) => {
+                    _ if dst == rhs
+                        && matches!(cst.get(&lhs), Some(ConstVal::Fx(v)) if *v == 0) =>
+                    {
                         rewrites = rewrites.saturating_add(1);
                     }
                     _ => {
@@ -711,7 +729,9 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                             out.push(IrInstr::SubFx { dst, lhs, rhs });
                         }
                     }
-                    _ if dst == lhs && matches!(cst.get(&rhs), Some(ConstVal::Fx(v)) if *v == 0) => {
+                    _ if dst == lhs
+                        && matches!(cst.get(&rhs), Some(ConstVal::Fx(v)) if *v == 0) =>
+                    {
                         rewrites = rewrites.saturating_add(1);
                     }
                     _ => {

@@ -6,12 +6,11 @@ extern crate std;
 #[cfg(feature = "std")]
 use sm_emit::{
     header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8,
-    Opcode, SemcodeFormatError, SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_DEBUG_SYMBOLS,
-    CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE,
+    Opcode, SemcodeFormatError, SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_CLOSURE_VALUES,
+    CAP_DEBUG_SYMBOLS, CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE,
     CAP_MAP_VALUES, CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_PRNG,
-    CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES,
-    CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_TEXT_VALUES, CAP_CLOSURE_VALUES,
-    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+    CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE,
+    CAP_TEXT_VALUES, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG,
 };
@@ -364,8 +363,8 @@ fn verify_function_code(
         }
     }
 
-    let has_ownership_section = cursor + 4 <= code.len()
-        && &code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG;
+    let has_ownership_section =
+        cursor + 4 <= code.len() && &code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG;
     let ownership_usage = if has_ownership_section {
         verify_ownership_section(name, code, &mut cursor, quotas)?
     } else {
@@ -580,18 +579,27 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
             refs.required_capabilities |= CAP_TEXT_VALUES;
-            let sid =
-                read_u16_le(code, cursor).map_err(|_| invalid("truncated text literal string id"))?;
-            refs.string_refs.push((offset, sid as usize, "text literal"));
+            let sid = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated text literal string id"))?;
+            refs.string_refs
+                .push((offset, sid as usize, "text literal"));
+        }
+        Opcode::ConcatText => {
+            let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
+            let lhs = read_u16_le(code, cursor).map_err(|_| invalid("truncated lhs register"))?;
+            let rhs = read_u16_le(code, cursor).map_err(|_| invalid("truncated rhs register"))?;
+            mark_reg(dst);
+            mark_reg(lhs);
+            mark_reg(rhs);
+            refs.required_capabilities |= CAP_TEXT_VALUES;
         }
         Opcode::MakeSequence => {
-            let dst =
-                read_u16_le(code, cursor).map_err(|_| invalid("truncated sequence dst register"))?;
+            let dst = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated sequence dst register"))?;
             mark_reg(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             let count = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated sequence arity"))?
-                as usize;
+                .map_err(|_| invalid("truncated sequence arity"))? as usize;
             for _ in 0..count {
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated sequence item register"))?;
@@ -802,12 +810,12 @@ fn decode_operands(
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapGet => {
-            let dst = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated map-get dst register"))?;
-            let map = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated map-get map register"))?;
-            let key = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated map-get key register"))?;
+            let dst =
+                read_u16_le(code, cursor).map_err(|_| invalid("truncated map-get dst register"))?;
+            let map =
+                read_u16_le(code, cursor).map_err(|_| invalid("truncated map-get map register"))?;
+            let key =
+                read_u16_le(code, cursor).map_err(|_| invalid("truncated map-get key register"))?;
             let default_val = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated map-get default register"))?;
             mark_reg(dst);
@@ -817,14 +825,14 @@ fn decode_operands(
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapSet => {
-            let dst = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated map-set dst register"))?;
-            let map = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated map-set map register"))?;
-            let key = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated map-set key register"))?;
-            let val = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated map-set val register"))?;
+            let dst =
+                read_u16_le(code, cursor).map_err(|_| invalid("truncated map-set dst register"))?;
+            let map =
+                read_u16_le(code, cursor).map_err(|_| invalid("truncated map-set map register"))?;
+            let key =
+                read_u16_le(code, cursor).map_err(|_| invalid("truncated map-set key register"))?;
+            let val =
+                read_u16_le(code, cursor).map_err(|_| invalid("truncated map-set val register"))?;
             mark_reg(dst);
             mark_reg(map);
             mark_reg(key);
@@ -853,8 +861,8 @@ fn decode_operands(
             refs.required_capabilities |= CAP_PRNG;
         }
         Opcode::MakeClosure => {
-            let dst = read_u16_le(code, cursor)
-                .map_err(|_| invalid("truncated closure dst register"))?;
+            let dst =
+                read_u16_le(code, cursor).map_err(|_| invalid("truncated closure dst register"))?;
             mark_reg(dst);
             refs.required_capabilities |= CAP_CLOSURE_VALUES;
             let sid = read_u16_le(code, cursor)
@@ -1029,8 +1037,8 @@ fn decode_operands(
                 .push((offset, sid as usize, "event post signal"));
         }
         Opcode::ClockRead => {
-            let dst =
-                read_u16_le(code, cursor).map_err(|_| invalid("truncated clock-read dst register"))?;
+            let dst = read_u16_le(code, cursor)
+                .map_err(|_| invalid("truncated clock-read dst register"))?;
             mark_reg(dst);
             refs.required_capabilities |= CAP_CLOCK_READ;
         }
@@ -1051,6 +1059,7 @@ fn decode_operands(
 fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
     match name {
         "sin" | "cos" | "tan" | "sqrt" | "abs" | "pow" => Some(CAP_F64_MATH),
+        "to_text" => Some(CAP_TEXT_VALUES),
         _ => None,
     }
 }
@@ -1103,7 +1112,10 @@ fn verify_ownership_section(
                 "truncated ownership event kind",
             )
         })?;
-        if !matches!(kind, OWNERSHIP_EVENT_KIND_BORROW | OWNERSHIP_EVENT_KIND_WRITE) {
+        if !matches!(
+            kind,
+            OWNERSHIP_EVENT_KIND_BORROW | OWNERSHIP_EVENT_KIND_WRITE
+        ) {
             return Err(reject_one(
                 function,
                 VerificationCode::InvalidOwnershipSection,
@@ -1179,9 +1191,7 @@ fn verify_ownership_section(
                         function,
                         VerificationCode::InvalidOwnershipSection,
                         *cursor - 1,
-                        format!(
-                            "unsupported ownership path component kind 0x{component_kind:02x}"
-                        ),
+                        format!("unsupported ownership path component kind 0x{component_kind:02x}"),
                     ));
                 }
             }

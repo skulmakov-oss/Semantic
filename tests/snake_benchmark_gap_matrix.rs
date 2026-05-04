@@ -64,6 +64,8 @@ fn check_run_compile_verify(rel: &str) {
 fn snake_benchmark_positive_surface_passes_end_to_end() {
     for rel in [
         "tests/fixtures/snake_benchmark/positive_text_equality.sm",
+        "tests/fixtures/snake_benchmark/positive_text_concat.sm",
+        "tests/fixtures/snake_benchmark/positive_text_to_text.sm",
         "tests/fixtures/snake_benchmark/positive_enum_match.sm",
         "tests/fixtures/snake_benchmark/positive_i32_relational.sm",
         "tests/fixtures/snake_benchmark/positive_i32_arithmetic.sm",
@@ -90,18 +92,20 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
 #[test]
 fn snake_benchmark_runtime_negative_reports_contract_violations() {
     // These fixtures pass smc check but fail at smc run with a specific error message.
-    let cases = [(
-        "tests/fixtures/snake_benchmark/negative_random_invalid_range.sm",
-        "lo (10) must be strictly less than hi (10)",
-    ),
-    (
-        "tests/fixtures/snake_benchmark/negative_i32_div_zero.sm",
-        "DivisionByZero",
-    ),
-    (
-        "tests/fixtures/snake_benchmark/negative_i32_mod_zero.sm",
-        "DivisionByZero",
-    )];
+    let cases = [
+        (
+            "tests/fixtures/snake_benchmark/negative_random_invalid_range.sm",
+            "lo (10) must be strictly less than hi (10)",
+        ),
+        (
+            "tests/fixtures/snake_benchmark/negative_i32_div_zero.sm",
+            "DivisionByZero",
+        ),
+        (
+            "tests/fixtures/snake_benchmark/negative_i32_mod_zero.sm",
+            "DivisionByZero",
+        ),
+    ];
 
     for (rel, needle) in cases {
         let input = repo_path(rel);
@@ -130,9 +134,14 @@ fn snake_benchmark_negative_gap_suite_reports_current_blockers() {
             "map_empty() requires a contextual Map(K, V) type",
         ),
         (
-            "tests/fixtures/snake_benchmark/negative_text_concatenation.sm",
+            "tests/fixtures/snake_benchmark/negative_text_plus_scalar.sm",
             "E0201",
-            "text concatenation is not part of the current M8.1 Wave 2 contract",
+            "text concatenation currently admits only text + text operands",
+        ),
+        (
+            "tests/fixtures/snake_benchmark/negative_to_text_record.sm",
+            "E0201",
+            "builtin 'to_text' does not yet support record type 'Probe'",
         ),
         (
             "tests/fixtures/snake_benchmark/negative_loop_break.sm",

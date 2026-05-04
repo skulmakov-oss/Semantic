@@ -373,7 +373,8 @@ Current text-literal limits:
 
 - the current executable text surface is only double-quoted same-line text
 - interpolation and multi-line text blocks are not part of the current surface
-- text concatenation is not yet part of the current source contract
+- text concatenation and explicit scalar `to_text(...)` are part of the current
+  application-completeness contract
 
 Current active collections checkpoint on `main`:
 

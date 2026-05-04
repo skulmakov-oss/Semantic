@@ -222,6 +222,7 @@ It is tracked through:
 Current benchmark-positive baseline includes:
 
 - same-family text equality;
+- same-family text concatenation and explicit scalar `to_text(...)`;
 - enum/control-flow basics;
 - same-family plain `i32` relational operators;
 - ordered `Sequence(T)` indexing and iteration;
@@ -234,7 +235,6 @@ Known benchmark-family blockers remain in the application-completeness stream ra
 - sequence utility layer;
 - first-wave map surface;
 - deterministic seeded PRNG;
-- text concatenation / minimal formatting;
 - narrow stdout experiment surface.
 
 ## 10. Legacy and compatibility perimeter
