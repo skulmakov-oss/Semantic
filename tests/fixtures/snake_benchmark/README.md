@@ -51,7 +51,7 @@ Current static-negative baseline includes:
 
 Remaining benchmark blocker families:
 
-- text concatenation / minimal formatting for traces
+- text observation is now being scoped through `docs/roadmap/text_observation_contract.md`
 - narrow stdout experiment surface
 
 Those remaining gaps should be frozen in tests only after their scope PRs choose
