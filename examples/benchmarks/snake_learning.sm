@@ -1,0 +1,199 @@
+// snake_learning.sm — Q-learning snake benchmark
+//
+// Demonstrates a seeded deterministic training loop over a 10x10 grid.
+//
+// State encoding (5 bits, 32 states):
+//   bit 4 — danger straight ahead
+//   bit 3 — danger to the left
+//   bit 2 — danger to the right
+//   bit 1 — food is in the forward half-plane
+//   bit 0 — food is to the left of heading
+//
+// Actions: 0 = turn left, 1 = go straight, 2 = turn right
+//
+// Q-values: integer (scaled ×10) stored as Map(i32, i32).
+//   Key = state * 3 + action  →  0 … 95
+//   Rewards: +50 eat food, +1 survive step, -100 die
+//   Update: Q(s,a) += reward  (accumulate; no discount)
+//
+// 10 training episodes with per-episode seeds; greedy selection
+// (tie-broken to action 1 = straight) after the first episode.
+//
+// Seed-independent invariants:
+//   total_score >= 0
+//   episode count == N_EPISODES
+//   Q-table contains entries (not empty after training)
+
+// --- position helpers --------------------------------------------------
+
+fn pack(x: i32, y: i32) -> i32 {
+    return x + y * 10;
+}
+
+fn cell_x(pos: i32) -> i32 {
+    return pos % 10;
+}
+
+fn cell_y(pos: i32) -> i32 {
+    return pos / 10;
+}
+
+fn in_bounds(x: i32, y: i32) -> bool {
+    return x >= 0 && x < 10 && y >= 0 && y < 10;
+}
+
+// --- relative-turn helpers --------------------------------------------
+// action 0 = turn left:  new dir = ( dy, -dx)
+// action 1 = straight:   new dir = (dx,   dy)
+// action 2 = turn right: new dir = (-dy,  dx)
+
+fn next_dx(dx: i32, dy: i32, action: i32) -> i32 {
+    if action == 0 { return dy; }
+    if action == 2 { return -dy; }
+    return dx;
+}
+
+fn next_dy(dx: i32, dy: i32, action: i32) -> i32 {
+    if action == 0 { return -dx; }
+    if action == 2 { return dx; }
+    return dy;
+}
+
+// --- danger probe (true = that cell is lethal) ------------------------
+
+fn is_danger(snake: Sequence(i32), nx: i32, ny: i32) -> bool {
+    if !in_bounds(nx, ny) { return true; }
+    let body: Sequence(i32) = pop(snake);
+    return contains(body, pack(nx, ny));
+}
+
+// --- 5-bit state encoding ---------------------------------------------
+
+fn state_of(snake: Sequence(i32), dx: i32, dy: i32, food: i32) -> i32 {
+    let hx: i32 = cell_x(snake[0]);
+    let hy: i32 = cell_y(snake[0]);
+    // left-turn direction: (dy, -dx); right-turn: (-dy, dx)
+    let mut s: i32 = 0;
+    if is_danger(snake, hx + dx, hy + dy) { s = s + 16; }
+    if is_danger(snake, hx + dy, hy - dx) { s = s + 8; }
+    if is_danger(snake, hx - dy, hy + dx) { s = s + 4; }
+    let fdx: i32 = cell_x(food) - hx;
+    let fdy: i32 = cell_y(food) - hy;
+    if fdx * dx + fdy * dy > 0   { s = s + 2; }
+    if fdx * dy - fdy * dx > 0   { s = s + 1; }
+    return s;
+}
+
+// --- Q-table helpers --------------------------------------------------
+
+fn q_key(state: i32, action: i32) -> i32 {
+    return state * 3 + action;
+}
+
+fn q_get(qtable: Map(i32, i32), state: i32, action: i32) -> i32 {
+    return map_get(qtable, q_key(state, action), 0);
+}
+
+fn q_add(qtable: Map(i32, i32), state: i32, action: i32, delta: i32) -> Map(i32, i32) {
+    let old: i32 = q_get(qtable, state, action);
+    return map_set(qtable, q_key(state, action), old + delta);
+}
+
+// Greedy: pick action with highest Q(state, *); ties broken to action 1.
+fn greedy_action(qtable: Map(i32, i32), state: i32) -> i32 {
+    let q0: i32 = q_get(qtable, state, 0);
+    let q1: i32 = q_get(qtable, state, 1);
+    let q2: i32 = q_get(qtable, state, 2);
+    let mut best: i32 = 1;
+    let mut best_q: i32 = q1;
+    if q0 > best_q { best = 0; best_q = q0; }
+    if q2 > best_q { best = 2; best_q = q2; }
+    return best;
+}
+
+// --- training loop ----------------------------------------------------
+
+fn main() {
+    let n_episodes: i32 = 10;
+    let max_steps: i32 = 200;
+
+    let mut qtable: Map(i32, i32) = map_empty();
+    let mut total_score: i32 = 0;
+    let mut total_steps: i32 = 0;
+
+    let mut episode: i32 = 0;
+    while episode < n_episodes {
+        // Each episode uses a distinct deterministic seed.
+        random_seed(episode * 137 + 42);
+
+        let mut snake: Sequence(i32) = [pack(5, 5), pack(4, 5), pack(3, 5)];
+        let mut food: i32 = random_next_i32(0, 100);
+        let mut score: i32 = 0;
+        let mut dx: i32 = 1;
+        let mut dy: i32 = 0;
+        let mut steps: i32 = 0;
+        let mut alive: bool = true;
+
+        while alive && steps < max_steps {
+            let state: i32 = state_of(snake, dx, dy, food);
+            // Episode 0: always go straight (bootstrap Q-table).
+            // Subsequent episodes: greedy from accumulated Q-values.
+            let action: i32 = if episode == 0 { 1 } else { greedy_action(qtable, state) };
+
+            let ndx: i32 = next_dx(dx, dy, action);
+            let ndy: i32 = next_dy(dx, dy, action);
+            dx = ndx;
+            dy = ndy;
+
+            let hx: i32 = cell_x(snake[0]);
+            let hy: i32 = cell_y(snake[0]);
+            let nx: i32 = hx + dx;
+            let ny: i32 = hy + dy;
+
+            if !in_bounds(nx, ny) {
+                alive = false;
+                qtable = q_add(qtable, state, action, -100);
+            } else {
+                let new_head: i32 = pack(nx, ny);
+                let tail_gone: Sequence(i32) = pop(snake);
+                if contains(tail_gone, new_head) {
+                    alive = false;
+                    qtable = q_add(qtable, state, action, -100);
+                } else {
+                    if new_head == food {
+                        snake = prepend(snake, new_head);
+                        score = score + 1;
+                        food = random_next_i32(0, 100);
+                        qtable = q_add(qtable, state, action, 50);
+                    } else {
+                        let grown: Sequence(i32) = prepend(snake, new_head);
+                        snake = pop(grown);
+                        qtable = q_add(qtable, state, action, 1);
+                    }
+                    steps = steps + 1;
+                }
+            }
+        }
+
+        total_score = total_score + score;
+        total_steps = total_steps + steps;
+        episode = episode + 1;
+    }
+
+    print("snake_learning: total_score=" + to_text(total_score)
+        + " total_steps=" + to_text(total_steps)
+        + " episodes=" + to_text(n_episodes));
+
+    // Seed-independent invariants
+    assert(total_score >= 0);
+    assert(total_steps >= 0);
+    assert(episode == n_episodes);
+    // Q-table must be non-empty after training (episodes left entries)
+    assert(map_contains(qtable, 0) || map_contains(qtable, 1) || map_contains(qtable, 2));
+
+    // Deterministic golden values: 10 episodes, seeds episode*137+42
+    // Episode 0 always goes straight (bootstrap).  Episodes 1-9 use
+    // greedy Q-values accumulated from prior episodes.
+    assert(total_score == 8);
+    assert(total_steps == 1417);
+}
