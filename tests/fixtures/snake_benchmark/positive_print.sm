@@ -1,0 +1,6 @@
+fn main() {
+    print("hello from Semantic");
+    let score: i32 = 42;
+    let msg: text = "score=" + to_text(score);
+    print(msg);
+}

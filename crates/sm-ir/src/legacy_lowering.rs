@@ -2,7 +2,7 @@ use super::*;
 use crate::semcode_format::{
     write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC2,
     MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, MAGIC10, MAGIC11, MAGIC12, MAGIC13,
-    MAGIC14, MAGIC15,
+    MAGIC14, MAGIC15, MAGIC16,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG,
@@ -1030,7 +1030,10 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // require_ownership_section: whenever the chosen header includes CAP_OWNERSHIP_PATHS,
     // every function must have an OWN0 section (even if empty) so the verifier check passes.
     let require_ownership_section;
-    if has_v15_prng_instr(funcs) {
+    if has_v16_stdout_instr(funcs) {
+        out.extend_from_slice(&MAGIC16);
+        require_ownership_section = true;
+    } else if has_v15_prng_instr(funcs) {
         out.extend_from_slice(&MAGIC15);
         require_ownership_section = true;
     } else if has_v14_map_instr(funcs) {
@@ -1784,6 +1787,14 @@ fn has_v8_text_instr(funcs: &[IrFunction]) -> bool {
             IrInstr::Call { name, .. } => name == "to_text",
             _ => false,
         })
+    })
+}
+
+fn has_v16_stdout_instr(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::Call { name, .. } if name == "print"))
     })
 }
 
@@ -3439,8 +3450,30 @@ fn lower_expr_with_expected(
                 out.push(IrInstr::MapSet { dst, map: map_reg, key: key_reg, val: val_reg });
                 return Ok((dst, ret_map_ty));
             }
+            // builtin print(msg: text) -> ()
             // builtin random_seed(seed: i32) -> ()
             // builtin to_text(value: text|bool|i32|u32|quad) -> text
+            if resolve_symbol_name(arena, *name)? == "print" {
+                if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: "builtin 'print' takes exactly one positional argument (msg: text)"
+                            .to_string(),
+                    });
+                }
+                let (arg_reg, _) = lower_expr(
+                    args[0].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    ret_ty, closure_state,
+                )?;
+                let dst = alloc(next);
+                out.push(IrInstr::Call {
+                    dst: Some(dst),
+                    name: "print".to_string(),
+                    args: vec![arg_reg],
+                });
+                return Ok((dst, Type::Unit));
+            }
             if resolve_symbol_name(arena, *name)? == "to_text" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
@@ -8515,6 +8548,27 @@ fn lower_expr_stmt_with_parts(
             )?;
             let dst = alloc(next);
             out.push(IrInstr::MapSet { dst, map: map_reg, key: key_reg, val: val_reg });
+            return Ok(());
+        }
+        // builtin print(msg: text) as statement
+        if resolve_symbol_name(arena, *name)? == "print" {
+            if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "builtin 'print' takes exactly one positional argument (msg: text)"
+                        .to_string(),
+                });
+            }
+            let (arg_reg, _) = lower_expr(
+                args[0].value,
+                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                ret_ty, closure_state,
+            )?;
+            out.push(IrInstr::Call {
+                dst: None,
+                name: "print".to_string(),
+                args: vec![arg_reg],
+            });
             return Ok(());
         }
         // builtin random_seed(seed: i32) as statement — valid (discards Unit result)

@@ -1,0 +1,5 @@
+fn main() {
+    // print expects text; passing i32 must be rejected.
+    // Expected: Error [E0201] builtin 'print' expects text, got I32
+    print(42);
+}
