@@ -419,8 +419,17 @@ Current `main` still fails this benchmark family at the following points:
   - focused benchmark tests green
   - CI green
 
-- `PR-F2` [required]
+- `PR-F2` [landed]
   Title: `examples/tests: add snake_learning benchmark`
+  Landed:
+  - `examples/benchmarks/snake_learning.sm` — 10 episodes, greedy
+    Q-learning with integer-scaled Q-values in Map(i32, i32)
+  - 5-bit state encoding (danger ahead/left/right + food direction)
+  - 3 actions (turn left / straight / turn right) with relative-turn helpers
+  - Episode 0 bootstraps Q-table via straight-line policy; episodes 1-9
+    use greedy selection from accumulated Q-values
+  - Deterministic golden: total_score=8, total_steps=1417 (seeds episode*137+42)
+  - `tests/snake_learning_benchmark.rs` — check/run/compile/verify
   Goal:
   - prove the self-learning loop is writable on the admitted surface
   Scope:
