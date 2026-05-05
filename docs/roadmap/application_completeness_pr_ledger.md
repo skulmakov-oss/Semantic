@@ -87,10 +87,14 @@ Current `main` already admits these benchmark-relevant surfaces:
 - statement `while` (pre-program, confirmed PR-B1 audit)
 - statement `loop`, bare `break`, `continue` (pre-program, confirmed PR-B1 audit)
   - bare `break`/`continue` outside a loop correctly rejected with E0201
+- first-wave text observation surface (landed PR-E1a)
+  - `text + text -> text`
+  - explicit `to_text(...)` for `text`, `bool`, `i32`, `u32`, and `quad`
+  - no implicit scalar conversion through `+`
+  - no stdout surface yet
 
 Current `main` still fails this benchmark family at the following points:
 
-- text concatenation / minimal formatting for traces (PR-E1)
 - a narrow admitted stdout experiment surface (PR-E2)
 
 ## Program Rules
@@ -346,8 +350,13 @@ Current `main` still fails this benchmark family at the following points:
   - `git diff --check`
   - CI green
 
-- `PR-E1a` [required]
+- `PR-E1a` [landed]
   Title: `stdlib/text: admit first-wave text concatenation and scalar to_text`
+  Landed:
+  - `text + text -> text`
+  - explicit `to_text(...)` for `text`, `bool`, `i32`, `u32`, and `quad`
+  - `text + scalar` remains rejected (E0201)
+  - `to_text(record)` remains rejected (E0201)
   Depends on:
   - `PR-E1`
   Goal:

@@ -68,7 +68,6 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
         "tests/fixtures/snake_benchmark/positive_i32_relational.sm",
         "tests/fixtures/snake_benchmark/positive_i32_arithmetic.sm",
         "tests/fixtures/snake_benchmark/positive_i32_div_mod.sm",
-        "tests/fixtures/snake_benchmark/negative_text_concatenation.sm",
         "tests/fixtures/snake_benchmark/positive_text_concat.sm",
         "tests/fixtures/snake_benchmark/positive_text_to_text.sm",
         "tests/fixtures/snake_benchmark/positive_let_mut.sm",
