@@ -2600,8 +2600,31 @@ fn infer_expr_type(
                 }
                 return Ok(map_ty);
             }
+            // builtin print(msg: text) -> ()
             // builtin random_seed(seed: i32) -> ()
             // builtin to_text(value: text|bool|i32|u32|quad) -> text
+            if resolve_symbol_name(arena, *name)? == "print" {
+                if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: "builtin 'print' takes exactly one positional argument (msg: text)"
+                            .to_string(),
+                    });
+                }
+                let arg_ty = infer_expr_type(
+                    args[0].value,
+                    arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+                )?;
+                if arg_ty != Type::Text {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin 'print' expects text, got {:?}", arg_ty
+                        ),
+                    });
+                }
+                return Ok(Type::Unit);
+            }
             if resolve_symbol_name(arena, *name)? == "to_text" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {

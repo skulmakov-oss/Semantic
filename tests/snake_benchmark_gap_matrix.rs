@@ -70,6 +70,7 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
         "tests/fixtures/snake_benchmark/positive_i32_div_mod.sm",
         "tests/fixtures/snake_benchmark/positive_text_concat.sm",
         "tests/fixtures/snake_benchmark/positive_text_to_text.sm",
+        "tests/fixtures/snake_benchmark/positive_print.sm",
         "tests/fixtures/snake_benchmark/positive_let_mut.sm",
         "tests/fixtures/snake_benchmark/positive_reassignment.sm",
         "tests/fixtures/snake_benchmark/positive_while_loop.sm",
@@ -150,6 +151,11 @@ fn snake_benchmark_negative_gap_suite_reports_current_blockers() {
             "tests/fixtures/snake_benchmark/negative_continue_statement.sm",
             "E0201",
             "continue is allowed only inside while or statement loop",
+        ),
+        (
+            "tests/fixtures/snake_benchmark/negative_print_non_text.sm",
+            "E0201",
+            "builtin 'print' expects text",
         ),
     ];
 

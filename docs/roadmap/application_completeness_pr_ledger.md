@@ -91,11 +91,12 @@ Current `main` already admits these benchmark-relevant surfaces:
   - `text + text -> text`
   - explicit `to_text(...)` for `text`, `bool`, `i32`, `u32`, and `quad`
   - no implicit scalar conversion through `+`
-  - no stdout surface yet
+- narrow stdout experiment surface (landed PR-E2)
+  - `print(msg: text)` — emits one line to stdout; no file I/O; no argv
 
 Current `main` still fails this benchmark family at the following points:
 
-- a narrow admitted stdout experiment surface (PR-E2)
+- (none — all base-path surfaces admitted; benchmark pack work begins with PR-F1)
 
 ## Program Rules
 
@@ -374,8 +375,12 @@ Current `main` still fails this benchmark family at the following points:
   - targeted text-format tests green
   - CI green
 
-- `PR-E2` [required]
+- `PR-E2` [landed]
   Title: `cli/runtime: admit narrow stdout experiment surface`
+  Landed:
+  - `print(msg: text)` — emits msg + newline to stdout
+  - `print` with non-text argument remains rejected (E0201)
+  - new capability `CAP_STDOUT = 1 << 17`, format version `SEMCOD16`
   Goal:
   - provide one honest observation channel for headless experiments
   Scope:

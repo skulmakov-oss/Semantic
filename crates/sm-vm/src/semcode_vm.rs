@@ -2342,6 +2342,25 @@ fn try_eval_builtin_call(name: &str, args: &[Value]) -> Result<Option<Value>, Ru
             Value::F64(lhs.powf(rhs))
         }
         "to_text" => Value::Text(value_to_text(expect_builtin_to_text_arg(name, args)?)?),
+        "print" => {
+            if args.len() != 1 {
+                return Err(RuntimeError::TypeMismatchRuntime(format!(
+                    "builtin 'print' expects 1 argument, got {}",
+                    args.len()
+                )));
+            }
+            let text = match &args[0] {
+                Value::Text(s) => s.clone(),
+                other => {
+                    return Err(RuntimeError::TypeMismatchRuntime(format!(
+                        "builtin 'print' expects text, got {:?}",
+                        other
+                    )));
+                }
+            };
+            println!("{}", text);
+            Value::Unit
+        }
         _ => return Ok(None),
     };
     Ok(Some(value))

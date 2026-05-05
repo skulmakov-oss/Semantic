@@ -9,7 +9,7 @@ use sm_emit::{
     Opcode, SemcodeFormatError, SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_DEBUG_SYMBOLS,
     CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE,
     CAP_MAP_VALUES, CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_PRNG,
-    CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES,
+    CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STDOUT,
     CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_TEXT_VALUES, CAP_CLOSURE_VALUES,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
@@ -1061,6 +1061,7 @@ fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
     match name {
         "sin" | "cos" | "tan" | "sqrt" | "abs" | "pow" => Some(CAP_F64_MATH),
         "to_text" => Some(CAP_TEXT_VALUES),
+        "print" => Some(CAP_STDOUT),
         _ => None,
     }
 }

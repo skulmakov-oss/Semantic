@@ -14,6 +14,7 @@ pub const MAGIC12: [u8; 8] = *b"SEMCOD12";
 pub const MAGIC13: [u8; 8] = *b"SEMCOD13";
 pub const MAGIC14: [u8; 8] = *b"SEMCOD14";
 pub const MAGIC15: [u8; 8] = *b"SEMCOD15";
+pub const MAGIC16: [u8; 8] = *b"SEMCOD16";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -32,6 +33,7 @@ pub const CAP_OWNERSHIP_FIELD_PATHS: u32 = 1 << 13;
 pub const CAP_SEQUENCE_ITERATION: u32 = 1 << 14;
 pub const CAP_MAP_VALUES: u32 = 1 << 15;
 pub const CAP_PRNG: u32 = 1 << 16;
+pub const CAP_STDOUT: u32 = 1 << 17;
 
 pub const OWNERSHIP_SECTION_TAG: [u8; 4] = *b"OWN0";
 pub const OWNERSHIP_EVENT_KIND_BORROW: u8 = 0;
@@ -285,11 +287,35 @@ pub const HEADER_V15: SemcodeHeaderSpec = SemcodeHeaderSpec {
         | CAP_PRNG,
 };
 
+pub const HEADER_V16: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC16,
+    epoch: 0,
+    rev: 17,
+    capabilities: CAP_DEBUG_SYMBOLS
+        | CAP_F64_MATH
+        | CAP_GATE_SURFACE
+        | CAP_FX_VALUES
+        | CAP_FX_MATH
+        | CAP_STATE_QUERY
+        | CAP_STATE_UPDATE
+        | CAP_EVENT_POST
+        | CAP_CLOCK_READ
+        | CAP_TEXT_VALUES
+        | CAP_SEQUENCE_VALUES
+        | CAP_CLOSURE_VALUES
+        | CAP_OWNERSHIP_PATHS
+        | CAP_OWNERSHIP_FIELD_PATHS
+        | CAP_SEQUENCE_ITERATION
+        | CAP_MAP_VALUES
+        | CAP_PRNG
+        | CAP_STDOUT,
+};
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
-        HEADER_V15,
+        HEADER_V15, HEADER_V16,
     ]
 }
 
