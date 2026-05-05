@@ -397,8 +397,15 @@ Current `main` still fails this benchmark family at the following points:
 
 ### F — Benchmark Pack And Close-Out
 
-- `PR-F1` [required]
+- `PR-F1` [landed]
   Title: `examples/tests: add snake_core benchmark`
+  Landed:
+  - `examples/benchmarks/snake_core.sm` — 10x10 headless snake engine
+  - wall-avoidance steering (clockwise turn on wall); terminates at 200
+    steps or on wall/self-collision
+  - deterministic with seed 42: `score=0 steps=200`
+  - verifies `len(snake) == 3 + score` invariant end-to-end
+  - `tests/snake_core_benchmark.rs` — check/run/compile/verify test
   Goal:
   - prove deterministic game-state logic on the admitted application surface
   Scope:
