@@ -68,6 +68,8 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
         "tests/fixtures/snake_benchmark/positive_i32_relational.sm",
         "tests/fixtures/snake_benchmark/positive_i32_arithmetic.sm",
         "tests/fixtures/snake_benchmark/positive_i32_div_mod.sm",
+        "tests/fixtures/snake_benchmark/positive_text_concat.sm",
+        "tests/fixtures/snake_benchmark/positive_text_to_text.sm",
         "tests/fixtures/snake_benchmark/positive_let_mut.sm",
         "tests/fixtures/snake_benchmark/positive_reassignment.sm",
         "tests/fixtures/snake_benchmark/positive_while_loop.sm",
@@ -130,9 +132,14 @@ fn snake_benchmark_negative_gap_suite_reports_current_blockers() {
             "map_empty() requires a contextual Map(K, V) type",
         ),
         (
-            "tests/fixtures/snake_benchmark/negative_text_concatenation.sm",
+            "tests/fixtures/snake_benchmark/negative_text_plus_scalar.sm",
             "E0201",
-            "text concatenation is not part of the current M8.1 Wave 2 contract",
+            "text concatenation currently admits only text + text operands",
+        ),
+        (
+            "tests/fixtures/snake_benchmark/negative_to_text_record.sm",
+            "E0201",
+            "builtin 'to_text' does not yet support record type 'Probe'",
         ),
         (
             "tests/fixtures/snake_benchmark/negative_loop_break.sm",

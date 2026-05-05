@@ -2601,6 +2601,44 @@ fn infer_expr_type(
                 return Ok(map_ty);
             }
             // builtin random_seed(seed: i32) -> ()
+            // builtin to_text(value: text|bool|i32|u32|quad) -> text
+            if resolve_symbol_name(arena, *name)? == "to_text" {
+                if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: "builtin 'to_text' takes exactly one positional argument"
+                            .to_string(),
+                    });
+                }
+                let arg_ty = infer_expr_type(
+                    args[0].value,
+                    arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+                )?;
+                match &arg_ty {
+                    Type::Text | Type::Bool | Type::I32 | Type::U32 | Type::Quad => {
+                        return Ok(Type::Text);
+                    }
+                    Type::Record(sym) => {
+                        let name_str = resolve_symbol_name(arena, *sym)
+                            .unwrap_or("<unknown>");
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "builtin 'to_text' does not yet support record type '{name_str}'"
+                            ),
+                        });
+                    }
+                    other => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "builtin 'to_text' currently supports text, bool, i32, u32, and quad; got {:?}",
+                                other
+                            ),
+                        });
+                    }
+                }
+            }
             if resolve_symbol_name(arena, *name)? == "random_seed" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
@@ -3018,17 +3056,13 @@ fn infer_expr_type(
                         });
                     }
                     if lt == Type::Text || rt == Type::Text {
-                        let message = if *op == BinaryOp::Add
-                            && lt == Type::Text
-                            && rt == Type::Text
-                        {
-                            "text concatenation is not part of the current M8.1 Wave 2 contract"
-                        } else {
-                            "text values currently support only equality in the M8.1 Wave 2 surface"
-                        };
+                        if *op == BinaryOp::Add && lt == Type::Text && rt == Type::Text {
+                            return Ok(Type::Text);
+                        }
                         return Err(FrontendError {
                             pos: 0,
-                            message: message.to_string(),
+                            message: "text concatenation currently admits only text + text operands"
+                                .to_string(),
                         });
                     }
                     if lt == Type::I32 && rt == Type::I32 {
@@ -3404,18 +3438,53 @@ mod tests {
     }
 
     #[test]
-    fn text_concatenation_rejects_in_wave2() {
+    fn text_concatenation_and_to_text_surface_typechecks() {
         let src = r#"
             fn main() {
-                let both = "a" + "b";
+                let score: i32 = 10;
+                let count: u32 = 7u32;
+                let flag: bool = true;
+                let marker: quad = T;
+                let label: text = "score=" + to_text(score);
+                let count_label: text = to_text(count);
+                let flag_label: text = to_text(flag);
+                let marker_label: text = to_text(marker);
+                let copy_label: text = to_text("done");
                 return;
             }
         "#;
+        typecheck_source(src).expect("text concatenation and to_text should typecheck");
+    }
 
-        let err = typecheck_source(src).expect_err("text concatenation must remain outside Wave 2");
+    #[test]
+    fn text_concatenation_rejects_scalar_operand() {
+        let src = r#"
+            fn main() {
+                let both: text = "a" + 1;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("text concatenation with scalar must still reject");
         assert!(err
             .message
-            .contains("text concatenation is not part of the current M8.1 Wave 2 contract"));
+            .contains("text concatenation currently admits only text + text operands"));
+    }
+
+    #[test]
+    fn to_text_rejects_record_types() {
+        let src = r#"
+            record Probe { x: i32, }
+            fn main() {
+                let probe: Probe = Probe { x: 1 };
+                let label: text = to_text(probe);
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("to_text should reject record values");
+        assert!(err
+            .message
+            .contains("builtin 'to_text' does not yet support record type 'Probe'"));
     }
 
     #[test]

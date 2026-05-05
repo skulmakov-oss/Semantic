@@ -1,0 +1,10 @@
+record Probe {
+    x: i32,
+}
+
+fn main() {
+    // to_text on a record is not admitted — only text, bool, i32, u32, quad.
+    // Expected: Error [E0201] builtin 'to_text' does not yet support record type 'Probe'
+    let probe: Probe = Probe { x: 1 };
+    let label: text = to_text(probe);
+}

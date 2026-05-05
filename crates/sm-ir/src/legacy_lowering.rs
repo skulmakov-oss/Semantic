@@ -49,6 +49,11 @@ pub enum IrInstr {
         dst: u16,
         val: String,
     },
+    ConcatText {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
     MakeSequence {
         dst: u16,
         items: Vec<u16>,
@@ -1121,7 +1126,8 @@ fn emit_semcode_function(
             | IrInstr::MapGet { .. }
             | IrInstr::MapSet { .. }
             | IrInstr::RngSeed { .. }
-            | IrInstr::RngNextI32 { .. } => {}
+            | IrInstr::RngNextI32 { .. }
+            | IrInstr::ConcatText { .. } => {}
             IrInstr::MakeClosure { name, .. } => {
                 let _ = interner.id(name)?;
             }
@@ -1242,6 +1248,7 @@ fn encoded_size(instr: &IrInstr) -> Option<usize> {
         IrInstr::LoadF64 { .. } => 1 + 2 + 8,
         IrInstr::LoadFx { .. } => 1 + 2 + 4,
         IrInstr::LoadText { .. } => 1 + 2 + 2,
+        IrInstr::ConcatText { .. } => 1 + 2 + 2 + 2,
         IrInstr::MakeSequence { items, .. } => 1 + 2 + 2 + (items.len() * 2),
         IrInstr::SequenceLen { .. } => 1 + 2 + 2,
         IrInstr::SequenceIsEmpty { .. } => 1 + 2 + 2,
@@ -1354,6 +1361,12 @@ fn emit_instr(
             out.push(Opcode::LoadText.byte());
             write_u16_le(out, *dst);
             write_u16_le(out, interner.lookup(val)?);
+        }
+        IrInstr::ConcatText { dst, lhs, rhs } => {
+            out.push(Opcode::ConcatText.byte());
+            write_u16_le(out, *dst);
+            write_u16_le(out, *lhs);
+            write_u16_le(out, *rhs);
         }
         IrInstr::MakeSequence { dst, items } => {
             out.push(Opcode::MakeSequence.byte());
@@ -1765,9 +1778,13 @@ fn has_v7_clock_read_instr(funcs: &[IrFunction]) -> bool {
 }
 
 fn has_v8_text_instr(funcs: &[IrFunction]) -> bool {
-    funcs
-        .iter()
-        .any(|f| f.instrs.iter().any(|i| matches!(i, IrInstr::LoadText { .. })))
+    funcs.iter().any(|f| {
+        f.instrs.iter().any(|i| match i {
+            IrInstr::LoadText { .. } | IrInstr::ConcatText { .. } => true,
+            IrInstr::Call { name, .. } => name == "to_text",
+            _ => false,
+        })
+    })
 }
 
 fn has_v9_sequence_instr(funcs: &[IrFunction]) -> bool {
@@ -3423,6 +3440,28 @@ fn lower_expr_with_expected(
                 return Ok((dst, ret_map_ty));
             }
             // builtin random_seed(seed: i32) -> ()
+            // builtin to_text(value: text|bool|i32|u32|quad) -> text
+            if resolve_symbol_name(arena, *name)? == "to_text" {
+                if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: "builtin 'to_text' takes exactly one positional argument"
+                            .to_string(),
+                    });
+                }
+                let (arg_reg, _) = lower_expr(
+                    args[0].value,
+                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
+                    ret_ty, closure_state,
+                )?;
+                let dst = alloc(next);
+                out.push(IrInstr::Call {
+                    dst: Some(dst),
+                    name: "to_text".to_string(),
+                    args: vec![arg_reg],
+                });
+                return Ok((dst, Type::Text));
+            }
             if resolve_symbol_name(arena, *name)? == "random_seed" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
@@ -3784,6 +3823,14 @@ fn lower_expr_with_expected(
                     return Ok((dst, Type::Bool));
                 }
                 BinaryOp::Add => {
+                    if lt == Type::Text && rt == Type::Text {
+                        out.push(IrInstr::ConcatText {
+                            dst,
+                            lhs: lr,
+                            rhs: rr,
+                        });
+                        return Ok((dst, Type::Text));
+                    }
                     if lt == Type::I32 {
                         out.push(IrInstr::AddI32 {
                             dst,

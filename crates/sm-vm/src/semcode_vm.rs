@@ -739,6 +739,11 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
+            Opcode::ConcatText => {
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            }
             Opcode::QAnd
             | Opcode::QOr
             | Opcode::QImpl
@@ -1227,8 +1232,17 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
             Opcode::LoadText => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-                let value = lookup_str(&f, sid)?.to_string();
+                let value = decode_text_literal(lookup_str(&f, sid)?);
                 set_reg(vm, frame_idx, dst, Value::Text(value))?;
+                next_pc = cur - f.instr_start;
+            }
+            Opcode::ConcatText => {
+                let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let rhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+                let mut out = as_text(get_reg(vm, frame_idx, lhs)?)?;
+                out.push_str(&as_text(get_reg(vm, frame_idx, rhs)?)?);
+                set_reg(vm, frame_idx, dst, Value::Text(out))?;
                 next_pc = cur - f.instr_start;
             }
             Opcode::MakeSequence => {
@@ -2327,9 +2341,55 @@ fn try_eval_builtin_call(name: &str, args: &[Value]) -> Result<Option<Value>, Ru
             let (lhs, rhs) = expect_builtin_binary_f64(name, args)?;
             Value::F64(lhs.powf(rhs))
         }
+        "to_text" => Value::Text(value_to_text(expect_builtin_to_text_arg(name, args)?)?),
         _ => return Ok(None),
     };
     Ok(Some(value))
+}
+
+fn decode_text_literal(raw: &str) -> String {
+    raw.strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(raw)
+        .to_string()
+}
+
+fn as_text(v: Value) -> Result<String, RuntimeError> {
+    if let Value::Text(x) = v {
+        Ok(x)
+    } else {
+        Err(RuntimeError::TypeMismatchRuntime("expected text".to_string()))
+    }
+}
+
+fn value_to_text(v: Value) -> Result<String, RuntimeError> {
+    match v {
+        Value::Text(x) => Ok(x),
+        Value::Bool(b) => Ok(if b { "true" } else { "false" }.to_string()),
+        Value::I32(x) => Ok(x.to_string()),
+        Value::U32(x) => Ok(x.to_string()),
+        Value::Quad(q) => Ok(match q {
+            QuadVal::N => "N",
+            QuadVal::T => "T",
+            QuadVal::F => "F",
+            QuadVal::S => "S",
+        }
+        .to_string()),
+        other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin 'to_text' currently supports text, bool, i32, u32, and quad; got {:?}",
+            other
+        ))),
+    }
+}
+
+fn expect_builtin_to_text_arg(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    if args.len() != 1 {
+        return Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin '{name}' expects 1 argument, got {}",
+            args.len()
+        )));
+    }
+    Ok(args[0].clone())
 }
 
 fn expect_builtin_unary_f64(name: &str, args: &[Value]) -> Result<f64, RuntimeError> {
@@ -2372,6 +2432,12 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
             let sid = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             let text = lookup_str(f, sid)?;
             format!("LOAD_TEXT r{}, {:?}", d, text)
+        }
+        Opcode::ConcatText => {
+            let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let l = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
+            format!("CONCAT_TEXT r{}, r{}, r{}", d, l, r)
         }
         Opcode::LoadI32 => {
             let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;

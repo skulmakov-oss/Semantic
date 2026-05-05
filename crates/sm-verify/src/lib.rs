@@ -584,6 +584,15 @@ fn decode_operands(
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated text literal string id"))?;
             refs.string_refs.push((offset, sid as usize, "text literal"));
         }
+        Opcode::ConcatText => {
+            let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
+            let lhs = read_u16_le(code, cursor).map_err(|_| invalid("truncated lhs register"))?;
+            let rhs = read_u16_le(code, cursor).map_err(|_| invalid("truncated rhs register"))?;
+            mark_reg(dst);
+            mark_reg(lhs);
+            mark_reg(rhs);
+            refs.required_capabilities |= CAP_TEXT_VALUES;
+        }
         Opcode::MakeSequence => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated sequence dst register"))?;
@@ -1051,6 +1060,7 @@ fn decode_operands(
 fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
     match name {
         "sin" | "cos" | "tan" | "sqrt" | "abs" | "pow" => Some(CAP_F64_MATH),
+        "to_text" => Some(CAP_TEXT_VALUES),
         _ => None,
     }
 }

@@ -268,6 +268,10 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                 cst.remove(&dst);
                 out.push(IrInstr::RngNextI32 { dst, lo, hi });
             }
+            IrInstr::ConcatText { dst, lhs, rhs } => {
+                cst.remove(&dst);
+                out.push(IrInstr::ConcatText { dst, lhs, rhs });
+            }
             IrInstr::LoadVar { dst, name } => {
                 cst.remove(&dst);
                 out.push(IrInstr::LoadVar { dst, name });

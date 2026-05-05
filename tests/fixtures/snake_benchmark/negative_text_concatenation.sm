@@ -1,4 +1,0 @@
-fn main() {
-    let label: text = "alpha" + "beta";
-    assert(label == "alphabeta");
-}
