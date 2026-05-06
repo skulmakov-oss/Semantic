@@ -124,3 +124,11 @@ Even after this track lands, the repository still does not claim:
 - a forked graphics stack
 - shader-language ownership
 - a promise that UI support is already part of the published `v1.1.1` line
+
+## Semantic UI DNA
+
+The next POST-UI architecture layer is governed by:
+
+- `docs/dna/SEMANTIC_UI_DNA.md`
+
+This keeps the completed M7 first-wave UI boundary distinct from later Semantic UI architecture-selection work.
