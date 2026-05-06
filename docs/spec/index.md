@@ -28,6 +28,7 @@ Current documents in this PR:
 - `audit.md` - audit trail and replay metadata contract
 - `ui_contract_map.md` - POST-UI Semantic UI contract sketch and ownership map
 - `ui_abi_capability_admission.md` - POST-UI ABI/capability admission checklist for future UI operations
+- `ui_verifier_admission_metadata.md` - POST-UI verifier-visible metadata plan for future UI operation admission
 
 Adjacent source-surface documents also remain relevant:
 
