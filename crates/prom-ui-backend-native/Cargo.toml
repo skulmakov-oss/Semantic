@@ -1,0 +1,15 @@
+[package]
+name = "prom-ui-backend-native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = ["std"]
+std = ["prom-ui-runtime/std"]
+
+[dependencies]
+prom-ui = { path = "../prom-ui", default-features = false }
+prom-ui-runtime = { path = "../prom-ui-runtime", default-features = false }
