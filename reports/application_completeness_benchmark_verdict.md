@@ -14,7 +14,7 @@ This verdict is based on:
 - a deterministic headless snake engine;
 - a deterministic seeded Q-learning benchmark;
 - an explicit external trace adapter contract;
-- green check/run/compile/verify paths;
+- green check / run / compile / verify paths;
 - green CI for the benchmark pack.
 
 This verdict does not mean Semantic is public release.
