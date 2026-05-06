@@ -258,6 +258,12 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
         Ok(())
     }
 
+    /// Submit a completed draw frame through the lifecycle-gated session.
+    pub fn submit_frame(&mut self, frame: &DrawFrame) -> Result<(), UiRuntimeError> {
+        self.lifecycle.admit(UiOperationId::FrameSubmit)?;
+        self.backend.draw_frame(frame)
+    }
+
     /// Current lifecycle state of this session.
     pub fn state(&self) -> SessionState {
         self.lifecycle.state()
@@ -501,6 +507,53 @@ impl DrawFrame {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::rc::Rc;
+    use core::cell::Cell;
+
+    struct CountingDrawBackend {
+        submitted: Rc<Cell<usize>>,
+        draw_error: Option<UiRuntimeError>,
+    }
+
+    impl CountingDrawBackend {
+        fn new() -> Self {
+            Self {
+                submitted: Rc::new(Cell::new(0)),
+                draw_error: None,
+            }
+        }
+
+        fn with_error(draw_error: UiRuntimeError) -> Self {
+            Self {
+                submitted: Rc::new(Cell::new(0)),
+                draw_error: Some(draw_error),
+            }
+        }
+    }
+
+    impl UiBackendAdapter for CountingDrawBackend {
+        fn create_window(&mut self, _config: &WindowConfig) -> Result<(), UiRuntimeError> {
+            Ok(())
+        }
+
+        fn close_window(&mut self) {}
+
+        fn run_event_loop<F: FnMut(LoopControl)>(
+            &mut self,
+            mut on_event: F,
+        ) -> Result<(), UiRuntimeError> {
+            on_event(LoopControl::ExitRequested);
+            Ok(())
+        }
+
+        fn draw_frame(&mut self, _frame: &DrawFrame) -> Result<(), UiRuntimeError> {
+            self.submitted.set(self.submitted.get() + 1);
+            if let Some(err) = &self.draw_error {
+                return Err(err.clone());
+            }
+            Ok(())
+        }
+    }
 
     fn all_ui_ops() -> [UiOperationId; 5] {
         [
@@ -809,6 +862,93 @@ mod tests {
                 state: SessionState::Closed,
             }
         );
+    }
+
+    #[test]
+    fn desktop_session_submit_frame_requires_running() {
+        let backend = CountingDrawBackend::new();
+        let submitted = backend.submitted.clone();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+        let frame = DrawFrame::new();
+
+        let err = session
+            .submit_frame(&frame)
+            .expect_err("submit before run must fail");
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::FrameSubmit,
+                state: SessionState::Created,
+            }
+        );
+        assert_eq!(submitted.get(), 0);
+    }
+
+    #[test]
+    fn desktop_session_submit_frame_succeeds_while_running() {
+        let backend = CountingDrawBackend::new();
+        let submitted = backend.submitted.clone();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session
+            .run(|_| LoopControl::ExitRequested)
+            .expect("run must succeed");
+
+        let mut frame = DrawFrame::new();
+        frame.clear(Color::BLUE);
+
+        session.submit_frame(&frame).unwrap();
+
+        assert_eq!(submitted.get(), 1);
+        assert_eq!(session.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn desktop_session_submit_frame_rejects_after_close() {
+        let backend = CountingDrawBackend::new();
+        let submitted = backend.submitted.clone();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session
+            .run(|_| LoopControl::ExitRequested)
+            .expect("run must succeed");
+        session.close().expect("close must succeed");
+
+        let frame = DrawFrame::new();
+        let err = session
+            .submit_frame(&frame)
+            .expect_err("submit after close must fail");
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::FrameSubmit,
+                state: SessionState::Closed,
+            }
+        );
+        assert_eq!(submitted.get(), 0);
+    }
+
+    #[test]
+    fn desktop_session_submit_frame_propagates_backend_error() {
+        let backend = CountingDrawBackend::with_error(UiRuntimeError::EventLoopFailed);
+        let submitted = backend.submitted.clone();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session
+            .run(|_| LoopControl::ExitRequested)
+            .expect("run must succeed");
+
+        let frame = DrawFrame::new();
+        let err = session
+            .submit_frame(&frame)
+            .expect_err("backend error must propagate");
+        assert_eq!(err, UiRuntimeError::EventLoopFailed);
+        assert_eq!(submitted.get(), 1);
+        assert_eq!(session.state(), SessionState::Running);
     }
 
     // ── Wave 3: draw-command family ───────────────────────────────────────────
