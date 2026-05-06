@@ -12,9 +12,9 @@
 
 extern crate alloc;
 
-use prom_ui::UiOperationId;
 use prom_ui_runtime::{
-    DrawFrame, InputEvent, LoopControl, UiBackendAdapter, UiRuntimeError, WindowConfig,
+    DrawFrame, InputEvent, InputEventKind, LoopControl, UiBackendAdapter, UiRuntimeError,
+    WindowConfig,
 };
 
 /// Returns whether this crate was compiled with the `winit-backend` feature.
@@ -206,6 +206,8 @@ pub struct NativeBackend {
     pending_events: alloc::vec::Vec<InputEvent>,
     submitted_frames: usize,
     closed: bool,
+    run_loop_calls: usize,
+    run_loop_ticks: usize,
 }
 
 impl NativeBackend {
@@ -217,6 +219,8 @@ impl NativeBackend {
             pending_events: alloc::vec::Vec::new(),
             submitted_frames: 0,
             closed: false,
+            run_loop_calls: 0,
+            run_loop_ticks: 0,
         }
     }
 
@@ -245,6 +249,14 @@ impl NativeBackend {
 
     pub const fn is_closed(&self) -> bool {
         self.closed
+    }
+
+    pub const fn run_loop_calls(&self) -> usize {
+        self.run_loop_calls
+    }
+
+    pub const fn run_loop_ticks(&self) -> usize {
+        self.run_loop_ticks
     }
 
     pub fn push_pending_event(&mut self, event: InputEvent) {
@@ -322,9 +334,25 @@ impl UiBackendAdapter for NativeBackend {
 
     fn run_event_loop<F: FnMut(LoopControl)>(
         &mut self,
-        _on_event: F,
+        mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
-        Err(UiRuntimeError::OperationNotAdmitted(UiOperationId::WindowRun))
+        self.run_loop_calls = self.run_loop_calls.saturating_add(1);
+
+        let events = self.drain_pending_events();
+
+        for event in events {
+            self.run_loop_ticks = self.run_loop_ticks.saturating_add(1);
+
+            match event.kind {
+                InputEventKind::CloseRequested => {
+                    on_event(LoopControl::ExitRequested);
+                    break;
+                }
+                _ => on_event(LoopControl::Continue),
+            }
+        }
+
+        Ok(())
     }
 
     fn draw_frame(&mut self, _frame: &DrawFrame) -> Result<(), UiRuntimeError> {
