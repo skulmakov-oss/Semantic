@@ -75,9 +75,9 @@ Every effectful UI operation must have an explicit capability path.
 
 Examples:
 
-- `CAP_UI_WINDOW`
-- `CAP_UI_EVENTS`
-- `CAP_UI_DRAW`
+- `DesktopSession`
+- `InputPoll`
+- `FrameEmit`
 
 ### Rule UI-3 - VM is not a UI runtime
 
