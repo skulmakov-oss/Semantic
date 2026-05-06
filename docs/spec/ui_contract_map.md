@@ -5,6 +5,10 @@ Track: POST-UI
 Scope: public contract sketch only
 Implementation: out of scope
 
+Related:
+- `docs/spec/ui_abi_capability_admission.md`
+- `docs/architecture/ui_ownership_map.md`
+
 ## 1. Purpose
 
 This document defines the minimal UI contracts that future implementation PRs must follow.
