@@ -21,7 +21,7 @@ It defines contract ownership and first-slice semantics.
 ```text
 UI Program
   ↓
-UI Host Calls
+UI Operations
   ↓
 UI Capabilities
   ↓
@@ -32,20 +32,19 @@ Frame Lifecycle
 Draw Command Buffer
 ```
 
-## 3. UI host call families
+## 3. UI operation families
 
-First slice host calls:
+Current `prom-ui` UI operation identities:
 
 ```text
-UiWindowCreate
-UiWindowClose
-UiPollEvent
-UiBeginFrame
-UiEndFrame
-UiDrawClear
-UiDrawRect
-UiDrawText
+WindowCreate
+WindowRun
+WindowClose
+EventPoll
+FrameSubmit
 ```
+
+These names intentionally match `UiOperationId`.
 
 Out of first slice:
 
@@ -58,20 +57,38 @@ UiClipboard
 UiDragDrop
 UiGpuPipeline
 UiNetworkResource
+MultiWindow
+BrowserTarget
+MobileTarget
 ```
+
+These are not current `UiOperationId` values.
+They are future/non-goal categories only.
 
 ## 4. Capability contract
 
+Current `prom-ui` capability identities:
+
 | Capability | Allows | Does not allow |
 | --- | --- | --- |
-| `CAP_UI_WINDOW` | create/close window | drawing or input access |
-| `CAP_UI_EVENTS` | poll/read UI events | drawing, window creation |
-| `CAP_UI_DRAW` | submit draw commands | event polling or window creation |
+| `DesktopSession` | create/run/close one desktop UI session | event polling or frame submission by itself |
+| `InputPoll` | poll/read UI events in an admitted session | window creation or frame submission |
+| `FrameEmit` | submit a frame through the admitted UI surface | event polling or window creation |
+
+Operation mapping:
+
+| UI operation | Required capability |
+| --- | --- |
+| `WindowCreate` | `DesktopSession` |
+| `WindowRun` | `DesktopSession` |
+| `WindowClose` | `DesktopSession` |
+| `EventPoll` | `InputPoll` |
+| `FrameSubmit` | `FrameEmit` |
 
 Admission rule:
 
 ```text
-If SemCode contains UI host calls,
+If SemCode contains admitted UI operations,
 the declared capability manifest must include matching UI capabilities.
 ```
 
@@ -98,24 +115,40 @@ Given the same event stream, Semantic UI program execution must be replayable.
 
 ## 6. Frame lifecycle v0
 
-Valid order:
+Current `prom-ui` exposes frame submission as a coarse operation:
 
 ```text
-UiBeginFrame(window)
-  UiDraw*
-UiEndFrame(window)
+FrameSubmit
 ```
 
-Invalid:
+The detailed internal frame lifecycle is still a future runtime contract.
 
-- draw before begin frame;
-- nested begin frame;
-- end frame without begin;
-- draw after close window.
+Valid future runtime order remains conceptually:
+
+```text
+begin frame
+  collect draw commands
+submit frame
+```
+
+Invalid future runtime cases:
+
+- frame submission before a desktop session exists;
+- frame submission after window close;
+- nested frame submission if the runtime model later forbids it;
+- drawing/frame emission without `FrameEmit`.
 
 ## 7. Draw command model v0
 
-Minimal commands:
+Current `prom-ui` does not expose individual draw commands as operation identities.
+
+Current public operation:
+
+```text
+FrameSubmit
+```
+
+Conceptual future draw-command payload may include:
 
 ```text
 Clear
@@ -126,7 +159,8 @@ Line
 
 Rules:
 
-- commands are submitted to a frame buffer / command buffer;
+- draw commands are payload concepts for future frame submission;
+- `Clear`, `Rect`, `Text`, and `Line` are not current `UiOperationId` values;
 - Semantic VM does not draw pixels directly;
 - backend-specific rendering is owned by `prom-ui-runtime`.
 

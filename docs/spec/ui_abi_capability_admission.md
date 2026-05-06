@@ -27,7 +27,7 @@ Current code-level facts:
 
 ## 3. Existing UI operation surface
 
-Current `prom-ui` operation identities:
+Current `prom-ui` UI operation identities:
 
 ```text
 WindowCreate

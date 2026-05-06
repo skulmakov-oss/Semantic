@@ -31,7 +31,7 @@ Required before code changes:
 
 Before executable UI operation support:
 
-- every UI operation maps to one `UiCapabilityKind`;
+- every `UiOperationId` maps to one `UiCapabilityKind`;
 - missing capability fails closed;
 - denial carries operation context;
 - default/gate manifests do not silently include UI capabilities.
@@ -41,8 +41,8 @@ Before executable UI operation support:
 Before VM execution support:
 
 - SemCode can expose required UI admission metadata;
-- verifier rejects unknown UI operation ids;
-- verifier rejects missing UI capabilities;
+- verifier rejects unknown `UiOperationId` values;
+- verifier rejects missing `UiCapabilityKind` values;
 - verifier keeps POST-UI outside stable profile.
 
 ### Gate UI-D - Runtime lifecycle gate
