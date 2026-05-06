@@ -13,6 +13,28 @@
 use prom_ui::UiOperationId;
 use prom_ui_runtime::{DrawFrame, LoopControl, UiBackendAdapter, UiRuntimeError, WindowConfig};
 
+/// Returns whether this crate was compiled with the `winit-backend` feature.
+pub const fn winit_backend_feature_enabled() -> bool {
+    cfg!(feature = "winit-backend")
+}
+
+#[cfg(feature = "winit-backend")]
+pub mod winit_placeholder {
+    //! Feature-gated placeholder for future winit integration.
+    //!
+    //! This module intentionally does not create windows or run an event loop yet.
+
+    /// Compile-time marker proving the `winit` crate is available behind the feature.
+    pub const WINIT_BACKEND_PLACEHOLDER: bool = true;
+
+    /// Return the winit crate version selected by Cargo.
+    ///
+    /// Kept as a simple static marker to avoid touching native APIs in G3.
+    pub const fn winit_backend_placeholder_enabled() -> bool {
+        true
+    }
+}
+
 /// Skeleton native backend.
 ///
 /// This type is intentionally not wired to a platform windowing library yet.
