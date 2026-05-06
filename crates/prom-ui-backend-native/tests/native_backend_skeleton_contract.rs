@@ -12,19 +12,22 @@ fn native_backend_skeleton_is_not_platform_wired() {
 }
 
 #[test]
-fn native_backend_create_window_fails_closed() {
+fn native_backend_create_window_stages_config_without_platform_window() {
     let backend = NativeBackend::new();
     let cfg = WindowConfig::new("NativeSkeleton", 640, 480);
 
-    let err = match DesktopSession::create(backend, cfg) {
-        Ok(_) => panic!("native skeleton must not create a real session yet"),
-        Err(err) => err,
-    };
+    let session = DesktopSession::create(backend, cfg).unwrap();
 
-    assert_eq!(
-        err,
-        UiRuntimeError::OperationNotAdmitted(UiOperationId::WindowCreate)
-    );
+    let stored = session
+        .backend()
+        .window_config()
+        .expect("window config must be staged");
+
+    assert_eq!(stored.title, "NativeSkeleton");
+    assert_eq!(stored.width, 640);
+    assert_eq!(stored.height, 480);
+    assert!(!session.backend().is_platform_wired());
+    assert!(!session.backend().is_closed());
 }
 
 #[test]
@@ -42,25 +45,22 @@ fn native_backend_run_event_loop_fails_closed() {
 }
 
 #[test]
-fn native_backend_draw_frame_fails_closed() {
+fn native_backend_draw_frame_is_staged_not_rendered() {
     let mut backend = NativeBackend::new();
     let frame = DrawFrame::new();
 
-    let err = backend
-        .draw_frame(&frame)
-        .expect_err("unwired native backend must reject draw_frame");
+    backend.draw_frame(&frame).unwrap();
 
-    assert_eq!(
-        err,
-        UiRuntimeError::OperationNotAdmitted(UiOperationId::FrameSubmit)
-    );
+    assert_eq!(backend.submitted_frames(), 1);
+    assert!(!backend.is_platform_wired());
 }
 
 #[test]
-fn native_backend_close_window_is_noop_before_platform_wiring() {
+fn native_backend_close_window_marks_closed_before_platform_wiring() {
     let mut backend = NativeBackend::new();
 
     backend.close_window();
 
+    assert!(backend.is_closed());
     assert!(!backend.is_platform_wired());
 }
