@@ -30,8 +30,9 @@ pub mod winit_placeholder {
     use winit::{
         application::ApplicationHandler,
         dpi::LogicalSize,
-        event::WindowEvent,
+        event::{ElementState, WindowEvent},
         event_loop::ActiveEventLoop,
+        keyboard::{KeyCode, PhysicalKey},
         window::{Window, WindowAttributes, WindowId},
     };
 
@@ -65,6 +66,72 @@ pub mod winit_placeholder {
     /// Returns whether the winit window config translation scaffold is available.
     pub const fn winit_window_config_translation_available() -> bool {
         true
+    }
+
+    /// Returns whether the winit event translation scaffold is available.
+    pub const fn winit_event_translation_available() -> bool {
+        true
+    }
+
+    /// Translate a winit close request into the Semantic UI input event surface.
+    pub fn translate_winit_close_requested() -> prom_ui_runtime::InputEvent {
+        prom_ui_runtime::InputEvent::new(prom_ui_runtime::InputEventKind::CloseRequested)
+    }
+
+    /// Translate a selected winit physical key into the current Semantic key code space.
+    ///
+    /// This is intentionally small. It is not a full keyboard layout or text-input model.
+    pub const fn translate_winit_key_code(key_code: KeyCode) -> Option<u32> {
+        match key_code {
+            KeyCode::KeyA => Some(65),
+            KeyCode::KeyB => Some(66),
+            KeyCode::KeyC => Some(67),
+            KeyCode::KeyD => Some(68),
+            KeyCode::KeyW => Some(87),
+            KeyCode::KeyS => Some(83),
+            KeyCode::Digit0 => Some(48),
+            KeyCode::Digit1 => Some(49),
+            KeyCode::Digit2 => Some(50),
+            KeyCode::Enter => Some(13),
+            KeyCode::Escape => Some(27),
+            KeyCode::Space => Some(32),
+            _ => None,
+        }
+    }
+
+    /// Translate a winit physical key state into a Semantic UI input event.
+    ///
+    /// Unsupported keys return `None`.
+    pub fn translate_winit_physical_key(
+        state: ElementState,
+        physical_key: PhysicalKey,
+    ) -> Option<prom_ui_runtime::InputEvent> {
+        let key_code = match physical_key {
+            PhysicalKey::Code(code) => translate_winit_key_code(code)?,
+            PhysicalKey::Unidentified(_) => return None,
+        };
+
+        let kind = match state {
+            ElementState::Pressed => prom_ui_runtime::InputEventKind::KeyDown { key_code },
+            ElementState::Released => prom_ui_runtime::InputEventKind::KeyUp { key_code },
+        };
+
+        Some(prom_ui_runtime::InputEvent::new(kind))
+    }
+
+    /// Translate selected winit `WindowEvent` variants into the Semantic UI input surface.
+    ///
+    /// This function does not run an event loop and does not mutate backend state.
+    pub fn translate_winit_window_event(
+        event: &WindowEvent,
+    ) -> Option<prom_ui_runtime::InputEvent> {
+        match event {
+            WindowEvent::CloseRequested => Some(translate_winit_close_requested()),
+            WindowEvent::KeyboardInput { event, .. } => {
+                translate_winit_physical_key(event.state, event.physical_key)
+            }
+            _ => None,
+        }
     }
 
     /// Type-level scaffold for future winit event-loop integration.
