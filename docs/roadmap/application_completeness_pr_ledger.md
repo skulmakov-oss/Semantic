@@ -444,11 +444,19 @@ Current `main` still fails this benchmark family at the following points:
   - focused learning-benchmark tests green
   - CI green
 
-- `PR-F3` [required]
+- `PR-F3` [landed]
   Title: `docs/examples: add snake trace adapter contract`
+  Landed:
+  - `docs/roadmap/snake_trace_adapter_contract.md`
+  - `examples/benchmarks/README.md`
+  - `examples/benchmarks/snake_trace_sample.txt`
+  - one line-oriented trace format for external renderers
+  - explicit boundary: Semantic emits deterministic text trace; renderer consumes it
+  - browser/DOM/Canvas/WebGL/native UI remain outside Semantic language ownership
   Goal:
-  - define how Semantic experiments feed an external HTML/TypeScript renderer
-    without making browser ownership part of the language boundary
+  - define how Semantic benchmark programs emit deterministic text traces that
+    an external renderer can consume without making browser ownership part of
+    the language boundary
   Scope:
   - one trace format
   - one adapter note
