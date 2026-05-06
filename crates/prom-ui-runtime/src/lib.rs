@@ -293,6 +293,11 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
     pub fn state(&self) -> SessionState {
         self.lifecycle.state()
     }
+
+    /// Read-only access to the backend for tests and reference inspection.
+    pub fn backend(&self) -> &B {
+        &self.backend
+    }
 }
 
 // ── PR 6: Deterministic event polling and frame-token ownership ───────────────
@@ -524,6 +529,90 @@ impl DrawFrame {
     /// Returns `true` if no commands have been pushed.
     pub fn is_empty(&self) -> bool {
         self.commands.is_empty()
+    }
+}
+
+/// Deterministic in-memory reference backend.
+///
+/// This backend does not create native windows and does not render pixels.
+/// It records lifecycle calls and submitted draw frames for tests/reference use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InMemoryBackend {
+    config: Option<WindowConfig>,
+    run_event_loop_calls: usize,
+    close_window_calls: usize,
+    loop_iterations: usize,
+    captured_frames: alloc::vec::Vec<alloc::vec::Vec<DrawCommand>>,
+}
+
+impl InMemoryBackend {
+    pub fn new() -> Self {
+        Self::with_loop_iterations(1)
+    }
+
+    pub fn with_loop_iterations(loop_iterations: usize) -> Self {
+        Self {
+            config: None,
+            run_event_loop_calls: 0,
+            close_window_calls: 0,
+            loop_iterations,
+            captured_frames: alloc::vec::Vec::new(),
+        }
+    }
+
+    pub fn config(&self) -> Option<&WindowConfig> {
+        self.config.as_ref()
+    }
+
+    pub fn run_event_loop_calls(&self) -> usize {
+        self.run_event_loop_calls
+    }
+
+    pub fn close_window_calls(&self) -> usize {
+        self.close_window_calls
+    }
+
+    pub fn captured_frames(&self) -> &[alloc::vec::Vec<DrawCommand>] {
+        &self.captured_frames
+    }
+
+    pub fn captured_frame_count(&self) -> usize {
+        self.captured_frames.len()
+    }
+}
+
+impl Default for InMemoryBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UiBackendAdapter for InMemoryBackend {
+    fn create_window(&mut self, config: &WindowConfig) -> Result<(), UiRuntimeError> {
+        self.config = Some(config.clone());
+        Ok(())
+    }
+
+    fn close_window(&mut self) {
+        self.close_window_calls = self.close_window_calls.saturating_add(1);
+    }
+
+    fn run_event_loop<F: FnMut(LoopControl)>(
+        &mut self,
+        mut on_event: F,
+    ) -> Result<(), UiRuntimeError> {
+        self.run_event_loop_calls = self.run_event_loop_calls.saturating_add(1);
+
+        for _ in 0..self.loop_iterations {
+            on_event(LoopControl::Continue);
+        }
+
+        Ok(())
+    }
+
+    fn draw_frame(&mut self, frame: &DrawFrame) -> Result<(), UiRuntimeError> {
+        self.captured_frames.push(frame.commands().to_vec());
+        Ok(())
     }
 }
 
