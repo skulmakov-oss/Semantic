@@ -298,6 +298,11 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
     pub fn backend(&self) -> &B {
         &self.backend
     }
+
+    /// Mutable access to the backend for reference and test configuration.
+    pub fn backend_mut(&mut self) -> &mut B {
+        &mut self.backend
+    }
 }
 
 // ── PR 6: Deterministic event polling and frame-token ownership ───────────────
@@ -543,6 +548,7 @@ pub struct InMemoryBackend {
     close_window_calls: usize,
     loop_iterations: usize,
     captured_frames: alloc::vec::Vec<alloc::vec::Vec<DrawCommand>>,
+    queued_events: alloc::vec::Vec<InputEvent>,
 }
 
 impl InMemoryBackend {
@@ -557,6 +563,7 @@ impl InMemoryBackend {
             close_window_calls: 0,
             loop_iterations,
             captured_frames: alloc::vec::Vec::new(),
+            queued_events: alloc::vec::Vec::new(),
         }
     }
 
@@ -578,6 +585,29 @@ impl InMemoryBackend {
 
     pub fn captured_frame_count(&self) -> usize {
         self.captured_frames.len()
+    }
+
+    pub fn push_event(&mut self, event: InputEvent) {
+        self.queued_events.push(event);
+    }
+
+    pub fn extend_events<I>(&mut self, events: I)
+    where
+        I: IntoIterator<Item = InputEvent>,
+    {
+        self.queued_events.extend(events);
+    }
+
+    pub fn queued_events(&self) -> &[InputEvent] {
+        &self.queued_events
+    }
+
+    pub fn queued_event_count(&self) -> usize {
+        self.queued_events.len()
+    }
+
+    pub fn drain_events(&mut self) -> alloc::vec::Vec<InputEvent> {
+        core::mem::replace(&mut self.queued_events, alloc::vec::Vec::new())
     }
 }
 
