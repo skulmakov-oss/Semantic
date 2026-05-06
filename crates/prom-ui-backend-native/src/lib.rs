@@ -26,11 +26,13 @@ pub mod winit_placeholder {
 
     use core::marker::PhantomData;
 
+    use prom_ui_runtime::WindowConfig;
     use winit::{
         application::ApplicationHandler,
+        dpi::LogicalSize,
         event::WindowEvent,
         event_loop::ActiveEventLoop,
-        window::WindowId,
+        window::{Window, WindowAttributes, WindowId},
     };
 
     /// Compile-time marker proving the `winit` crate is available behind the feature.
@@ -45,6 +47,23 @@ pub mod winit_placeholder {
 
     /// Returns a marker that anchors the current winit ApplicationHandler scaffold.
     pub const fn winit_event_loop_scaffold_available() -> bool {
+        true
+    }
+
+    /// Translate Semantic UI `WindowConfig` into winit `WindowAttributes`.
+    ///
+    /// This function does not create a native window.
+    /// It only prepares attributes for a future `ActiveEventLoop::create_window(...)` call.
+    pub fn window_config_to_winit_attributes(config: &WindowConfig) -> WindowAttributes {
+        Window::default_attributes()
+            .with_title(config.title.clone())
+            .with_inner_size(LogicalSize::new(config.width as f64, config.height as f64))
+            .with_visible(true)
+            .with_resizable(true)
+    }
+
+    /// Returns whether the winit window config translation scaffold is available.
+    pub const fn winit_window_config_translation_available() -> bool {
         true
     }
 
