@@ -264,6 +264,15 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
         self.backend.draw_frame(frame)
     }
 
+    /// Poll and drain input events through the lifecycle-gated session.
+    pub fn poll_events(
+        &mut self,
+        buffer: &mut EventBuffer,
+    ) -> Result<alloc::vec::Vec<InputEvent>, UiRuntimeError> {
+        self.lifecycle.admit(UiOperationId::EventPoll)?;
+        Ok(buffer.drain())
+    }
+
     /// Current lifecycle state of this session.
     pub fn state(&self) -> SessionState {
         self.lifecycle.state()
@@ -948,6 +957,94 @@ mod tests {
             .expect_err("backend error must propagate");
         assert_eq!(err, UiRuntimeError::EventLoopFailed);
         assert_eq!(submitted.get(), 1);
+        assert_eq!(session.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn desktop_session_poll_events_requires_running() {
+        let backend = CountingDrawBackend::new();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        let mut buffer = EventBuffer::new();
+        buffer.push(InputEvent::new(InputEventKind::KeyDown { key_code: 65 }));
+
+        let err = session
+            .poll_events(&mut buffer)
+            .expect_err("poll before run must fail");
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::EventPoll,
+                state: SessionState::Created,
+            }
+        );
+        assert!(!buffer.is_empty());
+    }
+
+    #[test]
+    fn desktop_session_poll_events_succeeds_while_running() {
+        let backend = CountingDrawBackend::new();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session
+            .run(|_| LoopControl::ExitRequested)
+            .expect("run must succeed");
+
+        let mut buffer = EventBuffer::new();
+        buffer.push(InputEvent::new(InputEventKind::KeyDown { key_code: 65 }));
+        buffer.push(InputEvent::new(InputEventKind::KeyUp { key_code: 65 }));
+
+        let events = session.poll_events(&mut buffer).unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, InputEventKind::KeyDown { key_code: 65 });
+        assert_eq!(events[1].kind, InputEventKind::KeyUp { key_code: 65 });
+        assert!(buffer.is_empty());
+        assert_eq!(session.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn desktop_session_poll_events_rejects_after_close() {
+        let backend = CountingDrawBackend::new();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session
+            .run(|_| LoopControl::ExitRequested)
+            .expect("run must succeed");
+        session.close().expect("close must succeed");
+
+        let mut buffer = EventBuffer::new();
+        buffer.push(InputEvent::new(InputEventKind::CloseRequested));
+
+        let err = session
+            .poll_events(&mut buffer)
+            .expect_err("poll after close must fail");
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::EventPoll,
+                state: SessionState::Closed,
+            }
+        );
+        assert!(!buffer.is_empty());
+    }
+
+    #[test]
+    fn desktop_session_poll_events_does_not_change_running_state() {
+        let backend = CountingDrawBackend::new();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session
+            .run(|_| LoopControl::ExitRequested)
+            .expect("run must succeed");
+
+        let mut buffer = EventBuffer::new();
+        let _ = session.poll_events(&mut buffer).unwrap();
+
         assert_eq!(session.state(), SessionState::Running);
     }
 
