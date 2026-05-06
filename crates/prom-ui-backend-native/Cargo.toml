@@ -9,7 +9,9 @@ path = "src/lib.rs"
 [features]
 default = ["std"]
 std = ["prom-ui-runtime/std"]
+winit-backend = ["std", "dep:winit"]
 
 [dependencies]
 prom-ui = { path = "../prom-ui", default-features = false }
 prom-ui-runtime = { path = "../prom-ui-runtime", default-features = false }
+winit = { version = "0.30.13", optional = true, default-features = false }
