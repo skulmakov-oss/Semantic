@@ -24,3 +24,9 @@ Semantic emits deterministic text traces.
 External renderers consume those traces.
 
 Browser, DOM, Canvas, WebGL, native windows, animation timing, and UI lifecycle are outside the Semantic language boundary.
+
+## Close-out report
+
+Application-completeness benchmark verdict:
+
+- `../../reports/application_completeness_benchmark_verdict.md`
