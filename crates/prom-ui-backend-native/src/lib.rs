@@ -10,8 +10,12 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+extern crate alloc;
+
 use prom_ui::UiOperationId;
-use prom_ui_runtime::{DrawFrame, LoopControl, UiBackendAdapter, UiRuntimeError, WindowConfig};
+use prom_ui_runtime::{
+    DrawFrame, InputEvent, LoopControl, UiBackendAdapter, UiRuntimeError, WindowConfig,
+};
 
 /// Returns whether this crate was compiled with the `winit-backend` feature.
 pub const fn winit_backend_feature_enabled() -> bool {
@@ -195,16 +199,24 @@ pub mod winit_placeholder {
 ///
 /// This type is intentionally not wired to a platform windowing library yet.
 /// It exists to lock the crate boundary before real native integration.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeBackend {
     platform_wired: bool,
+    window_config: Option<WindowConfig>,
+    pending_events: alloc::vec::Vec<InputEvent>,
+    submitted_frames: usize,
+    closed: bool,
 }
 
 impl NativeBackend {
     /// Create an unwired native backend skeleton.
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             platform_wired: false,
+            window_config: None,
+            pending_events: alloc::vec::Vec::new(),
+            submitted_frames: 0,
+            closed: false,
         }
     }
 
@@ -214,17 +226,58 @@ impl NativeBackend {
     pub const fn is_platform_wired(&self) -> bool {
         self.platform_wired
     }
+
+    pub fn window_config(&self) -> Option<&WindowConfig> {
+        self.window_config.as_ref()
+    }
+
+    pub fn pending_events(&self) -> &[InputEvent] {
+        &self.pending_events
+    }
+
+    pub fn pending_event_count(&self) -> usize {
+        self.pending_events.len()
+    }
+
+    pub fn submitted_frames(&self) -> usize {
+        self.submitted_frames
+    }
+
+    pub const fn is_closed(&self) -> bool {
+        self.closed
+    }
+
+    pub fn push_pending_event(&mut self, event: InputEvent) {
+        self.pending_events.push(event);
+    }
+
+    pub fn extend_pending_events<I>(&mut self, events: I)
+    where
+        I: IntoIterator<Item = InputEvent>,
+    {
+        self.pending_events.extend(events);
+    }
+
+    pub fn drain_pending_events(&mut self) -> alloc::vec::Vec<InputEvent> {
+        core::mem::replace(&mut self.pending_events, alloc::vec::Vec::new())
+    }
+}
+
+impl Default for NativeBackend {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl UiBackendAdapter for NativeBackend {
     fn create_window(&mut self, _config: &WindowConfig) -> Result<(), UiRuntimeError> {
-        Err(UiRuntimeError::OperationNotAdmitted(
-            UiOperationId::WindowCreate,
-        ))
+        self.window_config = Some(_config.clone());
+        self.closed = false;
+        Ok(())
     }
 
     fn close_window(&mut self) {
-        // No-op while the backend is not platform-wired.
+        self.closed = true;
     }
 
     fn run_event_loop<F: FnMut(LoopControl)>(
@@ -235,8 +288,7 @@ impl UiBackendAdapter for NativeBackend {
     }
 
     fn draw_frame(&mut self, _frame: &DrawFrame) -> Result<(), UiRuntimeError> {
-        Err(UiRuntimeError::OperationNotAdmitted(
-            UiOperationId::FrameSubmit,
-        ))
+        self.submitted_frames = self.submitted_frames.saturating_add(1);
+        Ok(())
     }
 }
