@@ -5,6 +5,11 @@ Track: POST-UI
 Scope: admission checklist and ABI/capability bridge only
 Implementation: out of scope
 
+Related:
+
+- `docs/spec/ui_verifier_admission_metadata.md`
+- `docs/roadmap/post_ui/ui_admission_checklist.md`
+
 ## 1. Purpose
 
 This document defines how future Semantic UI operations must pass through:
@@ -125,6 +130,9 @@ Future verifier support must not:
 - execute UI operations;
 - validate platform handles;
 - perform layout/widget checks.
+
+Detailed verifier-visible metadata planning lives in
+`docs/spec/ui_verifier_admission_metadata.md`.
 
 ## 8. Runtime admission checklist
 
