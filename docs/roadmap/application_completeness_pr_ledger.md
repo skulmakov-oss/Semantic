@@ -468,8 +468,14 @@ Current `main` still fails this benchmark family at the following points:
   - `git diff --check`
   - CI green
 
-- `PR-F4` [required]
+- `PR-F4` [landed]
   Title: `reports/tests: publish application-completeness benchmark verdict`
+  Landed:
+  - `reports/application_completeness_benchmark_verdict.md`
+  - final evidence report for `snake_core.sm`
+  - final evidence report for `snake_learning.sm`
+  - final evidence report for the trace adapter contract
+  - application-completeness benchmark pack marked closed
   Goal:
   - close this benchmark program with evidence rather than intuition
   Scope:
@@ -501,10 +507,12 @@ Current `main` still fails this benchmark family at the following points:
 
 ## Exit Condition
 
-This program is complete only when:
+Status: closed by PR-F4.
 
-- the snake benchmark pack is green on the admitted Semantic surface
-- the trace/export story is explicit
-- the benchmark does not depend on hidden author-only workarounds
-- browser rendering, if used, remains an external adapter rather than an
-  implicit language boundary
+The benchmark pack is closed because:
+
+- the snake benchmark pack is green on the admitted Semantic surface;
+- the trace/export story is explicit;
+- the benchmark does not depend on hidden author-only workarounds;
+- browser rendering remains an external adapter rather than an implicit
+  language boundary.
