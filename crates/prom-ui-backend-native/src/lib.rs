@@ -269,6 +269,46 @@ impl Default for NativeBackend {
     }
 }
 
+#[cfg(feature = "winit-backend")]
+impl NativeBackend {
+    /// Stage a translated winit `WindowEvent` into the backend pending-event queue.
+    ///
+    /// Returns `true` if the event was translated and staged.
+    /// Returns `false` for unsupported events.
+    ///
+    /// This does not run a native event loop and does not mutate platform state.
+    pub fn stage_winit_window_event(&mut self, event: &winit::event::WindowEvent) -> bool {
+        if let Some(input) = winit_placeholder::translate_winit_window_event(event) {
+            self.push_pending_event(input);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Stage a translated winit physical key event into the backend pending-event queue.
+    ///
+    /// Returns `true` if the key was supported and staged.
+    /// Returns `false` for unsupported or unidentified keys.
+    pub fn stage_winit_physical_key(
+        &mut self,
+        state: winit::event::ElementState,
+        physical_key: winit::keyboard::PhysicalKey,
+    ) -> bool {
+        if let Some(input) = winit_placeholder::translate_winit_physical_key(state, physical_key) {
+            self.push_pending_event(input);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Stage a close request into the backend pending-event queue.
+    pub fn stage_winit_close_requested(&mut self) {
+        self.push_pending_event(winit_placeholder::translate_winit_close_requested());
+    }
+}
+
 impl UiBackendAdapter for NativeBackend {
     fn create_window(&mut self, _config: &WindowConfig) -> Result<(), UiRuntimeError> {
         self.window_config = Some(_config.clone());
