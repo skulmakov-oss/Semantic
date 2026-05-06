@@ -27,6 +27,7 @@ Current documents in this PR:
 - `rules.md` - deterministic rule and agenda contract
 - `audit.md` - audit trail and replay metadata contract
 - `ui_contract_map.md` - POST-UI Semantic UI contract sketch and ownership map
+- `ui_abi_capability_admission.md` - POST-UI ABI/capability admission checklist for future UI operations
 
 Adjacent source-surface documents also remain relevant:
 

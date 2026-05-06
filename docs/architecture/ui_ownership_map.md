@@ -5,6 +5,11 @@ Track: POST-UI
 Scope: ownership and boundaries only
 Implementation: out of scope
 
+Related:
+- `docs/spec/ui_contract_map.md`
+- `docs/spec/ui_abi_capability_admission.md`
+- `docs/roadmap/post_ui/ui_admission_checklist.md`
+
 ## 1. Purpose
 
 This document defines ownership boundaries for the Semantic UI/Application layer.
