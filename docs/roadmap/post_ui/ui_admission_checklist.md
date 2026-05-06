@@ -40,9 +40,11 @@ Before executable UI operation support:
 
 Before VM execution support:
 
+- UI verifier admission metadata is specified in `docs/spec/ui_verifier_admission_metadata.md`;
 - SemCode can expose required UI admission metadata;
 - verifier rejects unknown `UiOperationId` values;
 - verifier rejects missing `UiCapabilityKind` values;
+- verifier rejects operation/capability mismatches;
 - verifier keeps POST-UI outside stable profile.
 
 ### Gate UI-D - Runtime lifecycle gate
