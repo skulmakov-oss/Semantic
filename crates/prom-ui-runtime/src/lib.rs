@@ -273,6 +273,22 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
         Ok(buffer.drain())
     }
 
+    /// Run one lifecycle-gated UI frame tick.
+    pub fn tick_frame<F>(
+        &mut self,
+        buffer: &mut EventBuffer,
+        mut on_frame: F,
+    ) -> Result<LoopControl, UiRuntimeError>
+    where
+        F: FnMut(&[InputEvent], &mut DrawFrame) -> LoopControl,
+    {
+        let events = self.poll_events(buffer)?;
+        let mut frame = DrawFrame::new();
+        let control = on_frame(&events, &mut frame);
+        self.submit_frame(&frame)?;
+        Ok(control)
+    }
+
     /// Current lifecycle state of this session.
     pub fn state(&self) -> SessionState {
         self.lifecycle.state()
@@ -1046,6 +1062,147 @@ mod tests {
         let _ = session.poll_events(&mut buffer).unwrap();
 
         assert_eq!(session.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn desktop_session_tick_frame_requires_running() {
+        let backend = CountingDrawBackend::new();
+        let submitted = backend.submitted.clone();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        let mut buffer = EventBuffer::new();
+        buffer.push(InputEvent::new(InputEventKind::KeyDown { key_code: 65 }));
+
+        let mut callback_called = false;
+
+        let err = session
+            .tick_frame(&mut buffer, |_events, _frame| {
+                callback_called = true;
+                LoopControl::Continue
+            })
+            .expect_err("tick before run must fail");
+
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::EventPoll,
+                state: SessionState::Created,
+            }
+        );
+        assert!(!callback_called);
+        assert!(!buffer.is_empty());
+        assert_eq!(submitted.get(), 0);
+    }
+
+    #[test]
+    fn desktop_session_tick_frame_drains_events_and_submits_frame() {
+        let backend = CountingDrawBackend::new();
+        let submitted = backend.submitted.clone();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session
+            .run(|_| LoopControl::ExitRequested)
+            .expect("run must succeed");
+
+        let mut buffer = EventBuffer::new();
+        buffer.push(InputEvent::new(InputEventKind::KeyDown { key_code: 65 }));
+        buffer.push(InputEvent::new(InputEventKind::KeyUp { key_code: 65 }));
+
+        let control = session
+            .tick_frame(&mut buffer, |events, frame| {
+                assert_eq!(events.len(), 2);
+                assert_eq!(events[0].kind, InputEventKind::KeyDown { key_code: 65 });
+                assert_eq!(events[1].kind, InputEventKind::KeyUp { key_code: 65 });
+
+                frame.clear(Color::BLACK);
+                frame.fill_rect(Rect::new(0, 0, 10, 10), Color::GREEN);
+
+                LoopControl::Continue
+            })
+            .expect("tick must succeed");
+
+        assert_eq!(control, LoopControl::Continue);
+        assert!(buffer.is_empty());
+        assert_eq!(submitted.get(), 1);
+        assert_eq!(session.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn desktop_session_tick_frame_rejects_after_close() {
+        let backend = CountingDrawBackend::new();
+        let submitted = backend.submitted.clone();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session.run(|_| LoopControl::ExitRequested).unwrap();
+        session.close().unwrap();
+
+        let mut buffer = EventBuffer::new();
+        buffer.push(InputEvent::new(InputEventKind::CloseRequested));
+
+        let mut callback_called = false;
+
+        let err = session
+            .tick_frame(&mut buffer, |_events, _frame| {
+                callback_called = true;
+                LoopControl::ExitRequested
+            })
+            .expect_err("tick after close must fail");
+
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::EventPoll,
+                state: SessionState::Closed,
+            }
+        );
+        assert!(!callback_called);
+        assert!(!buffer.is_empty());
+        assert_eq!(submitted.get(), 0);
+    }
+
+    #[test]
+    fn desktop_session_tick_frame_propagates_submit_error() {
+        let backend = CountingDrawBackend::with_error(UiRuntimeError::EventLoopFailed);
+        let submitted = backend.submitted.clone();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session.run(|_| LoopControl::ExitRequested).unwrap();
+
+        let mut buffer = EventBuffer::new();
+        buffer.push(InputEvent::new(InputEventKind::KeyDown { key_code: 65 }));
+
+        let err = session
+            .tick_frame(&mut buffer, |_events, frame| {
+                frame.clear(Color::BLUE);
+                LoopControl::Continue
+            })
+            .expect_err("backend submit error must propagate");
+
+        assert_eq!(err, UiRuntimeError::EventLoopFailed);
+        assert_eq!(submitted.get(), 1);
+        assert!(buffer.is_empty());
+        assert_eq!(session.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn desktop_session_tick_frame_returns_callback_control() {
+        let backend = CountingDrawBackend::new();
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session.run(|_| LoopControl::ExitRequested).unwrap();
+
+        let mut buffer = EventBuffer::new();
+
+        let control = session
+            .tick_frame(&mut buffer, |_events, _frame| LoopControl::ExitRequested)
+            .unwrap();
+
+        assert_eq!(control, LoopControl::ExitRequested);
     }
 
     // ── Wave 3: draw-command family ───────────────────────────────────────────
