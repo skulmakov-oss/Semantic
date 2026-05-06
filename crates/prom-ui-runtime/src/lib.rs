@@ -305,6 +305,25 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
     }
 }
 
+impl DesktopSession<InMemoryBackend> {
+    /// Run one lifecycle-gated in-memory frame tick using queued backend events.
+    pub fn tick_in_memory_frame<F>(&mut self, on_frame: F) -> Result<LoopControl, UiRuntimeError>
+    where
+        F: FnMut(&[InputEvent], &mut DrawFrame) -> LoopControl,
+    {
+        self.lifecycle.admit(UiOperationId::EventPoll)?;
+
+        let queued = self.backend_mut().drain_events();
+        let mut buffer = EventBuffer::new();
+
+        for event in queued {
+            buffer.push(event);
+        }
+
+        self.tick_frame(&mut buffer, on_frame)
+    }
+}
+
 // ── PR 6: Deterministic event polling and frame-token ownership ───────────────
 
 /// Taxonomy of first-wave input events admitted for polling.
