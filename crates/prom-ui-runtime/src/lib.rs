@@ -40,6 +40,11 @@ pub enum UiRuntimeError {
     CapabilityDenied(UiCapabilityKind),
     /// The requested UI operation is not yet admitted in this wave.
     OperationNotAdmitted(UiOperationId),
+    /// The requested UI operation is invalid for the current lifecycle state.
+    LifecycleViolation {
+        operation: UiOperationId,
+        state: SessionState,
+    },
     /// The backend failed to create the window.
     WindowCreationFailed,
     /// The event loop terminated with a backend-level error.
@@ -54,6 +59,13 @@ impl core::fmt::Display for UiRuntimeError {
             }
             UiRuntimeError::OperationNotAdmitted(op) => {
                 write!(f, "UI operation not yet admitted: {:?}", op)
+            }
+            UiRuntimeError::LifecycleViolation { operation, state } => {
+                write!(
+                    f,
+                    "UI lifecycle violation: {:?} is not valid in {:?}",
+                    operation, state
+                )
             }
             UiRuntimeError::WindowCreationFailed => {
                 write!(f, "backend failed to create window")
@@ -107,6 +119,55 @@ pub enum SessionState {
     Created,
     Running,
     Closed,
+}
+
+/// Fail-closed lifecycle gate for admitted UI operations.
+///
+/// This gate is purely runtime-local: it checks whether a UI operation is
+/// valid for the current session state and updates the state when admitted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UiLifecycleGate {
+    state: SessionState,
+}
+
+impl UiLifecycleGate {
+    /// Create a new lifecycle gate in the logical `Created` state.
+    pub fn new() -> Self {
+        Self {
+            state: SessionState::Created,
+        }
+    }
+
+    /// Current lifecycle state tracked by this gate.
+    pub fn state(&self) -> SessionState {
+        self.state
+    }
+
+    /// Check whether the given UI operation is admissible in the current state.
+    pub fn admit(&self, operation: UiOperationId) -> Result<(), UiRuntimeError> {
+        lifecycle_transition(self.state, operation).map(|_| ())
+    }
+
+    /// Check and apply the given UI operation, updating the lifecycle state.
+    pub fn apply(&mut self, operation: UiOperationId) -> Result<(), UiRuntimeError> {
+        let next = lifecycle_transition(self.state, operation)?;
+        self.state = next;
+        Ok(())
+    }
+}
+
+fn lifecycle_transition(
+    state: SessionState,
+    operation: UiOperationId,
+) -> Result<SessionState, UiRuntimeError> {
+    match (state, operation) {
+        (SessionState::Created, UiOperationId::WindowRun) => Ok(SessionState::Running),
+        (SessionState::Created, UiOperationId::WindowClose) => Ok(SessionState::Closed),
+        (SessionState::Running, UiOperationId::EventPoll) => Ok(SessionState::Running),
+        (SessionState::Running, UiOperationId::FrameSubmit) => Ok(SessionState::Running),
+        (SessionState::Running, UiOperationId::WindowClose) => Ok(SessionState::Closed),
+        _ => Err(UiRuntimeError::LifecycleViolation { operation, state }),
+    }
 }
 
 /// Internal contract a backend must implement to be driven by `DesktopSession`.
@@ -440,6 +501,16 @@ impl DrawFrame {
 mod tests {
     use super::*;
 
+    fn all_ui_ops() -> [UiOperationId; 5] {
+        [
+            UiOperationId::WindowCreate,
+            UiOperationId::WindowRun,
+            UiOperationId::WindowClose,
+            UiOperationId::EventPoll,
+            UiOperationId::FrameSubmit,
+        ]
+    }
+
     #[test]
     fn window_config_holds_title_and_dimensions() {
         let cfg = WindowConfig::new("Hello Wave 2", 1280, 720);
@@ -493,6 +564,91 @@ mod tests {
         let a = SessionState::Running;
         let _b = a; // Copy
         assert_eq!(a, SessionState::Running);
+    }
+
+    #[test]
+    fn lifecycle_gate_starts_created() {
+        let gate = UiLifecycleGate::new();
+        assert_eq!(gate.state(), SessionState::Created);
+        assert!(gate.admit(UiOperationId::WindowRun).is_ok());
+    }
+
+    #[test]
+    fn window_run_transitions_created_to_running() {
+        let mut gate = UiLifecycleGate::new();
+        gate.apply(UiOperationId::WindowRun).unwrap();
+        assert_eq!(gate.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn close_from_created_transitions_to_closed() {
+        let mut gate = UiLifecycleGate::new();
+        gate.apply(UiOperationId::WindowClose).unwrap();
+        assert_eq!(gate.state(), SessionState::Closed);
+    }
+
+    #[test]
+    fn event_poll_requires_running() {
+        let mut gate = UiLifecycleGate::new();
+        assert!(gate.apply(UiOperationId::EventPoll).is_err());
+        gate.apply(UiOperationId::WindowRun).unwrap();
+        assert!(gate.apply(UiOperationId::EventPoll).is_ok());
+        assert_eq!(gate.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn frame_submit_requires_running() {
+        let mut gate = UiLifecycleGate::new();
+        assert!(gate.apply(UiOperationId::FrameSubmit).is_err());
+        gate.apply(UiOperationId::WindowRun).unwrap();
+        assert!(gate.apply(UiOperationId::FrameSubmit).is_ok());
+        assert_eq!(gate.state(), SessionState::Running);
+    }
+
+    #[test]
+    fn window_create_is_rejected_after_gate_exists() {
+        let gate = UiLifecycleGate::new();
+        assert!(gate.admit(UiOperationId::WindowCreate).is_err());
+
+        let mut gate = UiLifecycleGate::new();
+        assert!(gate.apply(UiOperationId::WindowCreate).is_err());
+        assert_eq!(gate.state(), SessionState::Created);
+
+        let mut running_gate = UiLifecycleGate::new();
+        running_gate.apply(UiOperationId::WindowRun).unwrap();
+        assert!(running_gate.apply(UiOperationId::WindowCreate).is_err());
+
+        let mut closed_gate = UiLifecycleGate::new();
+        closed_gate.apply(UiOperationId::WindowClose).unwrap();
+        assert!(closed_gate.apply(UiOperationId::WindowCreate).is_err());
+    }
+
+    #[test]
+    fn closed_state_rejects_all_ui_operations() {
+        let mut gate = UiLifecycleGate::new();
+        gate.apply(UiOperationId::WindowClose).unwrap();
+        assert_eq!(gate.state(), SessionState::Closed);
+
+        for op in all_ui_ops() {
+            assert!(gate.apply(op).is_err(), "{op:?} should be rejected in Closed");
+        }
+    }
+
+    #[test]
+    fn lifecycle_violation_reports_operation_and_state() {
+        let mut gate = UiLifecycleGate::new();
+        let err = gate.apply(UiOperationId::EventPoll).unwrap_err();
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::EventPoll,
+                state: SessionState::Created,
+            }
+        );
+        assert_eq!(
+            err.to_string(),
+            "UI lifecycle violation: EventPoll is not valid in Created"
+        );
     }
 
     #[test]
