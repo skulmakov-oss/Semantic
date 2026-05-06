@@ -26,6 +26,7 @@ Current documents in this PR:
 - `state.md` - semantic state model and invariants
 - `rules.md` - deterministic rule and agenda contract
 - `audit.md` - audit trail and replay metadata contract
+- `ui_contract_map.md` - POST-UI Semantic UI contract sketch and ownership map
 
 Adjacent source-surface documents also remain relevant:
 
