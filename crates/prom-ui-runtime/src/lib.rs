@@ -207,7 +207,7 @@ pub trait UiBackendAdapter {
 /// public API surface.
 pub struct DesktopSession<B: UiBackendAdapter> {
     backend: B,
-    state: SessionState,
+    lifecycle: UiLifecycleGate,
 }
 
 impl<B: UiBackendAdapter> DesktopSession<B> {
@@ -218,7 +218,7 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
         backend.create_window(&config)?;
         Ok(Self {
             backend,
-            state: SessionState::Created,
+            lifecycle: UiLifecycleGate::new(),
         })
     }
 
@@ -235,7 +235,7 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
     where
         F: FnMut(&mut EventBuffer) -> LoopControl,
     {
-        self.state = SessionState::Running;
+        self.lifecycle.apply(UiOperationId::WindowRun)?;
         let mut buffer = EventBuffer::new();
         let exit_requested = core::cell::Cell::new(false);
         let result = self.backend.run_event_loop(|_backend_control| {
@@ -252,14 +252,15 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
     }
 
     /// Close the window and mark the session as closed.
-    pub fn close(&mut self) {
+    pub fn close(&mut self) -> Result<(), UiRuntimeError> {
+        self.lifecycle.apply(UiOperationId::WindowClose)?;
         self.backend.close_window();
-        self.state = SessionState::Closed;
+        Ok(())
     }
 
     /// Current lifecycle state of this session.
     pub fn state(&self) -> SessionState {
-        self.state
+        self.lifecycle.state()
     }
 }
 
@@ -697,8 +698,117 @@ mod tests {
         assert_eq!(session.state(), SessionState::Running);
         assert_eq!(frame_count, 3);
 
-        session.close();
+        session.close().expect("mock close must succeed");
         assert_eq!(session.state(), SessionState::Closed);
+    }
+
+    #[test]
+    fn desktop_session_rejects_run_after_close() {
+        struct MockBackend {
+            closed: bool,
+        }
+        impl UiBackendAdapter for MockBackend {
+            fn create_window(&mut self, _config: &WindowConfig) -> Result<(), UiRuntimeError> {
+                Ok(())
+            }
+            fn close_window(&mut self) {
+                self.closed = true;
+            }
+            fn run_event_loop<F: FnMut(LoopControl)>(
+                &mut self,
+                _on_event: F,
+            ) -> Result<(), UiRuntimeError> {
+                Ok(())
+            }
+        }
+
+        let backend = MockBackend { closed: false };
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+        session.close().unwrap();
+
+        let err = session
+            .run(|_| LoopControl::Continue)
+            .expect_err("run after close must fail");
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::WindowRun,
+                state: SessionState::Closed,
+            }
+        );
+    }
+
+    #[test]
+    fn desktop_session_rejects_double_run() {
+        struct MockBackend;
+        impl UiBackendAdapter for MockBackend {
+            fn create_window(&mut self, _config: &WindowConfig) -> Result<(), UiRuntimeError> {
+                Ok(())
+            }
+            fn close_window(&mut self) {}
+            fn run_event_loop<F: FnMut(LoopControl)>(
+                &mut self,
+                mut on_event: F,
+            ) -> Result<(), UiRuntimeError> {
+                on_event(LoopControl::ExitRequested);
+                Ok(())
+            }
+        }
+
+        let backend = MockBackend;
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session
+            .run(|_| LoopControl::ExitRequested)
+            .expect("first run must succeed");
+
+        let err = session
+            .run(|_| LoopControl::ExitRequested)
+            .expect_err("second run must fail");
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::WindowRun,
+                state: SessionState::Running,
+            }
+        );
+    }
+
+    #[test]
+    fn desktop_session_close_is_fail_closed_after_closed() {
+        struct MockBackend {
+            closed: usize,
+        }
+        impl UiBackendAdapter for MockBackend {
+            fn create_window(&mut self, _config: &WindowConfig) -> Result<(), UiRuntimeError> {
+                Ok(())
+            }
+            fn close_window(&mut self) {
+                self.closed = self.closed.saturating_add(1);
+            }
+            fn run_event_loop<F: FnMut(LoopControl)>(
+                &mut self,
+                _on_event: F,
+            ) -> Result<(), UiRuntimeError> {
+                Ok(())
+            }
+        }
+
+        let backend = MockBackend { closed: 0 };
+        let cfg = WindowConfig::new("Mock", 800, 600);
+        let mut session = DesktopSession::create(backend, cfg).unwrap();
+
+        session.close().unwrap();
+        let err = session.close().expect_err("second close must fail");
+        assert_eq!(
+            err,
+            UiRuntimeError::LifecycleViolation {
+                operation: UiOperationId::WindowClose,
+                state: SessionState::Closed,
+            }
+        );
     }
 
     // ── Wave 3: draw-command family ───────────────────────────────────────────
