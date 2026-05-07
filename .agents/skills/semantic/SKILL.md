@@ -36,7 +36,7 @@ PROMETHEUS_CRATES:
 - prom-ui*, apps/workbench: operator/application boundary, not compiler/verifier/VM owner.
 
 LEGACY_RULE:
-- ton618-core and compatibility paths are historical/support perimeter.
+- Historical and compatibility paths are support perimeter, not new architecture owners.
 - New architecture must land in the correct owner crate, not legacy shims.
 
 MUST:
