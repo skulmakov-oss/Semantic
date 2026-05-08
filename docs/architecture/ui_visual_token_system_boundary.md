@@ -342,3 +342,15 @@ renderer token resolver
 theme switching
 visual components
 ```
+
+## Layout primitive dependency
+
+Layout primitive admission depends on the visual token system boundary.
+
+```text
+visual doctrine
+  -> visual token system
+  -> layout primitives
+```
+
+Layout primitives must consume semantic tokens rather than raw colors, spacing, typography, or motion values.

@@ -380,3 +380,17 @@ Visual tokens are the reusable vocabulary of Semantic UI visual meaning.
 Tokens must follow this doctrine.
 
 Tokens must not introduce arbitrary theme values or renderer-owned meaning.
+
+## Layout primitive boundary
+
+The layout primitive system is defined separately in:
+
+```text
+docs/architecture/ui_layout_primitive_boundary.md
+```
+
+Layout primitives are the spatial grammar of Semantic UI.
+
+They must follow this doctrine and consume admitted visual tokens.
+
+Layout primitives must not introduce arbitrary widgets or renderer-owned layout meaning.

@@ -13,6 +13,7 @@ Related:
 - `docs/architecture/ui_renderer_admission_boundary.md`
 - `docs/architecture/ui_visual_design_doctrine.md`
 - `docs/architecture/ui_visual_token_system_boundary.md`
+- `docs/architecture/ui_layout_primitive_boundary.md`
 
 ## 1. Purpose
 
@@ -218,4 +219,26 @@ This preserves:
 Meaning first.
 Tokens second.
 Renderer third.
+```
+
+### Layout primitive ownership
+
+Layout primitives are owned by the UI architecture layer.
+
+| Component | Layout role |
+|---|---|
+| visual doctrine | owns meaning |
+| visual token system | owns reusable visual vocabulary |
+| layout primitive system | owns spatial grammar |
+| renderer | consumes resolved layout output |
+| native backend | does not own layout |
+| `prom-ui-runtime` | does not own layout |
+
+This preserves:
+
+```text
+Meaning first.
+Tokens second.
+Layout third.
+Renderer fourth.
 ```
