@@ -353,6 +353,18 @@ Interaction semantics are defined separately in:
 docs/architecture/ui_interaction_input_semantic_boundary.md
 ```
 
+## Focus and selection boundary
+
+Native backend must not own semantic focus or semantic selection.
+
+Native backend may translate host events into `InputEvent`.
+
+Focus and selection semantics are defined separately in:
+
+```text
+docs/architecture/ui_focus_selection_semantic_boundary.md
+```
+
 ## 14. Stop rules
 
 Stop the native backend implementation if it requires:

@@ -279,4 +279,16 @@ docs/architecture/ui_interaction_input_semantic_boundary.md
 
 Renderer must not treat native input or hit-test output as admitted semantic action.
 
+## Focus and selection dependency
+
+Renderer hit-testing or visual focus indication must not define semantic focus or selection.
+
+Focus and selection semantics are defined separately in:
+
+```text
+docs/architecture/ui_focus_selection_semantic_boundary.md
+```
+
+Renderer must not treat hit-test output as semantic selection or admitted action target.
+
 Renderer admission starts only after this boundary is accepted.

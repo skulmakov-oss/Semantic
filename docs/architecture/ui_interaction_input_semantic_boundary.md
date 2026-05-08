@@ -444,3 +444,23 @@ selection model
 Workbench interaction implementation
 renderer-owned input semantics
 ```
+
+## Focus and selection dependency
+
+Focus and selection semantics are defined separately in:
+
+```text
+docs/architecture/ui_focus_selection_semantic_boundary.md
+```
+
+Focus and selection are downstream from input and interaction intent.
+
+```text
+input signal
+  -> interaction intent
+  -> focus/selection request
+  -> admission
+  -> semantic focus/selection state
+```
+
+Raw input must not directly mutate focus or selection.

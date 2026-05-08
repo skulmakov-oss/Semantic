@@ -409,6 +409,18 @@ Layout primitives provide spatial structure and target regions.
 
 They must not own interaction meaning.
 
+## Focus and selection target dependency
+
+Layout primitives may provide target context for focus and selection.
+
+They must not own focus or selection semantics.
+
+Focus and selection are defined separately in:
+
+```text
+docs/architecture/ui_focus_selection_semantic_boundary.md
+```
+
 ## Component dependency
 
 Component admission depends on the layout primitive boundary.
