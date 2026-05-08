@@ -389,6 +389,18 @@ docs/architecture/ui_effect_request_capability_boundary.md
 
 Native backend may perform platform operations only after an admitted effect/lifecycle boundary exists.
 
+## Trace and audit visual boundary
+
+Native backend may expose transcript facts.
+
+Native backend must not define audit meaning.
+
+Trace/audit visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_trace_audit_visual_boundary.md
+```
+
 ## 14. Stop rules
 
 Stop the native backend implementation if it requires:

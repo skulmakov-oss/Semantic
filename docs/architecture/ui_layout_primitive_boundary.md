@@ -433,3 +433,15 @@ visual doctrine
 ```
 
 Components must compose admitted layout primitives rather than redefining spatial grammar.
+
+## Trace and audit visual dependency
+
+Layout primitives may provide trace lanes, timelines, and inspector regions.
+
+Trace/audit visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_trace_audit_visual_boundary.md
+```
+
+Layout primitives must not own trace/audit meaning.

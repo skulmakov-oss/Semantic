@@ -474,3 +474,15 @@ Workbench effect implementation
 renderer effect/capability authority
 native backend direct effect execution
 ```
+
+## Trace and audit visual dependency
+
+Trace/audit visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_trace_audit_visual_boundary.md
+```
+
+Effect requests and committed effects may produce trace/audit records.
+
+UI trace projection may display those records, but must not become the source of truth.

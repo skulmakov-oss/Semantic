@@ -432,3 +432,15 @@ docs/architecture/ui_effect_request_capability_boundary.md
 ```
 
 Components must not perform effects directly.
+
+## Trace and audit visual dependency
+
+Components may expose trace/audit projection surfaces.
+
+Trace/audit visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_trace_audit_visual_boundary.md
+```
+
+Components must not treat trace display as trace authority.

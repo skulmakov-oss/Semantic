@@ -315,4 +315,16 @@ docs/architecture/ui_effect_request_capability_boundary.md
 
 Renderer may display admitted effect/capability state, but must not decide or perform effects.
 
+## Trace and audit visual dependency
+
+Renderer admission does not grant renderer authority over trace/audit meaning.
+
+Trace/audit visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_trace_audit_visual_boundary.md
+```
+
+Renderer may render trace projections, but must not define trace truth or audit authority.
+
 Renderer admission starts only after this boundary is accepted.
