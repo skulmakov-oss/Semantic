@@ -20,6 +20,7 @@ Related:
 - `docs/architecture/ui_semantic_action_boundary.md`
 - `docs/architecture/ui_effect_request_capability_boundary.md`
 - `docs/architecture/ui_trace_audit_visual_boundary.md`
+- `docs/architecture/ui_error_denial_quarantine_visual_boundary.md`
 
 ## 1. Purpose
 
@@ -394,4 +395,29 @@ Trace is not decorative log.
 Audit is not UI state.
 Visual trace is not source of truth.
 Renderer output is not audit authority.
+```
+
+### Error, denial, and quarantine visual ownership
+
+Error, denial, conflict, and quarantine visual meaning is owned by the UI architecture layer.
+
+| Component | Error/denial/quarantine role |
+|---|---|
+| admission/policy layer | owns denial result |
+| effect boundary | owns effect failure/prepare/commit status |
+| trace/audit layer | owns causal record |
+| component system | exposes status surfaces |
+| layout primitive system | provides status regions |
+| renderer | renders admitted projections, does not classify meaning |
+| native backend | may expose native failure facts, does not own semantic status |
+| Workbench | may display projections, does not define core categories |
+
+This preserves:
+
+```text
+Error is not denial.
+Denial is not failure.
+Quarantine is not deletion.
+Conflict is not crash.
+Visual refusal is not hidden no-op.
 ```

@@ -432,3 +432,15 @@ trace-to-audit mapping
 renderer transcript audit mapping
 native transcript audit mapping
 ```
+
+## Error, denial, and quarantine visual dependency
+
+Error, denial, and quarantine visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_error_denial_quarantine_visual_boundary.md
+```
+
+Trace/audit projection may explain denial, failure, conflict, and quarantine.
+
+Visual trace must not hide denial/failure/quarantine state.

@@ -486,3 +486,17 @@ docs/architecture/ui_trace_audit_visual_boundary.md
 Effect requests and committed effects may produce trace/audit records.
 
 UI trace projection may display those records, but must not become the source of truth.
+
+## Error, denial, and quarantine visual dependency
+
+Effect request and capability denial states must be visually distinct.
+
+Error, denial, and quarantine visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_error_denial_quarantine_visual_boundary.md
+```
+
+Effect denial is not effect failure.
+Prepared effect is not committed effect.
+Quarantine is not deletion.

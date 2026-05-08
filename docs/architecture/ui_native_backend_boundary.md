@@ -401,6 +401,18 @@ Trace/audit visual boundaries are defined separately in:
 docs/architecture/ui_trace_audit_visual_boundary.md
 ```
 
+## Error, denial, and quarantine boundary
+
+Native backend may expose native failure facts.
+
+Native backend must not define semantic denial, conflict, or quarantine meaning.
+
+Error, denial, and quarantine visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_error_denial_quarantine_visual_boundary.md
+```
+
 ## 14. Stop rules
 
 Stop the native backend implementation if it requires:

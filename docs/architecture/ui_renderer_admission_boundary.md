@@ -327,4 +327,16 @@ docs/architecture/ui_trace_audit_visual_boundary.md
 
 Renderer may render trace projections, but must not define trace truth or audit authority.
 
+## Error, denial, and quarantine dependency
+
+Renderer admission does not grant renderer authority to classify errors, denials, conflicts, or quarantine.
+
+Error, denial, and quarantine visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_error_denial_quarantine_visual_boundary.md
+```
+
+Renderer may display admitted status projections, but must not define their meaning.
+
 Renderer admission starts only after this boundary is accepted.
