@@ -11,6 +11,7 @@ Related:
 - `docs/roadmap/post_ui/ui_admission_checklist.md`
 - `docs/architecture/ui_native_backend_boundary.md`
 - `docs/architecture/ui_renderer_admission_boundary.md`
+- `docs/architecture/ui_visual_design_doctrine.md`
 
 ## 1. Purpose
 
@@ -179,3 +180,21 @@ Current status:
 | future renderer type/crate | not admitted yet |
 
 Draw staging is not renderer ownership.
+
+### Visual doctrine ownership
+
+Semantic UI visual meaning is owned by the UI doctrine and architecture contracts, not by the renderer or native backend.
+
+| Component | Visual meaning ownership |
+|---|---|
+| `prom-ui-runtime` | exposes state/lifecycle data, does not own visual style |
+| `prom-ui-backend-native` | exposes native facade/transcripts, does not own visual doctrine |
+| renderer | executes admitted visual grammar, does not define meaning |
+| UI visual doctrine | owns visual principles and semantic visual grammar |
+
+This preserves the rule:
+
+```text
+Renderer serves Semantic UI doctrine.
+Renderer does not define Semantic UI doctrine.
+```
