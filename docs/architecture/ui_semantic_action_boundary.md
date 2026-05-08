@@ -432,3 +432,22 @@ Workbench action implementation
 renderer action affordances
 action-to-capability bridge
 ```
+
+## Effect request and UI capability dependency
+
+Effect requests and UI capabilities are defined separately in:
+
+```text
+docs/architecture/ui_effect_request_capability_boundary.md
+```
+
+Semantic UI action is not effect.
+
+```text
+semantic UI action
+  -> optional effect request
+  -> UI capability admission
+  -> runtime capability mapping if admitted
+```
+
+No semantic UI action may silently produce external effects.

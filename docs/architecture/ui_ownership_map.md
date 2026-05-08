@@ -18,6 +18,7 @@ Related:
 - `docs/architecture/ui_interaction_input_semantic_boundary.md`
 - `docs/architecture/ui_focus_selection_semantic_boundary.md`
 - `docs/architecture/ui_semantic_action_boundary.md`
+- `docs/architecture/ui_effect_request_capability_boundary.md`
 
 ## 1. Purpose
 
@@ -342,4 +343,28 @@ Intent is not action.
 Selection is not permission.
 Action is not effect.
 Effect requires boundary.
+```
+
+### Effect request and UI capability ownership
+
+Effect requests and UI capabilities are owned by the UI architecture/admission layer.
+
+| Component | Effect/capability role |
+|---|---|
+| semantic action layer | may request effects |
+| UI capability layer | owns UI-level capability admission |
+| runtime capability layer | owns actual runtime capability gates |
+| effect boundary | owns prepare/commit semantics |
+| component system | exposes affordances only |
+| renderer | displays admitted state, does not grant/perform effects |
+| native backend | performs platform operation only after admitted boundary |
+| Workbench | may consume admitted effects, does not define core semantics |
+
+This preserves:
+
+```text
+Action is not effect.
+Effect request is not committed effect.
+UI capability is not runtime capability by default.
+Prepared effect is not committed effect.
 ```
