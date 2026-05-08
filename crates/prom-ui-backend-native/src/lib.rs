@@ -623,6 +623,66 @@ pub mod winit_placeholder {
         }
     }
 
+    /// Returns whether the separate NativeBackend winit app facade is available.
+    pub const fn native_backend_winit_app_facade_available() -> bool {
+        true
+    }
+
+    /// Error returned by the separate NativeBackend winit app facade.
+    #[derive(Debug)]
+    pub enum NativeBackendWinitAppError {
+        MissingWindowConfig,
+        EventLoop(winit::error::EventLoopError),
+    }
+
+    impl From<winit::error::EventLoopError> for NativeBackendWinitAppError {
+        fn from(err: winit::error::EventLoopError) -> Self {
+            Self::EventLoop(err)
+        }
+    }
+
+    /// Separate native app facade for running NativeBackend through winit.
+    ///
+    /// This facade intentionally lives outside `UiBackendAdapter`.
+    /// It owns the native event-loop path and keeps `prom-ui-runtime` platform-neutral.
+    #[derive(Debug)]
+    pub struct NativeBackendWinitApp {
+        backend: NativeBackend,
+    }
+
+    impl NativeBackendWinitApp {
+        pub fn new(backend: NativeBackend) -> Result<Self, NativeBackendWinitAppError> {
+            if backend.window_config().is_none() {
+                return Err(NativeBackendWinitAppError::MissingWindowConfig);
+            }
+
+            Ok(Self { backend })
+        }
+
+        pub fn backend(&self) -> &NativeBackend {
+            &self.backend
+        }
+
+        pub fn into_backend(self) -> NativeBackend {
+            self.backend
+        }
+
+        /// Run the separate NativeBackend-backed winit app facade until the native window closes.
+        ///
+        /// This consumes the facade and returns a summary.
+        /// It does not modify `NativeBackend::run_event_loop(...)`.
+        pub fn run_until_close(
+            self,
+        ) -> Result<NativeBackendWinitAppStateSummary, NativeBackendWinitAppError> {
+            let event_loop = create_winit_event_loop()?;
+            let mut app_state = NativeBackendWinitAppState::new(self.backend);
+
+            event_loop.run_app(&mut app_state)?;
+
+            Ok(app_state.summary())
+        }
+    }
+
     /// Read-only summary of the NativeBackend winit app scaffold.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct NativeBackendWinitAppStateSummary {
