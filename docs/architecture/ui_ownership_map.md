@@ -10,6 +10,7 @@ Related:
 - `docs/spec/ui_abi_capability_admission.md`
 - `docs/roadmap/post_ui/ui_admission_checklist.md`
 - `docs/architecture/ui_native_backend_boundary.md`
+- `docs/architecture/ui_renderer_admission_boundary.md`
 
 ## 1. Purpose
 
@@ -159,3 +160,22 @@ prom-ui-runtime remains platform-neutral.
 UiBackendAdapter remains unchanged.
 Native-specific ownership stays inside prom-ui-backend-native.
 ```
+
+### Renderer ownership is not admitted yet
+
+The renderer is not owned by `prom-ui-runtime`, `UiBackendAdapter`, or `NativeBackend::run_event_loop(...)`.
+
+Renderer ownership must be introduced through a separate admitted layer.
+
+Current status:
+
+| Component | Renderer ownership |
+|---|---|
+| `prom-ui-runtime` | none |
+| `UiBackendAdapter` | none |
+| `NativeBackend` | none |
+| `NativeBackendWinitApp` | none |
+| `NativeBackendWinitAppState` | none |
+| future renderer type/crate | not admitted yet |
+
+Draw staging is not renderer ownership.
