@@ -31,6 +31,7 @@ pub mod winit_placeholder {
     use core::marker::PhantomData;
 
     use prom_ui_runtime::WindowConfig;
+    use winit::error::OsError;
     use winit::{
         application::ApplicationHandler,
         dpi::LogicalSize,
@@ -76,6 +77,11 @@ pub mod winit_placeholder {
         builder.build()
     }
 
+    /// Returns whether the winit native window creation scaffold is available.
+    pub const fn winit_window_creation_scaffold_available() -> bool {
+        true
+    }
+
     /// Translate Semantic UI `WindowConfig` into winit `WindowAttributes`.
     ///
     /// This function does not create a native window.
@@ -91,6 +97,20 @@ pub mod winit_placeholder {
     /// Returns whether the winit window config translation scaffold is available.
     pub const fn winit_window_config_translation_available() -> bool {
         true
+    }
+
+    /// Create a native winit `Window` from Semantic `WindowConfig`.
+    ///
+    /// This must only be called from a valid winit event-loop lifecycle callback,
+    /// such as `ApplicationHandler::resumed(...)`.
+    ///
+    /// This function does not run the event loop and does not render.
+    pub fn create_winit_window_from_config(
+        event_loop: &ActiveEventLoop,
+        config: &WindowConfig,
+    ) -> Result<Window, OsError> {
+        let attributes = window_config_to_winit_attributes(config);
+        event_loop.create_window(attributes)
     }
 
     /// Returns whether the winit event translation scaffold is available.
@@ -210,6 +230,88 @@ pub mod winit_placeholder {
 
             if matches!(event, WindowEvent::CloseRequested) {
                 self.close_requested = true;
+                event_loop.exit();
+            }
+        }
+    }
+
+    /// ApplicationHandler scaffold that creates one native window on `resumed(...)`.
+    ///
+    /// This is a controlled native-window creation scaffold.
+    /// It does not render, does not submit frames, and does not integrate with
+    /// `NativeBackend::run_event_loop(...)` yet.
+    #[derive(Debug)]
+    pub struct WinitWindowCreationScaffold {
+        config: WindowConfig,
+        window_id: Option<WindowId>,
+        window: Option<Window>,
+        create_attempts: usize,
+        create_failures: usize,
+    }
+
+    impl WinitWindowCreationScaffold {
+        pub fn new(config: WindowConfig) -> Self {
+            Self {
+                config,
+                window_id: None,
+                window: None,
+                create_attempts: 0,
+                create_failures: 0,
+            }
+        }
+
+        pub fn config(&self) -> &WindowConfig {
+            &self.config
+        }
+
+        pub const fn window_id(&self) -> Option<WindowId> {
+            self.window_id
+        }
+
+        pub const fn has_window(&self) -> bool {
+            self.window_id.is_some()
+        }
+
+        pub const fn create_attempts(&self) -> usize {
+            self.create_attempts
+        }
+
+        pub const fn create_failures(&self) -> usize {
+            self.create_failures
+        }
+    }
+
+    impl ApplicationHandler for WinitWindowCreationScaffold {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            if self.window.is_some() {
+                return;
+            }
+
+            self.create_attempts = self.create_attempts.saturating_add(1);
+
+            match create_winit_window_from_config(event_loop, &self.config) {
+                Ok(window) => {
+                    self.window_id = Some(window.id());
+                    self.window = Some(window);
+                }
+                Err(_err) => {
+                    self.create_failures = self.create_failures.saturating_add(1);
+                    event_loop.exit();
+                }
+            }
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            window_id: WindowId,
+            event: WindowEvent,
+        ) {
+            if Some(window_id) != self.window_id {
+                return;
+            }
+
+            if matches!(event, WindowEvent::CloseRequested) {
                 event_loop.exit();
             }
         }
