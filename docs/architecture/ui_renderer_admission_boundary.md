@@ -291,4 +291,16 @@ docs/architecture/ui_focus_selection_semantic_boundary.md
 
 Renderer must not treat hit-test output as semantic selection or admitted action target.
 
+## Semantic action dependency
+
+Renderer admission does not grant renderer ownership of Semantic UI actions.
+
+Semantic UI actions are defined separately in:
+
+```text
+docs/architecture/ui_semantic_action_boundary.md
+```
+
+Renderer may display admitted action affordances, but must not decide action meaning or admission.
+
 Renderer admission starts only after this boundary is accepted.

@@ -447,3 +447,16 @@ selection actions
 Workbench focus/selection implementation
 renderer-owned focus/selection semantics
 ```
+
+## Semantic action dependency
+
+Focus and selection may provide target context for semantic actions.
+
+Semantic UI actions are defined separately in:
+
+```text
+docs/architecture/ui_semantic_action_boundary.md
+```
+
+Selection is not action permission.
+Focus is not action admission.
