@@ -396,3 +396,15 @@ Components may expose interaction surfaces, but must not directly mutate semanti
 
 Components produce interaction intent candidates.
 Admission decides whether an intent becomes an action.
+
+## Focus and selection dependency
+
+Components may expose focusable and selectable surfaces.
+
+Focus and selection semantics are defined separately in:
+
+```text
+docs/architecture/ui_focus_selection_semantic_boundary.md
+```
+
+Components must not directly mutate global focus or selection from raw input.

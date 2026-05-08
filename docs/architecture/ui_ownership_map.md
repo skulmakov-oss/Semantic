@@ -16,6 +16,7 @@ Related:
 - `docs/architecture/ui_layout_primitive_boundary.md`
 - `docs/architecture/ui_component_admission_boundary.md`
 - `docs/architecture/ui_interaction_input_semantic_boundary.md`
+- `docs/architecture/ui_focus_selection_semantic_boundary.md`
 
 ## 1. Purpose
 
@@ -292,4 +293,28 @@ Interaction intent third.
 Admission fourth.
 Semantic action fifth.
 Trace/effect sixth.
+```
+
+### Focus and selection semantic ownership
+
+Focus and selection are owned by the UI architecture layer.
+
+| Component | Focus/selection role |
+|---|---|
+| native backend | captures/translates host events only |
+| `prom-ui-runtime` | may own normalized `InputEvent` contracts later, not raw semantics |
+| component system | exposes focusable/selectable surfaces |
+| layout primitive system | provides target context |
+| interaction semantic layer | produces focus/selection requests |
+| focus/selection semantic layer | owns focus/selection meaning |
+| admission/policy layer | decides whether focus/selection changes are allowed |
+| renderer | may display admitted focus/selection state, does not own meaning |
+
+This preserves:
+
+```text
+Hover is not focus.
+Focus is not selection.
+Selection is not action.
+Action requires admission.
 ```
