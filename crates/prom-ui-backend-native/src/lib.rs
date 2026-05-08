@@ -44,6 +44,7 @@ pub mod winit_placeholder {
 
     use core::marker::PhantomData;
 
+    use super::NativeBackend;
     use prom_ui_runtime::WindowConfig;
     use winit::error::OsError;
     use winit::{
@@ -443,6 +444,171 @@ pub mod winit_placeholder {
         event_loop.run_app(&mut app)?;
 
         Ok(app.result())
+    }
+
+    /// Returns whether the NativeBackend winit app state scaffold is available.
+    pub const fn native_backend_winit_app_state_available() -> bool {
+        true
+    }
+
+    /// Read-only summary of the NativeBackend winit app scaffold.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct NativeBackendWinitAppStateSummary {
+        pub resumed_calls: usize,
+        pub window_event_calls: usize,
+        pub create_attempts: usize,
+        pub create_failures: usize,
+        pub window_created: bool,
+        pub close_requested: bool,
+        pub staged_event_count: usize,
+    }
+
+    /// Winit ApplicationHandler scaffold backed by `NativeBackend`.
+    ///
+    /// This is a state scaffold for future native runtime integration.
+    /// It can create one native window and stage translated winit events into
+    /// the inner `NativeBackend`, but it is not wired into
+    /// `NativeBackend::run_event_loop(...)` yet.
+    #[derive(Debug)]
+    pub struct NativeBackendWinitAppState {
+        backend: NativeBackend,
+        window: Option<Window>,
+        window_id: Option<WindowId>,
+        resumed_calls: usize,
+        window_event_calls: usize,
+        create_attempts: usize,
+        create_failures: usize,
+        window_created: bool,
+        close_requested: bool,
+    }
+
+    impl NativeBackendWinitAppState {
+        pub fn new(backend: NativeBackend) -> Self {
+            Self {
+                backend,
+                window: None,
+                window_id: None,
+                resumed_calls: 0,
+                window_event_calls: 0,
+                create_attempts: 0,
+                create_failures: 0,
+                window_created: false,
+                close_requested: false,
+            }
+        }
+
+        pub fn backend(&self) -> &NativeBackend {
+            &self.backend
+        }
+
+        pub fn backend_mut(&mut self) -> &mut NativeBackend {
+            &mut self.backend
+        }
+
+        pub const fn window_id(&self) -> Option<WindowId> {
+            self.window_id
+        }
+
+        pub const fn has_window(&self) -> bool {
+            self.window_id.is_some()
+        }
+
+        pub const fn resumed_calls(&self) -> usize {
+            self.resumed_calls
+        }
+
+        pub const fn window_event_calls(&self) -> usize {
+            self.window_event_calls
+        }
+
+        pub const fn create_attempts(&self) -> usize {
+            self.create_attempts
+        }
+
+        pub const fn create_failures(&self) -> usize {
+            self.create_failures
+        }
+
+        pub const fn window_created(&self) -> bool {
+            self.window_created
+        }
+
+        pub const fn close_requested(&self) -> bool {
+            self.close_requested
+        }
+
+        pub fn summary(&self) -> NativeBackendWinitAppStateSummary {
+            NativeBackendWinitAppStateSummary {
+                resumed_calls: self.resumed_calls,
+                window_event_calls: self.window_event_calls,
+                create_attempts: self.create_attempts,
+                create_failures: self.create_failures,
+                window_created: self.window_created,
+                close_requested: self.close_requested,
+                staged_event_count: self.backend.pending_event_count(),
+            }
+        }
+
+        fn staged_config(&self) -> Option<&WindowConfig> {
+            self.backend.window_config()
+        }
+    }
+
+    impl ApplicationHandler for NativeBackendWinitAppState {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.resumed_calls = self.resumed_calls.saturating_add(1);
+
+            if self.window.is_some() {
+                return;
+            }
+
+            self.create_attempts = self.create_attempts.saturating_add(1);
+
+            let Some(config) = self.staged_config().cloned() else {
+                self.create_failures = self.create_failures.saturating_add(1);
+                event_loop.exit();
+                return;
+            };
+
+            match create_winit_window_from_config(event_loop, &config) {
+                Ok(window) => {
+                    self.window_id = Some(window.id());
+                    self.window = Some(window);
+                    self.window_created = true;
+                }
+                Err(_err) => {
+                    self.create_failures = self.create_failures.saturating_add(1);
+                    event_loop.exit();
+                }
+            }
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            window_id: WindowId,
+            event: WindowEvent,
+        ) {
+            if Some(window_id) != self.window_id {
+                return;
+            }
+
+            self.window_event_calls = self.window_event_calls.saturating_add(1);
+
+            if let Some(input) = translate_winit_window_event(&event) {
+                if matches!(
+                    &input.kind,
+                    prom_ui_runtime::InputEventKind::CloseRequested
+                ) {
+                    self.close_requested = true;
+                    self.backend.push_pending_event(input);
+                    event_loop.exit();
+                    return;
+                }
+
+                self.backend.push_pending_event(input);
+            }
+        }
     }
 }
 
