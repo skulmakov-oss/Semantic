@@ -15,6 +15,7 @@ Related:
 - `docs/architecture/ui_visual_token_system_boundary.md`
 - `docs/architecture/ui_layout_primitive_boundary.md`
 - `docs/architecture/ui_component_admission_boundary.md`
+- `docs/architecture/ui_interaction_input_semantic_boundary.md`
 
 ## 1. Purpose
 
@@ -266,4 +267,29 @@ Tokens second.
 Layout third.
 Components fourth.
 Renderer fifth.
+```
+
+### Interaction/input semantic ownership
+
+Interaction semantics are owned by the UI architecture layer.
+
+| Component | Interaction role |
+|---|---|
+| native backend | captures/translates host events |
+| `prom-ui-runtime` | owns normalized `InputEvent` contracts |
+| component system | exposes possible interaction surfaces |
+| layout primitive system | provides target context |
+| interaction semantic layer | owns interpreted UI intent |
+| admission/policy layer | decides whether intent becomes action |
+| renderer | may provide input plumbing, does not own semantics |
+
+This preserves:
+
+```text
+Native event first.
+Input signal second.
+Interaction intent third.
+Admission fourth.
+Semantic action fifth.
+Trace/effect sixth.
 ```

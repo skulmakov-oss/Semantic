@@ -35,6 +35,7 @@ Current documents in this PR:
 - `../architecture/ui_visual_token_system_boundary.md` - Semantic UI visual token system boundary before implementation
 - `../architecture/ui_layout_primitive_boundary.md` - Semantic UI layout primitive boundary before implementation
 - `../architecture/ui_component_admission_boundary.md` - Semantic UI component admission boundary before implementation
+- `../architecture/ui_interaction_input_semantic_boundary.md` - Semantic UI interaction and input semantic boundary before implementation
 
 Adjacent source-surface documents also remain relevant:
 

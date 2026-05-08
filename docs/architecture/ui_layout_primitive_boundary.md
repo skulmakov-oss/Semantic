@@ -401,6 +401,14 @@ renderer layout resolver
 Workbench visual layout implementation
 ```
 
+## Interaction target dependency
+
+Interaction semantics may use layout primitives as target context.
+
+Layout primitives provide spatial structure and target regions.
+
+They must not own interaction meaning.
+
 ## Component dependency
 
 Component admission depends on the layout primitive boundary.
