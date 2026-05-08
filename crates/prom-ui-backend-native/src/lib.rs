@@ -316,6 +316,120 @@ pub mod winit_placeholder {
             }
         }
     }
+
+    /// Returns whether the native run_app smoke scaffold is available.
+    pub const fn winit_run_app_smoke_available() -> bool {
+        true
+    }
+
+    /// Result summary for the native run_app smoke path.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct WinitRunAppSmokeResult {
+        pub resumed_calls: usize,
+        pub create_attempts: usize,
+        pub create_failures: usize,
+        pub window_created: bool,
+    }
+
+    /// Manual smoke scaffold for `EventLoop::run_app(...)`.
+    ///
+    /// This creates one native window on `resumed(...)` and exits immediately.
+    /// It is intended for manual smoke tests only.
+    #[derive(Debug)]
+    pub struct WinitRunAppSmokeScaffold {
+        config: WindowConfig,
+        resumed_calls: usize,
+        create_attempts: usize,
+        create_failures: usize,
+        window_created: bool,
+        window_id: Option<WindowId>,
+        window: Option<Window>,
+    }
+
+    impl WinitRunAppSmokeScaffold {
+        pub fn new(config: WindowConfig) -> Self {
+            Self {
+                config,
+                resumed_calls: 0,
+                create_attempts: 0,
+                create_failures: 0,
+                window_created: false,
+                window_id: None,
+                window: None,
+            }
+        }
+
+        pub fn result(&self) -> WinitRunAppSmokeResult {
+            WinitRunAppSmokeResult {
+                resumed_calls: self.resumed_calls,
+                create_attempts: self.create_attempts,
+                create_failures: self.create_failures,
+                window_created: self.window_created,
+            }
+        }
+
+        pub const fn has_window(&self) -> bool {
+            self.window_id.is_some()
+        }
+    }
+
+    impl ApplicationHandler for WinitRunAppSmokeScaffold {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.resumed_calls = self.resumed_calls.saturating_add(1);
+
+            if self.window.is_some() {
+                event_loop.exit();
+                return;
+            }
+
+            self.create_attempts = self.create_attempts.saturating_add(1);
+
+            match create_winit_window_from_config(event_loop, &self.config) {
+                Ok(window) => {
+                    self.window_id = Some(window.id());
+                    self.window = Some(window);
+                    self.window_created = true;
+                    event_loop.exit();
+                }
+                Err(_err) => {
+                    self.create_failures = self.create_failures.saturating_add(1);
+                    event_loop.exit();
+                }
+            }
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            window_id: WindowId,
+            event: WindowEvent,
+        ) {
+            if Some(window_id) != self.window_id {
+                return;
+            }
+
+            if matches!(event, WindowEvent::CloseRequested) {
+                event_loop.exit();
+            }
+        }
+    }
+
+    /// Run a manual native smoke using winit `EventLoop::run_app(...)`.
+    ///
+    /// This creates a real event loop and attempts to create one native window,
+    /// then exits immediately.
+    ///
+    /// This function is not used by `NativeBackend::run_event_loop(...)`.
+    pub fn run_winit_window_creation_smoke(
+        config: WindowConfig,
+    ) -> Result<WinitRunAppSmokeResult, winit::error::EventLoopError> {
+        let event_loop = create_winit_event_loop()?;
+        let mut app = WinitRunAppSmokeScaffold::new(config);
+
+        event_loop.run_app(&mut app)?;
+
+        Ok(app.result())
+    }
 }
 
 /// Skeleton native backend.
