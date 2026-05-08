@@ -354,3 +354,16 @@ visual doctrine
 ```
 
 Layout primitives must consume semantic tokens rather than raw colors, spacing, typography, or motion values.
+
+## Component dependency
+
+Component admission depends on the visual token system boundary.
+
+Components must consume semantic tokens rather than raw colors, spacing, typography, or motion values.
+
+```text
+visual doctrine
+  -> visual token system
+  -> layout primitives
+  -> semantic components
+```

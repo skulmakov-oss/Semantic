@@ -255,4 +255,16 @@ Renderer implementation must consume admitted layout output.
 
 Renderer implementation must not invent layout semantics.
 
+## Component dependency
+
+Renderer admission depends on the component admission boundary:
+
+```text
+docs/architecture/ui_component_admission_boundary.md
+```
+
+Renderer implementation must consume admitted component/layout output.
+
+Renderer implementation must not invent component semantics.
+
 Renderer admission starts only after this boundary is accepted.

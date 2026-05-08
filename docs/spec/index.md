@@ -34,6 +34,7 @@ Current documents in this PR:
 - `../architecture/ui_visual_design_doctrine.md` - Semantic UI visual design doctrine before renderer implementation
 - `../architecture/ui_visual_token_system_boundary.md` - Semantic UI visual token system boundary before implementation
 - `../architecture/ui_layout_primitive_boundary.md` - Semantic UI layout primitive boundary before implementation
+- `../architecture/ui_component_admission_boundary.md` - Semantic UI component admission boundary before implementation
 
 Adjacent source-surface documents also remain relevant:
 

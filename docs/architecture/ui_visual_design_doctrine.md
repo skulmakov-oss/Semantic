@@ -394,3 +394,17 @@ Layout primitives are the spatial grammar of Semantic UI.
 They must follow this doctrine and consume admitted visual tokens.
 
 Layout primitives must not introduce arbitrary widgets or renderer-owned layout meaning.
+
+## Component admission boundary
+
+The component admission boundary is defined separately in:
+
+```text
+docs/architecture/ui_component_admission_boundary.md
+```
+
+Components are reusable semantic UI units.
+
+They must follow this doctrine, consume admitted visual tokens, and compose admitted layout primitives.
+
+Components must not introduce arbitrary widgets or renderer-owned component meaning.
