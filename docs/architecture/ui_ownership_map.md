@@ -9,6 +9,7 @@ Related:
 - `docs/spec/ui_contract_map.md`
 - `docs/spec/ui_abi_capability_admission.md`
 - `docs/roadmap/post_ui/ui_admission_checklist.md`
+- `docs/architecture/ui_native_backend_boundary.md`
 
 ## 1. Purpose
 
@@ -140,3 +141,21 @@ This document is complete when:
 - forbidden ownership leaks are listed;
 - Workbench is separated from UI application boundary;
 - capability and ABI ownership are explicit.
+
+### Native backend facade ownership
+
+`prom-ui-backend-native` now separates three roles:
+
+| Role | Type | Responsibility |
+|---|---|---|
+| staged backend | `NativeBackend` | stores staged config/events/frame accounting |
+| native app facade | `NativeBackendWinitApp` | owns the native app run path outside `UiBackendAdapter` |
+| app state | `NativeBackendWinitAppState` | implements winit `ApplicationHandler` and owns native window state during run |
+
+This preserves the core invariant:
+
+```text
+prom-ui-runtime remains platform-neutral.
+UiBackendAdapter remains unchanged.
+Native-specific ownership stays inside prom-ui-backend-native.
+```
