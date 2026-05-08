@@ -420,3 +420,15 @@ docs/architecture/ui_semantic_action_boundary.md
 ```
 
 Components must not execute semantic actions directly from raw input or visual callbacks.
+
+## Effect request dependency
+
+Components may expose effect request affordances.
+
+Effect requests and UI capabilities are defined separately in:
+
+```text
+docs/architecture/ui_effect_request_capability_boundary.md
+```
+
+Components must not perform effects directly.

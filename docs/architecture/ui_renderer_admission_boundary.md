@@ -303,4 +303,16 @@ docs/architecture/ui_semantic_action_boundary.md
 
 Renderer may display admitted action affordances, but must not decide action meaning or admission.
 
+## Effect and capability dependency
+
+Renderer admission does not grant renderer authority to perform effects or grant capabilities.
+
+Effect requests and UI capabilities are defined separately in:
+
+```text
+docs/architecture/ui_effect_request_capability_boundary.md
+```
+
+Renderer may display admitted effect/capability state, but must not decide or perform effects.
+
 Renderer admission starts only after this boundary is accepted.

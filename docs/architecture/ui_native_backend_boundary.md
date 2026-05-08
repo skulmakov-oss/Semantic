@@ -377,6 +377,18 @@ Semantic UI actions are defined separately in:
 docs/architecture/ui_semantic_action_boundary.md
 ```
 
+## Effect request boundary
+
+Native backend must not perform Semantic UI effects directly from host events.
+
+Effect requests and UI capabilities are defined separately in:
+
+```text
+docs/architecture/ui_effect_request_capability_boundary.md
+```
+
+Native backend may perform platform operations only after an admitted effect/lifecycle boundary exists.
+
 ## 14. Stop rules
 
 Stop the native backend implementation if it requires:

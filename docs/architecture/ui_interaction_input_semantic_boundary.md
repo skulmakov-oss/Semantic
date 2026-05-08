@@ -482,3 +482,13 @@ interaction intent
 ```
 
 No interaction intent may directly perform effects.
+
+## Effect request dependency
+
+Interaction intent must not directly produce effects.
+
+Effect requests are downstream from admitted semantic actions and are defined separately in:
+
+```text
+docs/architecture/ui_effect_request_capability_boundary.md
+```
