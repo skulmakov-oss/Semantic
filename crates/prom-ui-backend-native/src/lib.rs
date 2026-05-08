@@ -643,6 +643,11 @@ pub mod winit_placeholder {
         true
     }
 
+    /// Returns whether the combined facade run transcript with draw facts is available.
+    pub const fn native_backend_winit_app_facade_draw_run_transcript_available() -> bool {
+        true
+    }
+
     /// Error returned by the separate NativeBackend winit app facade.
     #[derive(Debug)]
     pub enum NativeBackendWinitAppError {
@@ -877,6 +882,102 @@ pub mod winit_placeholder {
         }
     }
 
+    /// High-level status for the combined facade transcript.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NativeBackendWinitAppFacadeTranscriptStatus {
+        Planned,
+        Completed,
+        Failed,
+    }
+
+    /// Combined transcript for the NativeBackend winit app facade.
+    ///
+    /// This combines run, event, and draw-staging facts.
+    /// It does not imply rendering or frame presentation.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct NativeBackendWinitAppFacadeTranscript {
+        pub status: NativeBackendWinitAppFacadeTranscriptStatus,
+
+        pub run: NativeBackendWinitAppRunTranscript,
+        pub events: NativeBackendWinitAppEventTranscript,
+        pub draw: NativeBackendWinitAppDrawTranscript,
+
+        pub submitted_frames_before_run: usize,
+        pub renderer_used: bool,
+        pub frame_presented: bool,
+    }
+
+    impl NativeBackendWinitAppFacadeTranscript {
+        pub const fn planned(
+            run: NativeBackendWinitAppRunTranscript,
+            draw: NativeBackendWinitAppDrawTranscript,
+        ) -> Self {
+            Self {
+                status: NativeBackendWinitAppFacadeTranscriptStatus::Planned,
+                events: NativeBackendWinitAppEventTranscript {
+                    status: NativeBackendWinitAppEventTranscriptStatus::NoWindowEventsObserved,
+                    window_event_calls: 0,
+                    staged_event_count: 0,
+                    close_observed: false,
+                },
+                submitted_frames_before_run: draw.submitted_after,
+                run,
+                draw,
+                renderer_used: false,
+                frame_presented: false,
+            }
+        }
+
+        pub const fn completed(
+            run: NativeBackendWinitAppRunTranscript,
+            events: NativeBackendWinitAppEventTranscript,
+            draw: NativeBackendWinitAppDrawTranscript,
+        ) -> Self {
+            Self {
+                status: NativeBackendWinitAppFacadeTranscriptStatus::Completed,
+                submitted_frames_before_run: draw.submitted_after,
+                run,
+                events,
+                draw,
+                renderer_used: false,
+                frame_presented: false,
+            }
+        }
+
+        pub const fn failed(
+            run: NativeBackendWinitAppRunTranscript,
+            draw: NativeBackendWinitAppDrawTranscript,
+        ) -> Self {
+            Self {
+                status: NativeBackendWinitAppFacadeTranscriptStatus::Failed,
+                events: NativeBackendWinitAppEventTranscript {
+                    status: NativeBackendWinitAppEventTranscriptStatus::NoWindowEventsObserved,
+                    window_event_calls: 0,
+                    staged_event_count: 0,
+                    close_observed: false,
+                },
+                submitted_frames_before_run: draw.submitted_after,
+                run,
+                draw,
+                renderer_used: false,
+                frame_presented: false,
+            }
+        }
+
+        pub const fn has_draw_staging(&self) -> bool {
+            self.draw.submitted_after > 0 || self.draw.submitted_delta > 0
+        }
+
+        pub const fn rendered_or_presented(&self) -> bool {
+            self.renderer_used || self.frame_presented
+        }
+
+        pub fn completed_without_renderer(&self) -> bool {
+            matches!(self.status, NativeBackendWinitAppFacadeTranscriptStatus::Completed)
+                && !self.rendered_or_presented()
+        }
+    }
+
     /// Separate native app facade for running NativeBackend through winit.
     ///
     /// This facade intentionally lives outside `UiBackendAdapter`.
@@ -933,6 +1034,24 @@ pub mod winit_placeholder {
             NativeBackendWinitAppEventTranscript::from_run_transcript(transcript)
         }
 
+        /// Return a planned facade transcript including current draw-staging facts.
+        pub fn planned_facade_transcript(&self) -> NativeBackendWinitAppFacadeTranscript {
+            let run = self.planned_transcript();
+            let submitted = self.backend.submitted_frames();
+            let draw = NativeBackendWinitAppDrawTranscript::not_submitted(submitted);
+
+            NativeBackendWinitAppFacadeTranscript::planned(run, draw)
+        }
+
+        /// Build a completed facade transcript from run summary and pre-run draw facts.
+        pub const fn facade_transcript_from_parts(
+            run: NativeBackendWinitAppRunTranscript,
+            events: NativeBackendWinitAppEventTranscript,
+            draw: NativeBackendWinitAppDrawTranscript,
+        ) -> NativeBackendWinitAppFacadeTranscript {
+            NativeBackendWinitAppFacadeTranscript::completed(run, events, draw)
+        }
+
         /// Run the separate NativeBackend-backed winit app facade until the native window closes.
         ///
         /// This consumes the facade and returns a summary.
@@ -965,6 +1084,25 @@ pub mod winit_placeholder {
             let transcript = self.run_until_close_transcript()?;
             Ok(NativeBackendWinitAppEventTranscript::from_run_transcript(
                 transcript,
+            ))
+        }
+
+        /// Run until close and return a combined facade transcript.
+        ///
+        /// Draw facts are captured from the inner backend's submitted frame counter
+        /// before native run. This does not render or present frames.
+        pub fn run_until_close_facade_transcript(
+            self,
+        ) -> Result<NativeBackendWinitAppFacadeTranscript, NativeBackendWinitAppError> {
+            let submitted_before_run = self.backend.submitted_frames();
+
+            let draw = NativeBackendWinitAppDrawTranscript::not_submitted(submitted_before_run);
+
+            let run = self.run_until_close_transcript()?;
+            let events = NativeBackendWinitAppEventTranscript::from_run_transcript(run);
+
+            Ok(NativeBackendWinitAppFacadeTranscript::completed(
+                run, events, draw,
             ))
         }
 
