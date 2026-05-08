@@ -638,6 +638,11 @@ pub mod winit_placeholder {
         true
     }
 
+    /// Returns whether the NativeBackend winit app draw staging bridge is available.
+    pub const fn native_backend_winit_app_draw_staging_available() -> bool {
+        true
+    }
+
     /// Error returned by the separate NativeBackend winit app facade.
     #[derive(Debug)]
     pub enum NativeBackendWinitAppError {
@@ -825,6 +830,53 @@ pub mod winit_placeholder {
         }
     }
 
+    /// Status of a draw-frame staging operation.
+    ///
+    /// This is not renderer status. It only describes backend-side staging/accounting.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NativeBackendWinitAppDrawStagingStatus {
+        NotSubmitted,
+        Submitted,
+    }
+
+    /// Transcript for staged draw-frame submission through the native facade path.
+    ///
+    /// This does not imply rendering or presentation. It only records that a
+    /// `DrawFrame` was accepted into backend-side accounting.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct NativeBackendWinitAppDrawTranscript {
+        pub status: NativeBackendWinitAppDrawStagingStatus,
+        pub submitted_before: usize,
+        pub submitted_after: usize,
+        pub submitted_delta: usize,
+    }
+
+    impl NativeBackendWinitAppDrawTranscript {
+        pub const fn not_submitted(current_submitted_frames: usize) -> Self {
+            Self {
+                status: NativeBackendWinitAppDrawStagingStatus::NotSubmitted,
+                submitted_before: current_submitted_frames,
+                submitted_after: current_submitted_frames,
+                submitted_delta: 0,
+            }
+        }
+
+        pub const fn submitted(before: usize, after: usize) -> Self {
+            Self {
+                status: NativeBackendWinitAppDrawStagingStatus::Submitted,
+                submitted_before: before,
+                submitted_after: after,
+                submitted_delta: after.saturating_sub(before),
+            }
+        }
+
+        pub fn accepted_one_frame(&self) -> bool {
+            matches!(self.status, NativeBackendWinitAppDrawStagingStatus::Submitted)
+                && self.submitted_delta == 1
+                && self.submitted_after == self.submitted_before.saturating_add(1)
+        }
+    }
+
     /// Separate native app facade for running NativeBackend through winit.
     ///
     /// This facade intentionally lives outside `UiBackendAdapter`.
@@ -845,6 +897,10 @@ pub mod winit_placeholder {
 
         pub fn backend(&self) -> &NativeBackend {
             &self.backend
+        }
+
+        pub fn backend_mut(&mut self) -> &mut NativeBackend {
+            &mut self.backend
         }
 
         pub fn into_backend(self) -> NativeBackend {
@@ -911,6 +967,31 @@ pub mod winit_placeholder {
                 transcript,
             ))
         }
+
+        /// Stage a DrawFrame through the facade's inner NativeBackend.
+        ///
+        /// This only updates backend accounting through the existing `draw_frame(...)`
+        /// adapter method. It does not render and does not present anything.
+        pub fn stage_draw_frame(
+            &mut self,
+            frame: &prom_ui_runtime::DrawFrame,
+        ) -> Result<NativeBackendWinitAppDrawTranscript, prom_ui_runtime::UiRuntimeError> {
+            let before = self.backend.submitted_frames();
+
+            prom_ui_runtime::UiBackendAdapter::draw_frame(&mut self.backend, frame)?;
+
+            let after = self.backend.submitted_frames();
+
+            Ok(NativeBackendWinitAppDrawTranscript::submitted(before, after))
+        }
+    }
+
+    /// Return a staged draw transcript from frame counters.
+    pub const fn draw_transcript_from_counts(
+        before: usize,
+        after: usize,
+    ) -> NativeBackendWinitAppDrawTranscript {
+        NativeBackendWinitAppDrawTranscript::submitted(before, after)
     }
 
     /// Read-only summary of the NativeBackend winit app scaffold.
