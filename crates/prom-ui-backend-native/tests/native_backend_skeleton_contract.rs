@@ -1,7 +1,6 @@
-use prom_ui::UiOperationId;
 use prom_ui_backend_native::NativeBackend;
 use prom_ui_runtime::{
-    DesktopSession, DrawFrame, UiBackendAdapter, UiRuntimeError, WindowConfig,
+    DesktopSession, DrawFrame, UiBackendAdapter, WindowConfig,
 };
 
 #[test]
@@ -31,17 +30,16 @@ fn native_backend_create_window_stages_config_without_platform_window() {
 }
 
 #[test]
-fn native_backend_run_event_loop_fails_closed() {
+fn native_backend_run_event_loop_is_staged_not_platform_wired() {
     let mut backend = NativeBackend::new();
+    let mut controls = Vec::new();
 
-    let err = backend
-        .run_event_loop(|_| {})
-        .expect_err("unwired native backend must reject run_event_loop");
+    backend.run_event_loop(|control| controls.push(control)).unwrap();
 
-    assert_eq!(
-        err,
-        UiRuntimeError::OperationNotAdmitted(UiOperationId::WindowRun)
-    );
+    assert_eq!(backend.run_loop_calls(), 1);
+    assert_eq!(backend.run_loop_ticks(), 0);
+    assert!(controls.is_empty());
+    assert!(!backend.is_platform_wired());
 }
 
 #[test]

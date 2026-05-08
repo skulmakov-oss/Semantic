@@ -1,8 +1,6 @@
-use prom_ui::UiOperationId;
 use prom_ui_backend_native::NativeBackend;
 use prom_ui_runtime::{
-    DesktopSession, DrawFrame, InputEvent, InputEventKind, UiBackendAdapter, UiRuntimeError,
-    WindowConfig,
+    DesktopSession, DrawFrame, InputEvent, InputEventKind, UiBackendAdapter, WindowConfig,
 };
 
 #[test]
@@ -107,17 +105,18 @@ fn draw_frame_counts_submitted_frames_without_rendering() {
 }
 
 #[test]
-fn run_event_loop_remains_not_admitted_until_winit_wiring() {
+fn run_event_loop_is_staged_until_winit_wiring() {
     let mut backend = NativeBackend::new();
+    let mut controls = Vec::new();
 
-    let err = backend
-        .run_event_loop(|_| {})
-        .unwrap_err();
+    backend
+        .run_event_loop(|control| controls.push(control))
+        .unwrap();
 
-    assert_eq!(
-        err,
-        UiRuntimeError::OperationNotAdmitted(UiOperationId::WindowRun)
-    );
+    assert_eq!(backend.run_loop_calls(), 1);
+    assert_eq!(backend.run_loop_ticks(), 0);
+    assert!(controls.is_empty());
+    assert!(!backend.is_platform_wired());
 }
 
 #[test]
