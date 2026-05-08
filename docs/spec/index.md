@@ -31,6 +31,7 @@ Current documents in this PR:
 - `ui_verifier_admission_metadata.md` - POST-UI verifier-visible metadata plan for future UI operation admission
 - `../architecture/ui_native_backend_boundary.md` - native facade transcript boundary and ownership split
 - `../architecture/ui_renderer_admission_boundary.md` - renderer admission boundary before implementation
+- `../architecture/ui_visual_design_doctrine.md` - Semantic UI visual design doctrine before renderer implementation
 
 Adjacent source-surface documents also remain relevant:
 

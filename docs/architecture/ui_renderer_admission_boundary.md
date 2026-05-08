@@ -218,4 +218,17 @@ DrawFrame
   -> draw transcript
 ```
 
+## Visual doctrine dependency
+
+Renderer admission must follow the Semantic UI visual doctrine:
+
+```text
+docs/architecture/ui_visual_design_doctrine.md
+```
+
+Renderer implementation must not introduce visual meaning on its own.
+
+The renderer executes admitted visual grammar.
+It does not own Semantic UI meaning.
+
 Renderer admission starts only after this boundary is accepted.
