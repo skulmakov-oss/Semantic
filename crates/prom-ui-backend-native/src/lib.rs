@@ -633,6 +633,11 @@ pub mod winit_placeholder {
         true
     }
 
+    /// Returns whether the NativeBackend winit app event transcript extraction is available.
+    pub const fn native_backend_winit_app_event_transcript_available() -> bool {
+        true
+    }
+
     /// Error returned by the separate NativeBackend winit app facade.
     #[derive(Debug)]
     pub enum NativeBackendWinitAppError {
@@ -752,6 +757,74 @@ pub mod winit_placeholder {
         }
     }
 
+    /// Derived event status for the NativeBackend winit app facade path.
+    ///
+    /// This is derived from summary counters, not from a full raw event log.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NativeBackendWinitAppEventTranscriptStatus {
+        NoWindowEventsObserved,
+        WindowEventsObserved,
+        CloseObserved,
+    }
+
+    /// Derived event transcript extracted from facade summary/transcript.
+    ///
+    /// This is not a raw event log. It records event-level facts available from
+    /// `NativeBackendWinitAppStateSummary`.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct NativeBackendWinitAppEventTranscript {
+        pub status: NativeBackendWinitAppEventTranscriptStatus,
+        pub window_event_calls: usize,
+        pub staged_event_count: usize,
+        pub close_observed: bool,
+    }
+
+    impl NativeBackendWinitAppEventTranscript {
+        pub const fn from_summary(summary: NativeBackendWinitAppStateSummary) -> Self {
+            let status = if summary.close_requested {
+                NativeBackendWinitAppEventTranscriptStatus::CloseObserved
+            } else if summary.window_event_calls > 0 || summary.staged_event_count > 0 {
+                NativeBackendWinitAppEventTranscriptStatus::WindowEventsObserved
+            } else {
+                NativeBackendWinitAppEventTranscriptStatus::NoWindowEventsObserved
+            };
+
+            Self {
+                status,
+                window_event_calls: summary.window_event_calls,
+                staged_event_count: summary.staged_event_count,
+                close_observed: summary.close_requested,
+            }
+        }
+
+        pub const fn from_run_transcript(
+            transcript: NativeBackendWinitAppRunTranscript,
+        ) -> Self {
+            let status = if transcript.close_requested {
+                NativeBackendWinitAppEventTranscriptStatus::CloseObserved
+            } else if transcript.window_event_calls > 0 || transcript.staged_event_count > 0 {
+                NativeBackendWinitAppEventTranscriptStatus::WindowEventsObserved
+            } else {
+                NativeBackendWinitAppEventTranscriptStatus::NoWindowEventsObserved
+            };
+
+            Self {
+                status,
+                window_event_calls: transcript.window_event_calls,
+                staged_event_count: transcript.staged_event_count,
+                close_observed: transcript.close_requested,
+            }
+        }
+
+        pub const fn observed_any_event(&self) -> bool {
+            self.window_event_calls > 0 || self.staged_event_count > 0 || self.close_observed
+        }
+
+        pub const fn observed_close(&self) -> bool {
+            self.close_observed
+        }
+    }
+
     /// Separate native app facade for running NativeBackend through winit.
     ///
     /// This facade intentionally lives outside `UiBackendAdapter`.
@@ -790,6 +863,20 @@ pub mod winit_placeholder {
             NativeBackendWinitAppRunTranscript::completed_from_summary(summary)
         }
 
+        /// Build an event transcript from a completed app-state summary.
+        pub const fn event_transcript_from_summary(
+            summary: NativeBackendWinitAppStateSummary,
+        ) -> NativeBackendWinitAppEventTranscript {
+            NativeBackendWinitAppEventTranscript::from_summary(summary)
+        }
+
+        /// Build an event transcript from a facade run transcript.
+        pub const fn event_transcript_from_run_transcript(
+            transcript: NativeBackendWinitAppRunTranscript,
+        ) -> NativeBackendWinitAppEventTranscript {
+            NativeBackendWinitAppEventTranscript::from_run_transcript(transcript)
+        }
+
         /// Run the separate NativeBackend-backed winit app facade until the native window closes.
         ///
         /// This consumes the facade and returns a summary.
@@ -812,6 +899,16 @@ pub mod winit_placeholder {
             let summary = self.run_until_close()?;
             Ok(NativeBackendWinitAppRunTranscript::completed_from_summary(
                 summary,
+            ))
+        }
+
+        /// Run until close and return a derived event transcript.
+        pub fn run_until_close_event_transcript(
+            self,
+        ) -> Result<NativeBackendWinitAppEventTranscript, NativeBackendWinitAppError> {
+            let transcript = self.run_until_close_transcript()?;
+            Ok(NativeBackendWinitAppEventTranscript::from_run_transcript(
+                transcript,
             ))
         }
     }
