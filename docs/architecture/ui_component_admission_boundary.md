@@ -444,3 +444,15 @@ docs/architecture/ui_trace_audit_visual_boundary.md
 ```
 
 Components must not treat trace display as trace authority.
+
+## Error, denial, and quarantine visual dependency
+
+Components may expose denial, error, conflict, and quarantine surfaces.
+
+Error, denial, and quarantine visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_error_denial_quarantine_visual_boundary.md
+```
+
+Components must not invent denial/error/quarantine meaning.

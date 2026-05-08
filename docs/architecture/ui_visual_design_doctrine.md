@@ -408,3 +408,15 @@ Components are reusable semantic UI units.
 They must follow this doctrine, consume admitted visual tokens, and compose admitted layout primitives.
 
 Components must not introduce arbitrary widgets or renderer-owned component meaning.
+
+## Error, denial, and quarantine doctrine
+
+Error, denial, conflict, and quarantine states must be explicit and inspectable.
+
+They are defined separately in:
+
+```text
+docs/architecture/ui_error_denial_quarantine_visual_boundary.md
+```
+
+Visual refusal must not become hidden no-op.

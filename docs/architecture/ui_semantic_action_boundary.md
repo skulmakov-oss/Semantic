@@ -463,3 +463,15 @@ docs/architecture/ui_trace_audit_visual_boundary.md
 Semantic actions may produce trace records.
 
 A visual trace view may display those records, but must not define action success or audit authority.
+
+## Error, denial, and quarantine visual dependency
+
+Denied actions, failed actions, and quarantined targets must be visually distinct.
+
+Error, denial, and quarantine visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_error_denial_quarantine_visual_boundary.md
+```
+
+Denied intent must not be hidden as no-op.
