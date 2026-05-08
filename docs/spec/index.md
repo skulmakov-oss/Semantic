@@ -32,6 +32,7 @@ Current documents in this PR:
 - `../architecture/ui_native_backend_boundary.md` - native facade transcript boundary and ownership split
 - `../architecture/ui_renderer_admission_boundary.md` - renderer admission boundary before implementation
 - `../architecture/ui_visual_design_doctrine.md` - Semantic UI visual design doctrine before renderer implementation
+- `../architecture/ui_visual_token_system_boundary.md` - Semantic UI visual token system boundary before implementation
 
 Adjacent source-surface documents also remain relevant:
 

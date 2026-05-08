@@ -366,3 +366,17 @@ prom-ui-backend-native
 ```
 
 Renderer and visual implementation must follow this doctrine in later PRs.
+
+## Visual token system boundary
+
+The visual token system is defined separately in:
+
+```text
+docs/architecture/ui_visual_token_system_boundary.md
+```
+
+Visual tokens are the reusable vocabulary of Semantic UI visual meaning.
+
+Tokens must follow this doctrine.
+
+Tokens must not introduce arbitrary theme values or renderer-owned meaning.
