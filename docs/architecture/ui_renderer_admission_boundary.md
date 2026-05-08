@@ -267,4 +267,16 @@ Renderer implementation must consume admitted component/layout output.
 
 Renderer implementation must not invent component semantics.
 
+## Interaction dependency
+
+Renderer admission does not grant renderer ownership of interaction semantics.
+
+Renderer may support input plumbing only after the interaction/input semantic boundary is admitted:
+
+```text
+docs/architecture/ui_interaction_input_semantic_boundary.md
+```
+
+Renderer must not treat native input or hit-test output as admitted semantic action.
+
 Renderer admission starts only after this boundary is accepted.

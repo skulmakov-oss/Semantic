@@ -379,3 +379,20 @@ Workbench visual components
 renderer component resolver
 interactive component behavior
 ```
+
+## Interaction dependency
+
+Interaction semantic admission depends on the component admission boundary.
+
+```text
+visual doctrine
+  -> visual token system
+  -> layout primitives
+  -> semantic components
+  -> interaction semantics
+```
+
+Components may expose interaction surfaces, but must not directly mutate semantic state from raw input.
+
+Components produce interaction intent candidates.
+Admission decides whether an intent becomes an action.

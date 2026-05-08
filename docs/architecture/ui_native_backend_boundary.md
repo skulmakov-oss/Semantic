@@ -341,6 +341,18 @@ Current status:
 
 Draw staging is not renderer ownership.
 
+## Interaction boundary
+
+Native backend may translate host events into `InputEvent`.
+
+Native backend must not interpret those events as admitted semantic actions.
+
+Interaction semantics are defined separately in:
+
+```text
+docs/architecture/ui_interaction_input_semantic_boundary.md
+```
+
 ## 14. Stop rules
 
 Stop the native backend implementation if it requires:
