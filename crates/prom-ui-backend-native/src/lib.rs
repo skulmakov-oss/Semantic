@@ -498,6 +498,131 @@ pub mod winit_placeholder {
         true
     }
 
+    /// Returns whether the controlled NativeBackend winit run-loop integration plan is available.
+    pub const fn native_backend_winit_run_loop_plan_available() -> bool {
+        true
+    }
+
+    /// Current planned stage for NativeBackend/winit run-loop integration.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NativeBackendWinitRunLoopStage {
+        /// Existing manual smoke path.
+        ManualSmoke,
+
+        /// Existing NativeBackendWinitAppState manual run_app path.
+        ManualAppStateRun,
+
+        /// Future step: adapter integration has not been admitted yet.
+        AdapterIntegrationDeferred,
+    }
+
+    /// Ownership model for the planned NativeBackend/winit run-loop path.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NativeBackendWinitRunLoopOwnership {
+        /// Manual helper consumes NativeBackend and returns summary only.
+        ConsumesBackendReturnsSummary,
+
+        /// Future persistent ownership model is intentionally unresolved.
+        PersistentBackendOwnershipDeferred,
+    }
+
+    /// Preflight readiness for running the NativeBackend-backed winit app state.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NativeBackendWinitRunLoopReadiness {
+        MissingWindowConfig,
+        ReadyForManualAppStateRun,
+    }
+
+    /// Controlled integration plan for NativeBackend-backed winit run-loop support.
+    ///
+    /// This is a code-level contract, not a runtime integration.
+    /// It records the currently admitted boundary before `NativeBackend::run_event_loop(...)`
+    /// is allowed to touch winit.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct NativeBackendWinitRunLoopIntegrationPlan {
+        pub stage: NativeBackendWinitRunLoopStage,
+        pub ownership: NativeBackendWinitRunLoopOwnership,
+
+        pub requires_staged_window_config: bool,
+        pub uses_native_backend_app_state: bool,
+        pub creates_event_loop: bool,
+        pub may_create_native_window: bool,
+        pub may_call_run_app: bool,
+
+        pub integrates_with_backend_run_event_loop: bool,
+        pub mutates_prom_ui_runtime: bool,
+        pub changes_ui_backend_adapter: bool,
+        pub includes_renderer: bool,
+        pub presents_frames: bool,
+    }
+
+    impl NativeBackendWinitRunLoopIntegrationPlan {
+        /// Current G16-admitted plan.
+        ///
+        /// This reflects the existing manual `NativeBackendWinitAppState` path:
+        /// it can create an EventLoop, create one native window, and call run_app
+        /// only through manual/ignored smoke helpers.
+        ///
+        /// It does not admit normal runtime integration yet.
+        pub const fn current_manual_app_state_plan() -> Self {
+            Self {
+                stage: NativeBackendWinitRunLoopStage::ManualAppStateRun,
+                ownership: NativeBackendWinitRunLoopOwnership::ConsumesBackendReturnsSummary,
+
+                requires_staged_window_config: true,
+                uses_native_backend_app_state: true,
+                creates_event_loop: true,
+                may_create_native_window: true,
+                may_call_run_app: true,
+
+                integrates_with_backend_run_event_loop: false,
+                mutates_prom_ui_runtime: false,
+                changes_ui_backend_adapter: false,
+                includes_renderer: false,
+                presents_frames: false,
+            }
+        }
+
+        pub const fn keeps_runtime_boundary_clean(&self) -> bool {
+            !self.integrates_with_backend_run_event_loop
+                && !self.mutates_prom_ui_runtime
+                && !self.changes_ui_backend_adapter
+        }
+
+        pub const fn keeps_rendering_out_of_scope(&self) -> bool {
+            !self.includes_renderer && !self.presents_frames
+        }
+
+        pub const fn is_g16_admissible(&self) -> bool {
+            self.requires_staged_window_config
+                && self.uses_native_backend_app_state
+                && self.creates_event_loop
+                && self.may_create_native_window
+                && self.may_call_run_app
+                && self.keeps_runtime_boundary_clean()
+                && self.keeps_rendering_out_of_scope()
+        }
+    }
+
+    /// Return the current controlled integration plan.
+    pub const fn current_native_backend_winit_run_loop_plan(
+    ) -> NativeBackendWinitRunLoopIntegrationPlan {
+        NativeBackendWinitRunLoopIntegrationPlan::current_manual_app_state_plan()
+    }
+
+    /// Preflight the staged NativeBackend state for the current manual app-state run path.
+    ///
+    /// This does not create an EventLoop, does not create a Window, and does not call run_app.
+    pub fn native_backend_winit_run_loop_readiness(
+        backend: &NativeBackend,
+    ) -> NativeBackendWinitRunLoopReadiness {
+        if backend.window_config().is_some() {
+            NativeBackendWinitRunLoopReadiness::ReadyForManualAppStateRun
+        } else {
+            NativeBackendWinitRunLoopReadiness::MissingWindowConfig
+        }
+    }
+
     /// Read-only summary of the NativeBackend winit app scaffold.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct NativeBackendWinitAppStateSummary {
