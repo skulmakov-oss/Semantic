@@ -19,6 +19,7 @@ Related:
 - `docs/architecture/ui_focus_selection_semantic_boundary.md`
 - `docs/architecture/ui_semantic_action_boundary.md`
 - `docs/architecture/ui_effect_request_capability_boundary.md`
+- `docs/architecture/ui_trace_audit_visual_boundary.md`
 
 ## 1. Purpose
 
@@ -367,4 +368,30 @@ Action is not effect.
 Effect request is not committed effect.
 UI capability is not runtime capability by default.
 Prepared effect is not committed effect.
+```
+
+### Trace and audit visual ownership
+
+Trace/audit visual projection is owned by the UI architecture layer.
+
+| Component | Trace/audit role |
+|---|---|
+| semantic action layer | may produce action trace facts |
+| effect boundary | may produce effect trace facts |
+| capability/admission layer | may produce admission/denial trace facts |
+| audit/runtime boundary | owns authoritative audit records |
+| UI trace projection layer | displays trace/audit facts |
+| component system | exposes trace surfaces |
+| layout primitive system | provides trace lanes/panels |
+| renderer | renders projections, does not own trace/audit meaning |
+| native backend | may expose transcript facts, not audit authority |
+| Workbench | may display projections, does not define core semantics |
+
+This preserves:
+
+```text
+Trace is not decorative log.
+Audit is not UI state.
+Visual trace is not source of truth.
+Renderer output is not audit authority.
 ```

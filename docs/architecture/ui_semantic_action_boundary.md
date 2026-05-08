@@ -451,3 +451,15 @@ semantic UI action
 ```
 
 No semantic UI action may silently produce external effects.
+
+## Trace and audit visual dependency
+
+Trace/audit visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_trace_audit_visual_boundary.md
+```
+
+Semantic actions may produce trace records.
+
+A visual trace view may display those records, but must not define action success or audit authority.

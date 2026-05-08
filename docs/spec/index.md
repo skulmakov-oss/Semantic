@@ -39,6 +39,7 @@ Current documents in this PR:
 - `../architecture/ui_focus_selection_semantic_boundary.md` - Semantic UI focus and selection semantic boundary before implementation
 - `../architecture/ui_semantic_action_boundary.md` - Semantic UI action boundary before implementation
 - `../architecture/ui_effect_request_capability_boundary.md` - Semantic UI effect request and UI capability boundary before implementation
+- `../architecture/ui_trace_audit_visual_boundary.md` - Semantic UI trace and audit visual boundary before implementation
 
 Adjacent source-surface documents also remain relevant:
 
