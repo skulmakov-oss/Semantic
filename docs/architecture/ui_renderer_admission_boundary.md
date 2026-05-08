@@ -243,4 +243,16 @@ Renderer implementation must consume admitted visual tokens.
 
 Renderer implementation must not invent token semantics.
 
+## Layout dependency
+
+Renderer admission depends on the layout primitive boundary:
+
+```text
+docs/architecture/ui_layout_primitive_boundary.md
+```
+
+Renderer implementation must consume admitted layout output.
+
+Renderer implementation must not invent layout semantics.
+
 Renderer admission starts only after this boundary is accepted.
