@@ -408,3 +408,15 @@ docs/architecture/ui_focus_selection_semantic_boundary.md
 ```
 
 Components must not directly mutate global focus or selection from raw input.
+
+## Semantic action dependency
+
+Components may expose action affordances.
+
+Semantic UI actions are defined separately in:
+
+```text
+docs/architecture/ui_semantic_action_boundary.md
+```
+
+Components must not execute semantic actions directly from raw input or visual callbacks.

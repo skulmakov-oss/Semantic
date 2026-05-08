@@ -17,6 +17,7 @@ Related:
 - `docs/architecture/ui_component_admission_boundary.md`
 - `docs/architecture/ui_interaction_input_semantic_boundary.md`
 - `docs/architecture/ui_focus_selection_semantic_boundary.md`
+- `docs/architecture/ui_semantic_action_boundary.md`
 
 ## 1. Purpose
 
@@ -317,4 +318,28 @@ Hover is not focus.
 Focus is not selection.
 Selection is not action.
 Action requires admission.
+```
+
+### Semantic action ownership
+
+Semantic UI actions are owned by the UI architecture layer.
+
+| Component | Action role |
+|---|---|
+| native backend | captures/translates host events only |
+| `prom-ui-runtime` | may host future action admission contracts |
+| component system | exposes action affordance surfaces |
+| interaction semantic layer | produces action requests |
+| focus/selection semantic layer | provides target context |
+| semantic action layer | owns admitted UI actions |
+| admission/policy layer | decides whether action may exist |
+| renderer | may display action affordances, does not own action meaning |
+
+This preserves:
+
+```text
+Intent is not action.
+Selection is not permission.
+Action is not effect.
+Effect requires boundary.
 ```

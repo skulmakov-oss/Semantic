@@ -464,3 +464,21 @@ input signal
 ```
 
 Raw input must not directly mutate focus or selection.
+
+## Semantic action dependency
+
+Semantic UI actions are defined separately in:
+
+```text
+docs/architecture/ui_semantic_action_boundary.md
+```
+
+Interaction intent is not action.
+
+```text
+interaction intent
+  -> admission
+  -> semantic UI action
+```
+
+No interaction intent may directly perform effects.
