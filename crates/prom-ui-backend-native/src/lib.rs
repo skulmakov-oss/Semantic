@@ -17,6 +17,20 @@ use prom_ui_runtime::{
     WindowConfig,
 };
 
+#[cfg(feature = "winit-backend")]
+#[derive(Debug)]
+pub enum NativeBackendWinitSmokeError {
+    MissingWindowConfig,
+    EventLoop(winit::error::EventLoopError),
+}
+
+#[cfg(feature = "winit-backend")]
+impl From<winit::error::EventLoopError> for NativeBackendWinitSmokeError {
+    fn from(err: winit::error::EventLoopError) -> Self {
+        Self::EventLoop(err)
+    }
+}
+
 /// Returns whether this crate was compiled with the `winit-backend` feature.
 pub const fn winit_backend_feature_enabled() -> bool {
     cfg!(feature = "winit-backend")
@@ -520,6 +534,10 @@ impl Default for NativeBackend {
 
 #[cfg(feature = "winit-backend")]
 impl NativeBackend {
+    pub const fn winit_smoke_adapter_available() -> bool {
+        true
+    }
+
     /// Stage a translated winit `WindowEvent` into the backend pending-event queue.
     ///
     /// Returns `true` if the event was translated and staged.
@@ -555,6 +573,29 @@ impl NativeBackend {
     /// Stage a close request into the backend pending-event queue.
     pub fn stage_winit_close_requested(&mut self) {
         self.push_pending_event(winit_placeholder::translate_winit_close_requested());
+    }
+
+    /// Run the manual winit window-creation smoke using the staged `WindowConfig`.
+    ///
+    /// This does not integrate winit with `NativeBackend::run_event_loop(...)`.
+    /// It creates a temporary native event loop/window through the G12 manual smoke path
+    /// and returns the smoke result.
+    ///
+    /// The created native window is not retained by `NativeBackend`.
+    pub fn run_winit_smoke_from_staged_config(
+        &self,
+    ) -> Result<
+        winit_placeholder::WinitRunAppSmokeResult,
+        NativeBackendWinitSmokeError,
+    > {
+        let config = self
+            .window_config
+            .clone()
+            .ok_or(NativeBackendWinitSmokeError::MissingWindowConfig)?;
+
+        let result = winit_placeholder::run_winit_window_creation_smoke(config)?;
+
+        Ok(result)
     }
 }
 
