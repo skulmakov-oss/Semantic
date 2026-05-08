@@ -628,6 +628,11 @@ pub mod winit_placeholder {
         true
     }
 
+    /// Returns whether the NativeBackend winit app facade transcript contract is available.
+    pub const fn native_backend_winit_app_facade_transcript_available() -> bool {
+        true
+    }
+
     /// Error returned by the separate NativeBackend winit app facade.
     #[derive(Debug)]
     pub enum NativeBackendWinitAppError {
@@ -638,6 +643,112 @@ pub mod winit_placeholder {
     impl From<winit::error::EventLoopError> for NativeBackendWinitAppError {
         fn from(err: winit::error::EventLoopError) -> Self {
             Self::EventLoop(err)
+        }
+    }
+
+    /// High-level status of the NativeBackend winit facade run transcript.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum NativeBackendWinitAppRunTranscriptStatus {
+        /// Facade exists but native run has not been executed.
+        Planned,
+
+        /// Native run completed and returned a summary.
+        Completed,
+
+        /// Native run was attempted but failed before a completed summary.
+        Failed,
+    }
+
+    /// Transcript of the NativeBackend winit app facade run path.
+    ///
+    /// This is a compact contract object, not a full event log.
+    /// It captures the externally relevant milestones of the native facade path.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct NativeBackendWinitAppRunTranscript {
+        pub status: NativeBackendWinitAppRunTranscriptStatus,
+
+        pub staged_window_config: bool,
+        pub event_loop_requested: bool,
+        pub app_state_created: bool,
+        pub run_app_requested: bool,
+
+        pub resumed_calls: usize,
+        pub window_event_calls: usize,
+        pub create_attempts: usize,
+        pub create_failures: usize,
+        pub window_created: bool,
+        pub close_requested: bool,
+        pub staged_event_count: usize,
+    }
+
+    impl NativeBackendWinitAppRunTranscript {
+        pub const fn planned(staged_window_config: bool) -> Self {
+            Self {
+                status: NativeBackendWinitAppRunTranscriptStatus::Planned,
+
+                staged_window_config,
+                event_loop_requested: false,
+                app_state_created: false,
+                run_app_requested: false,
+
+                resumed_calls: 0,
+                window_event_calls: 0,
+                create_attempts: 0,
+                create_failures: 0,
+                window_created: false,
+                close_requested: false,
+                staged_event_count: 0,
+            }
+        }
+
+        pub const fn completed_from_summary(
+            summary: NativeBackendWinitAppStateSummary,
+        ) -> Self {
+            Self {
+                status: NativeBackendWinitAppRunTranscriptStatus::Completed,
+
+                staged_window_config: true,
+                event_loop_requested: true,
+                app_state_created: true,
+                run_app_requested: true,
+
+                resumed_calls: summary.resumed_calls,
+                window_event_calls: summary.window_event_calls,
+                create_attempts: summary.create_attempts,
+                create_failures: summary.create_failures,
+                window_created: summary.window_created,
+                close_requested: summary.close_requested,
+                staged_event_count: summary.staged_event_count,
+            }
+        }
+
+        pub const fn failed_after_request(staged_window_config: bool) -> Self {
+            Self {
+                status: NativeBackendWinitAppRunTranscriptStatus::Failed,
+
+                staged_window_config,
+                event_loop_requested: staged_window_config,
+                app_state_created: false,
+                run_app_requested: false,
+
+                resumed_calls: 0,
+                window_event_calls: 0,
+                create_attempts: 0,
+                create_failures: 0,
+                window_created: false,
+                close_requested: false,
+                staged_event_count: 0,
+            }
+        }
+
+        pub fn completed_cleanly(&self) -> bool {
+            matches!(self.status, NativeBackendWinitAppRunTranscriptStatus::Completed)
+                && self.staged_window_config
+                && self.event_loop_requested
+                && self.app_state_created
+                && self.run_app_requested
+                && self.window_created
+                && self.create_failures == 0
         }
     }
 
@@ -667,6 +778,18 @@ pub mod winit_placeholder {
             self.backend
         }
 
+        /// Return the planned transcript before native execution.
+        pub fn planned_transcript(&self) -> NativeBackendWinitAppRunTranscript {
+            NativeBackendWinitAppRunTranscript::planned(self.backend.window_config().is_some())
+        }
+
+        /// Build a completed transcript from a run summary.
+        pub const fn transcript_from_summary(
+            summary: NativeBackendWinitAppStateSummary,
+        ) -> NativeBackendWinitAppRunTranscript {
+            NativeBackendWinitAppRunTranscript::completed_from_summary(summary)
+        }
+
         /// Run the separate NativeBackend-backed winit app facade until the native window closes.
         ///
         /// This consumes the facade and returns a summary.
@@ -680,6 +803,16 @@ pub mod winit_placeholder {
             event_loop.run_app(&mut app_state)?;
 
             Ok(app_state.summary())
+        }
+
+        /// Run until close and return a transcript instead of raw summary.
+        pub fn run_until_close_transcript(
+            self,
+        ) -> Result<NativeBackendWinitAppRunTranscript, NativeBackendWinitAppError> {
+            let summary = self.run_until_close()?;
+            Ok(NativeBackendWinitAppRunTranscript::completed_from_summary(
+                summary,
+            ))
         }
     }
 
