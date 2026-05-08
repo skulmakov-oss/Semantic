@@ -337,6 +337,11 @@ pub mod winit_placeholder {
         true
     }
 
+    /// Returns whether the NativeBackend winit app-state run_app helper is available.
+    pub const fn native_backend_winit_app_state_run_app_available() -> bool {
+        true
+    }
+
     /// Result summary for the native run_app smoke path.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct WinitRunAppSmokeResult {
@@ -344,6 +349,19 @@ pub mod winit_placeholder {
         pub create_attempts: usize,
         pub create_failures: usize,
         pub window_created: bool,
+    }
+
+    /// Error returned by the manual NativeBackend app-state run_app helper.
+    #[derive(Debug)]
+    pub enum NativeBackendWinitAppStateRunError {
+        MissingWindowConfig,
+        EventLoop(winit::error::EventLoopError),
+    }
+
+    impl From<winit::error::EventLoopError> for NativeBackendWinitAppStateRunError {
+        fn from(err: winit::error::EventLoopError) -> Self {
+            Self::EventLoop(err)
+        }
     }
 
     /// Manual smoke scaffold for `EventLoop::run_app(...)`.
@@ -429,6 +447,16 @@ pub mod winit_placeholder {
         }
     }
 
+    fn ensure_native_backend_has_window_config(
+        backend: &NativeBackend,
+    ) -> Result<(), NativeBackendWinitAppStateRunError> {
+        if backend.window_config().is_some() {
+            Ok(())
+        } else {
+            Err(NativeBackendWinitAppStateRunError::MissingWindowConfig)
+        }
+    }
+
     /// Run a manual native smoke using winit `EventLoop::run_app(...)`.
     ///
     /// This creates a real event loop and attempts to create one native window,
@@ -444,6 +472,25 @@ pub mod winit_placeholder {
         event_loop.run_app(&mut app)?;
 
         Ok(app.result())
+    }
+
+    /// Run a manual native winit app loop using `NativeBackendWinitAppState`.
+    ///
+    /// This opens a real native window and returns after the window is closed.
+    /// It is intended for ignored/manual smoke tests only.
+    ///
+    /// This does not modify `NativeBackend::run_event_loop(...)`.
+    pub fn run_native_backend_winit_app_state_until_close(
+        backend: NativeBackend,
+    ) -> Result<NativeBackendWinitAppStateSummary, NativeBackendWinitAppStateRunError> {
+        ensure_native_backend_has_window_config(&backend)?;
+
+        let event_loop = create_winit_event_loop()?;
+        let mut app = NativeBackendWinitAppState::new(backend);
+
+        event_loop.run_app(&mut app)?;
+
+        Ok(app.summary())
     }
 
     /// Returns whether the NativeBackend winit app state scaffold is available.
