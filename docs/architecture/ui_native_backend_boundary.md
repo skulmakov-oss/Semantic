@@ -29,7 +29,7 @@ DesktopSession<NativeBackend>
   -> lifecycle gate
   -> native event loop
   -> DrawFrame
-  -> native draw submission
+  -> draw staging/accounting
 ```
 
 ## 2. Current runtime ownership
@@ -261,7 +261,28 @@ DrawFrame
   -> NativeBackendWinitAppDrawTranscript
 ```
 
-The draw path is not a renderer path.
+The draw path is draw staging/accounting only.
+
+## Renderer admission boundary
+
+Renderer implementation is intentionally not part of the native facade transcript boundary.
+
+The renderer boundary is defined separately in:
+
+```text
+docs/architecture/ui_renderer_admission_boundary.md
+```
+
+Until that boundary is admitted, draw facts remain staging/accounting only:
+
+```text
+DrawFrame
+  -> stage_draw_frame(...)
+  -> submitted_frames accounting
+  -> draw transcript
+```
+
+No renderer, surface, GPU, native drawing, or frame presentation is admitted by the native facade transcript track.
 
 ## 12. First implementation PR boundary
 
@@ -301,6 +322,25 @@ The native facade transcript boundary does not introduce:
 * integration of winit into `NativeBackend::run_event_loop(...)`;
 * Workbench integration.
 
+### Renderer ownership is not admitted yet
+
+The renderer is not owned by `prom-ui-runtime`, `UiBackendAdapter`, or `NativeBackend::run_event_loop(...)`.
+
+Renderer ownership must be introduced through a separate admitted layer.
+
+Current status:
+
+| Component | Renderer ownership |
+|---|---|
+| `prom-ui-runtime` | none |
+| `UiBackendAdapter` | none |
+| `NativeBackend` | none |
+| `NativeBackendWinitApp` | none |
+| `NativeBackendWinitAppState` | none |
+| future renderer type/crate | not admitted yet |
+
+Draw staging is not renderer ownership.
+
 ## 14. Stop rules
 
 Stop the native backend implementation if it requires:
@@ -311,4 +351,3 @@ Stop the native backend implementation if it requires:
 * changing lifecycle semantics;
 * adding VM/verifier/SemCode coupling;
 * making Workbench the owner of runtime UI semantics.
-
