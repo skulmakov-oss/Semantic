@@ -231,4 +231,16 @@ Renderer implementation must not introduce visual meaning on its own.
 The renderer executes admitted visual grammar.
 It does not own Semantic UI meaning.
 
+## Token dependency
+
+Renderer admission depends on the visual token system boundary:
+
+```text
+docs/architecture/ui_visual_token_system_boundary.md
+```
+
+Renderer implementation must consume admitted visual tokens.
+
+Renderer implementation must not invent token semantics.
+
 Renderer admission starts only after this boundary is accepted.

@@ -12,6 +12,7 @@ Related:
 - `docs/architecture/ui_native_backend_boundary.md`
 - `docs/architecture/ui_renderer_admission_boundary.md`
 - `docs/architecture/ui_visual_design_doctrine.md`
+- `docs/architecture/ui_visual_token_system_boundary.md`
 
 ## 1. Purpose
 
@@ -197,4 +198,24 @@ This preserves the rule:
 ```text
 Renderer serves Semantic UI doctrine.
 Renderer does not define Semantic UI doctrine.
+```
+
+### Visual token ownership
+
+Visual tokens are owned by the UI architecture layer.
+
+| Component | Token role |
+|---|---|
+| visual doctrine | owns meaning |
+| visual token system | owns reusable visual vocabulary |
+| renderer | consumes resolved tokens |
+| native backend | does not own tokens |
+| `prom-ui-runtime` | does not own tokens |
+
+This preserves:
+
+```text
+Meaning first.
+Tokens second.
+Renderer third.
 ```
