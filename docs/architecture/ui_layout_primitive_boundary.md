@@ -400,3 +400,16 @@ CSS layout maps
 renderer layout resolver
 Workbench visual layout implementation
 ```
+
+## Component dependency
+
+Component admission depends on the layout primitive boundary.
+
+```text
+visual doctrine
+  -> visual token system
+  -> layout primitives
+  -> semantic components
+```
+
+Components must compose admitted layout primitives rather than redefining spatial grammar.

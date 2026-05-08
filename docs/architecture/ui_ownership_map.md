@@ -14,6 +14,7 @@ Related:
 - `docs/architecture/ui_visual_design_doctrine.md`
 - `docs/architecture/ui_visual_token_system_boundary.md`
 - `docs/architecture/ui_layout_primitive_boundary.md`
+- `docs/architecture/ui_component_admission_boundary.md`
 
 ## 1. Purpose
 
@@ -241,4 +242,28 @@ Meaning first.
 Tokens second.
 Layout third.
 Renderer fourth.
+```
+
+### Component ownership
+
+Components are owned by the UI architecture layer.
+
+| Component | Component role |
+|---|---|
+| visual doctrine | owns meaning |
+| visual token system | supplies visual vocabulary |
+| layout primitive system | supplies spatial grammar |
+| component system | owns reusable semantic UI units |
+| renderer | consumes resolved component/layout output |
+| native backend | does not own components |
+| `prom-ui-runtime` | does not own components |
+
+This preserves:
+
+```text
+Meaning first.
+Tokens second.
+Layout third.
+Components fourth.
+Renderer fifth.
 ```
