@@ -34,6 +34,7 @@ pub mod action_dispatch_trace;
 pub mod action_dispatch_summary;
 pub mod effect_request;
 pub mod effect_request_trace;
+pub mod effect_request_summary;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -125,6 +126,11 @@ pub use effect_request::{
 pub use effect_request_trace::{
     trace_interaction_effect_request, InteractionEffectRequestTraceReason,
     InteractionEffectRequestTraceReport, InteractionEffectRequestTraceStatus,
+};
+pub use effect_request_summary::{
+    summarize_interaction_effect_requests, InteractionEffectRequestKindCount,
+    InteractionEffectRequestRuntimeCapabilityCount, InteractionEffectRequestSummary,
+    InteractionEffectRequestUiCapabilityCount,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
