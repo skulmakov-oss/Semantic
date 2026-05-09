@@ -379,6 +379,17 @@ docs/architecture/ui_workbench_consumption_boundary.md
 
 Workbench views must not become source of truth.
 
+## Implementation gate
+
+UI implementation is governed by:
+
+```text
+docs/architecture/ui_implementation_gate.md
+docs/architecture/ui_boundary_index.md
+```
+
+Visual implementation must cite admitted boundaries before adding code.
+
 ## Visual token system boundary
 
 The visual token system is defined separately in:
