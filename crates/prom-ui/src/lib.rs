@@ -27,6 +27,7 @@ pub mod action_candidate_summary;
 pub mod action_admission;
 pub mod action_admission_result;
 pub mod action_denial_trace;
+pub mod admitted_action;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -80,6 +81,11 @@ pub use action_admission_result::{
 pub use action_denial_trace::{
     trace_interaction_action_denial, InteractionActionDenialRetryHint,
     InteractionActionDenialTrace, InteractionActionDenialTraceId,
+};
+pub use admitted_action::{
+    build_interaction_admitted_semantic_action, InteractionAdmittedSemanticAction,
+    InteractionAdmittedSemanticActionDispatchReadiness,
+    InteractionAdmittedSemanticActionEffectReadiness, InteractionAdmittedSemanticActionId,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
