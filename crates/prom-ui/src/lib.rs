@@ -33,6 +33,7 @@ pub mod action_dispatch_record;
 pub mod action_dispatch_trace;
 pub mod action_dispatch_summary;
 pub mod effect_request;
+pub mod effect_request_trace;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -120,6 +121,10 @@ pub use effect_request::{
     InteractionEffectRequestPrepareCommitRelationship, InteractionEffectRequestRuntimeCapability,
     InteractionEffectRequestScope, InteractionEffectRequestTargetPolicy,
     InteractionEffectRequestUiCapability,
+};
+pub use effect_request_trace::{
+    trace_interaction_effect_request, InteractionEffectRequestTraceReason,
+    InteractionEffectRequestTraceReport, InteractionEffectRequestTraceStatus,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
