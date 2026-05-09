@@ -480,3 +480,16 @@ docs/architecture/ui_workbench_consumption_boundary.md
 ```
 
 Workbench trace view is not audit authority.
+
+## Simulation and snapshot dependency
+
+Replay and snapshot views may project trace/audit facts.
+
+Simulation and snapshot UI boundaries are defined separately in:
+
+```text
+docs/architecture/ui_simulation_snapshot_boundary.md
+```
+
+Replay is not current trace.
+Simulation is not audit authority.

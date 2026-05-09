@@ -499,3 +499,15 @@ docs/architecture/ui_recovery_rollback_visual_boundary.md
 ```
 
 A recovery option is not action permission.
+
+## Simulation and snapshot dependency
+
+Previewed, simulated, or replayed actions are not admitted semantic actions.
+
+Simulation and snapshot UI boundaries are defined separately in:
+
+```text
+docs/architecture/ui_simulation_snapshot_boundary.md
+```
+
+Preview is not admitted action.
