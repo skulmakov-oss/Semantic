@@ -29,6 +29,8 @@
 
 extern crate alloc;
 
+pub mod boundary_registry;
+
 use prom_ui::{UiCapabilityKind, UiOperationId};
 
 // ── Error type ───────────────────────────────────────────────────────────────
