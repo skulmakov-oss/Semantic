@@ -20,6 +20,7 @@
 extern crate alloc;
 
 pub mod interaction;
+pub mod action_binding;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -28,6 +29,20 @@ pub use interaction::{
     ElementId, InteractionModifiers, InteractionSource, InteractionTarget, RegionId,
     SurfaceId, WindowId, InteractionIntentDescriptor, InteractionIntentId,
     InteractionIntentKind,
+};
+pub use action_binding::{
+    find_interaction_action_binding_by_action,
+    find_interaction_action_binding_by_intent,
+    interaction_action_bindings,
+    InteractionActionAdmissionPolicy,
+    InteractionActionBindingDescriptor,
+    InteractionActionBindingId,
+    InteractionActionBindingScope,
+    InteractionActionEffectPolicy,
+    InteractionActionName,
+    InteractionActionTargetPolicy,
+    InteractionActionTracePolicy,
+    INTERACTION_ACTION_BINDINGS,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
