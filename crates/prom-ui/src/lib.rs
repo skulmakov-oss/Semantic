@@ -31,6 +31,7 @@ pub mod admitted_action;
 pub mod action_dispatch_route;
 pub mod action_dispatch_record;
 pub mod action_dispatch_trace;
+pub mod action_dispatch_summary;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -105,6 +106,11 @@ pub use action_dispatch_record::{
 pub use action_dispatch_trace::{
     trace_interaction_semantic_action_dispatch, InteractionSemanticActionDispatchTraceReason,
     InteractionSemanticActionDispatchTraceReport, InteractionSemanticActionDispatchTraceStatus,
+};
+pub use action_dispatch_summary::{
+    summarize_interaction_semantic_action_dispatches,
+    InteractionSemanticActionDispatchRouteCount, InteractionSemanticActionDispatchSummary,
+    InteractionSemanticActionDispatchTraceReasonCount,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
