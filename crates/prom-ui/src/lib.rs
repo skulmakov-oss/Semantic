@@ -21,6 +21,7 @@ extern crate alloc;
 
 pub mod interaction;
 pub mod raw_event;
+pub mod trace;
 
 pub use interaction::{
     ElementId, InteractionModifiers, InteractionSource, InteractionTarget, RegionId,
@@ -30,6 +31,10 @@ pub use interaction::{
 pub use raw_event::{
     map_raw_event_to_interaction_intent, RawKeyCode, RawPointerButton, RawTextInput,
     RawUiEvent, RawUiEventId, RawUiEventKind, RawUiEventPayload, RawUiEventTarget,
+};
+pub use trace::{
+    trace_raw_event_to_interaction_intent, InteractionIntentMappingRule,
+    InteractionIntentTraceReason, InteractionIntentTraceReport, InteractionIntentTraceStatus,
 };
 
 /// Marker for the UI application boundary capability family.
