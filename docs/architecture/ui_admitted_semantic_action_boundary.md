@@ -192,7 +192,26 @@ docs admitted action boundary
   -> effect request scaffold
 ```
 
-## 13. Validation expectation
+## 14. Semantic action dispatcher dependency
+
+Semantic action dispatcher boundary is defined separately in:
+
+```text
+docs/architecture/ui_semantic_action_dispatcher_boundary.md
+```
+
+The admitted action object layer stops before dispatch.
+
+```text
+InteractionAdmittedSemanticAction
+  -> future SemanticActionDispatcher
+```
+
+The action object is not dispatcher.
+The dispatcher is not effect bridge.
+Effect requires separate admission.
+
+## 15. Validation expectation
 
 Docs-only PR validation:
 
