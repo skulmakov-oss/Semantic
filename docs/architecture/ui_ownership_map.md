@@ -448,3 +448,29 @@ Cancel is not failure.
 Retry is not blind re-execute.
 Safe recovery requires trace.
 ```
+
+### Renderer transcript and presentation status ownership
+
+Renderer transcript and presentation status meaning is owned by the UI renderer boundary layer.
+
+| Component | Renderer transcript role |
+|---|---|
+| draw staging bridge | owns submitted-frame accounting only |
+| renderer layer | owns render attempt/result facts after admission |
+| presentation boundary | owns presentation attempt/result facts after admission |
+| trace visual layer | may project renderer transcript facts |
+| audit/runtime boundary | owns audit authority, not renderer transcript by default |
+| component system | exposes renderer status surfaces |
+| renderer | produces admitted transcript facts, does not own semantic success |
+| native backend | may expose surface/window facts, does not own semantic success |
+| Workbench | may display transcript projections, does not define core meaning |
+
+This preserves:
+
+```text
+Draw staging is not render attempted.
+Render attempted is not render succeeded.
+Render succeeded is not frame presented.
+Frame presented is not semantic success.
+Renderer transcript is not audit authority.
+```

@@ -425,6 +425,18 @@ Recovery and rollback visual boundaries are defined separately in:
 docs/architecture/ui_recovery_rollback_visual_boundary.md
 ```
 
+## Renderer transcript and presentation status boundary
+
+Native backend must not treat submitted frames as presented frames.
+
+Renderer transcript and presentation status boundaries are defined separately in:
+
+```text
+docs/architecture/ui_renderer_transcript_presentation_boundary.md
+```
+
+Native backend may participate in presentation only after an admitted renderer/native presentation boundary exists.
+
 ## 14. Stop rules
 
 Stop the native backend implementation if it requires:

@@ -468,3 +468,15 @@ docs/architecture/ui_recovery_rollback_visual_boundary.md
 ```
 
 Components must not invent recovery or rollback meaning.
+
+## Renderer transcript and presentation status dependency
+
+Components may expose renderer transcript and presentation status surfaces.
+
+Renderer transcript and presentation status boundaries are defined separately in:
+
+```text
+docs/architecture/ui_renderer_transcript_presentation_boundary.md
+```
+
+Components must not treat frame presentation as semantic success.
