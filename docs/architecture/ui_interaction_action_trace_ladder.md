@@ -145,7 +145,28 @@ in separate PRs.
 
 No PR should combine these steps.
 
-## 10. Forbidden shortcuts
+## 10. Action admission descriptor dependency
+
+Action admission descriptor boundary is defined separately in:
+
+```text
+docs/architecture/ui_action_admission_descriptor_boundary.md
+```
+
+The trace ladder stops before admission.
+
+```text
+InteractionActionCandidateSummary
+  -> future ActionAdmissionDescriptor
+  -> future ActionAdmissionResult
+  -> future AdmittedSemanticUiAction
+```
+
+The descriptor is not the decision.
+The decision is not execution.
+The admitted action is not an effect.
+
+## 11. Forbidden shortcuts
 
 Future PRs must not:
 
@@ -159,7 +180,7 @@ Future PRs must not:
 * hide unbound candidates as no-op;
 * add VM/Host ABI bridge from this ladder directly.
 
-## 11. Validation expectation
+## 12. Validation expectation
 
 Docs-only PR validation:
 
