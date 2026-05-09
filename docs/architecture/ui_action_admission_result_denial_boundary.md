@@ -218,7 +218,26 @@ docs result/denial boundary
   -> effect request bridge
 ```
 
-## 13. Validation expectation
+## 14. Admitted semantic action object dependency
+
+Admitted semantic action object boundary is defined separately in:
+
+```text
+docs/architecture/ui_admitted_semantic_action_boundary.md
+```
+
+The result layer stops before action object construction.
+
+```text
+InteractionActionAdmissionResult::Admitted
+  -> future AdmittedSemanticUiAction
+```
+
+Admitted result is not dispatched action.
+Denied result must not construct admitted action.
+Action object is not effect.
+
+## 15. Validation expectation
 
 Docs-only PR validation:
 

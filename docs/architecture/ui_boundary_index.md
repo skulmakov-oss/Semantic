@@ -26,6 +26,7 @@ visual doctrine
  -> semantic action boundary
   -> action admission descriptor
   -> action admission result / denial trace
+  -> admitted semantic action object
   -> effect request / UI capability boundary
   -> trace/audit visual boundary
   -> error/denial/quarantine visual boundary
@@ -50,6 +51,7 @@ visual doctrine
 | interaction-action trace ladder   | `docs/architecture/ui_interaction_action_trace_ladder.md`           |
 | action admission descriptor       | `docs/architecture/ui_action_admission_descriptor_boundary.md`      |
 | action admission result / denial trace | `docs/architecture/ui_action_admission_result_denial_boundary.md` |
+| admitted semantic action object   | `docs/architecture/ui_admitted_semantic_action_boundary.md`         |
 | effect requests / UI capabilities | `docs/architecture/ui_effect_request_capability_boundary.md`        |
 | trace/audit visual projection     | `docs/architecture/ui_trace_audit_visual_boundary.md`               |
 | error/denial/quarantine visuals   | `docs/architecture/ui_error_denial_quarantine_visual_boundary.md`   |
