@@ -30,6 +30,7 @@
 extern crate alloc;
 
 pub mod boundary_registry;
+pub mod visual_tokens;
 
 use prom_ui::{UiCapabilityKind, UiOperationId};
 
