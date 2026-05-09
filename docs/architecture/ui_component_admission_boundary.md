@@ -469,6 +469,18 @@ docs/architecture/ui_recovery_rollback_visual_boundary.md
 
 Components must not invent recovery or rollback meaning.
 
+## Workbench consumption dependency
+
+Workbench may consume admitted components or define Workbench-local components.
+
+Workbench UI consumption is defined separately in:
+
+```text
+docs/architecture/ui_workbench_consumption_boundary.md
+```
+
+Workbench-local components must not become core components without admission.
+
 ## Renderer transcript and presentation status dependency
 
 Components may expose renderer transcript and presentation status surfaces.

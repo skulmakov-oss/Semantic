@@ -102,6 +102,18 @@ It must define:
 
 Effect request is not execution.
 
+## Workbench effect and capability dependency
+
+Workbench may display and request effect/capability operations.
+
+Workbench UI consumption is defined separately in:
+
+```text
+docs/architecture/ui_workbench_consumption_boundary.md
+```
+
+Workbench must not grant capabilities or perform effects without admission.
+
 ## 5. UI capability definition
 
 A UI capability is a UI-layer permission concept.

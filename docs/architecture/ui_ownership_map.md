@@ -474,3 +474,27 @@ Render succeeded is not frame presented.
 Frame presented is not semantic success.
 Renderer transcript is not audit authority.
 ```
+
+### Workbench UI consumption ownership
+
+Workbench consumes admitted UI contracts.
+
+| Component | Workbench role |
+|---|---|
+| core UI contracts | own semantic meaning |
+| Workbench views | project admitted state |
+| Workbench commands | request local or admitted semantic operations |
+| trace/audit layer | owns authority |
+| capability/effect boundary | owns admission and effects |
+| renderer boundary | owns renderer transcript/presentation facts |
+| Workbench | consumes and displays, does not define core semantics |
+
+This preserves:
+
+```text
+Workbench consumes admitted UI contracts.
+Workbench does not define core UI semantics.
+Workbench convenience is not architecture rule.
+Workbench view is not source of truth.
+Workbench command is not semantic action by default.
+```

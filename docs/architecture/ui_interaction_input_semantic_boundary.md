@@ -483,6 +483,18 @@ interaction intent
 
 No interaction intent may directly perform effects.
 
+## Workbench interaction dependency
+
+Workbench shortcuts and commands must not bypass interaction/admission boundaries.
+
+Workbench UI consumption is defined separately in:
+
+```text
+docs/architecture/ui_workbench_consumption_boundary.md
+```
+
+A Workbench command is not semantic action by default.
+
 ## Effect request dependency
 
 Interaction intent must not directly produce effects.

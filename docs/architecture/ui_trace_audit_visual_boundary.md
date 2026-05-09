@@ -468,3 +468,15 @@ docs/architecture/ui_renderer_transcript_presentation_boundary.md
 ```
 
 Renderer transcript is not audit authority by default.
+
+## Workbench trace/audit dependency
+
+Workbench may display trace/audit projections.
+
+Workbench UI consumption is defined separately in:
+
+```text
+docs/architecture/ui_workbench_consumption_boundary.md
+```
+
+Workbench trace view is not audit authority.
