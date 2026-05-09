@@ -256,6 +256,26 @@ docs/architecture/ui_effect_request_capability_boundary.md
 
 This document narrows that general boundary for the I-series effect request descriptor step.
 
+## UI capability admission dependency
+
+UI capability admission boundary is defined separately in:
+
+```text
+docs/architecture/ui_capability_admission_boundary.md
+```
+
+The effect request descriptor/trace/summary layer stops before admission.
+
+```text
+InteractionEffectRequestDescriptor
+  -> future UiCapabilityAdmissionDescriptor
+  -> future UiCapabilityAdmissionResult
+```
+
+Effect request descriptor is not capability admission.
+Declared UI capability is not capability grant.
+UI capability admission is not runtime capability grant.
+
 ## 15. Validation expectation
 
 Docs-only PR validation:

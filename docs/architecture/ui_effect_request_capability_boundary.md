@@ -446,6 +446,26 @@ A future effect request implementation PR must define:
 
 No effect request should be added only because it is convenient for UI wiring.
 
+## UI capability admission dependency
+
+The I-series UI capability admission boundary is defined separately in:
+
+```text
+docs/architecture/ui_capability_admission_boundary.md
+```
+
+This document narrows the admission stage after effect request descriptors.
+
+```text
+EffectRequestDescriptor
+  -> future UiCapabilityAdmissionDescriptor
+  -> future UiCapabilityAdmissionResult
+  -> future RuntimeCapabilityMapping
+```
+
+UI capability admission is not runtime capability grant.
+Runtime capability mapping requires a separate boundary.
+
 ## 20. Future implementation shape
 
 H8 does not mandate implementation.
