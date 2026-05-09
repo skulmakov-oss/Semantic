@@ -371,3 +371,14 @@ render attempted != render succeeded
 render succeeded != frame presented
 frame presented != semantic success
 ```
+
+## Implementation gate dependency
+
+Renderer implementation remains gated by:
+
+```text
+docs/architecture/ui_implementation_gate.md
+docs/architecture/ui_boundary_index.md
+```
+
+Renderer must not be the first implementation step.

@@ -524,3 +524,28 @@ Preview is not admitted action.
 Replay is not current trace.
 Stale view is not authority.
 ```
+
+### UI implementation gate ownership
+
+Implementation authority is constrained by the admitted UI boundaries.
+
+| Component | Implementation role |
+|---|---|
+| boundary index | lists admitted boundary documents |
+| implementation gate | controls transition into code |
+| UI implementation PRs | must cite touched boundary documents |
+| renderer implementation | remains gated |
+| Workbench implementation | remains gated |
+| component implementation | remains gated |
+| action/effect implementation | remains gated by admission |
+| tests | enforce contract shape |
+
+This preserves:
+
+```text
+Docs freeze before code.
+Implementation follows boundaries.
+Renderer is not first.
+Workbench does not define semantics.
+Every code PR cites its boundary.
+```

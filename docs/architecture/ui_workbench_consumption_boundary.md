@@ -506,3 +506,14 @@ docs/architecture/ui_simulation_snapshot_boundary.md
 ```
 
 Workbench must not let non-live views look authoritative.
+
+## Implementation gate dependency
+
+Workbench implementation remains gated by:
+
+```text
+docs/architecture/ui_implementation_gate.md
+docs/architecture/ui_boundary_index.md
+```
+
+Workbench must consume admitted contracts and must not define core semantics.
