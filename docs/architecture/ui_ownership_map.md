@@ -498,3 +498,29 @@ Workbench convenience is not architecture rule.
 Workbench view is not source of truth.
 Workbench command is not semantic action by default.
 ```
+
+### Simulation and snapshot UI ownership
+
+Simulation and snapshot UI meaning is owned by the UI architecture layer.
+
+| Component | Simulation/snapshot role |
+|---|---|
+| live source | owns current authority |
+| snapshot view | preserves captured state, not live authority |
+| replay view | projects prior trace/event sequence |
+| simulation view | projects hypothetical state |
+| preview view | projects possible result before admission |
+| Workbench | may display these modes, does not make them authoritative |
+| trace/audit layer | owns original trace/audit facts |
+| capability/effect boundary | owns real admission/effect authority |
+| renderer | renders projections, does not define authority |
+
+This preserves:
+
+```text
+Snapshot is not live state.
+Simulation is not runtime state.
+Preview is not admitted action.
+Replay is not current trace.
+Stale view is not authority.
+```

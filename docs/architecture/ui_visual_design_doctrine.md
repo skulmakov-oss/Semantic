@@ -432,3 +432,15 @@ docs/architecture/ui_error_denial_quarantine_visual_boundary.md
 ```
 
 Visual refusal must not become hidden no-op.
+
+## Simulation and snapshot visual doctrine
+
+Simulation, snapshot, replay, preview, stale, and disconnected views must be visually distinct from live state.
+
+Simulation and snapshot UI boundaries are defined separately in:
+
+```text
+docs/architecture/ui_simulation_snapshot_boundary.md
+```
+
+Non-live views must not look authoritative.

@@ -494,3 +494,15 @@ Workbench stale-state model
 Workbench simulation model
 Workbench command palette semantics
 ```
+
+## Simulation and snapshot dependency
+
+Workbench may later display live, snapshot, replay, simulation, preview, stale, and disconnected views.
+
+Simulation and snapshot UI boundaries are defined separately in:
+
+```text
+docs/architecture/ui_simulation_snapshot_boundary.md
+```
+
+Workbench must not let non-live views look authoritative.

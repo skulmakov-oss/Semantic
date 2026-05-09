@@ -504,3 +504,15 @@ renderer audit mapping
 Workbench renderer transcript UI
 native backend presentation authority
 ```
+
+## Simulation and snapshot dependency
+
+Renderer replay, preview, and snapshot views must not be treated as current presentation state.
+
+Simulation and snapshot UI boundaries are defined separately in:
+
+```text
+docs/architecture/ui_simulation_snapshot_boundary.md
+```
+
+A replayed presented frame is not current frame presentation.

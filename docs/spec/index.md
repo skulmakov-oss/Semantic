@@ -44,6 +44,7 @@ Current documents in this PR:
 - `../architecture/ui_recovery_rollback_visual_boundary.md` - Semantic UI recovery and rollback visual boundary before implementation
 - `../architecture/ui_renderer_transcript_presentation_boundary.md` - Semantic UI renderer transcript and presentation status boundary before implementation
 - `../architecture/ui_workbench_consumption_boundary.md` - Workbench UI consumption boundary before implementation
+- `../architecture/ui_simulation_snapshot_boundary.md` - Semantic UI simulation and snapshot boundary before implementation
 
 Adjacent source-surface documents also remain relevant:
 

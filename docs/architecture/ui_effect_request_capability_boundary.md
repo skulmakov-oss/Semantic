@@ -538,3 +538,16 @@ docs/architecture/ui_renderer_transcript_presentation_boundary.md
 ```
 
 Effect success remains owned by the effect/capability boundary.
+
+## Simulation and snapshot dependency
+
+Previewed or simulated capability/effect state is not capability/effect authority.
+
+Simulation and snapshot UI boundaries are defined separately in:
+
+```text
+docs/architecture/ui_simulation_snapshot_boundary.md
+```
+
+A simulated capability is not a grant.
+A previewed effect is not prepared or committed.
