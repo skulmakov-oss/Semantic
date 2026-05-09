@@ -20,6 +20,7 @@
 extern crate alloc;
 
 pub mod interaction;
+pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
 
@@ -27,6 +28,10 @@ pub use interaction::{
     ElementId, InteractionModifiers, InteractionSource, InteractionTarget, RegionId,
     SurfaceId, WindowId, InteractionIntentDescriptor, InteractionIntentId,
     InteractionIntentKind,
+};
+pub use intent_stream::{
+    trace_interaction_intent_stream, InteractionIntentStreamModel,
+    InteractionIntentStreamReport, InteractionIntentStreamStats,
 };
 pub use raw_event::{
     map_raw_event_to_interaction_intent, RawKeyCode, RawPointerButton, RawTextInput,
