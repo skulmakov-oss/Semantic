@@ -456,3 +456,15 @@ docs/architecture/ui_error_denial_quarantine_visual_boundary.md
 ```
 
 Components must not invent denial/error/quarantine meaning.
+
+## Recovery and rollback visual dependency
+
+Components may expose recovery, retry, cancel, and rollback surfaces.
+
+Recovery and rollback visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_recovery_rollback_visual_boundary.md
+```
+
+Components must not invent recovery or rollback meaning.

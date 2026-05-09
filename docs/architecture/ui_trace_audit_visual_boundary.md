@@ -444,3 +444,15 @@ docs/architecture/ui_error_denial_quarantine_visual_boundary.md
 Trace/audit projection may explain denial, failure, conflict, and quarantine.
 
 Visual trace must not hide denial/failure/quarantine state.
+
+## Recovery and rollback visual dependency
+
+Recovery and rollback visualization may require trace/audit records.
+
+Recovery and rollback visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_recovery_rollback_visual_boundary.md
+```
+
+Visual recovery must not hide trace/audit causality.

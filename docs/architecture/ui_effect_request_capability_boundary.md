@@ -500,3 +500,17 @@ docs/architecture/ui_error_denial_quarantine_visual_boundary.md
 Effect denial is not effect failure.
 Prepared effect is not committed effect.
 Quarantine is not deletion.
+
+## Recovery and rollback visual dependency
+
+Effect recovery and rollback states must be visually distinct.
+
+Recovery and rollback visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_recovery_rollback_visual_boundary.md
+```
+
+Retry is not blind re-execute.
+Rollback is not generic undo.
+Prepared effect recovery is not committed effect rollback.
