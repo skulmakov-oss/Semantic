@@ -367,6 +367,18 @@ prom-ui-backend-native
 
 Renderer and visual implementation must follow this doctrine in later PRs.
 
+## Workbench UI consumption boundary
+
+Workbench must consume Semantic UI doctrine, not redefine it.
+
+Workbench UI consumption is defined separately in:
+
+```text
+docs/architecture/ui_workbench_consumption_boundary.md
+```
+
+Workbench views must not become source of truth.
+
 ## Visual token system boundary
 
 The visual token system is defined separately in:

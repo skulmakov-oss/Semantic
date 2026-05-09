@@ -142,6 +142,18 @@ request.rollback_effect
 
 A denied intent must not be treated as an action.
 
+## Workbench action dependency
+
+Workbench may request semantic actions.
+
+Workbench UI consumption is defined separately in:
+
+```text
+docs/architecture/ui_workbench_consumption_boundary.md
+```
+
+Workbench command is not semantic action by default.
+
 ## 7. Action vs focus/selection
 
 Focus and selection may provide context.

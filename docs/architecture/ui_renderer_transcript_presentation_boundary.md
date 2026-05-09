@@ -367,6 +367,18 @@ Native backend must not decide:
 
 Native backend may expose native surface/window facts if admitted later.
 
+## Workbench renderer transcript dependency
+
+Workbench may display renderer transcript and presentation status.
+
+Workbench UI consumption is defined separately in:
+
+```text
+docs/architecture/ui_workbench_consumption_boundary.md
+```
+
+Workbench must not treat renderer transcript as semantic success or audit authority.
+
 ## 20. Workbench relationship
 
 Workbench may display renderer transcript and presentation status.
