@@ -102,6 +102,27 @@ It must define:
 
 Effect request is not execution.
 
+## Effect request descriptor dependency
+
+The I-series effect request descriptor boundary is defined separately in:
+
+```text
+docs/architecture/ui_effect_request_descriptor_boundary.md
+```
+
+The descriptor step narrows this general H-series boundary.
+
+```text
+dispatch trace / summary
+  -> future EffectRequestDescriptor
+  -> future UI capability admission
+  -> future prepared effect
+```
+
+Effect request descriptor is not execution.
+Effect request descriptor is not capability grant.
+Prepared effect is not committed effect.
+
 ## Workbench effect and capability dependency
 
 Workbench may display and request effect/capability operations.
