@@ -23,6 +23,7 @@ pub mod interaction;
 pub mod action_binding;
 pub mod action_binding_trace;
 pub mod action_binding_stream;
+pub mod action_candidate_summary;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -53,6 +54,10 @@ pub use action_binding_trace::{
 pub use action_binding_stream::{
     trace_interaction_action_binding_stream, InteractionActionBindingTraceStreamModel,
     InteractionActionBindingTraceStreamReport, InteractionActionBindingTraceStreamStats,
+};
+pub use action_candidate_summary::{
+    summarize_interaction_action_candidates, InteractionActionBindingReasonCount,
+    InteractionActionCandidateCount, InteractionActionCandidateSummary,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
