@@ -224,7 +224,27 @@ docs admission boundary
 
 No PR should combine descriptor, decision, action object, dispatcher, and effect bridge.
 
-## 14. Validation expectation
+## 14. Action admission result and denial trace dependency
+
+Action admission result and denial trace boundaries are defined separately in:
+
+```text
+docs/architecture/ui_action_admission_result_denial_boundary.md
+```
+
+The descriptor layer stops before decision.
+
+```text
+ActionAdmissionDescriptor
+  -> future ActionAdmissionResult
+  -> future DenialTrace
+```
+
+Descriptor is not result.
+Result is not execution.
+Denied result must not be hidden as no-op.
+
+## 15. Validation expectation
 
 Docs-only PR validation:
 

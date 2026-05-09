@@ -166,7 +166,26 @@ The descriptor is not the decision.
 The decision is not execution.
 The admitted action is not an effect.
 
-## 11. Forbidden shortcuts
+## 11. Action admission result and denial trace dependency
+
+Action admission result and denial trace boundaries are defined separately in:
+
+```text
+docs/architecture/ui_action_admission_result_denial_boundary.md
+```
+
+The trace ladder stops before result and denial.
+
+```text
+ActionAdmissionDescriptor
+  -> future ActionAdmissionResult
+  -> future DenialTrace
+```
+
+Result is not execution.
+Denied result must be visible.
+
+## 12. Forbidden shortcuts
 
 Future PRs must not:
 
@@ -180,7 +199,7 @@ Future PRs must not:
 * hide unbound candidates as no-op;
 * add VM/Host ABI bridge from this ladder directly.
 
-## 12. Validation expectation
+## 13. Validation expectation
 
 Docs-only PR validation:
 
