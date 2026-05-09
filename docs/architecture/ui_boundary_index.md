@@ -45,6 +45,7 @@ visual doctrine
 | interaction/input semantics       | `docs/architecture/ui_interaction_input_semantic_boundary.md`       |
 | focus/selection semantics         | `docs/architecture/ui_focus_selection_semantic_boundary.md`         |
 | semantic actions                  | `docs/architecture/ui_semantic_action_boundary.md`                  |
+| interaction-action trace ladder   | `docs/architecture/ui_interaction_action_trace_ladder.md`           |
 | effect requests / UI capabilities | `docs/architecture/ui_effect_request_capability_boundary.md`        |
 | trace/audit visual projection     | `docs/architecture/ui_trace_audit_visual_boundary.md`               |
 | error/denial/quarantine visuals   | `docs/architecture/ui_error_denial_quarantine_visual_boundary.md`   |
