@@ -25,6 +25,7 @@ pub mod action_binding_trace;
 pub mod action_binding_stream;
 pub mod action_candidate_summary;
 pub mod action_admission;
+pub mod action_admission_result;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -68,6 +69,12 @@ pub use action_admission::{
     InteractionActionAdmissionLifecycleRequirement, InteractionActionAdmissionPolicyGateNamespace,
     InteractionActionAdmissionTargetOwnershipRequirement,
     InteractionActionAdmissionTargetRequirement, InteractionActionAdmissionTraceRequirement,
+};
+pub use action_admission_result::{
+    record_interaction_action_admitted_result, record_interaction_action_denied_result,
+    InteractionActionAdmissionDecisionStatus, InteractionActionAdmissionDenialReason,
+    InteractionActionAdmissionMissingRequirement, InteractionActionAdmissionResult,
+    InteractionActionAdmissionResultId,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
