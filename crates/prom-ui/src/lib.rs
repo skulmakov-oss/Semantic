@@ -32,6 +32,7 @@ pub mod action_dispatch_route;
 pub mod action_dispatch_record;
 pub mod action_dispatch_trace;
 pub mod action_dispatch_summary;
+pub mod effect_request;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -111,6 +112,14 @@ pub use action_dispatch_summary::{
     summarize_interaction_semantic_action_dispatches,
     InteractionSemanticActionDispatchRouteCount, InteractionSemanticActionDispatchSummary,
     InteractionSemanticActionDispatchTraceReasonCount,
+};
+pub use effect_request::{
+    describe_interaction_effect_request, InteractionEffectRequestDenialBehavior,
+    InteractionEffectRequestDescriptor, InteractionEffectRequestDescriptorId,
+    InteractionEffectRequestKind, InteractionEffectRequestLifecyclePrecondition,
+    InteractionEffectRequestPrepareCommitRelationship, InteractionEffectRequestRuntimeCapability,
+    InteractionEffectRequestScope, InteractionEffectRequestTargetPolicy,
+    InteractionEffectRequestUiCapability,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
