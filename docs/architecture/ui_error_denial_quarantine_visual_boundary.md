@@ -500,3 +500,15 @@ Workbench error views
 renderer-owned error semantics
 native backend-owned quarantine semantics
 ```
+
+## Renderer transcript and presentation status dependency
+
+Renderer denial, renderer failure, and presentation failure must remain visually distinct.
+
+Renderer transcript and presentation status boundaries are defined separately in:
+
+```text
+docs/architecture/ui_renderer_transcript_presentation_boundary.md
+```
+
+Render success must not hide presentation failure.

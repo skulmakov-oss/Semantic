@@ -514,3 +514,15 @@ docs/architecture/ui_recovery_rollback_visual_boundary.md
 Retry is not blind re-execute.
 Rollback is not generic undo.
 Prepared effect recovery is not committed effect rollback.
+
+## Renderer transcript and presentation status dependency
+
+Frame presentation is not semantic effect success.
+
+Renderer transcript and presentation status boundaries are defined separately in:
+
+```text
+docs/architecture/ui_renderer_transcript_presentation_boundary.md
+```
+
+Effect success remains owned by the effect/capability boundary.

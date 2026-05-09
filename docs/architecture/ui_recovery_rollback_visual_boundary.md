@@ -523,3 +523,15 @@ Workbench recovery views
 renderer-owned recovery semantics
 native backend-owned rollback semantics
 ```
+
+## Renderer transcript and presentation status dependency
+
+Renderer recovery must distinguish render retry, presentation retry, surface recreation, and continue-without-presentation.
+
+Renderer transcript and presentation status boundaries are defined separately in:
+
+```text
+docs/architecture/ui_renderer_transcript_presentation_boundary.md
+```
+
+Retry render must not blindly re-present an unsafe frame.

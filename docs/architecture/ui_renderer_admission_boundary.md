@@ -352,3 +352,41 @@ docs/architecture/ui_recovery_rollback_visual_boundary.md
 Renderer may display admitted recovery projections, but must not define their meaning.
 
 Renderer admission starts only after this boundary is accepted.
+
+## Renderer transcript and presentation status dependency
+
+Renderer transcript and presentation status boundaries are defined separately in:
+
+```text
+docs/architecture/ui_renderer_transcript_presentation_boundary.md
+```
+
+Renderer admission must not treat draw staging as rendering or presentation.
+
+Renderer implementation must preserve:
+
+```text
+draw staging != render attempted
+render attempted != render succeeded
+render succeeded != frame presented
+frame presented != semantic success
+```
+
+## Renderer transcript and presentation status dependency
+
+Renderer transcript and presentation status boundaries are defined separately in:
+
+```text
+docs/architecture/ui_renderer_transcript_presentation_boundary.md
+```
+
+Renderer admission must not treat draw staging as rendering or presentation.
+
+Renderer implementation must preserve:
+
+```text
+draw staging != render attempted
+render attempted != render succeeded
+render succeeded != frame presented
+frame presented != semantic success
+```

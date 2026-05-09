@@ -456,3 +456,15 @@ docs/architecture/ui_recovery_rollback_visual_boundary.md
 ```
 
 Visual recovery must not hide trace/audit causality.
+
+## Renderer transcript and presentation status dependency
+
+Renderer transcript may be projected into trace UI.
+
+Renderer transcript and presentation status boundaries are defined separately in:
+
+```text
+docs/architecture/ui_renderer_transcript_presentation_boundary.md
+```
+
+Renderer transcript is not audit authority by default.
