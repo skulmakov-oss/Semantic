@@ -35,6 +35,7 @@ pub mod action_dispatch_summary;
 pub mod effect_request;
 pub mod effect_request_trace;
 pub mod effect_request_summary;
+pub mod ui_capability_admission;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -131,6 +132,13 @@ pub use effect_request_summary::{
     summarize_interaction_effect_requests, InteractionEffectRequestKindCount,
     InteractionEffectRequestRuntimeCapabilityCount, InteractionEffectRequestSummary,
     InteractionEffectRequestUiCapabilityCount,
+};
+pub use ui_capability_admission::{
+    describe_interaction_ui_capability_admission,
+    InteractionUiCapabilityAdmissionDescriptor,
+    InteractionUiCapabilityAdmissionDescriptorId,
+    InteractionUiCapabilityAdmissionFutureResultShape,
+    InteractionUiCapabilityAdmissionRuntimeMappingRequirement,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
