@@ -475,3 +475,15 @@ docs/architecture/ui_error_denial_quarantine_visual_boundary.md
 ```
 
 Denied intent must not be hidden as no-op.
+
+## Recovery and rollback visual dependency
+
+Recovery and rollback actions must remain admitted semantic actions.
+
+Recovery and rollback visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_recovery_rollback_visual_boundary.md
+```
+
+A recovery option is not action permission.

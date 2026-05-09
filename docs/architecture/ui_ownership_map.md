@@ -21,6 +21,7 @@ Related:
 - `docs/architecture/ui_effect_request_capability_boundary.md`
 - `docs/architecture/ui_trace_audit_visual_boundary.md`
 - `docs/architecture/ui_error_denial_quarantine_visual_boundary.md`
+- `docs/architecture/ui_recovery_rollback_visual_boundary.md`
 
 ## 1. Purpose
 
@@ -420,4 +421,30 @@ Denial is not failure.
 Quarantine is not deletion.
 Conflict is not crash.
 Visual refusal is not hidden no-op.
+```
+
+### Recovery and rollback visual ownership
+
+Recovery and rollback visual meaning is owned by the UI architecture layer.
+
+| Component | Recovery/rollback role |
+|---|---|
+| error/denial/quarantine layer | provides source condition |
+| trace/audit layer | owns causal recovery record |
+| effect boundary | owns effect failure/prepare/commit/rollback semantics |
+| admission/policy layer | decides whether recovery action is allowed |
+| component system | exposes recovery surfaces |
+| layout primitive system | provides recovery regions |
+| renderer | renders admitted projections, does not classify recovery |
+| native backend | may expose native failure facts, does not own rollback semantics |
+| Workbench | may display recovery projections, does not define core behavior |
+
+This preserves:
+
+```text
+Recovery is not rollback.
+Rollback is not undo.
+Cancel is not failure.
+Retry is not blind re-execute.
+Safe recovery requires trace.
 ```

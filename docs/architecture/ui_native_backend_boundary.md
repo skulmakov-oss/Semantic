@@ -413,6 +413,18 @@ Error, denial, and quarantine visual boundaries are defined separately in:
 docs/architecture/ui_error_denial_quarantine_visual_boundary.md
 ```
 
+## Recovery and rollback boundary
+
+Native backend may expose native failure facts.
+
+Native backend must not define recovery or rollback semantics.
+
+Recovery and rollback visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_recovery_rollback_visual_boundary.md
+```
+
 ## 14. Stop rules
 
 Stop the native backend implementation if it requires:

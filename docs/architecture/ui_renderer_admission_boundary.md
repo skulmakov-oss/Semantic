@@ -339,4 +339,16 @@ docs/architecture/ui_error_denial_quarantine_visual_boundary.md
 
 Renderer may display admitted status projections, but must not define their meaning.
 
+## Recovery and rollback dependency
+
+Renderer admission does not grant renderer authority to classify recovery or rollback availability.
+
+Recovery and rollback visual boundaries are defined separately in:
+
+```text
+docs/architecture/ui_recovery_rollback_visual_boundary.md
+```
+
+Renderer may display admitted recovery projections, but must not define their meaning.
+
 Renderer admission starts only after this boundary is accepted.
