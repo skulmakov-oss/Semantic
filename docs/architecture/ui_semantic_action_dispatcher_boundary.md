@@ -216,7 +216,26 @@ docs dispatcher boundary
 
 No PR should combine dispatcher, effect request, capability admission, and execution.
 
-## 14. Validation expectation
+## 14. Effect request descriptor dependency
+
+Effect request descriptor boundary is defined separately in:
+
+```text
+docs/architecture/ui_effect_request_descriptor_boundary.md
+```
+
+The dispatch summary layer stops before effect request descriptor construction.
+
+```text
+InteractionSemanticActionDispatchSummary
+  -> future EffectRequestDescriptor
+```
+
+Dispatch metadata is not effect request.
+Effect request descriptor is not capability admission.
+Effect requires separate admission.
+
+## 15. Validation expectation
 
 Docs-only PR validation:
 
