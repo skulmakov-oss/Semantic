@@ -19,6 +19,14 @@
 
 extern crate alloc;
 
+pub mod interaction;
+
+pub use interaction::{
+    ElementId, InteractionModifiers, InteractionSource, InteractionTarget, RegionId,
+    SurfaceId, WindowId, InteractionIntentDescriptor, InteractionIntentId,
+    InteractionIntentKind,
+};
+
 /// Marker for the UI application boundary capability family.
 ///
 /// Inert at Wave 0. Capability taxonomy and operation identity are deferred
