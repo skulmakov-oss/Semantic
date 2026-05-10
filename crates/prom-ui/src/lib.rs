@@ -39,6 +39,7 @@ pub mod ui_capability_admission;
 pub mod ui_capability_admission_result;
 pub mod ui_capability_denial_trace;
 pub mod runtime_capability_mapping;
+pub mod runtime_capability_mapping_result;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -165,6 +166,15 @@ pub use runtime_capability_mapping::{
     InteractionRuntimeCapabilityMappingDescriptorId,
     InteractionRuntimeCapabilityMappingFutureResultShape,
     InteractionRuntimeCapabilityNamespace,
+};
+pub use runtime_capability_mapping_result::{
+    record_interaction_runtime_capability_denied_result,
+    record_interaction_runtime_capability_mapped_result,
+    InteractionRuntimeCapabilityMappingDecisionStatus,
+    InteractionRuntimeCapabilityMappingDenialReason,
+    InteractionRuntimeCapabilityMappingMissingRequirement,
+    InteractionRuntimeCapabilityMappingResult,
+    InteractionRuntimeCapabilityMappingResultId,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
