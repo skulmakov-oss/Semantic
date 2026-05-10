@@ -189,6 +189,27 @@ H8 does not define actual runtime capability names.
 
 H8 only requires that future mappings are explicit, testable, and traceable.
 
+## Runtime capability mapping dependency
+
+The I-series runtime capability mapping boundary is defined separately in:
+
+```text
+docs/architecture/ui_runtime_capability_mapping_boundary.md
+```
+
+This document narrows the runtime mapping stage after UI capability admission.
+
+```text
+UiCapabilityAdmissionResult
+  -> future RuntimeCapabilityMappingDescriptor
+  -> future RuntimeCapabilityMappingResult
+  -> future PreparedEffect
+```
+
+Runtime capability mapping is not Host ABI authority.
+Runtime capability mapping is not prepared effect.
+Prepared effect requires a separate boundary.
+
 ## 7. Capability visibility vs capability grant
 
 Showing a capability in UI does not grant it.

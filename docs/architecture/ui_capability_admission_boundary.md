@@ -262,6 +262,26 @@ docs/architecture/ui_effect_request_capability_boundary.md
 
 This document narrows the I-series UI capability admission step.
 
+## Runtime capability mapping dependency
+
+Runtime capability mapping boundary is defined separately in:
+
+```text
+docs/architecture/ui_runtime_capability_mapping_boundary.md
+```
+
+The UI capability admission layer stops before runtime capability mapping.
+
+```text
+InteractionUiCapabilityAdmissionResult
+  -> future RuntimeCapabilityMappingDescriptor
+  -> future RuntimeCapabilityMappingResult
+```
+
+UI capability admission result is not runtime capability grant.
+Runtime capability mapping is not Host ABI authority.
+Runtime capability mapping is not prepared effect.
+
 ## 17. Validation expectation
 
 Docs-only PR validation:
