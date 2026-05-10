@@ -33,6 +33,7 @@ Current documents in this PR:
 - `ui/host_runtime_effect_path_boundary.md` - canonical UI host runtime effect path boundary contract
 - `ui/ui_effect_envelope_v0.md` - canonical UI effect envelope v0 contract
 - `ui/ui_capability_taxonomy.md` - canonical UI capability taxonomy contract
+- `ui/ui_event_envelope_model.md` - canonical deterministic UI event envelope model
 - `../architecture/ui_native_backend_boundary.md` - native facade transcript boundary and ownership split
 - `../architecture/ui_renderer_admission_boundary.md` - renderer admission boundary before implementation
 - `../architecture/ui_visual_design_doctrine.md` - Semantic UI visual design doctrine before renderer implementation
