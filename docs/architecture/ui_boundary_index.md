@@ -30,6 +30,7 @@ visual doctrine
   -> semantic action dispatcher
   -> effect request descriptor
   -> UI capability admission
+  -> runtime capability mapping
   -> effect request / UI capability boundary
   -> trace/audit visual boundary
   -> error/denial/quarantine visual boundary
@@ -58,6 +59,7 @@ visual doctrine
 | semantic action dispatcher        | `docs/architecture/ui_semantic_action_dispatcher_boundary.md`      |
 | effect request descriptor         | `docs/architecture/ui_effect_request_descriptor_boundary.md`       |
 | UI capability admission          | `docs/architecture/ui_capability_admission_boundary.md`            |
+| runtime capability mapping      | `docs/architecture/ui_runtime_capability_mapping_boundary.md`      |
 | effect requests / UI capabilities | `docs/architecture/ui_effect_request_capability_boundary.md`        |
 | trace/audit visual projection     | `docs/architecture/ui_trace_audit_visual_boundary.md`               |
 | error/denial/quarantine visuals   | `docs/architecture/ui_error_denial_quarantine_visual_boundary.md`   |
