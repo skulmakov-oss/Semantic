@@ -40,6 +40,7 @@ pub mod ui_capability_admission_result;
 pub mod ui_capability_denial_trace;
 pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
+pub mod prepared_effect;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -175,6 +176,13 @@ pub use runtime_capability_mapping_result::{
     InteractionRuntimeCapabilityMappingMissingRequirement,
     InteractionRuntimeCapabilityMappingResult,
     InteractionRuntimeCapabilityMappingResultId,
+};
+pub use prepared_effect::{
+    describe_interaction_prepared_effect,
+    InteractionPreparedEffectCommitRequirement,
+    InteractionPreparedEffectDescriptor,
+    InteractionPreparedEffectDescriptorId,
+    InteractionPreparedEffectStatusShape,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
