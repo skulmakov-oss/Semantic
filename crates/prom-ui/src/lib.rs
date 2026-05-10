@@ -47,6 +47,7 @@ pub mod commit_boundary_result;
 pub mod committed_effect;
 pub mod committed_effect_record;
 pub mod host_runtime_effect;
+pub mod host_runtime_effect_denial_trace;
 pub mod host_runtime_effect_result;
 pub mod intent_stream;
 pub mod raw_event;
@@ -235,6 +236,11 @@ pub use host_runtime_effect::{
     InteractionHostRuntimeEffectBoundaryDescriptorId,
     InteractionHostRuntimeEffectPathRequirement,
     InteractionHostRuntimeMutationRequirement,
+};
+pub use host_runtime_effect_denial_trace::{
+    trace_interaction_host_runtime_effect_denial, InteractionHostRuntimeEffectDenialRetryHint,
+    InteractionHostRuntimeEffectDenialTrace, InteractionHostRuntimeEffectDenialTraceId,
+    InteractionHostRuntimeEffectDenialTraceStatus,
 };
 pub use host_runtime_effect_result::{
     record_interaction_host_runtime_effect_boundary_admitted_result,
