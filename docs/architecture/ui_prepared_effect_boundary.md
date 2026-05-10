@@ -243,6 +243,26 @@ docs/architecture/ui_effect_request_capability_boundary.md
 
 This document narrows the I-series prepared effect step.
 
+## Committed effect dependency
+
+Committed effect boundary is defined separately in:
+
+```text
+docs/architecture/ui_committed_effect_boundary.md
+```
+
+The prepared effect layer stops before commit and committed effect construction.
+
+```text
+InteractionPreparedEffectResult::Prepared
+  -> future CommitBoundary
+  -> future CommittedEffect
+```
+
+Prepared effect result is not commit boundary.
+Commit boundary is not Host ABI authority.
+Committed effect still requires explicit audit/runtime boundaries.
+
 ## 17. Validation expectation
 
 Docs-only PR validation:
