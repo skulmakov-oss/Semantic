@@ -61,6 +61,7 @@ visual doctrine
 | UI capability admission          | `docs/architecture/ui_capability_admission_boundary.md`            |
 | runtime capability mapping      | `docs/architecture/ui_runtime_capability_mapping_boundary.md`      |
 | prepared effect                 | `docs/architecture/ui_prepared_effect_boundary.md`                 |
+| committed effect                | `docs/architecture/ui_committed_effect_boundary.md`                 |
 | effect requests / UI capabilities | `docs/architecture/ui_effect_request_capability_boundary.md`        |
 | trace/audit visual projection     | `docs/architecture/ui_trace_audit_visual_boundary.md`               |
 | error/denial/quarantine visuals   | `docs/architecture/ui_error_denial_quarantine_visual_boundary.md`   |

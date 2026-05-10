@@ -231,6 +231,27 @@ Prepared effect is not Host ABI authority.
 Prepared effect is not committed effect.
 Commit requires a separate boundary.
 
+## Committed effect dependency
+
+The I-series committed effect boundary is defined separately in:
+
+```text
+docs/architecture/ui_committed_effect_boundary.md
+```
+
+This document narrows the committed effect stage after prepared effect handling.
+
+```text
+PreparedEffectResult::Prepared
+  -> future CommitBoundary
+  -> future CommittedEffect
+  -> future HostRuntimeEffectBoundary
+```
+
+Committed effect is not arbitrary Host ABI authority.
+Committed effect is not VM authority.
+Runtime mutation requires explicit capability-gated and auditable boundaries.
+
 ## 7. Capability visibility vs capability grant
 
 Showing a capability in UI does not grant it.
