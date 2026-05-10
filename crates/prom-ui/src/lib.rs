@@ -44,6 +44,7 @@ pub mod prepared_effect;
 pub mod prepared_effect_result;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
+pub mod committed_effect;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -211,6 +212,12 @@ pub use commit_boundary_result::{
     InteractionCommitBoundaryMissingRequirement,
     InteractionCommitBoundaryResult,
     InteractionCommitBoundaryResultId,
+};
+pub use committed_effect::{
+    describe_interaction_committed_effect, InteractionCommittedEffectAuditVisibility,
+    InteractionCommittedEffectDescriptor, InteractionCommittedEffectDescriptorId,
+    InteractionCommittedEffectHostPathRequirement,
+    InteractionCommittedEffectRuntimeMutationRequirement,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
