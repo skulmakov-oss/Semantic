@@ -42,6 +42,7 @@ pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
 pub mod prepared_effect;
 pub mod prepared_effect_result;
+pub mod commit_boundary;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -193,6 +194,13 @@ pub use prepared_effect_result::{
     InteractionPreparedEffectMissingRequirement,
     InteractionPreparedEffectResult,
     InteractionPreparedEffectResultId,
+};
+pub use commit_boundary::{
+    describe_interaction_commit_boundary,
+    InteractionCommitAuditRequirement,
+    InteractionCommitBoundaryDescriptor,
+    InteractionCommitBoundaryDescriptorId,
+    InteractionCommitBoundaryFutureCommittedEffectShape,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
