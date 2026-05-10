@@ -248,3 +248,21 @@ git diff --check
 ```
 
 No Rust tests are required for this PR.
+
+## 17. Relationship to full effect trace ladder
+
+The full UI-side effect trace ladder is documented in:
+
+```text
+docs/architecture/ui_full_effect_trace_ladder.md
+```
+
+The committed effect boundary is the final currently documented UI-side effect stage:
+
+```text
+InteractionCommitBoundaryResult::Committed
+  -> InteractionCommittedEffectDescriptor
+  -> InteractionCommittedEffectRecord
+```
+
+The committed effect record is still not Host ABI authority, VM authority, effect execution, runtime mutation, audit backend, or host runtime path.

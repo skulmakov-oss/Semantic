@@ -24,6 +24,7 @@ visual doctrine
   -> interaction/input semantic boundary
   -> focus/selection semantic boundary
   -> semantic action boundary
+  -> interaction-action trace ladder
   -> action admission descriptor
   -> action admission result / denial trace
   -> admitted semantic action object
@@ -31,6 +32,7 @@ visual doctrine
   -> effect request descriptor
   -> UI capability admission
   -> runtime capability mapping
+  -> full UI effect trace ladder
   -> effect request / UI capability boundary
   -> trace/audit visual boundary
   -> error/denial/quarantine visual boundary
@@ -53,6 +55,7 @@ visual doctrine
 | focus/selection semantics         | `docs/architecture/ui_focus_selection_semantic_boundary.md`         |
 | semantic actions                  | `docs/architecture/ui_semantic_action_boundary.md`                  |
 | interaction-action trace ladder   | `docs/architecture/ui_interaction_action_trace_ladder.md`           |
+| full UI effect trace ladder       | `docs/architecture/ui_full_effect_trace_ladder.md`                  |
 | action admission descriptor       | `docs/architecture/ui_action_admission_descriptor_boundary.md`      |
 | action admission result / denial trace | `docs/architecture/ui_action_admission_result_denial_boundary.md` |
 | admitted semantic action object   | `docs/architecture/ui_admitted_semantic_action_boundary.md`         |
