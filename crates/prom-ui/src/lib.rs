@@ -41,6 +41,7 @@ pub mod ui_capability_denial_trace;
 pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
 pub mod prepared_effect;
+pub mod prepared_effect_result;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -183,6 +184,15 @@ pub use prepared_effect::{
     InteractionPreparedEffectDescriptor,
     InteractionPreparedEffectDescriptorId,
     InteractionPreparedEffectStatusShape,
+};
+pub use prepared_effect_result::{
+    record_interaction_prepared_effect_denied_result,
+    record_interaction_prepared_effect_result,
+    InteractionPreparedEffectDecisionStatus,
+    InteractionPreparedEffectDenialReason,
+    InteractionPreparedEffectMissingRequirement,
+    InteractionPreparedEffectResult,
+    InteractionPreparedEffectResultId,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
