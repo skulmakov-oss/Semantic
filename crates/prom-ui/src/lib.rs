@@ -37,6 +37,7 @@ pub mod effect_request_trace;
 pub mod effect_request_summary;
 pub mod ui_capability_admission;
 pub mod ui_capability_admission_result;
+pub mod ui_capability_denial_trace;
 pub mod intent_stream;
 pub mod raw_event;
 pub mod trace;
@@ -149,6 +150,13 @@ pub use ui_capability_admission_result::{
     InteractionUiCapabilityAdmissionMissingRequirement,
     InteractionUiCapabilityAdmissionResult,
     InteractionUiCapabilityAdmissionResultId,
+};
+pub use ui_capability_denial_trace::{
+    trace_interaction_ui_capability_denial,
+    InteractionUiCapabilityDenialRetryHint,
+    InteractionUiCapabilityDenialTrace,
+    InteractionUiCapabilityDenialTraceId,
+    InteractionUiCapabilityDenialTraceStatus,
 };
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel,
