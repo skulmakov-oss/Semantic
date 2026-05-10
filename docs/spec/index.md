@@ -29,6 +29,8 @@ Current documents in this PR:
 - `ui_contract_map.md` - POST-UI Semantic UI contract sketch and ownership map
 - `ui_abi_capability_admission.md` - POST-UI ABI/capability admission checklist for future UI operations
 - `ui_verifier_admission_metadata.md` - POST-UI verifier-visible metadata plan for future UI operation admission
+- `ui/README.md` - POST-UI UI runtime effect path boundary subbundle
+- `ui/host_runtime_effect_path_boundary.md` - canonical UI host runtime effect path boundary contract
 - `../architecture/ui_native_backend_boundary.md` - native facade transcript boundary and ownership split
 - `../architecture/ui_renderer_admission_boundary.md` - renderer admission boundary before implementation
 - `../architecture/ui_visual_design_doctrine.md` - Semantic UI visual design doctrine before renderer implementation
