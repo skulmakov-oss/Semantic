@@ -265,6 +265,26 @@ docs/architecture/ui_effect_request_capability_boundary.md
 
 This document narrows the I-series runtime capability mapping step.
 
+## Prepared effect dependency
+
+Prepared effect boundary is defined separately in:
+
+```text
+docs/architecture/ui_prepared_effect_boundary.md
+```
+
+The runtime capability mapping layer stops before prepared effect construction.
+
+```text
+InteractionRuntimeCapabilityMappingResult::Mapped
+  -> future PreparedEffectDescriptor
+  -> future PreparedEffect
+```
+
+Runtime capability mapping result is not prepared effect.
+Prepared effect is not Host ABI authority.
+Prepared effect is not committed effect.
+
 ## 18. Validation expectation
 
 Docs-only PR validation:

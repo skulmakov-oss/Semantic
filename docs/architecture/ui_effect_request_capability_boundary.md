@@ -210,6 +210,27 @@ Runtime capability mapping is not Host ABI authority.
 Runtime capability mapping is not prepared effect.
 Prepared effect requires a separate boundary.
 
+## Prepared effect dependency
+
+The I-series prepared effect boundary is defined separately in:
+
+```text
+docs/architecture/ui_prepared_effect_boundary.md
+```
+
+This document narrows the prepared effect stage after runtime capability mapping.
+
+```text
+RuntimeCapabilityMappingResult::Mapped
+  -> future PreparedEffect
+  -> future CommitBoundary
+  -> future CommittedEffect
+```
+
+Prepared effect is not Host ABI authority.
+Prepared effect is not committed effect.
+Commit requires a separate boundary.
+
 ## 7. Capability visibility vs capability grant
 
 Showing a capability in UI does not grant it.
