@@ -9,6 +9,7 @@ Implementation: out of scope
 Related:
 
 - `README.md`
+- `ui_capability_taxonomy.md`
 - `../../architecture/ui_host_runtime_effect_boundary.md`
 - `../../architecture/ui_full_effect_trace_ladder.md`
 - `../abi.md`

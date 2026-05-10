@@ -9,12 +9,13 @@ Related:
 
 - `host_runtime_effect_path_boundary.md`
 - `ui_effect_envelope_v0.md`
+- `ui_capability_taxonomy.md`
 - `../../architecture/ui_host_runtime_effect_boundary.md`
 - `../../architecture/ui_full_effect_trace_ladder.md`
 
 This subbundle collects docs that define the boundary between the Semantic VM,
 runtime admission, capability and budget checks, audit intent, UI runtime, and
-platform adapters, and the contracts for the envelopes that move across that
-boundary.
+platform adapters, plus the contracts for the envelopes and capability taxonomy
+that move across that boundary.
 
 It does not add executable UI support.
