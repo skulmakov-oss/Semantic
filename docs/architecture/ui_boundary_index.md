@@ -33,6 +33,8 @@ visual doctrine
   -> UI capability admission
   -> runtime capability mapping
   -> full UI effect trace ladder
+  -> committed effect
+  -> host runtime effect boundary
   -> effect request / UI capability boundary
   -> trace/audit visual boundary
   -> error/denial/quarantine visual boundary
@@ -65,6 +67,7 @@ visual doctrine
 | runtime capability mapping      | `docs/architecture/ui_runtime_capability_mapping_boundary.md`      |
 | prepared effect                 | `docs/architecture/ui_prepared_effect_boundary.md`                 |
 | committed effect                | `docs/architecture/ui_committed_effect_boundary.md`                 |
+| host runtime effect boundary    | `docs/architecture/ui_host_runtime_effect_boundary.md`              |
 | effect requests / UI capabilities | `docs/architecture/ui_effect_request_capability_boundary.md`        |
 | trace/audit visual projection     | `docs/architecture/ui_trace_audit_visual_boundary.md`               |
 | error/denial/quarantine visuals   | `docs/architecture/ui_error_denial_quarantine_visual_boundary.md`   |

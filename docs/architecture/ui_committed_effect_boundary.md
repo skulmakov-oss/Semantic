@@ -266,3 +266,24 @@ InteractionCommitBoundaryResult::Committed
 ```
 
 The committed effect record is still not Host ABI authority, VM authority, effect execution, runtime mutation, audit backend, or host runtime path.
+
+## 18. Relationship to host runtime effect boundary
+
+The host runtime effect boundary is defined separately in:
+
+```text
+docs/architecture/ui_host_runtime_effect_boundary.md
+```
+
+The committed effect record remains inert until a future host runtime effect
+boundary admits it.
+
+```text
+InteractionCommittedEffectRecord
+  -> future HostRuntimeEffectBoundary
+  -> future HostRuntimeEffectPath
+```
+
+Host runtime effect boundary is not Host ABI execution.
+Host runtime effect path is not unbounded runtime mutation.
+Audit backend writes require a separate boundary.

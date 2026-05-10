@@ -261,3 +261,28 @@ git diff --check
 ```
 
 No Rust tests are required for this PR.
+
+## 15. Host runtime effect boundary dependency
+
+The host runtime effect boundary is defined separately in:
+
+```text
+docs/architecture/ui_host_runtime_effect_boundary.md
+```
+
+The current full UI-side ladder stops at:
+
+```text
+InteractionCommittedEffectRecord
+```
+
+The next future boundary is:
+
+```text
+InteractionCommittedEffectRecord
+  -> future HostRuntimeEffectBoundary
+  -> future HostRuntimeEffectPath
+```
+
+The host runtime effect boundary is still not Host ABI execution, VM authority,
+runtime mutation, or audit backend implementation.
