@@ -208,3 +208,32 @@ git diff --check
 ```
 
 No Rust tests are required for this PR.
+
+## 14. Full effect trace ladder dependency
+
+The complete UI-side effect trace ladder is documented separately in:
+
+```text
+docs/architecture/ui_full_effect_trace_ladder.md
+```
+
+This document covers the early interaction/action segment.
+
+The full ladder continues through:
+
+```text
+InteractionActionCandidateSummary
+  -> InteractionActionAdmissionDescriptor
+  -> InteractionActionAdmissionResult
+  -> InteractionAdmittedSemanticAction
+  -> InteractionSemanticActionDispatchRoute
+  -> InteractionSemanticActionDispatchRecord
+  -> InteractionEffectRequestDescriptor
+  -> InteractionUiCapabilityAdmissionResult
+  -> InteractionRuntimeCapabilityMappingResult
+  -> InteractionPreparedEffectResult
+  -> InteractionCommitBoundaryResult
+  -> InteractionCommittedEffectRecord
+```
+
+The full ladder is still inert and does not define Host ABI, VM calls, effect execution, runtime mutation, or audit backend behavior.
