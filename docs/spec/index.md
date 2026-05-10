@@ -31,6 +31,7 @@ Current documents in this PR:
 - `ui_verifier_admission_metadata.md` - POST-UI verifier-visible metadata plan for future UI operation admission
 - `ui/README.md` - POST-UI UI runtime effect path boundary subbundle
 - `ui/host_runtime_effect_path_boundary.md` - canonical UI host runtime effect path boundary contract
+- `ui/ui_effect_envelope_v0.md` - canonical UI effect envelope v0 contract
 - `../architecture/ui_native_backend_boundary.md` - native facade transcript boundary and ownership split
 - `../architecture/ui_renderer_admission_boundary.md` - renderer admission boundary before implementation
 - `../architecture/ui_visual_design_doctrine.md` - Semantic UI visual design doctrine before renderer implementation
