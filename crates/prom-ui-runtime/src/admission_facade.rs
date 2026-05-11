@@ -5,8 +5,8 @@
 //! budget accounting, audit admission, or platform execution.
 
 use crate::adapter_boundary::{
-    AdapterRequestId, UiAdapterRequest, UiAdapterResult, UiAdapterTarget, UiRuntimeAdapter,
-    UiRuntimeEffect,
+    AdapterRequestId, DrawBatchId, FrameId, UiAdapterRequest, UiAdapterResult, UiAdapterTarget,
+    UiRuntimeAdapter, UiRuntimeEffect, WindowId,
 };
 
 /// Local runtime request shape accepted by the admission façade.
@@ -35,6 +35,74 @@ impl UiRuntimeEffectRequest {
 
     pub const fn into_adapter_request(self) -> UiAdapterRequest {
         UiAdapterRequest::new(self.request_id, self.effect_id, self.target)
+    }
+
+    pub const fn window_create(request_id: AdapterRequestId) -> Self {
+        Self::new(
+            request_id,
+            UiRuntimeEffect::WindowCreate,
+            UiAdapterTarget::new(None, None, None),
+        )
+    }
+
+    pub const fn window_close(request_id: AdapterRequestId, window_id: WindowId) -> Self {
+        Self::new(
+            request_id,
+            UiRuntimeEffect::WindowClose,
+            UiAdapterTarget::window(window_id),
+        )
+    }
+
+    pub const fn poll_events(request_id: AdapterRequestId) -> Self {
+        Self::new(
+            request_id,
+            UiRuntimeEffect::PollEvents,
+            UiAdapterTarget::new(None, None, None),
+        )
+    }
+
+    pub const fn poll_events_for_window(
+        request_id: AdapterRequestId,
+        window_id: WindowId,
+    ) -> Self {
+        Self::new(
+            request_id,
+            UiRuntimeEffect::PollEvents,
+            UiAdapterTarget::window(window_id),
+        )
+    }
+
+    pub const fn begin_frame(request_id: AdapterRequestId, window_id: WindowId) -> Self {
+        Self::new(
+            request_id,
+            UiRuntimeEffect::BeginFrame,
+            UiAdapterTarget::window(window_id),
+        )
+    }
+
+    pub const fn submit_draw_commands(
+        request_id: AdapterRequestId,
+        window_id: WindowId,
+        frame_id: FrameId,
+        draw_batch_id: DrawBatchId,
+    ) -> Self {
+        Self::new(
+            request_id,
+            UiRuntimeEffect::SubmitDrawCommands,
+            UiAdapterTarget::draw_batch(window_id, frame_id, draw_batch_id),
+        )
+    }
+
+    pub const fn end_frame(
+        request_id: AdapterRequestId,
+        window_id: WindowId,
+        frame_id: FrameId,
+    ) -> Self {
+        Self::new(
+            request_id,
+            UiRuntimeEffect::EndFrame,
+            UiAdapterTarget::frame(window_id, frame_id),
+        )
     }
 }
 
@@ -261,6 +329,106 @@ mod tests {
 
         assert_eq!(reject.kind, UiAdmissionRejectKind::InvalidTargetForEffect);
         assert_eq!(reject.effect_id, UiRuntimeEffect::WindowClose);
+    }
+
+    #[test]
+    fn request_builder_window_create_uses_empty_target() {
+        let request = UiRuntimeEffectRequest::window_create(AdapterRequestId(7_000));
+
+        assert_eq!(request.request_id, AdapterRequestId(7_000));
+        assert_eq!(request.effect_id, UiRuntimeEffect::WindowCreate);
+        assert_eq!(request.target, UiAdapterTarget::default());
+    }
+
+    #[test]
+    fn request_builder_window_close_uses_window_target() {
+        let request = UiRuntimeEffectRequest::window_close(AdapterRequestId(7_001), WindowId(41));
+
+        assert_eq!(request.request_id, AdapterRequestId(7_001));
+        assert_eq!(request.effect_id, UiRuntimeEffect::WindowClose);
+        assert_eq!(request.target, UiAdapterTarget::window(WindowId(41)));
+    }
+
+    #[test]
+    fn request_builder_poll_events_uses_empty_target() {
+        let request = UiRuntimeEffectRequest::poll_events(AdapterRequestId(7_002));
+
+        assert_eq!(request.request_id, AdapterRequestId(7_002));
+        assert_eq!(request.effect_id, UiRuntimeEffect::PollEvents);
+        assert_eq!(request.target, UiAdapterTarget::default());
+    }
+
+    #[test]
+    fn request_builder_poll_events_for_window_uses_window_target() {
+        let request =
+            UiRuntimeEffectRequest::poll_events_for_window(AdapterRequestId(7_003), WindowId(42));
+
+        assert_eq!(request.request_id, AdapterRequestId(7_003));
+        assert_eq!(request.effect_id, UiRuntimeEffect::PollEvents);
+        assert_eq!(request.target, UiAdapterTarget::window(WindowId(42)));
+    }
+
+    #[test]
+    fn request_builder_begin_frame_uses_window_target() {
+        let request = UiRuntimeEffectRequest::begin_frame(AdapterRequestId(7_004), WindowId(43));
+
+        assert_eq!(request.request_id, AdapterRequestId(7_004));
+        assert_eq!(request.effect_id, UiRuntimeEffect::BeginFrame);
+        assert_eq!(request.target, UiAdapterTarget::window(WindowId(43)));
+    }
+
+    #[test]
+    fn request_builder_submit_draw_commands_uses_draw_batch_target() {
+        let request = UiRuntimeEffectRequest::submit_draw_commands(
+            AdapterRequestId(7_005),
+            WindowId(44),
+            FrameId(45),
+            DrawBatchId(46),
+        );
+
+        assert_eq!(request.request_id, AdapterRequestId(7_005));
+        assert_eq!(request.effect_id, UiRuntimeEffect::SubmitDrawCommands);
+        assert_eq!(
+            request.target,
+            UiAdapterTarget::draw_batch(WindowId(44), FrameId(45), DrawBatchId(46))
+        );
+    }
+
+    #[test]
+    fn request_builder_end_frame_uses_frame_target() {
+        let request =
+            UiRuntimeEffectRequest::end_frame(AdapterRequestId(7_006), WindowId(47), FrameId(48));
+
+        assert_eq!(request.request_id, AdapterRequestId(7_006));
+        assert_eq!(request.effect_id, UiRuntimeEffect::EndFrame);
+        assert_eq!(request.target, UiAdapterTarget::frame(WindowId(47), FrameId(48)));
+    }
+
+    #[test]
+    fn request_builders_all_pass_existing_shape_validation() {
+        let requests = [
+            UiRuntimeEffectRequest::window_create(AdapterRequestId(7_100)),
+            UiRuntimeEffectRequest::window_close(AdapterRequestId(7_101), WindowId(51)),
+            UiRuntimeEffectRequest::poll_events(AdapterRequestId(7_102)),
+            UiRuntimeEffectRequest::poll_events_for_window(AdapterRequestId(7_103), WindowId(52)),
+            UiRuntimeEffectRequest::begin_frame(AdapterRequestId(7_104), WindowId(53)),
+            UiRuntimeEffectRequest::submit_draw_commands(
+                AdapterRequestId(7_105),
+                WindowId(54),
+                FrameId(55),
+                DrawBatchId(56),
+            ),
+            UiRuntimeEffectRequest::end_frame(AdapterRequestId(7_106), WindowId(57), FrameId(58)),
+        ];
+
+        let mut facade = UiAdmissionFacade::new(RecordingAdapter::new());
+
+        for request in requests {
+            let result = facade.submit_admitted(request);
+            assert!(matches!(result, UiAdmissionResult::Submitted(_)));
+        }
+
+        assert_eq!(facade.adapter().requests().len(), 7);
     }
 
     #[test]
