@@ -14,6 +14,7 @@ Related:
 - `ui_frame_lifecycle_contract.md`
 - `ui_draw_command_batch_contract.md`
 - `ui_runtime_adapter_boundary.md`
+- `ui_runtime_implementation_checkpoint.md`
 - `../../architecture/ui_host_runtime_effect_boundary.md`
 - `../../architecture/ui_full_effect_trace_ladder.md`
 
