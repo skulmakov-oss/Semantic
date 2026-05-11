@@ -10,6 +10,7 @@ Related:
 - `README.md`
 - `../../architecture/ui_host_runtime_effect_boundary.md`
 - `../../architecture/ui_full_effect_trace_ladder.md`
+- `ui_runtime_adapter_boundary.md`
 - `../abi.md`
 - `../capabilities.md`
 - `../audit.md`
@@ -292,3 +293,14 @@ Future docs or implementation PRs may define:
 - future PR hooks are listed;
 - no code changes are introduced;
 - no ABI widening is claimed.
+
+## 13. Relationship to runtime adapter boundary
+
+The runtime adapter boundary is defined in:
+
+```text
+docs/spec/ui/ui_runtime_adapter_boundary.md
+```
+
+That document defines how normalized, admitted runtime requests move from
+`prom-ui-runtime` into platform adapters.
