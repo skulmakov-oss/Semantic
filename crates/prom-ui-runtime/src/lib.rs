@@ -29,10 +29,17 @@
 
 extern crate alloc;
 
+pub mod adapter_boundary;
 pub mod boundary_registry;
 pub mod visual_tokens;
 pub mod layout_primitives;
 pub mod component_metadata;
+
+pub use adapter_boundary::{
+    AdapterRequestId, DrawBatchId, FrameId, RecordingAdapter, UiAdapterFailure,
+    UiAdapterFailureKind, UiAdapterReject, UiAdapterRejectKind, UiAdapterRequest, UiAdapterResult,
+    UiAdapterTarget, UiAdapterValue, UiRuntimeAdapter, UiRuntimeEffect, WindowId,
+};
 
 use prom_ui::{UiCapabilityKind, UiOperationId};
 
