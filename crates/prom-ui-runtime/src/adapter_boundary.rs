@@ -1,41 +1,90 @@
 //! Spec-aligned skeleton boundary for `prom-ui-runtime`.
 //!
-//! This module is intentionally narrow: it defines the local runtime seam
-//! between admitted UI requests and a future platform adapter without owning
-//! any OS window backend, renderer, or ABI surface.
+//! This module defines the local seam between admitted, normalized UI runtime
+//! requests and a future platform adapter.
+//!
+//! It is intentionally narrow:
+//!
+//! - it defines logical IDs;
+//! - it defines a local `UiRuntimeEffect` taxonomy;
+//! - it defines normalized adapter request/result types;
+//! - it defines the `UiRuntimeAdapter` trait seam;
+//! - it provides `RecordingAdapter` as a deterministic no-op test adapter.
+//!
+//! ## Explicit non-goals
+//!
+//! This module does not provide:
+//!
+//! - real platform backend execution;
+//! - OS window creation;
+//! - native event loop ownership;
+//! - renderer or GPU access;
+//! - shader, texture, or font handling;
+//! - draw command binary encoding;
+//! - capability admission;
+//! - budget accounting;
+//! - audit admission or persistence;
+//! - ABI host-call surface;
+//! - VM integration.
+//!
+//! ## Boundary invariants
+//!
+//! - `AdapterRequestId`, `WindowId`, `FrameId`, and `DrawBatchId` are logical
+//!   session-local IDs.
+//! - Logical IDs are not OS handles.
+//! - Logical IDs are not capabilities.
+//! - `UiRuntimeEffect` is a local runtime boundary enum, not an ABI opcode.
+//! - `UiAdapterRequest` is a normalized local request, not a VM instruction.
+//! - `UiAdapterResult::Rejected` is an adapter-boundary rejection, not a
+//!   capability denial.
+//! - `UiAdapterResult::Failed` is an adapter/platform-style failure, not a
+//!   façade shape rejection.
+//! - `RecordingAdapter` records requests and returns synthetic normalized
+//!   results. It is not a backend and must not create windows or render pixels.
+//! - The adapter boundary must not expose VM state, source text, compiler IR,
+//!   OS handles, GPU handles, callbacks, or platform-native event structs.
+//!
+//! ## Future extension rule
+//!
+//! Any future platform adapter, renderer, event loop, ABI integration,
+//! capability enforcement, or audit/budget integration must be added in a
+//! separate PR with an explicit boundary review.
 
 use alloc::vec::Vec;
 
 /// Logical identifier for a runtime adapter request.
 ///
-/// This is session-local bookkeeping, not a capability and not a platform
-/// handle.
+/// This is session-local bookkeeping, not a capability, not a platform handle,
+/// and not a stable host resource identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AdapterRequestId(pub u64);
 
 /// Logical identifier for a runtime-managed window.
 ///
-/// This is a session-local logical ID, not an OS handle and not a capability.
+/// This is a session-local logical ID, not an OS handle, not a capability, and
+/// not a stable host resource identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct WindowId(pub u64);
 
 /// Logical identifier for a runtime-managed frame.
 ///
-/// This is a session-local logical ID, not a platform handle and not a
-/// capability.
+/// This is a session-local logical ID, not a platform handle, not a
+/// capability, and not a stable host resource identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FrameId(pub u64);
 
 /// Logical identifier for a bounded draw batch.
 ///
-/// This is a session-local logical ID, not a renderer object and not a
-/// capability.
+/// This is a session-local logical ID, not a renderer object, not a
+/// capability, and not a stable host resource identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DrawBatchId(pub u64);
 
 /// Local runtime effect kinds admitted by the adapter boundary skeleton.
 ///
 /// This is not an ABI opcode and does not imply real execution semantics.
+/// Adding a new effect here does not add a VM opcode, ABI call, capability, or
+/// platform implementation by itself.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UiRuntimeEffect {
     WindowCreate,
@@ -88,6 +137,9 @@ impl UiAdapterTarget {
 }
 
 /// Normalized runtime request delivered to the adapter boundary.
+///
+/// This request is assumed to be produced after higher-level admission or
+/// local façade validation. It must not carry raw host objects.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiAdapterRequest {
     pub request_id: AdapterRequestId,
@@ -173,6 +225,9 @@ impl UiAdapterFailure {
 }
 
 /// Normalized result returned by the adapter boundary.
+///
+/// `Rejected` and `Failed` are adapter outcomes. They do not represent
+/// capability admission decisions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum UiAdapterResult {
     Performed(UiAdapterValue),
@@ -197,7 +252,8 @@ impl UiAdapterResult {
 /// Boundary seam for future platform adapters.
 ///
 /// The trait is intentionally small and local to `prom-ui-runtime`. It does
-/// not expose VM state, OS handles, renderer internals, or ABI details.
+/// not expose VM state, OS handles, renderer internals, ABI details, or
+/// capability/audit policy decisions.
 pub trait UiRuntimeAdapter {
     fn submit(&mut self, request: UiAdapterRequest) -> UiAdapterResult;
 }
@@ -205,6 +261,8 @@ pub trait UiRuntimeAdapter {
 /// Deterministic no-op recording adapter for the boundary skeleton.
 ///
 /// It records requests in order and returns a normalized synthetic result.
+/// This adapter is deterministic and side-effect-free except for recording
+/// submitted requests in memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordingAdapter {
     requests: Vec<UiAdapterRequest>,
