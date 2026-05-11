@@ -141,6 +141,35 @@ mod tests {
         UiRuntimeEffectRequest::new(AdapterRequestId(request_id), effect_id, target)
     }
 
+    #[derive(Debug, Clone, Copy)]
+    enum TargetShape {
+        Empty,
+        WindowOnly,
+        Frame,
+        DrawBatch,
+        FrameWithoutWindow,
+        DrawBatchWithoutFrame,
+        DrawBatchWithoutWindow,
+    }
+
+    fn target_shape(shape: TargetShape) -> UiAdapterTarget {
+        match shape {
+            TargetShape::Empty => UiAdapterTarget::default(),
+            TargetShape::WindowOnly => UiAdapterTarget::window(WindowId(1)),
+            TargetShape::Frame => UiAdapterTarget::frame(WindowId(1), FrameId(2)),
+            TargetShape::DrawBatch => {
+                UiAdapterTarget::draw_batch(WindowId(1), FrameId(2), DrawBatchId(3))
+            }
+            TargetShape::FrameWithoutWindow => UiAdapterTarget::new(None, Some(FrameId(2)), None),
+            TargetShape::DrawBatchWithoutFrame => {
+                UiAdapterTarget::new(Some(WindowId(1)), None, Some(DrawBatchId(3)))
+            }
+            TargetShape::DrawBatchWithoutWindow => {
+                UiAdapterTarget::new(None, Some(FrameId(2)), Some(DrawBatchId(3)))
+            }
+        }
+    }
+
     #[test]
     fn window_create_accepts_empty_target() {
         let adapter = RecordingAdapter::new();
@@ -419,5 +448,324 @@ mod tests {
             UiAdmissionResult::Submitted(UiAdapterResult::Performed(UiAdapterValue::Unit))
         ));
         assert_eq!(facade.adapter().requests().len(), 2);
+    }
+
+    #[test]
+    fn target_shape_matrix_matches_contract() {
+        let cases = [
+            (UiRuntimeEffect::WindowCreate, TargetShape::Empty, true),
+            (UiRuntimeEffect::WindowCreate, TargetShape::WindowOnly, true),
+            (UiRuntimeEffect::WindowCreate, TargetShape::Frame, false),
+            (UiRuntimeEffect::WindowCreate, TargetShape::DrawBatch, false),
+            (UiRuntimeEffect::WindowCreate, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::WindowCreate,
+                TargetShape::DrawBatchWithoutFrame,
+                false,
+            ),
+            (
+                UiRuntimeEffect::WindowCreate,
+                TargetShape::DrawBatchWithoutWindow,
+                false,
+            ),
+            (UiRuntimeEffect::WindowClose, TargetShape::Empty, false),
+            (UiRuntimeEffect::WindowClose, TargetShape::WindowOnly, true),
+            (UiRuntimeEffect::WindowClose, TargetShape::Frame, false),
+            (UiRuntimeEffect::WindowClose, TargetShape::DrawBatch, false),
+            (UiRuntimeEffect::WindowClose, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::WindowClose,
+                TargetShape::DrawBatchWithoutFrame,
+                false,
+            ),
+            (
+                UiRuntimeEffect::WindowClose,
+                TargetShape::DrawBatchWithoutWindow,
+                false,
+            ),
+            (UiRuntimeEffect::PollEvents, TargetShape::Empty, true),
+            (UiRuntimeEffect::PollEvents, TargetShape::WindowOnly, true),
+            (UiRuntimeEffect::PollEvents, TargetShape::Frame, false),
+            (UiRuntimeEffect::PollEvents, TargetShape::DrawBatch, false),
+            (UiRuntimeEffect::PollEvents, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::PollEvents,
+                TargetShape::DrawBatchWithoutFrame,
+                false,
+            ),
+            (
+                UiRuntimeEffect::PollEvents,
+                TargetShape::DrawBatchWithoutWindow,
+                false,
+            ),
+            (UiRuntimeEffect::BeginFrame, TargetShape::Empty, false),
+            (UiRuntimeEffect::BeginFrame, TargetShape::WindowOnly, true),
+            (UiRuntimeEffect::BeginFrame, TargetShape::Frame, false),
+            (UiRuntimeEffect::BeginFrame, TargetShape::DrawBatch, false),
+            (UiRuntimeEffect::BeginFrame, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::BeginFrame,
+                TargetShape::DrawBatchWithoutFrame,
+                false,
+            ),
+            (
+                UiRuntimeEffect::BeginFrame,
+                TargetShape::DrawBatchWithoutWindow,
+                false,
+            ),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::Empty,
+                false,
+            ),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::WindowOnly,
+                false,
+            ),
+            (UiRuntimeEffect::SubmitDrawCommands, TargetShape::Frame, false),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::DrawBatch,
+                true,
+            ),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::FrameWithoutWindow,
+                false,
+            ),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::DrawBatchWithoutFrame,
+                false,
+            ),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::DrawBatchWithoutWindow,
+                false,
+            ),
+            (UiRuntimeEffect::EndFrame, TargetShape::Empty, false),
+            (UiRuntimeEffect::EndFrame, TargetShape::WindowOnly, false),
+            (UiRuntimeEffect::EndFrame, TargetShape::Frame, true),
+            (UiRuntimeEffect::EndFrame, TargetShape::DrawBatch, false),
+            (UiRuntimeEffect::EndFrame, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::EndFrame,
+                TargetShape::DrawBatchWithoutFrame,
+                false,
+            ),
+            (
+                UiRuntimeEffect::EndFrame,
+                TargetShape::DrawBatchWithoutWindow,
+                false,
+            ),
+        ];
+
+        for (index, (effect, shape, expected_valid)) in cases.into_iter().enumerate() {
+            let adapter = RecordingAdapter::new();
+            let mut facade = UiAdmissionFacade::new(adapter);
+
+            let result = facade.submit_admitted(request(
+                1_000 + index as u64,
+                effect,
+                target_shape(shape),
+            ));
+
+            assert_eq!(
+                matches!(result, UiAdmissionResult::Submitted(_)),
+                expected_valid,
+                "effect={effect:?}, shape={shape:?}"
+            );
+            assert_eq!(
+                facade.adapter().requests().len(),
+                if expected_valid { 1 } else { 0 },
+                "adapter submit count mismatch for effect={effect:?}, shape={shape:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn valid_matrix_cases_forward_exact_request() {
+        let cases = [
+            (
+                UiRuntimeEffect::WindowCreate,
+                TargetShape::Empty,
+                UiAdapterTarget::default(),
+            ),
+            (
+                UiRuntimeEffect::WindowCreate,
+                TargetShape::WindowOnly,
+                target_shape(TargetShape::WindowOnly),
+            ),
+            (
+                UiRuntimeEffect::WindowClose,
+                TargetShape::WindowOnly,
+                target_shape(TargetShape::WindowOnly),
+            ),
+            (
+                UiRuntimeEffect::PollEvents,
+                TargetShape::Empty,
+                UiAdapterTarget::default(),
+            ),
+            (
+                UiRuntimeEffect::PollEvents,
+                TargetShape::WindowOnly,
+                target_shape(TargetShape::WindowOnly),
+            ),
+            (
+                UiRuntimeEffect::BeginFrame,
+                TargetShape::WindowOnly,
+                target_shape(TargetShape::WindowOnly),
+            ),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::DrawBatch,
+                target_shape(TargetShape::DrawBatch),
+            ),
+            (
+                UiRuntimeEffect::EndFrame,
+                TargetShape::Frame,
+                target_shape(TargetShape::Frame),
+            ),
+        ];
+
+        for (index, (effect, shape, target)) in cases.into_iter().enumerate() {
+            let adapter = RecordingAdapter::new();
+            let mut facade = UiAdmissionFacade::new(adapter);
+            let request_id = AdapterRequestId(2_000 + index as u64);
+            let request = UiRuntimeEffectRequest::new(request_id, effect, target.clone());
+
+            let result = facade.submit_admitted(request);
+
+            assert!(matches!(
+                result,
+                UiAdmissionResult::Submitted(UiAdapterResult::Performed(UiAdapterValue::Unit))
+            ));
+            assert_eq!(facade.adapter().requests().len(), 1);
+
+            let forwarded = &facade.adapter().requests()[0];
+            assert_eq!(forwarded.request_id, request_id);
+            assert_eq!(forwarded.effect_id, effect);
+            assert_eq!(forwarded.target, target, "effect={effect:?}, shape={shape:?}");
+        }
+    }
+
+    #[test]
+    fn invalid_matrix_cases_do_not_reach_recording_adapter() {
+        let cases = [
+            (UiRuntimeEffect::WindowCreate, TargetShape::Frame),
+            (UiRuntimeEffect::WindowCreate, TargetShape::DrawBatch),
+            (UiRuntimeEffect::WindowClose, TargetShape::Empty),
+            (UiRuntimeEffect::WindowClose, TargetShape::Frame),
+            (UiRuntimeEffect::WindowClose, TargetShape::DrawBatch),
+            (UiRuntimeEffect::PollEvents, TargetShape::Frame),
+            (UiRuntimeEffect::PollEvents, TargetShape::DrawBatch),
+            (UiRuntimeEffect::PollEvents, TargetShape::FrameWithoutWindow),
+            (
+                UiRuntimeEffect::PollEvents,
+                TargetShape::DrawBatchWithoutFrame,
+            ),
+            (
+                UiRuntimeEffect::PollEvents,
+                TargetShape::DrawBatchWithoutWindow,
+            ),
+            (UiRuntimeEffect::BeginFrame, TargetShape::Empty),
+            (UiRuntimeEffect::BeginFrame, TargetShape::Frame),
+            (UiRuntimeEffect::BeginFrame, TargetShape::DrawBatch),
+            (UiRuntimeEffect::BeginFrame, TargetShape::FrameWithoutWindow),
+            (
+                UiRuntimeEffect::BeginFrame,
+                TargetShape::DrawBatchWithoutFrame,
+            ),
+            (
+                UiRuntimeEffect::BeginFrame,
+                TargetShape::DrawBatchWithoutWindow,
+            ),
+            (UiRuntimeEffect::SubmitDrawCommands, TargetShape::Empty),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::WindowOnly,
+            ),
+            (UiRuntimeEffect::SubmitDrawCommands, TargetShape::Frame),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::FrameWithoutWindow,
+            ),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::DrawBatchWithoutFrame,
+            ),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::DrawBatchWithoutWindow,
+            ),
+            (UiRuntimeEffect::EndFrame, TargetShape::Empty),
+            (UiRuntimeEffect::EndFrame, TargetShape::WindowOnly),
+            (UiRuntimeEffect::EndFrame, TargetShape::DrawBatch),
+            (UiRuntimeEffect::EndFrame, TargetShape::FrameWithoutWindow),
+            (UiRuntimeEffect::EndFrame, TargetShape::DrawBatchWithoutFrame),
+            (UiRuntimeEffect::EndFrame, TargetShape::DrawBatchWithoutWindow),
+        ];
+
+        for (index, (effect, shape)) in cases.into_iter().enumerate() {
+            let adapter = RecordingAdapter::new();
+            let mut facade = UiAdmissionFacade::new(adapter);
+
+            let result = facade.submit_admitted(request(
+                3_000 + index as u64,
+                effect,
+                target_shape(shape),
+            ));
+
+            assert!(matches!(result, UiAdmissionResult::Rejected(_)));
+            assert!(
+                facade.adapter().requests().is_empty(),
+                "invalid shape unexpectedly reached adapter for effect={effect:?}, shape={shape:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn window_create_does_not_accept_frame_or_batch_targets() {
+        let adapter = RecordingAdapter::new();
+        let mut facade = UiAdmissionFacade::new(adapter);
+
+        let frame_result = facade.submit_admitted(request(
+            4_000,
+            UiRuntimeEffect::WindowCreate,
+            target_shape(TargetShape::Frame),
+        ));
+        assert!(matches!(frame_result, UiAdmissionResult::Rejected(_)));
+        assert!(facade.adapter().requests().is_empty());
+
+        let batch_result = facade.submit_admitted(request(
+            4_001,
+            UiRuntimeEffect::WindowCreate,
+            target_shape(TargetShape::DrawBatch),
+        ));
+        assert!(matches!(batch_result, UiAdmissionResult::Rejected(_)));
+        assert!(facade.adapter().requests().is_empty());
+    }
+
+    #[test]
+    fn poll_events_does_not_accept_frame_or_batch_targets() {
+        let adapter = RecordingAdapter::new();
+        let mut facade = UiAdmissionFacade::new(adapter);
+
+        let frame_result = facade.submit_admitted(request(
+            4_100,
+            UiRuntimeEffect::PollEvents,
+            target_shape(TargetShape::Frame),
+        ));
+        assert!(matches!(frame_result, UiAdmissionResult::Rejected(_)));
+        assert!(facade.adapter().requests().is_empty());
+
+        let batch_result = facade.submit_admitted(request(
+            4_101,
+            UiRuntimeEffect::PollEvents,
+            target_shape(TargetShape::DrawBatch),
+        ));
+        assert!(matches!(batch_result, UiAdmissionResult::Rejected(_)));
+        assert!(facade.adapter().requests().is_empty());
     }
 }
