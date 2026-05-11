@@ -768,4 +768,145 @@ mod tests {
         assert!(matches!(batch_result, UiAdmissionResult::Rejected(_)));
         assert!(facade.adapter().requests().is_empty());
     }
+
+    #[test]
+    fn recording_adapter_facade_smoke_path_records_valid_ui_sequence() {
+        // This smoke path checks local façade routing only.
+        // It does not assert lifecycle ownership, capability admission,
+        // budget accounting, audit admission, or platform execution.
+        let mut facade = UiAdmissionFacade::new(RecordingAdapter::new());
+        let requests = [
+            request(
+                5_000,
+                UiRuntimeEffect::WindowCreate,
+                UiAdapterTarget::default(),
+            ),
+            request(
+                5_001,
+                UiRuntimeEffect::PollEvents,
+                UiAdapterTarget::window(WindowId(1)),
+            ),
+            request(
+                5_002,
+                UiRuntimeEffect::BeginFrame,
+                UiAdapterTarget::window(WindowId(1)),
+            ),
+            request(
+                5_003,
+                UiRuntimeEffect::SubmitDrawCommands,
+                UiAdapterTarget::draw_batch(WindowId(1), FrameId(10), DrawBatchId(100)),
+            ),
+            request(
+                5_004,
+                UiRuntimeEffect::EndFrame,
+                UiAdapterTarget::frame(WindowId(1), FrameId(10)),
+            ),
+            request(
+                5_005,
+                UiRuntimeEffect::WindowClose,
+                UiAdapterTarget::window(WindowId(1)),
+            ),
+        ];
+
+        for request in requests.iter().cloned() {
+            let result = facade.submit_admitted(request);
+            assert!(matches!(
+                result,
+                UiAdmissionResult::Submitted(UiAdapterResult::Performed(UiAdapterValue::Unit))
+            ));
+        }
+
+        let recorded = facade.adapter().requests();
+        assert_eq!(recorded.len(), requests.len());
+
+        for (recorded, expected) in recorded.iter().zip(requests.iter()) {
+            assert_eq!(
+                recorded,
+                &UiAdapterRequest::new(
+                    expected.request_id,
+                    expected.effect_id,
+                    expected.target.clone()
+                )
+            );
+        }
+
+        assert_eq!(
+            recorded.iter().map(|request| request.effect_id).collect::<alloc::vec::Vec<_>>(),
+            alloc::vec![
+                UiRuntimeEffect::WindowCreate,
+                UiRuntimeEffect::PollEvents,
+                UiRuntimeEffect::BeginFrame,
+                UiRuntimeEffect::SubmitDrawCommands,
+                UiRuntimeEffect::EndFrame,
+                UiRuntimeEffect::WindowClose,
+            ]
+        );
+    }
+
+    #[test]
+    fn recording_adapter_facade_smoke_path_stops_on_invalid_shape() {
+        // This smoke path checks local façade routing only.
+        // It does not assert lifecycle ownership, capability admission,
+        // budget accounting, audit admission, or platform execution.
+        let mut facade = UiAdmissionFacade::new(RecordingAdapter::new());
+
+        let valid_create = request(
+            6_000,
+            UiRuntimeEffect::WindowCreate,
+            UiAdapterTarget::default(),
+        );
+        let invalid_submit = request(
+            6_001,
+            UiRuntimeEffect::SubmitDrawCommands,
+            UiAdapterTarget::frame(WindowId(1), FrameId(10)),
+        );
+        let valid_close = request(
+            6_002,
+            UiRuntimeEffect::WindowClose,
+            UiAdapterTarget::window(WindowId(1)),
+        );
+
+        let create_result = facade.submit_admitted(valid_create.clone());
+        assert!(matches!(
+            create_result,
+            UiAdmissionResult::Submitted(UiAdapterResult::Performed(UiAdapterValue::Unit))
+        ));
+        let expected_create = UiAdapterRequest::new(
+            valid_create.request_id,
+            valid_create.effect_id,
+            valid_create.target.clone(),
+        );
+        assert_eq!(
+            facade.adapter().requests(),
+            &[expected_create.clone()]
+        );
+
+        let invalid_result = facade.submit_admitted(invalid_submit);
+        assert!(matches!(
+            invalid_result,
+            UiAdmissionResult::Rejected(UiAdmissionReject {
+                kind: UiAdmissionRejectKind::InvalidTargetForEffect,
+                effect_id: UiRuntimeEffect::SubmitDrawCommands
+            })
+        ));
+        assert_eq!(facade.adapter().requests(), &[expected_create.clone()]);
+
+        let close_result = facade.submit_admitted(valid_close.clone());
+        assert!(matches!(
+            close_result,
+            UiAdmissionResult::Submitted(UiAdapterResult::Performed(UiAdapterValue::Unit))
+        ));
+        let expected_close = UiAdapterRequest::new(
+            valid_close.request_id,
+            valid_close.effect_id,
+            valid_close.target.clone(),
+        );
+        assert_eq!(
+            facade.adapter().requests(),
+            &[
+                expected_create,
+                expected_close,
+            ]
+        );
+    }
 }
