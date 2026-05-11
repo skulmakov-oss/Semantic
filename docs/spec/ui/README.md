@@ -13,13 +13,14 @@ Related:
 - `ui_event_envelope_model.md`
 - `ui_frame_lifecycle_contract.md`
 - `ui_draw_command_batch_contract.md`
+- `ui_runtime_adapter_boundary.md`
 - `../../architecture/ui_host_runtime_effect_boundary.md`
 - `../../architecture/ui_full_effect_trace_ladder.md`
 
 This subbundle collects docs that define the boundary between the Semantic VM,
 runtime admission, capability and budget checks, audit intent, UI runtime, and
 platform adapters, plus the contracts for the envelopes, capability taxonomy,
-deterministic event model, frame lifecycle, and draw batch contract that move
-across that boundary.
+deterministic event model, frame lifecycle, draw batch contract, and runtime
+adapter boundary that move across that boundary.
 
 It does not add executable UI support.

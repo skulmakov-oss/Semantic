@@ -16,6 +16,7 @@ Related:
 - `README.md`
 - `../../architecture/ui_full_effect_trace_ladder.md`
 - `../../architecture/ui_committed_effect_boundary.md`
+- `ui_runtime_adapter_boundary.md`
 
 ## 1. Purpose
 
@@ -600,3 +601,14 @@ This document does not add:
 - no code changes;
 - no ABI widening;
 - no renderer/backend implementation.
+
+## 21. Relationship to runtime adapter boundary
+
+The runtime adapter boundary is defined in:
+
+```text
+docs/spec/ui/ui_runtime_adapter_boundary.md
+```
+
+This document defines the command batch shape consumed by
+`prom-ui-runtime` before adapter dispatch.
