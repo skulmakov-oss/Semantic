@@ -31,6 +31,7 @@ extern crate alloc;
 
 pub mod adapter_boundary;
 pub mod boundary_registry;
+pub mod admission_facade;
 pub mod visual_tokens;
 pub mod layout_primitives;
 pub mod component_metadata;
