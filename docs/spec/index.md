@@ -37,6 +37,7 @@ Current documents in this PR:
 - `ui/ui_frame_lifecycle_contract.md` - canonical UI frame lifecycle contract
 - `ui/ui_draw_command_batch_contract.md` - canonical minimal draw command batch contract
 - `ui/ui_runtime_adapter_boundary.md` - canonical UI runtime adapter boundary contract
+- `ui/ui_runtime_implementation_checkpoint.md` - UI runtime implementation checkpoint after I50-I63
 - `../architecture/ui_native_backend_boundary.md` - native facade transcript boundary and ownership split
 - `../architecture/ui_renderer_admission_boundary.md` - renderer admission boundary before implementation
 - `../architecture/ui_visual_design_doctrine.md` - Semantic UI visual design doctrine before renderer implementation
