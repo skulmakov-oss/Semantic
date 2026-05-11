@@ -15,6 +15,7 @@ Related:
 - `README.md`
 - `../../architecture/ui_full_effect_trace_ladder.md`
 - `../../architecture/ui_committed_effect_boundary.md`
+- `ui_draw_command_batch_contract.md`
 
 ## 1. Purpose
 
@@ -45,6 +46,9 @@ Frame-related effects from `I51`:
 - `BeginFrame`
 - `SubmitDrawCommands`
 - `EndFrame`
+
+The minimal batch contract for `SubmitDrawCommands` is defined in
+`ui_draw_command_batch_contract.md`.
 
 Frame-related capabilities from `I52`:
 
