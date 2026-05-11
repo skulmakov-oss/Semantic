@@ -32,6 +32,10 @@ impl UiRuntimeEffectRequest {
             target,
         }
     }
+
+    pub const fn into_adapter_request(self) -> UiAdapterRequest {
+        UiAdapterRequest::new(self.request_id, self.effect_id, self.target)
+    }
 }
 
 /// Reasons the local façade can reject an effect request before dispatch.
@@ -47,6 +51,16 @@ pub struct UiAdmissionReject {
     pub effect_id: UiRuntimeEffect,
 }
 
+impl UiAdmissionReject {
+    pub const fn new(kind: UiAdmissionRejectKind, effect_id: UiRuntimeEffect) -> Self {
+        Self { kind, effect_id }
+    }
+
+    pub const fn invalid_target_for_effect(effect_id: UiRuntimeEffect) -> Self {
+        Self::new(UiAdmissionRejectKind::InvalidTargetForEffect, effect_id)
+    }
+}
+
 /// Result of the local admission façade.
 ///
 /// `Rejected` means the request failed local shape validation and never
@@ -56,6 +70,38 @@ pub struct UiAdmissionReject {
 pub enum UiAdmissionResult {
     Submitted(UiAdapterResult),
     Rejected(UiAdmissionReject),
+}
+
+impl UiAdmissionResult {
+    pub const fn submitted(result: UiAdapterResult) -> Self {
+        Self::Submitted(result)
+    }
+
+    pub const fn rejected(reject: UiAdmissionReject) -> Self {
+        Self::Rejected(reject)
+    }
+
+    pub const fn is_submitted(&self) -> bool {
+        matches!(self, Self::Submitted(_))
+    }
+
+    pub const fn is_rejected(&self) -> bool {
+        matches!(self, Self::Rejected(_))
+    }
+
+    pub const fn as_submitted(&self) -> Option<&UiAdapterResult> {
+        match self {
+            Self::Submitted(result) => Some(result),
+            Self::Rejected(_) => None,
+        }
+    }
+
+    pub const fn as_rejected(&self) -> Option<&UiAdmissionReject> {
+        match self {
+            Self::Rejected(reject) => Some(reject),
+            Self::Submitted(_) => None,
+        }
+    }
 }
 
 /// Local façade that validates request shape and then forwards admitted
@@ -79,19 +125,14 @@ impl<A: UiRuntimeAdapter> UiAdmissionFacade<A> {
 
     pub fn submit_admitted(&mut self, request: UiRuntimeEffectRequest) -> UiAdmissionResult {
         if !target_shape_is_valid(request.effect_id, &request.target) {
-            return UiAdmissionResult::Rejected(UiAdmissionReject {
-                kind: UiAdmissionRejectKind::InvalidTargetForEffect,
-                effect_id: request.effect_id,
-            });
+            return UiAdmissionResult::rejected(UiAdmissionReject::invalid_target_for_effect(
+                request.effect_id,
+            ));
         }
 
-        let adapter_request = UiAdapterRequest::new(
-            request.request_id,
-            request.effect_id,
-            request.target,
-        );
+        let adapter_request = request.into_adapter_request();
 
-        UiAdmissionResult::Submitted(self.adapter.submit(adapter_request))
+        UiAdmissionResult::submitted(self.adapter.submit(adapter_request))
     }
 }
 
@@ -168,6 +209,73 @@ mod tests {
                 UiAdapterTarget::new(None, Some(FrameId(2)), Some(DrawBatchId(3)))
             }
         }
+    }
+
+    #[test]
+    fn admission_result_helpers_identify_submitted() {
+        let result = UiAdmissionResult::submitted(UiAdapterResult::performed(
+            UiAdapterValue::Unit,
+        ));
+
+        assert!(result.is_submitted());
+        assert!(!result.is_rejected());
+        assert!(matches!(result.as_submitted(), Some(UiAdapterResult::Performed(UiAdapterValue::Unit))));
+        assert_eq!(result.as_rejected(), None);
+    }
+
+    #[test]
+    fn admission_result_helpers_identify_rejected() {
+        let reject = UiAdmissionReject::invalid_target_for_effect(UiRuntimeEffect::EndFrame);
+        let result = UiAdmissionResult::rejected(reject);
+
+        assert!(!result.is_submitted());
+        assert!(result.is_rejected());
+        assert_eq!(result.as_submitted(), None);
+        assert_eq!(result.as_rejected(), Some(&reject));
+    }
+
+    #[test]
+    fn admission_result_as_submitted_returns_adapter_result() {
+        let adapter_result = UiAdapterResult::failed(UiAdapterFailureKind::BackendUnavailable);
+        let result = UiAdmissionResult::submitted(adapter_result.clone());
+
+        assert_eq!(result.as_submitted(), Some(&adapter_result));
+        assert_eq!(result.as_rejected(), None);
+    }
+
+    #[test]
+    fn admission_result_as_rejected_returns_reject_payload() {
+        let reject = UiAdmissionReject::new(
+            UiAdmissionRejectKind::InvalidTargetForEffect,
+            UiRuntimeEffect::SubmitDrawCommands,
+        );
+        let result = UiAdmissionResult::rejected(reject);
+
+        assert_eq!(result.as_submitted(), None);
+        assert_eq!(result.as_rejected(), Some(&reject));
+    }
+
+    #[test]
+    fn admission_reject_constructor_sets_kind_and_effect() {
+        let reject = UiAdmissionReject::invalid_target_for_effect(UiRuntimeEffect::WindowClose);
+
+        assert_eq!(reject.kind, UiAdmissionRejectKind::InvalidTargetForEffect);
+        assert_eq!(reject.effect_id, UiRuntimeEffect::WindowClose);
+    }
+
+    #[test]
+    fn runtime_effect_request_converts_to_adapter_request_without_rewriting_fields() {
+        let request = UiRuntimeEffectRequest::new(
+            AdapterRequestId(9_999),
+            UiRuntimeEffect::SubmitDrawCommands,
+            UiAdapterTarget::draw_batch(WindowId(4), FrameId(5), DrawBatchId(6)),
+        );
+
+        let adapter_request = request.clone().into_adapter_request();
+
+        assert_eq!(adapter_request.request_id, request.request_id);
+        assert_eq!(adapter_request.effect_id, request.effect_id);
+        assert_eq!(adapter_request.target, request.target);
     }
 
     #[test]
