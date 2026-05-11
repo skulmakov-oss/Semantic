@@ -1,8 +1,54 @@
 //! Local admission façade skeleton for `prom-ui-runtime`.
 //!
-//! This module validates only the local request shape before mapping it to
-//! the adapter boundary. It does not perform real capability enforcement,
-//! budget accounting, audit admission, or platform execution.
+//! This module is the narrow local routing layer between a runtime-local UI
+//! effect request shape and the adapter boundary.
+//!
+//! It performs only target-shape validation:
+//!
+//! - whether an effect has the required logical `WindowId`;
+//! - whether an effect has the required logical `FrameId`;
+//! - whether an effect has the required logical `DrawBatchId`;
+//! - whether an effect contains target IDs that are forbidden for that effect.
+//!
+//! It then maps the request to `UiAdapterRequest` and forwards it to a
+//! `UiRuntimeAdapter`.
+//!
+//! ## Explicit non-goals
+//!
+//! This module does not perform:
+//!
+//! - real capability enforcement;
+//! - budget accounting;
+//! - audit admission or audit persistence;
+//! - lifecycle state ownership;
+//! - window ownership checks;
+//! - draw batch validation;
+//! - event batch normalization;
+//! - ABI decoding;
+//! - VM host-call integration;
+//! - platform execution.
+//!
+//! ## Boundary invariants
+//!
+//! - `UiRuntimeEffectRequest` is not an ABI envelope.
+//! - `UiRuntimeEffect` is not an ABI opcode.
+//! - `WindowId`, `FrameId`, and `DrawBatchId` are logical IDs, not capabilities.
+//! - `UiAdmissionFacade` is not a security admission layer.
+//! - `UiAdmissionResult::Rejected` means the façade rejected the local request
+//!   before adapter dispatch.
+//! - `UiAdmissionResult::Submitted(UiAdapterResult::Rejected(_))` means the
+//!   adapter boundary received the request and rejected it.
+//! - `UiAdmissionResult::Submitted(UiAdapterResult::Failed(_))` means the
+//!   adapter boundary received the request and reported a failure.
+//! - Invalid target shapes must not reach the adapter.
+//! - Valid target shapes must preserve `request_id`, `effect_id`, and `target`
+//!   exactly when converted into `UiAdapterRequest`.
+//!
+//! ## Future extension rule
+//!
+//! Any future extension that adds capability checks, budget checks, audit
+//! admission, lifecycle ownership, VM integration, or platform execution must
+//! happen in a separate PR and must not be hidden inside this façade.
 
 use crate::adapter_boundary::{
     AdapterRequestId, DrawBatchId, FrameId, UiAdapterRequest, UiAdapterResult, UiAdapterTarget,
@@ -11,8 +57,10 @@ use crate::adapter_boundary::{
 
 /// Local runtime request shape accepted by the admission façade.
 ///
-/// This is a runtime-local shape, not a public ABI envelope and not a
-/// capability authority.
+/// This is a runtime-local shape, not a public ABI envelope, not a verified
+/// `UiEffectEnvelope`, and not a capability authority. The façade validates
+/// only whether the target shape is compatible with the local
+/// `UiRuntimeEffect`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiRuntimeEffectRequest {
     pub request_id: AdapterRequestId,
@@ -172,8 +220,12 @@ impl UiAdmissionResult {
     }
 }
 
-/// Local façade that validates request shape and then forwards admitted
-/// requests to the adapter boundary.
+/// Local façade that validates request shape and forwards admitted requests
+/// to the adapter boundary.
+///
+/// This façade assumes capability, budget, and audit admission either
+/// happened earlier or are intentionally absent in the current local-only
+/// skeleton. It must not become the owner of global security policy.
 pub struct UiAdmissionFacade<A: UiRuntimeAdapter> {
     adapter: A,
 }
@@ -191,6 +243,11 @@ impl<A: UiRuntimeAdapter> UiAdmissionFacade<A> {
         &mut self.adapter
     }
 
+    /// Validate the local target shape and submit to the adapter boundary.
+    ///
+    /// `Rejected` means the request did not reach the adapter.
+    /// `Submitted(...)` means the request reached the adapter and the contained
+    /// `UiAdapterResult` is the adapter's own outcome.
     pub fn submit_admitted(&mut self, request: UiRuntimeEffectRequest) -> UiAdmissionResult {
         if !target_shape_is_valid(request.effect_id, &request.target) {
             return UiAdmissionResult::rejected(UiAdmissionReject::invalid_target_for_effect(
@@ -204,6 +261,10 @@ impl<A: UiRuntimeAdapter> UiAdmissionFacade<A> {
     }
 }
 
+/// Local target-shape check only.
+///
+/// This function does not validate capabilities, budgets, audit state,
+/// lifecycle state, window ownership, draw batch contents, or backend support.
 fn target_shape_is_valid(effect_id: UiRuntimeEffect, target: &UiAdapterTarget) -> bool {
     match effect_id {
         UiRuntimeEffect::WindowCreate => target.frame_id.is_none() && target.draw_batch_id.is_none(),
