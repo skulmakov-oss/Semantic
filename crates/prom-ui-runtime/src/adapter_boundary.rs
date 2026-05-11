@@ -291,17 +291,155 @@ mod tests {
     }
 
     #[test]
-    fn logical_ids_are_separate_newtypes() {
+    fn window_target_does_not_include_frame_or_batch() {
+        let target = UiAdapterTarget::window(WindowId(1));
+
+        assert_eq!(target.window_id, Some(WindowId(1)));
+        assert_eq!(target.frame_id, None);
+        assert_eq!(target.draw_batch_id, None);
+    }
+
+    #[test]
+    fn frame_target_does_not_include_draw_batch() {
+        let target = UiAdapterTarget::frame(WindowId(1), FrameId(2));
+
+        assert_eq!(target.window_id, Some(WindowId(1)));
+        assert_eq!(target.frame_id, Some(FrameId(2)));
+        assert_eq!(target.draw_batch_id, None);
+    }
+
+    #[test]
+    fn draw_batch_target_contains_all_logical_ids() {
+        let target = UiAdapterTarget::draw_batch(WindowId(1), FrameId(2), DrawBatchId(3));
+
+        assert_eq!(target.window_id, Some(WindowId(1)));
+        assert_eq!(target.frame_id, Some(FrameId(2)));
+        assert_eq!(target.draw_batch_id, Some(DrawBatchId(3)));
+    }
+
+    #[test]
+    fn request_identity_is_not_target_identity() {
+        let request_id = AdapterRequestId(1);
+        let window_id = WindowId(1);
+        let frame_id = FrameId(2);
         let request = UiAdapterRequest::new(
-            AdapterRequestId(9),
+            request_id,
             UiRuntimeEffect::BeginFrame,
-            UiAdapterTarget::frame(WindowId(100), FrameId(200)),
+            UiAdapterTarget::frame(window_id, frame_id),
         );
 
-        assert_eq!(request.request_id, AdapterRequestId(9));
-        assert_eq!(request.target.window_id, Some(WindowId(100)));
-        assert_eq!(request.target.frame_id, Some(FrameId(200)));
+        assert_eq!(request.request_id, request_id);
+        assert_eq!(request.target.window_id, Some(window_id));
+        assert_eq!(request.target.frame_id, Some(frame_id));
         assert_eq!(request.target.draw_batch_id, None);
+    }
+
+    #[test]
+    fn recording_adapter_preserves_rejected_result() {
+        let mut adapter = RecordingAdapter::with_result(UiAdapterResult::rejected(
+            UiAdapterRejectKind::UnsupportedEffect,
+        ));
+        let request = UiAdapterRequest::new(
+            AdapterRequestId(5),
+            UiRuntimeEffect::SubmitDrawCommands,
+            UiAdapterTarget::draw_batch(WindowId(9), FrameId(8), DrawBatchId(7)),
+        );
+
+        let result = adapter.submit(request.clone());
+
+        assert_eq!(
+            result,
+            UiAdapterResult::Rejected(UiAdapterReject::unsupported_effect())
+        );
+        assert_eq!(adapter.requests(), &[request]);
+    }
+
+    #[test]
+    fn recording_adapter_preserves_failed_result() {
+        let mut adapter =
+            RecordingAdapter::with_result(UiAdapterResult::failed(UiAdapterFailureKind::BackendUnavailable));
+        let request = UiAdapterRequest::new(
+            AdapterRequestId(6),
+            UiRuntimeEffect::EndFrame,
+            UiAdapterTarget::frame(WindowId(3), FrameId(4)),
+        );
+
+        let result = adapter.submit(request.clone());
+
+        assert_eq!(
+            result,
+            UiAdapterResult::Failed(UiAdapterFailure::backend_unavailable())
+        );
+        assert_eq!(adapter.requests(), &[request]);
+    }
+
+    #[test]
+    fn invalid_request_is_rejection_not_failure() {
+        let result = UiAdapterResult::rejected(UiAdapterRejectKind::InvalidRequest);
+
+        assert!(matches!(
+            result,
+            UiAdapterResult::Rejected(UiAdapterReject {
+                kind: UiAdapterRejectKind::InvalidRequest
+            })
+        ));
+        assert!(!matches!(result, UiAdapterResult::Failed(_)));
+    }
+
+    #[test]
+    fn backend_unavailable_is_failure_not_rejection() {
+        let result = UiAdapterResult::failed(UiAdapterFailureKind::BackendUnavailable);
+
+        assert!(matches!(
+            result,
+            UiAdapterResult::Failed(UiAdapterFailure {
+                kind: UiAdapterFailureKind::BackendUnavailable
+            })
+        ));
+        assert!(!matches!(result, UiAdapterResult::Rejected(_)));
+    }
+
+    #[test]
+    fn into_requests_preserves_recorded_order() {
+        let mut adapter = RecordingAdapter::new();
+        let first = UiAdapterRequest::new(
+            AdapterRequestId(11),
+            UiRuntimeEffect::WindowClose,
+            UiAdapterTarget::window(WindowId(1)),
+        );
+        let second = UiAdapterRequest::new(
+            AdapterRequestId(12),
+            UiRuntimeEffect::PollEvents,
+            UiAdapterTarget::window(WindowId(2)),
+        );
+        let third = UiAdapterRequest::new(
+            AdapterRequestId(13),
+            UiRuntimeEffect::BeginFrame,
+            UiAdapterTarget::frame(WindowId(3), FrameId(4)),
+        );
+
+        let _ = adapter.submit(first.clone());
+        let _ = adapter.submit(second.clone());
+        let _ = adapter.submit(third.clone());
+
+        assert_eq!(adapter.into_requests(), vec![first, second, third]);
+    }
+
+    #[test]
+    fn recording_adapter_default_has_no_requests() {
+        let adapter = RecordingAdapter::default();
+
+        assert!(adapter.requests().is_empty());
+    }
+
+    #[test]
+    fn unit_result_is_normalized_success_value() {
+        let result = UiAdapterResult::performed(UiAdapterValue::Unit);
+
+        assert!(matches!(
+            result,
+            UiAdapterResult::Performed(UiAdapterValue::Unit)
+        ));
     }
 
     #[test]
@@ -314,10 +452,7 @@ mod tests {
         assert_ne!(rejected, invalid);
         assert_ne!(platform_failure, backend_unavailable);
         assert_ne!(rejected, platform_failure);
-        assert_eq!(
-            UiAdapterRejectKind::UnsupportedEffect,
-            UiAdapterRejectKind::UnsupportedEffect
-        );
+        assert_eq!(UiAdapterRejectKind::UnsupportedEffect, UiAdapterRejectKind::UnsupportedEffect);
         assert_ne!(
             UiAdapterRejectKind::UnsupportedEffect,
             UiAdapterRejectKind::InvalidRequest
