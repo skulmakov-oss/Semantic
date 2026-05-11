@@ -16,6 +16,7 @@ Related:
 - `ui_runtime_adapter_boundary.md`
 - `ui_runtime_implementation_checkpoint.md`
 - `local_runtime_skeleton_api_map.md`
+- `local_runtime_command_result_envelope.md`
 - `../../architecture/ui_host_runtime_effect_boundary.md`
 - `../../architecture/ui_full_effect_trace_ladder.md`
 
