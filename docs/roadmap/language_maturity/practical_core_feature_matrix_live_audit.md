@@ -232,7 +232,7 @@ be audited against current `main` before it can support planning claims.
 | FM-037 | CLI | `smc check` | confirmed-working | `E1-code: crates/smc-cli/src/app.rs::cmd_check; E2-test: tests/snake_benchmark_gap_matrix.rs::snake_benchmark_positive_surface_passes_end_to_end` | unit test | none | PCC-0.5 | none | Practical Hell | none |
 | FM-038 | CLI | `smc compile` | confirmed-working | `E1-code: crates/smc-cli/src/app.rs::cmd_compile; E2-test: tests/canonical_examples.rs::canonical_positive_examples_check_run_compile_and_verify` | unit test | none | PCC-0.5 | none | Practical Hell | none |
 | FM-039 | CLI | `smc verify` | confirmed-working | `E1-code: crates/smc-cli/src/app.rs::cmd_verify; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_stage_summaries_match_current_baseline` | unit test | none | PCC-0.5 | verifier | Verifier Hell | none |
-| FM-040 | CLI | `smc run-smc` | confirmed-partial | `E1-code: crates/smc-cli/src/app.rs::cmd_run_smc; E0-doc: crates/smc-cli/src/app.rs::usage` | manual inspection only | no direct CLI test invoking `smc run-smc` was found in this checkout | PCC-0.5 | none | Practical Hell | add one focused CLI test that runs `smc run-smc` on an emitted SemCode artifact |
+| FM-040 | CLI | `smc run-smc` | confirmed-working | `E2-test: tests/smc_run_smc_cli.rs::smc_run_smc_executes_emitted_semcode_artifact; E1-code: crates/smc-cli/src/app.rs::cmd_run_smc` | check -> compile -> verify -> run-smc | none | PCC-0.5 | none | Practical Hell | none |
 | FM-041 | CLI | project model v0 | unknown | TBD | TBD | TBD | PCC-9 | none | Practical Hell | audit |
 | FM-042 | Examples | canonical full-pipeline examples | confirmed-working | `E2-test: tests/canonical_examples.rs::canonical_positive_examples_check_run_compile_and_verify; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_stage_summaries_match_current_baseline` | check -> compile -> verify -> run-smc | none | PCC-0.5 | trace | Practical Hell | none |
 | FM-043 | UI boundary | UI docs phase v0 | confirmed-working | PR-PCC-0A / I67-I69 docs closure | documentation audit | none | none | none | none | keep frozen |
@@ -336,14 +336,13 @@ This PR is complete when:
 |---|---:|---:|---|
 | Control flow | 5 | 0 | none |
 | Execution trust | 2 | 0 | `FM-035` and `FM-036` stay partial until CTF freeze rows are closed |
-| CLI | 3 | 0 | `FM-040` needs a direct `smc run-smc` test |
+| CLI | 4 | 0 | none |
 | Examples | 1 | 0 | none |
 
 PCC-1 start status: `blocked`
 Reason: control-flow and CLI core paths now have concrete evidence, but the
 execution trust lane is still only partially frozen for trap taxonomy and
-determinism, and `smc run-smc` still needs a direct CLI test before the blocker
-set is fully closed.
+determinism.
 
 ## 16. Final state
 
