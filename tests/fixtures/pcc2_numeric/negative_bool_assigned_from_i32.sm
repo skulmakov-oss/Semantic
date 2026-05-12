@@ -1,0 +1,3 @@
+fn main() {
+    let flag: bool = 1 + 2;
+}

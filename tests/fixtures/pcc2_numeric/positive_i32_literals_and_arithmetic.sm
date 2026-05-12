@@ -1,0 +1,8 @@
+fn main() {
+    let a: i32 = 1;
+    let b: i32 = 2 + 3;
+    let c: i32 = a + b;
+    let d: i32 = c - 1;
+    let e: i32 = d * 2;
+    assert(e == 10);
+}
