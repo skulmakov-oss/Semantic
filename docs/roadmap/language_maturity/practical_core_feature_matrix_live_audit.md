@@ -198,11 +198,11 @@ be audited against current `main` before it can support planning claims.
 | FM-003 | Language surface | `let` bindings | unknown | TBD | TBD | TBD | PCC-0.5 | value | Type Hell | audit |
 | FM-004 | Language surface | `let mut` | unknown | TBD | TBD | TBD | PCC-0.5 / PCC-1 | value | Type Hell | audit |
 | FM-005 | Language surface | reassignment | unknown | TBD | TBD | TBD | PCC-0.5 / PCC-1 | value | Type Hell | audit |
-| FM-006 | Control flow | `if / else` | unknown | TBD | TBD | TBD | PCC-0.5 | determinism | Syntax Hell | audit |
-| FM-007 | Control flow | `while` | unknown | TBD | TBD | TBD | PCC-1 | determinism | VM Hell | audit |
-| FM-008 | Control flow | statement `loop` | unknown | TBD | TBD | TBD | PCC-1 | determinism | VM Hell | audit |
-| FM-009 | Control flow | `break` | unknown | TBD | TBD | TBD | PCC-1 | trap | VM Hell | audit |
-| FM-010 | Control flow | `continue` | unknown | TBD | TBD | TBD | PCC-1 | determinism | VM Hell | audit |
+| FM-006 | Control flow | `if / else` | confirmed-working | `E2-test: crates/sm-front/src/parser.rs::rustlike_parser_accepts_if_expression; E2-test: tests/bytecode_compat.rs::compat_i32_value_path_runs_under_v0_header; E0-doc: docs/roadmap/full_readiness_non_ui.md` | integration test | none | PCC-1 | determinism | Syntax Hell | none |
+| FM-007 | Control flow | `while` | confirmed-working | `E2-test: crates/sm-front/src/typecheck.rs::while_statement_with_bool_condition_typechecks; E2-test: tests/fixtures/snake_benchmark/positive_while_loop.sm; E2-test: tests/snake_benchmark_gap_matrix.rs::snake_benchmark_positive_surface_passes_end_to_end` | check -> compile -> verify -> run-smc | none | PCC-1 | determinism | Syntax Hell | none |
+| FM-008 | Control flow | statement `loop` | confirmed-working | `E2-test: crates/sm-front/src/typecheck.rs::statement_loop_with_continue_and_bare_break_typechecks; E2-test: tests/fixtures/snake_benchmark/positive_loop_control.sm; E2-test: tests/snake_benchmark_gap_matrix.rs::snake_benchmark_positive_surface_passes_end_to_end` | check -> compile -> verify -> run-smc | none | PCC-1 | determinism | Syntax Hell | none |
+| FM-009 | Control flow | `break` | confirmed-working | `E2-test: crates/sm-front/src/typecheck.rs::bare_break_outside_loop_rejects; E2-test: tests/fixtures/snake_benchmark/negative_loop_break.sm; E2-test: tests/fixtures/snake_benchmark/positive_loop_control.sm` | integration test | none | PCC-1 | trap / determinism | Syntax Hell | none |
+| FM-010 | Control flow | `continue` | confirmed-working | `E2-test: crates/sm-front/src/typecheck.rs::continue_outside_loop_rejects; E2-test: tests/fixtures/snake_benchmark/negative_continue_statement.sm; E2-test: tests/fixtures/snake_benchmark/positive_loop_control.sm` | integration test | none | PCC-1 | determinism | Syntax Hell | none |
 | FM-011 | Type system | `quad` | unknown | TBD | TBD | TBD | PCC-0.5 | value | Type Hell | audit |
 | FM-012 | Type system | `bool` | unknown | TBD | TBD | TBD | PCC-0.5 | value | Type Hell | audit |
 | FM-013 | Numeric core | `i32` arithmetic | unknown | TBD | TBD | TBD | PCC-2 | value/trap | VM Hell | audit |
@@ -225,16 +225,16 @@ be audited against current `main` before it can support planning claims.
 | FM-030 | Stdlib | `to_text` | unknown | TBD | TBD | TBD | PCC-8 | value | Practical Hell | audit |
 | FM-031 | Modules | import surface | unknown | TBD | TBD | TBD | PCC-0.5 | none | Syntax Hell | audit |
 | FM-032 | Modules | export / re-export surface | unknown | TBD | TBD | TBD | PCC-0.5 | none | Syntax Hell | audit |
-| FM-033 | Execution | verifier admission | unknown | TBD | TBD | TBD | PCC-0.5 | verifier | Verifier Hell | audit |
-| FM-034 | Execution | VM execution path | unknown | TBD | TBD | TBD | PCC-0.5 | determinism | VM Hell | audit |
-| FM-035 | Execution | trap taxonomy | unknown | TBD | TBD | TBD | CTF | trap | VM Hell | audit |
-| FM-036 | Execution | determinism matrix | unknown | TBD | TBD | TBD | CTF | determinism | VM Hell | audit |
-| FM-037 | CLI | `smc check` | unknown | TBD | TBD | TBD | PCC-0.5 | none | Syntax Hell | audit |
-| FM-038 | CLI | `smc compile` | unknown | TBD | TBD | TBD | PCC-0.5 | none | Lowering Hell | audit |
-| FM-039 | CLI | `smc verify` | unknown | TBD | TBD | TBD | PCC-0.5 | verifier | Verifier Hell | audit |
-| FM-040 | CLI | `smc run-smc` | unknown | TBD | TBD | TBD | PCC-0.5 | determinism | VM Hell | audit |
+| FM-033 | Execution | verifier admission | confirmed-working | `E0-doc: docs/spec/semcode.md; E1-code: crates/sm-vm/src/semcode_vm.rs::run_verified_semcode_with_entry_and_config; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_malformed_semcode_rejects_before_execution` | check -> compile -> verify | none | CTF | verifier | Verifier Hell | none |
+| FM-034 | Execution | VM execution path | confirmed-working | `E1-code: crates/sm-vm/src/semcode_vm.rs::run_verified_semcode_with_entry_and_config; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_stage_summaries_match_current_baseline; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_repeated_compiles_are_byte_stable` | check -> compile -> verify -> run-smc | none | CTF | determinism | VM Hell | none |
+| FM-035 | Execution | trap taxonomy | confirmed-partial | `E0-doc: docs/roadmap/language_maturity/core_trust_freeze/trap_taxonomy.md; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_malformed_semcode_rejects_before_execution; E2-test: tests/snake_benchmark_gap_matrix.rs::snake_benchmark_runtime_negative_reports_contract_violations` | integration test | CTF-2 remains a draft taxonomy with freeze-candidate and planned classes | CTF | trap | VM Hell | freeze the remaining runtime-failure classes before introducing any new trap kind |
+| FM-036 | Execution | determinism matrix | confirmed-partial | `E0-doc: docs/roadmap/language_maturity/core_trust_freeze/determinism_matrix.md; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_repeated_compiles_are_byte_stable; E2-test: tests/canonical_examples.rs::canonical_positive_examples_check_run_compile_and_verify` | integration test | CTF-3 still marks verifier/VM rows as audit-needed rather than frozen | CTF | determinism | VM Hell | convert the remaining audit-needed trust rows into frozen repeat-run fixtures |
+| FM-037 | CLI | `smc check` | confirmed-working | `E1-code: crates/smc-cli/src/app.rs::cmd_check; E2-test: tests/snake_benchmark_gap_matrix.rs::snake_benchmark_positive_surface_passes_end_to_end` | unit test | none | PCC-0.5 | none | Practical Hell | none |
+| FM-038 | CLI | `smc compile` | confirmed-working | `E1-code: crates/smc-cli/src/app.rs::cmd_compile; E2-test: tests/canonical_examples.rs::canonical_positive_examples_check_run_compile_and_verify` | unit test | none | PCC-0.5 | none | Practical Hell | none |
+| FM-039 | CLI | `smc verify` | confirmed-working | `E1-code: crates/smc-cli/src/app.rs::cmd_verify; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_stage_summaries_match_current_baseline` | unit test | none | PCC-0.5 | verifier | Verifier Hell | none |
+| FM-040 | CLI | `smc run-smc` | confirmed-partial | `E1-code: crates/smc-cli/src/app.rs::cmd_run_smc; E0-doc: crates/smc-cli/src/app.rs::usage` | manual inspection only | no direct CLI test invoking `smc run-smc` was found in this checkout | PCC-0.5 | none | Practical Hell | add one focused CLI test that runs `smc run-smc` on an emitted SemCode artifact |
 | FM-041 | CLI | project model v0 | unknown | TBD | TBD | TBD | PCC-9 | none | Practical Hell | audit |
-| FM-042 | Examples | canonical full-pipeline examples | unknown | TBD | TBD | TBD | PCC-0.5 | determinism | Practical Hell | audit |
+| FM-042 | Examples | canonical full-pipeline examples | confirmed-working | `E2-test: tests/canonical_examples.rs::canonical_positive_examples_check_run_compile_and_verify; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_stage_summaries_match_current_baseline` | check -> compile -> verify -> run-smc | none | PCC-0.5 | trace | Practical Hell | none |
 | FM-043 | UI boundary | UI docs phase v0 | confirmed-working | PR-PCC-0A / I67-I69 docs closure | documentation audit | none | none | none | none | keep frozen |
 | FM-044 | UI boundary | Workbench implementation | out-of-scope | PCC-0 truth reset | not applicable | frozen | post-PCC | none | none | exclude |
 | FM-045 | Experimental | sm-quad / packed quad substrate | unknown | TBD | TBD | TBD | post-PCC / experimental | value | none | audit as experimental |
@@ -330,7 +330,22 @@ This PR is complete when:
 - 7hell stage field is required;
 - no code is changed.
 
-## 15. Final state
+## 15. PCC-0D audit pass 1 summary
+
+| Group | Resolved | Still unknown | Main blocker |
+|---|---:|---:|---|
+| Control flow | 5 | 0 | none |
+| Execution trust | 2 | 0 | `FM-035` and `FM-036` stay partial until CTF freeze rows are closed |
+| CLI | 3 | 0 | `FM-040` needs a direct `smc run-smc` test |
+| Examples | 1 | 0 | none |
+
+PCC-1 start status: `blocked`
+Reason: control-flow and CLI core paths now have concrete evidence, but the
+execution trust lane is still only partially frozen for trap taxonomy and
+determinism, and `smc run-smc` still needs a direct CLI test before the blocker
+set is fully closed.
+
+## 16. Final state
 
 After this scaffold exists:
 
