@@ -554,16 +554,19 @@ with production shifts / breaks: 9–12 months
 
 ## 20. Gate before PCC-1
 
-PCC-1 must not start until these are complete:
+PCC-1 is conditionally unblockable after the PCC-0 blocker audit gate is
+closed and maintainers accept the audited state.
 
 ```text
-[ ] PCC-0 Truth Reset
-[ ] PCC-0.5 Feature Matrix Live Audit
-[ ] PCC-0.6 7hell Skeleton Seed
-[ ] CTF-0 Core Trust Freeze directory
+PCC-0 Truth Reset: landed
+PCC-0.5 Feature Matrix Live Audit: landed
+PCC-0.6 7hell Skeleton Seed: landed
+CTF-0 Core Trust Freeze directory: landed
 ```
 
-This is intentional. PCC-1 starts after the project has one current state, one audit map, one diagnostic harness seed, and one trust-lane registry.
+This is intentional. PCC-1 starts only after the project has one current
+state, one audit map, one diagnostic harness seed, and one trust-lane registry,
+and after maintainers accept the closed gate state.
 
 ## 21. Final formula
 

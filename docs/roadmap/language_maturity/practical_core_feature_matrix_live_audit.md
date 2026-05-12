@@ -344,13 +344,36 @@ Reason: all PCC-0D blocker rows are resolved, but PCC-1 start still requires
 maintainer acceptance of the audit state and no newer mainline changes
 invalidate the blocker matrix.
 
-## 16. Final state
+## 16. PCC-0H blocker audit gate closure
+
+| Gate item | Status | Evidence |
+|---|---|---|
+| Control-flow blockers FM-006..FM-010 | closed | PCC-0D |
+| Verifier / VM blockers FM-033..FM-034 | closed | PCC-0D |
+| Trap taxonomy FM-035 | closed | PCC-0F |
+| Determinism matrix FM-036 | closed | PCC-0G |
+| CLI blockers FM-037..FM-040 | closed | PCC-0D / PCC-0E |
+| Canonical examples FM-042 | closed | PCC-0D |
+| UI / Workbench freeze | still frozen | PCC-0A |
+| 7hell qualification path | seeded, not implemented | PCC-0C |
+
+PCC-0 blocker audit gate: `closed`
+PCC-1 start status: `conditionally unblockable`
+
+Reason:
+All PCC-0D blocker rows have been resolved, but PCC-1 still requires
+maintainer acceptance and must remain constrained by CTF and 7hell growth
+rules.
+
+## 17. Final state
 
 After this scaffold exists:
 
 ```text
-PCC-0 Truth Reset = landed
-PCC-0.5 Live Audit = scaffolded
-PCC-0.6 7hell Seed = next
-PCC-1 Control Flow = still blocked until audit gate is satisfied
+PCC-0 blocker audit gate = closed
+PCC-0.5 Live Audit = scaffolded and blocker pass closed
+PCC-0.6 7hell Qualification Contract = seeded
+PCC-1 = conditionally unblockable after maintainer acceptance
+CTF = parallel trust lane
+7hell = qualification growth path
 ```

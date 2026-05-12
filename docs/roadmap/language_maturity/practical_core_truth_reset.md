@@ -285,24 +285,24 @@ UI docs phase v0 is complete.
 Semantic has returned to PCC-0 truth reset and practical core readiness work.
 ```
 
-## 11. Next PR sequence
+## 11. PCC-0 gate closure
 
-Recommended immediate sequence:
+The PCC-0 blocker audit gate is now closed.
 
-```text
-PR-PCC-0A  docs(readiness): add Semantic practical core truth reset
-PR-PCC-0B  docs(readiness): add live feature matrix audit scaffold
-PR-PCC-0C  docs(7hell): seed 7hell qualification contract
-```
-
-PCC-1 must not start until:
+Gate status:
 
 ```text
-[ ] PCC-0 Truth Reset exists
-[ ] PCC-0.5 Feature Matrix Live Audit exists
-[ ] PCC-0.6 7hell Skeleton Seed exists
-[ ] CTF directory exists and is referenced by PCC work
+PCC-0 Truth Reset: landed
+PCC-0.5 Feature Matrix Live Audit scaffold: landed
+PCC-0D blocker audit pass: closed
+PCC-0E direct run-smc evidence: landed
+PCC-0F trap taxonomy freeze: landed
+PCC-0G determinism matrix freeze: landed
+PCC-1: conditionally unblockable after maintainer acceptance
 ```
+
+PCC-1 may begin only after maintainer acceptance of the closed gate state and
+only while CTF and 7hell growth rules remain in force.
 
 ## 12. Acceptance checklist
 
@@ -312,8 +312,9 @@ This PR is complete when:
 - I67 / I68 / I69 are named as the closed UI docs set;
 - UI/runtime implementation is explicitly frozen;
 - Workbench implementation is explicitly out of scope;
-- PCC-0 is named as the next active track;
-- PCC-0.5 live audit is required before widening;
+- PCC-0 blocker audit gate is explicitly closed;
+- PCC-1 is described as conditionally unblockable;
+- maintainer acceptance is required before PCC-1 begins;
 - CTF is described as parallel to PCC;
 - `7hell` is described as a qualification gate;
 - readiness wording is corrected away from optimistic overclaim;
@@ -327,8 +328,10 @@ After this document:
 UI docs phase v0 = complete
 UI implementation = frozen
 Semantic practical core = active priority
-PCC-0 = current gate
-PCC-0.5 = next audit gate
-PCC-0.6 = qualification harness seed
+PCC-0 blocker audit gate = closed
+PCC-0.5 = live audit scaffold landed
+PCC-0.6 = qualification harness seed landed
+PCC-1 = conditionally unblockable after maintainer acceptance
 CTF = parallel trust lane
+7hell = qualification growth path
 ```
