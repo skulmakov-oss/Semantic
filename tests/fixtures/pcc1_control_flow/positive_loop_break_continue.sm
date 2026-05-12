@@ -1,0 +1,12 @@
+fn main() {
+    let mut i: i32 = 0;
+    loop {
+        i = i + 1;
+        if i < 3 {
+            continue;
+        }
+        break;
+    }
+    assert(i == 3);
+    return;
+}
