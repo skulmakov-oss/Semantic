@@ -40,7 +40,7 @@ Meaning:
 Merged PCC-2 PRs and their UI / Workbench / I70 impact:
 
 | PR | Result | UI / Workbench / I70 impact |
-|---|---|---|---|
+|---|---|---|
 | `#588` PCC-2A | merged | Workbench/UI/I70 untouched |
 | `#589` PCC-2B | merged | Workbench/UI/I70 untouched |
 | `#590` PCC-2C | merged | Workbench/UI/I70 untouched |
