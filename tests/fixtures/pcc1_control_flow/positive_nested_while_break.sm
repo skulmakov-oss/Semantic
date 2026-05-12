@@ -1,0 +1,16 @@
+fn main() {
+    let mut outer: i32 = 0;
+    let mut inner_breaks: i32 = 0;
+    while outer < 3 {
+        outer = outer + 1;
+        let mut inner: i32 = 0;
+        while inner < 4 {
+            inner = inner + 1;
+            inner_breaks = inner_breaks + 1;
+            break;
+        }
+    }
+    assert(outer == 3);
+    assert(inner_breaks == 3);
+    return;
+}

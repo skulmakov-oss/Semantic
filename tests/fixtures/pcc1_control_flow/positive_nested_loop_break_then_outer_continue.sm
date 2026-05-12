@@ -1,0 +1,20 @@
+fn main() {
+    let mut outer: i32 = 0;
+    let mut inner_breaks: i32 = 0;
+    let mut tail: i32 = 0;
+    while outer < 3 {
+        outer = outer + 1;
+        loop {
+            inner_breaks = inner_breaks + 1;
+            break;
+        }
+        if outer < 3 {
+            continue;
+        }
+        tail = tail + 1;
+    }
+    assert(outer == 3);
+    assert(inner_breaks == 3);
+    assert(tail == 1);
+    return;
+}
