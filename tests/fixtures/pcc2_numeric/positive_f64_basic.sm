@@ -1,0 +1,4 @@
+fn main() {
+    let value: f64 = 1.5 + 2.25 * 2.0;
+    assert(value == 6.0);
+}

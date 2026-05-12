@@ -1,0 +1,11 @@
+fn main() {
+    let mut i: i32 = 0;
+    while i < 3 {
+        i = i + 1;
+    }
+    if (i + 1) == 4 {
+        return;
+    } else {
+        return;
+    }
+}
