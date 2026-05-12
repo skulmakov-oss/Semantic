@@ -1,0 +1,19 @@
+fn main() {
+    let mut outer: i32 = 0;
+    let mut inner_steps: i32 = 0;
+    while outer < 2 {
+        outer = outer + 1;
+        let mut inner: i32 = 0;
+        loop {
+            inner = inner + 1;
+            inner_steps = inner_steps + 1;
+            if inner < 2 {
+                continue;
+            }
+            break;
+        }
+    }
+    assert(outer == 2);
+    assert(inner_steps == 4);
+    return;
+}

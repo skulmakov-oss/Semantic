@@ -159,3 +159,73 @@ fn pcc1_control_flow_repeated_pipeline_is_stable() {
     let second = compile_verify_run_smc(input, "repeated_second.smc");
     assert_eq!(first, second, "emitted SemCode drifted across repeated PCC-1 gate runs");
 }
+
+#[test]
+fn pcc1_nested_while_break_positive_pipeline() {
+    compile_verify_run_smc(
+        "tests/fixtures/pcc1_control_flow/positive_nested_while_break.sm",
+        "nested_while_break_positive.smc",
+    );
+}
+
+#[test]
+fn pcc1_nested_loop_continue_positive_pipeline() {
+    compile_verify_run_smc(
+        "tests/fixtures/pcc1_control_flow/positive_nested_loop_continue.sm",
+        "nested_loop_continue_positive.smc",
+    );
+}
+
+#[test]
+fn pcc1_nested_loop_break_then_outer_continue_positive_pipeline() {
+    compile_verify_run_smc(
+        "tests/fixtures/pcc1_control_flow/positive_nested_loop_break_then_outer_continue.sm",
+        "nested_loop_break_then_outer_continue_positive.smc",
+    );
+}
+
+#[test]
+fn pcc1_break_after_nested_loop_outside_loop_rejects() {
+    let input = repo_path(
+        "tests/fixtures/pcc1_control_flow/negative_break_after_nested_loop_outside_loop.sm",
+    );
+    let err = cli_err(
+        vec!["check".to_string(), input.clone()],
+        &format!("smc check for {input}"),
+    );
+    assert!(
+        err.contains("Error [E0201]"),
+        "expected stable control-flow diagnostic code for break-after-nested-loop rejection, got: {err}"
+    );
+    assert!(
+        err.contains("bare break is allowed only inside while or statement loop"),
+        "expected break-after-nested-loop diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn pcc1_continue_after_nested_loop_outside_loop_rejects() {
+    let input = repo_path(
+        "tests/fixtures/pcc1_control_flow/negative_continue_after_nested_loop_outside_loop.sm",
+    );
+    let err = cli_err(
+        vec!["check".to_string(), input.clone()],
+        &format!("smc check for {input}"),
+    );
+    assert!(
+        err.contains("Error [E0201]"),
+        "expected stable control-flow diagnostic code for continue-after-nested-loop rejection, got: {err}"
+    );
+    assert!(
+        err.contains("continue is allowed only inside while or statement loop"),
+        "expected continue-after-nested-loop diagnostic, got: {err}"
+    );
+}
+
+#[test]
+fn pcc1_nested_control_flow_repeated_pipeline_is_stable() {
+    let input = "tests/fixtures/pcc1_control_flow/positive_nested_loop_break_then_outer_continue.sm";
+    let first = compile_verify_run_smc(input, "nested_repeated_first.smc");
+    let second = compile_verify_run_smc(input, "nested_repeated_second.smc");
+    assert_eq!(first, second, "nested control-flow emitted SemCode drifted across repeated PCC-1 gate runs");
+}
