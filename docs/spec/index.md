@@ -40,6 +40,7 @@ Current documents in this PR:
 - `ui/ui_runtime_implementation_checkpoint.md` - UI runtime implementation checkpoint after I50-I63
 - `ui/local_runtime_skeleton_api_map.md` - local UI runtime skeleton API map for Workbench and future runtime orchestration
 - `ui/local_runtime_command_result_envelope.md` - local runtime command/result envelope for Workbench to runtime exchange
+- `ui/local_runtime_event_stream_contract.md` - local runtime event stream contract for Workbench and local runtime progress reporting
 - `../architecture/ui_native_backend_boundary.md` - native facade transcript boundary and ownership split
 - `../architecture/ui_renderer_admission_boundary.md` - renderer admission boundary before implementation
 - `../architecture/ui_visual_design_doctrine.md` - Semantic UI visual design doctrine before renderer implementation
