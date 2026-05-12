@@ -1,0 +1,8 @@
+fn main() {
+    let mut i: i32 = 0;
+    while i < 3 {
+        i = i + 1;
+    }
+    assert(i == 3);
+    return;
+}
