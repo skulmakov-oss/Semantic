@@ -50,6 +50,24 @@ fn assert_stable_numeric_check_diagnostic(rel: &str, code: &str, needle: &str) {
     );
 }
 
+fn assert_stable_numeric_check_diagnostics(rel: &str, code: &str, needles: &[&str]) {
+    let input = fixture_path(rel);
+    let err = cli_err(
+        vec!["check".to_string(), input.clone()],
+        &format!("smc check for {input}"),
+    );
+    assert!(
+        err.contains(&format!("Error [{code}]")),
+        "expected diagnostic code {code} for {rel}, got: {err}"
+    );
+    for needle in needles {
+        assert!(
+            err.contains(needle),
+            "expected diagnostic containing '{needle}' for {rel}, got: {err}"
+        );
+    }
+}
+
 fn assert_invalid_numeric_compile_path_does_not_verify(rel: &str) {
     let input = fixture_path(rel);
     let dir = mk_temp_dir("pcc2_numeric_diagnostics_invalid");
@@ -84,6 +102,7 @@ fn assert_invalid_numeric_compile_path_does_not_verify(rel: &str) {
                 err.contains("Error [E0201]")
                     || err.contains("type mismatch")
                     || err.contains("fx coercion")
+                    || err.contains("operator type mismatch")
                     || err.contains("f64 arithmetic requires f64 operands")
                     || err.contains("cannot compare")
                     || err.contains("while condition must be bool")
@@ -123,25 +142,13 @@ fn pcc2_numeric_assignment_mismatches_have_stable_diagnostics() {
 #[test]
 fn pcc2_numeric_arithmetic_mismatches_have_stable_diagnostics() {
     let cases = [
-        (
-            "negative_i32_plus_bool.sm",
-            "E0201",
-            "f64 arithmetic requires f64 operands",
-        ),
-        (
-            "negative_i32_plus_f64.sm",
-            "E0201",
-            "f64 arithmetic requires f64 operands",
-        ),
-        (
-            "negative_fx_plus_f64.sm",
-            "E0201",
-            "f64 arithmetic requires f64 operands",
-        ),
+        ("negative_i32_plus_bool.sm", "E0201", &["I32", "Bool", "arithmetic"][..]),
+        ("negative_i32_plus_f64.sm", "E0201", &["I32", "F64", "arithmetic"][..]),
+        ("negative_fx_plus_f64.sm", "E0201", &["Fx", "F64", "arithmetic"][..]),
     ];
 
-    for (rel, code, needle) in cases {
-        assert_stable_numeric_check_diagnostic(rel, code, needle);
+    for (rel, code, needles) in cases {
+        assert_stable_numeric_check_diagnostics(rel, code, needles);
     }
 }
 
