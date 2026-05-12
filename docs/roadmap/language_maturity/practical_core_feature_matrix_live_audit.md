@@ -227,7 +227,7 @@ be audited against current `main` before it can support planning claims.
 | FM-032 | Modules | export / re-export surface | unknown | TBD | TBD | TBD | PCC-0.5 | none | Syntax Hell | audit |
 | FM-033 | Execution | verifier admission | confirmed-working | `E0-doc: docs/spec/semcode.md; E1-code: crates/sm-vm/src/semcode_vm.rs::run_verified_semcode_with_entry_and_config; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_malformed_semcode_rejects_before_execution` | check -> compile -> verify | none | CTF | verifier | Verifier Hell | none |
 | FM-034 | Execution | VM execution path | confirmed-working | `E1-code: crates/sm-vm/src/semcode_vm.rs::run_verified_semcode_with_entry_and_config; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_stage_summaries_match_current_baseline; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_repeated_compiles_are_byte_stable` | check -> compile -> verify -> run-smc | none | CTF | determinism | VM Hell | none |
-| FM-035 | Execution | trap taxonomy | confirmed-partial | `E0-doc: docs/roadmap/language_maturity/core_trust_freeze/trap_taxonomy.md; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_malformed_semcode_rejects_before_execution; E2-test: tests/snake_benchmark_gap_matrix.rs::snake_benchmark_runtime_negative_reports_contract_violations` | integration test | CTF-2 remains a draft taxonomy with freeze-candidate and planned classes | CTF | trap | VM Hell | freeze the remaining runtime-failure classes before introducing any new trap kind |
+| FM-035 | Execution | trap taxonomy | confirmed-working | `E0-doc: docs/roadmap/language_maturity/core_trust_freeze/trap_taxonomy.md; E2-test: crates/sm-vm/src/semcode_vm.rs::vm_rejects_unknown_opcode_on_load; E2-test: crates/sm-vm/src/semcode_vm.rs::vm_traps_on_failed_assert; E2-test: crates/sm-vm/src/semcode_vm.rs::vm_rejects_write_after_borrow_same_path; E2-test: crates/sm-vm/src/semcode_vm.rs::vm_traps_on_fx_division_by_zero; E2-test: crates/sm-vm/src/semcode_vm.rs::vm_enforces_configured_stack_depth; E2-test: crates/sm-vm/src/semcode_vm.rs::vm_enforces_configured_register_budget; E2-test: crates/sm-vm/src/semcode_vm.rs::verified_run_rejects_invalid_bytecode_before_execution; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_malformed_semcode_rejects_before_execution` | integration test | none | CTF | trap | VM Hell | none |
 | FM-036 | Execution | determinism matrix | confirmed-partial | `E0-doc: docs/roadmap/language_maturity/core_trust_freeze/determinism_matrix.md; E2-test: tests/g1_execution_integrity.rs::g1_execution_integrity_repeated_compiles_are_byte_stable; E2-test: tests/canonical_examples.rs::canonical_positive_examples_check_run_compile_and_verify` | integration test | CTF-3 still marks verifier/VM rows as audit-needed rather than frozen | CTF | determinism | VM Hell | convert the remaining audit-needed trust rows into frozen repeat-run fixtures |
 | FM-037 | CLI | `smc check` | confirmed-working | `E1-code: crates/smc-cli/src/app.rs::cmd_check; E2-test: tests/snake_benchmark_gap_matrix.rs::snake_benchmark_positive_surface_passes_end_to_end` | unit test | none | PCC-0.5 | none | Practical Hell | none |
 | FM-038 | CLI | `smc compile` | confirmed-working | `E1-code: crates/smc-cli/src/app.rs::cmd_compile; E2-test: tests/canonical_examples.rs::canonical_positive_examples_check_run_compile_and_verify` | unit test | none | PCC-0.5 | none | Practical Hell | none |
@@ -335,14 +335,13 @@ This PR is complete when:
 | Group | Resolved | Still unknown | Main blocker |
 |---|---:|---:|---|
 | Control flow | 5 | 0 | none |
-| Execution trust | 2 | 0 | `FM-035` and `FM-036` stay partial until CTF freeze rows are closed |
+| Execution trust | 3 | 0 | `FM-036` remains partial until CTF determinism rows are frozen |
 | CLI | 4 | 0 | none |
 | Examples | 1 | 0 | none |
 
 PCC-1 start status: `blocked`
-Reason: control-flow and CLI core paths now have concrete evidence, but the
-execution trust lane is still only partially frozen for trap taxonomy and
-determinism.
+Reason: control-flow, verifier admission, and trap taxonomy now have concrete
+evidence, but the determinism lane is still only partially frozen.
 
 ## 16. Final state
 
