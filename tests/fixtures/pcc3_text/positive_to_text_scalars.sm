@@ -1,0 +1,14 @@
+fn main() {
+    let score: i32 = 10;
+    let count: u32 = 7u32;
+    let flag: bool = true;
+    let marker: quad = T;
+    let score_text: text = to_text(score);
+    let count_text: text = to_text(count);
+    let flag_text: text = to_text(flag);
+    let marker_text: text = to_text(marker);
+    assert(score_text == "10");
+    assert(count_text == "7");
+    assert(flag_text == "true");
+    assert(marker_text == "T");
+}

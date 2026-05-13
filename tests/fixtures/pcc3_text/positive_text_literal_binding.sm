@@ -1,0 +1,4 @@
+fn main() {
+    let msg: text = "Semantic";
+    assert(msg == "Semantic");
+}
