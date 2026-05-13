@@ -1,0 +1,3 @@
+fn main() {
+    if "alpha" == true { return; } else { return; }
+}
