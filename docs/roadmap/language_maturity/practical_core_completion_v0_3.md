@@ -303,6 +303,9 @@ Trust DoD:
 
 ## 10. PCC-3 — Text Core
 
+Pre-entry surface boundary reset:
+`docs/roadmap/language_maturity/pcc3_text_surface_boundary_reset.md`
+
 Scope:
 
 - text literal;
