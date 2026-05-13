@@ -1,0 +1,4 @@
+fn main() {
+    let copy_text: text = to_text("done");
+    assert(copy_text == "done");
+}

@@ -1,0 +1,3 @@
+fn main() {
+    let msg: text = "score=" + 10;
+}
