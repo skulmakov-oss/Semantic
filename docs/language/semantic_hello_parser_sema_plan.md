@@ -162,3 +162,13 @@ fixtures, but it still does not add sema admission, lowering, verifier,
 runtime, or capability behavior.
 
 Pending fixtures remain outside accepted runtime truth until later phases.
+
+## 12. M-HELLO-3C Boundary Note
+
+`M-HELLO-3C` is the isolated sema-admission step for the parser-only Hello AST.
+
+It may add semantic validation diagnostics and sema-only tests, but it still
+does not add IR, lowering, SemCode, verifier, runtime, or capability
+behavior.
+
+Pending fixtures remain outside accepted runtime truth until later phases.
