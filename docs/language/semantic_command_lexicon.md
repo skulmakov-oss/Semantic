@@ -62,6 +62,23 @@ Status vocabulary:
 
 Reserved for entrypoint and program lifecycle vocabulary.
 
+Candidate vocabulary:
+
+- `entry`
+- `entry contract`
+- `lifecycle`
+- `start`
+- `admit`
+- `evaluate`
+- `transition`
+
+Clarify:
+
+- `entry` is the preferred Semantic-native direction for program/module entry.
+- `fn main` remains bridge-only where the current frontend requires it.
+- `main` must not be treated as canonical Semantic vocabulary.
+- `entry` is not executable unless grammar later implements it.
+
 ### 4.2 State Declaration
 
 Reserved for state-bearing and precondition vocabulary.
@@ -77,6 +94,23 @@ Reserved for admit / verify / checker vocabulary.
 ### 4.5 Transition and Completion
 
 Reserved for transition / execute / evaluate / complete vocabulary.
+
+Candidate vocabulary:
+
+- `complete`
+- `completion state`
+- `transition result`
+- `halt`
+- `yield completion`
+- `return`
+
+Clarify:
+
+- `complete` is the preferred Semantic-native direction for explicit completion.
+- `return` remains bridge-only where the current frontend requires it.
+- `return` must not be used as canonical public Semantic vocabulary.
+- `complete` is not executable unless grammar later implements it.
+- Whether completion is explicit or implicit remains an open design question.
 
 ### 4.6 Observation
 
@@ -110,13 +144,65 @@ Reserved for terms that are only valid in diagnostics or bridge tests.
 
 Reserved for command-line and workflow vocabulary.
 
-## 5. First-Pass Command / Primitive Table
+## 5. Entry Records
+
+### 5.1 `entry`
+
+- canonical term: `entry`
+- category: Entry and lifecycle
+- meaning: declares the semantic entrypoint / admission boundary for a program or module
+- accepted forms: planned / directional only
+- forbidden / legacy synonyms: `fn main`, `main`
+- bridge status: bridge syntax still required in current executable fixtures
+- verifier/runtime layer involved: frontend admission / module execution boundary, subject to future design
+- observation/effect impact: none by itself
+- example status: future directional sketch only
+- current status: planned / undecided
+- open questions: exact grammar, module-vs-program entry, multiple entrypoints, entry contracts
+- follow-up PR: `LEXICON-F` or later grammar planning
+
+### 5.2 `complete`
+
+- canonical term: `complete`
+- category: Transition and completion
+- meaning: declares successful completion / completion state of a semantic transition
+- accepted forms: planned / directional only
+- forbidden / legacy synonyms: `return`
+- bridge status: `return` remains current executable bridge where needed
+- verifier/runtime layer involved: VM / transition semantics, subject to future design
+- observation/effect impact: none by itself
+- example status: future directional sketch only
+- current status: planned / undecided
+- open questions: explicit vs implicit completion, completion values, quad completion state
+- follow-up PR: `LEXICON-F` or later grammar planning
+
+### 5.3 `transition`
+
+- canonical term: `transition`
+- category: Transition and completion
+- meaning: describes deterministic semantic state movement
+- accepted forms: model / documentation term
+- forbidden / legacy synonyms: generic `run everywhere`
+- bridge status: not source syntax yet
+- current status: implementation-detail / undecided
+
+### 5.4 `evaluate` / `execute`
+
+- canonical term: `evaluate` / `execute`
+- category: Transition and completion
+- meaning: source-level or runtime computation wording that should not be conflated with CLI `run`
+- accepted forms: model / documentation term
+- forbidden / legacy synonyms: generic `run` as source wording
+- bridge status: CLI/runtime terms may remain, but they are not canonical source-surface names
+- current status: implementation-detail / undecided
+
+## 6. First-Pass Command / Primitive Table
 
 | concept | preferred direction | legacy / weak direction | proposed category | current status | notes |
 |---|---|---|---|---|---|
-| entrypoint | `entry` | `main` / `fn main` | Entry and lifecycle | planned | Bridge entrypoint spelling remains in current executable fixtures, but it is not canonical. |
+| entrypoint | `entry` | `main` / `fn main` | Entry and lifecycle | planned / refined by `LEXICON-B` | Bridge entrypoint spelling remains in current executable fixtures, but it is not canonical. |
 | observable event | `observe` | `print` | Observation | planned | Observation must remain controlled and not collapse into generic stdout. |
-| completion | `complete` | `return` | Transition and completion | planned | Current completion spelling is bridge syntax in fixtures, not a final decision. |
+| completion | `complete` | `return` | Transition and completion | planned / refined by `LEXICON-B` | Current completion spelling is bridge syntax in fixtures, not a final decision. |
 | requirement | `require` | `assert` | Verification and admission | planned | Requirement vocabulary needs to stay distinct from diagnostics-only assertions. |
 | admission | `admit` / `verify` | unchecked `run` | Verification and admission | planned | Execution must remain verifier-gated. |
 | output target | observation sink | `stdout` | Controlled effects / capability boundary | implementation-detail | Host output channel wording is not canonical source vocabulary. |
@@ -129,12 +215,54 @@ Reserved for command-line and workflow vocabulary.
 | command-line check | `check` | source truth claim | CLI / tooling terms | implementation-detail | CLI verbs are tooling surface, not canonical source vocabulary. |
 | SemCode execution | `run-smc` | generic `run` | CLI / tooling terms | implementation-detail | Persisted artifact execution must remain verifier-admitted. |
 
-## 6. Bridge Compatibility Rule
+## 7. Decision Table
+
+| legacy / bridge term | proposed direction | status | allowed now? | notes |
+|---|---|---|---|---|
+| `fn main` | `entry` | bridge | yes, where current frontend requires it | Bridge entry spelling remains executable-only. |
+| `main` | `entry` | bridge / undecided | yes, where current frontend requires it | `main` must not be treated as canonical Semantic vocabulary. |
+| `return` | `complete` | bridge | yes, where current frontend requires it | Completion syntax remains bridge-only in current fixtures. |
+| generic `run` as source wording | `transition` / `evaluate` | undecided | yes as CLI/runtime wording only | Do not promote generic `run` into canonical source syntax. |
+| implicit program exit | `completion state` | undecided | yes as model wording only | Needs explicit vs implicit completion decision. |
+| module start | `entry contract` | planned | yes as directional terminology | Contract form must be settled separately from executable grammar. |
+
+## 8. Labeled Sketches
+
+### 8.1 Rejected legacy canonical sketch
+
+```semantic
+fn main() {
+    return;
+}
+```
+
+Label: rejected as canonical / bridge-only if executable.
+
+### 8.2 Future directional sketch
+
+```semantic
+entry Example {
+    complete T;
+}
+```
+
+Label: future directional sketch, not executable claim.
+
+### 8.3 Optional denser future sketch
+
+```semantic
+entry Example:
+    complete T
+```
+
+Label: density experiment only, not grammar decision.
+
+## 9. Bridge Compatibility Rule
 
 Bridge forms may remain executable where the current frontend requires them,
 but they are not canonical unless later accepted.
 
-## 7. Hello World Dependency
+## 10. Hello World Dependency
 
 Hello World remains required, but it is blocked until:
 
@@ -142,12 +270,12 @@ Hello World remains required, but it is blocked until:
 - controlled observation shape is accepted
 - implementation scope is opened separately under `#477` or a successor issue
 
-## 8. Relationship to `#478`
+## 11. Relationship to `#478`
 
 `#478` produced the audit.
 `#479` now defines the positive lexicon.
 
-## 9. Relationship to Future PRs
+## 12. Relationship to Future PRs
 
 Planned `#479` sequence:
 
@@ -159,12 +287,18 @@ Planned `#479` sequence:
 - `LEXICON-F — docs(language): prepare Hello World canonical shape decision`
 - `LEXICON-G — docs(language): close #479 lexicon/density phase`
 
-## 10. Acceptance Checklist
+## 13. Acceptance Checklist
 
 - lexicon skeleton created
 - entry schema defined
 - category skeleton defined
 - first-pass table added
+- entry/lifecycle vocabulary section refined
+- transition/completion vocabulary section refined
+- `entry` documented as planned/directional, not executable
+- `complete` documented as planned/directional, not executable
+- `fn main` remains bridge-only
+- `return` remains bridge-only
 - bridge compatibility rule recorded
 - Hello World dependency preserved
 - `#477` remains blocked/dependent
