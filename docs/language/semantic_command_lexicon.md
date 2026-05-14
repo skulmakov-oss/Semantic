@@ -91,6 +91,28 @@ Reserved for quad-state values, relations, and directional value vocabulary.
 
 Reserved for admit / verify / checker vocabulary.
 
+Candidate vocabulary:
+
+- `require`
+- `requirement`
+- `verify`
+- `verifier`
+- `admit`
+- `admission`
+- `check`
+- `assert`
+
+Clarify:
+
+- `require` is the preferred Semantic-native direction for source-level
+  requirement / precondition wording.
+- `assert` remains bridge-only where current frontend / tests require it.
+- `assert` must not be treated as canonical public Semantic vocabulary.
+- `verify` belongs primarily to verifier / admission / tooling vocabulary.
+- `admit` belongs to verifier-first execution policy.
+- `check` is CLI / tooling vocabulary, not automatically source syntax.
+- exact source syntax remains undecided.
+
 ### 4.5 Transition and Completion
 
 Reserved for transition / execute / evaluate / complete vocabulary.
@@ -186,7 +208,76 @@ Reserved for command-line and workflow vocabulary.
 - bridge status: not source syntax yet
 - current status: implementation-detail / undecided
 
-### 5.4 `evaluate` / `execute`
+### 5.4 `require`
+
+- canonical term: `require`
+- category: Verification and admission
+- meaning: declares a required condition or semantic precondition before
+  transition / admission
+- accepted forms: planned / directional only
+- forbidden / legacy synonyms: `assert`
+- bridge status: `assert` remains current executable bridge where needed
+- verifier/runtime layer involved: frontend / typecheck / verifier boundary,
+  subject to future design
+- observation/effect impact: none by itself
+- example status: future directional sketch only
+- current status: planned / undecided
+- open questions: source grammar, relation to contracts, whether failed
+  requirement traps or rejects admission, quad condition policy
+- follow-up PR: `LEXICON-F` or later grammar planning
+
+### 5.5 `verify`
+
+- canonical term: `verify`
+- category: Verification and admission
+- meaning: validates source / IR / SemCode according to a defined policy
+- accepted forms: CLI / tooling / admission vocabulary
+- forbidden / legacy synonyms: unchecked run
+- bridge status: implementation / tooling term
+- verifier/runtime layer involved: verifier-first admission
+- observation/effect impact: none
+- example status: tooling docs only
+- current status: implementation-detail / stable if existing CLI uses it
+- open questions: source-surface vs tool-surface separation
+
+### 5.6 `admit`
+
+- canonical term: `admit`
+- category: Verification and admission
+- meaning: records acceptance of a verified artifact or transition into
+  execution
+- accepted forms: admission-policy vocabulary
+- forbidden / legacy synonyms: unchecked execute
+- bridge status: not source syntax yet
+- verifier/runtime layer involved: verifier / runtime admission boundary
+- observation/effect impact: indirect; gates execution before effects
+- current status: implementation-detail / planned
+
+### 5.7 `assert`
+
+- canonical term: none / bridge term
+- category: Diagnostic-only terms or Verification and admission
+- meaning: current bridge / test assertion form
+- accepted forms: current executable bridge only
+- forbidden / legacy synonyms: public canonical `assert`
+- bridge status: bridge-only
+- current status: bridge
+- open questions: migration path to `require` or diagnostics-only status
+
+### 5.8 `check`
+
+- canonical term: `check`
+- category: CLI / tooling terms
+- meaning: source checking / diagnostics command in the public CLI surface
+- accepted forms: CLI / tooling vocabulary
+- forbidden / legacy synonyms: source syntax by default
+- bridge status: tooling term only
+- verifier/runtime layer involved: CLI orchestration / source admission
+- observation/effect impact: none by itself
+- current status: implementation-detail / stable if existing CLI uses it
+- open questions: whether the term ever becomes source-surface vocabulary
+
+### 5.9 `evaluate` / `execute`
 
 - canonical term: `evaluate` / `execute`
 - category: Transition and completion
@@ -203,8 +294,8 @@ Reserved for command-line and workflow vocabulary.
 | entrypoint | `entry` | `main` / `fn main` | Entry and lifecycle | planned / refined by `LEXICON-B` | Bridge entrypoint spelling remains in current executable fixtures, but it is not canonical. |
 | observable event | `observe` | `print` | Observation | planned | Observation must remain controlled and not collapse into generic stdout. |
 | completion | `complete` | `return` | Transition and completion | planned / refined by `LEXICON-B` | Current completion spelling is bridge syntax in fixtures, not a final decision. |
-| requirement | `require` | `assert` | Verification and admission | planned | Requirement vocabulary needs to stay distinct from diagnostics-only assertions. |
-| admission | `admit` / `verify` | unchecked `run` | Verification and admission | planned | Execution must remain verifier-gated. |
+| requirement | `require` | `assert` | Verification and admission | planned / refined by `LEXICON-C` | Requirement vocabulary needs to stay distinct from diagnostics-only assertions. |
+| admission | `admit` / `verify` | unchecked `run` | Verification and admission | planned / refined by `LEXICON-C` | Execution must remain verifier-gated. |
 | output target | observation sink | `stdout` | Controlled effects / capability boundary | implementation-detail | Host output channel wording is not canonical source vocabulary. |
 | external interaction | controlled effect | `I/O` | Controlled effects / capability boundary | implementation-detail | Keep effect admission explicit and bounded. |
 | execution | `transition` / `evaluate` / `execute` | `run everywhere` | Transition and completion | undecided | The runtime meaning needs a clean surface split from CLI wording. |
@@ -225,10 +316,17 @@ Reserved for command-line and workflow vocabulary.
 | generic `run` as source wording | `transition` / `evaluate` | undecided | yes as CLI/runtime wording only | Do not promote generic `run` into canonical source syntax. |
 | implicit program exit | `completion state` | undecided | yes as model wording only | Needs explicit vs implicit completion decision. |
 | module start | `entry contract` | planned | yes as directional terminology | Contract form must be settled separately from executable grammar. |
+| `assert` | `require` | bridge | yes, where current frontend requires it | Assertion spelling remains bridge-only in tests / fixtures. |
+| `check` | tooling check | CLI / tooling | yes | CLI terms stay distinct from source syntax. |
+| `verify` | verifier / admission term | tooling / verifier | yes | Verifier-first meaning is primary; source syntax is undecided. |
+| `admit` | admission-policy term | planned | yes as model wording | Admission wording belongs to verifier-first execution policy. |
+| unchecked `run` | `verify` / `admit` / `transition` sequence | bridge / weak | no as canonical source wording | Keep the verifier-first pipeline explicit. |
+| failed source requirement | reject / trap / diagnostic | undecided | yes as open question | Failure mode remains a policy decision. |
+| quad condition in requirement | quad-policy decision | undecided | yes as open question | Whether requirements can use quad relations needs later design. |
 
 ## 8. Labeled Sketches
 
-### 8.1 Rejected legacy canonical sketch
+### 8.1 Rejected legacy canonical sketch for entry / completion
 
 ```semantic
 fn main() {
@@ -238,7 +336,7 @@ fn main() {
 
 Label: rejected as canonical / bridge-only if executable.
 
-### 8.2 Future directional sketch
+### 8.2 Future directional sketch for entry / completion
 
 ```semantic
 entry Example {
@@ -248,7 +346,7 @@ entry Example {
 
 Label: future directional sketch, not executable claim.
 
-### 8.3 Optional denser future sketch
+### 8.3 Optional denser future sketch for entry / completion
 
 ```semantic
 entry Example:
@@ -257,12 +355,56 @@ entry Example:
 
 Label: density experiment only, not grammar decision.
 
-## 9. Bridge Compatibility Rule
+### 8.4 Rejected canonical requirement sketch
+
+```semantic
+assert(boot == T);
+```
+
+Label: bridge-only if executable; rejected as canonical public vocabulary.
+
+### 8.5 Future directional requirement sketch
+
+```semantic
+require boot == T;
+```
+
+Label: future directional sketch, not executable claim.
+
+### 8.6 Admission pipeline wording sketch
+
+```text
+check -> compile -> verify -> admit -> transition
+```
+
+Label: pipeline wording, not source syntax.
+
+## 9. Open Questions
+
+- exact grammar for `require`
+- whether `require` supports bool only, quad relation, or both
+- how failed requirement is represented: diagnostic, trap, rejected
+  admission, or completion state
+- distinction between `require`, `verify`, and `admit`
+- whether `assert` remains only in tests / fixtures
+- whether `check` remains strictly CLI
+- how requirement semantics map to SemCode / verifier later
+- relationship between source requirement and runtime traps
+
+## 10. Bridge Compatibility Rule
 
 Bridge forms may remain executable where the current frontend requires them,
 but they are not canonical unless later accepted.
 
-## 10. Hello World Dependency
+## 11. Dependency Notes
+
+- `#477` remains blocked.
+- Hello World remains blocked.
+- Observation vocabulary is not decided in this PR.
+- `LEXICON-D` will handle observation / effect vocabulary.
+- `LEXICON-F` will prepare Hello World canonical shape decision.
+
+## 12. Hello World Dependency
 
 Hello World remains required, but it is blocked until:
 
@@ -270,12 +412,12 @@ Hello World remains required, but it is blocked until:
 - controlled observation shape is accepted
 - implementation scope is opened separately under `#477` or a successor issue
 
-## 11. Relationship to `#478`
+## 13. Relationship to `#478`
 
 `#478` produced the audit.
 `#479` now defines the positive lexicon.
 
-## 12. Relationship to Future PRs
+## 14. Relationship to Future PRs
 
 Planned `#479` sequence:
 
@@ -287,7 +429,7 @@ Planned `#479` sequence:
 - `LEXICON-F — docs(language): prepare Hello World canonical shape decision`
 - `LEXICON-G — docs(language): close #479 lexicon/density phase`
 
-## 13. Acceptance Checklist
+## 15. Acceptance Checklist
 
 - lexicon skeleton created
 - entry schema defined
@@ -295,6 +437,14 @@ Planned `#479` sequence:
 - first-pass table added
 - entry/lifecycle vocabulary section refined
 - transition/completion vocabulary section refined
+- verification/admission vocabulary section refined
+- `require` entry added
+- `verify` entry added
+- `admit` entry added
+- `assert` bridge status clarified
+- `check` tooling status clarified
+- failed requirement / quad requirement questions listed
+- examples labeled as non-executable sketches
 - `entry` documented as planned/directional, not executable
 - `complete` documented as planned/directional, not executable
 - `fn main` remains bridge-only
