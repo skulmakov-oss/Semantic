@@ -1,0 +1,10 @@
+# Pending conceptual SemCode fixture for Hello verbose shape.
+# Not executable.
+# Not final opcode names.
+# Not bytecode format.
+# Not accepted golden SemCode.
+
+declare_local_quad boot = T
+require_quad_eq boot T
+request_observation_text "Hello, World!"
+complete_quad T
