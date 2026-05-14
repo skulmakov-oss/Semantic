@@ -1,0 +1,3 @@
+requested_host_channel = "stdout"
+expected_policy_result = "deny"
+reason = "stdout_not_default_sink"

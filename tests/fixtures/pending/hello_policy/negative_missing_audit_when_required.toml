@@ -1,0 +1,4 @@
+audit_policy = "required"
+audit_available = false
+expected_policy_result = "deny"
+reason = "audit_required_but_unavailable"
