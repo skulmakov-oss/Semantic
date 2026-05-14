@@ -1,0 +1,6 @@
+// Pending fixture.
+// Not executable yet.
+// Expected future status: possible secondary onboarding shape, not canonical architecture-bearing proof.
+entry HelloWorld {
+    observe "Hello, World!";
+}

@@ -1,0 +1,6 @@
+// Pending negative fixture.
+// Requirement must not perform observation/effects.
+entry HelloWorld {
+    require observe "Hello, World!";
+    complete T;
+}
