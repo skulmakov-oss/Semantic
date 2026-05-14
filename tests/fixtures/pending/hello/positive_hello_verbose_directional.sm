@@ -1,0 +1,9 @@
+// Pending fixture.
+// Not executable yet.
+// Expected future status: positive accepted Hello grammar slice.
+entry HelloWorld {
+    state boot: quad = T;
+    require boot == T;
+    observe "Hello, World!";
+    complete T;
+}

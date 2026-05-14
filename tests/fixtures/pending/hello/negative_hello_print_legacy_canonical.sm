@@ -1,0 +1,7 @@
+// Pending negative fixture.
+// Legacy bridge shape.
+// Rejected as canonical Hello surface.
+fn main() {
+    print("Hello, World!");
+    return;
+}

@@ -1,0 +1,6 @@
+// Pending negative fixture.
+// First Hello slice should only admit text literal observation payload.
+entry HelloWorld {
+    observe T;
+    complete T;
+}

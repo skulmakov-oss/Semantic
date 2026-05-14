@@ -1,0 +1,6 @@
+// Pending negative fixture.
+// General I/O is not canonical Hello observation.
+entry HelloWorld {
+    io.write("Hello, World!");
+    complete T;
+}
