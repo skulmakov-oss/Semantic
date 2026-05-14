@@ -4,6 +4,8 @@ pub use sm_profile::ParserProfile;
 #[cfg(feature = "std")]
 pub mod hello_ir;
 #[cfg(feature = "std")]
+pub mod hello_semcode;
+#[cfg(feature = "std")]
 pub mod semcode_format {
 pub use crate::local_format::{
 #[cfg(feature = "std")]
