@@ -15,6 +15,8 @@ use alloc::vec::Vec;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod types;
 #[cfg(any(feature = "alloc", feature = "std"))]
+pub mod hello_parser;
+#[cfg(any(feature = "alloc", feature = "std"))]
 pub use types::{
     AdtCtorExpr, AdtDecl, AdtVariant, AstArena, BinaryOp, BlockExpr, CallArg,
     ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily, Expr, ExprId,

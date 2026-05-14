@@ -152,3 +152,13 @@ It does not start any of these PRs.
 - no parser / sema implementation
 - no runtime / verifier / capability changes
 - `#477` remains open
+
+## 11. M-HELLO-3B Boundary Note
+
+`M-HELLO-3B` is the parser-only recognition step for the Hello grammar slice.
+
+It may add isolated parser structures and parser-only tests for pending
+fixtures, but it still does not add sema admission, lowering, verifier,
+runtime, or capability behavior.
+
+Pending fixtures remain outside accepted runtime truth until later phases.
