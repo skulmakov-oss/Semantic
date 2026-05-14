@@ -1,0 +1,8 @@
+operation_kind = "controlled_observation_text"
+payload_type = "text_literal"
+capability_observation_sink = "present"
+sink_available = true
+audit_policy = "required"
+audit_available = true
+deterministic_order = true
+expected_policy_result = "admit"

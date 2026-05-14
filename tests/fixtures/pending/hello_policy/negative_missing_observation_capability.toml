@@ -1,0 +1,3 @@
+capability_observation_sink = "missing"
+expected_policy_result = "deny"
+reason = "missing_observation_capability"

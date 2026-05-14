@@ -1,0 +1,3 @@
+deterministic_order = false
+expected_policy_result = "deny"
+reason = "nondeterministic_sink_configuration"
