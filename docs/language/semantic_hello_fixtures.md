@@ -51,3 +51,12 @@ This document registers pending Hello grammar-slice fixtures.
 - no runtime / verifier / capability changes
 - no Hello World implementation
 - `#477` remains open
+
+## 7. M-HELLO-3D Harness
+
+- pending fixtures are now covered by an isolated parser / sema harness
+- this is still not accepted runtime truth
+- no normal compiler pipeline admission
+- no SemCode / golden output
+- no verifier / runtime / capability behavior
+- pending fixture classification remains an admission-prep layer only
