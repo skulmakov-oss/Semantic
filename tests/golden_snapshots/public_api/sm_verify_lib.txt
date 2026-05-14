@@ -1,5 +1,7 @@
 source: crates/sm-verify/src/lib.rs
 #[cfg(feature = "std")]
+pub mod hello_pending_admission;
+#[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationCode {
 #[cfg(feature = "std")]
