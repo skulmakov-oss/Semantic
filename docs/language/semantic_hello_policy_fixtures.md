@@ -48,3 +48,13 @@ This document registers pending verifier / capability / runtime / audit policy f
 - prepares `#477`
 - does not close `#477`
 - future implementation must decide how these fixture expectations become executable tests
+
+## 7. M-HELLO-6A Boundary Note
+
+- isolated pending verifier-admission model exists
+- evaluates planning fixtures only
+- not production verifier admission
+- not real SemCode verification
+- no runtime / sink / capability / audit behavior
+- no normal compiler pipeline integration
+- `#477` remains open
