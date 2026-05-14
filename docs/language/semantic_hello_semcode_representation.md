@@ -155,3 +155,13 @@ Recommended next steps:
 - no verifier / runtime / capability changes
 - no accepted runtime behavior
 - `#477` remains open
+
+## 13. M-HELLO-4G Implementation Boundary
+
+- conceptual emitter skeleton exists
+- output is conceptual text only
+- not real SemCode bytes
+- not final opcodes
+- no verifier / runtime / capability behavior
+- no normal compiler pipeline integration
+- pending fixture remains not accepted golden SemCode
