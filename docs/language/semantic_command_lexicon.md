@@ -138,9 +138,51 @@ Clarify:
 
 Reserved for controlled observation vocabulary and proof-of-life wording.
 
+Candidate vocabulary:
+
+- `observe`
+- `observation`
+- `observable event`
+- `observation sink`
+- `emission`
+- `emit`
+- `print`
+- `stdout`
+
+Clarify:
+
+- `observe` is the preferred Semantic-native direction for controlled
+  observation.
+- `print` is rejected-as-canonical for public Semantic source vocabulary.
+- `print` may remain only as bridge / legacy comparison if current fixtures
+  require it.
+- `stdout` is an implementation / host-channel term, not canonical source
+  vocabulary.
+- `emit` is ambiguous: implementation emission vs observation emission must be
+  separated.
+- `observe` is not executable unless grammar / runtime / effect path later
+  implements it.
+
 ### 4.7 Controlled Effects
 
 Reserved for capability-bound effect vocabulary.
+
+Candidate vocabulary:
+
+- `controlled effect`
+- `effect`
+- `effect boundary`
+- `capability`
+- `capability gate`
+- `observation/effect admission`
+- `I/O`
+
+Clarify:
+
+- `controlled effect` is preferred over generic `I/O`.
+- generic `I/O` must not be canonical source vocabulary.
+- effects must remain capability / effect-bound where relevant.
+- no capability / effect admission change is made by this PR.
 
 ### 4.8 Memory / State Access
 
@@ -287,6 +329,84 @@ Reserved for command-line and workflow vocabulary.
 - bridge status: CLI/runtime terms may remain, but they are not canonical source-surface names
 - current status: implementation-detail / undecided
 
+### 5.10 `observe`
+
+- canonical term: `observe`
+- category: Observation
+- meaning: declares a controlled observable event or observation request
+- accepted forms: planned / directional only
+- forbidden / legacy synonyms: `print`
+- bridge status: `print` rejected as canonical; may appear only as rejected
+  legacy sketch / bridge comparison
+- verifier/runtime layer involved: future observation / effect boundary,
+  subject to design
+- observation/effect impact: yes; future controlled observation
+- example status: future directional sketch only
+- current status: planned / undecided
+- open questions: syntax, capability requirement, observation sink
+  representation, determinism / audit requirements, whether observation is an
+  effect
+- follow-up PR: `LEXICON-F` or later observation implementation planning
+
+### 5.11 `observation sink`
+
+- canonical term: observation sink
+- category: Observation / Controlled effects
+- meaning: target or channel for controlled observation
+- accepted forms: model / documentation term
+- forbidden / legacy synonyms: `stdout` as canonical source term
+- bridge status: implementation-detail
+- verifier/runtime layer involved: future runtime / effect boundary
+- observation/effect impact: yes
+- current status: implementation-detail / planned
+
+### 5.12 `controlled effect`
+
+- canonical term: controlled effect
+- category: Controlled effects
+- meaning: bounded interaction with external world or host boundary
+- accepted forms: model / policy term
+- forbidden / legacy synonyms: generic `I/O`
+- bridge status: not source syntax yet
+- verifier/runtime layer involved: capability / effect admission
+- observation/effect impact: yes
+- current status: implementation-detail / planned
+
+### 5.13 `print`
+
+- canonical term: none / rejected legacy term
+- category: Diagnostic-only terms or Observation
+- meaning: legacy output primitive
+- accepted forms: rejected legacy sketch / bridge comparison only
+- forbidden / legacy synonyms: canonical public `print`
+- bridge status: rejected-as-canonical
+- observation/effect impact: would imply uncontrolled output if canonized
+- current status: rejected
+
+### 5.14 `stdout`
+
+- canonical term: `stdout`
+- category: Observation / Controlled effects
+- meaning: host / process channel wording
+- accepted forms: implementation / host-channel term only
+- forbidden / legacy synonyms: canonical source vocabulary
+- bridge status: implementation-detail
+- verifier/runtime layer involved: host boundary / runtime channel
+- observation/effect impact: indirect
+- current status: implementation-detail
+
+### 5.15 `emit`
+
+- canonical term: `emit`
+- category: Compiler / artifact emission
+- meaning: compiler or artifact emission where already used
+- accepted forms: implementation / documentation term
+- forbidden / legacy synonyms: controlled observation vocabulary by default
+- bridge status: implementation-detail / undecided depending on context
+- verifier/runtime layer involved: compiler / artifact pipeline
+- observation/effect impact: no, unless later decided otherwise
+- current status: implementation-detail / undecided
+
 ## 6. First-Pass Command / Primitive Table
 
 | concept | preferred direction | legacy / weak direction | proposed category | current status | notes |
@@ -302,7 +422,7 @@ Reserved for command-line and workflow vocabulary.
 | semantic state | `state` | variable-only model | State declaration | planned | State should carry meaning beyond a plain mutable variable story. |
 | contradiction | `conflict` / `S` | boolean error | Quad values and quad relations | undecided | `S` remains a bridge/pattern term; future relation vocabulary still needs decision. |
 | unknown | `unknown` / `N` | null-like value | Quad values and quad relations | undecided | Unknown-state vocabulary remains directional, not frozen. |
-| text output proof | controlled observation proof | Hello World via `print` | Observation | planned | Proof-of-life must stay controlled, not generic output. |
+| text output proof | controlled observation proof | Hello World via `print` | Observation | planned / refined by `LEXICON-D` | Proof-of-life must stay controlled, not generic output. |
 | command-line check | `check` | source truth claim | CLI / tooling terms | implementation-detail | CLI verbs are tooling surface, not canonical source vocabulary. |
 | SemCode execution | `run-smc` | generic `run` | CLI / tooling terms | implementation-detail | Persisted artifact execution must remain verifier-admitted. |
 
@@ -323,6 +443,16 @@ Reserved for command-line and workflow vocabulary.
 | unchecked `run` | `verify` / `admit` / `transition` sequence | bridge / weak | no as canonical source wording | Keep the verifier-first pipeline explicit. |
 | failed source requirement | reject / trap / diagnostic | undecided | yes as open question | Failure mode remains a policy decision. |
 | quad condition in requirement | quad-policy decision | undecided | yes as open question | Whether requirements can use quad relations needs later design. |
+| `print` | `observe` | bridge / legacy | yes, only as rejected legacy comparison | Public canonical `print` must not be restored. |
+| `stdout` | observation sink | implementation-detail | yes | Keep host-channel wording separate from source vocabulary. |
+| generic `I/O` | controlled effect | implementation-detail | yes as model wording only | Generic I/O is not canonical source vocabulary. |
+| `emit` as compiler emission | implementation-detail | implementation-detail | yes | Keep compiler emission separate from controlled observation. |
+| `emit` as output | undecided | undecided | yes as open question | Observation emission and artifact emission must remain distinct. |
+| uncontrolled output | rejected | rejected | no as canonical source wording | Generic uncontrolled output remains out of bounds. |
+| observation without capability | undecided / blocked | undecided | blocked | Capability requirement must be decided before implementation. |
+| observation with capability / effect admission | planned | planned | not executable yet | Future effect admission path needs separate implementation. |
+| Hello World via `print` | rejected-as-canonical | rejected | no | Legacy form is only a comparison sketch. |
+| Hello World via controlled observation | planned / blocked | planned | blocked | Waits on observation vocabulary and canonical shape decisions. |
 
 ## 8. Labeled Sketches
 
@@ -379,8 +509,50 @@ check -> compile -> verify -> admit -> transition
 
 Label: pipeline wording, not source syntax.
 
+### 8.7 Rejected canonical observation sketch
+
+```semantic
+print("Hello, World!");
+```
+
+Label: rejected as canonical public vocabulary.
+
+### 8.8 Future directional observation sketch
+
+```semantic
+observe "Hello, World!";
+```
+
+Label: future directional sketch, not executable claim.
+
+### 8.9 Controlled observation policy sketch
+
+```text
+require -> verify -> admit -> observe -> audit
+```
+
+Label: policy wording, not source syntax.
+
+### 8.10 Capability-bound effect sketch
+
+```text
+controlled effect = admitted capability + audited boundary
+```
+
+Label: model wording, not source syntax.
+
 ## 9. Open Questions
 
+- exact grammar for `observe`
+- whether `observe` is statement, event, transition, or effect request
+- whether `observe` requires declared capability
+- how observation sink is represented
+- whether observation is deterministic output, audited effect, or both
+- how observation interacts with verifier/admission
+- whether observation can fail and how failure is represented
+- whether Hello World can exist without general I/O
+- whether `emit` should ever be user-facing
+- how to keep compiler emission separate from observation emission
 - exact grammar for `require`
 - whether `require` supports bool only, quad relation, or both
 - how failed requirement is represented: diagnostic, trap, rejected
@@ -400,8 +572,8 @@ but they are not canonical unless later accepted.
 
 - `#477` remains blocked.
 - Hello World remains blocked.
-- Observation vocabulary is not decided in this PR.
-- `LEXICON-D` will handle observation / effect vocabulary.
+- No observation implementation starts here.
+- Any future observation / effect implementation must be checked against CTF / capability policy.
 - `LEXICON-F` will prepare Hello World canonical shape decision.
 
 ## 12. Hello World Dependency
@@ -438,12 +610,20 @@ Planned `#479` sequence:
 - entry/lifecycle vocabulary section refined
 - transition/completion vocabulary section refined
 - verification/admission vocabulary section refined
+- observation vocabulary section refined
+- controlled effect vocabulary section refined
 - `require` entry added
 - `verify` entry added
 - `admit` entry added
+- `observe` entry added
+- observation sink entry added
+- controlled effect entry added
 - `assert` bridge status clarified
 - `check` tooling status clarified
 - failed requirement / quad requirement questions listed
+- `print` rejected-as-canonical clarified
+- `stdout` implementation-detail clarified
+- `I/O` generic term rejected as canonical source vocabulary
 - examples labeled as non-executable sketches
 - `entry` documented as planned/directional, not executable
 - `complete` documented as planned/directional, not executable
