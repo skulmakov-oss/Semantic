@@ -161,3 +161,11 @@ Recommended next steps:
 - no verifier / runtime / capability changes
 - no accepted runtime behavior
 - `#477` remains open
+
+## 14. M-HELLO-4C Implementation Boundary
+
+- isolated Hello IR structs and lowering skeleton exist
+- no SemCode emission
+- no verifier / runtime / capability behavior
+- no normal compiler pipeline integration
+- pending fixtures remain outside accepted runtime truth

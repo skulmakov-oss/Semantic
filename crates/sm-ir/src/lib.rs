@@ -21,6 +21,9 @@ mod frontend {
 mod local_format;
 
 #[cfg(feature = "std")]
+pub mod hello_ir;
+
+#[cfg(feature = "std")]
 pub mod semcode_format {
     pub use crate::local_format::{
         header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8,
