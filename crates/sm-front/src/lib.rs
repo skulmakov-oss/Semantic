@@ -15,24 +15,83 @@ use alloc::vec::Vec;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod types;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use types::{
-    AdtCtorExpr, AdtDecl, AdtVariant, AstArena, BinaryOp, BlockExpr, CallArg,
-    ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily, Expr, ExprId,
-    FrontendError, FrontendErrorKind, Function, IfExpr, ImplDecl, LogosEntity, LogosEntityField,
-    LogosEntityFieldKind, LogosLaw, LogosProgram, LogosSystem, LogosWhen, LoopExpr, MatchArm,
-    MatchExpr, MatchExprArm, IterableLoopDesugaring, Program, QuadVal, RecordDecl, RecordField, RecordFieldExpr,
-    RecordInitField, RecordLiteralExpr, RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole,
-    SchemaShape, SchemaVariant, SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr,
-    SequenceLiteral, SequenceType, MapType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token,
-    TokenKind, TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem, Type,
-    UnaryOp, ValidationCheck, ValidationFieldPlan, ValidationPlan, ValidationShapePlan,
-    ValidationVariantPlan,
-    // M9.7
-    PathAvailability, PatternPath,
-};
-#[cfg(any(feature = "alloc", feature = "std"))]
 pub use sm_profile::{CompatibilityMode, ParserProfile};
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use types::{
+    AdtCtorExpr,
+    AdtDecl,
+    AdtVariant,
+    AstArena,
+    BinaryOp,
+    BlockExpr,
+    CallArg,
+    ClosureCapturePolicy,
+    ClosureLiteral,
+    ClosureType,
+    ClosureValueFamily,
+    Expr,
+    ExprId,
+    FrontendError,
+    FrontendErrorKind,
+    Function,
+    IfExpr,
+    ImplDecl,
+    IterableLoopDesugaring,
+    LogosEntity,
+    LogosEntityField,
+    LogosEntityFieldKind,
+    LogosLaw,
+    LogosProgram,
+    LogosSystem,
+    LogosWhen,
+    LoopExpr,
+    MapType,
+    MatchArm,
+    MatchExpr,
+    MatchExprArm,
+    // M9.7
+    PathAvailability,
+    PatternPath,
+    Program,
+    QuadVal,
+    RecordDecl,
+    RecordField,
+    RecordFieldExpr,
+    RecordInitField,
+    RecordLiteralExpr,
+    RecordUpdateExpr,
+    SchemaDecl,
+    SchemaField,
+    SchemaRole,
+    SchemaShape,
+    SchemaVariant,
+    SchemaVersion,
+    SequenceCollectionFamily,
+    SequenceIndexExpr,
+    SequenceLiteral,
+    SequenceType,
+    Stmt,
+    StmtId,
+    SymbolId,
+    TextLiteral,
+    TextLiteralFamily,
+    Token,
+    TokenKind,
+    TraitBound,
+    TraitDecl,
+    TraitMethodSig,
+    TuplePatternItem,
+    Type,
+    UnaryOp,
+    ValidationCheck,
+    ValidationFieldPlan,
+    ValidationPlan,
+    ValidationShapePlan,
+    ValidationVariantPlan,
+};
 
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub mod hello_parser;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod lexer;
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -166,9 +225,16 @@ impl ScopeEnv {
     }
 
     pub fn insert_const(&mut self, name: SymbolId, ty: Type) {
-        self.insert_binding(name, ScopeBinding {
-            ty, is_const: true, is_mutable: false, consumed: false, path_state: Vec::new(),
-        });
+        self.insert_binding(
+            name,
+            ScopeBinding {
+                ty,
+                is_const: true,
+                is_mutable: false,
+                consumed: false,
+                path_state: Vec::new(),
+            },
+        );
     }
 
     /// Mark a variable as consumed (moved out). Subsequent reads will be rejected.
@@ -196,7 +262,9 @@ impl ScopeEnv {
         use crate::types::PatternPath;
 
         fn path_is_prefix(a: &PatternPath, b: &PatternPath) -> bool {
-            if a.elems.len() > b.elems.len() { return false; }
+            if a.elems.len() > b.elems.len() {
+                return false;
+            }
             a.elems.iter().zip(&b.elems).all(|(x, y)| x == y)
         }
 
@@ -207,7 +275,9 @@ impl ScopeEnv {
                 // Rule 1 — new path subsumes longer existing entries of the same state:
                 //   e.g. adding Moved(root) while Moved(root.0) exists → drop root.0.
                 binding.path_state.retain(|(existing, existing_state)| {
-                    if *existing_state != state { return true; }
+                    if *existing_state != state {
+                        return true;
+                    }
                     !path_is_prefix(&path, existing)
                 });
                 // Rule 2 — if an existing entry already covers the new path (same state,
@@ -235,7 +305,9 @@ impl ScopeEnv {
         use crate::types::{PathAvailability, PatternPath};
 
         fn path_is_prefix(a: &PatternPath, b: &PatternPath) -> bool {
-            if a.elems.len() > b.elems.len() { return false; }
+            if a.elems.len() > b.elems.len() {
+                return false;
+            }
             a.elems.iter().zip(&b.elems).all(|(x, y)| x == y)
         }
         fn paths_overlap(a: &PatternPath, b: &PatternPath) -> bool {
@@ -269,7 +341,10 @@ impl ScopeEnv {
                                 stored_path.elems
                             )
                         };
-                        return Err(crate::types::FrontendError { pos: 0, message: msg });
+                        return Err(crate::types::FrontendError {
+                            pos: 0,
+                            message: msg,
+                        });
                     }
                 }
             }
@@ -295,14 +370,18 @@ impl ScopeEnv {
         use crate::types::{CaptureMode, PathAvailability, PatternPath};
 
         fn path_is_prefix(a: &PatternPath, b: &PatternPath) -> bool {
-            if a.elems.len() > b.elems.len() { return false; }
+            if a.elems.len() > b.elems.len() {
+                return false;
+            }
             a.elems.iter().zip(&b.elems).all(|(x, y)| x == y)
         }
         fn paths_overlap(a: &PatternPath, b: &PatternPath) -> bool {
             path_is_prefix(a, b) || path_is_prefix(b, a)
         }
 
-        let Some(binding) = self.binding(name) else { return Ok(()); };
+        let Some(binding) = self.binding(name) else {
+            return Ok(());
+        };
 
         if binding.consumed {
             return Err(crate::types::FrontendError {
@@ -312,18 +391,26 @@ impl ScopeEnv {
         }
 
         for (stored_path, stored_state) in &binding.path_state {
-            if !paths_overlap(stored_path, path) { continue; }
+            if !paths_overlap(stored_path, path) {
+                continue;
+            }
             let msg: Option<&str> = match (stored_state, capture) {
-                (PathAvailability::Borrowed, CaptureMode::Move) =>
-                    Some("cannot move from borrowed path"),
-                (PathAvailability::Moved, CaptureMode::Borrow) =>
-                    Some("cannot borrow from moved path"),
-                (PathAvailability::Moved, CaptureMode::Move) =>
-                    Some("cannot move from already-moved path"),
+                (PathAvailability::Borrowed, CaptureMode::Move) => {
+                    Some("cannot move from borrowed path")
+                }
+                (PathAvailability::Moved, CaptureMode::Borrow) => {
+                    Some("cannot borrow from moved path")
+                }
+                (PathAvailability::Moved, CaptureMode::Move) => {
+                    Some("cannot move from already-moved path")
+                }
                 _ => None,
             };
             if let Some(m) = msg {
-                return Err(crate::types::FrontendError { pos: 0, message: m.to_string() });
+                return Err(crate::types::FrontendError {
+                    pos: 0,
+                    message: m.to_string(),
+                });
             }
         }
         Ok(())
@@ -340,7 +427,9 @@ impl ScopeEnv {
     }
 
     pub fn is_const(&self, name: SymbolId) -> bool {
-        self.binding(name).map(|binding| binding.is_const).unwrap_or(false)
+        self.binding(name)
+            .map(|binding| binding.is_const)
+            .unwrap_or(false)
     }
 
     pub fn is_mutable(&self, name: SymbolId) -> bool {
@@ -389,14 +478,24 @@ pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
                 params: f
                     .params
                     .iter()
-                    .map(|(_, t)| canonicalize_declared_type_generic(
-                        t, &record_table, &adt_table, &program.arena, &f.type_params,
-                    ))
+                    .map(|(_, t)| {
+                        canonicalize_declared_type_generic(
+                            t,
+                            &record_table,
+                            &adt_table,
+                            &program.arena,
+                            &f.type_params,
+                        )
+                    })
                     .collect::<Result<Vec<_>, _>>()?,
                 param_names: Some(f.params.iter().map(|(name, _)| *name).collect()),
                 param_defaults: Some(f.param_defaults.clone()),
                 ret: canonicalize_declared_type_generic(
-                    &f.ret, &record_table, &adt_table, &program.arena, &f.type_params,
+                    &f.ret,
+                    &record_table,
+                    &adt_table,
+                    &program.arena,
+                    &f.type_params,
                 )?,
             },
         );
@@ -574,10 +673,7 @@ pub fn canonicalize_declared_type(
             } else {
                 Err(FrontendError {
                     pos: 0,
-                    message: format!(
-                        "unknown enum type '{}'",
-                        resolve_symbol_name(arena, *name)?
-                    ),
+                    message: format!("unknown enum type '{}'", resolve_symbol_name(arena, *name)?),
                 })
             }
         }
@@ -612,25 +708,51 @@ pub fn canonicalize_declared_type_generic(
         Type::Tuple(items) => Ok(Type::Tuple(
             items
                 .iter()
-                .map(|item| canonicalize_declared_type_generic(item, record_table, adt_table, arena, type_params))
+                .map(|item| {
+                    canonicalize_declared_type_generic(
+                        item,
+                        record_table,
+                        adt_table,
+                        arena,
+                        type_params,
+                    )
+                })
                 .collect::<Result<Vec<_>, _>>()?,
         )),
         Type::Sequence(sequence) => Ok(Type::Sequence(SequenceType {
             family: sequence.family,
             item: Box::new(canonicalize_declared_type_generic(
-                sequence.item.as_ref(), record_table, adt_table, arena, type_params,
+                sequence.item.as_ref(),
+                record_table,
+                adt_table,
+                arena,
+                type_params,
             )?),
         })),
         Type::Map(map) => Ok(Type::Map(MapType {
             key: Box::new(canonicalize_declared_type_generic(
-                map.key.as_ref(), record_table, adt_table, arena, type_params,
+                map.key.as_ref(),
+                record_table,
+                adt_table,
+                arena,
+                type_params,
             )?),
             val: Box::new(canonicalize_declared_type_generic(
-                map.val.as_ref(), record_table, adt_table, arena, type_params,
+                map.val.as_ref(),
+                record_table,
+                adt_table,
+                arena,
+                type_params,
             )?),
         })),
         Type::Measured(base, unit) => {
-            let canonical_base = canonicalize_declared_type_generic(base, record_table, adt_table, arena, type_params)?;
+            let canonical_base = canonicalize_declared_type_generic(
+                base,
+                record_table,
+                adt_table,
+                arena,
+                type_params,
+            )?;
             if !canonical_base.is_core_numeric_scalar() {
                 return Err(FrontendError {
                     pos: 0,
@@ -642,21 +764,45 @@ pub fn canonicalize_declared_type_generic(
             }
             Ok(Type::Measured(Box::new(canonical_base), *unit))
         }
-        Type::Option(item) => Ok(Type::Option(Box::new(
-            canonicalize_declared_type_generic(item, record_table, adt_table, arena, type_params)?,
-        ))),
+        Type::Option(item) => Ok(Type::Option(Box::new(canonicalize_declared_type_generic(
+            item,
+            record_table,
+            adt_table,
+            arena,
+            type_params,
+        )?))),
         Type::Result(ok_ty, err_ty) => Ok(Type::Result(
-            Box::new(canonicalize_declared_type_generic(ok_ty, record_table, adt_table, arena, type_params)?),
-            Box::new(canonicalize_declared_type_generic(err_ty, record_table, adt_table, arena, type_params)?),
+            Box::new(canonicalize_declared_type_generic(
+                ok_ty,
+                record_table,
+                adt_table,
+                arena,
+                type_params,
+            )?),
+            Box::new(canonicalize_declared_type_generic(
+                err_ty,
+                record_table,
+                adt_table,
+                arena,
+                type_params,
+            )?),
         )),
         Type::Closure(closure) => Ok(Type::Closure(crate::types::ClosureType {
             family: closure.family,
             capture: closure.capture,
             param: Box::new(canonicalize_declared_type_generic(
-                &closure.param, record_table, adt_table, arena, type_params,
+                &closure.param,
+                record_table,
+                adt_table,
+                arena,
+                type_params,
             )?),
             ret: Box::new(canonicalize_declared_type_generic(
-                &closure.ret, record_table, adt_table, arena, type_params,
+                &closure.ret,
+                record_table,
+                adt_table,
+                arena,
+                type_params,
             )?),
         })),
         Type::Record(name) => {
@@ -687,10 +833,7 @@ pub fn canonicalize_declared_type_generic(
             } else {
                 Err(FrontendError {
                     pos: 0,
-                    message: format!(
-                        "unknown enum type '{}'",
-                        resolve_symbol_name(arena, *name)?
-                    ),
+                    message: format!("unknown enum type '{}'", resolve_symbol_name(arena, *name)?),
                 })
             }
         }
@@ -871,7 +1014,10 @@ fn finalize_ordered_call_args(
 }
 
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn resolve_symbol_name<'a>(arena: &'a AstArena, id: SymbolId) -> Result<&'a str, FrontendError> {
+pub fn resolve_symbol_name<'a>(
+    arena: &'a AstArena,
+    id: SymbolId,
+) -> Result<&'a str, FrontendError> {
     arena.try_symbol_name(id).ok_or(FrontendError {
         pos: 0,
         message: format!("invalid symbol id {}", id.0),
