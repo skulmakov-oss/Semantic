@@ -1,4 +1,5 @@
 source: crates/prom-cap/src/lib.rs
+pub mod hello_observation_capability;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityKind {
 pub const fn required_capability_for_call(call: HostCallId) -> CapabilityKind {

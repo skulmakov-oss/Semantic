@@ -58,3 +58,15 @@ This document registers pending verifier / capability / runtime / audit policy f
 - no runtime / sink / capability / audit behavior
 - no normal compiler pipeline integration
 - `#477` remains open
+
+## 8. M-HELLO-6C Boundary Note
+
+- isolated observation capability model skeleton exists
+- no production capability admission
+- no verifier integration
+- no runtime routing
+- no host output
+- no stdout default
+- no audit behavior
+- no CLI pipeline integration
+- `#477` remains open
