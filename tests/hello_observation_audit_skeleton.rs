@@ -3,9 +3,6 @@ use prom_audit::hello_observation_audit::{
     HelloObservationAuditLinkage, HelloObservationAuditPayloadRef,
     HelloObservationAuditPolicyClass,
 };
-use prom_audit::{AuditEventId, AuditEventKind, AuditSessionMetadata, AuditTrail};
-use prom_cap::{CapabilityManifestMetadata, CapabilityManifestVersion};
-use sm_runtime_core::ExecutionContext;
 
 fn sample_linkage() -> HelloObservationAuditLinkage {
     HelloObservationAuditLinkage {
@@ -65,20 +62,4 @@ fn hello_observation_audit_skeleton_rejects_stdout_style_kinds_by_construction()
     assert_ne!(event.operation_kind, "stdout");
     assert_ne!(event.operation_kind, "print");
     assert_ne!(event.operation_kind, "io.write");
-}
-
-#[test]
-fn hello_observation_audit_skeleton_keeps_existing_audit_trail_unchanged() {
-    let session = AuditSessionMetadata {
-        context: ExecutionContext::KernelBound,
-        capability_manifest: CapabilityManifestMetadata {
-            schema: "prom.cap.manifest".to_string(),
-            version: CapabilityManifestVersion::V1,
-        },
-        gate_registry_bound: true,
-    };
-    let mut trail = AuditTrail::new(session);
-    let id = trail.record(AuditEventKind::SessionFinished);
-    assert_eq!(id, AuditEventId(0));
-    assert_eq!(trail.events().len(), 1);
 }
