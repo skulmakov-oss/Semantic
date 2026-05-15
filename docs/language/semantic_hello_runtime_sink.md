@@ -189,6 +189,16 @@ Recommended next steps:
 - no stdout default
 - no print / general I/O
 - no capability admission
+
+## 15. M-HELLO-8B Implementation Boundary
+
+- isolated capability-gated observation route test harness exists
+- capability allow is required before route skeleton is called
+- denied capability does not route
+- route remains explicit sink only
+- no production capability admission
+- no VM / runtime production routing
+- no host output
 - no audit storage
 - no CLI / smc integration
 - `#477` remains open
