@@ -2,6 +2,8 @@
 
 extern crate alloc;
 
+pub mod hello_observation_audit;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 use prom_cap::{CapabilityKind, CapabilityManifestMetadata, CapabilityManifestVersion};
