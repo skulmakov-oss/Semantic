@@ -212,16 +212,14 @@ Recommended next steps:
 - no CLI / smc integration
 - `#477` remains open
 
+## 16. M-HELLO-7D Implementation Boundary
 
-## 14. M-HELLO-7B Implementation Boundary
-
-- isolated real SemCode-level emission skeleton exists
-- emits typed / planning SemCode-level operations only
-- no real SemCode bytes
-- no opcode IDs
-- no bytecode format changes
-- no verifier admission
-- no VM/runtime routing
-- no capability / audit behavior
-- no CLI pipeline integration
+- negative verifier tests exist for forbidden observation encodings
+- stdout / print / io.write / file / network / stdin are rejected
+- opcode / bytecode markers are rejected
+- tests target isolated verifier-admission skeleton only
+- no production verifier pipeline integration
+- no real SemCode byte verification
+- no VM/runtime/capability/audit behavior
+- no CLI / smc integration
 - `#477` remains open

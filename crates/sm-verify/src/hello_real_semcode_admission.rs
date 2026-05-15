@@ -108,7 +108,7 @@ pub fn admit_hello_real_semcode_skeleton(
                         HelloRealSemCodeAdmissionError::PrintNotAllowed,
                     );
                 }
-                "\"io.write\"" => {
+                "\"io.write\"" | "\"file\"" | "\"network\"" | "\"stdin\"" => {
                     return HelloRealSemCodeAdmissionDecision::Reject(
                         HelloRealSemCodeAdmissionError::GenericIoNotAllowed,
                     );
