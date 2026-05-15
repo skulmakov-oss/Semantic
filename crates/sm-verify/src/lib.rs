@@ -20,6 +20,8 @@ use std::collections::HashSet;
 
 #[cfg(feature = "std")]
 pub mod hello_pending_admission;
+#[cfg(feature = "std")]
+pub mod hello_real_semcode_admission;
 
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
