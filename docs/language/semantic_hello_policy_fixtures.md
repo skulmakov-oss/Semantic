@@ -70,3 +70,16 @@ This document registers pending verifier / capability / runtime / audit policy f
 - no audit behavior
 - no CLI pipeline integration
 - `#477` remains open
+
+## 9. M-HELLO-6E Boundary Note
+
+- isolated policy harness exists
+- composes pending verifier, runtime sink, capability, and audit skeletons
+- harness is test-only
+- no production verifier admission
+- no VM / runtime routing
+- no production capability admission
+- no AuditTrail / audit storage
+- no SemCode / opcode changes
+- no CLI pipeline integration
+- `#477` remains open
