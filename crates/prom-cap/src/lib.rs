@@ -2,6 +2,8 @@
 
 extern crate alloc;
 
+pub mod hello_observation_capability;
+
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use prom_abi::HostCallId;
