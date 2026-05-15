@@ -171,13 +171,24 @@ Clarifications:
 - update examples/README only after real behavior exists
 - keep `#477` open
 
-## 11. Issue State
+## 11. M-HELLO-10B Boundary Note
+
+- gated provisional byte-emission skeleton exists
+- representation is deterministic but not production SemCode
+- `OBSERVE_TEXT_LITERAL` remains symbolic / not a numeric opcode ID
+- no stable bytecode format is claimed
+- no production encoder integration
+- no verifier / VM / runtime / capability / audit / CLI behavior
+- no accepted golden SemCode
+- `#477` remains open
+
+## 12. Issue State
 
 - this PR does not close `#477`
 - this PR does not satisfy `#477` acceptance criteria
 - this PR only removes the design fork between dedicated encoding and host-call fallback
 
-## 12. Acceptance Checklist
+## 13. Acceptance Checklist
 
 - [ ] dedicated encoding decision recorded
 - [ ] typed host-call fallback documented but not selected
@@ -192,4 +203,3 @@ Clarifications:
 - [ ] no bytecode format changes
 - [ ] no accepted runtime behavior
 - [ ] `#477` remains open
-
