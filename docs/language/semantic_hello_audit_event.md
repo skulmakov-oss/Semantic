@@ -196,3 +196,17 @@ Recommended next steps:
 - no verifier / capability behavior
 - no CLI pipeline integration
 - `#477` remains open
+
+## 14. M-HELLO-8C Boundary Note
+
+- isolated observation audit decision test harness exists
+- required audit policy records local audit event skeleton only
+- deferred audit policy produces local Deferred decision
+- denied route produces local NotRecorded decision
+- no production AuditTrail integration
+- no audit storage
+- no VM / runtime production routing
+- no host output
+- no capability / verifier behavior
+- no CLI / smc integration
+- `#477` remains open
