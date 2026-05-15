@@ -184,3 +184,15 @@ Recommended next steps:
 - no SemCode / opcode changes
 - no accepted runtime behavior
 - `#477` remains open
+
+## 13. M-HELLO-6D Boundary Note
+
+- isolated observation audit event skeleton exists
+- no audit storage implementation
+- no AuditTrail integration
+- no runtime routing
+- no host output
+- no stdout default
+- no verifier / capability behavior
+- no CLI pipeline integration
+- `#477` remains open
