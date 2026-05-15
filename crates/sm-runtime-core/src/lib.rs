@@ -12,6 +12,8 @@ use alloc::vec::Vec;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod hello_observation_sink;
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub mod hello_observation_route;
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, PartialEq)]

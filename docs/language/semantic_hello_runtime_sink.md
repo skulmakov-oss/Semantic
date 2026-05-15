@@ -179,3 +179,16 @@ Recommended next steps:
 - no capability / audit behavior
 - no CLI pipeline integration
 - `#477` remains open
+
+## 14. M-HELLO-8A Implementation Boundary
+
+- isolated runtime observation route skeleton exists
+- routes admitted Hello observation to explicit sink only
+- no VM / runtime production routing
+- no host output
+- no stdout default
+- no print / general I/O
+- no capability admission
+- no audit storage
+- no CLI / smc integration
+- `#477` remains open
