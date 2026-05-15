@@ -24,6 +24,9 @@ pub use sm_ir::{
     compile_program_to_semcode_with_options_debug, emit_ir_to_semcode, CompileProfile, OptLevel,
 };
 
+#[cfg(feature = "std")]
+pub mod hello_real_semcode;
+
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;

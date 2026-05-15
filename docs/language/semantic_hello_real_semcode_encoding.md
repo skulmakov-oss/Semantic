@@ -186,3 +186,15 @@ Recommended next steps:
 - no accepted runtime behavior
 - `#477` remains open
 
+## 14. M-HELLO-7B Implementation Boundary
+
+- isolated real SemCode-level emission skeleton exists
+- emits typed / planning SemCode-level operations only
+- no real SemCode bytes
+- no opcode IDs
+- no bytecode format changes
+- no verifier admission
+- no VM/runtime routing
+- no capability / audit behavior
+- no CLI pipeline integration
+- `#477` remains open
