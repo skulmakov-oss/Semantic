@@ -4,31 +4,14 @@ use prom_cap::hello_observation_capability::{
     evaluate_hello_observation_capability, HelloObservationCapabilityContext,
     HelloObservationCapabilityDecision, HelloObservationCapabilityDenial,
 };
+use sm_runtime_core::hello_observation_route::{
+    route_hello_observation_to_sink, HelloObservationRouteError,
+    HelloObservationRouteInput, HelloObservationRouteResult,
+};
 use sm_runtime_core::hello_observation_sink::{
     HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
     HelloObservationSink, HelloObservationSinkError,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HelloObservationRouteError {
-    NotAdmitted,
-    NonControlledText,
-    ForbiddenHostOutput,
-    SinkRejected,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HelloObservationRouteResult {
-    Routed,
-    NotRouted(HelloObservationRouteError),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct HelloObservationRouteInput {
-    admitted: bool,
-    text: String,
-    sequence_index: HelloObservationSequenceIndex,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CapabilityGatedRouteResult {
@@ -53,41 +36,6 @@ impl HelloObservationSink for InMemorySink {
         }
         self.events.push(event);
         Ok(())
-    }
-}
-
-fn route_hello_observation_to_sink<S: HelloObservationSink>(
-    input: HelloObservationRouteInput,
-    sink: &mut S,
-) -> HelloObservationRouteResult {
-    if !input.admitted {
-        return HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NotAdmitted);
-    }
-
-    match input.text.as_str() {
-        "Hello, World!" => {
-            let event = HelloObservationEvent {
-                operation_kind: "controlled_observation_text",
-                observation_class: HelloObservationClass::ControlledText,
-                text: input.text,
-                sequence_index: input.sequence_index,
-            };
-
-            match sink.observe(event) {
-                Ok(()) => HelloObservationRouteResult::Routed,
-                Err(_) => HelloObservationRouteResult::NotRouted(
-                    HelloObservationRouteError::SinkRejected,
-                ),
-            }
-        }
-        "stdout" | "print" | "io.write" | "file" | "network" | "stdin" => {
-            HelloObservationRouteResult::NotRouted(
-                HelloObservationRouteError::ForbiddenHostOutput,
-            )
-        }
-        _ => HelloObservationRouteResult::NotRouted(
-            HelloObservationRouteError::NonControlledText,
-        ),
     }
 }
 
