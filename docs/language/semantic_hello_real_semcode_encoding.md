@@ -223,3 +223,5 @@ Recommended next steps:
 - no VM/runtime/capability/audit behavior
 - no CLI / smc integration
 - `#477` remains open
+
+See also: [`semantic_hello_implementation_closeout.md`](semantic_hello_implementation_closeout.md)
