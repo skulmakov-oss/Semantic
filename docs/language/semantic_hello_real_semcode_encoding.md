@@ -224,4 +224,4 @@ Recommended next steps:
 - no CLI / smc integration
 - `#477` remains open
 
-See also: [`semantic_hello_implementation_closeout.md`](semantic_hello_implementation_closeout.md)
+See also: [`semantic_hello_controlled_observation_encoding.md`](semantic_hello_controlled_observation_encoding.md)
