@@ -168,3 +168,14 @@ Recommended next steps:
 - no SemCode / opcode changes
 - no accepted runtime behavior
 - `#477` remains open
+
+## 13. M-HELLO-6B Implementation Boundary
+
+- isolated runtime observation sink interface skeleton exists
+- no host output
+- no stdout default
+- no print
+- no VM / runtime route integration
+- no capability / audit behavior
+- no CLI pipeline integration
+- `#477` remains open
