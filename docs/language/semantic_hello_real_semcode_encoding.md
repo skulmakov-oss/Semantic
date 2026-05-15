@@ -198,3 +198,30 @@ Recommended next steps:
 - no capability / audit behavior
 - no CLI pipeline integration
 - `#477` remains open
+
+## 15. M-HELLO-7C Implementation Boundary
+
+- isolated verifier admission for Hello real SemCode-level skeleton exists
+- admits controlled `observe_text_literal` only
+- no real SemCode byte verification
+- no numeric opcode IDs
+- no bytecode format changes
+- no production verifier pipeline integration
+- no VM/runtime routing
+- no capability / audit behavior
+- no CLI / smc integration
+- `#477` remains open
+
+
+## 14. M-HELLO-7B Implementation Boundary
+
+- isolated real SemCode-level emission skeleton exists
+- emits typed / planning SemCode-level operations only
+- no real SemCode bytes
+- no opcode IDs
+- no bytecode format changes
+- no verifier admission
+- no VM/runtime routing
+- no capability / audit behavior
+- no CLI pipeline integration
+- `#477` remains open
