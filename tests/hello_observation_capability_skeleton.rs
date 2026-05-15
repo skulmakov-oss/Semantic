@@ -1,13 +1,10 @@
-#[path = "../crates/prom-cap/src/hello_observation_capability.rs"]
-mod hello_observation_capability;
-
-use hello_observation_capability::{
+use prom_abi::HostCallId;
+use prom_cap::hello_observation_capability::{
     evaluate_hello_observation_capability, HelloObservationCapability,
     HelloObservationCapabilityContext, HelloObservationCapabilityDecision,
     HelloObservationCapabilityDenial, HelloObservationCapabilityPolicy,
 };
-use prom_abi::HostCallId;
-use prom_cap::{required_capability_for_call, CapabilityKind};
+use prom_cap::{CapabilityKind, required_capability_for_call};
 
 fn allow_context() -> HelloObservationCapabilityContext {
     HelloObservationCapabilityContext {
@@ -104,3 +101,4 @@ fn hello_observation_capability_skeleton_keeps_existing_host_call_mapping_unchan
         CapabilityKind::PulseEmit
     );
 }
+

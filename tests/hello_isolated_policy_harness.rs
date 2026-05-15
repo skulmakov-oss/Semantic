@@ -4,10 +4,7 @@ use prom_audit::hello_observation_audit::{
     HelloObservationAuditPayloadRef, HelloObservationAuditPolicyClass,
     HelloObservationAuditSequenceIndex,
 };
-#[path = "../crates/prom-cap/src/hello_observation_capability.rs"]
-mod hello_observation_capability;
-
-use hello_observation_capability::{
+use prom_cap::hello_observation_capability::{
     evaluate_hello_observation_capability, HelloObservationCapability,
     HelloObservationCapabilityContext, HelloObservationCapabilityDecision,
     HelloObservationCapabilityDenial, HelloObservationCapabilityPolicy,

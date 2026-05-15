@@ -63,3 +63,4 @@ pub fn evaluate_hello_observation_capability(
 
     HelloObservationCapabilityDecision::Allow
 }
+
