@@ -68,3 +68,5 @@ Later real CLI integration may start only after:
 - it is a controlled smoke-path harness only
 - production CLI remains blocked
 
+See also: [`semantic_hello_implementation_closeout.md`](semantic_hello_implementation_closeout.md)
+
