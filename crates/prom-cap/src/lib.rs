@@ -14,6 +14,7 @@ pub enum CapabilityKind {
     GateRead,
     GateWrite,
     PulseEmit,
+    ControlledObservationSink,
     StateQuery,
     StateUpdate,
     EventPost,
@@ -43,6 +44,7 @@ pub const fn capability_surface_class(kind: CapabilityKind) -> CapabilitySurface
         CapabilityKind::GateRead => CapabilitySurfaceClass::StableV1,
         CapabilityKind::GateWrite => CapabilitySurfaceClass::StableV1,
         CapabilityKind::PulseEmit => CapabilitySurfaceClass::StableV1,
+        CapabilityKind::ControlledObservationSink => CapabilitySurfaceClass::PlannedPostStable,
         CapabilityKind::StateQuery => CapabilitySurfaceClass::PlannedPostStable,
         CapabilityKind::StateUpdate => CapabilitySurfaceClass::PlannedPostStable,
         CapabilityKind::EventPost => CapabilitySurfaceClass::PlannedPostStable,
@@ -406,6 +408,10 @@ mod tests {
             CapabilitySurfaceClass::StableV1
         );
         assert_eq!(
+            capability_surface_class(CapabilityKind::ControlledObservationSink),
+            CapabilitySurfaceClass::PlannedPostStable
+        );
+        assert_eq!(
             capability_surface_class(CapabilityKind::ClockRead),
             CapabilitySurfaceClass::PlannedPostStable
         );
@@ -416,7 +422,19 @@ mod tests {
         let manifest = CapabilityManifest::gate_surface();
         assert!(manifest.allows(CapabilityKind::GateRead));
         assert!(!manifest.allows(CapabilityKind::StateQuery));
+        assert!(!manifest.allows(CapabilityKind::ControlledObservationSink));
         assert!(!manifest.allows(CapabilityKind::ClockRead));
+    }
+
+    #[test]
+    fn manifest_can_allow_controlled_observation_sink_only_when_explicitly_granted() {
+        let mut manifest = CapabilityManifest::new();
+        assert!(!manifest.allows(CapabilityKind::ControlledObservationSink));
+        manifest.allow(CapabilityKind::ControlledObservationSink);
+        assert!(manifest.allows(CapabilityKind::ControlledObservationSink));
+        manifest
+            .require(CapabilityKind::ControlledObservationSink)
+            .expect("explicitly granted capability must admit");
     }
 
     #[test]
