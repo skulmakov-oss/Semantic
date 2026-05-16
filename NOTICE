@@ -1,0 +1,21 @@
+Semantic Language
+Copyright 2026 Said Kulmakov
+
+This project was created and is maintained by Said Kulmakov.
+
+Semantic is a deterministic verified execution platform with native quad logic,
+SemCode VM, verifier-first admission, and controlled PROMETHEUS boundary
+integration.
+
+Semantic is part of a broader system architecture developed by Said Kulmakov.
+The Apache-2.0 license in this repository applies to the source code,
+documentation, examples, tests, reports, and associated repository files that
+are explicitly included in this repository, unless a file states otherwise.
+
+This notice does not modify the Apache License 2.0 and does not extend the
+license to proprietary modules, private system components, unreleased
+architectural elements, third-party dependencies, external tools, or external
+assets.
+
+Public behavior claims for Semantic are governed by the canonical specification
+bundle, public status model, and corresponding tests.
