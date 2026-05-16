@@ -4,7 +4,7 @@
 
 # Semantic Language
 
-Semantic is a deterministic verified execution platform with native quad logic, SemCode verifier, VM runtime, and PROMETHEUS boundary.
+Semantic is a deterministic verified execution platform with native quad logic, SemCode VM, verifier-first admission, and controlled PROMETHEUS boundary integration.
 
 ## Visual Architecture Render
 
