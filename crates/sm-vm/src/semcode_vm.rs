@@ -13,6 +13,9 @@ use sm_runtime_core::{
     AccessPath, AdtCarrier, ExecutionConfig, ExecutionContext, QuotaExceeded, QuotaKind,
     RecordCarrier, RuntimeQuotas, RuntimeSymbolTable, RuntimeTrap, SymbolId,
 };
+use sm_runtime_core::hello_observation_sink::{
+    HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
+};
 use sm_verify::verify_semcode;
 use sm_verify::RejectReport;
 use std::collections::{HashMap, HashSet};
@@ -99,6 +102,8 @@ pub struct VM {
     pub symbols: RuntimeSymbolTable,
     /// PRNG state for random_seed / random_next_i32 (xorshift64; 0 = unseeded).
     pub prng_state: u64,
+    hello_observation_events: Vec<HelloObservationEvent>,
+    hello_observation_sequence_index: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,6 +167,30 @@ impl core::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
+impl VM {
+    fn record_controlled_text_observation(&mut self, text: String) -> Result<(), RuntimeError> {
+        if matches!(
+            text.as_str(),
+            "stdout" | "print" | "io.write" | "file" | "network" | "stdin"
+        ) {
+            return Err(RuntimeError::TypeMismatchRuntime(format!(
+                "builtin 'print' does not admit host-output marker '{}'",
+                text
+            )));
+        }
+
+        let event = HelloObservationEvent {
+            operation_kind: "controlled_observation_text",
+            observation_class: HelloObservationClass::ControlledText,
+            text,
+            sequence_index: HelloObservationSequenceIndex(self.hello_observation_sequence_index),
+        };
+        self.hello_observation_sequence_index += 1;
+        self.hello_observation_events.push(event);
+        Ok(())
+    }
+}
+
 pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     run_semcode_with_config(
         bytes,
@@ -172,6 +201,16 @@ pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
 pub fn run_verified_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     run_verified_semcode_with_config(
         bytes,
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+    )
+}
+
+pub fn run_semcode_collecting_hello_observations(
+    bytes: &[u8],
+) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
+    run_semcode_with_entry_and_config_collecting_hello_observations(
+        bytes,
+        "main",
         ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
     )
 }
@@ -248,6 +287,8 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config<
         effect_calls: 0,
         symbols,
         prng_state: 0,
+        hello_observation_events: Vec::new(),
+        hello_observation_sequence_index: 0,
     };
     push_frame(&mut vm, entry, Vec::new(), None)?;
     let mut bridge = PrometheusVmHost { host, capabilities };
@@ -279,6 +320,8 @@ pub fn run_verified_semcode_with_ui_capabilities<
         effect_calls: 0,
         symbols,
         prng_state: 0,
+        hello_observation_events: Vec::new(),
+        hello_observation_sequence_index: 0,
     };
     push_frame(&mut vm, "main", Vec::new(), None)?;
     let mut bridge = PrometheusUiVmHost { host, capabilities, ui_capabilities };
@@ -290,6 +333,15 @@ pub fn run_semcode_with_entry_and_config(
     entry: &str,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
+    run_semcode_with_entry_and_config_collecting_hello_observations(bytes, entry, config)
+        .map(|_| ())
+}
+
+fn run_semcode_with_entry_and_config_collecting_hello_observations(
+    bytes: &[u8],
+    entry: &str,
+    config: ExecutionConfig,
+) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
     let (_, symbols, functions) = parse_semcode(bytes)?;
     let mut vm = VM {
         functions,
@@ -298,10 +350,13 @@ pub fn run_semcode_with_entry_and_config(
         effect_calls: 0,
         symbols,
         prng_state: 0,
+        hello_observation_events: Vec::new(),
+        hello_observation_sequence_index: 0,
     };
     push_frame(&mut vm, entry, Vec::new(), None)?;
     let mut host = LegacyVmHost;
-    exec_loop(&mut vm, &mut host)
+    exec_loop(&mut vm, &mut host)?;
+    Ok(vm.hello_observation_events)
 }
 
 pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {
@@ -1813,7 +1868,7 @@ fn exec_loop<H: VmHostBridge>(vm: &mut VM, host: &mut H) -> Result<(), RuntimeEr
                     let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                     args.push(get_reg(vm, frame_idx, r)?);
                 }
-                if let Some(result) = try_eval_builtin_call(&callee, &args)? {
+                if let Some(result) = try_eval_builtin_call(vm, &callee, &args)? {
                     if has_dst {
                         set_reg(vm, frame_idx, dst, result)?;
                     }
@@ -2330,7 +2385,11 @@ fn value_eq(a: &Value, b: &Value) -> Result<bool, RuntimeError> {
     }
 }
 
-fn try_eval_builtin_call(name: &str, args: &[Value]) -> Result<Option<Value>, RuntimeError> {
+fn try_eval_builtin_call(
+    vm: &mut VM,
+    name: &str,
+    args: &[Value],
+) -> Result<Option<Value>, RuntimeError> {
     let value = match name {
         "sin" => Value::F64(expect_builtin_unary_f64(name, args)?.sin()),
         "cos" => Value::F64(expect_builtin_unary_f64(name, args)?.cos()),
@@ -2358,7 +2417,7 @@ fn try_eval_builtin_call(name: &str, args: &[Value]) -> Result<Option<Value>, Ru
                     )));
                 }
             };
-            println!("{}", text);
+            vm.record_controlled_text_observation(text)?;
             Value::Unit
         }
         _ => return Ok(None),
@@ -3257,6 +3316,8 @@ mod tests {
             effect_calls: 0,
             symbols,
             prng_state: 0,
+            hello_observation_events: Vec::new(),
+            hello_observation_sequence_index: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
@@ -3282,6 +3343,8 @@ mod tests {
             effect_calls: 0,
             symbols,
             prng_state: 0,
+            hello_observation_events: Vec::new(),
+            hello_observation_sequence_index: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push main");
@@ -3313,6 +3376,8 @@ mod tests {
             effect_calls: 0,
             symbols,
             prng_state: 0,
+            hello_observation_events: Vec::new(),
+            hello_observation_sequence_index: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push frame");
@@ -3337,6 +3402,8 @@ mod tests {
             effect_calls: 0,
             symbols,
             prng_state: 0,
+            hello_observation_events: Vec::new(),
+            hello_observation_sequence_index: 0,
         };
 
         push_frame(&mut vm, "main", Vec::new(), None).expect("push main");
@@ -4001,6 +4068,85 @@ mod tests {
         bytes[opcode_pos] = 0xff;
         let err = run_verified_semcode(&bytes).expect_err("must fail");
         assert!(matches!(err, RuntimeError::VerifierRejected(_)));
+    }
+
+    #[test]
+    fn vm_builtin_print_collects_controlled_text_observation_in_memory() {
+        let src = r#"
+            fn main() {
+                print("Hello, World!");
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let events = run_semcode_collecting_hello_observations(&bytes).expect("run");
+
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+        assert_eq!(event.operation_kind, "controlled_observation_text");
+        assert_eq!(event.observation_class, HelloObservationClass::ControlledText);
+        assert_eq!(event.text, "Hello, World!");
+        assert_eq!(event.sequence_index, HelloObservationSequenceIndex(0));
+    }
+
+    #[test]
+    fn vm_builtin_print_assigns_deterministic_sequence_indexes() {
+        let src = r#"
+            fn main() {
+                print("Hello, World!");
+                print("Hello, World!");
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let events = run_semcode_collecting_hello_observations(&bytes).expect("run");
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].sequence_index, HelloObservationSequenceIndex(0));
+        assert_eq!(events[1].sequence_index, HelloObservationSequenceIndex(1));
+    }
+
+    #[test]
+    fn vm_builtin_print_rejects_non_text_values_without_implicit_conversion() {
+        let mut vm = VM {
+            functions: HashMap::new(),
+            callstack: Vec::new(),
+            config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+            effect_calls: 0,
+            symbols: RuntimeSymbolTable::new(),
+            prng_state: 0,
+            hello_observation_events: Vec::new(),
+            hello_observation_sequence_index: 0,
+        };
+
+        let err = try_eval_builtin_call(&mut vm, "print", &[Value::I32(10)])
+            .expect_err("i32 must fail");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+
+        let err = try_eval_builtin_call(&mut vm, "print", &[Value::Quad(QuadVal::T)])
+            .expect_err("quad must fail");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+    }
+
+    #[test]
+    fn vm_builtin_print_rejects_host_output_markers_without_observation_leakage() {
+        for forbidden in ["stdout", "print", "io.write", "file", "network", "stdin"] {
+            let src = format!(
+                r#"
+                    fn main() {{
+                        print("{forbidden}");
+                        return;
+                    }}
+                "#
+            );
+            let bytes = compile_program_to_semcode(&src).expect("compile");
+            let err = run_semcode_collecting_hello_observations(&bytes)
+                .expect_err("host-output marker must fail");
+            assert!(
+                matches!(err, RuntimeError::TypeMismatchRuntime(_)),
+                "unexpected error for {forbidden}: {err}"
+            );
+        }
     }
 
     fn ownership_tracking_bytes() -> Vec<u8> {
