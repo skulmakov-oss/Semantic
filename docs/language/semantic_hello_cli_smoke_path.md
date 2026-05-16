@@ -12,12 +12,12 @@ output, or README / user-facing promotion.
 
 ## 2. CLI Smoke Model
 
+### Route A - source run path
+
 ```text
 source file
-  -> smc check
-  -> smc compile
-  -> smc verify
-  -> smc run / run-smc
+  -> smc run
+  -> internal check/compile/verify path
   -> verified VM execution
   -> controlled observation event
   -> capability allow
@@ -25,6 +25,25 @@ source file
   -> CLI observation sink
 ```
 
+### Route B - verified artifact path
+
+```text
+source file
+  -> smc check
+  -> smc compile
+  -> .smc artifact
+  -> smc verify
+  -> smc run-smc
+  -> verified VM execution
+  -> controlled observation event
+  -> capability allow
+  -> audit decision
+  -> CLI observation sink
+```
+
+`smc run` owns the source execution workflow.
+`smc run-smc` owns the verified artifact execution workflow.
+They must be tested separately.
 The CLI must only render the observation after the full controlled route
 succeeds.
 The CLI must not synthesize the output independently.
@@ -64,17 +83,17 @@ This is not a stable public stdout API claim.
 
 | Case | Expected CLI result |
 | --- | --- |
-| check fails | no output |
-| compile fails | no output |
-| verify fails | no output |
-| VM route missing | no output |
-| capability denied | no output |
-| audit denied | no output |
-| audit policy missing | no output |
-| observation class not ControlledText | no output |
-| file / stdin / network target appears | reject / no output |
-| formatting / interpolation requested | reject / no output |
-| valid controlled text observation approved | render exact payload once |
+| check fails | non-zero exit + diagnostic; no observation payload |
+| compile fails | non-zero exit + diagnostic; no observation payload |
+| verify fails | non-zero exit + diagnostic; no observation payload |
+| VM route missing | non-zero exit + diagnostic; no observation payload |
+| capability denied | non-zero exit + diagnostic; no observation payload |
+| audit denied | non-zero exit + diagnostic; no observation payload |
+| audit policy missing | non-zero exit + diagnostic; no observation payload |
+| observation class not ControlledText | non-zero exit + diagnostic; no observation payload |
+| file / stdin / network target appears | reject with non-zero exit + diagnostic; no observation payload |
+| formatting / interpolation requested | reject with non-zero exit + diagnostic; no observation payload |
+| valid controlled text observation approved | zero exit + render exact payload once |
 
 ## 6. Smoke Commands
 
@@ -119,6 +138,7 @@ no general stdout
 no formatting / interpolation
 no implicit scalar-to-text conversion
 no file / stdin / network
+no fake success on failure cases
 no closure of #477
 ```
 
@@ -140,9 +160,13 @@ This document does not satisfy #477 acceptance criteria.
 
 ```text
 [ ] CLI smoke-path contract documented
+[ ] source-run route documented separately
+[ ] verified-artifact route documented separately
 [ ] lower-layer prerequisites explicit
 [ ] CLI denial matrix documented
 [ ] target smoke commands documented without claiming they pass
+[ ] denied / error cases require non-zero exit + diagnostic
+[ ] observation payload is suppressed on failure
 [ ] owner boundary correct
 [ ] no fake output path exists
 [ ] #477 remains open
