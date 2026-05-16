@@ -71,7 +71,7 @@ Based on the current code state, the next narrow split should be:
 
 - `M-HELLO-12A-1` - done: VM-side non-output controlled observation event seam
 - `M-HELLO-12A-2` - done: verifier-side controlled observation admission seam
- - `M-HELLO-12A-3` - done: production capability gate for controlled observation sink
+- `M-HELLO-12A-3` - done: production capability gate for controlled observation sink
 - `M-HELLO-12A-4` - wire audit decision policy into the observation route
 - `M-HELLO-12A-5` - add CLI result envelope rendering for source-run and run-smc separately
 
