@@ -6,6 +6,7 @@ pub mod hello_observation_audit;
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use hello_observation_audit::ControlledObservationAuditDecision;
 use prom_cap::{CapabilityKind, CapabilityManifestMetadata, CapabilityManifestVersion};
 use sm_runtime_core::ExecutionContext;
 
@@ -40,6 +41,15 @@ pub enum AuditEventKind {
     CapabilityDenied {
         capability: CapabilityKind,
         call: Option<String>,
+    },
+    ControlledObservation {
+        operation_kind: String,
+        observation_class: String,
+        payload_hash: Option<u64>,
+        redacted: bool,
+        sequence_index: u64,
+        policy: ControlledObservationAuditDecision,
+        linkage: crate::hello_observation_audit::HelloObservationAuditLinkage,
     },
     GateRead {
         device_id: u16,
@@ -559,6 +569,46 @@ fn encode_event_kind(out: &mut String, kind: &AuditEventKind) {
                 None => out.push_str("none"),
             }
         }
+        AuditEventKind::ControlledObservation {
+            operation_kind,
+            observation_class,
+            payload_hash,
+            redacted,
+            sequence_index,
+            policy,
+            linkage,
+        } => {
+            out.push_str("\tcontrolled-observation\t");
+            out.push_str(&escape_archive_field(operation_kind));
+            out.push('\t');
+            out.push_str(&escape_archive_field(observation_class));
+            out.push('\t');
+            match payload_hash {
+                Some(hash) => out.push_str(&hash.to_string()),
+                None => out.push_str("none"),
+            }
+            out.push('\t');
+            out.push_str(if *redacted { "true" } else { "false" });
+            out.push('\t');
+            out.push_str(&sequence_index.to_string());
+            out.push('\t');
+            out.push_str(display_controlled_observation_audit_decision(*policy));
+            out.push('\t');
+            match linkage.verifier_admission_ref {
+                Some(value) => out.push_str(&value.to_string()),
+                None => out.push_str("none"),
+            }
+            out.push('\t');
+            match linkage.capability_policy_ref {
+                Some(value) => out.push_str(&value.to_string()),
+                None => out.push_str("none"),
+            }
+            out.push('\t');
+            match linkage.sink_policy_ref {
+                Some(value) => out.push_str(&value.to_string()),
+                None => out.push_str("none"),
+            }
+        }
         AuditEventKind::GateRead { device_id, port } => {
             out.push_str("\tgate-read\t");
             out.push_str(&device_id.to_string());
@@ -639,6 +689,26 @@ fn decode_event_kind(parts: &[&str]) -> Result<AuditEventKind, AuditReplayArchiv
             Ok(AuditEventKind::CapabilityDenied {
                 capability: parse_capability_kind(parts[1])?,
                 call: parse_optional_string(parts[2])?,
+            })
+        }
+        "controlled-observation" => {
+            if parts.len() != 10 {
+                return Err(AuditReplayArchiveFormatError::new(
+                    "invalid controlled-observation payload",
+                ));
+            }
+            Ok(AuditEventKind::ControlledObservation {
+                operation_kind: unescape_archive_field(parts[1])?,
+                observation_class: unescape_archive_field(parts[2])?,
+                payload_hash: parse_optional_u64(parts[3])?,
+                redacted: parse_bool_field(parts[4], "controlled observation redacted flag")?,
+                sequence_index: parse_u64_field(parts[5], "controlled observation sequence index")?,
+                policy: parse_controlled_observation_audit_decision(parts[6])?,
+                linkage: crate::hello_observation_audit::HelloObservationAuditLinkage {
+                    verifier_admission_ref: parse_optional_u64(parts[7])?,
+                    capability_policy_ref: parse_optional_u64(parts[8])?,
+                    sink_policy_ref: parse_optional_u64(parts[9])?,
+                },
             })
         }
         "gate-read" => {
@@ -742,6 +812,17 @@ fn display_capability_kind(kind: CapabilityKind) -> &'static str {
     }
 }
 
+fn display_controlled_observation_audit_decision(
+    decision: ControlledObservationAuditDecision,
+) -> &'static str {
+    match decision {
+        ControlledObservationAuditDecision::Record => "record",
+        ControlledObservationAuditDecision::Redact => "redact",
+        ControlledObservationAuditDecision::NoStore => "no_store",
+        ControlledObservationAuditDecision::Deny => "deny",
+    }
+}
+
 fn parse_capability_kind(
     raw: &str,
 ) -> Result<CapabilityKind, AuditReplayArchiveFormatError> {
@@ -756,6 +837,20 @@ fn parse_capability_kind(
         "ClockRead" => Ok(CapabilityKind::ClockRead),
         _ => Err(AuditReplayArchiveFormatError::new(
             "unknown capability kind in archive",
+        )),
+    }
+}
+
+fn parse_controlled_observation_audit_decision(
+    raw: &str,
+) -> Result<ControlledObservationAuditDecision, AuditReplayArchiveFormatError> {
+    match raw {
+        "record" => Ok(ControlledObservationAuditDecision::Record),
+        "redact" => Ok(ControlledObservationAuditDecision::Redact),
+        "no_store" => Ok(ControlledObservationAuditDecision::NoStore),
+        "deny" => Ok(ControlledObservationAuditDecision::Deny),
+        _ => Err(AuditReplayArchiveFormatError::new(
+            "unknown controlled observation audit decision in archive",
         )),
     }
 }
@@ -820,6 +915,15 @@ fn parse_optional_event_id(
     Ok(Some(AuditEventId(parse_u64_field(raw, "replay last event id")?)))
 }
 
+fn parse_optional_u64(
+    raw: &str,
+) -> Result<Option<u64>, AuditReplayArchiveFormatError> {
+    if raw == "none" {
+        return Ok(None);
+    }
+    Ok(Some(parse_u64_field(raw, "optional u64")?))
+}
+
 fn parse_optional_string(
     raw: &str,
 ) -> Result<Option<String>, AuditReplayArchiveFormatError> {
@@ -880,6 +984,12 @@ fn unescape_archive_field(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hello_observation_audit::{
+        apply_controlled_observation_audit_policy,
+        ControlledObservationAuditDecision,
+        ControlledObservationAuditResult,
+        HelloObservationAuditLinkage,
+    };
 
     fn sample_session() -> AuditSessionMetadata {
         AuditSessionMetadata {
@@ -935,6 +1045,151 @@ mod tests {
             }
             other => panic!("unexpected event {other:?}"),
         }
+    }
+
+    fn controlled_observation_linkage() -> HelloObservationAuditLinkage {
+        HelloObservationAuditLinkage {
+            verifier_admission_ref: Some(17),
+            capability_policy_ref: Some(29),
+            sink_policy_ref: Some(31),
+        }
+    }
+
+    #[test]
+    fn controlled_observation_record_policy_appends_deterministic_event() {
+        let mut trail = AuditTrail::new(sample_session());
+        let result = apply_controlled_observation_audit_policy(
+            &mut trail,
+            0xfeed_beef,
+            7,
+            ControlledObservationAuditDecision::Record,
+            controlled_observation_linkage(),
+        );
+
+        assert_eq!(
+            result,
+            ControlledObservationAuditResult::Recorded(AuditEventId(0))
+        );
+        assert_eq!(trail.events().len(), 1);
+        match &trail.events()[0].kind {
+            AuditEventKind::ControlledObservation {
+                operation_kind,
+                observation_class,
+                payload_hash,
+                redacted,
+                sequence_index,
+                policy,
+                linkage,
+            } => {
+                assert_eq!(operation_kind, "controlled_observation_text");
+                assert_eq!(observation_class, "ControlledText");
+                assert_eq!(*payload_hash, Some(0xfeed_beef));
+                assert!(!redacted);
+                assert_eq!(*sequence_index, 7);
+                assert_eq!(*policy, ControlledObservationAuditDecision::Record);
+                assert_eq!(*linkage, controlled_observation_linkage());
+            }
+            other => panic!("unexpected event {other:?}"),
+        }
+
+        let archive = trail.replay_archive();
+        let text = archive.to_canonical_text();
+        let parsed = AuditReplayArchive::from_canonical_text(&text).expect("parse");
+        assert_eq!(parsed, archive);
+        assert!(text.contains("controlled-observation"));
+        assert!(!text.contains("ControlledObservationSink"));
+    }
+
+    #[test]
+    fn controlled_observation_redact_policy_appends_redacted_event() {
+        let mut trail = AuditTrail::new(sample_session());
+        let result = apply_controlled_observation_audit_policy(
+            &mut trail,
+            0xfeed_beef,
+            9,
+            ControlledObservationAuditDecision::Redact,
+            controlled_observation_linkage(),
+        );
+
+        assert_eq!(
+            result,
+            ControlledObservationAuditResult::Recorded(AuditEventId(0))
+        );
+        assert_eq!(trail.events().len(), 1);
+        match &trail.events()[0].kind {
+            AuditEventKind::ControlledObservation {
+                payload_hash,
+                redacted,
+                policy,
+                sequence_index,
+                ..
+            } => {
+                assert_eq!(*payload_hash, None);
+                assert!(*redacted);
+                assert_eq!(*policy, ControlledObservationAuditDecision::Redact);
+                assert_eq!(*sequence_index, 9);
+            }
+            other => panic!("unexpected event {other:?}"),
+        }
+
+        let archive = trail.replay_archive();
+        let text = archive.to_canonical_text();
+        let parsed = AuditReplayArchive::from_canonical_text(&text).expect("parse");
+        assert_eq!(parsed, archive);
+        assert!(text.contains("controlled-observation"));
+    }
+
+    #[test]
+    fn controlled_observation_no_store_and_deny_are_explicit() {
+        let mut no_store_trail = AuditTrail::new(sample_session());
+        let no_store = apply_controlled_observation_audit_policy(
+            &mut no_store_trail,
+            123,
+            1,
+            ControlledObservationAuditDecision::NoStore,
+            controlled_observation_linkage(),
+        );
+        assert_eq!(no_store, ControlledObservationAuditResult::NoStore);
+        assert!(no_store_trail.events().is_empty());
+
+        let mut deny_trail = AuditTrail::new(sample_session());
+        let denied = apply_controlled_observation_audit_policy(
+            &mut deny_trail,
+            456,
+            2,
+            ControlledObservationAuditDecision::Deny,
+            controlled_observation_linkage(),
+        );
+        assert_eq!(denied, ControlledObservationAuditResult::Denied);
+        assert!(deny_trail.events().is_empty());
+    }
+
+    #[test]
+    fn controlled_observation_archive_representation_is_deterministic() {
+        let linkage = controlled_observation_linkage();
+
+        let mut first = AuditTrail::new(sample_session());
+        apply_controlled_observation_audit_policy(
+            &mut first,
+            0x1234,
+            3,
+            ControlledObservationAuditDecision::Record,
+            linkage,
+        );
+
+        let mut second = AuditTrail::new(sample_session());
+        apply_controlled_observation_audit_policy(
+            &mut second,
+            0x1234,
+            3,
+            ControlledObservationAuditDecision::Record,
+            linkage,
+        );
+
+        assert_eq!(
+            first.replay_archive().to_canonical_text(),
+            second.replay_archive().to_canonical_text()
+        );
     }
 
     #[test]
