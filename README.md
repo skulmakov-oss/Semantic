@@ -10,13 +10,38 @@ Semantic is a deterministic verified execution platform with native quad logic, 
 
 [![Semantic Snake AI Demo](https://img.youtube.com/vi/SKV-TfaJ0Fg/maxresdefault.jpg)](https://www.youtube.com/watch?v=SKV-TfaJ0Fg)
 
-> Canvas-based prototype for rendering architecture graphs, pipeline flow, verification gates, capability edges, and runtime state overlays.
+> Visual prototype for rendering execution pipelines, verifier gates, capability boundaries, runtime-state overlays, and architecture graphs.
 
-Semantic is a deterministic compiler/runtime system for contract-bound
-source-to-execution workflows. Current repository `main` includes broader
-language and platform work than the currently published stable line, so release
-reading must follow the canonical status model rather than assuming all landed
-behavior is promised.
+## What Semantic Is
+
+Semantic is built for programs that must be checked before they are allowed to run.
+
+A Semantic program is compiled into SemCode, admitted by a verifier, and then executed by a deterministic VM under explicit runtime limits and capability boundaries.
+
+The core execution path is:
+
+```text
+source
+  -> frontend / semantic analysis
+  -> IR / deterministic passes
+  -> SemCode
+  -> verifier admission
+  -> deterministic VM
+  -> optional PROMETHEUS boundary
+```
+
+Semantic is designed for:
+
+- reasoning rules;
+- semantic state transitions;
+- native `quad` logic: `N / F / T / S`;
+- deterministic execution;
+- verifier-first admission;
+- bounded runtime behavior;
+- controlled host effects through explicit capabilities.
+
+The repository `main` may contain work that is newer than the currently published stable line. Public claims should therefore be read through the canonical status model in `docs/roadmap/public_status_model.md`.
+
 The public contract is centered in `docs/spec/*`. Historical roadmap notes and legacy compatibility shims remain in the repository, but they are not the primary source of truth for the current toolchain surface.
 
 ## Current Status
