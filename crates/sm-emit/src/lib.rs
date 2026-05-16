@@ -27,6 +27,9 @@ pub use sm_ir::{
 #[cfg(feature = "std")]
 pub mod hello_real_semcode;
 
+#[cfg(feature = "std")]
+pub mod hello_observation_bytes;
+
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
