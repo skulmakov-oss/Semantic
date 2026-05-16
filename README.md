@@ -4,7 +4,36 @@
 
 # Semantic Language
 
-Semantic is a deterministic verified execution platform with native quad logic, SemCode VM, verifier-first admission, and controlled PROMETHEUS boundary integration.
+Semantic lets reasoning programs be checked before they are allowed to run.
+
+It is a deterministic verified execution platform with native quad logic, SemCode VM, verifier-first admission, and controlled PROMETHEUS boundary integration.
+
+```text
+source
+  -> semantic analysis
+  -> IR
+  -> SemCode
+  -> verifier admission
+  -> deterministic VM
+  -> controlled boundary
+```
+
+## Start Here
+
+- New to the project: read `docs/roadmap/public_maturity_snapshot.md`.
+- Want to try the pipeline: run the zero-effect verifier smoke path in `Quickstart`.
+- Want the contract: start with `docs/spec/index.md`, `docs/spec/semcode.md`, `docs/spec/verifier.md`, and `docs/spec/vm.md`.
+- Want the active development track: read `docs/language/semantic_hello_*`.
+
+## Minimal Smoke Example
+
+```sm
+fn main() {
+    return;
+}
+```
+
+This is a zero-effect program. It is useful for checking the core path without claiming general stdout, formatting, file I/O, network I/O, or broad host effects.
 
 ## Visual Architecture Render
 
@@ -13,8 +42,6 @@ Semantic is a deterministic verified execution platform with native quad logic, 
 > Visual prototype for rendering execution pipelines, verifier gates, capability boundaries, runtime-state overlays, and architecture graphs.
 
 ## What Semantic Is
-
-Semantic is built for programs that must be checked before they are allowed to run.
 
 A Semantic program is compiled into SemCode, admitted by a verifier, and then executed by a deterministic VM under explicit runtime limits and capability boundaries.
 
