@@ -373,30 +373,70 @@ For a fuller onboarding path, see:
 - `docs/examples_index.md`
 
 ## Current CLI Surface
-Current command families exposed by `smc`:
-- `compile`
-- `check`
-- `lint`
-- `watch`
-- `fmt`
-- `dump-ast`
-- `dump-ir`
-- `dump-bytecode`
-- `hash-ast`
-- `hash-ir`
-- `hash-smc`
-- `snapshots`
-- `features`
-- `explain`
-- `repl`
-- `verify`
-- `run`
-- `run-smc`
-- `disasm`
 
-Low-level VM entrypoint:
-- `svm run <input.smc>`
-- `svm disasm <input.smc>`
+`smc` is the canonical public CLI for the Semantic toolchain. It is the preferred route for source checks, SemCode emission, verifier admission, and public execution flows.
+
+### Core pipeline commands
+
+These commands represent the standard source-to-execution path.
+
+| Command | Role |
+|---|---|
+| `smc check <file.sm>` | Parse and semantically check source without emitting an artifact. |
+| `smc compile <file.sm> -o <file.smc>` | Compile source into a SemCode artifact. |
+| `smc verify <file.smc>` | Admit or reject a SemCode artifact before execution. |
+| `smc run <file.sm>` | Run from source through the standard CLI route. |
+| `smc run-smc <file.smc>` | Run a precompiled SemCode artifact through the standard CLI route. |
+
+### Inspection and artifact commands
+
+These commands expose intermediate artifacts and stable inspection surfaces.
+
+| Command | Role |
+|---|---|
+| `smc dump-ast <file.sm>` | Show the parsed source structure. |
+| `smc dump-ir <file.sm>` | Show the lowered IR path. |
+| `smc dump-bytecode <file.sm>` | Show emitted bytecode-oriented information. |
+| `smc disasm <file.smc>` | Disassemble a SemCode artifact through the CLI route. |
+| `smc hash-ast <file.sm>` | Produce a stable AST-oriented hash. |
+| `smc hash-ir <file.sm>` | Produce a stable IR-oriented hash. |
+| `smc hash-smc <file.smc>` | Produce a stable SemCode artifact hash. |
+| `smc snapshots ...` | Work with snapshot-oriented regression artifacts. |
+
+### Diagnostics and developer tooling
+
+These commands support editing, diagnostics, and toolchain discovery.
+
+| Command | Role |
+|---|---|
+| `smc lint <file.sm>` | Run lint-style checks. |
+| `smc fmt <path>` | Format source files or check formatting. |
+| `smc explain <code>` | Explain a diagnostic or toolchain code. |
+| `smc features` | Show exposed feature/profile information. |
+| `smc watch ...` | Watch files and rerun selected checks. |
+| `smc repl` | Start the interactive Semantic REPL route. |
+
+### Low-level VM entrypoint
+
+`svm` is the lower-level VM-oriented entrypoint. It is useful for VM-focused inspection, but `smc` remains the canonical public toolchain route.
+
+| Command | Role |
+|---|---|
+| `svm run <file.smc>` | Run a SemCode artifact through the VM entrypoint. |
+| `svm disasm <file.smc>` | Disassemble a SemCode artifact through the VM entrypoint. |
+
+### CLI boundary rule
+
+The CLI must not become a second execution semantics owner.
+
+```text
+smc orchestrates
+verifier admits or rejects
+VM executes
+PROMETHEUS boundary controls effects
+```
+
+Public `.smc` execution remains verifier-first. Controlled observation / Hello World output is tracked separately in the active M-Hello path and must not be read as general stdout support.
 
 ## Current SemCode And Runtime Notes
 - The SemCode contract is owned by `sm-ir` and surfaced through `sm-emit`.
