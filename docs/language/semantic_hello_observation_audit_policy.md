@@ -32,8 +32,7 @@ admitted ControlledTextObservation
 The audit layer must not itself write to stdout.
 
 The audit layer decides whether the controlled observation event must be
-recorded, denied, redacted, summarized, or explicitly passed with a no-store
-policy.
+recorded, denied, redacted, or explicitly passed with a no-store policy.
 
 ## 3. Required Audit Record Shape
 
