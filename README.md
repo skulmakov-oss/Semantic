@@ -170,7 +170,14 @@ one logical change
 If a cleanup or UI task starts requiring new language/runtime behavior, it must move into the appropriate feature track instead of widening scope silently.
 
 ## Primary References
-- `docs/spec/index.md` - canonical spec bundle entrypoint
+
+### Status and release posture
+- `docs/roadmap/public_status_model.md` - canonical status vocabulary: stable, limited, main-only, out of scope
+- `docs/roadmap/v1_readiness.md` - readiness posture and v1-oriented status model
+- `reports/g1_execution_integrity.md` - execution-integrity gate report
+
+### Canonical specification bundle
+- `docs/spec/index.md` - spec bundle entrypoint
 - `docs/spec/syntax.md` - source syntax contract
 - `docs/spec/types.md` - source type contract
 - `docs/spec/source_semantics.md` - source execution and binding semantics
@@ -179,8 +186,27 @@ If a cleanup or UI task starts requiring new language/runtime behavior, it must 
 - `docs/spec/vm.md` - VM execution contract
 - `docs/spec/runtime_ownership.md` - frozen tuple + direct record-field runtime ownership contract
 - `docs/spec/cli.md` - public CLI surface
+
+### Current M-Hello / controlled observation track
+- `docs/language/semantic_hello_controlled_observation_encoding.md` - controlled observation encoding decision
+- `docs/language/semantic_hello_observation_admission_runtime_path.md` - admission/runtime path map
+- `docs/language/semantic_hello_observation_admission_shape.md` - verifier-facing observation shape
+- `docs/language/semantic_hello_vm_observation_execution_route.md` - VM observation execution route
+- `docs/language/semantic_hello_observation_capability_gate.md` - controlled observation capability gate
+- `docs/language/semantic_hello_observation_audit_policy.md` - audit policy for controlled observation
+- `docs/language/semantic_hello_cli_smoke_path.md` - CLI smoke path for controlled observation
+
+### Onboarding and project orientation
+- `docs/getting_started.md` - first practical onboarding path
+- `docs/examples_index.md` - examples index
 - `docs/LANGUAGE.md` - language overview and design intent
 - `docs/NAMING.md` - naming rules and short forms
+- `docs/NO_STD.md` - `no_std` / `alloc` / `std` support boundaries
+
+### Architecture and compatibility perimeter
+- `ARCHITECTURE.md` - repository-level architecture overview
+- `docs/legacy-map.md` - retained compatibility and legacy perimeter inventory
+- `docs/release_artifact_model.md` - release artifact model
 
 ## What Is In The Repository
 - Source frontend: lexer, parser, typing, and source-surface ownership work in `crates/sm-front`
