@@ -10,6 +10,7 @@ See also:
 - [`semantic_hello_observation_capability_gate.md`](semantic_hello_observation_capability_gate.md)
 - [`semantic_hello_observation_audit_policy.md`](semantic_hello_observation_audit_policy.md)
 - [`semantic_hello_implementation_closeout.md`](semantic_hello_implementation_closeout.md)
+- [`semantic_hello_cli_smoke_path.md`](semantic_hello_cli_smoke_path.md)
 
 ## 1. Purpose
 
