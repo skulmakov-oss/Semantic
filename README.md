@@ -280,37 +280,92 @@ The repository intentionally retains a narrow compatibility perimeter. It is not
 New architecture must land in the appropriate owner crate, not in compatibility paths.
 
 ## Quickstart
-Use these commands from repository root.
+
+This quickstart is a **zero-effect verifier smoke path**. It proves the core pipeline:
+
+```text
+source -> check -> compile -> verify -> run -> disasm
+```
+
+It does not demonstrate general stdout, formatting, file I/O, network I/O, or the M-Hello controlled observation track.
+
+### 1. Build the public entrypoints
 
 ```powershell
-# 1) Build the public entrypoints
 cargo build --bin smc --bin svm
+```
 
-# 2) Create a minimal program
+### 2. Create a minimal Semantic source file
+
+```powershell
 @'
 fn main() {
     return;
 }
-'@ | Set-Content program.sm
-
-# 3) Check source
-cargo run --bin smc -- check program.sm
-
-# 4) Compile source -> SemCode
-cargo run --bin smc -- compile program.sm -o program.smc
-
-# 5) Verify compiled SemCode
-cargo run --bin smc -- verify program.smc
-
-# 6) Run source directly
-cargo run --bin smc -- run program.sm
-
-# 7) Run precompiled SemCode through the standard CLI route
-cargo run --bin smc -- run-smc program.smc
-
-# 8) Disassemble SemCode
-cargo run --bin svm -- disasm program.smc
+'@ | Set-Content smoke_zero.sm
 ```
+
+This program has no host effects. It is intentionally minimal.
+
+### 3. Check source
+
+```powershell
+cargo run --bin smc -- check smoke_zero.sm
+```
+
+This validates the source through the frontend / semantic-analysis route.
+
+### 4. Compile source to SemCode
+
+```powershell
+cargo run --bin smc -- compile smoke_zero.sm -o smoke_zero.smc
+```
+
+This emits a SemCode artifact from the checked source path.
+
+### 5. Verify the SemCode artifact
+
+```powershell
+cargo run --bin smc -- verify smoke_zero.smc
+```
+
+This is the admission gate. Public `.smc` execution is verifier-first.
+
+### 6. Run from source
+
+```powershell
+cargo run --bin smc -- run smoke_zero.sm
+```
+
+This exercises the source-run route.
+
+### 7. Run the verified artifact route
+
+```powershell
+cargo run --bin smc -- run-smc smoke_zero.smc
+```
+
+This exercises the precompiled SemCode route.
+
+### 8. Disassemble SemCode
+
+```powershell
+cargo run --bin svm -- disasm smoke_zero.smc
+```
+
+This confirms the artifact can be inspected through the VM tooling route.
+
+### Expected result
+
+The smoke path should:
+
+- accept the minimal source file;
+- emit `smoke_zero.smc`;
+- admit the SemCode artifact through `smc verify`;
+- run both source and `.smc` routes without host effects;
+- produce disassembly containing the compiled `main` function.
+
+For controlled text observation / Hello World work, follow the active M-Hello documents under `docs/language/semantic_hello_*`.
 
 For a fuller onboarding path, see:
 
