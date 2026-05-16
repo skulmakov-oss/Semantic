@@ -734,6 +734,7 @@ fn display_capability_kind(kind: CapabilityKind) -> &'static str {
         CapabilityKind::GateRead => "GateRead",
         CapabilityKind::GateWrite => "GateWrite",
         CapabilityKind::PulseEmit => "PulseEmit",
+        CapabilityKind::ControlledObservationSink => "ControlledObservationSink",
         CapabilityKind::StateQuery => "StateQuery",
         CapabilityKind::StateUpdate => "StateUpdate",
         CapabilityKind::EventPost => "EventPost",
@@ -748,6 +749,7 @@ fn parse_capability_kind(
         "GateRead" => Ok(CapabilityKind::GateRead),
         "GateWrite" => Ok(CapabilityKind::GateWrite),
         "PulseEmit" => Ok(CapabilityKind::PulseEmit),
+        "ControlledObservationSink" => Ok(CapabilityKind::ControlledObservationSink),
         "StateQuery" => Ok(CapabilityKind::StateQuery),
         "StateUpdate" => Ok(CapabilityKind::StateUpdate),
         "EventPost" => Ok(CapabilityKind::EventPost),
@@ -933,6 +935,22 @@ mod tests {
             }
             other => panic!("unexpected event {other:?}"),
         }
+    }
+
+    #[test]
+    fn replay_archive_roundtrips_controlled_observation_sink_capability_kind() {
+        let mut trail = AuditTrail::new(sample_session());
+        trail.record(AuditEventKind::CapabilityDenied {
+            capability: CapabilityKind::ControlledObservationSink,
+            call: Some("ControlledObservationSink".to_string()),
+        });
+
+        let archive = trail.replay_archive();
+        let text = archive.to_canonical_text();
+        let parsed = AuditReplayArchive::from_canonical_text(&text).expect("parse");
+
+        assert_eq!(parsed, archive);
+        assert!(text.contains("ControlledObservationSink"));
     }
 
     #[test]

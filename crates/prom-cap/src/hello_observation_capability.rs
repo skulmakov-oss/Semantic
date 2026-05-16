@@ -3,6 +3,8 @@
 //! This module models future capability admission for controlled Hello
 //! observation without wiring into production capability handling.
 
+use super::{CapabilityChecker, CapabilityKind};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelloObservationCapability {
     ObservationSink,
@@ -62,5 +64,43 @@ pub fn evaluate_hello_observation_capability(
     }
 
     HelloObservationCapabilityDecision::Allow
+}
+
+pub fn require_hello_observation_sink_capability<C: CapabilityChecker>(
+    checker: &C,
+    context: &HelloObservationCapabilityContext,
+) -> HelloObservationCapabilityDecision {
+    match context.requested_host_channel {
+        Some("stdout") => {
+            return HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::StdoutNotDefaultSink,
+            );
+        }
+        Some("print") | Some("io.write") | Some("file") | Some("network") | Some("stdin") => {
+            return HelloObservationCapabilityDecision::Deny(
+                HelloObservationCapabilityDenial::GenericIoNotAllowed,
+            );
+        }
+        _ => {}
+    }
+
+    if !context.observation_sink_present {
+        return HelloObservationCapabilityDecision::Deny(
+            HelloObservationCapabilityDenial::MissingObservationCapability,
+        );
+    }
+
+    if !context.sink_available {
+        return HelloObservationCapabilityDecision::Deny(
+            HelloObservationCapabilityDenial::SinkUnavailable,
+        );
+    }
+
+    match checker.require(CapabilityKind::ControlledObservationSink) {
+        Ok(()) => HelloObservationCapabilityDecision::Allow,
+        Err(_) => HelloObservationCapabilityDecision::Deny(
+            HelloObservationCapabilityDenial::MissingObservationCapability,
+        ),
+    }
 }
 

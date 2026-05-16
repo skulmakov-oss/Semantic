@@ -1,10 +1,11 @@
 use prom_abi::HostCallId;
 use prom_cap::hello_observation_capability::{
-    evaluate_hello_observation_capability, HelloObservationCapability,
-    HelloObservationCapabilityContext, HelloObservationCapabilityDecision,
-    HelloObservationCapabilityDenial, HelloObservationCapabilityPolicy,
+    evaluate_hello_observation_capability, require_hello_observation_sink_capability,
+    HelloObservationCapability, HelloObservationCapabilityContext,
+    HelloObservationCapabilityDecision, HelloObservationCapabilityDenial,
+    HelloObservationCapabilityPolicy,
 };
-use prom_cap::{CapabilityKind, required_capability_for_call};
+use prom_cap::{CapabilityKind, CapabilityManifest, CapabilitySurfaceClass, required_capability_for_call, capability_surface_class};
 
 fn allow_context() -> HelloObservationCapabilityContext {
     HelloObservationCapabilityContext {
@@ -86,6 +87,55 @@ fn hello_observation_capability_skeleton_denies_generic_io_fallbacks() {
                 HelloObservationCapabilityDenial::GenericIoNotAllowed,
             ),
             "channel {channel} must not be admitted"
+        );
+    }
+}
+
+#[test]
+fn hello_observation_capability_skeleton_requires_explicit_controlled_observation_sink_capability() {
+    let mut manifest = CapabilityManifest::new();
+    let context = allow_context();
+
+    assert_eq!(
+        require_hello_observation_sink_capability(&manifest, &context),
+        HelloObservationCapabilityDecision::Deny(
+            HelloObservationCapabilityDenial::MissingObservationCapability,
+        )
+    );
+
+    manifest.allow(CapabilityKind::ControlledObservationSink);
+    assert_eq!(
+        require_hello_observation_sink_capability(&manifest, &context),
+        HelloObservationCapabilityDecision::Allow
+    );
+
+    let gate_surface = CapabilityManifest::gate_surface();
+    assert!(!gate_surface.allows(CapabilityKind::ControlledObservationSink));
+    assert_eq!(
+        capability_surface_class(CapabilityKind::ControlledObservationSink),
+        CapabilitySurfaceClass::PlannedPostStable
+    );
+}
+
+#[test]
+fn hello_observation_capability_skeleton_keeps_controlled_observation_separate_from_stdout() {
+    let mut manifest = CapabilityManifest::new();
+    manifest.allow(CapabilityKind::ControlledObservationSink);
+
+    for channel in ["stdout", "print", "io.write", "file", "network", "stdin"] {
+        let context = requested_channel_context(channel);
+        assert_eq!(
+            require_hello_observation_sink_capability(&manifest, &context),
+            if channel == "stdout" {
+                HelloObservationCapabilityDecision::Deny(
+                    HelloObservationCapabilityDenial::StdoutNotDefaultSink,
+                )
+            } else {
+                HelloObservationCapabilityDecision::Deny(
+                    HelloObservationCapabilityDenial::GenericIoNotAllowed,
+                )
+            },
+            "channel {channel} must be denied"
         );
     }
 }

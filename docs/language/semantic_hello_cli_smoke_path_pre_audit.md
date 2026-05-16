@@ -2,10 +2,11 @@
 
 Status: inspection-only readiness audit for `#477`
 
-Implementation note: `M-HELLO-12A-1` and `M-HELLO-12A-2` are now
-implemented as a VM-side non-output controlled observation event seam and
-a verifier-side controlled observation admission seam. The broader CLI
-controlled observation path is still not ready.
+Implementation note: `M-HELLO-12A-1`, `M-HELLO-12A-2`, and
+`M-HELLO-12A-3` are now implemented as a VM-side non-output controlled
+observation event seam, a verifier-side controlled observation admission
+seam, and a production capability gate seam. The broader CLI controlled
+observation path is still not ready.
 
 See also:
 
@@ -41,7 +42,7 @@ Inspected owners:
 | --- | --- | --- | --- | --- |
 | verifier admission | admits `ControlledTextObservation` shape | Hello-specific controlled observation admission seam now exists in `sm-verify`, but production `verify_semcode` still maps builtin `print` to `CAP_STDOUT` | partial | wire the verifier seam into the later production admission chain |
 | VM route | emits internal `ControlledObservationEvent` | current VM builtin `print` now records internal controlled observation events in memory without direct stdout; the seam is still isolated from verifier / capability / audit / CLI layers | yes | wire the VM seam into the later verifier / capability / audit / CLI chain |
-| capability gate | explicit controlled sink allow / deny | isolated `hello_observation_capability` skeleton exists, but production capability handling does not expose a controlled observation sink gate | partial | wire a production capability gate for controlled observation sink |
+| capability gate | explicit controlled sink allow / deny | `prom-cap` now exposes a `ControlledObservationSink` capability and a production-manifest-aware helper, but the runtime observation route is still not consuming it | partial | wire the production capability gate into the later observation route |
 | audit policy | `record` / `redact` / `no_store` / `deny` decision | isolated `hello_observation_audit` skeleton exists, but production audit storage has no controlled observation policy integration | partial | wire audit decision policy into the observation route |
 | CLI source-run | `smc run` uses full controlled route | `smc run` compiles source and runs bytes directly; it does not consume a controlled observation result envelope | no | add a source-run route that only renders approved controlled observation results |
 | CLI artifact-run | `run-smc` uses full controlled route | `run-smc` verifies then runs bytes directly; it still does not consume a controlled observation result envelope | no | add a verified-artifact route that only renders approved controlled observation results |
@@ -70,7 +71,7 @@ Based on the current code state, the next narrow split should be:
 
 - `M-HELLO-12A-1` - done: VM-side non-output controlled observation event seam
 - `M-HELLO-12A-2` - done: verifier-side controlled observation admission seam
-- `M-HELLO-12A-3` - wire production capability gate for controlled observation sink
+ - `M-HELLO-12A-3` - done: production capability gate for controlled observation sink
 - `M-HELLO-12A-4` - wire audit decision policy into the observation route
 - `M-HELLO-12A-5` - add CLI result envelope rendering for source-run and run-smc separately
 
@@ -79,7 +80,8 @@ Based on the current code state, the next narrow split should be:
 `M-HELLO-12A-code is not ready.`
 
 Lower-layer production seams are incomplete or still isolated, even though
-`M-HELLO-12A-1` and `M-HELLO-12A-2` are now implemented as narrow seams.
+`M-HELLO-12A-1`, `M-HELLO-12A-2`, and `M-HELLO-12A-3` are now implemented
+as narrow seams.
 
 The current code has separate `smc run` and `run-smc` commands, but neither
 command is an honest controlled observation CLI implementation yet.
