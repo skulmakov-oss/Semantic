@@ -679,8 +679,15 @@ Reference:
 - `docs/NO_STD.md`
 
 ## License
-Apache License 2.0
+
+Semantic is licensed under the Apache License 2.0.
+
+The repository license covers the project source code, documentation, examples, tests, reports, and associated repository files unless a file states otherwise.
+
+Third-party dependencies, external tools, and external assets remain under their own licenses.
+
+The license does not widen the public Semantic contract. Public behavior claims are governed by `docs/spec/*`, `docs/roadmap/public_status_model.md`, and the corresponding tests.
 
 Copyright (c) 2026 Said Kulmakov
 
-See `LICENSE` for the repository license text.
+See `LICENSE` for the full license text.
