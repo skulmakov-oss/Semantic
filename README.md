@@ -688,6 +688,6 @@ Third-party dependencies, external tools, and external assets remain under their
 
 The license does not widen the public Semantic contract. Public behavior claims are governed by `docs/spec/*`, `docs/roadmap/public_status_model.md`, and the corresponding tests.
 
-Copyright (c) 2026 Said Kulmakov
+Copyright 2026 Said Kulmakov.
 
-See `LICENSE` for the full license text.
+See `LICENSE` for the full license text and `NOTICE` for attribution and project-scope notes.
