@@ -5,6 +5,7 @@ Status: docs-only scope note for `#661`
 See also:
 
 - [`semantic_hello_controlled_observation_encoding.md`](semantic_hello_controlled_observation_encoding.md)
+- [`semantic_hello_observation_admission_shape.md`](semantic_hello_observation_admission_shape.md)
 - [`semantic_hello_implementation_closeout.md`](semantic_hello_implementation_closeout.md)
 
 ## 1. Purpose
