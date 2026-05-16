@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use sm_emit::hello_observation_bytes::{
+    emit_hello_observation_bytes_from_real_semcode_skeleton,
     emit_hello_observation_bytes_gated, render_hello_observation_bytes_gated,
     HelloObservationByteEmissionError, HelloObservationByteRecord,
 };
@@ -55,15 +56,18 @@ fn assert_reject(
 }
 
 #[test]
-fn hello_observation_byte_emission_emits_gated_provisional_representation() {
+fn hello_observation_byte_bridge_emits_gated_provisional_representation() {
     let module = canonical_real_semcode();
-    let emitted = emit_hello_observation_bytes_gated(&module)
+    let emitted = emit_hello_observation_bytes_from_real_semcode_skeleton(&module)
+        .expect("canonical hello should emit gated observation bytes");
+    let gated_emitted = emit_hello_observation_bytes_gated(&module)
         .expect("canonical hello should emit gated observation bytes");
     let rendered = render_hello_observation_bytes_gated(&module)
         .expect("canonical hello should render gated observation bytes");
     let rendered_text = String::from_utf8(rendered).expect("utf8 rendered bytes");
 
     assert_eq!(emitted.format_status, "gated_provisional_not_production");
+    assert_eq!(gated_emitted, emitted);
     assert_eq!(emitted.records.len(), 4);
     match &emitted.records[..] {
         [

@@ -34,6 +34,12 @@ pub enum HelloObservationByteEmissionError {
     ForbiddenHostOutput,
 }
 
+pub fn emit_hello_observation_bytes_from_real_semcode_skeleton(
+    module: &HelloRealSemCodeModule,
+) -> Result<HelloObservationByteModule, HelloObservationByteEmissionError> {
+    emit_hello_observation_bytes_gated(module)
+}
+
 pub fn emit_hello_observation_bytes_gated(
     module: &HelloRealSemCodeModule,
 ) -> Result<HelloObservationByteModule, HelloObservationByteEmissionError> {
