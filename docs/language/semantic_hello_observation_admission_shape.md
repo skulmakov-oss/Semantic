@@ -6,6 +6,7 @@ See also:
 
 - [`semantic_hello_observation_admission_runtime_path.md`](semantic_hello_observation_admission_runtime_path.md)
 - [`semantic_hello_vm_observation_execution_route.md`](semantic_hello_vm_observation_execution_route.md)
+- [`semantic_hello_observation_capability_gate.md`](semantic_hello_observation_capability_gate.md)
 - [`semantic_hello_controlled_observation_encoding.md`](semantic_hello_controlled_observation_encoding.md)
 
 ## 1. Purpose
