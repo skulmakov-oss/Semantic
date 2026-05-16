@@ -66,7 +66,8 @@ Not accepted today:
 |---|---|---|
 | observation byte bridge | `sm-emit` | provisional bridge already exists; no production bytecode claim |
 | real observation admission | `sm-verify` | future admission must stay narrow and verifier-first |
-| runtime observation route | `sm-runtime-core` | explicit sink routing only, not host output |
+| execution of admitted observation | `sm-vm` | owns instruction dispatch / execution behavior for admitted SemCode |
+| runtime vocabulary / sink config | `sm-runtime-core` | shared execution config, trap/quota vocabulary, not routing/orchestration owner |
 | capability gate | `prom-cap` | route gating only, no broad host-call widening |
 | audit decision / storage policy | `prom-audit` | record or defer by explicit policy only |
 | CLI smoke path | `smc-cli` | later, after verifier/runtime/capability/audit are accepted |
@@ -76,7 +77,7 @@ This table is a planning split, not an implementation claim.
 ## 5. Next PR Split
 
 - `11B` - production observation admission shape
-- `11C` - runtime route scope for admitted controlled observation
+- `11C` - VM execution route scope for admitted controlled observation
 - `11D` - capability gate wiring for the explicit sink route
 - `11E` - audit decision/storage policy for controlled observation
 - `12A` - CLI smoke path only after the above are accepted
