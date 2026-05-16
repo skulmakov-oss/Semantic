@@ -52,6 +52,15 @@ Observed risks in code:
 - `run-smc` verifies and then runs bytes directly without a controlled observation envelope
 - CLI output is ordinary text output, not controlled observation rendering
 
+Evidence:
+
+- `crates/sm-verify/src/lib.rs:1066-1072` maps builtin `print` to `CAP_STDOUT`
+- `crates/sm-vm/src/semcode_vm.rs:2345-2361` routes builtin `print` to direct `println!`
+- `crates/smc-cli/src/app.rs:2169-2176` makes `smc run` compile source and call `run_semcode`
+- `crates/smc-cli/src/app.rs:2197-2203` makes `run-smc` verify and then call `run_verified_semcode`
+- `crates/prom-cap/src/hello_observation_capability.rs` remains an isolated skeleton, not production capability wiring
+- `crates/prom-audit/src/hello_observation_audit.rs` remains an isolated skeleton, not production audit storage wiring
+
 ## 5. Required Implementation Split
 
 Based on the current code state, the next narrow split should be:
