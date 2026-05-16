@@ -16,7 +16,21 @@ use sm_front::{
 use sm_ir::{compile_program_to_ir_with_options_and_profile, lower_logos_laws_to_ir};
 use sm_sema::{check_file_with_provider_and_profile, check_source_with_profile, ModuleProvider};
 use sm_verify::verify_semcode;
-use sm_vm::{disasm_semcode, run_semcode, run_verified_semcode};
+use sm_vm::{disasm_semcode, run_semcode_collecting_hello_observations};
+use prom_audit::hello_observation_audit::{
+    apply_controlled_observation_audit_policy, ControlledObservationAuditDecision,
+    ControlledObservationAuditResult, HelloObservationAuditLinkage,
+};
+use prom_audit::{AuditEventId, AuditSessionMetadata, AuditTrail};
+use prom_cap::{
+    hello_observation_capability::{
+        require_hello_observation_sink_capability, HelloObservationCapabilityContext,
+        HelloObservationCapabilityDecision,
+    },
+    CapabilityKind, CapabilityManifest,
+};
+use sm_runtime_core::hello_observation_sink::HelloObservationClass;
+use sm_runtime_core::ExecutionContext;
 use std::collections::HashSet;
 use std::env;
 use std::io::{self, Write};
@@ -2166,6 +2180,98 @@ fn run_repl_check(buffer: &str) {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControlledObservationCliEnvelope {
+    capability_decision: HelloObservationCapabilityDecision,
+    audit_results: Vec<ControlledObservationAuditResult>,
+    rendered_lines: Vec<String>,
+}
+
+fn stable_text_hash(text: &str) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn render_controlled_observation_envelope(bytes: &[u8]) -> Result<ControlledObservationCliEnvelope, String> {
+    verify_semcode(bytes).map_err(|report| report.to_string())?;
+
+    let events = run_semcode_collecting_hello_observations(bytes).map_err(|e| e.to_string())?;
+    let mut capability_manifest = CapabilityManifest::new();
+    capability_manifest.allow(CapabilityKind::ControlledObservationSink);
+
+    let capability_context = HelloObservationCapabilityContext {
+        observation_sink_present: true,
+        sink_available: true,
+        requested_host_channel: None,
+    };
+    let capability_decision =
+        require_hello_observation_sink_capability(&capability_manifest, &capability_context);
+    let HelloObservationCapabilityDecision::Allow = capability_decision else {
+        return Err(format!(
+            "controlled observation capability denied: {:?}",
+            capability_decision
+        ));
+    };
+
+    let mut audit_trail = AuditTrail::new(AuditSessionMetadata {
+        context: ExecutionContext::VerifiedLocal,
+        capability_manifest: capability_manifest.metadata(),
+        gate_registry_bound: true,
+    });
+    let linkage = HelloObservationAuditLinkage {
+        verifier_admission_ref: Some(1),
+        capability_policy_ref: Some(2),
+        sink_policy_ref: Some(3),
+    };
+
+    let mut rendered_lines = Vec::with_capacity(events.len());
+    let mut audit_results = Vec::with_capacity(events.len());
+    for (expected_index, event) in events.into_iter().enumerate() {
+        if event.observation_class != HelloObservationClass::ControlledText {
+            return Err(format!(
+                "unexpected observation class in CLI envelope: {:?}",
+                event.observation_class
+            ));
+        }
+        if event.sequence_index.0 != expected_index as u64 {
+            return Err(format!(
+                "nondeterministic observation order: expected sequence_index {} but got {}",
+                expected_index,
+                event.sequence_index.0
+            ));
+        }
+        let audit_result = apply_controlled_observation_audit_policy(
+            &mut audit_trail,
+            stable_text_hash(&event.text),
+            event.sequence_index.0,
+            ControlledObservationAuditDecision::Record,
+            linkage,
+        );
+        match audit_result {
+            ControlledObservationAuditResult::Recorded(AuditEventId(_)) => {
+                rendered_lines.push(event.text);
+            }
+            ControlledObservationAuditResult::NoStore => {
+                return Err("audit policy unexpectedly returned no_store".to_string());
+            }
+            ControlledObservationAuditResult::Denied => {
+                return Err("audit policy unexpectedly denied controlled observation".to_string());
+            }
+        }
+        audit_results.push(audit_result);
+    }
+
+    Ok(ControlledObservationCliEnvelope {
+        capability_decision,
+        audit_results,
+        rendered_lines,
+    })
+}
+
 fn cmd_run(args: &[String]) -> Result<(), String> {
     if args.len() != 1 {
         return Err("usage: smc run <input.sm>".to_string());
@@ -2173,7 +2279,11 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let input = args[0].as_str();
     let src = read_source_with_package_admission(Path::new(input))?;
     let bytes = compile_program_to_semcode(&src).map_err(|e| e.to_string())?;
-    run_semcode(&bytes).map_err(|e| e.to_string())
+    let envelope = render_controlled_observation_envelope(&bytes)?;
+    for line in envelope.rendered_lines {
+        println!("{line}");
+    }
+    Ok(())
 }
 
 fn cmd_verify(args: &[String]) -> Result<(), String> {
@@ -2200,7 +2310,11 @@ fn cmd_run_smc(args: &[String]) -> Result<(), String> {
     }
     let input = args[0].as_str();
     let bytes = std::fs::read(input).map_err(|e| format!("failed to read '{}': {}", input, e))?;
-    run_verified_semcode(&bytes).map_err(|e| e.to_string())
+    let envelope = render_controlled_observation_envelope(&bytes)?;
+    for line in envelope.rendered_lines {
+        println!("{line}");
+    }
+    Ok(())
 }
 
 fn cmd_disasm(args: &[String]) -> Result<(), String> {
@@ -2238,4 +2352,61 @@ fn usage() -> String {
         "  smc disasm <input.smc>",
     ]
     .join("\n")
+}
+
+#[cfg(test)]
+mod cli_observation_envelope_tests {
+    use super::*;
+
+    #[test]
+    fn render_controlled_observation_envelope_applies_production_capability_and_audit() {
+        let src = r#"
+fn main() {
+    print("Hello, World!");
+}
+"#;
+        let bytes = compile_program_to_semcode(src).expect("compile canonical hello source");
+
+        let envelope = render_controlled_observation_envelope(&bytes)
+            .expect("controlled observation envelope should render");
+
+        assert_eq!(
+            envelope.capability_decision,
+            HelloObservationCapabilityDecision::Allow
+        );
+        assert_eq!(envelope.rendered_lines, vec!["Hello, World!".to_string()]);
+        assert_eq!(envelope.audit_results.len(), 1);
+        assert!(matches!(
+            envelope.audit_results[0],
+            ControlledObservationAuditResult::Recorded(AuditEventId(0))
+        ));
+    }
+
+    #[test]
+    fn render_controlled_observation_envelope_preserves_sequence_order() {
+        let src = r#"
+fn main() {
+    print("hello from Semantic");
+    print("score=42");
+}
+"#;
+        let bytes = compile_program_to_semcode(src).expect("compile two-event print source");
+
+        let envelope = render_controlled_observation_envelope(&bytes)
+            .expect("controlled observation envelope should render");
+
+        assert_eq!(envelope.rendered_lines, vec![
+            "hello from Semantic".to_string(),
+            "score=42".to_string(),
+        ]);
+        assert_eq!(envelope.audit_results.len(), 2);
+        assert!(matches!(
+            envelope.audit_results[0],
+            ControlledObservationAuditResult::Recorded(AuditEventId(0))
+        ));
+        assert!(matches!(
+            envelope.audit_results[1],
+            ControlledObservationAuditResult::Recorded(AuditEventId(1))
+        ));
+    }
 }
