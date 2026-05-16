@@ -44,6 +44,36 @@ The repository `main` may contain work that is newer than the currently publishe
 
 The public contract is centered in `docs/spec/*`. Historical roadmap notes and legacy compatibility shims remain in the repository, but they are not the primary source of truth for the current toolchain surface.
 
+## Design Invariants
+
+Semantic is governed by invariants that are stronger than individual features. A feature can be experimental, limited, or out of scope; these rules define the shape of the platform.
+
+| Invariant | Meaning |
+|---|---|
+| Verifier-first admission | A program is not trusted merely because it parsed or compiled. |
+| Deterministic execution | The same admitted artifact, runtime config, capability context, and input boundary must produce the same behavior. |
+| SemCode artifact boundary | Source constructs lower into SemCode; SemCode is admitted before public execution. |
+| Native quad logic | `N / F / T / S` are first-class semantic states, not comments or ad-hoc flags. |
+| Explicit branch control | Quad values carry uncertainty/conflict, while branch control remains explicit. |
+| Capability-gated effects | Host interaction must cross an explicit capability boundary. |
+| Audit for controlled effects | Controlled effects should be observable, attributable, and replay-oriented where the runtime path supports it. |
+| UI is not authority | Workbench, Studio, and UI crates may request and display; they must not own verifier, VM, or runtime truth. |
+| Main is not automatically stable | Landing on `main` does not widen the public stable contract by itself. |
+
+The compact rule is:
+
+```text
+source describes
+compiler lowers
+verifier admits
+VM executes
+PROMETHEUS boundary controls effects
+audit records
+UI displays
+```
+
+If a change weakens one of these invariants, it should be treated as an architecture change, not as a routine feature patch.
+
 ## Current Status
 
 Status: **post-v1 contract-stabilized platform in controlled expansion**.
