@@ -7,9 +7,11 @@ use sm_front::hello_parser::parse_hello_file;
 use sm_front::hello_sema::validate_hello_file;
 use sm_ir::hello_ir::lower_hello_checked_file;
 use sm_verify::hello_real_semcode_admission::{
+    admit_controlled_text_observation_shape,
     admit_hello_real_semcode_skeleton, HelloRealSemCodeAdmissionDecision,
     HelloRealSemCodeAdmissionError, HelloRealSemCodeAdmissionInput,
-    HelloRealSemCodeAdmissionOp,
+    HelloRealSemCodeAdmissionOp, builtin_call_controlled_observation_admission,
+    ControlledObservationAdmissionKind,
 };
 use std::vec::Vec;
 
@@ -191,5 +193,22 @@ fn hello_real_semcode_admission_rejects_opcode_and_bytecode_markers() {
     assert_reject(
         bytecode,
         HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed,
+    );
+}
+
+#[test]
+fn hello_real_semcode_controlled_observation_admission_seam_distinguishes_print_from_stdout() {
+    assert_eq!(
+        builtin_call_controlled_observation_admission("print"),
+        Some(ControlledObservationAdmissionKind::ControlledTextLiteral)
+    );
+    assert_eq!(
+        builtin_call_controlled_observation_admission("stdout"),
+        None
+    );
+
+    assert_eq!(
+        admit_controlled_text_observation_shape(&render_text_literal("Hello, World!")),
+        Ok(ControlledObservationAdmissionKind::ControlledTextLiteral)
     );
 }

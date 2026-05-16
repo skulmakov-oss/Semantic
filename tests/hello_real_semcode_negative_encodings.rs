@@ -8,6 +8,7 @@ use sm_front::hello_parser::parse_hello_file;
 use sm_front::hello_sema::validate_hello_file;
 use sm_ir::hello_ir::lower_hello_checked_file;
 use sm_verify::hello_real_semcode_admission::{
+    admit_controlled_text_observation_shape,
     admit_hello_real_semcode_skeleton, HelloRealSemCodeAdmissionDecision,
     HelloRealSemCodeAdmissionError, HelloRealSemCodeAdmissionInput,
     HelloRealSemCodeAdmissionOp,
@@ -170,3 +171,22 @@ fn hello_real_semcode_negative_encodings_reject_order_bypasses_and_missing_ops()
     );
 }
 
+#[test]
+fn hello_real_semcode_controlled_observation_admission_rejects_forbidden_text_markers() {
+    for (replacement, expected) in [
+        ("stdout", HelloRealSemCodeAdmissionError::StdoutNotAllowed),
+        ("print", HelloRealSemCodeAdmissionError::PrintNotAllowed),
+        ("io.write", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
+        ("file", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
+        ("network", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
+        ("stdin", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
+        ("opcode", HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed),
+        ("bytecode", HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed),
+        ("Not Hello", HelloRealSemCodeAdmissionError::NonTextObservation),
+    ] {
+        assert_eq!(
+            admit_controlled_text_observation_shape(&render_text_literal(replacement)),
+            Err(expected)
+        );
+    }
+}

@@ -1,6 +1,11 @@
 use std::string::String;
 use std::vec::Vec;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlledObservationAdmissionKind {
+    ControlledTextLiteral,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HelloRealSemCodeAdmissionInput {
     pub ops: Vec<HelloRealSemCodeAdmissionOp>,
@@ -32,6 +37,32 @@ pub enum HelloRealSemCodeAdmissionError {
     GenericIoNotAllowed,
     OpcodeOrBytecodeNotAllowed,
     UnsupportedShape,
+}
+
+pub fn builtin_call_controlled_observation_admission(
+    name: &str,
+) -> Option<ControlledObservationAdmissionKind> {
+    match name {
+        "print" => Some(ControlledObservationAdmissionKind::ControlledTextLiteral),
+        _ => None,
+    }
+}
+
+pub fn admit_controlled_text_observation_shape(
+    text: &str,
+) -> Result<ControlledObservationAdmissionKind, HelloRealSemCodeAdmissionError> {
+    match text {
+        "\"Hello, World!\"" => Ok(ControlledObservationAdmissionKind::ControlledTextLiteral),
+        "\"stdout\"" => Err(HelloRealSemCodeAdmissionError::StdoutNotAllowed),
+        "\"print\"" => Err(HelloRealSemCodeAdmissionError::PrintNotAllowed),
+        "\"io.write\"" | "\"file\"" | "\"network\"" | "\"stdin\"" => {
+            Err(HelloRealSemCodeAdmissionError::GenericIoNotAllowed)
+        }
+        "\"opcode\"" | "\"bytecode\"" => {
+            Err(HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed)
+        }
+        _ => Err(HelloRealSemCodeAdmissionError::NonTextObservation),
+    }
 }
 
 pub fn admit_hello_real_semcode_skeleton(
@@ -96,32 +127,10 @@ pub fn admit_hello_real_semcode_skeleton(
                     HelloRealSemCodeAdmissionError::MissingRequirement,
                 );
             }
-            match text.as_str() {
-                "\"Hello, World!\"" => {}
-                "\"stdout\"" => {
-                    return HelloRealSemCodeAdmissionDecision::Reject(
-                        HelloRealSemCodeAdmissionError::StdoutNotAllowed,
-                    );
-                }
-                "\"print\"" => {
-                    return HelloRealSemCodeAdmissionDecision::Reject(
-                        HelloRealSemCodeAdmissionError::PrintNotAllowed,
-                    );
-                }
-                "\"io.write\"" | "\"file\"" | "\"network\"" | "\"stdin\"" => {
-                    return HelloRealSemCodeAdmissionDecision::Reject(
-                        HelloRealSemCodeAdmissionError::GenericIoNotAllowed,
-                    );
-                }
-                "\"opcode\"" | "\"bytecode\"" => {
-                    return HelloRealSemCodeAdmissionDecision::Reject(
-                        HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed,
-                    );
-                }
-                _ => {
-                    return HelloRealSemCodeAdmissionDecision::Reject(
-                        HelloRealSemCodeAdmissionError::NonTextObservation,
-                    );
+            match admit_controlled_text_observation_shape(text) {
+                Ok(ControlledObservationAdmissionKind::ControlledTextLiteral) => {}
+                Err(error) => {
+                    return HelloRealSemCodeAdmissionDecision::Reject(error);
                 }
             }
 
