@@ -182,13 +182,25 @@ Clarifications:
 - no accepted golden SemCode
 - `#477` remains open
 
-## 12. Issue State
+## 12. M-HELLO-10C Bridge Note
+
+- bridge API now makes the handoff from the Hello real SemCode skeleton to the gated provisional observation bytes explicit
+- the bridge remains provisional and non-production
+- the bridge preserves the same canonical validation rules as M-HELLO-10B
+- no final numeric opcode ID is assigned
+- no stable bytecode format is claimed
+- no production encoder integration
+- no verifier / VM / runtime / capability / audit / CLI behavior
+- no accepted golden SemCode
+- `#477` remains open
+
+## 13. Issue State
 
 - this PR does not close `#477`
 - this PR does not satisfy `#477` acceptance criteria
 - this PR only removes the design fork between dedicated encoding and host-call fallback
 
-## 13. Acceptance Checklist
+## 14. Acceptance Checklist
 
 - [ ] dedicated encoding decision recorded
 - [ ] typed host-call fallback documented but not selected
