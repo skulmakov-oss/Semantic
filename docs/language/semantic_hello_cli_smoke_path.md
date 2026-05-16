@@ -172,7 +172,8 @@ This document does not satisfy #477 acceptance criteria.
 [ ] #477 remains open
 ```
 
-See also: [`semantic_hello_implementation_closeout.md`](semantic_hello_implementation_closeout.md)
+See also:
 
-See also: [`semantic_hello_cli_smoke_path_pre_audit.md`](semantic_hello_cli_smoke_path_pre_audit.md)
+- [`semantic_hello_implementation_closeout.md`](semantic_hello_implementation_closeout.md)
+- [`semantic_hello_cli_smoke_path_pre_audit.md`](semantic_hello_cli_smoke_path_pre_audit.md)
 
