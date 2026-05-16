@@ -209,28 +209,75 @@ If a cleanup or UI task starts requiring new language/runtime behavior, it must 
 - `docs/release_artifact_model.md` - release artifact model
 
 ## What Is In The Repository
-- Source frontend: lexer, parser, typing, and source-surface ownership work in `crates/sm-front`
-- Semantic analysis and diagnostics in `crates/sm-sema`
-- Lowering, IR, optimization passes, and canonical SemCode contract in `crates/sm-ir`
-- Producer-facing SemCode facade in `crates/sm-emit`
-- Structural SemCode admission verifier in `crates/sm-verify`
-- Shared runtime vocabulary and quotas in `crates/sm-runtime-core`
-- Verified-only VM execution in `crates/sm-vm`
-- Canonical public CLI owner in `crates/smc-cli`
-- Additional boundary/runtime crates currently present on `main`:
-  - `crates/prom-abi`
-  - `crates/prom-cap`
-  - `crates/prom-gates`
-  - `crates/prom-runtime`
-  - `crates/prom-state`
-  - `crates/prom-rules`
-  - `crates/prom-audit`
-  - `crates/prom-ui`
-  - `crates/prom-ui-runtime`
-  - `crates/prom-ui-demo`
-- Compatibility perimeter:
-  - `src/bin/ton618_core.rs`
-  - `crates/ton618-core`
+
+The repository is organized as a layered workspace. No single crate owns the whole system; each layer has a narrow responsibility.
+
+### Language construction layer
+
+This layer turns `.sm` source into checked intermediate forms.
+
+- `crates/sm-front` — lexer, parser, AST-facing source model, source-surface typing helpers
+- `crates/sm-profile` — parser/profile policy, feature gates, compatibility profile surface
+- `crates/sm-sema` — semantic analysis, diagnostics, imports/exports, symbol/type policy
+- `crates/sm-ir` — IR model, lowering, deterministic passes, IR validation
+- `crates/sm-emit` — producer-facing SemCode emission facade
+
+### Execution layer
+
+This layer owns admission, execution vocabulary, and verified VM behavior.
+
+- `crates/sm-verify` — SemCode admission verifier
+- `crates/sm-runtime-core` — runtime-safe shared vocabulary: quotas, traps, execution config, runtime IDs
+- `crates/sm-vm` — deterministic SemCode VM and disassembly/runtime execution path
+
+### PROMETHEUS boundary layer
+
+This layer owns controlled interaction with host state, capabilities, gates, audit, and runtime integration.
+
+- `crates/prom-abi` — host-call ABI vocabulary
+- `crates/prom-cap` — capability policy and capability-denial model
+- `crates/prom-gates` — gate descriptors and gate binding layer
+- `crates/prom-runtime` — runtime session orchestration
+- `crates/prom-state` — semantic state store
+- `crates/prom-rules` — deterministic rule agenda and rule evaluation
+- `crates/prom-audit` — audit, trace, and replay-oriented records
+
+### Tooling layer
+
+This layer is the user/operator-facing command surface. It may orchestrate many crates, but it does not own their internal semantics.
+
+- `crates/smc-cli` — canonical public CLI owner for `check`, `compile`, `verify`, `run`, `run-smc`, `disasm`, diagnostics, snapshots, and related tooling
+- root binary shims — public entrypoints such as `smc`, `svm`, and retained compatibility launchers
+
+### UI / application layer
+
+This layer is an operator/application shell. It must use canonical pipeline APIs and must not bypass verifier admission.
+
+- `crates/prom-ui` — UI-facing model surface
+- `crates/prom-ui-runtime` — UI/runtime bridge layer
+- `crates/prom-ui-demo` — demo surface for UI/runtime integration
+- `apps/workbench` — Workbench / future Studio-facing application shell
+
+### Docs, tests, assets, and reports
+
+These paths carry the public contract, active design records, regression coverage, and project assets.
+
+- `docs/spec/*` — canonical public contract bundle
+- `docs/language/*` — language-track and active feature-track design records
+- `docs/roadmap/*` — status, readiness, and roadmap control documents
+- `reports/*` — gate reports and release/readiness evidence
+- `tests/*` — integration, contract, fixture, and regression tests
+- `assets/*` — brand and retained non-core assets
+
+### Compatibility perimeter
+
+The repository intentionally retains a narrow compatibility perimeter. It is not a second owner of the Semantic platform contracts.
+
+- `crates/ton618-core` — compatibility-named low-level primitive crate
+- `src/bin/ton618_core.rs` — retained compatibility launcher
+- `docs/legacy-map.md` — authoritative inventory for retained legacy/compatibility paths
+
+New architecture must land in the appropriate owner crate, not in compatibility paths.
 
 ## Quickstart
 Use these commands from repository root.
