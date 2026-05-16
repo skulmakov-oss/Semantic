@@ -7,6 +7,7 @@ See also:
 - [`semantic_hello_real_semcode_encoding.md`](semantic_hello_real_semcode_encoding.md)
 - [`semantic_hello_implementation_closeout.md`](semantic_hello_implementation_closeout.md)
 - [`semantic_hello_observation_admission_runtime_path.md`](semantic_hello_observation_admission_runtime_path.md)
+- [`semantic_hello_observation_admission_shape.md`](semantic_hello_observation_admission_shape.md)
 
 ## 1. Purpose
 
