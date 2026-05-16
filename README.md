@@ -439,18 +439,121 @@ PROMETHEUS boundary controls effects
 Public `.smc` execution remains verifier-first. Controlled observation / Hello World output is tracked separately in the active M-Hello path and must not be read as general stdout support.
 
 ## Current SemCode And Runtime Notes
-- The SemCode contract is owned by `sm-ir` and surfaced through `sm-emit`.
-- The current spec documents a versioned SemCode family and capability-gated emission.
-- Standard `.smc` execution is verifier-first; verified admission is not optional on the public route.
-- The current runtime ownership slice is intentionally narrow:
-  - tuple paths
-  - direct record-field paths
-  - frame-local borrow lifetime
-  - exact overlap rejection
-  - parent-child rejection
-  - child-parent rejection
-  - sibling writes allowed
-  - unsupported: ADT payload paths, schema paths, partial release, aliasing graphs, inter-frame persistence, and indirect projections
+
+SemCode is the executable artifact boundary of Semantic. It is not source syntax and it is not the host runtime. A `.smc` artifact must be structurally valid, admitted by the verifier, and executed under the runtime contract.
+
+### SemCode ownership
+
+Current repository ownership is split deliberately:
+
+| Area | Owner |
+|---|---|
+| Source syntax and source semantics | `sm-front`, `sm-sema` |
+| IR and lowering path | `sm-ir` |
+| Producer-facing SemCode emission facade | `sm-emit` |
+| SemCode admission / rejection | `sm-verify` |
+| Runtime vocabulary: quotas, traps, execution config | `sm-runtime-core` |
+| Deterministic execution and disassembly | `sm-vm` |
+| Host effects, capabilities, gates, audit | `prom-*` boundary crates |
+
+The important rule is simple:
+
+```text
+source constructs do not execute directly
+SemCode does not bypass admission
+VM execution does not own host authority
+```
+
+### Verifier-first execution
+
+Public `.smc` execution is verifier-first.
+
+```text
+SemCode bytes
+  -> structural / capability / resource admission
+  -> verified program
+  -> deterministic VM execution
+```
+
+The VM is not expected to be the only safety boundary. Invalid opcodes, malformed function envelopes, unsupported capability use, bad jump targets, resource-budget violations, and incompatible SemCode metadata belong at the admission boundary before public execution.
+
+### Runtime model
+
+The runtime is treated as a deterministic state transition system.
+
+```text
+state[k + 1] = step(state[k], instruction[pc])
+```
+
+The runtime state includes, at minimum:
+
+- program counter and current instruction;
+- frame / call-stack state;
+- runtime values and registers;
+- quotas / bounded execution limits;
+- traps and stop reasons;
+- active ownership paths;
+- capability context;
+- optional PROMETHEUS host-boundary state.
+
+Given the same admitted SemCode, runtime configuration, capability context, and input boundary, execution must remain deterministic.
+
+### Runtime ownership slice
+
+The currently documented ownership slice is intentionally narrow and frozen.
+
+Supported:
+
+- tuple access paths;
+- direct record-field access paths;
+- frame-local borrow lifetime;
+- exact overlap rejection;
+- parent-child overlap rejection;
+- child-parent overlap rejection;
+- sibling writes allowed when paths do not overlap.
+
+Unsupported in the current slice:
+
+- ADT payload paths;
+- schema paths;
+- partial borrow release before frame exit;
+- advanced alias / region reasoning;
+- inter-frame borrow persistence;
+- indirect projections;
+- smart path normalization.
+
+This is deliberate: the current runtime ownership model prefers a small verified contract over broad but ambiguous alias semantics.
+
+### Controlled observation note
+
+The active M-Hello work adds a narrow controlled text observation route. It must not be read as general stdout.
+
+The intended controlled observation path is:
+
+```text
+verified SemCode
+  -> VM controlled observation event
+  -> ControlledObservationSink capability gate
+  -> audit decision
+  -> CLI rendering envelope
+```
+
+Out of scope for this route:
+
+- general stdout;
+- formatted printing;
+- implicit scalar-to-text conversion;
+- file / stdin / network I/O;
+- broad host ABI widening.
+
+### Stability rule
+
+SemCode/runtime behavior must not be promoted from `main` to public stable language without matching spec, verifier, VM, CLI, and test coverage.
+
+```text
+implementation landed
+  != public contract widened
+```
 
 ## Testing
 ```powershell
