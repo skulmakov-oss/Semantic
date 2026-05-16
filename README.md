@@ -618,13 +618,34 @@ changed layer
 No PR should widen a public claim without matching tests and documentation updates.
 
 ## no_std Smoke Check
-Core library supports `no_std` mode.
+
+The `no_std` smoke check protects the core library boundary. It does not claim that the entire workspace, CLI, UI, PROMETHEUS integration layer, or application crates are `no_std`.
+
+Use it when a change touches core library code, feature flags, dependency boundaries, or shared types intended to remain usable without `std`.
 
 ```powershell
 cargo check --no-default-features
 ```
 
+Expected result:
+
+- core library code compiles without default `std` features;
+- accidental `std` imports are rejected in the no-default-features path;
+- feature-gated `alloc` / `std` usage remains explicit;
+- CLI, UI, host-boundary, and integration surfaces remain outside this smoke unless separately documented.
+
+Boundary rule:
+
+```text
+no_std core support
+  != no_std full workspace
+  != no_std CLI
+  != no_std PROMETHEUS boundary
+  != no_std UI/application layer
+```
+
 Reference:
+
 - `docs/NO_STD.md`
 
 ## License
