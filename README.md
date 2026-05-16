@@ -556,12 +556,66 @@ implementation landed
 ```
 
 ## Testing
+
+Tests are treated as contract evidence, not only as regression checks. A behavior should not be promoted in README, examples, or specs unless the corresponding tests cover the pipeline stage that owns it.
+
+### Minimal pre-PR gate
+
+Run this before any normal code or docs PR:
+
 ```powershell
 cargo fmt --check
 cargo test -q
+```
+
+### Public contract gates
+
+Run these when a change touches public API, CLI behavior, runtime ownership, SemCode, verifier admission, or README/spec language:
+
+```powershell
 cargo test -q --test public_api_contracts
 cargo test -q --test runtime_ownership_e2e
 ```
+
+### Layer-focused checks
+
+Use focused package tests when working inside a specific owner layer:
+
+```powershell
+cargo test -q -p sm-verify
+cargo test -q -p sm-vm
+cargo test -q -p smc-cli
+cargo test -q -p prom-cap
+cargo test -q -p prom-audit
+```
+
+Run only the relevant subset when the change is isolated. Run the broader workspace test when the change crosses ownership boundaries.
+
+### M-Hello / controlled observation checks
+
+For the active controlled-observation track, use the focused tests that cover the source route, verifier route, VM observation route, capability gate, audit policy, and CLI envelope:
+
+```powershell
+cargo test -q --test hello_cli_observation_envelope
+cargo test -q --test hello_cli_smoke_pipeline_harness
+cargo test -q --test hello_real_semcode_admission
+cargo test -q --test hello_real_semcode_negative_encodings
+cargo test -q --test hello_observation_capability_skeleton
+cargo test -q --test public_api_contracts
+```
+
+These tests are for the narrow controlled text observation path. Passing them does not imply general stdout, formatting, file I/O, stdin, network I/O, or broad host ABI support.
+
+### Test selection rule
+
+```text
+changed layer
+  -> run that layer's focused tests
+  -> run public contract tests if behavior is visible
+  -> run full cargo test if ownership boundaries are crossed
+```
+
+No PR should widen a public claim without matching tests and documentation updates.
 
 ## no_std Smoke Check
 Core library supports `no_std` mode.
