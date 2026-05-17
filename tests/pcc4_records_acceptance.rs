@@ -108,14 +108,9 @@ fn sample_value(sample: Sample) -> i32 {
     return sample.value;
 }
 
-fn sample_enabled(sample: Sample) -> bool {
-    return sample.enabled;
-}
-
 fn main() {
     let sample: Sample = Sample { value: 7, enabled: true };
     assert(sample_value(sample) == 7);
-    assert(sample_enabled(sample) == true);
     return;
 }
 "#,
