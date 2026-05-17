@@ -379,6 +379,10 @@ Scope:
 - verifier / VM path;
 - diagnostics.
 
+Live audit:
+
+- `docs/roadmap/language_maturity/pcc4_records_live_audit.md`
+
 DoD:
 
 ```text
