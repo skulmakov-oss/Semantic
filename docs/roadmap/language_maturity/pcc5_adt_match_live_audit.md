@@ -1,6 +1,6 @@
 # PCC-5 ADT + Basic Match Live Audit
 
-Status: live audit
+Status: PCC-5 closed / evidence synced
 Owner: language maturity stream
 Scope: ADT + basic match readiness before PCC-5 implementation
 Non-goal: code changes
@@ -26,13 +26,15 @@ Current `main` already contains the ADT and basic match seam across the full pra
 - PCC-5B adds a dedicated positive ADT acceptance fixture suite for declaration and constructor use.
 - PCC-5C adds a dedicated positive basic ADT match acceptance fixture suite.
 - PCC-5D adds a dedicated negative ADT and basic match diagnostics fixture suite.
+- PCC-5E closes the PCC-5 evidence trail and roadmap status.
 
 Audit verdict:
 
 ```text
 The core ADT + basic match seams are already present in main.
 PCC-5 does not need a new architecture seam before implementation.
-The remaining gap is evidence packaging: dedicated PCC-5 fixture / closeout documentation.
+The PCC-5 evidence trail is now complete for the current Practical Core scope.
+PCC-5 is closed for the current Practical Core scope.
 ```
 
 CTF touched: none
@@ -54,7 +56,7 @@ Reason: docs-only audit; no runtime value, trap, determinism, verifier, SymbolId
 | verifier | validates ADT/match bytecode | confirmed-working | yes | keep bytecode checks stable |
 | VM | executes ADT/match runtime values | confirmed-working | yes | keep runtime carrier behavior stable |
 | diagnostics | clear ADT/match errors | confirmed-working | yes | keep diagnostic needles stable |
-| tests | positive/negative coverage | confirmed-working | yes | PCC-5B positive ADT fixtures exist; PCC-5C positive match fixtures exist; PCC-5D negative lock exists |
+| tests | positive/negative coverage | confirmed-working | yes | PCC-5B positive ADT fixtures exist; PCC-5C positive match fixtures exist; PCC-5D negative lock exists; PCC-5E closeout synced |
 
 ## 4. Risk List
 
@@ -67,20 +69,16 @@ Observed risks are narrow, not architectural:
 - ADT representation must not leak into the PROMETHEUS host ABI.
 - The current evidence is spread across existing benchmarks and unit tests, not a dedicated `pcc5` fixture suite yet.
 
-## 5. Recommended PCC-5 Split
+## 5. PCC-5 Evidence Chain
 
-The audit does not point to a missing core seam that requires a new parser/typecheck/lowering redesign.
+PCC-5A established the audit / scope correction baseline.
+PCC-5B locked positive ADT declaration / constructor fixtures.
+PCC-5C locked positive basic ADT match fixtures.
+PCC-5D locked negative ADT/match diagnostics fixtures.
+PCC-5E closes the PCC-5 evidence trail and roadmap status.
 
-Recommended next split:
-
-```text
-PCC-5B — test(adt): lock canonical ADT declaration / constructor fixtures
-PCC-5C — test(match): lock basic ADT match fixtures
-PCC-5D — test(adt): lock negative ADT/match diagnostics fixtures
-PCC-5E — docs(adt): close PCC-5 with evidence sync and roadmap status update
-```
-
-If a dedicated fixture suite becomes necessary for roadmap hygiene, add it as evidence work, not as a new language design PR.
+No further PCC-5 implementation split is required for the current Practical Core scope.
+Future aggregate work belongs to later phases only.
 
 ## PCC-5B Evidence
 
@@ -149,6 +147,29 @@ PCC-5D does not add new ADT or match semantics.
 PCC-5D does not redesign exhaustiveness.
 PCC-5 closeout remains PCC-5E.
 
+## PCC-5E Closeout
+
+PCC-5 ADT + Basic Match is closed for the current Practical Core scope.
+
+Evidence chain:
+
+- PCC-5A — docs audit / scope correction
+- PCC-5B — positive ADT declaration / constructor fixtures
+- PCC-5C — positive basic ADT match fixtures
+- PCC-5D — negative ADT/match diagnostics fixtures
+- PCC-5E — closeout / roadmap sync
+
+Evidence-backed conclusions:
+
+- ADT declaration is evidence-backed.
+- Constructor expression is evidence-backed.
+- Basic ADT match is evidence-backed.
+- Invalid ADT/match programs reject with stable diagnostics.
+- Invalid ADT/match programs do not reach a verified execution path.
+- No new architecture seam was required.
+
+Future PCC aggregate work remains assigned to later phases only.
+
 ## 6. Out of Scope
 
 - records
@@ -179,6 +200,9 @@ PCC-5 closeout remains PCC-5E.
 - [x] tests inspected
 - [x] PCC-5D negative fixture suite added
 - [x] invalid ADT/match diagnostics locked
+- [x] PCC-5E closeout evidence synced
+- [x] PCC-5 roadmap status updated
+- [x] feature matrix ADT/match rows confirmed
 - [x] risks documented
-- [x] PCC-5 split proposed
+- [x] PCC-5 evidence chain recorded
 - [x] no code changed
