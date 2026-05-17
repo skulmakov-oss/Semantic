@@ -1,8 +1,8 @@
 # PCC-4 Records Live Audit
 
-Status: PCC-4C in progress
+Status: PCC-4 closed / evidence synced
 Owner: language maturity stream
-Scope: records readiness, positive/negative fixture lock
+Scope: records readiness, positive/negative fixture lock, closeout
 Non-goal: record architecture redesign
 
 ## 1. Purpose
@@ -14,6 +14,8 @@ PCC-4A was docs-only. It did not change parser, typecheck, lowering, SemCode, ve
 PCC-4B added positive canonical acceptance fixtures only. It did not redesign record architecture or widen ADT, schema, PROMETHEUS host ABI, UI, Workbench, or runtime ownership scope.
 
 PCC-4C adds negative diagnostics fixtures only. It continues to avoid record architecture redesign and does not widen ADT, schema, PROMETHEUS host ABI, UI, Workbench, or runtime ownership scope.
+
+PCC-4D closes the records track for the current Practical Core scope and synchronizes the evidence into roadmap status.
 
 ## 2. Current Known Status
 
@@ -104,7 +106,40 @@ smc compile -> either rejects or emits artifact that does not verify
 
 This makes PCC-4C a diagnostics lock rather than a new record architecture change.
 
-## 6. Risk List
+## 6. PCC-4D Closeout
+
+PCC-4A established that the core record seams already exist.
+
+PCC-4B added positive canonical acceptance fixtures:
+
+- `pcc4_record_declaration.sm`
+- `pcc4_record_construction_and_field_read.sm`
+- `pcc4_record_function_boundary.sm`
+
+PCC-4C added negative diagnostics fixtures:
+
+- unknown record type;
+- missing required field;
+- duplicate field in record literal;
+- unknown field access;
+- record field type mismatch.
+
+Final verdict:
+
+```text
+PCC-4 records end-to-end is closed for the current Practical Core Completion scope.
+```
+
+Future expansions remain out of scope for PCC-4:
+
+- ADT;
+- schema;
+- collections;
+- general object model;
+- host ABI widening;
+- runtime ownership widening.
+
+## 7. Risk List
 
 Observed risks:
 
@@ -121,7 +156,7 @@ Not observed:
 - no evidence of missing SemCode opcodes for record construction or access;
 - no evidence that the VM lacks a runtime carrier for records.
 
-## 7. Recommended PCC-4 Split
+## 8. Recommended PCC-4 Split
 
 Because the core seams are already present, the next work is better split as fixture and closeout coverage rather than a new architecture build.
 
@@ -135,7 +170,7 @@ PCC-4D — close PCC-4 with evidence sync and roadmap status update
 
 If a future implementation delta is discovered during PCC-4B or PCC-4C, split it narrowly from the fixture lock before landing.
 
-## 8. Out of Scope
+## 9. Out of Scope
 
 This audit and PCC-4B do not expand into:
 
@@ -153,7 +188,7 @@ This audit and PCC-4B do not expand into:
 - README promotion;
 - host ABI widening.
 
-## 9. Acceptance Checklist
+## 10. Acceptance Checklist
 
 - [x] parser surface inspected
 - [x] typecheck inspected
@@ -176,4 +211,8 @@ This audit and PCC-4B do not expand into:
 - [x] unknown field access diagnostic locked
 - [x] field type mismatch diagnostic locked
 - [x] invalid record sources do not verify
+- [x] PCC-4D closeout evidence synced
+- [x] PCC-4 roadmap status updated
+- [x] feature matrix records rows updated
+- [x] PCC-4 closed without record architecture redesign
 

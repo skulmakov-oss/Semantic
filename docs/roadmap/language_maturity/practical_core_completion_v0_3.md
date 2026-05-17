@@ -383,6 +383,15 @@ Live audit:
 
 - `docs/roadmap/language_maturity/pcc4_records_live_audit.md`
 
+Closeout note:
+
+```text
+PCC-4A/B/C/D evidence is complete for the current Practical Core scope.
+Positive and negative fixture coverage exists.
+PCC-4 is closed for current scope.
+Further aggregate work moves to PCC-5 ADT + Basic Match, then PCC-6 Option / Result, PCC-7 Collections v0, and PCC-8 Stdlib v0.
+```
+
 DoD:
 
 ```text
