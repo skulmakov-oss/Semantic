@@ -1,0 +1,9 @@
+record Probe {
+    value: i32,
+    active: bool,
+}
+
+fn main() {
+    let probe: Probe = Probe { value: true, active: false };
+    return;
+}

@@ -1,0 +1,4 @@
+fn main() {
+    let probe: MissingRecord = MissingRecord { value: 1 };
+    return;
+}

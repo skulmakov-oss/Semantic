@@ -1,0 +1,9 @@
+record Pair {
+    left: i32,
+    right: i32,
+}
+
+fn main() {
+    let pair: Pair = Pair { left: 1, left: 2, right: 3 };
+    return;
+}
