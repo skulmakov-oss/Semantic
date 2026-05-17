@@ -434,6 +434,18 @@ DoD:
 [ ] verifier and VM agree on ADT carrier rules
 ```
 
+PCC-5 closeout note:
+
+```text
+PCC-5A/B/C/D/E evidence chain is complete for the current Practical Core scope.
+Positive ADT declaration / constructor fixtures exist.
+Positive basic ADT match fixtures exist.
+Negative ADT/match diagnostics fixtures exist.
+PCC-5 is closed for the current Practical Core scope.
+Future aggregate work moves to PCC-6 Option / Result, PCC-7 Collections v0,
+and PCC-8 Stdlib v0.
+```
+
 ## 14. PCC-6 — Option / Result
 
 Scope:
