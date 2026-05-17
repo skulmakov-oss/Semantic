@@ -1,0 +1,9 @@
+enum Signal {
+    Red,
+    Green,
+    Blue,
+}
+
+fn main() {
+    return;
+}

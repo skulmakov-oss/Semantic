@@ -13,17 +13,15 @@ fn cli_ok(args: Vec<String>, context: &str) {
 }
 
 fn mk_temp_dir(prefix: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join(format!(
-            "{}_{}_{}",
-            prefix,
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!(
+        "{}_{}_{}",
+        prefix,
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    ));
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir
 }
@@ -39,7 +37,7 @@ fn check_run_compile_verify(rel: &str) {
         &format!("smc run for {input}"),
     );
 
-    let dir = mk_temp_dir("smc_pcc5_adt_acceptance");
+    let dir = mk_temp_dir("smc_pcc5_match_acceptance");
     let out = dir.join("out.smc");
     let out_arg = out.to_string_lossy().replace('\\', "/");
     cli_ok(
@@ -60,16 +58,16 @@ fn check_run_compile_verify(rel: &str) {
 }
 
 #[test]
-fn pcc5_adt_declaration_only_fixture_passes_full_cli_path() {
-    check_run_compile_verify("tests/fixtures/pcc5_adt/pcc5_adt_declaration_only.sm");
+fn pcc5_match_unit_enum_label_fixture_passes_full_cli_path() {
+    check_run_compile_verify("tests/fixtures/pcc5_match/positive_match_unit_enum_label.sm");
 }
 
 #[test]
-fn pcc5_adt_unit_constructor_fixture_passes_full_cli_path() {
-    check_run_compile_verify("tests/fixtures/pcc5_adt/pcc5_adt_unit_constructor.sm");
+fn pcc5_match_function_boundary_fixture_passes_full_cli_path() {
+    check_run_compile_verify("tests/fixtures/pcc5_match/positive_match_function_boundary.sm");
 }
 
 #[test]
-fn pcc5_adt_constructor_function_boundary_fixture_passes_full_cli_path() {
-    check_run_compile_verify("tests/fixtures/pcc5_adt/pcc5_adt_constructor_function_boundary.sm");
+fn pcc5_match_constructor_from_function_fixture_passes_full_cli_path() {
+    check_run_compile_verify("tests/fixtures/pcc5_match/positive_match_constructor_from_function.sm");
 }
