@@ -17,6 +17,7 @@ Verify the bundle includes:
 - `docs/roadmap/compatibility_statement.md`
 - `docs/roadmap/release_asset_smoke_matrix.md`
 - `docs/roadmap/stable_release_policy.md`
+- `docs/roadmap/private_custody_mode.md`, if the repository is private or if release preparation follows a private custody period
 - published asset notes for `smc.exe`, `svm.exe`, and the Windows zip when a GitHub release is cut
 
 Reproducible check command:
@@ -57,6 +58,7 @@ Verify the release notes include:
 - explicit snapshot regeneration rule
 - compatibility-sensitive contract families
 - which packaged assets were published for the current tag
+- whether the release was prepared from a private custody period, without exposing private-only implementation details
 
 ## Required Asset Smoke
 
@@ -70,6 +72,16 @@ Reproducible command:
 
 - `pwsh -File scripts/verify_release_assets.ps1 -Tag <tag> -AssetsDirectory <downloaded-assets-dir>`
 
+## Custody Transition Check
+
+Before publishing anything derived from a private repository state, verify:
+
+- public-facing documents still distinguish implemented, stable, planned, and experimental behavior;
+- private-only architecture notes are not accidentally promoted into public claims;
+- known limits remain visible in release-facing notes;
+- repository visibility and access-control changes are treated as operational facts, not technical maturity evidence;
+- the final release branch or tag points only to content intended for that release surface.
+
 ## Blocking Rule
 
 Do not mark the bundle release-ready if:
@@ -79,3 +91,4 @@ Do not mark the bundle release-ready if:
 - compatibility-sensitive tests were not run
 - runtime snapshots were regenerated without review
 - readiness and compatibility documents disagree with actual repository behavior
+- private custody mode is used to bypass PR, CI, or release evidence discipline
