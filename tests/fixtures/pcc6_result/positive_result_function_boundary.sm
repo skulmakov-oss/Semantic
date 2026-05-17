@@ -1,0 +1,20 @@
+fn parse_flag(flag: bool) -> Result(i32, text) {
+    if flag {
+        return Result::Ok(9);
+    }
+    return Result::Err("disabled");
+}
+
+fn unwrap_or_zero(res: Result(i32, text)) -> i32 {
+    let value: i32 = match res {
+        Result::Ok(v) => { v }
+        Result::Err(e) => { 0 }
+    };
+    return value;
+}
+
+fn main() {
+    assert(unwrap_or_zero(parse_flag(true)) == 9);
+    assert(unwrap_or_zero(parse_flag(false)) == 0);
+    return;
+}

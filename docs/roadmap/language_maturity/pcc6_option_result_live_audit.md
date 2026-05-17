@@ -34,15 +34,16 @@ standard-form baseline across the practical stack:
 - The current docs already freeze the narrow first-wave boundary in
   `option_result_standard_forms_scope.md`.
 - Dedicated PCC-6 positive Option fixture packaging now exists.
-- Dedicated Result and negative PCC-6 fixture packaging is still missing.
+- Dedicated PCC-6 positive Result fixture packaging now exists.
+- Dedicated negative PCC-6 fixture packaging is still missing.
 
 Audit verdict:
 
 ```text
 The narrow first-wave Option / Result baseline is already present in main.
 PCC-6 does not need a new architecture seam before fixture packaging.
-PCC-6B now covers the Option side; Result and negative PCC-6 fixture packaging
-remain to be added.
+PCC-6B covers the Option side; PCC-6C now covers the Result side.
+Negative PCC-6 fixture packaging remains to be added.
 ```
 
 CTF touched: none
@@ -67,7 +68,7 @@ SymbolId, capability, or trace change.
 | verifier | validates emitted form | confirmed-working | yes | keep bytecode checks stable |
 | VM | executes Option / Result path | confirmed-working | yes | keep runtime carrier behavior stable |
 | diagnostics | clear Option / Result errors | confirmed-working | yes | keep diagnostic needles stable |
-| tests | positive / negative coverage | confirmed-partial | partial | dedicated Result and negative PCC-6 fixture packaging is still missing |
+| tests | positive / negative coverage | confirmed-partial | partial | dedicated negative PCC-6 fixture packaging is still missing |
 | docs | standard-form boundary | documented-only | partial | keep scope boundary synced with live evidence |
 
 ## 4. Risk List
@@ -82,8 +83,8 @@ Observed risks are narrow, not architectural:
 - Match ergonomics must remain canonical unless separately scoped.
 - Option / Result should reuse the existing ADT-style carrier path where the
   current design says so.
-- Dedicated Result and negative PCC-6 fixture packaging may still be missing
-  even if the baseline implementation already exists.
+- Dedicated negative PCC-6 fixture packaging may still be missing even if the
+  baseline implementation already exists.
 
 ## 5. Recommended PCC-6 Split
 
@@ -133,6 +134,7 @@ not widen the PR into general generics or host ABI work.
 - [x] risks documented
 - [x] PCC-6 split proposed
 - [x] PCC-6B positive Option fixtures added
+- [x] PCC-6C positive Result fixtures added
 - [x] no code changed
 
 ## 8. PCC-6B Evidence
@@ -152,6 +154,30 @@ Validation:
 - `cargo test --test pcc6_option_acceptance`
 - `git diff --check`
 
-PCC-6B does not cover Result. Result positive fixtures remain PCC-6C.
+PCC-6B does not include Result fixtures.
+Negative diagnostics remain PCC-6D.
+PCC-6 closeout remains PCC-6E.
+
+## 9. PCC-6C Evidence
+
+PCC-6C adds dedicated positive Result standard-form acceptance fixtures.
+
+Covered positive cases:
+
+- `Result(T, E)` declared type position;
+- `Result::Ok(value)` constructor;
+- `Result::Err(error)` constructor;
+- success payload binding through explicit match;
+- error payload binding through explicit match;
+- Result value across a function boundary.
+
+Validation:
+
+- `cargo test --test pcc6_result_acceptance`
+- `cargo test --test pcc6_option_acceptance`
+- `git diff --check`
+
+PCC-6C does not add new Result semantics.
+PCC-6C does not turn Result into exception handling.
 Negative diagnostics remain PCC-6D.
 PCC-6 closeout remains PCC-6E.
