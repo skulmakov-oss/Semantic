@@ -1,0 +1,4 @@
+fn main() {
+    let dir: MissingDirection = MissingDirection::Right;
+    return;
+}
