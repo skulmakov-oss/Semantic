@@ -1,0 +1,4 @@
+fn main() {
+    let value: i32 = Result::Ok(7);
+    return;
+}

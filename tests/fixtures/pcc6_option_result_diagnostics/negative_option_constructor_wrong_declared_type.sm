@@ -1,0 +1,4 @@
+fn main() {
+    let value: i32 = Option::Some(7);
+    return;
+}

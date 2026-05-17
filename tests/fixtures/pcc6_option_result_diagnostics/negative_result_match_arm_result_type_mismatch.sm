@@ -1,0 +1,8 @@
+fn main() {
+    let res: Result(i32, text) = Result::Ok(7);
+    let value: i32 = match res {
+        Result::Ok(v) => { v }
+        Result::Err(e) => { false }
+    };
+    return;
+}
