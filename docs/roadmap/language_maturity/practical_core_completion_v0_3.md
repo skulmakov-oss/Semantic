@@ -412,6 +412,10 @@ Scope:
 - initial exhaustiveness policy or explicit non-exhaustive limitation;
 - lowering and VM path.
 
+Live audit:
+
+- `docs/roadmap/language_maturity/pcc5_adt_match_live_audit.md`
+
 DoD:
 
 ```text
