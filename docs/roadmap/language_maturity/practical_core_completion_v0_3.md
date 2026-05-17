@@ -416,6 +416,15 @@ Live audit:
 
 - `docs/roadmap/language_maturity/pcc5_adt_match_live_audit.md`
 
+PCC-5 boundary note:
+
+```text
+records are closed as nominal value aggregates;
+ADT is a separate aggregate family;
+collections are not records;
+host ABI stays closed to record values.
+```
+
 DoD:
 
 ```text
