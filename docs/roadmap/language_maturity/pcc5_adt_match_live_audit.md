@@ -23,6 +23,7 @@ Current `main` already contains the ADT and basic match seam across the full pra
 - The VM already carries ADT runtime values and executes ADT constructor/tag/access instructions.
 - Diagnostics for invalid ADT and match shapes already exist.
 - Existing tests already exercise the surface end-to-end through the snake benchmark path.
+- PCC-5B adds a dedicated positive ADT acceptance fixture suite for declaration and constructor use.
 
 Audit verdict:
 
@@ -51,7 +52,7 @@ Reason: docs-only audit; no runtime value, trap, determinism, verifier, SymbolId
 | verifier | validates ADT/match bytecode | confirmed-working | yes | keep bytecode checks stable |
 | VM | executes ADT/match runtime values | confirmed-working | yes | keep runtime carrier behavior stable |
 | diagnostics | clear ADT/match errors | confirmed-working | yes | keep diagnostic needles stable |
-| tests | positive/negative coverage | confirmed-partial | partial | add PCC-5-named fixture suite if desired |
+| tests | positive/negative coverage | confirmed-partial | partial | PCC-5B positive fixtures exist; PCC-5C/PCC-5D still needed for full lock |
 
 ## 4. Risk List
 
@@ -78,6 +79,27 @@ PCC-5E — docs(adt): close PCC-5 with evidence sync and roadmap status update
 ```
 
 If a dedicated fixture suite becomes necessary for roadmap hygiene, add it as evidence work, not as a new language design PR.
+
+## PCC-5B Evidence
+
+PCC-5B adds dedicated positive ADT declaration / constructor acceptance fixtures.
+
+Covered positive cases:
+
+- enum / ADT declaration;
+- unit-like constructor expression;
+- constructor value across a function boundary;
+- optional minimal constructor observation is deferred because stable equality is not admitted for the nominal enum shape in this slice.
+
+Validation:
+
+- `cargo test --test pcc5_adt_acceptance`
+- `cargo test --test snake_benchmark_gap_matrix snake_benchmark_positive_surface_passes_end_to_end`
+- `git diff --check`
+
+PCC-5B does not close match coverage.
+Basic match fixture lock remains PCC-5C.
+Negative diagnostics remain PCC-5D.
 
 ## 6. Out of Scope
 
