@@ -1,8 +1,8 @@
 # PCC-4 Records Live Audit
 
-Status: PCC-4B in progress
+Status: PCC-4C in progress
 Owner: language maturity stream
-Scope: records readiness and fixture lock
+Scope: records readiness, positive/negative fixture lock
 Non-goal: record architecture redesign
 
 ## 1. Purpose
@@ -11,7 +11,9 @@ This document is a live readiness audit for records before PCC-4 implementation 
 
 PCC-4A was docs-only. It did not change parser, typecheck, lowering, SemCode, verifier, VM, diagnostics, tests, or examples.
 
-PCC-4B adds positive canonical acceptance fixtures only. It does not redesign record architecture or widen ADT, schema, PROMETHEUS host ABI, UI, Workbench, or runtime ownership scope.
+PCC-4B added positive canonical acceptance fixtures only. It did not redesign record architecture or widen ADT, schema, PROMETHEUS host ABI, UI, Workbench, or runtime ownership scope.
+
+PCC-4C adds negative diagnostics fixtures only. It continues to avoid record architecture redesign and does not widen ADT, schema, PROMETHEUS host ABI, UI, Workbench, or runtime ownership scope.
 
 ## 2. Current Known Status
 
@@ -50,7 +52,7 @@ PCC-4 starts with fixture/closeout work rather than new parser/lowering/VM archi
 | verifier | accepts record-related bytecode safely | verifier recognizes record opcodes and validates payload shape | yes | locked through verify path |
 | VM | runtime record value behavior | `Value::Record(RecordCarrier<Value>)` already executes deterministically | yes | locked through run path |
 | diagnostics | clear source errors | record-specific parse/typecheck/runtime diagnostics already exist | yes | expand in PCC-4C negative fixtures |
-| tests | positive/negative coverage | PCC-4B adds dedicated positive acceptance coverage | partial | add PCC-4C negative diagnostics fixtures |
+| tests | positive/negative coverage | Dedicated positive acceptance coverage exists and PCC-4C adds negative diagnostics coverage | yes | closeout evidence sync |
 
 ## 4. PCC-4B Evidence
 
@@ -81,7 +83,28 @@ smc verify out.smc
 
 This makes PCC-4B an end-to-end acceptance lock rather than a parser-only fixture.
 
-## 5. Risk List
+## 5. PCC-4C Evidence
+
+PCC-4C adds `tests/pcc4_records_diagnostics.rs` as the dedicated negative diagnostics fixture suite.
+
+Covered negative cases:
+
+- unknown record type;
+- missing required field;
+- duplicate field in record literal;
+- unknown field access;
+- record field type mismatch.
+
+Each fixture follows the same acceptance contour:
+
+```text
+smc check -> stable rejection diagnostic
+smc compile -> either rejects or emits artifact that does not verify
+```
+
+This makes PCC-4C a diagnostics lock rather than a new record architecture change.
+
+## 6. Risk List
 
 Observed risks:
 
@@ -98,7 +121,7 @@ Not observed:
 - no evidence of missing SemCode opcodes for record construction or access;
 - no evidence that the VM lacks a runtime carrier for records.
 
-## 6. Recommended PCC-4 Split
+## 7. Recommended PCC-4 Split
 
 Because the core seams are already present, the next work is better split as fixture and closeout coverage rather than a new architecture build.
 
@@ -112,7 +135,7 @@ PCC-4D — close PCC-4 with evidence sync and roadmap status update
 
 If a future implementation delta is discovered during PCC-4B or PCC-4C, split it narrowly from the fixture lock before landing.
 
-## 7. Out of Scope
+## 8. Out of Scope
 
 This audit and PCC-4B do not expand into:
 
@@ -130,7 +153,7 @@ This audit and PCC-4B do not expand into:
 - README promotion;
 - host ABI widening.
 
-## 8. Acceptance Checklist
+## 9. Acceptance Checklist
 
 - [x] parser surface inspected
 - [x] typecheck inspected
@@ -146,4 +169,11 @@ This audit and PCC-4B do not expand into:
 - [x] record construction + field read positive fixture added
 - [x] record function-boundary positive fixture added
 - [x] no record architecture redesign
+- [x] PCC-4C negative fixture suite added
+- [x] unknown record type diagnostic locked
+- [x] missing field diagnostic locked
+- [x] duplicate field diagnostic locked
+- [x] unknown field access diagnostic locked
+- [x] field type mismatch diagnostic locked
+- [x] invalid record sources do not verify
 
