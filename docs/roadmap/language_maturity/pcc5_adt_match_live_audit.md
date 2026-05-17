@@ -25,6 +25,7 @@ Current `main` already contains the ADT and basic match seam across the full pra
 - Existing tests already exercise the surface end-to-end through the snake benchmark path.
 - PCC-5B adds a dedicated positive ADT acceptance fixture suite for declaration and constructor use.
 - PCC-5C adds a dedicated positive basic ADT match acceptance fixture suite.
+- PCC-5D adds a dedicated negative ADT and basic match diagnostics fixture suite.
 
 Audit verdict:
 
@@ -53,7 +54,7 @@ Reason: docs-only audit; no runtime value, trap, determinism, verifier, SymbolId
 | verifier | validates ADT/match bytecode | confirmed-working | yes | keep bytecode checks stable |
 | VM | executes ADT/match runtime values | confirmed-working | yes | keep runtime carrier behavior stable |
 | diagnostics | clear ADT/match errors | confirmed-working | yes | keep diagnostic needles stable |
-| tests | positive/negative coverage | confirmed-partial | partial | PCC-5B positive ADT fixtures exist; PCC-5C positive match fixtures exist; PCC-5D still needed for negative lock |
+| tests | positive/negative coverage | confirmed-working | yes | PCC-5B positive ADT fixtures exist; PCC-5C positive match fixtures exist; PCC-5D negative lock exists |
 
 ## 4. Risk List
 
@@ -122,6 +123,32 @@ PCC-5C does not add new match semantics.
 Negative diagnostics remain PCC-5D.
 PCC-5 closeout remains PCC-5E.
 
+## PCC-5D Evidence
+
+PCC-5D adds dedicated negative ADT and basic match diagnostics fixtures.
+
+Covered negative cases:
+
+- unknown ADT / enum type;
+- unknown constructor / variant;
+- constructor assigned to wrong ADT type;
+- constructor payload type mismatch;
+- constructor payload arity mismatch;
+- match arm with unknown variant;
+- match arm result type mismatch;
+- non-exhaustive match missing a declared variant.
+
+Validation:
+
+- `cargo test --test pcc5_adt_diagnostics`
+- `cargo test --test pcc5_adt_acceptance`
+- `cargo test --test pcc5_match_acceptance`
+- `git diff --check`
+
+PCC-5D does not add new ADT or match semantics.
+PCC-5D does not redesign exhaustiveness.
+PCC-5 closeout remains PCC-5E.
+
 ## 6. Out of Scope
 
 - records
@@ -150,6 +177,8 @@ PCC-5 closeout remains PCC-5E.
 - [x] VM runtime inspected
 - [x] diagnostics inspected
 - [x] tests inspected
+- [x] PCC-5D negative fixture suite added
+- [x] invalid ADT/match diagnostics locked
 - [x] risks documented
 - [x] PCC-5 split proposed
 - [x] no code changed

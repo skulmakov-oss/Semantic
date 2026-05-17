@@ -1,0 +1,9 @@
+enum Probe {
+    Value(i32),
+    Pair(i32, bool),
+}
+
+fn main() {
+    let probe: Probe = Probe::Value(true);
+    return;
+}
