@@ -211,9 +211,9 @@ be audited against current `main` before it can support planning claims.
 | FM-016 | Text core | text literal | unknown | TBD | TBD | TBD | PCC-3 | value | Practical Hell | audit |
 | FM-017 | Text core | text equality | unknown | TBD | TBD | TBD | PCC-3 | value | Practical Hell | audit |
 | FM-018 | Text core | text concat | unknown | TBD | TBD | TBD | PCC-3 | value | Practical Hell | audit |
-| FM-019 | Records | record declaration | unknown | TBD | TBD | TBD | PCC-4 | value | Practical Hell | audit |
-| FM-020 | Records | record construction | unknown | TBD | TBD | TBD | PCC-4 | value | Practical Hell | audit |
-| FM-021 | Records | field access | unknown | TBD | TBD | TBD | PCC-4 | value | Practical Hell | audit |
+| FM-019 | Records | record declaration | confirmed-working | `E3-pipeline: tests/pcc4_records_acceptance.rs::pcc4_record_declaration_fixture_passes_full_cli_path; E2-test: tests/pcc4_records_diagnostics.rs::pcc4_records_unknown_type_rejects_and_does_not_verify` | check -> run -> compile -> verify | none | PCC-4 | value | Practical Hell | closed for PCC-4 current scope |
+| FM-020 | Records | record construction | confirmed-working | `E3-pipeline: tests/pcc4_records_acceptance.rs::pcc4_record_construction_and_field_read_fixture_passes_full_cli_path; E2-test: tests/pcc4_records_diagnostics.rs::pcc4_records_missing_required_field_rejects_and_does_not_verify; E2-test: tests/pcc4_records_diagnostics.rs::pcc4_records_duplicate_field_rejects_and_does_not_verify` | check -> run -> compile -> verify | none | PCC-4 | value | Practical Hell | closed for PCC-4 current scope |
+| FM-021 | Records | field access | confirmed-working | `E3-pipeline: tests/pcc4_records_acceptance.rs::pcc4_record_construction_and_field_read_fixture_passes_full_cli_path; E3-pipeline: tests/pcc4_records_acceptance.rs::pcc4_record_function_boundary_fixture_passes_full_cli_path; E2-test: tests/pcc4_records_diagnostics.rs::pcc4_records_unknown_field_access_rejects_and_does_not_verify` | check -> run -> compile -> verify | none | PCC-4 | value | Practical Hell | closed for PCC-4 current scope |
 | FM-022 | ADT / match | enum declaration | unknown | TBD | TBD | TBD | PCC-5 | value | Practical Hell | audit |
 | FM-023 | ADT / match | constructor expression | unknown | TBD | TBD | TBD | PCC-5 | value | Practical Hell | audit |
 | FM-024 | ADT / match | basic ADT match | unknown | TBD | TBD | TBD | PCC-5 | determinism | Practical Hell | audit |
