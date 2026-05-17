@@ -1,0 +1,10 @@
+fn unwrap(res: Result(i32, text)) -> i32 {
+    let value: i32 = match res {
+        Result::Ok(v) => { v }
+    };
+    return value;
+}
+
+fn main() {
+    return;
+}

@@ -1,0 +1,10 @@
+fn unwrap(opt: Option(i32)) -> i32 {
+    let value: i32 = match opt {
+        Option::Some(v) => { v }
+    };
+    return value;
+}
+
+fn main() {
+    return;
+}

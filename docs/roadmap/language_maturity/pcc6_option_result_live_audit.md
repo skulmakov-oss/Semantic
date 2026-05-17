@@ -35,15 +35,16 @@ standard-form baseline across the practical stack:
   `option_result_standard_forms_scope.md`.
 - Dedicated PCC-6 positive Option fixture packaging now exists.
 - Dedicated PCC-6 positive Result fixture packaging now exists.
-- Dedicated negative PCC-6 fixture packaging is still missing.
+- Dedicated negative PCC-6 fixture packaging now exists.
 
 Audit verdict:
 
 ```text
 The narrow first-wave Option / Result baseline is already present in main.
 PCC-6 does not need a new architecture seam before fixture packaging.
-PCC-6B covers the Option side; PCC-6C now covers the Result side.
-Negative PCC-6 fixture packaging remains to be added.
+PCC-6B covers the Option side; PCC-6C covers the Result side; PCC-6D covers
+the negative diagnostics side.
+PCC-6 closeout remains to be synced.
 ```
 
 CTF touched: none
@@ -62,13 +63,13 @@ SymbolId, capability, or trace change.
 | typecheck | Option payload validation | confirmed-working | yes | keep as fixture-backed evidence |
 | typecheck | Result payload validation | confirmed-working | yes | keep as fixture-backed evidence |
 | typecheck | match arm payload binding | confirmed-working | yes | keep as fixture-backed evidence |
-| exhaustiveness | Option / Result match policy | confirmed-partial | partial | dedicated Result-specific qualification / negative packaging still missing |
+| exhaustiveness | Option / Result match policy | confirmed-working | yes | keep match-policy diagnostics stable |
 | lowering | Option / Result constructor / match lowering | confirmed-working | yes | keep as fixture-backed evidence |
 | SemCode | stable representation | confirmed-working | yes | keep opcode mapping and verifier coverage stable |
 | verifier | validates emitted form | confirmed-working | yes | keep bytecode checks stable |
 | VM | executes Option / Result path | confirmed-working | yes | keep runtime carrier behavior stable |
 | diagnostics | clear Option / Result errors | confirmed-working | yes | keep diagnostic needles stable |
-| tests | positive / negative coverage | confirmed-partial | partial | dedicated negative PCC-6 fixture packaging is still missing |
+| tests | positive / negative coverage | confirmed-working | yes | keep dedicated PCC-6 evidence synced for closeout |
 | docs | standard-form boundary | documented-only | partial | keep scope boundary synced with live evidence |
 
 ## 4. Risk List
@@ -83,8 +84,8 @@ Observed risks are narrow, not architectural:
 - Match ergonomics must remain canonical unless separately scoped.
 - Option / Result should reuse the existing ADT-style carrier path where the
   current design says so.
-- Dedicated negative PCC-6 fixture packaging may still be missing even if the
-  baseline implementation already exists.
+- Dedicated PCC-6 closeout evidence may still be missing even if the baseline
+  implementation already exists.
 
 ## 5. Recommended PCC-6 Split
 
@@ -135,6 +136,7 @@ not widen the PR into general generics or host ABI work.
 - [x] PCC-6 split proposed
 - [x] PCC-6B positive Option fixtures added
 - [x] PCC-6C positive Result fixtures added
+- [x] PCC-6D negative diagnostics fixtures added
 - [x] no code changed
 
 ## 8. PCC-6B Evidence
@@ -179,5 +181,33 @@ Validation:
 
 PCC-6C does not add new Result semantics.
 PCC-6C does not turn Result into exception handling.
-Negative diagnostics remain PCC-6D.
+PCC-6 closeout remains PCC-6E.
+
+## 10. PCC-6D Evidence
+
+PCC-6D adds dedicated negative Option / Result diagnostics fixtures.
+
+Covered negative cases:
+
+- Option constructor payload mismatch;
+- Option constructor assigned to wrong declared type;
+- Option match exhaustiveness boundary;
+- Option match arm result type mismatch;
+- Result::Ok payload mismatch;
+- Result::Err payload mismatch;
+- Result constructor assigned to wrong declared type;
+- Result match exhaustiveness boundary;
+- Result match arm result type mismatch.
+
+Validation:
+
+- `cargo test --test pcc6_option_result_diagnostics`
+- `cargo test --test pcc6_option_acceptance`
+- `cargo test --test pcc6_result_acceptance`
+- `git diff --check`
+
+PCC-6D does not add new Option / Result semantics.
+PCC-6D does not add general generics.
+PCC-6D does not turn Result into exception handling.
+PCC-6D does not redesign exhaustiveness.
 PCC-6 closeout remains PCC-6E.
