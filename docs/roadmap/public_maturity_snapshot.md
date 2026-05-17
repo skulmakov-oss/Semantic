@@ -69,6 +69,14 @@ Current public documentation does not claim:
 | Controlled observation | Finish M-Hello as a narrow verified observation path with capability and audit boundaries. | Controlled observation does not become general stdout by accident. |
 | Production hardening | Harden specs, tests, diagnostics, release artifacts, runtime contracts, and public status labels. | No public claim widens without spec + tests + verifier/VM/CLI coverage. |
 
+## Custody and visibility note
+
+Repository visibility is an access-control posture, not a change to the technical maturity model.
+
+When the repository is private, `docs/roadmap/private_custody_mode.md` defines the custody discipline used to keep branch protection, PR traceability, release-facing non-claims, and public communication boundaries intact.
+
+Private work can be broader than public claims, but public-facing language still remains constrained by specs, tests, status documents, and explicit non-claims.
+
 ## How to read this repository
 
 A first-time reader should not treat the repository as a finished general-purpose language product. It is better read as a serious R&D / platform project with a real staged architecture and active contract-hardening work.
@@ -83,6 +91,7 @@ The practical reading order is:
 6. `docs/spec/vm.md`
 7. `docs/spec/runtime_ownership.md`
 8. `docs/language/semantic_hello_*`
+9. `docs/roadmap/private_custody_mode.md`, when repository custody / visibility policy is relevant
 
 ## Public communication rule
 
