@@ -1,0 +1,19 @@
+enum Mode {
+    Idle,
+    Run,
+    Stop,
+}
+
+fn mode_code(mode: Mode) -> text {
+    let code: text = match mode {
+        Mode::Idle => { "0" }
+        Mode::Run => { "1" }
+        Mode::Stop => { "2" }
+    };
+    return code;
+}
+
+fn main() {
+    assert(mode_code(Mode::Run) == "1");
+    return;
+}

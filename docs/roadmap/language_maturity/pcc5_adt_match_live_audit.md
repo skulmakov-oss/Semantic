@@ -24,6 +24,7 @@ Current `main` already contains the ADT and basic match seam across the full pra
 - Diagnostics for invalid ADT and match shapes already exist.
 - Existing tests already exercise the surface end-to-end through the snake benchmark path.
 - PCC-5B adds a dedicated positive ADT acceptance fixture suite for declaration and constructor use.
+- PCC-5C adds a dedicated positive basic ADT match acceptance fixture suite.
 
 Audit verdict:
 
@@ -52,7 +53,7 @@ Reason: docs-only audit; no runtime value, trap, determinism, verifier, SymbolId
 | verifier | validates ADT/match bytecode | confirmed-working | yes | keep bytecode checks stable |
 | VM | executes ADT/match runtime values | confirmed-working | yes | keep runtime carrier behavior stable |
 | diagnostics | clear ADT/match errors | confirmed-working | yes | keep diagnostic needles stable |
-| tests | positive/negative coverage | confirmed-partial | partial | PCC-5B positive fixtures exist; PCC-5C/PCC-5D still needed for full lock |
+| tests | positive/negative coverage | confirmed-partial | partial | PCC-5B positive ADT fixtures exist; PCC-5C positive match fixtures exist; PCC-5D still needed for negative lock |
 
 ## 4. Risk List
 
@@ -88,8 +89,7 @@ Covered positive cases:
 
 - enum / ADT declaration;
 - unit-like constructor expression;
-- constructor value across a function boundary;
-- optional minimal constructor observation is deferred because stable equality is not admitted for the nominal enum shape in this slice.
+- constructor value across a function boundary.
 
 Validation:
 
@@ -100,6 +100,27 @@ Validation:
 PCC-5B does not close match coverage.
 Basic match fixture lock remains PCC-5C.
 Negative diagnostics remain PCC-5D.
+
+## PCC-5C Evidence
+
+PCC-5C adds dedicated positive basic ADT match acceptance fixtures.
+
+Covered positive cases:
+
+- basic match over a unit-like enum;
+- match expression assigned to a local value;
+- ADT value matched across a function boundary;
+- constructor returned from a function and matched.
+
+Validation:
+
+- `cargo test --test pcc5_match_acceptance`
+- `cargo test --test pcc5_adt_acceptance`
+- `git diff --check`
+
+PCC-5C does not add new match semantics.
+Negative diagnostics remain PCC-5D.
+PCC-5 closeout remains PCC-5E.
 
 ## 6. Out of Scope
 
