@@ -488,6 +488,10 @@ DoD:
 [ ] 7hell includes practical collection fixtures
 ```
 
+Live audit:
+
+- `docs/roadmap/language_maturity/pcc7_collections_live_audit.md`
+
 ## 16. PCC-8 — Stdlib v0
 
 Scope:
