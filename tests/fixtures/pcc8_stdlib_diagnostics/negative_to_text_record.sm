@@ -1,0 +1,9 @@
+record Probe {
+    x: i32,
+}
+
+fn main() {
+    let probe: Probe = Probe { x: 1 };
+    let label: text = to_text(probe);
+    return;
+}

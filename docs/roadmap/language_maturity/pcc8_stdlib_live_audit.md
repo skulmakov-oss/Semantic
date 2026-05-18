@@ -15,18 +15,20 @@ It is docs-only. It does not add helper behavior.
 ## 2. Current Known Status
 
 Current `main` already shows a narrow helper-adjacent surface, PCC-8B freezes
-the public helper boundary in a separate contract doc, and PCC-8C now adds the
-first dedicated positive helper fixtures.
+the public helper boundary in a separate contract doc, PCC-8C adds the first
+dedicated positive helper fixtures, and PCC-8D adds the first dedicated
+negative helper fixtures.
 
 That still does not mean PCC-8 is fully closed:
 
-- `assert` is already used as a runtime-visible failure surface and now has a
-  dedicated positive PCC-8 acceptance fixture.
+- `assert` is already used as a runtime-visible failure surface and now has
+  both positive and negative PCC-8 acceptance coverage.
 - `print` is exercised by benchmark fixtures for text-only output and now has
-  a dedicated positive PCC-8 acceptance fixture for the admitted text path.
+  both positive and negative PCC-8 acceptance coverage for the admitted text
+  path and non-text rejection.
 - `to_text` is exercised by benchmark fixtures for admitted basic types and
-  now has a dedicated positive PCC-8 acceptance fixture for admitted basic
-  types.
+  now has both positive and negative PCC-8 acceptance coverage for admitted
+  types and rejected record input.
 - `debug_render` remains internal tooling and must not be treated as a public
   `to_text` substitute.
 - The stdlib roadmap docs already describe the intended first-wave families
@@ -34,7 +36,7 @@ That still does not mean PCC-8 is fully closed:
   helpers, Option / Result helpers), and PCC-8B now freezes the public helper
   contract boundary without claiming implementation completion.
 - Text helper behavior is already backed by earlier PCC fixture suites and now
-  has a dedicated positive PCC-8 acceptance fixture as well.
+  has dedicated positive PCC-8 coverage.
 - Sequence / map / Option / Result helper behavior is already backed by
   earlier PCC fixture suites, but PCC-8 still lacks dedicated packaging for the
   broader stdlib boundary itself.
@@ -47,27 +49,27 @@ That still does not mean PCC-8 is fully closed:
 | ---------------- | ------------------------------------------------ | ------------- | ------ | ----------- |
 | surface          | public helper list                               | confirmed-partial | no | keep the public contract frozen but avoid claiming implementation completion |
 | surface          | helper naming / canonical call form              | confirmed-partial | no | keep `debug_render` internal and preserve canonical helper spellings |
-| assert           | assert behavior                                  | confirmed-working | no | keep helper contract and failure wording stable |
-| print            | text-only print behavior                         | confirmed-partial | no | keep text-only boundary documented and stable |
-| to_text          | admitted basic types                             | confirmed-working | no | keep admitted types and canonical call sites stable |
-| to_text          | rejected unsupported types                       | confirmed-partial | no | keep unsupported-type rejection wording stable |
-| text helpers     | text concat / len / equality boundary            | confirmed-partial | no | keep text helper behavior bounded to the current public text contract |
+| assert           | assert behavior                                  | confirmed-working | yes | keep helper contract and deterministic trap wording stable |
+| print            | text-only print behavior                         | confirmed-working | yes | keep text-only boundary documented and stable |
+| to_text          | admitted basic types                             | confirmed-working | yes | keep admitted types and canonical call sites stable |
+| to_text          | rejected unsupported types                       | confirmed-working | yes | keep unsupported-type rejection wording stable |
+| text helpers     | text concat / len / equality boundary            | confirmed-working | yes | keep text helper behavior bounded to the current public text contract |
 | math helpers     | admitted numeric helpers                         | documented-only | no | freeze first-wave helper list and type scope before implementation |
 | sequence helpers | len / is_empty / contains / push / prepend / pop | confirmed-partial | no | keep collection helpers out of public stdlib claims until packaged separately |
 | map helpers      | map_empty / map_set / map_get                    | confirmed-partial | no | keep collection helpers out of public stdlib claims until packaged separately |
 | Option helpers   | admitted helper surface                          | confirmed-partial | no | preserve narrow standard-form boundary and explicit canonical forms |
 | Result helpers   | admitted helper surface                          | confirmed-partial | no | preserve narrow standard-form boundary and explicit canonical forms |
-| typecheck        | helper type contracts                            | confirmed-partial | no | freeze helper contracts before any implementation widening |
-| diagnostics      | helper misuse diagnostics                        | confirmed-partial | no | keep failure wording stable and separate from debug helpers |
-| traps            | runtime helper failures                          | confirmed-partial | no | preserve deterministic trap behavior for false/assert and helper misuse |
+| typecheck        | helper type contracts                            | confirmed-working | yes | keep helper contracts and failure wording stable |
+| diagnostics      | helper misuse diagnostics                        | confirmed-working | yes | keep failure wording stable and separate from debug helpers |
+| traps            | runtime helper failures                          | confirmed-working | yes | preserve deterministic trap behavior for false/assert and helper misuse |
 | lowering         | helper lowering path                             | confirmed-partial | no | keep helper lowering inspectable and public-contract aligned |
 | SemCode          | helper representation                            | confirmed-partial | no | keep helper lowering on the admitted verifier-admissible path |
 | verifier         | verifies helper form                             | confirmed-partial | no | keep verifier-first admission intact for helper-like execution paths |
 | VM/runtime       | executes helper form                             | confirmed-partial | no | preserve deterministic runtime behavior for helper paths |
-| determinism      | deterministic helper behavior                    | confirmed-partial | no | keep helper output / trap behavior stable across runs |
-| docs             | public stdlib contract                           | confirmed-partial | no | keep the public contract frozen and separate from implementation completion |
+| determinism      | deterministic helper behavior                    | confirmed-working | yes | keep helper output / trap behavior stable across runs |
+| docs             | public stdlib contract                           | confirmed-working | yes | keep the public contract frozen and separate from implementation completion |
 | examples         | canonical examples avoid internal debug helpers  | documented-only | no | keep canonical examples free of `debug_render` and other internal helpers |
-| tests            | positive / negative coverage                     | confirmed-partial | no | add dedicated PCC-8 packaging after the contract boundary is frozen |
+| tests            | positive / negative coverage                     | confirmed-working | yes | dedicated PCC-8 packaging now covers positive and negative admitted helper cases |
 
 ## 4. PCC-8B Evidence
 
@@ -116,7 +118,33 @@ PCC-8C does not cover diagnostics / traps.
 PCC-8D remains helper diagnostics and runtime traps.
 PCC-8E remains closeout.
 
-## 6. Risk List
+## 6. PCC-8D Evidence
+
+PCC-8D adds dedicated Stdlib v0 helper diagnostics and runtime trap fixtures.
+
+Covered negative / trap cases:
+
+- assert(false) deterministic runtime trap;
+- print(non-text) text-only diagnostic;
+- unsupported to_text(record) rejection;
+- assert arity mismatch rejection;
+- assert argument type mismatch rejection;
+- to_text arity mismatch rejection.
+
+Validation:
+
+- `cargo test --test pcc8_stdlib_diagnostics`
+- `cargo test --test pcc8_stdlib_acceptance`
+- `git diff --check`
+
+PCC-8D does not add helpers.
+PCC-8D does not promote debug_render.
+PCC-8D does not expand to_text.
+PCC-8D does not introduce universal reflection.
+PCC-8D does not change host / capability boundaries.
+PCC-8E remains closeout.
+
+## 7. Risk List
 
 Include at least:
 
@@ -131,7 +159,7 @@ Include at least:
 - public helper list must be explicit.
 - canonical examples must not rely on internal debug formatting.
 
-## 7. Recommended PCC-8 Split
+## 8. Recommended PCC-8 Split
 
 Default split:
 
@@ -152,7 +180,7 @@ between B/C/D, for example:
 - PCC-8I4 helper diagnostics seam;
 - PCC-8I5 public helper contract docs seam.
 
-## 8. Out of Scope
+## 9. Out of Scope
 
 Explicitly list:
 
@@ -167,7 +195,7 @@ Explicitly list:
 - UI / Workbench;
 - README promotion.
 
-## 9. Acceptance Checklist
+## 10. Acceptance Checklist
 
 ```markdown
 - [ ] helper surface inspected
@@ -194,7 +222,7 @@ Explicitly list:
 - [ ] no code changed
 ```
 
-## 10. CTF Note
+## 11. CTF Note
 
 Because this is docs-only:
 
