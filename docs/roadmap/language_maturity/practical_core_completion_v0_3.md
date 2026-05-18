@@ -561,10 +561,12 @@ DoD:
 Live audit:
 
 - `docs/roadmap/language_maturity/pcc8_stdlib_live_audit.md`
+- `docs/roadmap/language_maturity/pcc8_stdlib_public_contract.md`
 
-PCC-8 remains a live audit. The public helper contract is not frozen yet, and
-`debug_render` remains internal tooling rather than a replacement for
-`to_text`.
+PCC-8 remains a live audit. The public helper contract is frozen in
+`pcc8_stdlib_public_contract.md`, but implementation / fixture packaging is
+still open. `debug_render` remains internal tooling rather than a replacement
+for `to_text`.
 
 ## 17. PCC-9 — Project Model v0
 
