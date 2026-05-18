@@ -469,6 +469,18 @@ DoD:
 [ ] diagnostics for invalid payload usage are stable
 ```
 
+PCC-6 closeout note:
+
+- PCC-6 is closed for the current Practical Core scope.
+- Evidence lives in `pcc6_option_result_live_audit.md`.
+- Dedicated test suites now cover positive Option standard-form fixtures,
+  positive Result standard-form fixtures, and negative Option / Result
+  diagnostics.
+- Further aggregate work remains assigned to later PCC phases:
+  - `PCC-7` Collections v0
+  - `PCC-8` Stdlib v0
+  - `PCC-9` Project Model v0
+
 ## 15. PCC-7 — Collections v0
 
 Scope:
