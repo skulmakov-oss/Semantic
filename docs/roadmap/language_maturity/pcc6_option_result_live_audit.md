@@ -1,6 +1,6 @@
 # PCC-6 Option / Result Live Audit
 
-Status: live audit
+Status: PCC-6 closed / evidence synced
 Owner: language maturity stream
 Scope: Option / Result readiness before PCC-6 implementation or fixture work
 Non-goal: code changes
@@ -44,7 +44,7 @@ The narrow first-wave Option / Result baseline is already present in main.
 PCC-6 does not need a new architecture seam before fixture packaging.
 PCC-6B covers the Option side; PCC-6C covers the Result side; PCC-6D covers
 the negative diagnostics side.
-PCC-6 closeout remains to be synced.
+PCC-6E now closes the track for the current Practical Core scope.
 ```
 
 CTF touched: none
@@ -137,6 +137,12 @@ not widen the PR into general generics or host ABI work.
 - [x] PCC-6B positive Option fixtures added
 - [x] PCC-6C positive Result fixtures added
 - [x] PCC-6D negative diagnostics fixtures added
+- [x] PCC-6E closeout evidence synced
+- [x] PCC-6 roadmap status updated
+- [x] feature matrix Option / Result rows confirmed
+- [x] no Option / Result architecture redesign
+- [x] no general generics introduced
+- [x] no host ABI widening introduced
 - [x] no code changed
 
 ## 8. PCC-6B Evidence
@@ -211,3 +217,34 @@ PCC-6D does not add general generics.
 PCC-6D does not turn Result into exception handling.
 PCC-6D does not redesign exhaustiveness.
 PCC-6 closeout remains PCC-6E.
+
+## 11. PCC-6E Closeout
+
+PCC-6E closes the current Option / Result practical-core track.
+
+Evidence chain:
+
+- PCC-6A — docs audit / scope correction
+- PCC-6B — positive Option standard-form fixtures
+- PCC-6C — positive Result standard-form fixtures
+- PCC-6D — negative Option / Result diagnostics fixtures
+- PCC-6E — closeout / roadmap sync
+
+Final verdict:
+
+```text
+PCC-6 Option / Result is closed for the current Practical Core scope.
+```
+
+Evidence-backed surface:
+
+- `Option(T)` is evidence-backed.
+- `Result(T, E)` is evidence-backed.
+- `Option::Some(value)` / `Option::None` are evidence-backed.
+- `Result::Ok(value)` / `Result::Err(error)` are evidence-backed.
+- explicit match payload binding is evidence-backed.
+- invalid Option / Result programs reject with stable diagnostics.
+- invalid Option / Result programs do not reach a verified execution path.
+- no new architecture seam was required.
+- no general generics, hidden prelude injection, exception semantics, or host
+  ABI widening were introduced.
