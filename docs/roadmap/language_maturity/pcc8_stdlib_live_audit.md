@@ -14,8 +14,9 @@ It is docs-only. It does not add helper behavior.
 
 ## 2. Current Known Status
 
-Current `main` already shows a narrow helper-adjacent surface, but it is not
-yet frozen as a public stdlib contract:
+Current `main` already shows a narrow helper-adjacent surface, and PCC-8B now
+freezes the public helper boundary in a separate contract doc, but the
+implementation / fixture side is still not ready:
 
 - `assert` is already used as a runtime-visible failure surface and appears in
   canonical fixtures, but no dedicated PCC-8 helper contract is frozen yet.
@@ -28,8 +29,8 @@ yet frozen as a public stdlib contract:
   `to_text` substitute.
 - The stdlib roadmap docs already describe the intended first-wave families
   (`assert`, math helpers, text helpers, `to_text`, sequence helpers, map
-  helpers, Option / Result helpers), but the public helper list is still a
-  roadmap contract rather than a frozen public API contract.
+  helpers, Option / Result helpers), and PCC-8B now freezes the public helper
+  contract boundary without claiming implementation completion.
 - Sequence / map / Option / Result helper behavior is already backed by
   earlier PCC fixture suites, but PCC-8 still lacks dedicated packaging for the
   stdlib boundary itself.
@@ -40,8 +41,8 @@ yet frozen as a public stdlib contract:
 
 | Layer            | Required for PCC-8                               | Current state | Ready? | Next action |
 | ---------------- | ------------------------------------------------ | ------------- | ------ | ----------- |
-| surface          | public helper list                               | documented-only | no | freeze the public helper list and keep it separate from internal tooling |
-| surface          | helper naming / canonical call form              | documented-only | no | keep `debug_render` internal and preserve canonical helper spellings |
+| surface          | public helper list                               | confirmed-partial | no | keep the public contract frozen but avoid claiming implementation completion |
+| surface          | helper naming / canonical call form              | confirmed-partial | no | keep `debug_render` internal and preserve canonical helper spellings |
 | assert           | assert behavior                                  | confirmed-partial | no | freeze helper contract and failure wording |
 | print            | text-only print behavior                         | confirmed-partial | no | document text-only boundary and non-text rejection wording |
 | to_text          | admitted basic types                             | confirmed-partial | no | freeze admitted types and canonical call sites |
@@ -60,11 +61,35 @@ yet frozen as a public stdlib contract:
 | verifier         | verifies helper form                             | confirmed-partial | no | keep verifier-first admission intact for helper-like execution paths |
 | VM/runtime       | executes helper form                             | confirmed-partial | no | preserve deterministic runtime behavior for helper paths |
 | determinism      | deterministic helper behavior                    | confirmed-partial | no | keep helper output / trap behavior stable across runs |
-| docs             | public stdlib contract                           | documented-only | no | freeze the public helper contract before implementation packaging |
+| docs             | public stdlib contract                           | confirmed-partial | no | keep the public contract frozen and separate from implementation completion |
 | examples         | canonical examples avoid internal debug helpers  | documented-only | no | keep canonical examples free of `debug_render` and other internal helpers |
 | tests            | positive / negative coverage                     | confirmed-partial | no | add dedicated PCC-8 packaging after the contract boundary is frozen |
 
-## 4. Risk List
+## 4. PCC-8B Evidence
+
+PCC-8B freezes the public helper contract and debug_render boundary.
+
+Covered:
+
+- public helper family classification;
+- debug_render internal-only boundary;
+- to_text admitted-types boundary;
+- unsupported to_text rejection boundary;
+- print text-only boundary;
+- helper failure behavior policy;
+- capability / host boundary;
+- canonical examples rule.
+
+Validation:
+
+- `git diff --check`
+
+PCC-8B does not add tests or implementation.
+PCC-8C remains positive fixture packaging.
+PCC-8D remains diagnostics / trap fixture packaging.
+PCC-8E remains closeout.
+
+## 5. Risk List
 
 Include at least:
 
@@ -79,7 +104,7 @@ Include at least:
 - public helper list must be explicit.
 - canonical examples must not rely on internal debug formatting.
 
-## 5. Recommended PCC-8 Split
+## 6. Recommended PCC-8 Split
 
 Default split:
 
@@ -100,7 +125,7 @@ between B/C/D, for example:
 - PCC-8I4 helper diagnostics seam;
 - PCC-8I5 public helper contract docs seam.
 
-## 6. Out of Scope
+## 7. Out of Scope
 
 Explicitly list:
 
@@ -115,7 +140,7 @@ Explicitly list:
 - UI / Workbench;
 - README promotion.
 
-## 7. Acceptance Checklist
+## 8. Acceptance Checklist
 
 ```markdown
 - [ ] helper surface inspected
@@ -142,7 +167,7 @@ Explicitly list:
 - [ ] no code changed
 ```
 
-## 8. CTF Note
+## 9. CTF Note
 
 Because this is docs-only:
 
