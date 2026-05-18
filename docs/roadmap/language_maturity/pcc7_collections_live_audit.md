@@ -24,8 +24,9 @@ surface:
 - `Map<K,V>` is exercised through contextual `map_empty()` construction and a
   basic persistent update / lookup baseline.
 - Dedicated PCC-7 positive Map fixture packaging now exists.
-- Negative snake fixtures already lock the current `map_empty()` contextual
-  typing boundary.
+- Dedicated PCC-7 negative diagnostics / trap packaging now exists for map
+  contextual typing, sequence bounds, sequence pop on empty, and map
+  key/value mismatch.
 - The roadmap docs already classify `Sequence<T>` and `Map<K,V>` as
   runtime-managed dynamic containers, not records.
 - The current docs already treat collections as a separate aggregate family
@@ -33,10 +34,12 @@ surface:
 - Deterministic iteration for `Sequence<T>` is evidenced by the benchmark
   surface and the dedicated PCC-7 Sequence suite; deterministic iteration for
   `Map<K,V>` is still policy-documented rather than separately closed.
+- PCC-7D now locks negative diagnostics / trap behavior for map contextual
+  typing, sequence bounds, sequence pop on empty, and map key/value mismatch.
 - Memory / quota interaction is a required PCC-7 concern, but no dedicated
   closeout evidence exists yet.
-- Dedicated PCC-7 fixture packaging is still missing for negative diagnostics,
-  iteration policy, missing-key behavior, and memory / quota closeout.
+- Map missing-key behavior is still policy-documented rather than separately
+  closed.
 
 Audit verdict:
 
@@ -44,10 +47,10 @@ Audit verdict:
 The Collections v0 baseline is partially present in main.
 Sequence behavior is benchmark-evidenced and backed by dedicated PCC-7
 fixtures. Map behavior is benchmark-evidenced and now backed by dedicated
-PCC-7 positive fixtures at the narrow contextual construction / basic
-insert-update / basic lookup level.
-PCC-7 still needs explicit fixture packaging and policy evidence for Map
-iteration, bounds / missing-key behavior, and memory / quota interaction.
+PCC-7 positive and negative fixtures at the narrow contextual construction /
+basic insert-update / basic lookup level.
+PCC-7 still needs explicit policy evidence for Map iteration, missing-key
+behavior, and memory / quota interaction.
 ```
 
 CTF touched: none
@@ -59,18 +62,18 @@ SymbolId, capability, or trace change.
 | Layer | Required for PCC-7 | Current state | Ready? | Next action |
 | --- | --- | --- | --- | --- |
 | parser | `Sequence<T>` type syntax | confirmed-working | yes | keep dedicated Sequence fixtures stable |
-| parser | `Map<K,V>` type syntax | confirmed-partial | partial | keep benchmark evidence, package PCC-7 fixtures |
+| parser | `Map<K,V>` type syntax | confirmed-working | yes | keep dedicated Map fixtures stable |
 | parser | sequence construction/literal | confirmed-working | yes | keep dedicated Sequence fixtures stable |
-| parser | map construction/literal | confirmed-partial | partial | keep contextual `map_empty()` evidence and add policy closeout |
+| parser | map construction/literal | confirmed-working | yes | keep contextual `map_empty()` evidence and stable diagnostics |
 | frontend model | collection type representation | confirmed-working | yes | keep runtime-managed container boundary explicit |
 | typecheck | Sequence element typing | confirmed-working | yes | keep dedicated Sequence fixtures stable |
-| typecheck | Map key/value typing | confirmed-partial | partial | audit contextual typing and missing-key policy |
+| typecheck | Map key/value typing | confirmed-working | yes | keep key/value mismatch diagnostics stable |
 | sequence ops | indexing | confirmed-working | yes | keep dedicated Sequence fixtures stable |
 | sequence ops | iteration | confirmed-working | yes | keep deterministic iteration evidence stable |
 | sequence ops | len / is_empty / contains | confirmed-working | yes | keep dedicated Sequence fixtures stable |
 | sequence ops | push / prepend / pop | confirmed-working | yes | keep persistent update evidence stable |
-| map ops | empty map contextual typing | confirmed-partial | partial | keep current blocker fixture and policy wording stable |
-| map ops | insert / lookup | confirmed-partial | partial | audit lookup / update policy evidence |
+| map ops | empty map contextual typing | confirmed-working | yes | keep current blocker fixture and policy wording stable |
+| map ops | insert / lookup | confirmed-working | yes | keep lookup / update evidence stable |
 | map ops | missing-key behavior | confirmed-partial | partial | define and evidence the trap / default policy |
 | determinism | Sequence iteration policy | confirmed-working | yes | keep deterministic iteration evidence stable |
 | determinism | Map iteration policy | confirmed-partial | partial | audit whether iteration is admitted and stable |
@@ -82,7 +85,7 @@ SymbolId, capability, or trace change.
 | verifier | validates emitted collection form | confirmed-working | yes | keep verifier coverage stable |
 | VM/runtime | carrier behavior | confirmed-working | yes | keep runtime-managed container semantics explicit |
 | diagnostics | clear collection errors | confirmed-working | yes | preserve current blocker diagnostics |
-| tests | positive / negative coverage | confirmed-partial | partial | package PCC-7 fixtures explicitly |
+| tests | positive / negative coverage | confirmed-working | yes | keep dedicated PCC-7 fixtures stable |
 | docs | collection boundary | confirmed-working | yes | keep `PCC-3.5` and PCC-7 boundary synced |
 
 ## 4. Risk List
@@ -99,9 +102,9 @@ Observed risks are narrow but real:
 - Collections must not widen host ABI.
 - Stdlib helpers must not be smuggled into PCC-7 unless already required for
   the admitted surface.
-- Dedicated PCC-7 fixture packaging is still missing for negative diagnostics,
-  iteration policy, missing-key behavior, and memory / quota closeout even
-  though the Sequence and basic Map baselines now have dedicated fixtures.
+- Dedicated PCC-7 fixture packaging now covers positive and negative
+  Sequence / Map surfaces, but missing-key behavior, Map iteration policy, and
+  memory / quota closeout are still open.
 
 ## 5. Recommended PCC-7 Split
 
@@ -165,6 +168,7 @@ Potential narrow follow-ups:
 - [x] PCC-7 split proposed
 - [x] PCC-7B positive Sequence fixtures added
 - [x] PCC-7C positive Map fixtures added
+- [x] PCC-7D negative diagnostics / trap fixtures added
 - [x] no code changed
 
 ## 8. Evidence Notes
@@ -224,7 +228,7 @@ Validation:
 
 PCC-7B does not cover Map.
 Map positive fixtures remain PCC-7C.
-Negative diagnostics / traps remain PCC-7D.
+Negative diagnostics / traps now include PCC-7D.
 
 ## 10. PCC-7C Evidence
 
@@ -246,8 +250,41 @@ Validation:
 - `git diff --check`
 
 PCC-7C does not cover Sequence expansion.
-Negative diagnostics / traps remain PCC-7D.
-Missing-key behavior remains PCC-7D unless already needed by positive Map
-fixtures.
+Negative diagnostics / traps are covered by PCC-7D.
+Missing-key behavior remains open because current `map_get` still returns a
+default rather than trapping.
 Memory / quota and policy closeout remain PCC-7E or a narrow policy PR if
 needed.
+
+## 11. PCC-7D Evidence
+
+PCC-7D adds dedicated negative Collections diagnostics and trap fixtures.
+
+Covered negative cases:
+
+- `map_empty()` without contextual `Map(K,V)` type;
+- statement-form `map_empty();`;
+- Sequence bounds behavior via out-of-bounds indexing;
+- empty Sequence pop behavior;
+- Sequence element type mismatch;
+- Map key type mismatch;
+- Map value type mismatch.
+
+Omitted from this phase:
+
+- Map missing-key behavior, because current admitted `map_get` returns a
+  default and does not trap.
+
+Validation:
+
+- `cargo test --test pcc7_collections_diagnostics`
+- `cargo test --test pcc7_sequence_acceptance`
+- `cargo test --test pcc7_map_acceptance`
+- `cargo test -q --test snake_benchmark_gap_matrix snake_benchmark_positive_surface_passes_end_to_end`
+- `git diff --check`
+
+PCC-7D does not add new collection semantics.
+PCC-7D does not implement missing-key behavior.
+PCC-7D does not implement memory / quota policy.
+PCC-7D does not change aliasing or ownership policy.
+PCC-7 closeout remains PCC-7E.

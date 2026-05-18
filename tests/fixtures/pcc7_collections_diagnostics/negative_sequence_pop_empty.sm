@@ -1,0 +1,5 @@
+fn main() {
+    let values: Sequence(i32) = [];
+    let popped: Sequence(i32) = pop(values);
+    return;
+}
