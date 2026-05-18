@@ -1,0 +1,18 @@
+fn main() {
+    let xs: Sequence(i32) = [1, 2, 3];
+    let popped: Sequence(i32) = pop(xs);
+    assert(len(popped) == 2);
+    assert(contains(popped, 1) == true);
+    assert(contains(popped, 2) == true);
+    assert(contains(popped, 3) == false);
+    assert(len(xs) == 3);
+
+    let mut tail: Sequence(i32) = [10, 20, 30, 40];
+    tail = pop(tail);
+    assert(len(tail) == 3);
+    tail = pop(tail);
+    assert(len(tail) == 2);
+    assert(contains(tail, 10) == true);
+    assert(contains(tail, 20) == true);
+    assert(contains(tail, 30) == false);
+}

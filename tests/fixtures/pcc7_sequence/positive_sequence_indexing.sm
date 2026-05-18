@@ -1,0 +1,7 @@
+fn main() {
+    let values: Sequence(i32) = [1, 2, 3];
+    let head: i32 = values[0];
+    assert(head == 1);
+    assert(values == [1, 2, 3]);
+    return;
+}

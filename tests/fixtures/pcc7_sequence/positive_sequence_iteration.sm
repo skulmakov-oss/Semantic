@@ -1,0 +1,15 @@
+fn classify(values: Sequence(i32)) -> bool {
+    let saw_retry: bool = false;
+    for value in values {
+        if value == 2 {
+            saw_retry ||= true;
+        }
+    }
+    return saw_retry;
+}
+
+fn main() {
+    let right: bool = classify([0, 2, 4]);
+    assert(right == true);
+    return;
+}

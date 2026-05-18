@@ -1,0 +1,18 @@
+fn main() {
+    let xs: Sequence(i32) = [1, 2, 3];
+
+    let pushed: Sequence(i32) = push(xs, 4);
+    assert(len(pushed) == 4);
+    assert(contains(pushed, 4) == true);
+    assert(contains(xs, 4) == false);
+
+    let prepended: Sequence(i32) = prepend(xs, 0);
+    assert(len(prepended) == 4);
+    assert(contains(prepended, 0) == true);
+
+    let mut body: Sequence(i32) = [10];
+    body = push(body, 20);
+    body = push(body, 30);
+    body = prepend(body, 5);
+    assert(len(body) == 4);
+}
