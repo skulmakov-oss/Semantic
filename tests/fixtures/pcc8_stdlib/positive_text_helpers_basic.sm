@@ -1,0 +1,13 @@
+fn echo(x: text) -> text {
+    return x;
+}
+
+fn main() {
+    let label: text = "score=" + "10";
+    let left: text = "alpha";
+    let right: text = echo("alpha");
+    assert(label == "score=10");
+    assert(left == right);
+    assert(left != "beta");
+    return;
+}
