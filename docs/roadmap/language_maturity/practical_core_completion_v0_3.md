@@ -504,6 +504,33 @@ Live audit:
 
 - `docs/roadmap/language_maturity/pcc7_collections_live_audit.md`
 
+PCC-7 closeout note:
+
+```text
+PCC-7 is closed for the current Practical Core fixture-backed scope.
+Evidence lives in `pcc7_collections_live_audit.md`.
+Dedicated test suites now cover positive Sequence<T> fixtures, positive
+Map<K,V> fixtures, and negative collection diagnostics / trap fixtures.
+Bounded open items remain:
+- Map missing-key policy;
+- Map iteration policy;
+- assignment / aliasing policy;
+- memory / quota evidence.
+Further work remains assigned to later phases or explicit policy tracks:
+- `PCC-8` Stdlib v0;
+- `PCC-9` Project Model v0;
+- optional future collection policy track if needed.
+```
+
+Bounded scope note:
+
+```text
+PCC-7 closeout does not claim Map missing-key completeness, Map iteration
+completeness, assignment / aliasing completeness, or memory / quota
+completeness.
+Those remain bounded policy or future-work items.
+```
+
 ## 16. PCC-8 — Stdlib v0
 
 Scope:

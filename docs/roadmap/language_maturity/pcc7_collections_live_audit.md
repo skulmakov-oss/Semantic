@@ -1,6 +1,6 @@
 # PCC-7 Collections v0 Live Audit
 
-Status: live audit
+Status: PCC-7 closed / evidence synced for current fixture-backed scope
 Owner: language maturity stream
 Scope: Collections v0 readiness before PCC-7 implementation or fixture work
 Non-goal: code changes
@@ -44,13 +44,15 @@ surface:
 Audit verdict:
 
 ```text
-The Collections v0 baseline is partially present in main.
+The Collections v0 baseline is present in main for the current fixture-backed
+scope.
 Sequence behavior is benchmark-evidenced and backed by dedicated PCC-7
 fixtures. Map behavior is benchmark-evidenced and now backed by dedicated
 PCC-7 positive and negative fixtures at the narrow contextual construction /
 basic insert-update / basic lookup level.
-PCC-7 still needs explicit policy evidence for Map iteration, missing-key
-behavior, and memory / quota interaction.
+PCC-7 is closed for the current Practical Core fixture-backed scope.
+Map missing-key behavior, Map iteration policy, assignment / aliasing policy,
+and memory / quota evidence remain bounded open items.
 ```
 
 CTF touched: none
@@ -74,12 +76,12 @@ SymbolId, capability, or trace change.
 | sequence ops | push / prepend / pop | confirmed-working | yes | keep persistent update evidence stable |
 | map ops | empty map contextual typing | confirmed-working | yes | keep current blocker fixture and policy wording stable |
 | map ops | insert / lookup | confirmed-working | yes | keep lookup / update evidence stable |
-| map ops | missing-key behavior | confirmed-partial | partial | define and evidence the trap / default policy |
+| map ops | missing-key behavior | confirmed-partial | partial | keep bounded-open policy note until explicit evidence lands |
 | determinism | Sequence iteration policy | confirmed-working | yes | keep deterministic iteration evidence stable |
-| determinism | Map iteration policy | confirmed-partial | partial | audit whether iteration is admitted and stable |
+| determinism | Map iteration policy | confirmed-partial | partial | keep bounded-open policy note until explicit evidence lands |
 | mutation | mutation semantics | confirmed-working | yes | keep persistent update evidence stable |
-| assignment | assignment / aliasing policy | confirmed-partial | partial | audit aliasing limits before implementation |
-| memory/quota | allocation and quota behavior | confirmed-partial | partial | collect explicit quota evidence |
+| assignment | assignment / aliasing policy | confirmed-partial | partial | keep bounded-open policy note until explicit evidence lands |
+| memory/quota | allocation and quota behavior | confirmed-partial | partial | keep bounded-open policy note until explicit evidence lands |
 | lowering | collection op lowering | confirmed-working | yes | keep current pipeline evidence stable |
 | SemCode | stable representation | confirmed-working | yes | keep encoding stable and audited |
 | verifier | validates emitted collection form | confirmed-working | yes | keep verifier coverage stable |
@@ -199,8 +201,16 @@ Validation:
 - `docs/roadmap/language_maturity/collections_surface_full_scope.md`
 - `docs/roadmap/first_wave_map_surface.md`
 
-PCC-7 is not closed.
-PCC-7 fixture packaging and policy closeout remain to be added.
+PCC-7 is closed for the current fixture-backed scope.
+The following are not claimed complete by PCC-7E:
+
+- Map missing-key behavior;
+- Map iteration policy;
+- assignment / aliasing policy;
+- memory / quota closeout evidence.
+
+These remain bounded policy / future-work items and must not be treated as
+implemented by PCC-7E.
 
 ## 9. PCC-7B Evidence
 
@@ -253,8 +263,7 @@ PCC-7C does not cover Sequence expansion.
 Negative diagnostics / traps are covered by PCC-7D.
 Missing-key behavior remains open because current `map_get` still returns a
 default rather than trapping.
-Memory / quota and policy closeout remain PCC-7E or a narrow policy PR if
-needed.
+Memory / quota and policy closeout remain bounded open for later policy work.
 
 ## 11. PCC-7D Evidence
 
@@ -288,3 +297,62 @@ PCC-7D does not implement missing-key behavior.
 PCC-7D does not implement memory / quota policy.
 PCC-7D does not change aliasing or ownership policy.
 PCC-7 closeout remains PCC-7E.
+
+## 12. PCC-7E Closeout
+
+PCC-7A — docs audit / scope correction
+PCC-7B — positive Sequence<T> fixtures
+PCC-7C — positive Map<K,V> fixtures
+PCC-7D — negative collection diagnostics and trap fixtures
+PCC-7E — bounded closeout / roadmap sync
+
+Final verdict:
+
+```text
+PCC-7 Collections v0 is closed for the current Practical Core fixture-backed
+scope.
+```
+
+Evidence-backed statements:
+
+- Sequence<T> positive path is evidence-backed.
+- Map<K,V> contextual construction and basic update / lookup path are
+  evidence-backed.
+- Collection diagnostics / traps are evidence-backed for the admitted
+  negative fixture set.
+- Invalid collection programs covered by PCC-7D do not silently pass.
+- Sequence bounds and empty-pop traps are deterministic under the current
+  admitted surface.
+- No new collection semantics were introduced.
+- No GC policy was introduced.
+- No host ABI collection widening was introduced.
+
+Bounded-open items not claimed complete by PCC-7E:
+
+- Map missing-key behavior;
+- Map iteration policy;
+- assignment / aliasing policy;
+- memory / quota evidence.
+
+These remain bounded policy / future-work items and must not be treated as
+implemented by PCC-7E.
+
+Validation:
+
+- `cargo test --test pcc7_sequence_acceptance`
+- `cargo test --test pcc7_map_acceptance`
+- `cargo test --test pcc7_collections_diagnostics`
+- `cargo test -q --test snake_benchmark_gap_matrix snake_benchmark_positive_surface_passes_end_to_end`
+- `git diff --check`
+
+## 13. PCC-7E Acceptance Checklist
+
+- [x] PCC-7B positive Sequence fixtures added
+- [x] PCC-7C positive Map fixtures added
+- [x] PCC-7D negative diagnostics / trap fixtures added
+- [x] PCC-7E bounded closeout evidence synced
+- [x] PCC-7 roadmap status updated
+- [x] open policy boundaries documented
+- [x] no collection architecture redesign
+- [x] no memory / quota implementation introduced
+- [x] no host ABI widening introduced
