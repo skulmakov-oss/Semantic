@@ -23,6 +23,7 @@ surface:
 - Dedicated PCC-7 positive Sequence fixture packaging now exists.
 - `Map<K,V>` is exercised through contextual `map_empty()` construction and a
   basic persistent update / lookup baseline.
+- Dedicated PCC-7 positive Map fixture packaging now exists.
 - Negative snake fixtures already lock the current `map_empty()` contextual
   typing boundary.
 - The roadmap docs already classify `Sequence<T>` and `Map<K,V>` as
@@ -34,20 +35,19 @@ surface:
   `Map<K,V>` is still policy-documented rather than separately closed.
 - Memory / quota interaction is a required PCC-7 concern, but no dedicated
   closeout evidence exists yet.
-- Dedicated PCC-7 fixture packaging is still missing for Map, negative
-  diagnostics, and policy closeout.
+- Dedicated PCC-7 fixture packaging is still missing for negative diagnostics,
+  iteration policy, missing-key behavior, and memory / quota closeout.
 
 Audit verdict:
 
 ```text
 The Collections v0 baseline is partially present in main.
-Sequence behavior is benchmark-evidenced and now backed by dedicated PCC-7
-fixtures.
-Map behavior is benchmark-evidenced only at the narrow contextual construction
-/ basic lookup level.
-PCC-7 still needs explicit fixture packaging and policy evidence for Map,
-negative diagnostics, bounds / missing-key behavior, and memory / quota
-interaction.
+Sequence behavior is benchmark-evidenced and backed by dedicated PCC-7
+fixtures. Map behavior is benchmark-evidenced and now backed by dedicated
+PCC-7 positive fixtures at the narrow contextual construction / basic
+insert-update / basic lookup level.
+PCC-7 still needs explicit fixture packaging and policy evidence for Map
+iteration, bounds / missing-key behavior, and memory / quota interaction.
 ```
 
 CTF touched: none
@@ -61,7 +61,7 @@ SymbolId, capability, or trace change.
 | parser | `Sequence<T>` type syntax | confirmed-working | yes | keep dedicated Sequence fixtures stable |
 | parser | `Map<K,V>` type syntax | confirmed-partial | partial | keep benchmark evidence, package PCC-7 fixtures |
 | parser | sequence construction/literal | confirmed-working | yes | keep dedicated Sequence fixtures stable |
-| parser | map construction/literal | confirmed-partial | partial | package PCC-7 fixtures and close policy gaps |
+| parser | map construction/literal | confirmed-partial | partial | keep contextual `map_empty()` evidence and add policy closeout |
 | frontend model | collection type representation | confirmed-working | yes | keep runtime-managed container boundary explicit |
 | typecheck | Sequence element typing | confirmed-working | yes | keep dedicated Sequence fixtures stable |
 | typecheck | Map key/value typing | confirmed-partial | partial | audit contextual typing and missing-key policy |
@@ -99,9 +99,9 @@ Observed risks are narrow but real:
 - Collections must not widen host ABI.
 - Stdlib helpers must not be smuggled into PCC-7 unless already required for
   the admitted surface.
-- Dedicated PCC-7 fixture packaging is still missing for Map, negative
-  diagnostics, and policy closeout even though the Sequence baseline is now
-  fixture-backed.
+- Dedicated PCC-7 fixture packaging is still missing for negative diagnostics,
+  iteration policy, missing-key behavior, and memory / quota closeout even
+  though the Sequence and basic Map baselines now have dedicated fixtures.
 
 ## 5. Recommended PCC-7 Split
 
@@ -164,6 +164,7 @@ Potential narrow follow-ups:
 - [x] risks documented
 - [x] PCC-7 split proposed
 - [x] PCC-7B positive Sequence fixtures added
+- [x] PCC-7C positive Map fixtures added
 - [x] no code changed
 
 ## 8. Evidence Notes
@@ -224,5 +225,29 @@ Validation:
 PCC-7B does not cover Map.
 Map positive fixtures remain PCC-7C.
 Negative diagnostics / traps remain PCC-7D.
+
+## 10. PCC-7C Evidence
+
+PCC-7C adds dedicated positive Map<K,V> acceptance fixtures.
+
+Covered positive cases:
+
+- `Map<K,V>` declared type position;
+- contextual `map_empty()` construction;
+- basic insert / update surface;
+- basic lookup surface;
+- persistent update behavior.
+
+Validation:
+
+- `cargo test --test pcc7_map_acceptance`
+- `cargo test --test pcc7_sequence_acceptance`
+- `cargo test -q --test snake_benchmark_gap_matrix snake_benchmark_positive_surface_passes_end_to_end`
+- `git diff --check`
+
+PCC-7C does not cover Sequence expansion.
+Negative diagnostics / traps remain PCC-7D.
+Missing-key behavior remains PCC-7D unless already needed by positive Map
+fixtures.
 Memory / quota and policy closeout remain PCC-7E or a narrow policy PR if
 needed.

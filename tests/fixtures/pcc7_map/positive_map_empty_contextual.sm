@@ -1,0 +1,5 @@
+fn main() {
+    let m: Map(i32, bool) = map_empty();
+    assert(map_contains(m, 1) == false);
+    return;
+}
