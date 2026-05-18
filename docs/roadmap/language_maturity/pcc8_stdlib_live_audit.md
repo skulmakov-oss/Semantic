@@ -14,26 +14,30 @@ It is docs-only. It does not add helper behavior.
 
 ## 2. Current Known Status
 
-Current `main` already shows a narrow helper-adjacent surface, and PCC-8B now
-freezes the public helper boundary in a separate contract doc, but the
-implementation / fixture side is still not ready:
+Current `main` already shows a narrow helper-adjacent surface, PCC-8B freezes
+the public helper boundary in a separate contract doc, and PCC-8C now adds the
+first dedicated positive helper fixtures.
 
-- `assert` is already used as a runtime-visible failure surface and appears in
-  canonical fixtures, but no dedicated PCC-8 helper contract is frozen yet.
-- `print` is exercised by benchmark fixtures for text-only output, with a
-  stable rejection path for non-text input, but it is still boundary-managed
-  rather than a closed public stdlib contract.
-- `to_text` is exercised by benchmark fixtures for admitted basic types and is
-  explicitly rejected for unsupported record input.
+That still does not mean PCC-8 is fully closed:
+
+- `assert` is already used as a runtime-visible failure surface and now has a
+  dedicated positive PCC-8 acceptance fixture.
+- `print` is exercised by benchmark fixtures for text-only output and now has
+  a dedicated positive PCC-8 acceptance fixture for the admitted text path.
+- `to_text` is exercised by benchmark fixtures for admitted basic types and
+  now has a dedicated positive PCC-8 acceptance fixture for admitted basic
+  types.
 - `debug_render` remains internal tooling and must not be treated as a public
   `to_text` substitute.
 - The stdlib roadmap docs already describe the intended first-wave families
   (`assert`, math helpers, text helpers, `to_text`, sequence helpers, map
   helpers, Option / Result helpers), and PCC-8B now freezes the public helper
   contract boundary without claiming implementation completion.
+- Text helper behavior is already backed by earlier PCC fixture suites and now
+  has a dedicated positive PCC-8 acceptance fixture as well.
 - Sequence / map / Option / Result helper behavior is already backed by
   earlier PCC fixture suites, but PCC-8 still lacks dedicated packaging for the
-  stdlib boundary itself.
+  broader stdlib boundary itself.
 - `std.math` remains a proposed family contract rather than a shipped public
   stdlib module.
 
@@ -43,9 +47,9 @@ implementation / fixture side is still not ready:
 | ---------------- | ------------------------------------------------ | ------------- | ------ | ----------- |
 | surface          | public helper list                               | confirmed-partial | no | keep the public contract frozen but avoid claiming implementation completion |
 | surface          | helper naming / canonical call form              | confirmed-partial | no | keep `debug_render` internal and preserve canonical helper spellings |
-| assert           | assert behavior                                  | confirmed-partial | no | freeze helper contract and failure wording |
-| print            | text-only print behavior                         | confirmed-partial | no | document text-only boundary and non-text rejection wording |
-| to_text          | admitted basic types                             | confirmed-partial | no | freeze admitted types and canonical call sites |
+| assert           | assert behavior                                  | confirmed-working | no | keep helper contract and failure wording stable |
+| print            | text-only print behavior                         | confirmed-partial | no | keep text-only boundary documented and stable |
+| to_text          | admitted basic types                             | confirmed-working | no | keep admitted types and canonical call sites stable |
 | to_text          | rejected unsupported types                       | confirmed-partial | no | keep unsupported-type rejection wording stable |
 | text helpers     | text concat / len / equality boundary            | confirmed-partial | no | keep text helper behavior bounded to the current public text contract |
 | math helpers     | admitted numeric helpers                         | documented-only | no | freeze first-wave helper list and type scope before implementation |
@@ -89,7 +93,30 @@ PCC-8C remains positive fixture packaging.
 PCC-8D remains diagnostics / trap fixture packaging.
 PCC-8E remains closeout.
 
-## 5. Risk List
+## 5. PCC-8C Evidence
+
+PCC-8C adds dedicated positive Stdlib v0 helper acceptance fixtures.
+
+Covered positive cases:
+
+- assert true path;
+- print(text) positive path;
+- to_text for explicitly admitted basic types;
+- admitted text helper surface.
+
+Validation:
+
+- `cargo test --test pcc8_stdlib_acceptance`
+- `git diff --check`
+
+PCC-8C does not add new helpers.
+PCC-8C does not promote debug_render.
+PCC-8C does not expand to_text.
+PCC-8C does not cover diagnostics / traps.
+PCC-8D remains helper diagnostics and runtime traps.
+PCC-8E remains closeout.
+
+## 6. Risk List
 
 Include at least:
 
@@ -104,7 +131,7 @@ Include at least:
 - public helper list must be explicit.
 - canonical examples must not rely on internal debug formatting.
 
-## 6. Recommended PCC-8 Split
+## 7. Recommended PCC-8 Split
 
 Default split:
 
@@ -125,7 +152,7 @@ between B/C/D, for example:
 - PCC-8I4 helper diagnostics seam;
 - PCC-8I5 public helper contract docs seam.
 
-## 7. Out of Scope
+## 8. Out of Scope
 
 Explicitly list:
 
@@ -140,7 +167,7 @@ Explicitly list:
 - UI / Workbench;
 - README promotion.
 
-## 8. Acceptance Checklist
+## 9. Acceptance Checklist
 
 ```markdown
 - [ ] helper surface inspected
@@ -167,7 +194,7 @@ Explicitly list:
 - [ ] no code changed
 ```
 
-## 9. CTF Note
+## 10. CTF Note
 
 Because this is docs-only:
 
