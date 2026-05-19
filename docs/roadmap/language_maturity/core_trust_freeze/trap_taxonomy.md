@@ -53,6 +53,38 @@ None remain in the PCC-0F freeze set after this pass.
 If a future PCC PR introduces a new runtime-failure class, it starts here and
 must not be claimed as frozen until evidence exists.
 
+## CTF-WP2 PCC-4..PCC-9 Trap / Diagnostics Sync
+
+PCC-4, PCC-5, and PCC-6 diagnostics are compile/check-time diagnostics, not necessarily VM trap classes.
+
+PCC-7D introduced and locked collection runtime traps where applicable:
+
+- Sequence out-of-bounds indexing;
+- empty Sequence pop;
+- other currently evidenced runtime trap surfaces from PCC-7D.
+
+PCC-8D locked:
+
+- `assert(false)` deterministic runtime trap;
+- helper misuse diagnostics;
+- unsupported `to_text` diagnostics.
+
+PCC-9D locked manifest/project-adjacent diagnostics, not VM trap classes.
+
+No new trap class is introduced by CTF-WP2.
+
+Existing frozen classes remain unchanged unless explicit evidence requires a new freeze-candidate entry.
+
+These are PCC fixture-backed failure surfaces, but their final trap taxonomy class names require a separate CTF-E or CTF-WP follow-up before being promoted to frozen trap classes.
+
+PCC follow-up trap candidates:
+
+- Sequence out-of-bounds indexing;
+- empty Sequence pop;
+- collection baseline lookup / missing-key failures where still open;
+- helper misuse diagnostics that are not yet canonically named as VM traps;
+- manifest/project diagnostics from PCC-9D.
+
 ## 5. Planned / non-admitted classes
 
 None remain in the current PCC practical-core trap set.
