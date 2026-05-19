@@ -596,7 +596,8 @@ Roadmap artifacts:
 - live audit: `docs/roadmap/language_maturity/pcc9_project_model_live_audit.md`
 - contract freeze: `docs/roadmap/language_maturity/pcc9_project_model_contract.md`
 - waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
- - CTF sync waypoint: `docs/roadmap/language_maturity/core_trust_freeze/ctf_wp1_pcc4_pcc9_sync.md`
+- CTF sync waypoint: `docs/roadmap/language_maturity/core_trust_freeze/ctf_wp1_pcc4_pcc9_sync.md`
+- CTF follow-up: `CTF-WP2 — docs(core-trust-freeze): update runtime value and trap registry after PCC`
 
 PCC-9 is closed for the current admitted manifest / project-adjacent baseline.
 The current evidence is bounded to the existing package-manifest baseline and

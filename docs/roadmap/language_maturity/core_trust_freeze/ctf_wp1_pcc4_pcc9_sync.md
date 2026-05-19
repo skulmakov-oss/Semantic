@@ -180,6 +180,15 @@ It identifies which CTF files are aligned and which require follow-up.
 - [ ] no tests or fixtures changed
 ```
 
+## CTF-WP2 Follow-up
+
+CTF-WP2 updates:
+
+- runtime value registry after PCC-4..PCC-9;
+- trap taxonomy notes after PCC diagnostics / trap fixture closeout.
+
+CTF-WP2 does not close CTF and does not claim release readiness.
+
 CTF touched: docs only
 
 Reason: docs-only trust-surface sync; no runtime value, trap, determinism, verifier, SymbolId, capability, or trace change
