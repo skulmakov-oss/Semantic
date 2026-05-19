@@ -122,6 +122,33 @@ dependency resolution semantics.
 PCC-9D remains project diagnostics fixtures.
 PCC-9E remains closeout.
 
+## PCC-9D Evidence
+
+PCC-9D adds dedicated diagnostics fixtures for the currently admitted project
+model / manifest baseline.
+
+Covered diagnostics cases:
+
+- malformed current `Semantic.package` manifest input;
+- missing required manifest / package field where admitted;
+- invalid format / version where admitted;
+- invalid dependency shape where admitted;
+- entry / module admission rejection where admitted;
+- import-resolution rejection where admitted.
+
+Validation:
+
+- `cargo test --test pcc9_project_model_diagnostics`
+- `cargo test --test pcc9_project_model_acceptance`
+- `git diff --check`
+
+PCC-9D does not implement project-root check/run.
+PCC-9D does not implement `semantic.toml`.
+PCC-9D does not implement `smc new`.
+PCC-9D does not add package-manager, registry, workspace, lockfile, or
+dependency-resolution semantics.
+PCC-9E remains bounded closeout.
+
 ## Risk List
 
 - Project Model v0 can silently become a package manager.
