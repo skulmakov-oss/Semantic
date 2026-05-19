@@ -1,6 +1,6 @@
 # PCC-8 Stdlib v0 Live Audit
 
-Status: live audit
+Status: PCC-8 closed / evidence synced for current admitted helper surface
 Owner: language maturity stream
 Scope: Stdlib v0 readiness before PCC-8 implementation or fixture work
 Non-goal: code changes
@@ -19,7 +19,7 @@ the public helper boundary in a separate contract doc, PCC-8C adds the first
 dedicated positive helper fixtures, and PCC-8D adds the first dedicated
 negative helper fixtures.
 
-That still does not mean PCC-8 is fully closed:
+That still does not mean PCC-8 is a broad stdlib completion:
 
 - `assert` is already used as a runtime-visible failure surface and now has
   both positive and negative PCC-8 acceptance coverage.
@@ -38,10 +38,11 @@ That still does not mean PCC-8 is fully closed:
 - Text helper behavior is already backed by earlier PCC fixture suites and now
   has dedicated positive PCC-8 coverage.
 - Sequence / map / Option / Result helper behavior is already backed by
-  earlier PCC fixture suites, but PCC-8 still lacks dedicated packaging for the
-  broader stdlib boundary itself.
+  earlier PCC fixture suites, but PCC-8 does not claim them as new stdlib
+  expansion.
 - `std.math` remains a proposed family contract rather than a shipped public
   stdlib module.
+- Helper behavior is deterministic within the current admitted surface.
 
 ## 3. Readiness Matrix
 
@@ -144,7 +145,45 @@ PCC-8D does not introduce universal reflection.
 PCC-8D does not change host / capability boundaries.
 PCC-8E remains closeout.
 
-## 7. Risk List
+## 7. PCC-8E Closeout
+
+PCC-8A — docs audit / scope correction.
+PCC-8B — public helper contract and debug_render boundary freeze.
+PCC-8C — positive basic helper fixtures.
+PCC-8D — helper diagnostics and runtime trap fixtures.
+PCC-8E — bounded closeout / roadmap sync.
+
+PCC-8 Stdlib v0 is closed for the current admitted helper surface.
+
+Explicit evidence-backed statements:
+
+- assert positive and false / trap paths are evidence-backed;
+- print(text) is evidence-backed;
+- print(non-text) rejection is evidence-backed;
+- to_text for admitted basic types is evidence-backed;
+- unsupported to_text(record) rejection is evidence-backed;
+- helper arity / argument diagnostics for admitted helpers are evidence-backed;
+- admitted text helper surface is evidence-backed;
+- helper behavior is deterministic within the current admitted surface;
+- no new helper semantics were introduced;
+- no host ABI widening was introduced;
+- no IO / capability expansion was introduced.
+
+Bounded-open note:
+
+```text
+The following are not claimed complete by PCC-8E:
+- broad stdlib completion;
+- std.math implementation;
+- universal to_text / reflection;
+- debug_render as public helper;
+- formatting macro system;
+- IO/capability expansion;
+- collection memory/quota policy;
+- exception-like Option / Result helper semantics.
+```
+
+## 8. Risk List
 
 Include at least:
 
@@ -159,7 +198,7 @@ Include at least:
 - public helper list must be explicit.
 - canonical examples must not rely on internal debug formatting.
 
-## 8. Recommended PCC-8 Split
+## 9. Recommended PCC-8 Split
 
 Default split:
 
@@ -180,7 +219,7 @@ between B/C/D, for example:
 - PCC-8I4 helper diagnostics seam;
 - PCC-8I5 public helper contract docs seam.
 
-## 9. Out of Scope
+## 10. Out of Scope
 
 Explicitly list:
 
@@ -195,34 +234,25 @@ Explicitly list:
 - UI / Workbench;
 - README promotion.
 
-## 10. Acceptance Checklist
+## 11. Acceptance Checklist
 
 ```markdown
-- [ ] helper surface inspected
-- [ ] assert inspected
-- [ ] print inspected
-- [ ] to_text inspected
-- [ ] text helpers inspected
-- [ ] math helpers inspected
-- [ ] sequence helpers inspected
-- [ ] map helpers inspected
-- [ ] Option helpers inspected
-- [ ] Result helpers inspected
-- [ ] helper type contracts inspected
-- [ ] lowering inspected
-- [ ] SemCode/verifier inspected
-- [ ] VM/runtime inspected
-- [ ] diagnostics/traps inspected
-- [ ] tests inspected
-- [ ] docs inspected
-- [ ] canonical examples inspected
-- [ ] debug_render boundary inspected
-- [ ] risks documented
-- [ ] PCC-8 split proposed
-- [ ] no code changed
+- [x] helper surface inspected
+- [x] assert inspected
+- [x] print inspected
+- [x] to_text inspected
+- [x] text helpers inspected
+- [x] helper type contracts inspected
+- [x] diagnostics/traps inspected
+- [x] tests inspected
+- [x] docs inspected
+- [x] debug_render boundary inspected
+- [x] risks documented
+- [x] PCC-8A/B/C/D/E evidence chain synced
+- [x] no code changed by closeout
 ```
 
-## 11. CTF Note
+## 12. CTF Note
 
 Because this is docs-only:
 
@@ -230,5 +260,5 @@ Because this is docs-only:
 
 Reason:
 
-`docs-only audit; no runtime value, trap, determinism, verifier, SymbolId,
-capability, or trace change`
+`docs-only bounded closeout; no runtime value, trap, determinism, verifier,
+SymbolId, capability, or trace change`

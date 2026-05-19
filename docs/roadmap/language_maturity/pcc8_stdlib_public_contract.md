@@ -101,3 +101,6 @@ PCC-8C — test(stdlib): lock positive basic helper fixtures
 PCC-8D — test(stdlib): lock helper diagnostics and runtime traps
 PCC-8E — docs(stdlib): close PCC-8 with evidence sync and roadmap status update
 ```
+
+PCC-8E closes the current admitted helper surface; it does not expand the
+public contract.
