@@ -563,10 +563,21 @@ Live audit:
 - `docs/roadmap/language_maturity/pcc8_stdlib_live_audit.md`
 - `docs/roadmap/language_maturity/pcc8_stdlib_public_contract.md`
 
-PCC-8 remains a live audit. The public helper contract is frozen in
-`pcc8_stdlib_public_contract.md`, but implementation / fixture packaging is
-still open. `debug_render` remains internal tooling rather than a replacement
-for `to_text`.
+PCC-8 is closed for the current admitted Stdlib v0 helper surface.
+Evidence lives in `pcc8_stdlib_live_audit.md`.
+The public helper boundary lives in `pcc8_stdlib_public_contract.md`.
+Dedicated test suites now cover positive basic helper fixtures and helper
+diagnostics / runtime traps.
+Bounded open items remain:
+
+- `std.math`;
+- broad stdlib expansion;
+- universal reflection / broad `to_text`;
+- public `debug_render`;
+- formatting macros;
+- IO/capability expansion.
+
+Further practical-core work moves to PCC-9 Project Model v0.
 
 ## 17. PCC-9 — Project Model v0
 
