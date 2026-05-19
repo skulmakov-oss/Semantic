@@ -595,16 +595,19 @@ Roadmap artifacts:
 
 - live audit: `docs/roadmap/language_maturity/pcc9_project_model_live_audit.md`
 - contract freeze: `docs/roadmap/language_maturity/pcc9_project_model_contract.md`
-
-Roadmap artifacts:
-
-- live audit: `docs/roadmap/language_maturity/pcc9_project_model_live_audit.md`
-- contract freeze: `docs/roadmap/language_maturity/pcc9_project_model_contract.md`
+- waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
 
 PCC-9 is closed for the current admitted manifest / project-adjacent baseline.
 The current evidence is bounded to the existing package-manifest baseline and
 project-adjacent helpers; project-root `check` / `run` and `smc new` remain
 explicit follow-up work unless separately evidenced.
+
+Checkpoint outcome:
+
+- bounded current manifest / project-adjacent baseline is closed;
+- project-root workflow, `semantic.toml` parser / loader, `smc new`, package
+  registry, dependency resolver, and workspace remain open;
+- the next step is CTF synchronization and qualification planning.
 
 DoD:
 
