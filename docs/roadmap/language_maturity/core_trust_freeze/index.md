@@ -16,6 +16,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 
 - Current sync waypoint: `docs/roadmap/language_maturity/core_trust_freeze/ctf_wp1_pcc4_pcc9_sync.md`
 - Runtime / trap follow-up: `CTF-WP2 — RuntimeValue and trap registry sync after PCC`
+- Determinism / verifier-first follow-up: `CTF-WP3 — determinism and verifier-first policy sync after PCC`
 - PCC waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
 
 ## Files
