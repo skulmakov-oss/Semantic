@@ -37,8 +37,8 @@ Current repo evidence is split:
 - project diagnostics are documented, but project-level diagnostic fixtures are
   still missing
 - project fixtures are still missing
-- docs now include a project-model contract freeze, but that does not claim
-  implementation
+- docs now include a project-model contract freeze boundary, but that does not
+  claim implementation
 - 7hell project-level readiness is still follow-up only
 
 ## Readiness Matrix
@@ -88,31 +88,37 @@ Validation:
 - `git diff --check`
 
 PCC-9A does not add project implementation or project fixtures.
-PCC-9B remains the minimal contract freeze.
+PCC-9B remains the contract freeze boundary.
 PCC-9C remains positive project fixtures.
 PCC-9D remains diagnostics fixtures.
 PCC-9E remains closeout.
 
-## PCC-9B Evidence
+## PCC-9C Evidence
 
-PCC-9B freezes the minimal Project Model v0 contract.
+PCC-9C adds dedicated positive Project Model v0 acceptance fixtures for the
+currently admitted manifest / project-adjacent baseline.
 
-Covered:
+Covered positive cases:
 
-- minimal project layout;
-- minimal manifest boundary;
-- project-root command intent;
-- `smc new` optional / follow-up boundary;
-- deterministic module root policy;
-- project diagnostics categories;
-- package-manager / registry / workspace exclusion.
+- single-file `.sm` baseline remains stable;
+- current admitted `Semantic.package` manifest baseline;
+- `manifest_dir` / `module_root` baseline;
+- local dependency inventory where admitted;
+- entry / module admission where admitted;
+- import-resolution helper baseline where admitted.
 
 Validation:
 
+- `cargo test --test pcc9_project_model_acceptance`
 - `git diff --check`
 
-PCC-9B does not add implementation or fixtures.
-PCC-9C remains positive minimal project fixtures.
+PCC-9C follows the PCC-9B contract freeze boundary and stays on the currently
+admitted baseline.
+PCC-9C does not implement project-root check/run.
+PCC-9C does not implement `semantic.toml`.
+PCC-9C does not implement `smc new`.
+PCC-9C does not add package-manager, registry, workspace, lockfile, or
+dependency resolution semantics.
 PCC-9D remains project diagnostics fixtures.
 PCC-9E remains closeout.
 
