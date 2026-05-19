@@ -591,14 +591,10 @@ Scope:
 - deterministic module roots;
 - project-level 7hell.
 
-Live audit:
+Roadmap artifacts:
 
-- `docs/roadmap/language_maturity/pcc9_project_model_live_audit.md`
-
-PCC-9 remains a live audit. Project Model v0 is not closed. The current
-evidence is still bounded to single-file behavior plus package-manifest and
-import-resolution baseline helpers; project-root `check` / `run` and `smc new`
-remain explicit follow-up work unless separately evidenced.
+- live audit: `docs/roadmap/language_maturity/pcc9_project_model_live_audit.md`
+- contract freeze: `docs/roadmap/language_maturity/pcc9_project_model_contract.md`
 
 DoD:
 
@@ -608,6 +604,11 @@ DoD:
 [ ] project-level diagnostics are stable
 [ ] project fixtures exist
 ```
+
+PCC-9 remains a live audit. Project Model v0 is not closed. The current
+evidence is still bounded to single-file behavior plus package-manifest and
+import-resolution baseline helpers; project-root `check` / `run` and `smc new`
+remain explicit follow-up work unless separately evidenced.
 
 ## 18. Waypoint review rule
 
