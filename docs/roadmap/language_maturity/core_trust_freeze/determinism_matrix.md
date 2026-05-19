@@ -51,6 +51,16 @@ None remain in the PCC core determinism freeze set after this pass.
 If a future PCC PR introduces a new determinism-sensitive behavior, it starts
 here and must not be called frozen until evidence exists.
 
+## CTF-WP3 PCC-4..PCC-9 Determinism Sync
+
+PCC-4..PCC-9 closeouts do not freeze broad feature families.
+
+They do provide bounded determinism evidence for current admitted fixture-backed surfaces.
+
+`freeze-candidate` means protected from silent change, not release freeze.
+
+Future widening still requires new CTF review.
+
 ## 5. Planned / non-admitted surfaces
 
 These determinism-sensitive families are intentionally not frozen for the
@@ -60,8 +70,24 @@ current PCC core-readiness gate:
 |---|---|---|---|---|---|---|
 | Numeric behavior | Arithmetic and numeric result/trap rules that belong to later language phases. | PCC-2 | docs / roadmap only | PCC-2 | planned | typecheck, emit, VM |
 | Text behavior | Text operations and text-result stability. | PCC-3 | docs / roadmap only | PCC-3 | planned | typecheck, emit, VM |
-| Records / ADT / collections / stdlib | Later language-surface determinism families. | PCC-4+ / PCC-5+ / PCC-7+ / PCC-8+ | docs / roadmap only | later PCC phases | planned | typecheck, emit, VM |
-| Project model / packaging | Project-level orchestration and packaging order. | PCC-9 | docs / roadmap only | PCC-9 | planned | CLI |
+| Records | Current record literal/access/update fixture surface only. | PCC-4 | PCC-4 closeout | PCC-4 | freeze-candidate | typecheck, emit, VM |
+| ADT + basic match | Current constructors + basic match fixtures only. | PCC-5 | PCC-5 closeout | PCC-5 | freeze-candidate | typecheck, emit, VM |
+| Option / Result | Standard forms only. | PCC-6 | PCC-6 closeout | PCC-6 | freeze-candidate | typecheck, emit, VM |
+| Sequence | Current Sequence operations covered by PCC-7B/D. | PCC-7 | PCC-7 closeout | PCC-7 | freeze-candidate | typecheck, emit, VM |
+| Map | Admitted baseline only; missing-key, iteration policy, and quota remain open. | PCC-7 | PCC-7 closeout | PCC-7 | audit-needed / freeze-candidate | typecheck, emit, VM |
+| Stdlib helpers | `assert` / `print` / `to_text` admitted helper surface only. | PCC-8 | PCC-8 closeout | PCC-8 | freeze-candidate | typecheck, emit, VM |
+| Project model manifest baseline | Current `Semantic.package` helper baseline only. | PCC-9 | PCC-9 closeout | PCC-9 | freeze-candidate | CLI |
+
+Open determinism notes:
+
+- map missing-key behavior remains unresolved;
+- map iteration policy remains unresolved;
+- collection memory/quota determinism remains open;
+- project-root discovery remains open;
+- semantic.toml parse/load determinism remains open;
+- src/main.sm discovery remains open;
+- smc new output determinism remains open;
+- project-level 7hell determinism remains open.
 
 ## 6. Out-of-scope surfaces
 

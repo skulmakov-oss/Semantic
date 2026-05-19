@@ -189,6 +189,15 @@ CTF-WP2 updates:
 
 CTF-WP2 does not close CTF and does not claim release readiness.
 
+## CTF-WP3 Follow-up
+
+CTF-WP3 updates:
+
+- determinism matrix after PCC-4..PCC-9;
+- verifier-first policy after PCC feature-surface closeout.
+
+CTF-WP3 does not close CTF and does not claim release readiness.
+
 CTF touched: docs only
 
 Reason: docs-only trust-surface sync; no runtime value, trap, determinism, verifier, SymbolId, capability, or trace change
