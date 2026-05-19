@@ -596,19 +596,28 @@ Roadmap artifacts:
 - live audit: `docs/roadmap/language_maturity/pcc9_project_model_live_audit.md`
 - contract freeze: `docs/roadmap/language_maturity/pcc9_project_model_contract.md`
 
+Roadmap artifacts:
+
+- live audit: `docs/roadmap/language_maturity/pcc9_project_model_live_audit.md`
+- contract freeze: `docs/roadmap/language_maturity/pcc9_project_model_contract.md`
+
+PCC-9 is closed for the current admitted manifest / project-adjacent baseline.
+The current evidence is bounded to the existing package-manifest baseline and
+project-adjacent helpers; project-root `check` / `run` and `smc new` remain
+explicit follow-up work unless separately evidenced.
+
 DoD:
 
 ```text
 [ ] minimal project layout is documented
 [ ] project check/run works or is explicitly scoped as follow-up
-[ ] project-level diagnostics are stable
-[ ] project fixtures exist
+[x] project-level diagnostics are stable for the admitted manifest baseline
+[x] project fixtures exist for the admitted manifest baseline
 ```
 
-PCC-9 remains a live audit. Project Model v0 is not closed. The current
-evidence is still bounded to single-file behavior plus package-manifest and
-import-resolution baseline helpers; project-root `check` / `run` and `smc new`
-remain explicit follow-up work unless separately evidenced.
+PCC-9 remains closed only for the current admitted manifest / project-adjacent
+baseline. The remaining project-root flow, `semantic.toml` parser / loader,
+`smc new`, and project-level 7hell remain explicit follow-up work.
 
 ## 18. Waypoint review rule
 

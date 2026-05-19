@@ -1,6 +1,6 @@
 # PCC-9 Project Model v0 Live Audit
 
-Status: live audit
+Status: PCC-9 closed / evidence synced for current admitted manifest baseline
 Owner: language maturity stream
 Scope: Project Model v0 readiness before PCC-9 implementation or fixture work
 Non-goal: code changes
@@ -148,6 +148,67 @@ PCC-9D does not implement `smc new`.
 PCC-9D does not add package-manager, registry, workspace, lockfile, or
 dependency-resolution semantics.
 PCC-9E remains bounded closeout.
+
+## PCC-9E Closeout
+
+PCC-9E closes the current admitted manifest / project-adjacent baseline for
+Project Model v0.
+
+Evidence chain:
+
+- PCC-9A — docs audit / scope correction
+- PCC-9B — minimal project layout and manifest contract freeze
+- PCC-9C — positive minimal project / manifest-baseline fixtures
+- PCC-9D — project-model diagnostics fixtures
+- PCC-9E — bounded closeout / roadmap sync
+
+Final verdict:
+
+PCC-9 Project Model v0 is closed for the current admitted manifest /
+project-adjacent baseline.
+
+Evidence-backed surface:
+
+- single-file `.sm` baseline is evidence-backed;
+- current admitted `Semantic.package` manifest baseline is evidence-backed;
+- `manifest_dir` / `module_root` baseline is evidence-backed;
+- local dependency inventory is evidence-backed;
+- entry / module admission is evidence-backed;
+- import-resolution helper baseline is evidence-backed;
+- manifest diagnostics are evidence-backed for the PCC-9D fixture set;
+- entry path escape rejection is evidence-backed;
+- unresolved dependency alias rejection is evidence-backed;
+- no project-root CLI behavior was implemented by PCC-9E;
+- no `semantic.toml` parser was implemented by PCC-9E;
+- no `smc new` behavior was implemented by PCC-9E;
+- no package manager / registry / workspace semantics were introduced.
+
+The following are not claimed complete by PCC-9E:
+
+- project-root `smc check <project-root>`;
+- project-root `smc run <project-root>`;
+- `semantic.toml` parser / loader;
+- `src/main.sm` project-root discovery;
+- `smc new`;
+- project-level 7hell;
+- package registry;
+- dependency resolver;
+- lockfile;
+- workspace / multi-package model;
+- remote packages;
+- build cache redesign;
+- UI / Workbench / Studio.
+
+Acceptance checklist:
+
+- [x] PCC-9A audit landed
+- [x] PCC-9B contract freeze landed
+- [x] PCC-9C positive fixtures landed
+- [x] PCC-9D diagnostics fixtures landed
+- [x] PCC-9E closeout evidence synced
+- [x] open project-root boundaries documented
+- [x] package-manager / registry / workspace exclusions preserved
+- [x] no implementation changes by closeout
 
 ## Risk List
 
