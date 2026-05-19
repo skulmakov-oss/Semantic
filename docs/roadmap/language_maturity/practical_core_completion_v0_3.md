@@ -599,6 +599,7 @@ Roadmap artifacts:
 - CTF sync waypoint: `docs/roadmap/language_maturity/core_trust_freeze/ctf_wp1_pcc4_pcc9_sync.md`
 - CTF follow-up: `CTF-WP2 — docs(core-trust-freeze): update runtime value and trap registry after PCC`
 - CTF follow-up: `CTF-WP3 — docs(core-trust-freeze): update determinism and verifier-first evidence after PCC`
+- CTF follow-up: `CTF-WP4 — docs(core-trust-freeze): update golden trace and capability denial policy after PCC`
 
 PCC-9 is closed for the current admitted manifest / project-adjacent baseline.
 The current evidence is bounded to the existing package-manifest baseline and
