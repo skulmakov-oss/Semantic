@@ -198,6 +198,16 @@ CTF-WP3 updates:
 
 CTF-WP3 does not close CTF and does not claim release readiness.
 
+## CTF-WP4 Follow-up
+
+CTF-WP4 updates:
+
+- golden trace policy after PCC-4..PCC-9;
+- capability/effect denial matrix after PCC feature-surface closeout.
+
+CTF-WP4 does not add golden trace artifacts.
+CTF-WP4 does not close CTF and does not claim release readiness.
+
 CTF touched: docs only
 
 Reason: docs-only trust-surface sync; no runtime value, trap, determinism, verifier, SymbolId, capability, or trace change
