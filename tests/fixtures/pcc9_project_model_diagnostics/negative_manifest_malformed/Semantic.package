@@ -1,0 +1,4 @@
+format 1
+package "app
+manifest_dir .
+module_root src
