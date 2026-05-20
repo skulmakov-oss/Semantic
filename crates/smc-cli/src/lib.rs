@@ -17,6 +17,8 @@ mod package_manifest;
 #[cfg(feature = "std")]
 mod schema_versioning;
 #[cfg(feature = "std")]
+mod seven_hell;
+#[cfg(feature = "std")]
 mod wire_contract;
 
 #[cfg(feature = "std")]
@@ -45,6 +47,8 @@ pub use formatter::{format_path, format_source_text, FormatterMode, FormatterSum
 pub use package_manifest::{admit_package_entry_module, parse_package_manifest_baseline, resolve_package_import_path, validate_package_manifest_baseline, PackageDependency, PackageDependencySource, PackageIdentity, PackageImportResolutionCode, PackageImportResolutionError, PackageManifest, PackageManifestParseCode, PackageManifestParseError, PackageManifestValidationCode, PackageManifestValidationError, PackageModuleAdmission, PackageModuleAdmissionCode, PackageModuleAdmissionError, PackageRoot, PACKAGE_IMPORT_SEPARATOR, PACKAGE_MANIFEST_BASELINE_VERSION, PACKAGE_MANIFEST_FILE_NAME};
 #[cfg(feature = "std")]
 pub use schema_versioning::{build_schema_migration_metadata, classify_record_schema_compatibility, classify_tagged_union_schema_compatibility, format_schema_migration_metadata, RecordSchemaCompatibilityReport, SchemaCompatibilityBuildError, SchemaCompatibilityKind, SchemaFieldChange, SchemaFieldChangeKind, SchemaMigrationChangeSet, SchemaMigrationMetadataArtifact, SchemaMigrationReviewKind, SchemaMigrationShapeKind, SchemaVariantChangeKind, TaggedUnionSchemaCompatibilityReport, TaggedUnionSchemaVariantChange};
+#[cfg(feature = "std")]
+pub use seven_hell::{parse_7hell_args, render_7hell_skeleton_report, run_7hell_skeleton, SevenHellOutputMode, SevenHellSkeletonOptions};
 #[cfg(feature = "std")]
 pub use wire_contract::{build_generated_wire_contract, format_generated_wire_contract, GeneratedWireContractArtifact, GeneratedWireContractBuildError, TaggedWireUnionContract, TaggedWireUnionField, TaggedWireUnionVariant, WirePatchField, WirePatchTypeContract, GENERATED_WIRE_CONTRACT_FORMAT_VERSION, GENERATED_WIRE_CONTRACT_GENERATOR, GENERATED_WIRE_CONTRACT_GENERATOR_VERSION};
 
