@@ -48,8 +48,6 @@ pub use package_manifest::{admit_package_entry_module, parse_package_manifest_ba
 #[cfg(feature = "std")]
 pub use schema_versioning::{build_schema_migration_metadata, classify_record_schema_compatibility, classify_tagged_union_schema_compatibility, format_schema_migration_metadata, RecordSchemaCompatibilityReport, SchemaCompatibilityBuildError, SchemaCompatibilityKind, SchemaFieldChange, SchemaFieldChangeKind, SchemaMigrationChangeSet, SchemaMigrationMetadataArtifact, SchemaMigrationReviewKind, SchemaMigrationShapeKind, SchemaVariantChangeKind, TaggedUnionSchemaCompatibilityReport, TaggedUnionSchemaVariantChange};
 #[cfg(feature = "std")]
-pub use seven_hell::{parse_7hell_args, render_7hell_skeleton_report, run_7hell_skeleton, SevenHellOutputMode, SevenHellSkeletonOptions};
-#[cfg(feature = "std")]
 pub use wire_contract::{build_generated_wire_contract, format_generated_wire_contract, GeneratedWireContractArtifact, GeneratedWireContractBuildError, TaggedWireUnionContract, TaggedWireUnionField, TaggedWireUnionVariant, WirePatchField, WirePatchTypeContract, GENERATED_WIRE_CONTRACT_FORMAT_VERSION, GENERATED_WIRE_CONTRACT_GENERATOR, GENERATED_WIRE_CONTRACT_GENERATOR_VERSION};
 
 #[cfg(feature = "std")]
