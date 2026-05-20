@@ -210,6 +210,17 @@ CTF-WP4 does not close CTF and does not claim release readiness.
 
 CTF-WR1 reviews the first trust-sync wave after WP1..WP4.
 
+## CTF-WP5 Follow-up
+
+CTF-WP5 defines:
+
+- CTF evidence backlog;
+- freeze-candidate promotion rules;
+- evidence classes;
+- next evidence PR order.
+
+CTF-WP5 does not close CTF and does not claim release readiness.
+
 CTF touched: docs only
 
 Reason: docs-only trust-surface sync; no runtime value, trap, determinism, verifier, SymbolId, capability, or trace change
