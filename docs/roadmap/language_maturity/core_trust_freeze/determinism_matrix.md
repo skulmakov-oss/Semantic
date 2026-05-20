@@ -167,3 +167,11 @@ FM-035 is unchanged by this PR.
 [x] FM-036 can be treated as frozen for PCC readiness
 [x] FM-035 is left untouched
 ```
+
+## CTF-WP6 Project-Root Determinism Notes
+
+CTF-WP6 defines future evidence requirements for project-root determinism before PCC-9I implementation.
+
+Project-root discovery, `semantic.toml`, `src/main.sm`, `smc new`, and project-level 7hell remain open until separately evidenced.
+
+WP6 does not add project-root determinism artifacts.

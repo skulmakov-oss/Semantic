@@ -130,3 +130,11 @@ Boundaries:
 - no package registry / remote dependency trace.
 
 Future CTF-E2 / CTF-E3 still own replay and trap taxonomy evidence.
+
+## CTF-WP6 Project-Root Golden Trace Notes
+
+CTF-WP6 defines the trust policy for future project-root behavior, but it does not add trace artifacts.
+
+Future PCC-9I work may add positive project-root check / run traces, project diagnostics traces, and project-root replay traces when behavior is implemented and stable.
+
+Project manifest helper traces are still not project-root execution traces.

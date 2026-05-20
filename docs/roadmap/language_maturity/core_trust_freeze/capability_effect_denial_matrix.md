@@ -66,3 +66,13 @@ No capability matrix entry is promoted to full release-frozen status by this PR.
 [ ] Is host state unchanged on denial?
 [ ] Is this actually out-of-PCC?
 ```
+
+## CTF-WP6 Project-Root Capability Notes
+
+CTF-WP6 states the boundary for future project-root support before PCC-9I implementation.
+
+Reading admitted project files is tooling input, not language host capability.
+
+Project-root support must not introduce network IO, registry access, remote package fetch, or telemetry.
+
+No project-root capability widening is added by WP6.

@@ -93,3 +93,11 @@ Any future SemCode/opcode/helper expansion must update verifier-first policy or 
 [ ] Does 7hell verify before run?
 [ ] Are debug helpers kept out of the language surface?
 ```
+
+## CTF-WP6 Project-Root Trust Route
+
+CTF-WP6 defines the trust route for future project-root behavior before PCC-9I implementation.
+
+Future project-root run paths must preserve verifier-first admission and must not use project helper tests as execution evidence.
+
+No project-root implementation is added by WP6.

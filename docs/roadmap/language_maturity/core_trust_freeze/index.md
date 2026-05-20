@@ -25,6 +25,8 @@ CTF is not a final phase after PCC. It runs across PCC.
 - Evidence backlog: `docs/roadmap/language_maturity/core_trust_freeze/ctf_evidence_backlog.md`
 - Promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/freeze_candidate_promotion_rules.md`
 - Evidence backlog / promotion waypoint: `CTF-WP5 — define CTF evidence backlog and freeze-candidate promotion rules`
+- Project-root trust policy: `docs/roadmap/language_maturity/core_trust_freeze/project_root_trust_policy.md`
+- Project-root trust waypoint: `CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I`
 - PCC waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
 
 ## Files
@@ -38,6 +40,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 | `verifier_first_policy.md` | Does public execution still require admission before VM run? |
 | `golden_trace_policy.md` | Does the change require new or updated golden traces? |
 | `capability_effect_denial_matrix.md` | Did host/effect/capability behavior change? |
+| `project_root_trust_policy.md` | Does future project-root support preserve verifier-first trust? |
 
 ## PR requirement
 
