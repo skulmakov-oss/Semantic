@@ -162,15 +162,65 @@ Boundaries:
 - no semantic.toml parser;
 - no CTF closure.
 
+## 7HELL-WP2 Evidence
+
+7HELL-WP2 maps PCC-4..PCC-9 evidence into 7hell stages.
+
+Covered:
+
+- Records;
+- ADT + Match;
+- Option / Result;
+- Collections;
+- Stdlib helpers;
+- Project Model baseline.
+
+Boundaries:
+
+- no 7hell implementation;
+- no CLI command;
+- no CI gate;
+- no release readiness;
+- no CTF closure.
+
+## 7HELL-WP3 Evidence
+
+7HELL-WP3 defines the initial fixture selection for the future 7hell skeleton command.
+
+Covered:
+
+- positive end-to-end fixture candidates;
+- negative diagnostic fixture candidates;
+- one runtime trap fixture candidate;
+- one project-adjacent diagnostic fixture candidate;
+- stage coverage matrix;
+- stop conditions for future 7HELL-S1 implementation.
+
+Boundaries:
+
+- no 7hell implementation;
+- no CLI command;
+- no tests or fixtures added;
+- no CI gate;
+- no release readiness;
+- no CTF closure.
+
 ## Prioritized Next PRs
 
 ```text
-7HELL-WP2 — docs(7hell): map PCC-4..PCC-9 evidence into 7hell stages
+7HELL-S1 — cli(7hell): add docs-backed skeleton command without release gate
+```
+
+Alternative docs split if implementation discovers fixture ambiguity:
+
+```text
+7HELL-WP4 — docs(7hell): finalize exact skeleton fixture path list
 ```
 
 Make clear:
 
 - CTF-E3 distinguishes compile-time diagnostics from VM traps.
+- 7HELL-S1 must stay a skeleton command, not a release gate.
 
 ## Out of Scope
 
@@ -199,24 +249,3 @@ Make clear:
 - [ ] no unrelated tests or fixtures changed
 - [ ] no unreviewed trace artifacts added
 ```
-
-## 7HELL-WP2 Evidence
-
-7HELL-WP2 maps PCC-4..PCC-9 evidence into 7hell stages.
-
-Covered:
-
-- Records;
-- ADT + Match;
-- Option / Result;
-- Collections;
-- Stdlib helpers;
-- Project Model baseline.
-
-Boundaries:
-
-- no 7hell implementation;
-- no CLI command;
-- no CI gate;
-- no release readiness;
-- no CTF closure.
