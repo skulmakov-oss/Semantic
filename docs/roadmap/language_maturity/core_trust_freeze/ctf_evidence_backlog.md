@@ -199,3 +199,24 @@ Make clear:
 - [ ] no unrelated tests or fixtures changed
 - [ ] no unreviewed trace artifacts added
 ```
+
+## 7HELL-WP2 Evidence
+
+7HELL-WP2 maps PCC-4..PCC-9 evidence into 7hell stages.
+
+Covered:
+
+- Records;
+- ADT + Match;
+- Option / Result;
+- Collections;
+- Stdlib helpers;
+- Project Model baseline.
+
+Boundaries:
+
+- no 7hell implementation;
+- no CLI command;
+- no CI gate;
+- no release readiness;
+- no CTF closure.

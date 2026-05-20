@@ -210,6 +210,8 @@ Qualification report contract:
 
 - `docs/roadmap/language_maturity/7hell_report_contract.md`
 
+7HELL-WP2 maps PCC-4..PCC-9 evidence into the 7hell stage model; implementation remains future work.
+
 ## 7. CTF-0 — Core Trust Freeze directory
 
 Core Trust Freeze is not a post-PCC phase. It is a parallel lane.

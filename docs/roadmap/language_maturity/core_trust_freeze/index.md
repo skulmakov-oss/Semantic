@@ -28,6 +28,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 - Project-root trust policy: `docs/roadmap/language_maturity/core_trust_freeze/project_root_trust_policy.md`
 - Project-root trust waypoint: `CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I`
 - 7hell report contract: `docs/roadmap/language_maturity/7hell_report_contract.md`
+- 7hell PCC stage mapping: `docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md`
 - PCC waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
 
 ## Files

@@ -522,3 +522,13 @@ PCC-0.5 Live Audit = scaffolded
 PCC-0.6 7hell Qualification Contract = seeded
 PCC-1 Control Flow = still blocked until audit and skeleton decisions are handled
 ```
+
+## PCC-4..PCC-9 Stage Mapping
+
+The PCC-4..PCC-9 evidence-to-stage mapping is defined in:
+
+- `7hell_pcc4_pcc9_stage_mapping.md`
+
+This mapping records how existing PCC evidence should feed future 7hell stage records.
+
+This does not implement 7hell.
