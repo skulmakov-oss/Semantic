@@ -477,3 +477,13 @@ It does not claim readiness.
 - [ ] no release gate claimed
 - [ ] no readiness claimed
 ```
+
+## PCC Evidence Mapping
+
+Future report evidence objects may reference the PCC-4..PCC-9 stage mapping:
+
+- `7hell_pcc4_pcc9_stage_mapping.md`
+
+The mapping defines which PCC evidence belongs to each 7hell stage.
+
+WP2 does not implement report generation.
