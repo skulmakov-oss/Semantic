@@ -19,6 +19,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 - Determinism / verifier-first follow-up: `CTF-WP3 — determinism and verifier-first policy sync after PCC`
 - Golden trace / capability follow-up: `CTF-WP4 — golden trace and capability/effect denial policy sync after PCC`
 - Golden trace evidence: `CTF-E1 — selected PCC golden trace coverage`
+- Collection replay evidence: `CTF-E2 — collection determinism replay coverage`
 - Waypoint review: `docs/roadmap/language_maturity/core_trust_freeze/ctf_waypoint_review_after_wp1_wp4.md`
 - Evidence backlog: `docs/roadmap/language_maturity/core_trust_freeze/ctf_evidence_backlog.md`
 - Promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/freeze_candidate_promotion_rules.md`

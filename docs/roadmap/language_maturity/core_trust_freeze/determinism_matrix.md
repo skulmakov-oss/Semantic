@@ -61,6 +61,23 @@ They do provide bounded determinism evidence for current admitted fixture-backed
 
 Future widening still requires new CTF review.
 
+## CTF-E2 Collection Replay Evidence
+
+CTF-E2 adds E4-style replay evidence for selected admitted PCC-7 collection surfaces.
+
+Replay evidence covers only:
+
+- selected Sequence baseline behavior;
+- selected admitted Map insert/lookup and persistent update baseline behavior.
+
+This does not close:
+
+- Map missing-key behavior;
+- Map iteration policy;
+- collection memory/quota determinism;
+- broad collections freeze;
+- release readiness.
+
 ## 5. Planned / non-admitted surfaces
 
 These determinism-sensitive families are intentionally not frozen for the
@@ -73,8 +90,8 @@ current PCC core-readiness gate:
 | Records | Current record literal/access/update fixture surface only. | PCC-4 | PCC-4 closeout | PCC-4 | freeze-candidate | typecheck, emit, VM |
 | ADT + basic match | Current constructors + basic match fixtures only. | PCC-5 | PCC-5 closeout | PCC-5 | freeze-candidate | typecheck, emit, VM |
 | Option / Result | Standard forms only. | PCC-6 | PCC-6 closeout | PCC-6 | freeze-candidate | typecheck, emit, VM |
-| Sequence | Current Sequence operations covered by PCC-7B/D. | PCC-7 | PCC-7 closeout | PCC-7 | freeze-candidate | typecheck, emit, VM |
-| Map | Admitted baseline only; missing-key, iteration policy, and quota remain open. | PCC-7 | PCC-7 closeout | PCC-7 | audit-needed / freeze-candidate | typecheck, emit, VM |
+| Sequence | Current Sequence operations covered by PCC-7B/D and selected replay evidence. | PCC-7 | PCC-7 closeout + CTF-E2 | PCC-7 | evidence-backed for selected admitted replay surfaces | typecheck, emit, VM |
+| Map | Admitted baseline only; missing-key, iteration policy, and quota remain open, with selected replay evidence for insert / lookup and persistent update. | PCC-7 | PCC-7 closeout + CTF-E2 | PCC-7 | evidence-backed for selected admitted baseline only / audit-needed overall | typecheck, emit, VM |
 | Stdlib helpers | `assert` / `print` / `to_text` admitted helper surface only. | PCC-8 | PCC-8 closeout | PCC-8 | freeze-candidate | typecheck, emit, VM |
 | Project model manifest baseline | Current `Semantic.package` helper baseline only. | PCC-9 | PCC-9 closeout | PCC-9 | freeze-candidate | CLI |
 

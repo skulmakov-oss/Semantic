@@ -1,0 +1,63 @@
+{
+  "replay_id": "CTF-E2-PCC7-MAP-INSERT-LOOKUP-REPLAY-001",
+  "pcc": "PCC-7",
+  "surface": "Map insert/lookup",
+  "source_fixture": "tests/fixtures/pcc7_map/positive_map_basic_insert_lookup.sm",
+  "replay_class": ["check", "ir", "semcode", "verifier", "vm"],
+  "replay_count": 5,
+  "expected_status": "accept",
+  "source_hash": "2b2fe057d0e062a2",
+  "summary_hash": "2678c8fbde9e4690",
+  "verifier_status": "accept",
+  "vm_status": "ok",
+  "all_runs_equal": true,
+  "boundary": "current admitted PCC-7 Map baseline only; missing-key and iteration remain open",
+  "runs": [
+  {
+    "run_index": 1,
+    "check_status": "accept",
+    "source_hash": "2b2fe057d0e062a2",
+    "ir_shape_hash": "60abb4f62a3c7f22",
+    "semcode_hash": "6f442fbf0ced8a28",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  },
+  {
+    "run_index": 2,
+    "check_status": "accept",
+    "source_hash": "2b2fe057d0e062a2",
+    "ir_shape_hash": "60abb4f62a3c7f22",
+    "semcode_hash": "6f442fbf0ced8a28",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  },
+  {
+    "run_index": 3,
+    "check_status": "accept",
+    "source_hash": "2b2fe057d0e062a2",
+    "ir_shape_hash": "60abb4f62a3c7f22",
+    "semcode_hash": "6f442fbf0ced8a28",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  },
+  {
+    "run_index": 4,
+    "check_status": "accept",
+    "source_hash": "2b2fe057d0e062a2",
+    "ir_shape_hash": "60abb4f62a3c7f22",
+    "semcode_hash": "6f442fbf0ced8a28",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  },
+  {
+    "run_index": 5,
+    "check_status": "accept",
+    "source_hash": "2b2fe057d0e062a2",
+    "ir_shape_hash": "60abb4f62a3c7f22",
+    "semcode_hash": "6f442fbf0ced8a28",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  }
+]
+
+}
