@@ -23,7 +23,7 @@ It prevents uncontrolled jump from docs-sync to release claims.
 | CTF-BL-002 | Golden trace artifacts | add selected source/type/IR/SemCode/verifier/VM trace samples | protect byte/result/diagnostic stability | CTF-E1 | done | trace freeze |
 | CTF-BL-003 | Collection determinism replay | repeated-run evidence for Sequence/Map admitted baseline | collection determinism is bounded but not deeply replay-backed | CTF-E2 | done | determinism freeze |
 | CTF-BL-004 | Map open-edge policy | decide missing-key / iteration / quota evidence boundary | Map remains bounded-open | CTF-WP / future PCC-7 follow-up | planned | collections freeze |
-| CTF-BL-005 | Trap taxonomy regression | map fixture-backed failure surfaces to stable trap/diagnostic categories | avoid compile diagnostics vs VM trap confusion | CTF-E3 | planned | trap freeze |
+| CTF-BL-005 | Trap taxonomy regression | map fixture-backed failure surfaces to stable trap/diagnostic categories | avoid compile diagnostics vs VM trap confusion | CTF-E3 | done | trap freeze |
 | CTF-BL-006 | Project-root trust policy | define trust impact before project-root check/run implementation | project-root remains open | PCC-9I / CTF follow-up | planned | project model freeze |
 | CTF-BL-007 | 7hell report shape | define stable qualification report surface | readiness needs stable qualification output | 7HELL-WP / CTF follow-up | planned | readiness |
 | CTF-BL-008 | Capability denial replay | replay denied-effect behavior once capability surfaces widen | capability denial must be deterministic | future CTF-E | deferred | capability freeze |
@@ -97,6 +97,29 @@ Boundaries:
 - no CTF closure;
 - no release readiness.
 
+## CTF-E3 Evidence
+
+CTF-E3 adds trap taxonomy regression evidence for selected PCC failure surfaces.
+
+Covered:
+
+- Sequence out-of-bounds runtime trap candidate;
+- empty Sequence pop runtime trap candidate;
+- assert(false) runtime trap;
+- unsupported to_text diagnostic;
+- project manifest diagnostic.
+
+Boundaries:
+
+- compile/check-time diagnostics are not VM traps;
+- project manifest diagnostics are not project-root execution traps;
+- Map missing-key policy remains open;
+- Map iteration policy remains open;
+- collection quota/memory policy remains open;
+- no new trap class is promoted to frozen without existing evidence;
+- no CTF closure;
+- no release readiness.
+
 ## Evidence Classes
 
 | Evidence class | Meaning | Example |
@@ -117,14 +140,13 @@ Rules:
 ## Prioritized Next PRs
 
 ```text
-CTF-E3 — test(core-trust-freeze): add trap taxonomy regression coverage
 CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I
 7HELL-WP1 — docs(7hell): define qualification report contract
 ```
 
 Make clear:
 
-- CTF-E3 should distinguish compile-time diagnostics from VM traps.
+- CTF-E3 distinguishes compile-time diagnostics from VM traps.
 
 ## Out of Scope
 

@@ -1,0 +1,79 @@
+{
+  "taxonomy_id": "CTF-E3-PCC7-SEQUENCE-OOB-VM-TRAP-001",
+  "pcc": "PCC-7",
+  "surface": "Sequence out-of-bounds",
+  "source_fixture": "tests/fixtures/pcc7_collections_diagnostics/negative_sequence_index_out_of_bounds.sm",
+  "failure_layer": "vm-trap",
+  "expected_status": "trap",
+  "stable_error_code": null,
+  "stable_message_needle": "SEQUENCE_GET index out of bounds",
+  "trap_class": null,
+  "candidate_class": "sequence-index-out-of-bounds",
+  "summary_hash": "6eac91dfef76ea11",
+  "boundary": "runtime sequence trap candidate only; not a frozen VM trap class",
+  "all_runs_equal": true,
+  "replay_count": 5,
+  "runs": [
+  {
+    "run_index": 1,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "bf196714a34951cd",
+    "ir_shape_hash": "60bcb2f62a4aeeef",
+    "semcode_hash": "d18e7a440320c9a3",
+    "stable_error_code": null,
+    "stable_message_needle": "SEQUENCE_GET index out of bounds",
+    "trap_class": null,
+    "candidate_class": "sequence-index-out-of-bounds"
+  },
+  {
+    "run_index": 2,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "bf196714a34951cd",
+    "ir_shape_hash": "60bcb2f62a4aeeef",
+    "semcode_hash": "d18e7a440320c9a3",
+    "stable_error_code": null,
+    "stable_message_needle": "SEQUENCE_GET index out of bounds",
+    "trap_class": null,
+    "candidate_class": "sequence-index-out-of-bounds"
+  },
+  {
+    "run_index": 3,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "bf196714a34951cd",
+    "ir_shape_hash": "60bcb2f62a4aeeef",
+    "semcode_hash": "d18e7a440320c9a3",
+    "stable_error_code": null,
+    "stable_message_needle": "SEQUENCE_GET index out of bounds",
+    "trap_class": null,
+    "candidate_class": "sequence-index-out-of-bounds"
+  },
+  {
+    "run_index": 4,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "bf196714a34951cd",
+    "ir_shape_hash": "60bcb2f62a4aeeef",
+    "semcode_hash": "d18e7a440320c9a3",
+    "stable_error_code": null,
+    "stable_message_needle": "SEQUENCE_GET index out of bounds",
+    "trap_class": null,
+    "candidate_class": "sequence-index-out-of-bounds"
+  },
+  {
+    "run_index": 5,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "bf196714a34951cd",
+    "ir_shape_hash": "60bcb2f62a4aeeef",
+    "semcode_hash": "d18e7a440320c9a3",
+    "stable_error_code": null,
+    "stable_message_needle": "SEQUENCE_GET index out of bounds",
+    "trap_class": null,
+    "candidate_class": "sequence-index-out-of-bounds"
+  }
+]
+
+}
