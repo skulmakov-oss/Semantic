@@ -17,8 +17,6 @@ mod package_manifest;
 #[cfg(feature = "std")]
 mod schema_versioning;
 #[cfg(feature = "std")]
-mod seven_hell;
-#[cfg(feature = "std")]
 mod wire_contract;
 
 #[cfg(feature = "std")]
