@@ -136,7 +136,7 @@ mod tests {
     }
 
     #[test]
-    fn renders_human_skeleton_without_readiness_claim() {
+    fn renders_human_skeleton_boundary() {
         let options = SevenHellSkeletonOptions {
             target: "program.sm".to_string(),
             output_mode: SevenHellOutputMode::Human,
@@ -147,7 +147,8 @@ mod tests {
         assert!(rendered.contains("[7/7] User Pain / Diagnostics Hell"));
         assert!(rendered.contains("result: INCOMPLETE"));
         assert!(rendered.contains("skeleton command only"));
-        assert!(!rendered.contains("release readiness"));
+        assert!(rendered.contains("no check, compile, verify, VM run, CI gate, release readiness, or CTF closure"));
+        assert!(!rendered.contains("result: PASS"));
     }
 
     #[test]
