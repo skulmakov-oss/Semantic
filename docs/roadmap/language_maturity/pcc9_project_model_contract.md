@@ -187,3 +187,5 @@ Possible narrow implementation seams after the freeze:
 - `PCC-9I6 — diagnostics(project-model): stabilize project layout errors`
 
 Do not implement these in PCC-9B.
+
+CTF-WP6 owns the trust-policy definition for future PCC-9I implementation, but it does not widen this contract or claim project-root readiness.
