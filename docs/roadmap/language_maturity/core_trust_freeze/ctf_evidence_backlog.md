@@ -122,7 +122,7 @@ Make clear:
 - [ ] no item overclaimed as done without evidence
 - [ ] no CTF closure claimed
 - [ ] no release readiness claimed
-- [ ] no code changed
-- [ ] no tests or fixtures changed
-- [ ] no trace artifacts added
+- [ ] no unrelated code changed
+- [ ] no unrelated tests or fixtures changed
+- [ ] no unreviewed trace artifacts added
 ```
