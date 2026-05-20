@@ -85,6 +85,39 @@ PCC follow-up trap candidates:
 - helper misuse diagnostics that are not yet canonically named as VM traps;
 - manifest/project diagnostics from PCC-9D.
 
+## CTF-E3 Regression Evidence
+
+CTF-E3 adds regression artifacts for selected PCC failure surfaces.
+
+Evidence-backed by:
+
+- `tests/ctf_e3_trap_taxonomy_regression.rs`
+- `tests/fixtures/core_trust_freeze/trap_taxonomy/ctf_e3/`
+
+Classification:
+
+- runtime traps stay runtime traps;
+- compile/check-time diagnostics stay diagnostics;
+- project-adjacent manifest diagnostics stay project diagnostics;
+- boundary denials remain boundary denials.
+
+Promotion impact:
+
+- `assert(false)` remains mapped to the existing Assertion failure class;
+- Sequence out-of-bounds and empty pop are evidence-backed candidate classes unless already canonically named;
+- unsupported `to_text` remains diagnostic, not VM trap;
+- manifest diagnostics remain project-adjacent diagnostics, not VM traps.
+
+This does not close:
+
+- all trap taxonomy;
+- Map missing-key policy;
+- Map iteration policy;
+- collection quota/memory policy;
+- project-root diagnostics;
+- semantic.toml diagnostics;
+- 7hell readiness.
+
 ## 5. Planned / non-admitted classes
 
 None remain in the current PCC practical-core trap set.

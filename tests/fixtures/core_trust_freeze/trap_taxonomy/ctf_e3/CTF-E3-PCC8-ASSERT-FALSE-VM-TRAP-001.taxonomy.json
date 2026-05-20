@@ -1,0 +1,79 @@
+{
+  "taxonomy_id": "CTF-E3-PCC8-ASSERT-FALSE-VM-TRAP-001",
+  "pcc": "PCC-8",
+  "surface": "Stdlib assert(false)",
+  "source_fixture": "tests/fixtures/pcc8_stdlib_diagnostics/negative_assert_false_trap.sm",
+  "failure_layer": "vm-trap",
+  "expected_status": "trap",
+  "stable_error_code": null,
+  "stable_message_needle": "assertion failed",
+  "trap_class": "Assertion failure",
+  "candidate_class": null,
+  "summary_hash": "eedb4c4255f4d2d3",
+  "boundary": "runtime assertion failure only; no host effect or capability widening",
+  "all_runs_equal": true,
+  "replay_count": 5,
+  "runs": [
+  {
+    "run_index": 1,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "ac1a3cb2bd71d14b",
+    "ir_shape_hash": "aa750173e9bbe47f",
+    "semcode_hash": "deffabf85e0f85d2",
+    "stable_error_code": null,
+    "stable_message_needle": "assertion failed",
+    "trap_class": "Assertion failure",
+    "candidate_class": null
+  },
+  {
+    "run_index": 2,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "ac1a3cb2bd71d14b",
+    "ir_shape_hash": "aa750173e9bbe47f",
+    "semcode_hash": "deffabf85e0f85d2",
+    "stable_error_code": null,
+    "stable_message_needle": "assertion failed",
+    "trap_class": "Assertion failure",
+    "candidate_class": null
+  },
+  {
+    "run_index": 3,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "ac1a3cb2bd71d14b",
+    "ir_shape_hash": "aa750173e9bbe47f",
+    "semcode_hash": "deffabf85e0f85d2",
+    "stable_error_code": null,
+    "stable_message_needle": "assertion failed",
+    "trap_class": "Assertion failure",
+    "candidate_class": null
+  },
+  {
+    "run_index": 4,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "ac1a3cb2bd71d14b",
+    "ir_shape_hash": "aa750173e9bbe47f",
+    "semcode_hash": "deffabf85e0f85d2",
+    "stable_error_code": null,
+    "stable_message_needle": "assertion failed",
+    "trap_class": "Assertion failure",
+    "candidate_class": null
+  },
+  {
+    "run_index": 5,
+    "failure_layer": "vm-trap",
+    "observed_status": "trap",
+    "source_hash": "ac1a3cb2bd71d14b",
+    "ir_shape_hash": "aa750173e9bbe47f",
+    "semcode_hash": "deffabf85e0f85d2",
+    "stable_error_code": null,
+    "stable_message_needle": "assertion failed",
+    "trap_class": "Assertion failure",
+    "candidate_class": null
+  }
+]
+
+}

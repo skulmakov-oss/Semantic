@@ -602,6 +602,7 @@ Roadmap artifacts:
 - CTF follow-up: `CTF-WP4 — docs(core-trust-freeze): update golden trace and capability denial policy after PCC`
 - CTF evidence: `CTF-E1 — test(core-trust-freeze): add golden trace coverage for selected PCC fixture surfaces`
 - CTF evidence: `CTF-E2 — test(core-trust-freeze): add collection determinism replay coverage`
+- CTF evidence: `CTF-E3 — test(core-trust-freeze): add trap taxonomy regression coverage`
 - CTF waypoint review: `docs/roadmap/language_maturity/core_trust_freeze/ctf_waypoint_review_after_wp1_wp4.md`
 - CTF backlog / promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/ctf_evidence_backlog.md`
 - CTF backlog / promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/freeze_candidate_promotion_rules.md`
