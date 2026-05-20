@@ -206,6 +206,10 @@ DoD:
 [ ] first fixture group is attached to PCC-1
 ```
 
+Qualification report contract:
+
+- `docs/roadmap/language_maturity/7hell_report_contract.md`
+
 ## 7. CTF-0 — Core Trust Freeze directory
 
 Core Trust Freeze is not a post-PCC phase. It is a parallel lane.

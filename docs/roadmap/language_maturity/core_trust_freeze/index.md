@@ -27,6 +27,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 - Evidence backlog / promotion waypoint: `CTF-WP5 — define CTF evidence backlog and freeze-candidate promotion rules`
 - Project-root trust policy: `docs/roadmap/language_maturity/core_trust_freeze/project_root_trust_policy.md`
 - Project-root trust waypoint: `CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I`
+- 7hell report contract: `docs/roadmap/language_maturity/7hell_report_contract.md`
 - PCC waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
 
 ## Files
@@ -41,6 +42,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 | `golden_trace_policy.md` | Does the change require new or updated golden traces? |
 | `capability_effect_denial_matrix.md` | Did host/effect/capability behavior change? |
 | `project_root_trust_policy.md` | Does future project-root support preserve verifier-first trust? |
+| `7hell_report_contract.md` | Does future 7hell reporting remain stable and deterministic? |
 
 ## PR requirement
 

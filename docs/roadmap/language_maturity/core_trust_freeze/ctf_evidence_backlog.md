@@ -25,7 +25,7 @@ It prevents uncontrolled jump from docs-sync to release claims.
 | CTF-BL-004 | Map open-edge policy | decide missing-key / iteration / quota evidence boundary | Map remains bounded-open | CTF-WP / future PCC-7 follow-up | planned | collections freeze |
 | CTF-BL-005 | Trap taxonomy regression | map fixture-backed failure surfaces to stable trap/diagnostic categories | avoid compile diagnostics vs VM trap confusion | CTF-E3 | done | trap freeze |
 | CTF-BL-006 | Project-root trust policy | define trust impact before project-root check/run implementation | project-root remains open | CTF-WP6 | done | project model freeze |
-| CTF-BL-007 | 7hell report shape | define stable qualification report surface | readiness needs stable qualification output | 7HELL-WP / CTF follow-up | planned | readiness |
+| CTF-BL-007 | 7hell report shape | define stable qualification report surface | readiness needs stable qualification output | 7HELL-WP1 | done | readiness |
 | CTF-BL-008 | Capability denial replay | replay denied-effect behavior once capability surfaces widen | capability denial must be deterministic | future CTF-E | deferred | capability freeze |
 | CTF-BL-009 | SymbolId / hot-path audit | verify PCC value/name surfaces do not regress into string hot paths | freeze-candidate names need hot-path discipline | future CTF-WP/E | planned | runtime performance/trust |
 
@@ -137,36 +137,35 @@ Rules:
 - `frozen` requires at least E2 and usually E3/E4 for execution-sensitive surfaces.
 - release-facing freeze requires E5 or explicit waiver.
 
-## CTF-WP6 Evidence
+## 7HELL-WP1 Evidence
 
-CTF-WP6 defines project-root trust policy before PCC-9I implementation.
+7HELL-WP1 defines the 7hell qualification report contract.
 
 Covered:
 
-- verifier-first route for future project-root commands;
-- deterministic manifest / entry / path policy;
-- project diagnostics policy;
-- capability / effect boundary;
-- future golden trace requirements;
-- future PCC-9I split.
+- human report shape;
+- JSON report shape;
+- stage record contract;
+- diagnostic object contract;
+- evidence object contract;
+- CTF reference contract;
+- boundary object contract;
+- report versioning.
 
 Boundaries:
 
+- no 7hell implementation;
+- no CLI command;
+- no CI gate;
+- no release readiness;
 - no project-root implementation;
 - no semantic.toml parser;
-- no smc new;
-- no package registry;
-- no dependency resolver;
-- no workspace;
-- no remote packages;
-- no CTF closure;
-- no release readiness.
+- no CTF closure.
 
 ## Prioritized Next PRs
 
 ```text
-7HELL-WP1 — docs(7hell): define qualification report contract
-PCC-9I1 — cli(project-model): add project-root check entrypoint
+7HELL-WP2 — docs(7hell): map PCC-4..PCC-9 evidence into 7hell stages
 ```
 
 Make clear:
