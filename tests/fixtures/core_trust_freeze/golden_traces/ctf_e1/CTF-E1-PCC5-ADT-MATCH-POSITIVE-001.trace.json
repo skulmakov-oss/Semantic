@@ -1,0 +1,18 @@
+{
+  "trace_id": "CTF-E1-PCC5-ADT-MATCH-POSITIVE-001",
+  "pcc": "PCC-5",
+  "pcc_owner": "PCC-5",
+  "surface": "ADT + basic match",
+  "source_fixture": "tests/fixtures/pcc5_match/positive_match_unit_enum_label.sm",
+  "trace_class": ["syntax", "type", "ir", "semcode", "verifier", "vm"],
+  "stage": "selected",
+  "expected_status": "accept",
+  "source_hash": "b674e2eb54322422",
+  "ir_hash": "f40e40b30590a1ac",
+  "semcode_hash": "35c781ffe8a81c83",
+  "verifier_status": "accept",
+  "vm_status": "ok",
+  "runtime_config": "default",
+  "expected_output_hash": "c407777f917b26bd",
+  "notes": "Selected basic ADT/match trace only; no broader pattern-matching freeze."
+}

@@ -1,0 +1,18 @@
+{
+  "trace_id": "CTF-E1-PCC8-STDLIB-HELPER-001",
+  "pcc": "PCC-8",
+  "pcc_owner": "PCC-8",
+  "surface": "Stdlib helper boundary",
+  "source_fixture": "tests/fixtures/pcc8_stdlib/positive_assert_true.sm",
+  "trace_class": ["syntax", "type", "ir", "semcode", "verifier", "vm"],
+  "stage": "selected",
+  "expected_status": "accept",
+  "source_hash": "7dd16913eee5d7ee",
+  "ir_hash": "aa750173e9bbe47f",
+  "semcode_hash": "ddba0b30bdabfdf7",
+  "verifier_status": "accept",
+  "vm_status": "ok",
+  "runtime_config": "default",
+  "expected_output_hash": "7da46547c025309f",
+  "notes": "Selected assert helper boundary only; no universal to_text or debug_render widening."
+}

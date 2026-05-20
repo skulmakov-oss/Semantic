@@ -1,0 +1,18 @@
+{
+  "trace_id": "CTF-E1-PCC4-RECORD-POSITIVE-001",
+  "pcc": "PCC-4",
+  "pcc_owner": "PCC-4",
+  "surface": "Records",
+  "source_fixture": "examples/qualification/g1_real_program_trial/data_audit_record_iterable/src/main.sm",
+  "trace_class": ["syntax", "type", "ir", "semcode", "verifier", "vm"],
+  "stage": "selected",
+  "expected_status": "accept",
+  "source_hash": "ab07713734d22976",
+  "ir_hash": "b419ef35fb669085",
+  "semcode_hash": "3e052eda00ea9591",
+  "verifier_status": "accept",
+  "vm_status": "ok",
+  "runtime_config": "default",
+  "expected_output_hash": "f86e5fe8a76915ad",
+  "notes": "Selected representative record fixture only; no project-root, Map, or 7hell coverage."
+}

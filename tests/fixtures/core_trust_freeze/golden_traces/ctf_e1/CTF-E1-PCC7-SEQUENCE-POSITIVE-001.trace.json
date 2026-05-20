@@ -1,0 +1,18 @@
+{
+  "trace_id": "CTF-E1-PCC7-SEQUENCE-POSITIVE-001",
+  "pcc": "PCC-7",
+  "pcc_owner": "PCC-7",
+  "surface": "Sequence",
+  "source_fixture": "tests/fixtures/pcc7_sequence/positive_sequence_indexing.sm",
+  "trace_class": ["syntax", "type", "ir", "semcode", "verifier", "vm"],
+  "stage": "selected",
+  "expected_status": "accept",
+  "source_hash": "2881ddd5433113ef",
+  "ir_hash": "60b2c1f62a42b3e7",
+  "semcode_hash": "78f164c2dc9f1111",
+  "verifier_status": "accept",
+  "vm_status": "ok",
+  "runtime_config": "default",
+  "expected_output_hash": "8ce404860467cfdb",
+  "notes": "Selected Sequence baseline only; Map missing-key, iteration, and quota policy remain open."
+}

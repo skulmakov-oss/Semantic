@@ -1,0 +1,18 @@
+{
+  "trace_id": "CTF-E1-PCC6-OPTION-POSITIVE-001",
+  "pcc": "PCC-6",
+  "pcc_owner": "PCC-6",
+  "surface": "Option",
+  "source_fixture": "tests/fixtures/pcc6_option/positive_option_some_match.sm",
+  "trace_class": ["syntax", "type", "ir", "semcode", "verifier", "vm"],
+  "stage": "selected",
+  "expected_status": "accept",
+  "source_hash": "86a1c92a6678acca",
+  "ir_hash": "60b5c1f62a44e9be",
+  "semcode_hash": "4aafda9e6d448d53",
+  "verifier_status": "accept",
+  "vm_status": "ok",
+  "runtime_config": "default",
+  "expected_output_hash": "b0a5d3939d5819de",
+  "notes": "Selected standard-form Option trace only; Result remains covered by later evidence if needed."
+}

@@ -19,8 +19,8 @@ It prevents uncontrolled jump from docs-sync to release claims.
 
 | Backlog ID | Area | Evidence need | Why needed | Candidate PR | Status | Blocking for |
 | ---------- | ---- | ------------- | ---------- | ------------ | ------ | ------------ |
-| CTF-BL-001 | Golden trace selection | choose representative PCC fixture surfaces for trace promotion | PCC fixtures are not golden traces | CTF-E1 | planned | trace freeze |
-| CTF-BL-002 | Golden trace artifacts | add selected source/type/IR/SemCode/verifier/VM trace samples | protect byte/result/diagnostic stability | CTF-E1 | planned | trace freeze |
+| CTF-BL-001 | Golden trace selection | choose representative PCC fixture surfaces for trace promotion | PCC fixtures are not golden traces | CTF-E1 | done | trace freeze |
+| CTF-BL-002 | Golden trace artifacts | add selected source/type/IR/SemCode/verifier/VM trace samples | protect byte/result/diagnostic stability | CTF-E1 | done | trace freeze |
 | CTF-BL-003 | Collection determinism replay | repeated-run evidence for Sequence/Map admitted baseline | collection determinism is bounded but not deeply replay-backed | CTF-E2 | planned | determinism freeze |
 | CTF-BL-004 | Map open-edge policy | decide missing-key / iteration / quota evidence boundary | Map remains bounded-open | CTF-WP / future PCC-7 follow-up | planned | collections freeze |
 | CTF-BL-005 | Trap taxonomy regression | map fixture-backed failure surfaces to stable trap/diagnostic categories | avoid compile diagnostics vs VM trap confusion | CTF-E3 | planned | trap freeze |
@@ -39,6 +39,34 @@ Status values allowed:
 - `done`
 
 Do not mark any backlog item done unless the evidence already exists and is linked.
+
+## CTF-E1 Evidence
+
+CTF-E1 adds the first selected golden trace coverage for PCC fixture-backed surfaces.
+
+Covered:
+
+- Records trace candidate;
+- ADT / match trace candidate;
+- Option trace candidate;
+- Sequence trace candidate;
+- Stdlib helper boundary trace candidate.
+
+Trace artifacts are checked in under:
+
+- `tests/fixtures/core_trust_freeze/golden_traces/ctf_e1/`;
+- `tests/ctf_e1_golden_traces.rs`.
+
+Boundaries:
+
+- not all PCC fixtures are golden traces;
+- no release readiness claim;
+- no CTF closure;
+- no 7hell report trace;
+- no Map missing-key / iteration / quota trace;
+- no project-root execution trace;
+- no semantic.toml trace;
+- no package registry / remote dependency trace.
 
 ## Evidence Classes
 
@@ -60,7 +88,6 @@ Rules:
 ## Prioritized Next PRs
 
 ```text
-CTF-E1 — test(core-trust-freeze): add golden trace coverage for selected PCC fixture surfaces
 CTF-E2 — test(core-trust-freeze): add collection determinism replay coverage
 CTF-E3 — test(core-trust-freeze): add trap taxonomy regression coverage
 CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I
@@ -69,8 +96,6 @@ CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC
 
 Make clear:
 
-- CTF-E1 should not cover every feature.
-- CTF-E1 should select representative traces first.
 - CTF-E2 should focus on admitted collection baseline only, not open Map policy edges.
 - CTF-E3 should distinguish compile-time diagnostics from VM traps.
 
