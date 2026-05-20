@@ -104,8 +104,29 @@ Trace boundary notes:
 - Project-level 7hell remains open.
 - Map missing-key / iteration / quota policy remain open, so golden traces for those edges must not be claimed.
 
-```text
-CTF-E1 — test(core-trust-freeze): add golden trace coverage for selected PCC fixture surfaces
-```
+## CTF-E1 Selected Golden Trace Coverage
 
-Do not implement CTF-E1 in this PR.
+CTF-E1 promotes only selected PCC fixture-backed surfaces into golden trace evidence.
+
+The first evidence set is representative, not exhaustive:
+
+- PCC-4 Records;
+- PCC-5 ADT + basic match;
+- PCC-6 Option;
+- PCC-7 Sequence;
+- PCC-8 stdlib helper boundary.
+
+CTF-E1 adds checked-in golden trace artifacts for selected surfaces only.
+
+Boundaries:
+
+- not all PCC fixtures are golden traces;
+- no release-facing freeze;
+- no CTF closure;
+- no Map missing-key / iteration / quota trace;
+- no 7hell report trace;
+- no project-root execution trace;
+- no semantic.toml trace;
+- no package registry / remote dependency trace.
+
+Future CTF-E2 / CTF-E3 still own replay and trap taxonomy evidence.
