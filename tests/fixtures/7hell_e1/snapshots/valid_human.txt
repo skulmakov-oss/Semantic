@@ -1,0 +1,22 @@
+Semantic 7hell qualification
+target: tests/fixtures/7hell_e1/valid_minimal.sm
+mode: single-file
+profile: default
+
+[1/7] Syntax Hell                   PASS
+  summary: single-file check accepted
+[2/7] Type Hell                     PASS
+  summary: single-file check accepted
+[3/7] Lowering Hell                 NOT_IMPLEMENTED
+  summary: 7HELL-S2 does not lower
+[4/7] Verifier Hell                 NOT_IMPLEMENTED
+  summary: 7HELL-S2 does not verify
+[5/7] VM Hell                       NOT_IMPLEMENTED
+  summary: 7HELL-S2 does not run VM
+[6/7] Practical Hell                NOT_IMPLEMENTED
+  summary: 7HELL-S2 does not execute practical stage
+[7/7] User Pain / Diagnostics Hell  NOT_IMPLEMENTED
+  summary: 7HELL-S2 does not wire diagnostics
+
+result: INCOMPLETE
+boundary: S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure

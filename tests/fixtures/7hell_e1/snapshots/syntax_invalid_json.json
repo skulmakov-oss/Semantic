@@ -1,0 +1,109 @@
+{
+  "schema": "semantic.7hell.report.v0",
+  "tool": "smc 7hell",
+  "target": {
+    "kind": "single-file",
+    "display": "tests/fixtures/7hell_e1/syntax_invalid.sm",
+    "normalized": "tests/fixtures/7hell_e1/syntax_invalid.sm"
+  },
+  "profile": "default",
+  "result": "fail",
+  "stages": [
+    {
+      "index": 1,
+      "name": "Syntax Hell",
+      "key": "syntax",
+      "status": "fail",
+      "summary": "code: E0000; category: syntax; summary: expected identifier",
+      "diagnostic_ids": ["D001"],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 2,
+      "name": "Type Hell",
+      "key": "type",
+      "status": "blocked",
+      "summary": "blocked by syntax check failure",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": "syntax"
+    },
+    {
+      "index": 3,
+      "name": "Lowering Hell",
+      "key": "lowering",
+      "status": "blocked",
+      "summary": "blocked by earlier stage failure",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": "type"
+    },
+    {
+      "index": 4,
+      "name": "Verifier Hell",
+      "key": "verifier",
+      "status": "blocked",
+      "summary": "blocked by earlier stage failure",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": "lowering"
+    },
+    {
+      "index": 5,
+      "name": "VM Hell",
+      "key": "vm",
+      "status": "blocked",
+      "summary": "blocked by earlier stage failure",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": "verifier"
+    },
+    {
+      "index": 6,
+      "name": "Practical Hell",
+      "key": "practical",
+      "status": "blocked",
+      "summary": "blocked by earlier stage failure",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": "vm"
+    },
+    {
+      "index": 7,
+      "name": "User Pain / Diagnostics Hell",
+      "key": "diagnostics",
+      "status": "not_implemented",
+      "summary": "diagnostic wiring reserved for 7HELL-S3",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "id": "D001",
+      "stage": "syntax",
+      "kind": "syntax-diagnostic",
+      "code": "E0000",
+      "category": "syntax",
+      "message_needle": "expected identifier",
+      "severity": "error",
+      "source": {
+        "file": "tests/fixtures/7hell_e1/syntax_invalid.sm",
+        "line": 1,
+        "column": 1
+      }
+    }
+  ],
+  "evidence": [],
+  "ctf": [],
+  "boundaries": [
+    {
+      "id": "B001",
+      "scope": "7hell-s2-single-file",
+      "status": "s2-single-file-check-only",
+      "reason": "S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure"
+    }
+  ]
+}
