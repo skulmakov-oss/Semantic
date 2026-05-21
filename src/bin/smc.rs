@@ -1050,6 +1050,35 @@ fn main() {
     }
 
     #[test]
+    fn verifier_reject_json_snapshot() {
+        let target = "tests/fixtures/7hell_e1/verifier_reject.synthetic.sm".to_string();
+        let report = sm_verify::RejectReport {
+            diagnostics: vec![sm_verify::VerificationDiagnostic {
+                code: sm_verify::VerificationCode::UnknownOpcode,
+                function: Some("main".to_string()),
+                offset: Some(0),
+                message: "unknown opcode 0xff".to_string(),
+            }],
+        };
+        let diagnostic = diagnostic_from_verifier_error(&report, &target);
+        let seven = build_verifier_failed_7hell_report(target.clone(), diagnostic);
+        let rendered = render_7hell_report(&seven, SevenHellOutputMode::Json);
+
+        assert!(rendered.contains("\"kind\": \"verifier-rejection\""));
+        assert!(rendered.contains("\"stage\": \"verifier\""));
+        assert!(rendered.contains("\"code\": \"UnknownOpcode\""));
+        assert!(!rendered.contains("\"kind\": \"vm-trap\""));
+        assert!(!rendered.contains("\"kind\": \"project-diagnostic\""));
+        assert!(!rendered.contains("\"result\": \"pass\""));
+
+        let snapshot = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/7hell_e1/snapshots/verifier_reject_json.json");
+        let expected = std::fs::read_to_string(&snapshot)
+            .unwrap_or_else(|err| panic!("read {}: {}", snapshot.display(), err));
+        assert_eq!(expected.replace("\r\n", "\n"), rendered.replace("\r\n", "\n"));
+    }
+
+    #[test]
     fn display_path_never_reveals_absolute_temp_path() {
         let dir = mk_temp_dir("smc_7hell_s2_display");
         let entry = dir.join("program.sm");
