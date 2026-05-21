@@ -264,54 +264,81 @@ Rules:
 - This is a mapping document only.
 - Future implementation must use this mapping when generating reports.
 
-## 11. Open gaps before 7hell skeleton
+## 11. Cross-stage evidence matrix
 
-- PCC-4 record mapping may need exact fixture inventory confirmation.
-- project-root stage behavior remains future.
-- `semantic.toml` report target remains future.
-- Map missing-key report behavior remains future.
-- Map iteration report behavior remains future.
-- collection quota/memory report behavior remains future.
-- capability denial report behavior remains future.
-- release gate semantics remain future.
-- CI integration remains future.
+| PCC                 | Syntax        | Type             | Lowering | Verifier     | VM                           | Practical      | Diagnostics | Status       |
+| ------------------- | ------------- | ---------------- | -------- | ------------ | ---------------------------- | -------------- | ----------- | ------------ |
+| PCC-4 Records       | mapped        | mapped           | mapped   | mapped       | partial                      | mapped         | mapped      | mapping only |
+| PCC-5 ADT/Match     | mapped        | mapped           | mapped   | mapped       | partial                      | mapped         | mapped      | mapping only |
+| PCC-6 Option/Result | mapped        | mapped           | mapped   | mapped       | partial                      | mapped         | mapped      | mapping only |
+| PCC-7 Collections   | mapped        | mapped           | mapped   | mapped       | mapped for selected baseline | mapped         | mapped      | mapping only |
+| PCC-8 Stdlib        | n/a or mapped | mapped           | n/a      | n/a/implicit | mapped                       | mapped         | mapped      | mapping only |
+| PCC-9 Project Model | future        | project-adjacent | future   | future       | future                       | partial/future | mapped      | mapping only |
 
-## 12. Recommended next split
+Use `mapped`, `partial`, `future`, `n/a`, or `open`.
 
-`7HELL-S1 — cli(7hell): add docs-backed skeleton command without release gate`
+Important:
 
-Alternative docs step if needed:
+- Do not use `pass`.
+- Do not use `complete`.
+- Do not imply 7hell command currently executes those stages.
 
-`7HELL-WP3 — docs(7hell): define initial fixture selection for skeleton command`
+## 12. 7hell implementation implications
 
-Default recommendation:
+Future 7hell implementation should consume this mapping in this order:
 
-- Use `7HELL-WP3` first if fixture selection is still ambiguous.
-- Use `7HELL-S1` if mapping and fixture selection are already clear.
+```text
+7HELL-S2 — cli(7hell): route skeleton stages to existing single-file check where safe
+7HELL-S3 — cli(7hell): add stage result wiring for syntax/type diagnostics
+7HELL-S4 — cli(7hell): add verifier / VM stage placeholders with explicit blocked states
+7HELL-E1 — test(7hell): add first report snapshot tests
+7HELL-E2 — test(7hell): map PCC-4..PCC-6 fixtures into stage snapshots
+7HELL-E3 — test(7hell): map PCC-7..PCC-9 fixtures into stage snapshots
+```
 
-## 13. Final verdict
+Implementation order may be adjusted.
 
-7HELL-WP2 maps PCC-4..PCC-9 evidence into the 7hell stage model.
+Project-root 7hell must wait for PCC-9I.
 
-It does not implement 7hell.
+7hell must not bypass verifier-first route.
 
+## 13. Boundary ledger
+
+| Boundary               | Status               |
+| ---------------------- | -------------------- |
+| 7hell command skeleton | landed in 7HELL-S1   |
+| stage mapping          | defined by 7HELL-WP2 |
+| stage execution        | future               |
+| report snapshots       | future               |
+| project-root 7hell     | future after PCC-9I  |
+| CI release gate        | future, not admitted |
+| release readiness      | not claimed          |
+
+## 14. Final verdict
+
+```text
+7HELL-WP2 maps PCC-4..PCC-9 evidence into 7hell stages.
+It does not implement stage execution.
+It does not add fixtures.
 It does not create a release gate.
-
 It does not claim readiness.
+```
 
-## 14. Acceptance checklist
+## 15. Acceptance checklist
 
-- [ ] PCC-4 mapped to 7hell stages
-- [ ] PCC-5 mapped to 7hell stages
-- [ ] PCC-6 mapped to 7hell stages
-- [ ] PCC-7 mapped to 7hell stages
-- [ ] PCC-8 mapped to 7hell stages
-- [ ] PCC-9 mapped to 7hell stages
-- [ ] CTF-E1/E2/E3 references included where relevant
-- [ ] report object mapping defined
-- [ ] open gaps listed
-- [ ] no implementation added
+```markdown
+- [ ] PCC-4 mapping exists
+- [ ] PCC-5 mapping exists
+- [ ] PCC-6 mapping exists
+- [ ] PCC-7 mapping exists
+- [ ] PCC-8 mapping exists
+- [ ] PCC-9 mapping exists
+- [ ] cross-stage matrix exists
+- [ ] boundary ledger exists
+- [ ] future implementation split is proposed
+- [ ] no 7hell command behavior changed
 - [ ] no tests or fixtures added
 - [ ] no CI gate added
-- [ ] no release readiness claimed
+- [ ] no readiness claimed
 - [ ] no CTF closure claimed
+```
