@@ -532,3 +532,5 @@ The PCC-4..PCC-9 evidence-to-stage mapping is defined in:
 The fixture growth rule is constrained by `7hell_pcc4_pcc9_stage_mapping.md`, which maps PCC-4..PCC-9 evidence into 7hell stages.
 
 7HELL-WP2 is docs-only; implementation remains future work.
+
+Any future command implementation must follow `7hell_skeleton_to_runner_transition.md`.

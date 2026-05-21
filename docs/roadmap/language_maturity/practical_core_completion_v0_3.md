@@ -211,6 +211,7 @@ Qualification report contract:
 - `docs/roadmap/language_maturity/7hell_report_contract.md`
 
 7HELL-WP2 maps PCC-4..PCC-9 evidence into the 7hell stage model; this is a docs-only mapping and stage execution remains future work.
+7HELL-WP3 defines skeleton-to-runner transition rules before S2 implementation.
 
 ## 7. CTF-0 — Core Trust Freeze directory
 
