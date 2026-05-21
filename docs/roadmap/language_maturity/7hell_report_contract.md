@@ -487,4 +487,6 @@ Future report evidence objects may reference the PCC-4..PCC-9 stage mapping:
 The mapping defines which PCC evidence belongs to each 7hell stage.
 This mapping is docs-only and does not imply the skeleton command executes mapped stages.
 
+When stages become executable, report status transitions must follow `7hell_skeleton_to_runner_transition.md`.
+
 WP2 does not implement report generation.

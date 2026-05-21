@@ -302,6 +302,19 @@ Project-root 7hell must wait for PCC-9I.
 
 7hell must not bypass verifier-first route.
 
+## Skeleton-to-Runner Transition
+
+The mapping in this document must be consumed through:
+
+- `7hell_skeleton_to_runner_transition.md`
+
+The transition document defines:
+
+- which stages may execute first;
+- which stages must remain blocked;
+- when verifier / VM execution is allowed;
+- why project-root 7hell must wait for PCC-9I.
+
 ## 13. Boundary ledger
 
 | Boundary               | Status               |
