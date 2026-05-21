@@ -11,14 +11,13 @@ profile: default
   summary: SemCode emitted for verifier admission
 [4/7] Verifier Hell                 PASS
   summary: SemCode verifier accepted program (1 function(s))
-[5/7] VM Hell                       BLOCKED
-  blocked_by: vm
-  summary: VM execution intentionally not implemented in 7HELL-S5
+[5/7] VM Hell                       PASS
+  summary: VM executed verified SemCode successfully
 [6/7] Practical Hell                BLOCKED
   blocked_by: vm
-  summary: blocked until VM execution is available
+  summary: host-visible effects and practical qualification are outside 7HELL-S6
 [7/7] User Pain / Diagnostics Hell  NOT_IMPLEMENTED
-  summary: 7HELL-S5 does not wire diagnostics
+  summary: 7HELL-S6 does not wire diagnostics
 
 result: INCOMPLETE
-boundary: S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure
+boundary: S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure
