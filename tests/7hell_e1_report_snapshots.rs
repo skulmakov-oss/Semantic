@@ -75,20 +75,13 @@ fn syntax_invalid_json_snapshot() {
         &String::from_utf8_lossy(&output.stdout),
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.is_empty(),
-        "unexpected stderr: {}",
-        stderr
-    );
+    assert!(stderr.is_empty(), "unexpected stderr: {}", stderr);
 }
 
 #[test]
 fn project_flag_rejected() {
     let output = smc_output(&["7hell", "--project", "."]);
-    assert!(
-        !output.status.success(),
-        "command unexpectedly succeeded"
-    );
+    assert!(!output.status.success(), "command unexpectedly succeeded");
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("unknown flag '--project'"),

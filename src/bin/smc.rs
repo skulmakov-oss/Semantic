@@ -252,7 +252,7 @@ fn build_passed_7hell_report(target_display: String) -> SevenHellReport {
                 "Lowering Hell",
                 "lowering",
                 SevenHellStageStatus::NotImplemented,
-                "7HELL-S2 does not lower",
+                "lowering stage not implemented in 7HELL-S4",
                 None,
                 vec![],
             ),
@@ -260,27 +260,27 @@ fn build_passed_7hell_report(target_display: String) -> SevenHellReport {
                 4,
                 "Verifier Hell",
                 "verifier",
-                SevenHellStageStatus::NotImplemented,
-                "7HELL-S2 does not verify",
-                None,
+                SevenHellStageStatus::Blocked,
+                "blocked until lowering/SemCode emission is available",
+                Some("lowering"),
                 vec![],
             ),
             stage_report(
                 5,
                 "VM Hell",
                 "vm",
-                SevenHellStageStatus::NotImplemented,
-                "7HELL-S2 does not run VM",
-                None,
+                SevenHellStageStatus::Blocked,
+                "blocked until verifier admission is available",
+                Some("verifier"),
                 vec![],
             ),
             stage_report(
                 6,
                 "Practical Hell",
                 "practical",
-                SevenHellStageStatus::NotImplemented,
-                "7HELL-S2 does not execute practical stage",
-                None,
+                SevenHellStageStatus::Blocked,
+                "blocked until VM execution is available",
+                Some("vm"),
                 vec![],
             ),
             stage_report(
@@ -288,13 +288,13 @@ fn build_passed_7hell_report(target_display: String) -> SevenHellReport {
                 "User Pain / Diagnostics Hell",
                 "diagnostics",
                 SevenHellStageStatus::NotImplemented,
-                "7HELL-S2 does not wire diagnostics",
+                "7HELL-S4 does not wire diagnostics",
                 None,
                 vec![],
             ),
         ],
         diagnostics: Vec::new(),
-        boundary: "S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure",
+        boundary: "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -389,7 +389,7 @@ fn build_failed_7hell_report(target_display: String, diagnostic: SevenHellDiagno
             ),
         ],
         diagnostics,
-        boundary: "S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure",
+        boundary: "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -691,10 +691,10 @@ mod tests {
         assert!(rendered.contains("[1/7] Syntax Hell"));
         assert!(rendered.contains("[2/7] Type Hell"));
         assert!(rendered.contains("PASS"));
-        assert!(rendered.contains("NOT_IMPLEMENTED"));
+        assert!(rendered.contains("BLOCKED"));
         assert!(rendered.contains("result: INCOMPLETE"));
         assert!(rendered.contains(
-            "S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure"
+            "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure"
         ));
         assert!(!rendered.contains("result: PASS"));
     }
@@ -708,7 +708,8 @@ mod tests {
         assert!(rendered.contains("\"key\": \"syntax\""));
         assert!(rendered.contains("\"key\": \"diagnostics\""));
         assert!(rendered.contains("\"status\": \"pass\""));
-        assert!(rendered.contains("\"blocked_by\": null"));
+        assert!(rendered.contains("\"status\": \"blocked\""));
+        assert!(rendered.contains("\"blocked_by\": \"lowering\""));
         assert!(rendered.contains("\"scope\": \"7hell-s2-single-file\""));
         assert!(rendered.contains("\"diagnostics\": []"));
     }
@@ -731,11 +732,11 @@ fn main() {
         assert!(outcome.success);
         assert!(outcome.rendered.contains("Syntax Hell"));
         assert!(outcome.rendered.contains("PASS"));
-        assert!(outcome.rendered.contains("NOT_IMPLEMENTED"));
+        assert!(outcome.rendered.contains("BLOCKED"));
         assert!(outcome.rendered.contains("result: INCOMPLETE"));
         assert!(!outcome.rendered.contains("result: PASS"));
         assert!(outcome.rendered.contains(
-            "boundary: S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure"
+            "boundary: S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure"
         ));
 
         let _ = std::fs::remove_dir_all(&dir);
