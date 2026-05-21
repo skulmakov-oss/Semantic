@@ -2,6 +2,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use sm_emit::{compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
+use sm_front::FrontendError;
+use sm_verify::{RejectReport, VerifiedProgram, verify_semcode};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SevenHellOutputMode {
     Human,
@@ -12,6 +16,8 @@ enum SevenHellOutputMode {
 enum SevenHellDiagnosticKind {
     SyntaxDiagnostic,
     CheckDiagnostic,
+    LoweringDiagnostic,
+    VerifierRejection,
     BoundaryDenial,
 }
 
@@ -20,6 +26,8 @@ impl SevenHellDiagnosticKind {
         match self {
             Self::SyntaxDiagnostic => "syntax-diagnostic",
             Self::CheckDiagnostic => "check-diagnostic",
+            Self::LoweringDiagnostic => "lowering-diagnostic",
+            Self::VerifierRejection => "verifier-rejection",
             Self::BoundaryDenial => "boundary-denial",
         }
     }
@@ -176,13 +184,30 @@ fn execute_7hell_single_file(target: &str, output_mode: SevenHellOutputMode) -> 
     let target_display = display_path_for_report(target);
     let report = match fs::read_to_string(Path::new(target)) {
         Ok(source) => match smc_cli::CliPipeline::semantic_check_source(&source) {
-            Ok(_) => build_passed_7hell_report(target_display),
+            Ok(_) => match compile_program_to_semcode_with_options_debug(
+                &source,
+                CompileProfile::Auto,
+                OptLevel::O0,
+                false,
+            ) {
+                Ok(bytes) => match verify_semcode(&bytes) {
+                    Ok(verified) => build_verified_7hell_report(target_display, verified),
+                    Err(report) => build_verifier_failed_7hell_report(
+                        target_display.clone(),
+                        diagnostic_from_verifier_error(&report, &target_display),
+                    ),
+                },
+                Err(error) => build_lowering_failed_7hell_report(
+                    target_display.clone(),
+                    diagnostic_from_compile_error(&error, &target_display),
+                ),
+            },
             Err(error_text) => {
                 let diagnostic = diagnostic_from_check_error(&error_text, &target_display);
-                build_failed_7hell_report(target_display, diagnostic)
+                build_check_failed_7hell_report(target_display, diagnostic)
             }
         },
-        Err(_) => build_failed_7hell_report(
+        Err(_) => build_check_failed_7hell_report(
             target_display.clone(),
             boundary_denial_diagnostic(&target_display),
         ),
@@ -223,7 +248,7 @@ fn display_path_for_report(path: &str) -> String {
     }
 }
 
-fn build_passed_7hell_report(target_display: String) -> SevenHellReport {
+fn build_verified_7hell_report(target_display: String, verified: VerifiedProgram) -> SevenHellReport {
     SevenHellReport {
         target_display: target_display.clone(),
         target_normalized: target_display,
@@ -251,8 +276,8 @@ fn build_passed_7hell_report(target_display: String) -> SevenHellReport {
                 3,
                 "Lowering Hell",
                 "lowering",
-                SevenHellStageStatus::NotImplemented,
-                "lowering stage not implemented in 7HELL-S4",
+                SevenHellStageStatus::Pass,
+                "SemCode emitted for verifier admission",
                 None,
                 vec![],
             ),
@@ -260,9 +285,12 @@ fn build_passed_7hell_report(target_display: String) -> SevenHellReport {
                 4,
                 "Verifier Hell",
                 "verifier",
-                SevenHellStageStatus::Blocked,
-                "blocked until lowering/SemCode emission is available",
-                Some("lowering"),
+                SevenHellStageStatus::Pass,
+                format!(
+                    "SemCode verifier accepted program ({} function(s))",
+                    verified.functions.len()
+                ),
+                None,
                 vec![],
             ),
             stage_report(
@@ -270,8 +298,8 @@ fn build_passed_7hell_report(target_display: String) -> SevenHellReport {
                 "VM Hell",
                 "vm",
                 SevenHellStageStatus::Blocked,
-                "blocked until verifier admission is available",
-                Some("verifier"),
+                "VM execution intentionally not implemented in 7HELL-S5",
+                Some("vm"),
                 vec![],
             ),
             stage_report(
@@ -288,17 +316,175 @@ fn build_passed_7hell_report(target_display: String) -> SevenHellReport {
                 "User Pain / Diagnostics Hell",
                 "diagnostics",
                 SevenHellStageStatus::NotImplemented,
-                "7HELL-S4 does not wire diagnostics",
+                "7HELL-S5 does not wire diagnostics",
                 None,
                 vec![],
             ),
         ],
         diagnostics: Vec::new(),
-        boundary: "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure",
+        boundary: "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
-fn build_failed_7hell_report(target_display: String, diagnostic: SevenHellDiagnostic) -> SevenHellReport {
+fn build_lowering_failed_7hell_report(
+    target_display: String,
+    diagnostic: SevenHellDiagnostic,
+) -> SevenHellReport {
+    let diag_id = diagnostic.id.clone();
+    SevenHellReport {
+        target_display: target_display.clone(),
+        target_normalized: target_display,
+        result: SevenHellResult::Fail,
+        stages: [
+            stage_report(
+                1,
+                "Syntax Hell",
+                "syntax",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted",
+                None,
+                vec![],
+            ),
+            stage_report(
+                2,
+                "Type Hell",
+                "type",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted",
+                None,
+                vec![],
+            ),
+            stage_report(
+                3,
+                "Lowering Hell",
+                "lowering",
+                SevenHellStageStatus::Fail,
+                failure_stage_summary(&diagnostic),
+                None,
+                vec![diag_id.clone()],
+            ),
+            stage_report(
+                4,
+                "Verifier Hell",
+                "verifier",
+                SevenHellStageStatus::Blocked,
+                "blocked by lowering stage failure",
+                Some("lowering"),
+                vec![],
+            ),
+            stage_report(
+                5,
+                "VM Hell",
+                "vm",
+                SevenHellStageStatus::Blocked,
+                "blocked by verifier stage failure",
+                Some("verifier"),
+                vec![],
+            ),
+            stage_report(
+                6,
+                "Practical Hell",
+                "practical",
+                SevenHellStageStatus::Blocked,
+                "blocked by VM stage failure",
+                Some("vm"),
+                vec![],
+            ),
+            stage_report(
+                7,
+                "User Pain / Diagnostics Hell",
+                "diagnostics",
+                SevenHellStageStatus::NotImplemented,
+                "verifier-stage audit does not wire diagnostics for compile failures",
+                None,
+                vec![],
+            ),
+        ],
+        diagnostics: vec![diagnostic],
+        boundary: "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+    }
+}
+
+fn build_verifier_failed_7hell_report(
+    target_display: String,
+    diagnostic: SevenHellDiagnostic,
+) -> SevenHellReport {
+    let diag_id = diagnostic.id.clone();
+    SevenHellReport {
+        target_display: target_display.clone(),
+        target_normalized: target_display,
+        result: SevenHellResult::Fail,
+        stages: [
+            stage_report(
+                1,
+                "Syntax Hell",
+                "syntax",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted".to_string(),
+                None,
+                vec![],
+            ),
+            stage_report(
+                2,
+                "Type Hell",
+                "type",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted".to_string(),
+                None,
+                vec![],
+            ),
+            stage_report(
+                3,
+                "Lowering Hell",
+                "lowering",
+                SevenHellStageStatus::Pass,
+                "SemCode emitted for verifier admission",
+                None,
+                vec![],
+            ),
+            stage_report(
+                4,
+                "Verifier Hell",
+                "verifier",
+                SevenHellStageStatus::Fail,
+                failure_stage_summary(&diagnostic),
+                None,
+                vec![diag_id.clone()],
+            ),
+            stage_report(
+                5,
+                "VM Hell",
+                "vm",
+                SevenHellStageStatus::Blocked,
+                "VM execution intentionally not implemented in 7HELL-S5",
+                Some("vm"),
+                vec![],
+            ),
+            stage_report(
+                6,
+                "Practical Hell",
+                "practical",
+                SevenHellStageStatus::Blocked,
+                "blocked until VM execution is available",
+                Some("vm"),
+                vec![],
+            ),
+            stage_report(
+                7,
+                "User Pain / Diagnostics Hell",
+                "diagnostics",
+                SevenHellStageStatus::NotImplemented,
+                "7HELL-S5 does not wire diagnostics",
+                None,
+                vec![],
+            ),
+        ],
+        diagnostics: vec![diagnostic],
+        boundary: "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+    }
+}
+
+fn build_check_failed_7hell_report(target_display: String, diagnostic: SevenHellDiagnostic) -> SevenHellReport {
     let failure_on_type = diagnostic.stage == "type";
     let mut diagnostics = Vec::new();
     let diag_id = diagnostic.id.clone();
@@ -389,7 +575,7 @@ fn build_failed_7hell_report(target_display: String, diagnostic: SevenHellDiagno
             ),
         ],
         diagnostics,
-        boundary: "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure",
+        boundary: "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -501,7 +687,7 @@ fn render_json_7hell_report(report: &SevenHellReport) -> String {
     let diagnostics = render_json_diagnostics(&report.diagnostics);
 
     format!(
-        "{{\n  \"schema\": \"semantic.7hell.report.v0\",\n  \"tool\": \"smc 7hell\",\n  \"target\": {{\n    \"kind\": \"single-file\",\n    \"display\": \"{}\",\n    \"normalized\": \"{}\"\n  }},\n  \"profile\": \"default\",\n  \"result\": \"{}\",\n  \"stages\": [\n{}\n  ],\n  \"diagnostics\": {},\n  \"evidence\": [],\n  \"ctf\": [],\n  \"boundaries\": [\n    {{\n      \"id\": \"B001\",\n      \"scope\": \"7hell-s2-single-file\",\n      \"status\": \"s2-single-file-check-only\",\n      \"reason\": \"{}\"\n    }}\n  ]\n}}\n",
+        "{{\n  \"schema\": \"semantic.7hell.report.v0\",\n  \"tool\": \"smc 7hell\",\n  \"target\": {{\n    \"kind\": \"single-file\",\n    \"display\": \"{}\",\n    \"normalized\": \"{}\"\n  }},\n  \"profile\": \"default\",\n  \"result\": \"{}\",\n  \"stages\": [\n{}\n  ],\n  \"diagnostics\": {},\n  \"evidence\": [],\n  \"ctf\": [],\n  \"boundaries\": [\n    {{\n      \"id\": \"B001\",\n      \"scope\": \"7hell-single-file\",\n      \"status\": \"s5-verifier-stage-only\",\n      \"reason\": \"{}\"\n    }}\n  ]\n}}\n",
         json_escape(&report.target_display),
         json_escape(&report.target_normalized),
         report.result.as_json(),
@@ -585,6 +771,41 @@ fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenH
             file: target_display.to_string(),
             line,
             column,
+        },
+    }
+}
+
+fn diagnostic_from_compile_error(error: &FrontendError, target_display: &str) -> SevenHellDiagnostic {
+    SevenHellDiagnostic {
+        id: "D001".to_string(),
+        stage: "lowering",
+        kind: SevenHellDiagnosticKind::LoweringDiagnostic,
+        code: "E0300".to_string(),
+        category: "lowering",
+        message_needle: error.message.clone(),
+        severity: "error",
+        source: SevenHellDiagnosticSource {
+            file: target_display.to_string(),
+            line: None,
+            column: None,
+        },
+    }
+}
+
+fn diagnostic_from_verifier_error(report: &RejectReport, target_display: &str) -> SevenHellDiagnostic {
+    let diagnostic = report.diagnostics.first().expect("verifier rejection diagnostic");
+    SevenHellDiagnostic {
+        id: "D001".to_string(),
+        stage: "verifier",
+        kind: SevenHellDiagnosticKind::VerifierRejection,
+        code: format!("{:?}", diagnostic.code),
+        category: "verifier",
+        message_needle: diagnostic.message.clone(),
+        severity: "error",
+        source: SevenHellDiagnosticSource {
+            file: target_display.to_string(),
+            line: None,
+            column: None,
         },
     }
 }
@@ -685,32 +906,67 @@ mod tests {
 
     #[test]
     fn renders_incomplete_human_s2_pass() {
-        let report = build_passed_7hell_report("program.sm".to_string());
+        let report = build_verified_7hell_report(
+            "program.sm".to_string(),
+            VerifiedProgram {
+                header: sm_emit::SemcodeHeaderSpec {
+                    magic: *b"SEMC0000",
+                    epoch: 0,
+                    rev: 0,
+                    capabilities: 0,
+                },
+                functions: vec![sm_verify::VerifiedFunction {
+                    name: "main".to_string(),
+                    code_len: 0,
+                    string_count: 0,
+                    debug_symbol_count: 0,
+                }],
+            },
+        );
         let rendered = render_7hell_report(&report, SevenHellOutputMode::Human);
         assert!(rendered.contains("Semantic 7hell qualification"));
         assert!(rendered.contains("[1/7] Syntax Hell"));
         assert!(rendered.contains("[2/7] Type Hell"));
+        assert!(rendered.contains("[3/7] Lowering Hell"));
+        assert!(rendered.contains("[4/7] Verifier Hell"));
         assert!(rendered.contains("PASS"));
         assert!(rendered.contains("BLOCKED"));
         assert!(rendered.contains("result: INCOMPLETE"));
         assert!(rendered.contains(
-            "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure"
+            "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
         ));
         assert!(!rendered.contains("result: PASS"));
     }
 
     #[test]
     fn renders_json_s2_pass_schema() {
-        let report = build_passed_7hell_report("program.sm".to_string());
+        let report = build_verified_7hell_report(
+            "program.sm".to_string(),
+            VerifiedProgram {
+                header: sm_emit::SemcodeHeaderSpec {
+                    magic: *b"SEMC0000",
+                    epoch: 0,
+                    rev: 0,
+                    capabilities: 0,
+                },
+                functions: vec![sm_verify::VerifiedFunction {
+                    name: "main".to_string(),
+                    code_len: 0,
+                    string_count: 0,
+                    debug_symbol_count: 0,
+                }],
+            },
+        );
         let rendered = render_7hell_report(&report, SevenHellOutputMode::Json);
         assert!(rendered.contains("\"schema\": \"semantic.7hell.report.v0\""));
         assert!(rendered.contains("\"result\": \"incomplete\""));
         assert!(rendered.contains("\"key\": \"syntax\""));
+        assert!(rendered.contains("\"key\": \"verifier\""));
         assert!(rendered.contains("\"key\": \"diagnostics\""));
         assert!(rendered.contains("\"status\": \"pass\""));
         assert!(rendered.contains("\"status\": \"blocked\""));
-        assert!(rendered.contains("\"blocked_by\": \"lowering\""));
-        assert!(rendered.contains("\"scope\": \"7hell-s2-single-file\""));
+        assert!(rendered.contains("\"scope\": \"7hell-single-file\""));
+        assert!(rendered.contains("\"status\": \"s5-verifier-stage-only\""));
         assert!(rendered.contains("\"diagnostics\": []"));
     }
 
@@ -736,7 +992,7 @@ fn main() {
         assert!(outcome.rendered.contains("result: INCOMPLETE"));
         assert!(!outcome.rendered.contains("result: PASS"));
         assert!(outcome.rendered.contains(
-            "boundary: S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure"
+            "boundary: S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
         ));
 
         let _ = std::fs::remove_dir_all(&dir);

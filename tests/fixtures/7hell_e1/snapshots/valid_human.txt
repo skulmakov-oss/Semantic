@@ -7,19 +7,18 @@ profile: default
   summary: single-file check accepted
 [2/7] Type Hell                     PASS
   summary: single-file check accepted
-[3/7] Lowering Hell                 NOT_IMPLEMENTED
-  summary: lowering stage not implemented in 7HELL-S4
-[4/7] Verifier Hell                 BLOCKED
-  blocked_by: lowering
-  summary: blocked until lowering/SemCode emission is available
+[3/7] Lowering Hell                 PASS
+  summary: SemCode emitted for verifier admission
+[4/7] Verifier Hell                 PASS
+  summary: SemCode verifier accepted program (1 function(s))
 [5/7] VM Hell                       BLOCKED
-  blocked_by: verifier
-  summary: blocked until verifier admission is available
+  blocked_by: vm
+  summary: VM execution intentionally not implemented in 7HELL-S5
 [6/7] Practical Hell                BLOCKED
   blocked_by: vm
   summary: blocked until VM execution is available
 [7/7] User Pain / Diagnostics Hell  NOT_IMPLEMENTED
-  summary: 7HELL-S4 does not wire diagnostics
+  summary: 7HELL-S5 does not wire diagnostics
 
 result: INCOMPLETE
-boundary: S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure
+boundary: S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure
