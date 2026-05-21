@@ -102,8 +102,8 @@
     {
       "id": "B001",
       "scope": "7hell-single-file",
-      "status": "s5-verifier-stage-only",
-      "reason": "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+      "status": "s6-silent-vm-stage-only",
+      "reason": "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
     }
   ]
 }

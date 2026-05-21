@@ -5,6 +5,7 @@ use std::process::ExitCode;
 use sm_emit::{compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
 use sm_front::FrontendError;
 use sm_verify::{RejectReport, VerifiedProgram, verify_semcode};
+use sm_vm::{run_verified_semcode, RuntimeError as VmRuntimeError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SevenHellOutputMode {
@@ -18,6 +19,8 @@ enum SevenHellDiagnosticKind {
     CheckDiagnostic,
     LoweringDiagnostic,
     VerifierRejection,
+    VmTrap,
+    VmError,
     BoundaryDenial,
 }
 
@@ -28,6 +31,8 @@ impl SevenHellDiagnosticKind {
             Self::CheckDiagnostic => "check-diagnostic",
             Self::LoweringDiagnostic => "lowering-diagnostic",
             Self::VerifierRejection => "verifier-rejection",
+            Self::VmTrap => "vm-trap",
+            Self::VmError => "vm-error",
             Self::BoundaryDenial => "boundary-denial",
         }
     }
@@ -120,6 +125,7 @@ struct SevenHellReport {
     result: SevenHellResult,
     stages: [SevenHellStageReport; 7],
     diagnostics: Vec<SevenHellDiagnostic>,
+    boundary_status: &'static str,
     boundary: &'static str,
 }
 
@@ -191,7 +197,13 @@ fn execute_7hell_single_file(target: &str, output_mode: SevenHellOutputMode) -> 
                 false,
             ) {
                 Ok(bytes) => match verify_semcode(&bytes) {
-                    Ok(verified) => build_verified_7hell_report(target_display, verified),
+                    Ok(verified) => match run_verified_semcode(&bytes) {
+                        Ok(()) => build_vm_passed_7hell_report(target_display, verified),
+                        Err(error) => build_vm_failed_7hell_report(
+                            target_display.clone(),
+                            diagnostic_from_vm_error(&error, &target_display),
+                        ),
+                    },
                     Err(report) => build_verifier_failed_7hell_report(
                         target_display.clone(),
                         diagnostic_from_verifier_error(&report, &target_display),
@@ -248,7 +260,12 @@ fn display_path_for_report(path: &str) -> String {
     }
 }
 
+#[cfg(test)]
 fn build_verified_7hell_report(target_display: String, verified: VerifiedProgram) -> SevenHellReport {
+    build_vm_passed_7hell_report(target_display, verified)
+}
+
+fn build_vm_passed_7hell_report(target_display: String, verified: VerifiedProgram) -> SevenHellReport {
     SevenHellReport {
         target_display: target_display.clone(),
         target_normalized: target_display,
@@ -297,9 +314,9 @@ fn build_verified_7hell_report(target_display: String, verified: VerifiedProgram
                 5,
                 "VM Hell",
                 "vm",
-                SevenHellStageStatus::Blocked,
-                "VM execution intentionally not implemented in 7HELL-S5",
-                Some("vm"),
+                SevenHellStageStatus::Pass,
+                "VM executed verified SemCode successfully",
+                None,
                 vec![],
             ),
             stage_report(
@@ -307,7 +324,7 @@ fn build_verified_7hell_report(target_display: String, verified: VerifiedProgram
                 "Practical Hell",
                 "practical",
                 SevenHellStageStatus::Blocked,
-                "blocked until VM execution is available",
+                "host-visible effects and practical qualification are outside 7HELL-S6",
                 Some("vm"),
                 vec![],
             ),
@@ -316,13 +333,14 @@ fn build_verified_7hell_report(target_display: String, verified: VerifiedProgram
                 "User Pain / Diagnostics Hell",
                 "diagnostics",
                 SevenHellStageStatus::NotImplemented,
-                "7HELL-S5 does not wire diagnostics",
+                "7HELL-S6 does not wire diagnostics",
                 None,
                 vec![],
             ),
         ],
         diagnostics: Vec::new(),
-        boundary: "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s6-silent-vm-stage-only",
+        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -401,7 +419,8 @@ fn build_lowering_failed_7hell_report(
             ),
         ],
         diagnostics: vec![diagnostic],
-        boundary: "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s6-silent-vm-stage-only",
+        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -480,7 +499,88 @@ fn build_verifier_failed_7hell_report(
             ),
         ],
         diagnostics: vec![diagnostic],
-        boundary: "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s6-silent-vm-stage-only",
+        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+    }
+}
+
+fn build_vm_failed_7hell_report(
+    target_display: String,
+    diagnostic: SevenHellDiagnostic,
+) -> SevenHellReport {
+    let diag_id = diagnostic.id.clone();
+    SevenHellReport {
+        target_display: target_display.clone(),
+        target_normalized: target_display,
+        result: SevenHellResult::Fail,
+        stages: [
+            stage_report(
+                1,
+                "Syntax Hell",
+                "syntax",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted",
+                None,
+                vec![],
+            ),
+            stage_report(
+                2,
+                "Type Hell",
+                "type",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted",
+                None,
+                vec![],
+            ),
+            stage_report(
+                3,
+                "Lowering Hell",
+                "lowering",
+                SevenHellStageStatus::Pass,
+                "SemCode emitted for verifier admission",
+                None,
+                vec![],
+            ),
+            stage_report(
+                4,
+                "Verifier Hell",
+                "verifier",
+                SevenHellStageStatus::Pass,
+                "SemCode verifier accepted program",
+                None,
+                vec![],
+            ),
+            stage_report(
+                5,
+                "VM Hell",
+                "vm",
+                SevenHellStageStatus::Fail,
+                failure_stage_summary(&diagnostic),
+                None,
+                vec![diag_id.clone()],
+            ),
+            stage_report(
+                6,
+                "Practical Hell",
+                "practical",
+                SevenHellStageStatus::Blocked,
+                "host-visible effects and practical qualification are outside 7HELL-S6",
+                Some("vm"),
+                vec![],
+            ),
+            stage_report(
+                7,
+                "User Pain / Diagnostics Hell",
+                "diagnostics",
+                SevenHellStageStatus::NotImplemented,
+                "7HELL-S6 does not wire diagnostics",
+                None,
+                vec![],
+            ),
+        ],
+        diagnostics: vec![diagnostic],
+        boundary_status: "s6-silent-vm-stage-only",
+        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -575,7 +675,8 @@ fn build_check_failed_7hell_report(target_display: String, diagnostic: SevenHell
             ),
         ],
         diagnostics,
-        boundary: "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s6-silent-vm-stage-only",
+        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -687,12 +788,13 @@ fn render_json_7hell_report(report: &SevenHellReport) -> String {
     let diagnostics = render_json_diagnostics(&report.diagnostics);
 
     format!(
-        "{{\n  \"schema\": \"semantic.7hell.report.v0\",\n  \"tool\": \"smc 7hell\",\n  \"target\": {{\n    \"kind\": \"single-file\",\n    \"display\": \"{}\",\n    \"normalized\": \"{}\"\n  }},\n  \"profile\": \"default\",\n  \"result\": \"{}\",\n  \"stages\": [\n{}\n  ],\n  \"diagnostics\": {},\n  \"evidence\": [],\n  \"ctf\": [],\n  \"boundaries\": [\n    {{\n      \"id\": \"B001\",\n      \"scope\": \"7hell-single-file\",\n      \"status\": \"s5-verifier-stage-only\",\n      \"reason\": \"{}\"\n    }}\n  ]\n}}\n",
+        "{{\n  \"schema\": \"semantic.7hell.report.v0\",\n  \"tool\": \"smc 7hell\",\n  \"target\": {{\n    \"kind\": \"single-file\",\n    \"display\": \"{}\",\n    \"normalized\": \"{}\"\n  }},\n  \"profile\": \"default\",\n  \"result\": \"{}\",\n  \"stages\": [\n{}\n  ],\n  \"diagnostics\": {},\n  \"evidence\": [],\n  \"ctf\": [],\n  \"boundaries\": [\n    {{\n      \"id\": \"B001\",\n      \"scope\": \"7hell-single-file\",\n      \"status\": \"{}\",\n      \"reason\": \"{}\"\n    }}\n  ]\n}}\n",
         json_escape(&report.target_display),
         json_escape(&report.target_normalized),
         report.result.as_json(),
         stages,
         diagnostics,
+        json_escape(report.boundary_status),
         json_escape(report.boundary)
     )
 }
@@ -807,6 +909,82 @@ fn diagnostic_from_verifier_error(report: &RejectReport, target_display: &str) -
             line: None,
             column: None,
         },
+    }
+}
+
+fn diagnostic_from_vm_error(error: &VmRuntimeError, target_display: &str) -> SevenHellDiagnostic {
+    match error {
+        VmRuntimeError::Trap(trap) => SevenHellDiagnostic {
+            id: "D001".to_string(),
+            stage: "vm",
+            kind: SevenHellDiagnosticKind::VmTrap,
+            code: format!("{:?}", trap),
+            category: "vm",
+            message_needle: vm_trap_message_needle(*trap),
+            severity: "error",
+            source: SevenHellDiagnosticSource {
+                file: target_display.to_string(),
+                line: None,
+                column: None,
+            },
+        },
+        other => SevenHellDiagnostic {
+            id: "D001".to_string(),
+            stage: "vm",
+            kind: SevenHellDiagnosticKind::VmError,
+            code: vm_error_code(other),
+            category: "vm",
+            message_needle: other.to_string(),
+            severity: "error",
+            source: SevenHellDiagnosticSource {
+                file: target_display.to_string(),
+                line: None,
+                column: None,
+            },
+        },
+    }
+}
+
+fn vm_trap_message_needle(trap: sm_runtime_core::RuntimeTrap) -> String {
+    match trap {
+        sm_runtime_core::RuntimeTrap::AssertionFailed => "assertion failed".to_string(),
+        sm_runtime_core::RuntimeTrap::BorrowWriteConflict => {
+            "write path overlaps active borrow".to_string()
+        }
+        sm_runtime_core::RuntimeTrap::StackOverflow => "stack overflow".to_string(),
+        sm_runtime_core::RuntimeTrap::StackUnderflow => "stack underflow".to_string(),
+        sm_runtime_core::RuntimeTrap::TypeMismatch => "runtime type mismatch".to_string(),
+        sm_runtime_core::RuntimeTrap::InvalidOpcode => "invalid opcode".to_string(),
+        sm_runtime_core::RuntimeTrap::InvalidJump => "invalid jump".to_string(),
+        sm_runtime_core::RuntimeTrap::DivisionByZero => "division by zero".to_string(),
+        sm_runtime_core::RuntimeTrap::ArithmeticOverflow => "arithmetic overflow".to_string(),
+        sm_runtime_core::RuntimeTrap::CapabilityDenied => "capability denied".to_string(),
+        sm_runtime_core::RuntimeTrap::AbiViolation => "abi violation".to_string(),
+        sm_runtime_core::RuntimeTrap::VerifierRejected => "verifier rejected".to_string(),
+        sm_runtime_core::RuntimeTrap::QuotaExceeded(_) => "quota exceeded".to_string(),
+    }
+}
+
+fn vm_error_code(error: &VmRuntimeError) -> String {
+    match error {
+        VmRuntimeError::BadHeader => "BadHeader".to_string(),
+        VmRuntimeError::UnsupportedBytecodeVersion { .. } => {
+            "UnsupportedBytecodeVersion".to_string()
+        }
+        VmRuntimeError::BadFormat(_) => "BadFormat".to_string(),
+        VmRuntimeError::UnknownFunction(_) => "UnknownFunction".to_string(),
+        VmRuntimeError::InvalidJumpAddress { .. } => "InvalidJumpAddress".to_string(),
+        VmRuntimeError::TypeMismatchRuntime(_) => "TypeMismatchRuntime".to_string(),
+        VmRuntimeError::StackUnderflow => "StackUnderflow".to_string(),
+        VmRuntimeError::StackOverflow => "StackOverflow".to_string(),
+        VmRuntimeError::QuotaExceeded(_) => "QuotaExceeded".to_string(),
+        VmRuntimeError::VerifierRejected(_) => "VerifierRejected".to_string(),
+        VmRuntimeError::UnknownVariable(_) => "UnknownVariable".to_string(),
+        VmRuntimeError::InvalidStringId(_) => "InvalidStringId".to_string(),
+        VmRuntimeError::HostAbi(_) => "HostAbi".to_string(),
+        VmRuntimeError::CapabilityDenied(_) => "CapabilityDenied".to_string(),
+        VmRuntimeError::UiCapabilityDenied(_) => "UiCapabilityDenied".to_string(),
+        VmRuntimeError::Trap(trap) => format!("{:?}", trap),
     }
 }
 
@@ -929,11 +1107,12 @@ mod tests {
         assert!(rendered.contains("[2/7] Type Hell"));
         assert!(rendered.contains("[3/7] Lowering Hell"));
         assert!(rendered.contains("[4/7] Verifier Hell"));
+        assert!(rendered.contains("[5/7] VM Hell"));
         assert!(rendered.contains("PASS"));
         assert!(rendered.contains("BLOCKED"));
         assert!(rendered.contains("result: INCOMPLETE"));
         assert!(rendered.contains(
-            "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+            "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
         ));
         assert!(!rendered.contains("result: PASS"));
     }
@@ -966,7 +1145,7 @@ mod tests {
         assert!(rendered.contains("\"status\": \"pass\""));
         assert!(rendered.contains("\"status\": \"blocked\""));
         assert!(rendered.contains("\"scope\": \"7hell-single-file\""));
-        assert!(rendered.contains("\"status\": \"s5-verifier-stage-only\""));
+        assert!(rendered.contains("\"status\": \"s6-silent-vm-stage-only\""));
         assert!(rendered.contains("\"diagnostics\": []"));
     }
 
@@ -989,10 +1168,11 @@ fn main() {
         assert!(outcome.rendered.contains("Syntax Hell"));
         assert!(outcome.rendered.contains("PASS"));
         assert!(outcome.rendered.contains("BLOCKED"));
+        assert!(outcome.rendered.contains("VM executed verified SemCode successfully"));
         assert!(outcome.rendered.contains("result: INCOMPLETE"));
         assert!(!outcome.rendered.contains("result: PASS"));
         assert!(outcome.rendered.contains(
-            "boundary: S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+            "boundary: S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
         ));
 
         let _ = std::fs::remove_dir_all(&dir);
