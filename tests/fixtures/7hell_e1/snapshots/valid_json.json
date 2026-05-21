@@ -1,0 +1,94 @@
+{
+  "schema": "semantic.7hell.report.v0",
+  "tool": "smc 7hell",
+  "target": {
+    "kind": "single-file",
+    "display": "tests/fixtures/7hell_e1/valid_minimal.sm",
+    "normalized": "tests/fixtures/7hell_e1/valid_minimal.sm"
+  },
+  "profile": "default",
+  "result": "incomplete",
+  "stages": [
+    {
+      "index": 1,
+      "name": "Syntax Hell",
+      "key": "syntax",
+      "status": "pass",
+      "summary": "single-file check accepted",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 2,
+      "name": "Type Hell",
+      "key": "type",
+      "status": "pass",
+      "summary": "single-file check accepted",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 3,
+      "name": "Lowering Hell",
+      "key": "lowering",
+      "status": "not_implemented",
+      "summary": "7HELL-S2 does not lower",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 4,
+      "name": "Verifier Hell",
+      "key": "verifier",
+      "status": "not_implemented",
+      "summary": "7HELL-S2 does not verify",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 5,
+      "name": "VM Hell",
+      "key": "vm",
+      "status": "not_implemented",
+      "summary": "7HELL-S2 does not run VM",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 6,
+      "name": "Practical Hell",
+      "key": "practical",
+      "status": "not_implemented",
+      "summary": "7HELL-S2 does not execute practical stage",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 7,
+      "name": "User Pain / Diagnostics Hell",
+      "key": "diagnostics",
+      "status": "not_implemented",
+      "summary": "7HELL-S2 does not wire diagnostics",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    }
+  ],
+  "diagnostics": [],
+  "evidence": [],
+  "ctf": [],
+  "boundaries": [
+    {
+      "id": "B001",
+      "scope": "7hell-s2-single-file",
+      "status": "s2-single-file-check-only",
+      "reason": "S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure"
+    }
+  ]
+}
