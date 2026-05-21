@@ -101,9 +101,9 @@
   "boundaries": [
     {
       "id": "B001",
-      "scope": "7hell-s2-single-file",
-      "status": "s2-single-file-check-only",
-      "reason": "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure"
+      "scope": "7hell-single-file",
+      "status": "s5-verifier-stage-only",
+      "reason": "S5 verifier-stage execution only; no VM run, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
     }
   ]
 }
