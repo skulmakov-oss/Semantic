@@ -1,0 +1,109 @@
+{
+  "schema": "semantic.7hell.report.v0",
+  "tool": "smc 7hell",
+  "target": {
+    "kind": "single-file",
+    "display": "tests/fixtures/7hell_e1/vm_trap_assert_false.sm",
+    "normalized": "tests/fixtures/7hell_e1/vm_trap_assert_false.sm"
+  },
+  "profile": "default",
+  "result": "fail",
+  "stages": [
+    {
+      "index": 1,
+      "name": "Syntax Hell",
+      "key": "syntax",
+      "status": "pass",
+      "summary": "single-file check accepted",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 2,
+      "name": "Type Hell",
+      "key": "type",
+      "status": "pass",
+      "summary": "single-file check accepted",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 3,
+      "name": "Lowering Hell",
+      "key": "lowering",
+      "status": "pass",
+      "summary": "SemCode emitted for verifier admission",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 4,
+      "name": "Verifier Hell",
+      "key": "verifier",
+      "status": "pass",
+      "summary": "SemCode verifier accepted program",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 5,
+      "name": "VM Hell",
+      "key": "vm",
+      "status": "fail",
+      "summary": "code: AssertionFailed; category: vm; summary: assertion failed",
+      "diagnostic_ids": ["D001"],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 6,
+      "name": "Practical Hell",
+      "key": "practical",
+      "status": "blocked",
+      "summary": "host-visible effects and practical qualification are outside 7HELL-S6",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": "vm"
+    },
+    {
+      "index": 7,
+      "name": "User Pain / Diagnostics Hell",
+      "key": "diagnostics",
+      "status": "not_implemented",
+      "summary": "7HELL-S6 does not wire diagnostics",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "id": "D001",
+      "stage": "vm",
+      "kind": "vm-trap",
+      "code": "AssertionFailed",
+      "category": "vm",
+      "message_needle": "assertion failed",
+      "severity": "error",
+      "source": {
+        "file": "tests/fixtures/7hell_e1/vm_trap_assert_false.sm",
+        "line": null,
+        "column": null
+      }
+    }
+  ],
+  "evidence": [],
+  "ctf": [],
+  "boundaries": [
+    {
+      "id": "B001",
+      "scope": "7hell-single-file",
+      "status": "s6-silent-vm-stage-only",
+      "reason": "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+    }
+  ]
+}
