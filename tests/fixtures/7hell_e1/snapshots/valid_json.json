@@ -34,7 +34,7 @@
       "name": "Lowering Hell",
       "key": "lowering",
       "status": "not_implemented",
-      "summary": "7HELL-S2 does not lower",
+      "summary": "lowering stage not implemented in 7HELL-S4",
       "diagnostic_ids": [],
       "evidence_ids": [],
       "blocked_by": null
@@ -43,38 +43,38 @@
       "index": 4,
       "name": "Verifier Hell",
       "key": "verifier",
-      "status": "not_implemented",
-      "summary": "7HELL-S2 does not verify",
+      "status": "blocked",
+      "summary": "blocked until lowering/SemCode emission is available",
       "diagnostic_ids": [],
       "evidence_ids": [],
-      "blocked_by": null
+      "blocked_by": "lowering"
     },
     {
       "index": 5,
       "name": "VM Hell",
       "key": "vm",
-      "status": "not_implemented",
-      "summary": "7HELL-S2 does not run VM",
+      "status": "blocked",
+      "summary": "blocked until verifier admission is available",
       "diagnostic_ids": [],
       "evidence_ids": [],
-      "blocked_by": null
+      "blocked_by": "verifier"
     },
     {
       "index": 6,
       "name": "Practical Hell",
       "key": "practical",
-      "status": "not_implemented",
-      "summary": "7HELL-S2 does not execute practical stage",
+      "status": "blocked",
+      "summary": "blocked until VM execution is available",
       "diagnostic_ids": [],
       "evidence_ids": [],
-      "blocked_by": null
+      "blocked_by": "vm"
     },
     {
       "index": 7,
       "name": "User Pain / Diagnostics Hell",
       "key": "diagnostics",
       "status": "not_implemented",
-      "summary": "7HELL-S2 does not wire diagnostics",
+      "summary": "7HELL-S4 does not wire diagnostics",
       "diagnostic_ids": [],
       "evidence_ids": [],
       "blocked_by": null
@@ -88,7 +88,7 @@
       "id": "B001",
       "scope": "7hell-s2-single-file",
       "status": "s2-single-file-check-only",
-      "reason": "S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure"
+      "reason": "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure"
     }
   ]
 }

@@ -103,7 +103,7 @@
       "id": "B001",
       "scope": "7hell-s2-single-file",
       "status": "s2-single-file-check-only",
-      "reason": "S2 single-file check only; no compile, verify, VM run, project-root, CI gate, release readiness, or CTF closure"
+      "reason": "S4 downstream placeholder discipline only; no lower, SemCode emit, verifier, VM run, project-root, CI gate, release readiness, or CTF closure"
     }
   ]
 }
