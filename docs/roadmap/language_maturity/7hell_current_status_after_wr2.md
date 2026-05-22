@@ -42,7 +42,7 @@ only pattern this document records.
 | Syntax Hell | active / report-backed | S2/S3 + E1 snapshots | current S1..S7 wave, refreshed through #740 | single-file path only, no project-root behavior |
 | Type Hell | active / report-backed | S2/S3 + E2 snapshots | current S1..S7 wave, refreshed through #740 | single-file check path, no language widening |
 | Lowering Hell | covered through compile path / explicit status | S5 verifier-stage path requires compile-to-SemCode | current S1..S7 wave, refreshed through #740 | not a separate broad lowering qualification suite yet |
-| Verifier Hell | active / rejection snapshot-backed | S5 + E3 | #736, #737, #738, #740 | selected single-file fixtures only, no verifier behavior change |
+| Verifier Hell | active / rejection snapshot-backed | S5 + E3 | #730, #731, #732, #740 | selected single-file fixtures only, no verifier behavior change |
 | VM Hell | active / trap snapshot-backed | S6 + E4 | #733, #734, #735, #740 | silent verified single-file VM execution only, no host-visible output |
 | Practical Hell | active / failure snapshot-backed | S7 + E5 | #736, #737, #738, #739, #740 | uses non-rendering practical envelope, no raw observation text, no host-visible output |
 | Diagnostics Hell / User Pain | not implemented / decision required | none yet | pending next decision only | must not be implemented before deciding whether it is a standalone S8 stage, a report-quality layer, or a future PCC diagnostics track |
