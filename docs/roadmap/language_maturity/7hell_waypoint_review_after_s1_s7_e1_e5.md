@@ -4,6 +4,10 @@ Status: waypoint review
 Scope: 7hell command, report shape, stage execution, and snapshot evidence
 Non-goal: release readiness, CTF closure, project-root behavior, package/workspace behavior
 
+Current post-WR2 status refresh:
+
+- `7hell_current_status_after_wr2.md`
+
 ## 1. Current stage status
 
 | Stage | Status | What it is backed by | Current evidence |
@@ -82,16 +86,17 @@ Failure paths:
 
 `result: incomplete` is still the correct success outcome for the current S7 path because Diagnostics Hell remains unimplemented.
 
-## 5. Remaining bounded work
+## 5. Remaining bounded decision
 
-- `7HELL-S8-AUDIT` - audit(7hell): define Diagnostics Hell seam before execution
-- `7HELL-S8-SEAM` - optional, only if audit finds no safe seam
-- `7HELL-S8` - cli(7hell): add Diagnostics Hell summary if safe
-- `7HELL-E6` - test(7hell): diagnostics-stage snapshot coverage
+Diagnostics Hell / User Pain remains undecided.
 
-Do not jump to release readiness.
-Do not turn `7hell` into a CI gate yet.
-Do not add project-root before separate PCC-9I/project-root work.
+Before implementation, decide whether it is:
+
+- A. standalone `7HELL-S8` stage;
+- B. report-quality layer across all failure reports;
+- C. future PCC diagnostics track outside the current 7hell wave.
+
+No S8 work should start before this decision is recorded.
 
 ## 6. Decision
 
