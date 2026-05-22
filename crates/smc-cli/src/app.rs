@@ -2187,6 +2187,35 @@ struct ControlledObservationCliEnvelope {
     rendered_lines: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControlledObservationSummary {
+    sequence_index: u64,
+    observation_class: HelloObservationClass,
+    text_hash: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControlledObservationQualificationEnvelope {
+    capability_decision: HelloObservationCapabilityDecision,
+    audit_results: Vec<ControlledObservationAuditResult>,
+    observations: Vec<ControlledObservationSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControlledObservationCollectedEvent {
+    sequence_index: u64,
+    observation_class: HelloObservationClass,
+    text_hash: u64,
+    text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ControlledObservationInternalEnvelope {
+    capability_decision: HelloObservationCapabilityDecision,
+    audit_results: Vec<ControlledObservationAuditResult>,
+    events: Vec<ControlledObservationCollectedEvent>,
+}
+
 fn stable_text_hash(text: &str) -> u64 {
     let mut hash = 0xcbf29ce484222325u64;
     for byte in text.as_bytes() {
@@ -2196,7 +2225,9 @@ fn stable_text_hash(text: &str) -> u64 {
     hash
 }
 
-fn render_controlled_observation_envelope(bytes: &[u8]) -> Result<ControlledObservationCliEnvelope, String> {
+fn collect_controlled_observation_envelope(
+    bytes: &[u8],
+) -> Result<ControlledObservationInternalEnvelope, String> {
     verify_semcode(bytes).map_err(|report| report.to_string())?;
 
     let events = run_semcode_collecting_hello_observations(bytes).map_err(|e| e.to_string())?;
@@ -2228,8 +2259,8 @@ fn render_controlled_observation_envelope(bytes: &[u8]) -> Result<ControlledObse
         sink_policy_ref: Some(3),
     };
 
-    let mut rendered_lines = Vec::with_capacity(events.len());
     let mut audit_results = Vec::with_capacity(events.len());
+    let mut collected_events = Vec::with_capacity(events.len());
     for (expected_index, event) in events.into_iter().enumerate() {
         if event.observation_class != HelloObservationClass::ControlledText {
             return Err(format!(
@@ -2253,7 +2284,6 @@ fn render_controlled_observation_envelope(bytes: &[u8]) -> Result<ControlledObse
         );
         match audit_result {
             ControlledObservationAuditResult::Recorded(AuditEventId(_)) => {
-                rendered_lines.push(event.text);
             }
             ControlledObservationAuditResult::NoStore => {
                 return Err("audit policy unexpectedly returned no_store".to_string());
@@ -2263,12 +2293,52 @@ fn render_controlled_observation_envelope(bytes: &[u8]) -> Result<ControlledObse
             }
         }
         audit_results.push(audit_result);
+        collected_events.push(ControlledObservationCollectedEvent {
+            sequence_index: event.sequence_index.0,
+            observation_class: event.observation_class,
+            text_hash: stable_text_hash(&event.text),
+            text: event.text,
+        });
     }
 
-    Ok(ControlledObservationCliEnvelope {
+    Ok(ControlledObservationInternalEnvelope {
         capability_decision,
         audit_results,
-        rendered_lines,
+        events: collected_events,
+    })
+}
+
+fn qualify_controlled_observation_envelope(
+    bytes: &[u8],
+) -> Result<ControlledObservationQualificationEnvelope, String> {
+    let internal = collect_controlled_observation_envelope(bytes)?;
+    Ok(ControlledObservationQualificationEnvelope {
+        capability_decision: internal.capability_decision,
+        audit_results: internal.audit_results,
+        observations: internal
+            .events
+            .into_iter()
+            .map(|event| ControlledObservationSummary {
+                sequence_index: event.sequence_index,
+                observation_class: event.observation_class,
+                text_hash: event.text_hash,
+            })
+            .collect(),
+    })
+}
+
+fn render_controlled_observation_envelope(
+    bytes: &[u8],
+) -> Result<ControlledObservationCliEnvelope, String> {
+    let internal = collect_controlled_observation_envelope(bytes)?;
+    Ok(ControlledObservationCliEnvelope {
+        capability_decision: internal.capability_decision,
+        audit_results: internal.audit_results,
+        rendered_lines: internal
+            .events
+            .into_iter()
+            .map(|event| event.text)
+            .collect(),
     })
 }
 
@@ -2406,6 +2476,85 @@ fn main() {
         ));
         assert!(matches!(
             envelope.audit_results[1],
+            ControlledObservationAuditResult::Recorded(AuditEventId(1))
+        ));
+    }
+
+    #[test]
+    fn qualify_controlled_observation_envelope_is_non_rendering() {
+        let src = r#"
+fn main() {
+    print("Hello, World!");
+}
+"#;
+        let bytes = compile_program_to_semcode(src).expect("compile canonical hello source");
+
+        let envelope = qualify_controlled_observation_envelope(&bytes)
+            .expect("controlled observation qualification should succeed");
+
+        assert_eq!(
+            envelope.capability_decision,
+            HelloObservationCapabilityDecision::Allow
+        );
+        assert_eq!(envelope.observations.len(), 1);
+        assert_eq!(envelope.observations[0].sequence_index, 0);
+        assert_eq!(
+            envelope.observations[0].observation_class,
+            HelloObservationClass::ControlledText
+        );
+        assert_eq!(
+            envelope.observations[0].text_hash,
+            stable_text_hash("Hello, World!")
+        );
+        assert_eq!(envelope.audit_results.len(), 1);
+        assert!(matches!(
+            envelope.audit_results[0],
+            ControlledObservationAuditResult::Recorded(AuditEventId(0))
+        ));
+    }
+
+    #[test]
+    fn qualification_and_rendering_share_observation_order() {
+        let src = r#"
+fn main() {
+    print("hello from Semantic");
+    print("score=42");
+}
+"#;
+        let bytes = compile_program_to_semcode(src).expect("compile two-event print source");
+
+        let qualification = qualify_controlled_observation_envelope(&bytes)
+            .expect("controlled observation qualification should succeed");
+        let rendering = render_controlled_observation_envelope(&bytes)
+            .expect("controlled observation envelope should render");
+
+        assert_eq!(
+            qualification
+                .observations
+                .iter()
+                .map(|observation| observation.sequence_index)
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+        assert_eq!(
+            qualification
+                .observations
+                .iter()
+                .map(|observation| observation.text_hash)
+                .collect::<Vec<_>>(),
+            vec![stable_text_hash("hello from Semantic"), stable_text_hash("score=42")]
+        );
+        assert_eq!(
+            rendering.rendered_lines,
+            vec!["hello from Semantic".to_string(), "score=42".to_string()]
+        );
+        assert_eq!(qualification.audit_results.len(), 2);
+        assert!(matches!(
+            qualification.audit_results[0],
+            ControlledObservationAuditResult::Recorded(AuditEventId(0))
+        ));
+        assert!(matches!(
+            qualification.audit_results[1],
             ControlledObservationAuditResult::Recorded(AuditEventId(1))
         ));
     }
