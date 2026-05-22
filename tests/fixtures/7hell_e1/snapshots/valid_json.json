@@ -63,18 +63,18 @@
       "index": 6,
       "name": "Practical Hell",
       "key": "practical",
-      "status": "blocked",
-      "summary": "host-visible effects and practical qualification are outside 7HELL-S6",
+      "status": "pass",
+      "summary": "Practical qualification completed without host-visible rendering (0 observation(s), 0 audit record(s))",
       "diagnostic_ids": [],
       "evidence_ids": [],
-      "blocked_by": "vm"
+      "blocked_by": null
     },
     {
       "index": 7,
       "name": "User Pain / Diagnostics Hell",
       "key": "diagnostics",
       "status": "not_implemented",
-      "summary": "7HELL-S6 does not wire diagnostics",
+      "summary": "7HELL-S7 does not wire diagnostics",
       "diagnostic_ids": [],
       "evidence_ids": [],
       "blocked_by": null
@@ -87,8 +87,8 @@
     {
       "id": "B001",
       "scope": "7hell-single-file",
-      "status": "s6-silent-vm-stage-only",
-      "reason": "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+      "status": "s7-practical-qualification-only",
+      "reason": "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
     }
   ]
 }
