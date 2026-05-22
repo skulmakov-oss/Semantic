@@ -4,6 +4,10 @@ Status: waypoint review
 Scope: 7hell command, report shape, stage execution, and snapshot evidence
 Non-goal: release readiness, CTF closure, project-root behavior, package/workspace behavior
 
+Current post-WR2 status refresh:
+
+- `7hell_current_status_after_wr2.md`
+
 ## 1. Current stage status
 
 | Stage | Status | What it is backed by | Current evidence |
