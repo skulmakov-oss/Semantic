@@ -1470,6 +1470,43 @@ fn main() {
     }
 
     #[test]
+    fn practical_failure_json_snapshot() {
+        let target = "tests/fixtures/7hell_e1/practical_failure.synthetic.sm".to_string();
+        let diagnostic = diagnostic_from_practical_error(
+            "controlled observation capability denied",
+            &target,
+        );
+        let report = build_practical_failed_7hell_report(target.clone(), diagnostic);
+        let rendered = render_7hell_report(&report, SevenHellOutputMode::Json);
+
+        assert!(rendered.contains("\"stage\": \"practical\""));
+        assert!(rendered.contains("\"kind\": \"practical-diagnostic\""));
+        assert!(rendered.contains("\"code\": \"PracticalQualificationFailed\""));
+        assert!(rendered.contains("\"category\": \"practical\""));
+        assert!(rendered.contains("\"result\": \"fail\""));
+        assert!(rendered.contains("\"key\": \"practical\""));
+        assert!(rendered.contains("\"status\": \"fail\""));
+        assert!(rendered.contains("\"key\": \"vm\""));
+        assert!(rendered.contains("\"status\": \"pass\""));
+        assert!(rendered.contains("\"key\": \"diagnostics\""));
+        assert!(rendered.contains("\"status\": \"not_implemented\""));
+        assert!(!rendered.contains("\"kind\": \"vm-trap\""));
+        assert!(!rendered.contains("\"kind\": \"verifier-rejection\""));
+        assert!(!rendered.contains("\"kind\": \"project-diagnostic\""));
+        assert!(!rendered.contains("rendered_lines"));
+        assert!(!rendered.contains("raw_text"));
+        assert!(!rendered.contains("stdout"));
+        assert!(!rendered.contains("Hello, World!"));
+        assert!(!rendered.contains("\"result\": \"pass\""));
+
+        let snapshot = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/7hell_e1/snapshots/practical_failure_json.json");
+        let expected = std::fs::read_to_string(&snapshot)
+            .unwrap_or_else(|err| panic!("read {}: {}", snapshot.display(), err));
+        assert_eq!(expected.replace("\r\n", "\n"), rendered.replace("\r\n", "\n"));
+    }
+
+    #[test]
     fn display_path_never_reveals_absolute_temp_path() {
         let dir = mk_temp_dir("smc_7hell_s2_display");
         let entry = dir.join("program.sm");
