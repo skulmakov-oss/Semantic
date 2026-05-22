@@ -18,9 +18,10 @@ skeleton.
 
 Current bounded status:
 
-- S1..S7 are completed in the bounded current scope.
-- E1..E5 are completed.
+- Implementation work packages S1..S7 are completed in the bounded current scope.
+- Evidence packages E1..E5 are completed.
 - WR2 has been recorded.
+- This does not mean all 7hell stages are complete: Diagnostics Hell / User Pain remains not implemented and still requires a separate boundary decision.
 - `7hell` is still not a release gate.
 - `7hell` is still not a CI gate.
 - `7hell` is still not CTF closure.
