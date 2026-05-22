@@ -2188,17 +2188,17 @@ struct ControlledObservationCliEnvelope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ControlledObservationSummary {
-    sequence_index: u64,
-    observation_class: HelloObservationClass,
-    text_hash: u64,
+pub struct ControlledObservationSummary {
+    pub sequence_index: u64,
+    pub observation_class: HelloObservationClass,
+    pub text_hash: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct ControlledObservationQualificationEnvelope {
-    capability_decision: HelloObservationCapabilityDecision,
-    audit_results: Vec<ControlledObservationAuditResult>,
-    observations: Vec<ControlledObservationSummary>,
+pub struct ControlledObservationQualificationEnvelope {
+    pub capability_decision: HelloObservationCapabilityDecision,
+    pub audit_results: Vec<ControlledObservationAuditResult>,
+    pub observations: Vec<ControlledObservationSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2308,7 +2308,7 @@ fn collect_controlled_observation_envelope(
     })
 }
 
-fn qualify_controlled_observation_envelope(
+pub(crate) fn qualify_controlled_observation_envelope(
     bytes: &[u8],
 ) -> Result<ControlledObservationQualificationEnvelope, String> {
     let internal = collect_controlled_observation_envelope(bytes)?;

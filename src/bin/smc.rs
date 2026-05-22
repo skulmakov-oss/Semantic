@@ -4,7 +4,8 @@ use std::process::ExitCode;
 
 use sm_emit::{compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
 use sm_front::FrontendError;
-use sm_verify::{RejectReport, VerifiedProgram, verify_semcode};
+use sm_verify::{verify_semcode, RejectReport, VerifiedProgram};
+use smc_cli::{CliPipeline, ControlledObservationQualificationEnvelope};
 use sm_vm::{run_verified_semcode, RuntimeError as VmRuntimeError};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,6 +22,7 @@ enum SevenHellDiagnosticKind {
     VerifierRejection,
     VmTrap,
     VmError,
+    PracticalDiagnostic,
     BoundaryDenial,
 }
 
@@ -33,6 +35,7 @@ impl SevenHellDiagnosticKind {
             Self::VerifierRejection => "verifier-rejection",
             Self::VmTrap => "vm-trap",
             Self::VmError => "vm-error",
+            Self::PracticalDiagnostic => "practical-diagnostic",
             Self::BoundaryDenial => "boundary-denial",
         }
     }
@@ -198,7 +201,17 @@ fn execute_7hell_single_file(target: &str, output_mode: SevenHellOutputMode) -> 
             ) {
                 Ok(bytes) => match verify_semcode(&bytes) {
                     Ok(verified) => match run_verified_semcode(&bytes) {
-                        Ok(()) => build_vm_passed_7hell_report(target_display, verified),
+                        Ok(()) => match CliPipeline::qualify_controlled_observation_bytes(&bytes) {
+                            Ok(practical) => build_practical_passed_7hell_report(
+                                target_display,
+                                verified,
+                                practical,
+                            ),
+                            Err(error) => build_practical_failed_7hell_report(
+                                target_display.clone(),
+                                diagnostic_from_practical_error(&error, &target_display),
+                            ),
+                        },
                         Err(error) => build_vm_failed_7hell_report(
                             target_display.clone(),
                             diagnostic_from_vm_error(&error, &target_display),
@@ -262,9 +275,18 @@ fn display_path_for_report(path: &str) -> String {
 
 #[cfg(test)]
 fn build_verified_7hell_report(target_display: String, verified: VerifiedProgram) -> SevenHellReport {
-    build_vm_passed_7hell_report(target_display, verified)
+    build_practical_passed_7hell_report(
+        target_display,
+        verified,
+        ControlledObservationQualificationEnvelope {
+            capability_decision: prom_cap::hello_observation_capability::HelloObservationCapabilityDecision::Allow,
+            audit_results: Vec::new(),
+            observations: Vec::new(),
+        },
+    )
 }
 
+#[allow(dead_code)]
 fn build_vm_passed_7hell_report(target_display: String, verified: VerifiedProgram) -> SevenHellReport {
     SevenHellReport {
         target_display: target_display.clone(),
@@ -324,7 +346,7 @@ fn build_vm_passed_7hell_report(target_display: String, verified: VerifiedProgra
                 "Practical Hell",
                 "practical",
                 SevenHellStageStatus::Blocked,
-                "host-visible effects and practical qualification are outside 7HELL-S6",
+                "host-visible effects and practical qualification are outside 7HELL-S7",
                 Some("vm"),
                 vec![],
             ),
@@ -333,14 +355,181 @@ fn build_vm_passed_7hell_report(target_display: String, verified: VerifiedProgra
                 "User Pain / Diagnostics Hell",
                 "diagnostics",
                 SevenHellStageStatus::NotImplemented,
-                "7HELL-S6 does not wire diagnostics",
+                "7HELL-S7 does not wire diagnostics",
                 None,
                 vec![],
             ),
         ],
         diagnostics: Vec::new(),
-        boundary_status: "s6-silent-vm-stage-only",
-        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s7-practical-qualification-only",
+        boundary: "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+    }
+}
+
+fn build_practical_passed_7hell_report(
+    target_display: String,
+    verified: VerifiedProgram,
+    practical: ControlledObservationQualificationEnvelope,
+) -> SevenHellReport {
+    SevenHellReport {
+        target_display: target_display.clone(),
+        target_normalized: target_display,
+        result: SevenHellResult::Incomplete,
+        stages: [
+            stage_report(
+                1,
+                "Syntax Hell",
+                "syntax",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted",
+                None,
+                vec![],
+            ),
+            stage_report(
+                2,
+                "Type Hell",
+                "type",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted",
+                None,
+                vec![],
+            ),
+            stage_report(
+                3,
+                "Lowering Hell",
+                "lowering",
+                SevenHellStageStatus::Pass,
+                "SemCode emitted for verifier admission",
+                None,
+                vec![],
+            ),
+            stage_report(
+                4,
+                "Verifier Hell",
+                "verifier",
+                SevenHellStageStatus::Pass,
+                format!(
+                    "SemCode verifier accepted program ({} function(s))",
+                    verified.functions.len()
+                ),
+                None,
+                vec![],
+            ),
+            stage_report(
+                5,
+                "VM Hell",
+                "vm",
+                SevenHellStageStatus::Pass,
+                "VM executed verified SemCode successfully",
+                None,
+                vec![],
+            ),
+            stage_report(
+                6,
+                "Practical Hell",
+                "practical",
+                SevenHellStageStatus::Pass,
+                format!(
+                    "Practical qualification completed without host-visible rendering ({} observation(s), {} audit record(s))",
+                    practical.observations.len(),
+                    practical.audit_results.len()
+                ),
+                None,
+                vec![],
+            ),
+            stage_report(
+                7,
+                "User Pain / Diagnostics Hell",
+                "diagnostics",
+                SevenHellStageStatus::NotImplemented,
+                "7HELL-S7 does not wire diagnostics",
+                None,
+                vec![],
+            ),
+        ],
+        diagnostics: Vec::new(),
+        boundary_status: "s7-practical-qualification-only",
+        boundary: "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+    }
+}
+
+fn build_practical_failed_7hell_report(
+    target_display: String,
+    diagnostic: SevenHellDiagnostic,
+) -> SevenHellReport {
+    let diag_id = diagnostic.id.clone();
+    SevenHellReport {
+        target_display: target_display.clone(),
+        target_normalized: target_display,
+        result: SevenHellResult::Fail,
+        stages: [
+            stage_report(
+                1,
+                "Syntax Hell",
+                "syntax",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted",
+                None,
+                vec![],
+            ),
+            stage_report(
+                2,
+                "Type Hell",
+                "type",
+                SevenHellStageStatus::Pass,
+                "single-file check accepted",
+                None,
+                vec![],
+            ),
+            stage_report(
+                3,
+                "Lowering Hell",
+                "lowering",
+                SevenHellStageStatus::Pass,
+                "SemCode emitted for verifier admission",
+                None,
+                vec![],
+            ),
+            stage_report(
+                4,
+                "Verifier Hell",
+                "verifier",
+                SevenHellStageStatus::Pass,
+                "SemCode verifier accepted program",
+                None,
+                vec![],
+            ),
+            stage_report(
+                5,
+                "VM Hell",
+                "vm",
+                SevenHellStageStatus::Pass,
+                "VM executed verified SemCode successfully",
+                None,
+                vec![],
+            ),
+            stage_report(
+                6,
+                "Practical Hell",
+                "practical",
+                SevenHellStageStatus::Fail,
+                failure_stage_summary(&diagnostic),
+                None,
+                vec![diag_id.clone()],
+            ),
+            stage_report(
+                7,
+                "User Pain / Diagnostics Hell",
+                "diagnostics",
+                SevenHellStageStatus::NotImplemented,
+                "7HELL-S7 does not wire diagnostics",
+                None,
+                vec![],
+            ),
+        ],
+        diagnostics: vec![diagnostic],
+        boundary_status: "s7-practical-qualification-only",
+        boundary: "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -413,14 +602,14 @@ fn build_lowering_failed_7hell_report(
                 "User Pain / Diagnostics Hell",
                 "diagnostics",
                 SevenHellStageStatus::NotImplemented,
-                "verifier-stage audit does not wire diagnostics for compile failures",
+                "diagnostic wiring reserved for 7HELL-S3",
                 None,
                 vec![],
             ),
         ],
         diagnostics: vec![diagnostic],
-        boundary_status: "s6-silent-vm-stage-only",
-        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s7-practical-qualification-only",
+        boundary: "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -493,14 +682,14 @@ fn build_verifier_failed_7hell_report(
                 "User Pain / Diagnostics Hell",
                 "diagnostics",
                 SevenHellStageStatus::NotImplemented,
-                "7HELL-S5 does not wire diagnostics",
+                "7HELL-S7 does not wire diagnostics",
                 None,
                 vec![],
             ),
         ],
         diagnostics: vec![diagnostic],
-        boundary_status: "s6-silent-vm-stage-only",
-        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s7-practical-qualification-only",
+        boundary: "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -564,7 +753,7 @@ fn build_vm_failed_7hell_report(
                 "Practical Hell",
                 "practical",
                 SevenHellStageStatus::Blocked,
-                "host-visible effects and practical qualification are outside 7HELL-S6",
+                "host-visible effects and practical qualification are outside 7HELL-S7",
                 Some("vm"),
                 vec![],
             ),
@@ -573,14 +762,14 @@ fn build_vm_failed_7hell_report(
                 "User Pain / Diagnostics Hell",
                 "diagnostics",
                 SevenHellStageStatus::NotImplemented,
-                "7HELL-S6 does not wire diagnostics",
+                "7HELL-S7 does not wire diagnostics",
                 None,
                 vec![],
             ),
         ],
         diagnostics: vec![diagnostic],
-        boundary_status: "s6-silent-vm-stage-only",
-        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s7-practical-qualification-only",
+        boundary: "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -675,8 +864,8 @@ fn build_check_failed_7hell_report(target_display: String, diagnostic: SevenHell
             ),
         ],
         diagnostics,
-        boundary_status: "s6-silent-vm-stage-only",
-        boundary: "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
+        boundary_status: "s7-practical-qualification-only",
+        boundary: "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure",
     }
 }
 
@@ -945,6 +1134,25 @@ fn diagnostic_from_vm_error(error: &VmRuntimeError, target_display: &str) -> Sev
     }
 }
 
+fn diagnostic_from_practical_error(error_text: &str, target_display: &str) -> SevenHellDiagnostic {
+    let first_line = error_text.lines().next().unwrap_or(error_text);
+    SevenHellDiagnostic {
+        id: "D001".to_string(),
+        stage: "practical",
+        kind: SevenHellDiagnosticKind::PracticalDiagnostic,
+        code: "PracticalQualificationFailed".to_string(),
+        category: "practical",
+        message_needle: extract_error_message(first_line)
+            .unwrap_or_else(|| first_line.trim().to_string()),
+        severity: "error",
+        source: SevenHellDiagnosticSource {
+            file: target_display.to_string(),
+            line: None,
+            column: None,
+        },
+    }
+}
+
 fn vm_trap_message_needle(trap: sm_runtime_core::RuntimeTrap) -> String {
     match trap {
         sm_runtime_core::RuntimeTrap::AssertionFailed => "assertion failed".to_string(),
@@ -1108,11 +1316,13 @@ mod tests {
         assert!(rendered.contains("[3/7] Lowering Hell"));
         assert!(rendered.contains("[4/7] Verifier Hell"));
         assert!(rendered.contains("[5/7] VM Hell"));
+        assert!(rendered.contains("[6/7] Practical Hell"));
         assert!(rendered.contains("PASS"));
-        assert!(rendered.contains("BLOCKED"));
+        assert!(!rendered.contains("BLOCKED"));
+        assert!(rendered.contains("Practical qualification completed without host-visible rendering (0 observation(s), 0 audit record(s))"));
         assert!(rendered.contains("result: INCOMPLETE"));
         assert!(rendered.contains(
-            "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+            "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
         ));
         assert!(!rendered.contains("result: PASS"));
     }
@@ -1143,9 +1353,9 @@ mod tests {
         assert!(rendered.contains("\"key\": \"verifier\""));
         assert!(rendered.contains("\"key\": \"diagnostics\""));
         assert!(rendered.contains("\"status\": \"pass\""));
-        assert!(rendered.contains("\"status\": \"blocked\""));
+        assert!(rendered.contains("\"status\": \"not_implemented\""));
         assert!(rendered.contains("\"scope\": \"7hell-single-file\""));
-        assert!(rendered.contains("\"status\": \"s6-silent-vm-stage-only\""));
+        assert!(rendered.contains("\"status\": \"s7-practical-qualification-only\""));
         assert!(rendered.contains("\"diagnostics\": []"));
     }
 
@@ -1167,12 +1377,13 @@ fn main() {
         assert!(outcome.success);
         assert!(outcome.rendered.contains("Syntax Hell"));
         assert!(outcome.rendered.contains("PASS"));
-        assert!(outcome.rendered.contains("BLOCKED"));
+        assert!(outcome.rendered.contains("[6/7] Practical Hell"));
+        assert!(outcome.rendered.contains("Practical qualification completed without host-visible rendering (0 observation(s), 0 audit record(s))"));
         assert!(outcome.rendered.contains("VM executed verified SemCode successfully"));
         assert!(outcome.rendered.contains("result: INCOMPLETE"));
         assert!(!outcome.rendered.contains("result: PASS"));
         assert!(outcome.rendered.contains(
-            "boundary: S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+            "boundary: S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
         ));
 
         let _ = std::fs::remove_dir_all(&dir);

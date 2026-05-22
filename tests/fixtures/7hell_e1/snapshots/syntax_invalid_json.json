@@ -102,8 +102,8 @@
     {
       "id": "B001",
       "scope": "7hell-single-file",
-      "status": "s6-silent-vm-stage-only",
-      "reason": "S6 silent VM-stage execution only; no host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+      "status": "s7-practical-qualification-only",
+      "reason": "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
     }
   ]
 }

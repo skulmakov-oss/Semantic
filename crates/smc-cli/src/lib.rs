@@ -36,6 +36,8 @@ pub struct CliPipeline;
 #[cfg(feature = "std")]
 pub use app::{main_entry, run};
 #[cfg(feature = "std")]
+pub use app::{ControlledObservationQualificationEnvelope, ControlledObservationSummary};
+#[cfg(feature = "std")]
 pub use api_contract::{build_generated_api_contract, format_generated_api_contract, GeneratedApiContractArtifact, GeneratedApiContractBuildError, GeneratedApiField, GeneratedApiSchema, GeneratedApiSchemaRole, GeneratedApiSchemaShape, GeneratedApiVariant, GENERATED_API_CONTRACT_FORMAT_VERSION, GENERATED_API_CONTRACT_GENERATOR, GENERATED_API_CONTRACT_GENERATOR_VERSION};
 #[cfg(feature = "std")]
 pub use config::{build_config_contract, parse_config_document, validate_config_document, ConfigContract, ConfigContractBuildError, ConfigDocument, ConfigEntry, ConfigNumber, ConfigNumberKind, ConfigParseError, ConfigValidationDiagnostic, ConfigValidationError, ConfigValue};
@@ -97,6 +99,12 @@ impl CliPipeline {
             .canonicalize()
             .map_err(|e| format!("failed to resolve '{}': {}", path.display(), e))?;
         check_file_with_provider(&root, &provider).map_err(|e| e.to_string())
+    }
+
+    pub fn qualify_controlled_observation_bytes(
+        bytes: &[u8],
+    ) -> Result<ControlledObservationQualificationEnvelope, String> {
+        app::qualify_controlled_observation_envelope(bytes)
     }
 
     pub fn explain(code: &str) -> Option<&'static str> {
