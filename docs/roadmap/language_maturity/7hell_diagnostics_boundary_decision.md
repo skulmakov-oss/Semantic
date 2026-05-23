@@ -10,6 +10,10 @@ Related:
 - `7hell_current_status_after_wr2.md`
 - `7hell_waypoint_review_after_s1_s7_e1_e5.md`
 
+The report-quality seam audit is recorded in:
+
+- `../../../reports/7hell_diag_report_quality_seam_audit.md`
+
 ## 1. Background
 
 `7hell` has reached an active bounded qualification contour.
