@@ -7,6 +7,7 @@ Non-goal: implementation, S8, release readiness, CI gate, or CTF closure
 
 Related:
 
+- `7hell_diagnostics_boundary_decision.md`
 - `7hell_qualification_contract.md`
 - `7hell_waypoint_review_after_s1_s7_e1_e5.md`
 - `roadmap_wave_2_7hell_update.md`
@@ -21,7 +22,8 @@ Current bounded status:
 - Implementation work packages S1..S7 are completed in the bounded current scope.
 - Evidence packages E1..E5 are completed.
 - WR2 has been recorded.
-- This does not mean all 7hell stages are complete: Diagnostics Hell / User Pain remains not implemented and still requires a separate boundary decision.
+- This does not mean all 7hell stages are complete: Diagnostics Hell / User Pain remains not implemented.
+- The Diagnostics Hell boundary decision is recorded in `7hell_diagnostics_boundary_decision.md`.
 - `7hell` is still not a release gate.
 - `7hell` is still not a CI gate.
 - `7hell` is still not CTF closure.
@@ -46,7 +48,7 @@ only pattern this document records.
 | Verifier Hell | active / rejection snapshot-backed | S5 + E3 | #730, #731, #732, #740 | selected single-file fixtures only, no verifier behavior change |
 | VM Hell | active / trap snapshot-backed | S6 + E4 | #733, #734, #735, #740 | silent verified single-file VM execution only, no host-visible output |
 | Practical Hell | active / failure snapshot-backed | S7 + E5 | #736, #737, #738, #739, #740 | uses non-rendering practical envelope, no raw observation text, no host-visible output |
-| Diagnostics Hell / User Pain | not implemented / decision required | none yet | pending next decision only | must not be implemented before deciding whether it is a standalone S8 stage, a report-quality layer, or a future PCC diagnostics track |
+| Diagnostics Hell / User Pain | not implemented / boundary decided | decision record only | `7hell_diagnostics_boundary_decision.md` | classified as a report-quality layer applied across existing failure reports; implementation remains future work |
 
 ## 3. Recent PR pattern
 
@@ -61,16 +63,17 @@ for future Diagnostics/User-Pain work:
 
 Any future Diagnostics Hell work must follow that same pattern.
 
-## 4. Next decision: Diagnostics Hell boundary
+## 4. Diagnostics Hell boundary decision
 
-Before implementation begins, Diagnostics Hell must be classified as one of:
+The boundary decision is recorded in:
 
-- A. Standalone `7HELL-S8` stage
-- B. Report-quality layer applied across all failure reports
-- C. Future PCC diagnostics track, not part of the current 7hell wave
+- `7hell_diagnostics_boundary_decision.md`
 
-This document does not choose among those options.
-That decision is still required before any Diagnostics Hell implementation work.
+Diagnostics Hell / User Pain is classified as a report-quality layer applied
+across existing failure reports.
+
+Diagnostics Hell remains not implemented.
+The next safe work package is audit-only.
 
 ## 5. Explicit non-goals
 

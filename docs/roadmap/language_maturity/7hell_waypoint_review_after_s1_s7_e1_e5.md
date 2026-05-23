@@ -7,6 +7,7 @@ Non-goal: release readiness, CTF closure, project-root behavior, package/workspa
 Current post-WR2 status refresh:
 
 - `7hell_current_status_after_wr2.md`
+- `7hell_diagnostics_boundary_decision.md`
 
 ## 1. Current stage status
 
@@ -88,15 +89,15 @@ Failure paths:
 
 ## 5. Remaining bounded decision
 
-Diagnostics Hell / User Pain remains undecided.
+The Diagnostics Hell / User Pain boundary decision is recorded in:
 
-Before implementation, decide whether it is:
+- `7hell_diagnostics_boundary_decision.md`
 
-- A. standalone `7HELL-S8` stage;
-- B. report-quality layer across all failure reports;
-- C. future PCC diagnostics track outside the current 7hell wave.
+Diagnostics Hell / User Pain is classified as a report-quality layer across all
+failure reports.
 
-No S8 work should start before this decision is recorded.
+Implementation remains future work.
+No S8 execution-stage work should start from this waypoint review.
 
 ## 6. Decision
 
