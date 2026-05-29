@@ -37,7 +37,6 @@ This is a zero-effect program. It is useful for checking the core path without c
 
 ## Visual Architecture Render
 
-[![Semantic Snake AI Demo](https://img.youtube.com/vi/SKV-TfaJ0Fg/maxresdefault.jpg)](https://www.youtube.com/watch?v=SKV-TfaJ0Fg)
 
 > Visual prototype for rendering execution pipelines, verifier gates, capability boundaries, runtime-state overlays, and architecture graphs.
 
