@@ -1,6 +1,6 @@
 # CTF-2 — Trap Taxonomy
 
-Status: frozen for PCC core readiness
+Status: frozen for PCC core readiness and post-7hell sync
 Parent lane: `core_trust_freeze/index.md`
 
 ## 1. Purpose
@@ -9,7 +9,9 @@ This file freezes the current execution-failure surface that PCC practical core
 readiness depends on.
 
 The goal is not to forecast every future failure mode. The goal is to make the
-current failure surface explicit, stable, and reviewable before PCC-1 starts.
+current failure surface explicit, stable, and reviewable before PCC-1 starts,
+and to keep the post-7hell diagnostics/report-quality work separate from trap
+taxonomy widening.
 
 ## 2. Freeze status
 
@@ -52,6 +54,10 @@ None remain in the PCC-0F freeze set after this pass.
 
 If a future PCC PR introduces a new runtime-failure class, it starts here and
 must not be claimed as frozen until evidence exists.
+
+The current 7hell diagnostics/report-quality layer does not add a new trap
+class. It classifies report quality after execution and should remain separate
+from VM trap naming.
 
 ## CTF-WP2 PCC-4..PCC-9 Trap / Diagnostics Sync
 
@@ -133,6 +139,10 @@ the blocker set for FM-035 in this pass.
 That includes capability / UI capability / host-ABI denial surfaces that are
 owned by the capability and boundary documentation lanes.
 
+Controlled-observation denials remain boundary denials, not VM trap classes.
+They are evaluated in the observation/report layer and must not be renamed into
+the trap taxonomy unless a later PCC or CTF review explicitly promotes them.
+
 ## 7. Admission rule for new trap classes
 
 1. Name the class explicitly.
@@ -168,6 +178,9 @@ boundary docs, so they do not block the practical-core trap taxonomy freeze in
 this pass.
 
 FM-036 remains a separate blocker and is not changed by this PR.
+
+The post-7hell Diagnostics Hell report-quality layer does not change the frozen
+trap set or create a new VM failure family.
 
 ## 10. Acceptance checklist
 
