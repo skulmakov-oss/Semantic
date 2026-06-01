@@ -1,6 +1,6 @@
 # CTF-1 — RuntimeValue Registry
 
-Status: draft registry
+Status: post-PCC / post-7hell sync registry
 Parent lane: `core_trust_freeze/index.md`
 
 ## Purpose
@@ -11,7 +11,7 @@ It is not a full VM implementation document. It is a trust registry.
 
 ## Current registry shape
 
-Use the following table during PCC live audit.
+Use the following table during PCC live audit and post-7hell trust synchronization.
 
 | Runtime value family | Status | PCC owner | Notes |
 |---|---|---|---|
@@ -29,6 +29,7 @@ Use the following table during PCC live audit.
 | `Result(T,E)` | freeze-candidate | PCC-6 | Current standard-form Result only. |
 | `Sequence<T>` | freeze-candidate | PCC-7 | Current admitted Sequence fixture-backed surface only. |
 | `Map<K,V>` | freeze-candidate | PCC-7 | Current admitted Map baseline only; missing-key / iteration / quota policy remains open. |
+| controlled observation carrier / event | out-of-pcc | M-Hello / 7hell | Narrow controlled-observation evidence exists, but this is not general stdout and not a general runtime value family in this trust lane. |
 | project manifest metadata | audit-needed | PCC-9 | Current Semantic.package manifest baseline only; not a runtime value unless later represented in VM/runtime. |
 | closure values | out-of-pcc unless audited | post-PCC / current-main audit | Do not widen in PCC unless explicitly pulled in. |
 | host handles | out-of-pcc | separate runtime boundary scope | Do not mix into practical core. |
@@ -68,7 +69,7 @@ Any public conversion belongs to PCC-8 Stdlib v0.
 
 ## CTF-WP2 PCC-4..PCC-9 Runtime Value Sync
 
-PCC-4..PCC-9 closeouts did not add new runtime behavior in this PR.
+PCC-4..PCC-9 closeouts and the current 7hell / M-Hello wave did not add new runtime value families in this registry.
 
 WP2 records trust status based on existing PCC fixture evidence.
 
@@ -84,4 +85,5 @@ Boundary notes:
 - Sequence: current positive / negative fixture-backed operations only;
 - Map: current baseline only; missing-key behavior, iteration policy, and memory/quota remain open;
 - text / to_text: no universal reflection; debug_render remains internal-only;
+- controlled observation carrier / event: narrow verified-observation evidence exists, but it is not a general stdout family and stays separate from raw observation text;
 - Project Model: Semantic.package baseline is project-adjacent evidence, not a runtime value family unless runtime representation is later introduced.
