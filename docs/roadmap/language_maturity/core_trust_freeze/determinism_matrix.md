@@ -100,6 +100,7 @@ Open determinism notes:
 - map missing-key behavior remains unresolved;
 - map iteration policy remains unresolved;
 - collection memory/quota determinism remains open;
+- Map open-edge policy is recorded in `map_open_edge_policy.md`;
 - project-root discovery remains open;
 - semantic.toml parse/load determinism remains open;
 - src/main.sm discovery remains open;

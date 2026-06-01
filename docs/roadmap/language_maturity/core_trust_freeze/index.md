@@ -34,6 +34,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 - 7hell PCC stage mapping: `docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md`
 - 7hell initial fixture selection: `docs/roadmap/language_maturity/7hell_initial_fixture_selection.md`
 - SymbolId hot-path audit: `docs/roadmap/language_maturity/core_trust_freeze/symbolid_hot_path_audit.md`
+- Map open-edge policy: `docs/roadmap/language_maturity/core_trust_freeze/map_open_edge_policy.md`
 - PCC waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
 
 ## Files
@@ -53,6 +54,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 | `7hell_diag_report_quality_seam_audit.md` | Has the future Diagnostics Hell report-quality seam been located safely? |
 | `capability_denial_replay.md` | Has denied-effect replay evidence been planned without widening capability behavior? |
 | `symbolid_hot_path_audit.md` | Have names and symbols been audited to stay off the runtime hot path? |
+| `map_open_edge_policy.md` | Have Map missing-key / iteration / quota edges been kept explicitly open? |
 
 ## PR requirement
 
