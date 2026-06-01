@@ -28,6 +28,8 @@ CTF is not a final phase after PCC. It runs across PCC.
 - Project-root trust policy: `docs/roadmap/language_maturity/core_trust_freeze/project_root_trust_policy.md`
 - Project-root trust waypoint: `CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I`
 - 7hell report contract: `docs/roadmap/language_maturity/7hell_report_contract.md`
+- 7hell Diagnostics Hell boundary decision: `docs/roadmap/language_maturity/7hell_diagnostics_boundary_decision.md`
+- 7hell Diagnostics Hell seam audit: `reports/7hell_diag_report_quality_seam_audit.md`
 - 7hell PCC stage mapping: `docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md`
 - 7hell initial fixture selection: `docs/roadmap/language_maturity/7hell_initial_fixture_selection.md`
 - PCC waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
@@ -45,6 +47,8 @@ CTF is not a final phase after PCC. It runs across PCC.
 | `capability_effect_denial_matrix.md` | Did host/effect/capability behavior change? |
 | `project_root_trust_policy.md` | Does future project-root support preserve verifier-first trust? |
 | `7hell_report_contract.md` | Does future 7hell reporting remain stable and deterministic? |
+| `7hell_diagnostics_boundary_decision.md` | Has Diagnostics Hell been classified without changing execution behavior? |
+| `7hell_diag_report_quality_seam_audit.md` | Has the future Diagnostics Hell report-quality seam been located safely? |
 
 ## PR requirement
 
