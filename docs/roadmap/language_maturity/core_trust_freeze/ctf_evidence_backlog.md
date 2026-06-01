@@ -26,7 +26,7 @@ It prevents uncontrolled jump from docs-sync to release claims.
 | CTF-BL-005 | Trap taxonomy regression | map fixture-backed failure surfaces to stable trap/diagnostic categories | avoid compile diagnostics vs VM trap confusion | CTF-E3 | done | trap freeze |
 | CTF-BL-006 | Project-root trust policy | define trust impact before project-root check/run implementation | project-root remains open | CTF-WP6 | done | project model freeze |
 | CTF-BL-007 | 7hell report shape | define stable qualification report surface | readiness needs stable qualification output | 7HELL-WP1 | done | readiness |
-| CTF-BL-008 | Capability denial replay | replay denied-effect behavior once capability surfaces widen | capability denial must be deterministic | future CTF-E | deferred | capability freeze |
+| CTF-BL-008 | Capability denial replay | replay denied-effect behavior once capability surfaces widen | capability denial must be deterministic | CTF-E4 | ready-for-task | capability freeze |
 | CTF-BL-009 | SymbolId / hot-path audit | verify PCC value/name surfaces do not regress into string hot paths | freeze-candidate names need hot-path discipline | future CTF-WP/E | planned | runtime performance/trust |
 
 Status values allowed:
@@ -119,6 +119,31 @@ Boundaries:
 - no new trap class is promoted to frozen without existing evidence;
 - no CTF closure;
 - no release readiness.
+
+## CTF-E4 Evidence
+
+CTF-E4 adds denied-effect replay evidence for capability and effect surfaces that can be mistaken for host widening.
+
+Covered:
+
+- bounded `print(text)` replay;
+- `to_text` / formatting boundary replay;
+- `debug_render` internal-only replay boundary;
+- file IO denial replay;
+- network IO denial replay;
+- host gate read/write denial replay;
+- pulse emit denial replay;
+- UI event/frame denial replay;
+- audit emission internal-only replay.
+
+Boundaries:
+
+- no host widening;
+- no new IO path;
+- no registry or remote fetch replay;
+- no telemetry widening;
+- no release readiness;
+- no CTF closure.
 
 ## Evidence Classes
 

@@ -148,13 +148,13 @@ No release-readiness claim may cite CTF-WP1..WP4 without a later CTF closeout / 
 
 ```text
 Decision:
-Move from CTF docs-sync waypoint into targeted evidence planning.
+Move from CTF docs-sync waypoint into targeted denied-effect replay evidence planning.
 
 Immediate next step:
-CTF-E1 — test(core-trust-freeze): add golden trace coverage for selected PCC fixture surfaces
+CTF-E4 — docs(core-trust-freeze): define capability denial replay evidence
 ```
 
-Alternative if we want one more docs-only step:
+Alternative if we want one more docs-only step before evidence:
 
 ```text
 CTF-WP5 — docs(core-trust-freeze): define CTF evidence backlog and freeze-candidate promotion rules
@@ -162,10 +162,10 @@ CTF-WP5 — docs(core-trust-freeze): define CTF evidence backlog and freeze-cand
 
 Default recommendation:
 
-- If we want to start hardening with tests: `CTF-E1`.
-- If we want one more control document before tests: `CTF-WP5`.
+- If we want to start hardening the trust lane with replay evidence: `CTF-E4`.
+- If we want one more control document before evidence work: `CTF-WP5`.
 
-The document should recommend `CTF-WP5` first if the project wants maximum control before adding trace artifacts.
+The document should recommend `CTF-E4` first if the project wants the next trust-evidence boundary rather than another backlog-only control step.
 
 ## Evidence Backlog Preview
 
@@ -175,6 +175,7 @@ The document should recommend `CTF-WP5` first if the project wants maximum contr
 | Golden trace artifacts | Need stable source / type / IR / SemCode / verifier / VM trace samples | CTF-E1 |
 | Collection determinism replay | Map / Sequence behavior needs replay evidence | CTF-E2 |
 | Trap taxonomy regression | Fixture-backed failure surfaces need stable trap / diagnostic mapping | CTF-E3 |
+| Capability denial replay | Denied-effect behavior needs replay evidence | CTF-E4 |
 | Project-root trust policy | Future project-root work must preserve verifier / determinism / capability boundaries | future PCC-9I / CTF follow-up |
 | 7hell report shape | Qualification output must become stable before readiness | 7HELL-WP / CTF-E follow-up |
 
