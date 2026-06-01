@@ -40,7 +40,7 @@ The admitted `smc` command surface is currently:
 
 Current accepted usage forms are:
 
-- `smc compile <input.sm> -o|--out <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--metrics]`
+- `smc compile <input.sm|project-root> -o|--out <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--metrics]`
 - `smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc watch <input.sm> [--metrics] [--color auto|always|never]`
@@ -123,11 +123,12 @@ Public rule:
 
 ## Source Admission Rule
 
-Commands that ingest source input through `<input.sm>` operate through the current package-admission and helper-module loading rules rather than unrestricted filesystem execution.
+Commands that ingest source input through `<input.sm>` or admitted project-root forms operate through the current package-admission and helper-module loading rules rather than unrestricted filesystem execution.
 
 Current rule:
 
 - source-reading commands inherit the current executable bundle admission boundary
+- project-root `smc compile` uses the bounded project entry resolution, then writes the SemCode artifact only to the requested `-o|--out` path
 - `smc check` also accepts a bounded admitted project-root entrypoint through `Semantic.package` + `src/main.sm`
 - project-root `smc check` also resolves a minimal `semantic.toml` manifest when present
 - project-root `smc run` uses the same bounded project entry resolution, then follows the existing verifier-first source execution route

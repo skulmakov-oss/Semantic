@@ -37,6 +37,39 @@ fn cli_run_project_root_ok(dir: &std::path::Path, context: &str) {
     cli_ok(vec!["run".to_string(), input], context);
 }
 
+fn cli_compile_project_root_ok(dir: &std::path::Path, out_name: &str, context: &str) -> PathBuf {
+    let input = normalize_path(dir);
+    let out = dir.join(out_name);
+    let out_arg = normalize_path(&out);
+    cli_ok(
+        vec![
+            "compile".to_string(),
+            input,
+            "-o".to_string(),
+            out_arg.clone(),
+        ],
+        context,
+    );
+    assert!(out.is_file(), "{context} did not write requested output");
+    cli_ok(
+        vec!["verify".to_string(), out_arg],
+        &format!("{context} produced unverifiable SemCode"),
+    );
+    out
+}
+
+fn cli_compile_project_root_err(dir: &std::path::Path, out_name: &str, context: &str) -> String {
+    let input = normalize_path(dir);
+    let out = dir.join(out_name);
+    let out_arg = normalize_path(&out);
+    let err = cli_err(
+        vec!["compile".to_string(), input, "-o".to_string(), out_arg],
+        context,
+    );
+    assert!(!out.exists(), "{context} unexpectedly wrote output");
+    err
+}
+
 fn cli_check_dot_ok(dir: &std::path::Path, context: &str) {
     let output = Command::new(env!("CARGO_BIN_EXE_smc"))
         .arg("check")
@@ -67,6 +100,31 @@ fn cli_run_dot_ok(dir: &std::path::Path, context: &str) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn cli_compile_dot_ok(dir: &std::path::Path, out_name: &str, context: &str) -> PathBuf {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("compile")
+        .arg(".")
+        .arg("-o")
+        .arg(out_name)
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let out = dir.join(out_name);
+    assert!(out.is_file(), "{context} did not write requested output");
+    cli_ok(
+        vec!["verify".to_string(), normalize_path(&out)],
+        &format!("{context} produced unverifiable SemCode"),
+    );
+    out
 }
 
 fn cli_err(args: Vec<String>, context: &str) -> String {
@@ -216,6 +274,20 @@ fn full_project_root_package_baseline_run_path() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn full_project_root_package_baseline_compile_path() {
+    let dir = mk_temp_dir("pcc9_project_root_package_compile_acceptance");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+
+    cli_compile_project_root_ok(
+        &dir,
+        "package-out.smc",
+        "smc compile for package project root",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn pcc9_single_file_baseline_passes_full_cli_path() {
     full_cli_path("tests/fixtures/pcc9_project_model/single_file_baseline/main.sm");
@@ -237,6 +309,11 @@ fn pcc9_project_root_package_baseline_still_runs_entrypoint() {
 }
 
 #[test]
+fn pcc9_project_root_package_baseline_still_compiles_entrypoint() {
+    full_project_root_package_baseline_compile_path();
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_explicit_entry_passes_check() {
     let dir = mk_temp_dir("pcc9_project_root_semantic_explicit_entry");
     write_semantic_toml(&dir, Some("src/main.sm"));
@@ -254,6 +331,17 @@ fn pcc9_project_root_semantic_toml_explicit_entry_runs() {
     write_source(&dir.join("src").join("main.sm"));
 
     cli_run_project_root_ok(&dir, "smc run for semantic.toml explicit entry");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_semantic_toml_explicit_entry_compiles() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_explicit_entry_compile");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    cli_compile_project_root_ok(&dir, "explicit-out.smc", "smc compile for explicit entry");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -281,6 +369,17 @@ fn pcc9_project_root_semantic_toml_default_entry_runs() {
 }
 
 #[test]
+fn pcc9_project_root_semantic_toml_default_entry_compiles() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_default_entry_compile");
+    write_semantic_toml(&dir, None);
+    write_source(&dir.join("src").join("main.sm"));
+
+    cli_compile_project_root_ok(&dir, "default-out.smc", "smc compile for default entry");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_nested_entry_passes_check() {
     let dir = mk_temp_dir("pcc9_project_root_semantic_nested_entry");
     write_semantic_toml(&dir, Some("examples/main.sm"));
@@ -298,6 +397,17 @@ fn pcc9_project_root_semantic_toml_nested_entry_runs() {
     write_source(&dir.join("examples").join("main.sm"));
 
     cli_run_project_root_ok(&dir, "smc run for semantic.toml nested entry");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_semantic_toml_nested_entry_compiles() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_nested_entry_compile");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_source(&dir.join("examples").join("main.sm"));
+
+    cli_compile_project_root_ok(&dir, "nested-out.smc", "smc compile for nested entry");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -330,6 +440,22 @@ fn pcc9_project_root_semantic_toml_is_preferred_over_package_manifest_for_run() 
 }
 
 #[test]
+fn pcc9_project_root_semantic_toml_is_preferred_over_package_manifest_for_compile() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_preferred_compile");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("examples").join("main.sm"));
+
+    cli_compile_project_root_ok(
+        &dir,
+        "preferred-out.smc",
+        "smc compile prefers semantic.toml over Semantic.package",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_check_dot_matches_absolute_project_root() {
     let dir = mk_temp_dir("pcc9_project_root_check_dot");
     write_semantic_toml(&dir, Some("src/main.sm"));
@@ -349,6 +475,22 @@ fn pcc9_project_root_run_dot_matches_absolute_project_root() {
 
     cli_run_project_root_ok(&dir, "smc run for absolute project root");
     cli_run_dot_ok(&dir, "smc run dot from project root");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_compile_dot_writes_requested_output() {
+    let dir = mk_temp_dir("pcc9_project_root_compile_dot");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    cli_compile_project_root_ok(
+        &dir,
+        "absolute-out.smc",
+        "smc compile absolute project root",
+    );
+    cli_compile_dot_ok(&dir, "dot-out.smc", "smc compile dot from project root");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -394,6 +536,31 @@ name = "app"
     let err = cli_err(
         vec!["run".to_string(), input.clone()],
         &format!("smc run for invalid manifest project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("malformed"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_compile_rejects_invalid_semantic_toml_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_compile_invalid_syntax");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package
+name = "app"
+"#,
+    )
+    .expect("write manifest");
+
+    let err = cli_compile_project_root_err(
+        &dir,
+        "invalid-out.smc",
+        "smc compile for invalid manifest project root",
     );
     assert!(err.contains("semantic.toml"), "{err}");
     assert!(err.contains("malformed"), "{err}");
@@ -455,6 +622,34 @@ entry = "examples/missing.sm"
 }
 
 #[test]
+fn pcc9_project_root_compile_rejects_missing_entry_file_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_compile_missing_entry_file");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package]
+name = "app"
+
+[project]
+entry = "examples/missing.sm"
+"#,
+    )
+    .expect("write manifest");
+
+    let err = cli_compile_project_root_err(
+        &dir,
+        "missing-out.smc",
+        "smc compile for missing entry file project root",
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("missing file"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_rejects_empty_package_name() {
     let dir = mk_temp_dir("pcc9_project_root_empty_package_name");
     std::fs::write(
@@ -501,6 +696,34 @@ entry = "../escape.sm"
     let err = cli_err(
         vec!["run".to_string(), input.clone()],
         &format!("smc run for escaped entry project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("must not escape the project root"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_compile_rejects_path_escape_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_compile_path_escape");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+    )
+    .expect("write manifest");
+
+    let err = cli_compile_project_root_err(
+        &dir,
+        "escape-out.smc",
+        "smc compile for escaped entry project root",
     );
     assert!(err.contains("semantic.toml"), "{err}");
     assert!(err.contains("must not escape the project root"), "{err}");
