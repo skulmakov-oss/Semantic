@@ -15,8 +15,14 @@ pub struct HelloObservationByteModule {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelloObservationByteRecord {
-    DeclareLocalQuad { symbol: String, value: String },
-    RequireQuadEq { symbol: String, expected: String },
+    DeclareLocalQuad {
+        symbol: String,
+        value: String,
+    },
+    RequireQuadEq {
+        symbol: String,
+        expected: String,
+    },
     ObserveTextLiteral {
         symbolic_op: &'static str,
         text_const_index: u32,
@@ -24,7 +30,9 @@ pub enum HelloObservationByteRecord {
         sequence_index: u32,
         policy_ref: u32,
     },
-    CompleteQuad { value: String },
+    CompleteQuad {
+        value: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,15 +99,16 @@ fn validate_and_extract_controlled_text(
     }
 
     match module.ops.as_slice() {
-        [
-            HelloRealSemCodeOp::DeclareLocalQuad { name, value },
-            HelloRealSemCodeOp::RequireQuadEq {
-                name: require_symbol,
-                expected,
-            },
-            HelloRealSemCodeOp::ObserveTextLiteral { text },
-            HelloRealSemCodeOp::CompleteQuad { value: complete_value },
-        ] if name == "boot" && value == "T" && require_symbol == "boot" && expected == "T" && complete_value == "T" =>
+        [HelloRealSemCodeOp::DeclareLocalQuad { name, value }, HelloRealSemCodeOp::RequireQuadEq {
+            name: require_symbol,
+            expected,
+        }, HelloRealSemCodeOp::ObserveTextLiteral { text }, HelloRealSemCodeOp::CompleteQuad {
+            value: complete_value,
+        }] if name == "boot"
+            && value == "T"
+            && require_symbol == "boot"
+            && expected == "T"
+            && complete_value == "T" =>
         {
             let text = strip_rendered_text(text);
             if is_forbidden_host_output(text) {
@@ -121,5 +130,8 @@ fn strip_rendered_text(text: &str) -> &str {
 }
 
 fn is_forbidden_host_output(text: &str) -> bool {
-    matches!(text, "stdout" | "print" | "io.write" | "file" | "network" | "stdin")
+    matches!(
+        text,
+        "stdout" | "print" | "io.write" | "file" | "network" | "stdin"
+    )
 }

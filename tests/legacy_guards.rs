@@ -183,10 +183,7 @@ fn root_smc_is_thin_wrapper_over_smc_cli() {
 
 #[test]
 fn legacy_compatibility_perimeter_is_explicit_and_narrow() {
-    let explicit_shims = [
-        "src/bin/ton618_core.rs",
-        "crates/ton618-core/src/lib.rs",
-    ];
+    let explicit_shims = ["src/bin/ton618_core.rs", "crates/ton618-core/src/lib.rs"];
 
     for path in explicit_shims {
         let txt = fs::read_to_string(path).expect("read compatibility shim");
@@ -278,11 +275,7 @@ fn ton618_named_path_inventory_is_explicit() {
 #[test]
 fn ton618_content_inventory_is_explicit() {
     let mut files = Vec::new();
-    collect_files_with_extensions(
-        Path::new("."),
-        &["rs", "md", "toml", "lock"],
-        &mut files,
-    );
+    collect_files_with_extensions(Path::new("."), &["rs", "md", "toml", "lock"], &mut files);
 
     let mut matches = BTreeSet::new();
     for file in files {

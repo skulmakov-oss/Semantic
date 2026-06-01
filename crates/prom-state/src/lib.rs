@@ -513,9 +513,9 @@ impl StateSnapshotArchive {
         }
         let epoch = StateEpoch(parse_u64_field(epoch_parts[1], "archive epoch")?);
 
-        let record_count_line = lines
-            .next()
-            .ok_or_else(|| StateSnapshotArchiveFormatError::new("missing archive record-count line"))?;
+        let record_count_line = lines.next().ok_or_else(|| {
+            StateSnapshotArchiveFormatError::new("missing archive record-count line")
+        })?;
         let record_count_parts = split_archive_line(record_count_line);
         if record_count_parts.len() != 2 || record_count_parts[0] != "records" {
             return Err(StateSnapshotArchiveFormatError::new(
@@ -698,26 +698,17 @@ fn split_archive_line(line: &str) -> Vec<&str> {
     line.split('\t').collect()
 }
 
-fn parse_u32_field(
-    raw: &str,
-    label: &str,
-) -> Result<u32, StateSnapshotArchiveFormatError> {
+fn parse_u32_field(raw: &str, label: &str) -> Result<u32, StateSnapshotArchiveFormatError> {
     raw.parse::<u32>()
         .map_err(|_| StateSnapshotArchiveFormatError::new(format!("invalid {}", label)))
 }
 
-fn parse_u64_field(
-    raw: &str,
-    label: &str,
-) -> Result<u64, StateSnapshotArchiveFormatError> {
+fn parse_u64_field(raw: &str, label: &str) -> Result<u64, StateSnapshotArchiveFormatError> {
     raw.parse::<u64>()
         .map_err(|_| StateSnapshotArchiveFormatError::new(format!("invalid {}", label)))
 }
 
-fn parse_usize_field(
-    raw: &str,
-    label: &str,
-) -> Result<usize, StateSnapshotArchiveFormatError> {
+fn parse_usize_field(raw: &str, label: &str) -> Result<usize, StateSnapshotArchiveFormatError> {
     raw.parse::<usize>()
         .map_err(|_| StateSnapshotArchiveFormatError::new(format!("invalid {}", label)))
 }
@@ -737,9 +728,7 @@ fn escape_archive_field(value: &str) -> String {
     escaped
 }
 
-fn unescape_archive_field(
-    value: &str,
-) -> Result<String, StateSnapshotArchiveFormatError> {
+fn unescape_archive_field(value: &str) -> Result<String, StateSnapshotArchiveFormatError> {
     let mut out = String::new();
     let mut chars = value.chars();
     while let Some(ch) = chars.next() {
@@ -978,9 +967,15 @@ records\t0\n";
         );
 
         assert_eq!(artifact.checkpoints[0].checkpoint_ordinal, 0);
-        assert_eq!(artifact.checkpoints[0].snapshot.snapshot.epoch, StateEpoch(1));
+        assert_eq!(
+            artifact.checkpoints[0].snapshot.snapshot.epoch,
+            StateEpoch(1)
+        );
         assert_eq!(artifact.checkpoints[1].checkpoint_ordinal, 1);
-        assert_eq!(artifact.checkpoints[1].snapshot.snapshot.epoch, StateEpoch(2));
+        assert_eq!(
+            artifact.checkpoints[1].snapshot.snapshot.epoch,
+            StateEpoch(2)
+        );
     }
 
     #[test]

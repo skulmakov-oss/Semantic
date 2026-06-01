@@ -87,7 +87,9 @@ mod tests {
     use super::*;
     use crate::action_binding::InteractionActionName;
     use crate::action_binding_trace::InteractionActionBindingTraceStatus;
-    use crate::interaction::{ElementId, InteractionIntentId, InteractionIntentKind, InteractionSource, InteractionTarget};
+    use crate::interaction::{
+        ElementId, InteractionIntentId, InteractionIntentKind, InteractionSource, InteractionTarget,
+    };
     use crate::raw_event::{RawUiEventId, RawUiEventKind};
     use crate::trace::{
         InteractionIntentMappingRule, InteractionIntentTraceReason, InteractionIntentTraceReport,
@@ -238,6 +240,9 @@ mod tests {
             report.reports[0].action,
             Some(InteractionActionName::CloseWindow)
         );
-        assert_eq!(report.reports[2].binding_status, InteractionActionBindingTraceStatus::Unbound);
+        assert_eq!(
+            report.reports[2].binding_status,
+            InteractionActionBindingTraceStatus::Unbound
+        );
     }
 }

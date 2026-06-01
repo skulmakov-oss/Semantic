@@ -23,12 +23,12 @@ pub mod semcode_format {
     pub use sm_emit::{
         header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8,
         read_utf8, supported_headers, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
-        Opcode, SemcodeFormatError, SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_DEBUG_SYMBOLS,
-        CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE,
-        CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_TEXT_VALUES,
-        CAP_CLOSURE_VALUES, HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5,
-        HEADER_V6, HEADER_V7, HEADER_V8, HEADER_V9, HEADER_V10, MAGIC0, MAGIC1, MAGIC2, MAGIC3,
-        MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, MAGIC10,
+        Opcode, SemcodeFormatError, SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_CLOSURE_VALUES,
+        CAP_DEBUG_SYMBOLS, CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES,
+        CAP_GATE_SURFACE, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_TEXT_VALUES,
+        HEADER_V0, HEADER_V1, HEADER_V10, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6,
+        HEADER_V7, HEADER_V8, HEADER_V9, MAGIC0, MAGIC1, MAGIC10, MAGIC2, MAGIC3, MAGIC4, MAGIC5,
+        MAGIC6, MAGIC7, MAGIC8, MAGIC9,
     };
 }
 #[cfg(feature = "std")]
@@ -36,8 +36,8 @@ pub mod semcode_vm {
     pub use sm_vm::{
         disasm_semcode, run_semcode, run_semcode_with_entry,
         run_verified_semcode_with_host_and_capabilities,
-        run_verified_semcode_with_host_and_capabilities_and_config, ClosureValue, DebugSymbol, Frame,
-        FunctionBytecode, RuntimeError, Value, VM,
+        run_verified_semcode_with_host_and_capabilities_and_config, ClosureValue, DebugSymbol,
+        Frame, FunctionBytecode, RuntimeError, Value, VM,
     };
 }
 #[cfg(feature = "std")]

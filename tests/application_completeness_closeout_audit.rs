@@ -24,7 +24,10 @@ fn application_completeness_closeout_artifacts_exist() {
     ];
 
     for rel in required {
-        assert!(repo_path(rel).exists(), "missing required closeout artifact: {rel}");
+        assert!(
+            repo_path(rel).exists(),
+            "missing required closeout artifact: {rel}"
+        );
     }
 }
 

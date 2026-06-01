@@ -1,6 +1,6 @@
 use sm_front::hello_parser::{
-    HelloCompleteQuad, HelloEntry, HelloObserveText, HelloQuadLit, HelloRequireQuadEq, HelloStateDecl,
-    HelloStmt,
+    HelloCompleteQuad, HelloEntry, HelloObserveText, HelloQuadLit, HelloRequireQuadEq,
+    HelloStateDecl, HelloStmt,
 };
 use sm_front::hello_sema::HelloCheckedFile;
 use sm_front::FrontendError;
@@ -96,29 +96,29 @@ fn lower_entry(entry: &HelloEntry) -> Result<HelloIrEntry, FrontendError> {
 
 fn lower_stmt(stmt: &HelloStmt) -> Result<HelloIrStmt, FrontendError> {
     match stmt {
-        HelloStmt::State(HelloStateDecl { name, value, .. }) => Ok(HelloIrStmt::LocalQuad(
-            HelloIrLocalQuad {
+        HelloStmt::State(HelloStateDecl { name, value, .. }) => {
+            Ok(HelloIrStmt::LocalQuad(HelloIrLocalQuad {
                 symbol: name.clone(),
                 value: (*value).into(),
-            },
-        )),
+            }))
+        }
         HelloStmt::Require(HelloRequireQuadEq { state, value }) => {
             Ok(HelloIrStmt::RequireQuadEq(HelloIrRequireQuadEq {
                 symbol: state.clone(),
                 expected: (*value).into(),
             }))
         }
-        HelloStmt::Observe(HelloObserveText { text }) => Ok(HelloIrStmt::ObserveText(
-            HelloIrObserveText {
+        HelloStmt::Observe(HelloObserveText { text }) => {
+            Ok(HelloIrStmt::ObserveText(HelloIrObserveText {
                 text: text.clone(),
                 observation_class: HelloIrObservationClass::Controlled,
-            },
-        )),
-        HelloStmt::Complete(HelloCompleteQuad { value }) => Ok(HelloIrStmt::CompleteQuad(
-            HelloIrCompleteQuad {
+            }))
+        }
+        HelloStmt::Complete(HelloCompleteQuad { value }) => {
+            Ok(HelloIrStmt::CompleteQuad(HelloIrCompleteQuad {
                 value: (*value).into(),
-            },
-        )),
+            }))
+        }
     }
 }
 

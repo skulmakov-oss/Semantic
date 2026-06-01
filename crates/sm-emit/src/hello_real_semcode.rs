@@ -1,6 +1,6 @@
 use sm_ir::hello_ir::{
-    HelloIrCompleteQuad, HelloIrLocalQuad, HelloIrModule, HelloIrObserveText,
-    HelloIrObservationClass, HelloIrQuadLit, HelloIrRequireQuadEq, HelloIrStmt,
+    HelloIrCompleteQuad, HelloIrLocalQuad, HelloIrModule, HelloIrObservationClass,
+    HelloIrObserveText, HelloIrQuadLit, HelloIrRequireQuadEq, HelloIrStmt,
 };
 use std::string::String;
 use std::vec::Vec;
@@ -38,23 +38,18 @@ pub fn render_hello_real_semcode_skeleton(
     }
 
     let ops = match module.entry.body.as_slice() {
-        [
-            HelloIrStmt::LocalQuad(HelloIrLocalQuad {
-                symbol,
-                value: HelloIrQuadLit::T,
-            }),
-            HelloIrStmt::RequireQuadEq(HelloIrRequireQuadEq {
-                symbol: require_symbol,
-                expected: HelloIrQuadLit::T,
-            }),
-            HelloIrStmt::ObserveText(HelloIrObserveText {
-                text,
-                observation_class: HelloIrObservationClass::Controlled,
-            }),
-            HelloIrStmt::CompleteQuad(HelloIrCompleteQuad {
-                value: HelloIrQuadLit::T,
-            }),
-        ] => vec![
+        [HelloIrStmt::LocalQuad(HelloIrLocalQuad {
+            symbol,
+            value: HelloIrQuadLit::T,
+        }), HelloIrStmt::RequireQuadEq(HelloIrRequireQuadEq {
+            symbol: require_symbol,
+            expected: HelloIrQuadLit::T,
+        }), HelloIrStmt::ObserveText(HelloIrObserveText {
+            text,
+            observation_class: HelloIrObservationClass::Controlled,
+        }), HelloIrStmt::CompleteQuad(HelloIrCompleteQuad {
+            value: HelloIrQuadLit::T,
+        })] => vec![
             HelloRealSemCodeOp::DeclareLocalQuad {
                 name: symbol.clone(),
                 value: render_quad(HelloIrQuadLit::T).to_string(),
@@ -63,9 +58,7 @@ pub fn render_hello_real_semcode_skeleton(
                 name: require_symbol.clone(),
                 expected: render_quad(HelloIrQuadLit::T).to_string(),
             },
-            HelloRealSemCodeOp::ObserveTextLiteral {
-                text: text.clone(),
-            },
+            HelloRealSemCodeOp::ObserveTextLiteral { text: text.clone() },
             HelloRealSemCodeOp::CompleteQuad {
                 value: render_quad(HelloIrQuadLit::T).to_string(),
             },

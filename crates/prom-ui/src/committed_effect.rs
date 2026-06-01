@@ -120,7 +120,8 @@ pub fn describe_interaction_committed_effect(
         audit_visibility: InteractionCommittedEffectAuditVisibility::Required,
         runtime_mutation_requirement:
             InteractionCommittedEffectRuntimeMutationRequirement::SeparateBoundaryRequired,
-        host_path_requirement: InteractionCommittedEffectHostPathRequirement::SeparateBoundaryRequired,
+        host_path_requirement:
+            InteractionCommittedEffectHostPathRequirement::SeparateBoundaryRequired,
     })
 }
 
@@ -168,14 +169,14 @@ mod tests {
         InteractionSemanticActionDispatchTraceStatus,
     };
     use crate::admitted_action::InteractionAdmittedSemanticActionId;
-    use crate::effect_request::describe_interaction_effect_request;
-    use crate::interaction::InteractionIntentKind;
     use crate::commit_boundary::describe_interaction_commit_boundary;
     use crate::commit_boundary_result::{
-        record_interaction_commit_boundary_denied_result,
         record_interaction_commit_boundary_committed_result,
-        InteractionCommitBoundaryDenialReason, InteractionCommitBoundaryMissingRequirement,
+        record_interaction_commit_boundary_denied_result, InteractionCommitBoundaryDenialReason,
+        InteractionCommitBoundaryMissingRequirement,
     };
+    use crate::effect_request::describe_interaction_effect_request;
+    use crate::interaction::InteractionIntentKind;
     use crate::prepared_effect::describe_interaction_prepared_effect;
     use crate::prepared_effect_result::record_interaction_prepared_effect_result;
     use crate::runtime_capability_mapping::describe_interaction_runtime_capability_mapping;
@@ -214,7 +215,8 @@ mod tests {
         let ui_result = record_interaction_ui_capability_admitted_result(&admission);
         let mapping_descriptor = describe_interaction_runtime_capability_mapping(&ui_result)
             .expect("admitted result should produce mapping descriptor");
-        let mapping_result = record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
+        let mapping_result =
+            record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
         let prepared_descriptor = describe_interaction_prepared_effect(&mapping_result)
             .expect("mapped result should produce prepared effect descriptor");
         let prepared_result = record_interaction_prepared_effect_result(&prepared_descriptor);
@@ -226,7 +228,8 @@ mod tests {
         record_interaction_commit_boundary_committed_result(&commit_boundary_descriptor())
     }
 
-    fn denied_commit_boundary_result() -> crate::commit_boundary_result::InteractionCommitBoundaryResult {
+    fn denied_commit_boundary_result(
+    ) -> crate::commit_boundary_result::InteractionCommitBoundaryResult {
         record_interaction_commit_boundary_denied_result(
             &commit_boundary_descriptor(),
             InteractionCommitBoundaryDenialReason::PolicyDenied,
@@ -258,7 +261,10 @@ mod tests {
     fn descriptor_preserves_source_capability_audit_metadata() {
         let descriptor = committed_effect_descriptor();
 
-        assert_eq!(descriptor.audit_requirement, InteractionCommitAuditRequirement::Required);
+        assert_eq!(
+            descriptor.audit_requirement,
+            InteractionCommitAuditRequirement::Required
+        );
         assert_eq!(
             descriptor.runtime_mutation_requirement,
             InteractionCommittedEffectRuntimeMutationRequirement::SeparateBoundaryRequired
@@ -267,7 +273,10 @@ mod tests {
             descriptor.host_path_requirement,
             InteractionCommittedEffectHostPathRequirement::SeparateBoundaryRequired
         );
-        assert_eq!(descriptor.audit_visibility, InteractionCommittedEffectAuditVisibility::Required);
+        assert_eq!(
+            descriptor.audit_visibility,
+            InteractionCommittedEffectAuditVisibility::Required
+        );
     }
 
     #[test]

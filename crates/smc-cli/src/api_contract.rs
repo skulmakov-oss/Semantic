@@ -162,11 +162,7 @@ pub fn build_generated_api_contract(
 
 pub fn format_generated_api_contract(artifact: &GeneratedApiContractArtifact) -> String {
     let mut out = String::new();
-    let _ = writeln!(
-        out,
-        "semantic_api_contract v{}",
-        artifact.format_version
-    );
+    let _ = writeln!(out, "semantic_api_contract v{}", artifact.format_version);
     let _ = writeln!(
         out,
         "generator {} {}",
@@ -227,10 +223,7 @@ fn display_generated_api_role(role: GeneratedApiSchemaRole) -> &'static str {
     }
 }
 
-fn display_generated_api_type(
-    ty: &Type,
-    arena: &AstArena,
-) -> Result<String, FrontendError> {
+fn display_generated_api_type(ty: &Type, arena: &AstArena) -> Result<String, FrontendError> {
     Ok(match ty {
         Type::Quad => "quad".to_string(),
         Type::QVec(width) => format!("qvec({})", width),
@@ -304,7 +297,10 @@ mod tests {
     fn generated_api_contract_artifact_uses_canonical_metadata() {
         let artifact = GeneratedApiContractArtifact::new(Vec::new());
 
-        assert_eq!(artifact.format_version, GENERATED_API_CONTRACT_FORMAT_VERSION);
+        assert_eq!(
+            artifact.format_version,
+            GENERATED_API_CONTRACT_FORMAT_VERSION
+        );
         assert_eq!(artifact.generator_name, GENERATED_API_CONTRACT_GENERATOR);
         assert_eq!(
             artifact.generator_version,

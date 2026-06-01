@@ -10,11 +10,7 @@ struct CounterApp {
 }
 
 impl CounterApp {
-    fn on_frame(
-        &mut self,
-        events: &[InputEvent],
-        frame: &mut DrawFrame,
-    ) -> LoopControl {
+    fn on_frame(&mut self, events: &[InputEvent], frame: &mut DrawFrame) -> LoopControl {
         for event in events {
             match event.kind {
                 InputEventKind::KeyDown { key_code: 1 } => {
@@ -40,16 +36,8 @@ impl CounterApp {
         }
 
         frame.clear(Color::BLACK);
-        frame.fill_rect(
-            Rect::new(0, 0, self.counter as u32 + 1, 10),
-            Color::GREEN,
-        );
-        frame.draw_text(
-            format!("counter={}", self.counter),
-            10,
-            20,
-            Color::WHITE,
-        );
+        frame.fill_rect(Rect::new(0, 0, self.counter as u32 + 1, 10), Color::GREEN);
+        frame.draw_text(format!("counter={}", self.counter), 10, 20, Color::WHITE);
 
         LoopControl::Continue
     }
@@ -247,10 +235,7 @@ fn in_memory_e2e_tick_after_close_is_rejected_and_preserves_events() {
         })
         .expect_err("tick after close must fail");
 
-    assert!(matches!(
-        err,
-        UiRuntimeError::LifecycleViolation { .. }
-    ));
+    assert!(matches!(err, UiRuntimeError::LifecycleViolation { .. }));
 
     assert!(!callback_called);
     assert_eq!(app.counter, 0);

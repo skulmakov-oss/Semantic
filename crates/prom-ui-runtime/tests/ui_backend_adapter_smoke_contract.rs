@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use prom_ui::UiOperationId;
 use prom_ui_runtime::{
     Color, DesktopSession, DrawFrame, LoopControl, Rect, UiBackendAdapter, UiRuntimeError,
     WindowConfig,
 };
-use prom_ui::UiOperationId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum BackendCall {

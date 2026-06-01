@@ -114,11 +114,17 @@ impl InteractionActionBindingDescriptor {
     }
 
     pub const fn requires_target(&self) -> bool {
-        matches!(self.target_policy, InteractionActionTargetPolicy::RequiresTarget)
+        matches!(
+            self.target_policy,
+            InteractionActionTargetPolicy::RequiresTarget
+        )
     }
 
     pub const fn requires_admission(&self) -> bool {
-        matches!(self.admission_policy, InteractionActionAdmissionPolicy::Required)
+        matches!(
+            self.admission_policy,
+            InteractionActionAdmissionPolicy::Required
+        )
     }
 
     pub const fn may_request_effect(&self) -> bool {
@@ -245,10 +251,9 @@ mod tests {
 
     #[test]
     fn select_trace_event_requires_target() {
-        let binding = find_interaction_action_binding_by_action(
-            InteractionActionName::SelectTraceEvent,
-        )
-        .expect("select trace event binding should exist");
+        let binding =
+            find_interaction_action_binding_by_action(InteractionActionName::SelectTraceEvent)
+                .expect("select trace event binding should exist");
 
         assert_eq!(binding.source_intent, InteractionIntentKind::Select);
         assert!(binding.requires_target());
@@ -257,7 +262,10 @@ mod tests {
     #[test]
     fn initial_bindings_do_not_produce_effects() {
         for binding in interaction_action_bindings() {
-            assert_eq!(binding.effect_policy, InteractionActionEffectPolicy::NoEffect);
+            assert_eq!(
+                binding.effect_policy,
+                InteractionActionEffectPolicy::NoEffect
+            );
             assert!(!binding.may_request_effect());
         }
     }

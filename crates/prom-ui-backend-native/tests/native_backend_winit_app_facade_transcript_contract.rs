@@ -2,10 +2,8 @@
 
 use prom_ui_backend_native::{
     winit_placeholder::{
-        native_backend_winit_app_facade_transcript_available,
-        NativeBackendWinitApp,
-        NativeBackendWinitAppRunTranscript,
-        NativeBackendWinitAppRunTranscriptStatus,
+        native_backend_winit_app_facade_transcript_available, NativeBackendWinitApp,
+        NativeBackendWinitAppRunTranscript, NativeBackendWinitAppRunTranscriptStatus,
         NativeBackendWinitAppStateSummary,
     },
     NativeBackend,

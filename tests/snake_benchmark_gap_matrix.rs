@@ -93,18 +93,20 @@ fn snake_benchmark_positive_surface_passes_end_to_end() {
 #[test]
 fn snake_benchmark_runtime_negative_reports_contract_violations() {
     // These fixtures pass smc check but fail at smc run with a specific error message.
-    let cases = [(
-        "tests/fixtures/snake_benchmark/negative_random_invalid_range.sm",
-        "lo (10) must be strictly less than hi (10)",
-    ),
-    (
-        "tests/fixtures/snake_benchmark/negative_i32_div_zero.sm",
-        "DivisionByZero",
-    ),
-    (
-        "tests/fixtures/snake_benchmark/negative_i32_mod_zero.sm",
-        "DivisionByZero",
-    )];
+    let cases = [
+        (
+            "tests/fixtures/snake_benchmark/negative_random_invalid_range.sm",
+            "lo (10) must be strictly less than hi (10)",
+        ),
+        (
+            "tests/fixtures/snake_benchmark/negative_i32_div_zero.sm",
+            "DivisionByZero",
+        ),
+        (
+            "tests/fixtures/snake_benchmark/negative_i32_mod_zero.sm",
+            "DivisionByZero",
+        ),
+    ];
 
     for (rel, needle) in cases {
         let input = repo_path(rel);

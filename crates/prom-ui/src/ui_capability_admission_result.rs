@@ -18,8 +18,7 @@ use crate::effect_request::{
     InteractionEffectRequestTargetPolicy, InteractionEffectRequestUiCapability,
 };
 use crate::ui_capability_admission::{
-    InteractionUiCapabilityAdmissionDescriptor,
-    InteractionUiCapabilityAdmissionDescriptorId,
+    InteractionUiCapabilityAdmissionDescriptor, InteractionUiCapabilityAdmissionDescriptorId,
     InteractionUiCapabilityAdmissionRuntimeMappingRequirement,
 };
 
@@ -120,8 +119,7 @@ fn build_result(
         missing_requirement,
         requested_effect: descriptor.requested_effect,
         declared_ui_capability: descriptor.declared_ui_capability,
-        declared_runtime_capability_requirement: descriptor
-            .declared_runtime_capability_requirement,
+        declared_runtime_capability_requirement: descriptor.declared_runtime_capability_requirement,
         lifecycle_precondition: descriptor.lifecycle_precondition,
         target_policy: descriptor.target_policy,
         denial_behavior: descriptor.denial_behavior,
@@ -134,11 +132,17 @@ fn build_result(
 
 impl InteractionUiCapabilityAdmissionResult {
     pub const fn is_admitted(&self) -> bool {
-        matches!(self.status, InteractionUiCapabilityAdmissionDecisionStatus::Admitted)
+        matches!(
+            self.status,
+            InteractionUiCapabilityAdmissionDecisionStatus::Admitted
+        )
     }
 
     pub const fn is_denied(&self) -> bool {
-        matches!(self.status, InteractionUiCapabilityAdmissionDecisionStatus::Denied)
+        matches!(
+            self.status,
+            InteractionUiCapabilityAdmissionDecisionStatus::Denied
+        )
     }
 
     pub const fn grants_ui_capability(&self) -> bool {
@@ -260,9 +264,15 @@ mod tests {
 
         let result = record_interaction_ui_capability_admitted_result(&descriptor);
 
-        assert_eq!(result.status, InteractionUiCapabilityAdmissionDecisionStatus::Admitted);
+        assert_eq!(
+            result.status,
+            InteractionUiCapabilityAdmissionDecisionStatus::Admitted
+        );
         assert_eq!(result.descriptor_id, descriptor.id);
-        assert_eq!(result.id, InteractionUiCapabilityAdmissionResultId(descriptor.id.0));
+        assert_eq!(
+            result.id,
+            InteractionUiCapabilityAdmissionResultId(descriptor.id.0)
+        );
     }
 
     #[test]
@@ -275,9 +285,15 @@ mod tests {
             InteractionUiCapabilityAdmissionMissingRequirement::Policy,
         );
 
-        assert_eq!(result.status, InteractionUiCapabilityAdmissionDecisionStatus::Denied);
+        assert_eq!(
+            result.status,
+            InteractionUiCapabilityAdmissionDecisionStatus::Denied
+        );
         assert_eq!(result.descriptor_id, descriptor.id);
-        assert_eq!(result.id, InteractionUiCapabilityAdmissionResultId(descriptor.id.0));
+        assert_eq!(
+            result.id,
+            InteractionUiCapabilityAdmissionResultId(descriptor.id.0)
+        );
     }
 
     #[test]
@@ -312,7 +328,10 @@ mod tests {
         assert_eq!(result.target_policy, descriptor.target_policy);
         assert_eq!(result.denial_behavior, descriptor.denial_behavior);
         assert_eq!(result.trace_requirement, descriptor.trace_requirement);
-        assert_eq!(result.policy_gate_namespace, descriptor.policy_gate_namespace);
+        assert_eq!(
+            result.policy_gate_namespace,
+            descriptor.policy_gate_namespace
+        );
         assert_eq!(result.scope, descriptor.scope);
         assert_eq!(
             result.runtime_mapping_requirement,
@@ -326,7 +345,10 @@ mod tests {
 
         let result = record_interaction_ui_capability_admitted_result(&descriptor);
 
-        assert_eq!(result.denial_reason, InteractionUiCapabilityAdmissionDenialReason::None);
+        assert_eq!(
+            result.denial_reason,
+            InteractionUiCapabilityAdmissionDenialReason::None
+        );
         assert_eq!(
             result.missing_requirement,
             InteractionUiCapabilityAdmissionMissingRequirement::None

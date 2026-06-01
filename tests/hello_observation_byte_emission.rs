@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use sm_emit::hello_observation_bytes::{
-    emit_hello_observation_bytes_from_real_semcode_skeleton,
-    emit_hello_observation_bytes_gated, render_hello_observation_bytes_gated,
-    HelloObservationByteEmissionError, HelloObservationByteRecord,
+    emit_hello_observation_bytes_from_real_semcode_skeleton, emit_hello_observation_bytes_gated,
+    render_hello_observation_bytes_gated, HelloObservationByteEmissionError,
+    HelloObservationByteRecord,
 };
 use sm_emit::hello_real_semcode::{
     emit_hello_real_semcode_skeleton, HelloRealSemCodeModule, HelloRealSemCodeOp,
@@ -26,12 +26,14 @@ fn fixture_text(rel: &str) -> String {
 
 fn parse_validate_lower() -> sm_ir::hello_ir::HelloIrModule {
     let input = fixture_text("tests/fixtures/pending/hello/positive_hello_verbose_directional.sm");
-    let parsed = parse_hello_file(&input)
-        .unwrap_or_else(|err| panic!("parser unexpectedly rejected canonical hello fixture: {err}"));
+    let parsed = parse_hello_file(&input).unwrap_or_else(|err| {
+        panic!("parser unexpectedly rejected canonical hello fixture: {err}")
+    });
     let checked = validate_hello_file(parsed)
         .unwrap_or_else(|err| panic!("sema unexpectedly rejected canonical hello fixture: {err}"));
-    lower_hello_checked_file(&checked)
-        .unwrap_or_else(|err| panic!("lowering unexpectedly rejected canonical hello fixture: {err}"))
+    lower_hello_checked_file(&checked).unwrap_or_else(|err| {
+        panic!("lowering unexpectedly rejected canonical hello fixture: {err}")
+    })
 }
 
 fn canonical_real_semcode() -> HelloRealSemCodeModule {
@@ -44,10 +46,7 @@ fn render_text_literal(text: &str) -> String {
     format!("{text:?}")
 }
 
-fn assert_reject(
-    module: &HelloRealSemCodeModule,
-    expected: HelloObservationByteEmissionError,
-) {
+fn assert_reject(module: &HelloRealSemCodeModule, expected: HelloObservationByteEmissionError) {
     assert_eq!(
         emit_hello_observation_bytes_gated(module),
         Err(expected.clone())
@@ -70,21 +69,18 @@ fn hello_observation_byte_bridge_emits_gated_provisional_representation() {
     assert_eq!(gated_emitted, emitted);
     assert_eq!(emitted.records.len(), 4);
     match &emitted.records[..] {
-        [
-            HelloObservationByteRecord::DeclareLocalQuad { symbol, value },
-            HelloObservationByteRecord::RequireQuadEq {
-                symbol: req_symbol,
-                expected,
-            },
-            HelloObservationByteRecord::ObserveTextLiteral {
-                symbolic_op,
-                text_const_index,
-                observation_class,
-                sequence_index,
-                policy_ref,
-            },
-            HelloObservationByteRecord::CompleteQuad { value: complete_value },
-        ] => {
+        [HelloObservationByteRecord::DeclareLocalQuad { symbol, value }, HelloObservationByteRecord::RequireQuadEq {
+            symbol: req_symbol,
+            expected,
+        }, HelloObservationByteRecord::ObserveTextLiteral {
+            symbolic_op,
+            text_const_index,
+            observation_class,
+            sequence_index,
+            policy_ref,
+        }, HelloObservationByteRecord::CompleteQuad {
+            value: complete_value,
+        }] => {
             assert_eq!(symbol, "boot");
             assert_eq!(value, "T");
             assert_eq!(req_symbol, "boot");

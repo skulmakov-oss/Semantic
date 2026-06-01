@@ -147,11 +147,11 @@ fn update_mode() -> bool {
 
 fn write_text(path: &PathBuf, text: &str) {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap_or_else(|err| {
-            panic!("create_dir_all failed for {}: {err}", parent.display())
-        });
+        fs::create_dir_all(parent)
+            .unwrap_or_else(|err| panic!("create_dir_all failed for {}: {err}", parent.display()));
     }
-    fs::write(path, text).unwrap_or_else(|err| panic!("write failed for {}: {err}", path.display()));
+    fs::write(path, text)
+        .unwrap_or_else(|err| panic!("write failed for {}: {err}", path.display()));
 }
 
 fn assert_text_file(path: &PathBuf, got: &str) {
@@ -164,7 +164,12 @@ fn assert_text_file(path: &PathBuf, got: &str) {
         &fs::read_to_string(path)
             .unwrap_or_else(|err| panic!("read failed for {}: {err}", path.display())),
     );
-    assert_eq!(expected, got, "trace artifact drifted at {}", path.display());
+    assert_eq!(
+        expected,
+        got,
+        "trace artifact drifted at {}",
+        path.display()
+    );
 }
 
 fn render_trace_manifest() -> String {

@@ -13,15 +13,17 @@ fn cli_ok(args: Vec<String>, context: &str) {
 }
 
 fn mk_temp_dir(prefix: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!(
-        "{}_{}_{}",
-        prefix,
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos()
-    ));
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!(
+            "{}_{}_{}",
+            prefix,
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir
 }

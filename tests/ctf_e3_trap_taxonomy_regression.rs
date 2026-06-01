@@ -6,8 +6,8 @@ use semantic_language::{
     semantics::check_source,
     semcode_verify::verify_semcode,
 };
-use smc_cli::parse_package_manifest_baseline;
 use sm_vm::run_verified_semcode;
+use smc_cli::parse_package_manifest_baseline;
 
 const REPLAY_COUNT: usize = 5;
 const UPDATE_ENV: &str = "SM_UPDATE_CTF_E3_TAXONOMY";
@@ -169,11 +169,11 @@ fn update_mode() -> bool {
 
 fn write_text(path: &PathBuf, text: &str) {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap_or_else(|err| {
-            panic!("create_dir_all failed for {}: {err}", parent.display())
-        });
+        fs::create_dir_all(parent)
+            .unwrap_or_else(|err| panic!("create_dir_all failed for {}: {err}", parent.display()));
     }
-    fs::write(path, text).unwrap_or_else(|err| panic!("write failed for {}: {err}", path.display()));
+    fs::write(path, text)
+        .unwrap_or_else(|err| panic!("write failed for {}: {err}", path.display()));
 }
 
 fn assert_text_file(path: &PathBuf, got: &str) {
@@ -186,7 +186,12 @@ fn assert_text_file(path: &PathBuf, got: &str) {
         &fs::read_to_string(path)
             .unwrap_or_else(|err| panic!("read failed for {}: {err}", path.display())),
     );
-    assert_eq!(expected, got, "taxonomy artifact drifted at {}", path.display());
+    assert_eq!(
+        expected,
+        got,
+        "taxonomy artifact drifted at {}",
+        path.display()
+    );
 }
 
 fn render_manifest() -> String {
@@ -352,8 +357,14 @@ fn render_runs(runs: &[RunSummary]) -> String {
     for (idx, run) in runs.iter().enumerate() {
         out.push_str("  {\n");
         out.push_str(&format!("    \"run_index\": {},\n", run.run_index));
-        out.push_str(&format!("    \"failure_layer\": \"{}\",\n", run.failure_layer));
-        out.push_str(&format!("    \"observed_status\": \"{}\",\n", run.observed_status));
+        out.push_str(&format!(
+            "    \"failure_layer\": \"{}\",\n",
+            run.failure_layer
+        ));
+        out.push_str(&format!(
+            "    \"observed_status\": \"{}\",\n",
+            run.observed_status
+        ));
         out.push_str(&format!("    \"source_hash\": \"{}\",\n", run.source_hash));
         if let Some(ir_shape_hash) = &run.ir_shape_hash {
             out.push_str(&format!("    \"ir_shape_hash\": \"{}\",\n", ir_shape_hash));
@@ -380,7 +391,10 @@ fn render_runs(runs: &[RunSummary]) -> String {
             out.push_str("    \"trap_class\": null,\n");
         }
         if let Some(candidate_class) = &run.candidate_class {
-            out.push_str(&format!("    \"candidate_class\": \"{}\"\n", candidate_class));
+            out.push_str(&format!(
+                "    \"candidate_class\": \"{}\"\n",
+                candidate_class
+            ));
         } else {
             out.push_str("    \"candidate_class\": null\n");
         }
@@ -401,7 +415,11 @@ fn render_artifact(case: &TaxonomyCase) -> String {
         "project-diagnostic" => run_project_diagnostic_case(case),
         other => panic!("unsupported failure layer {other}"),
     };
-    assert!(runs_all_equal(&runs), "taxonomy drifted for {}", case.taxonomy_id);
+    assert!(
+        runs_all_equal(&runs),
+        "taxonomy drifted for {}",
+        case.taxonomy_id
+    );
     let summary_hash = hash_hex(&render_runs(&runs));
     let stable_error_code = case
         .stable_error_code

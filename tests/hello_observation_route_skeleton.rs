@@ -1,15 +1,13 @@
 use std::path::PathBuf;
 use std::vec::Vec;
 
-use sm_emit::hello_real_semcode::{
-    emit_hello_real_semcode_skeleton, HelloRealSemCodeOp,
-};
+use sm_emit::hello_real_semcode::{emit_hello_real_semcode_skeleton, HelloRealSemCodeOp};
 use sm_front::hello_parser::parse_hello_file;
 use sm_front::hello_sema::validate_hello_file;
 use sm_ir::hello_ir::lower_hello_checked_file;
 use sm_runtime_core::hello_observation_route::{
-    route_hello_observation_to_sink, HelloObservationRouteError,
-    HelloObservationRouteInput, HelloObservationRouteResult,
+    route_hello_observation_to_sink, HelloObservationRouteError, HelloObservationRouteInput,
+    HelloObservationRouteResult,
 };
 use sm_runtime_core::hello_observation_sink::{
     HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
@@ -34,12 +32,14 @@ fn fixture_text(rel: &str) -> String {
 
 fn parse_validate_lower() -> sm_ir::hello_ir::HelloIrModule {
     let input = fixture_text("tests/fixtures/pending/hello/positive_hello_verbose_directional.sm");
-    let parsed = parse_hello_file(&input)
-        .unwrap_or_else(|err| panic!("parser unexpectedly rejected canonical hello fixture: {err}"));
+    let parsed = parse_hello_file(&input).unwrap_or_else(|err| {
+        panic!("parser unexpectedly rejected canonical hello fixture: {err}")
+    });
     let checked = validate_hello_file(parsed)
         .unwrap_or_else(|err| panic!("sema unexpectedly rejected canonical hello fixture: {err}"));
-    lower_hello_checked_file(&checked)
-        .unwrap_or_else(|err| panic!("lowering unexpectedly rejected canonical hello fixture: {err}"))
+    lower_hello_checked_file(&checked).unwrap_or_else(|err| {
+        panic!("lowering unexpectedly rejected canonical hello fixture: {err}")
+    })
 }
 
 fn render_text_literal(text: &str) -> String {
@@ -63,9 +63,7 @@ fn skeleton_to_admission_input(ops: &[HelloRealSemCodeOp]) -> HelloRealSemCodeAd
                 }
             }
             HelloRealSemCodeOp::ObserveTextLiteral { text } => {
-                HelloRealSemCodeAdmissionOp::ObserveTextLiteral {
-                    text: text.clone(),
-                }
+                HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text: text.clone() }
             }
             HelloRealSemCodeOp::CompleteQuad { value } => {
                 HelloRealSemCodeAdmissionOp::CompleteQuad {
@@ -92,10 +90,7 @@ struct InMemorySink {
 }
 
 impl HelloObservationSink for InMemorySink {
-    fn observe(
-        &mut self,
-        event: HelloObservationEvent,
-    ) -> Result<(), HelloObservationSinkError> {
+    fn observe(&mut self, event: HelloObservationEvent) -> Result<(), HelloObservationSinkError> {
         if self.reject {
             return Err(HelloObservationSinkError::Denied);
         }
@@ -128,7 +123,10 @@ fn hello_observation_route_routes_admitted_hello_to_explicit_sink() {
     assert_eq!(sink.events.len(), 1);
     let event = &sink.events[0];
     assert_eq!(event.operation_kind, "controlled_observation_text");
-    assert_eq!(event.observation_class, HelloObservationClass::ControlledText);
+    assert_eq!(
+        event.observation_class,
+        HelloObservationClass::ControlledText
+    );
     assert_eq!(event.text, "Hello, World!");
     assert_eq!(event.sequence_index, HelloObservationSequenceIndex(0));
 }
@@ -159,9 +157,7 @@ fn hello_observation_route_rejects_non_admitted_and_forbidden_inputs() {
         );
         assert_eq!(
             result,
-            HelloObservationRouteResult::NotRouted(
-                HelloObservationRouteError::ForbiddenHostOutput,
-            )
+            HelloObservationRouteResult::NotRouted(HelloObservationRouteError::ForbiddenHostOutput,)
         );
     }
 
@@ -207,5 +203,8 @@ fn hello_observation_route_composes_isolated_verifier_and_sink_layers() {
 
     assert_eq!(result, HelloObservationRouteResult::Routed);
     assert_eq!(sink.events.len(), 1);
-    assert_eq!(sink.events[0].sequence_index, HelloObservationSequenceIndex(0));
+    assert_eq!(
+        sink.events[0].sequence_index,
+        HelloObservationSequenceIndex(0)
+    );
 }

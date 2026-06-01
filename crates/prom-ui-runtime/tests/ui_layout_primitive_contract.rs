@@ -1,6 +1,5 @@
 use prom_ui_runtime::layout_primitives::{
-    find_ui_layout_primitive, ui_layout_primitives, UiLayoutPrimitiveDomain,
-    UiLayoutPrimitiveKind,
+    find_ui_layout_primitive, ui_layout_primitives, UiLayoutPrimitiveDomain, UiLayoutPrimitiveKind,
 };
 
 #[test]

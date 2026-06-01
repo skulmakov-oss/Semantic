@@ -1,6 +1,6 @@
 use prom_ui_runtime::{
-    Color, DesktopSession, DrawCommand, InMemoryBackend, InputEvent, InputEventKind,
-    LoopControl, SessionState, UiRuntimeError, WindowConfig,
+    Color, DesktopSession, DrawCommand, InMemoryBackend, InputEvent, InputEventKind, LoopControl,
+    SessionState, UiRuntimeError, WindowConfig,
 };
 
 #[test]
@@ -22,10 +22,7 @@ fn tick_in_memory_frame_requires_running_and_preserves_queue() {
         })
         .expect_err("tick before run must fail");
 
-    assert!(matches!(
-        err,
-        UiRuntimeError::LifecycleViolation { .. }
-    ));
+    assert!(matches!(err, UiRuntimeError::LifecycleViolation { .. }));
 
     assert!(!callback_called);
     assert_eq!(session.backend().queued_event_count(), 1);
@@ -147,10 +144,7 @@ fn tick_in_memory_frame_after_close_preserves_queue() {
         })
         .expect_err("tick after close must fail");
 
-    assert!(matches!(
-        err,
-        UiRuntimeError::LifecycleViolation { .. }
-    ));
+    assert!(matches!(err, UiRuntimeError::LifecycleViolation { .. }));
 
     assert!(!callback_called);
     assert_eq!(session.backend().queued_event_count(), 1);

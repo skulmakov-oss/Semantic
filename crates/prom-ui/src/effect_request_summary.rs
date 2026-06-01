@@ -53,7 +53,10 @@ pub fn summarize_interaction_effect_requests(
     };
 
     for trace in traces {
-        if matches!(trace.trace_status, InteractionEffectRequestTraceStatus::Described) {
+        if matches!(
+            trace.trace_status,
+            InteractionEffectRequestTraceStatus::Described
+        ) {
             summary.described += 1;
         }
 
@@ -150,10 +153,14 @@ impl InteractionEffectRequestSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action_admission::InteractionActionAdmissionPolicyGateNamespace;
+    use crate::action_binding::InteractionActionName;
+    use crate::action_dispatch_record::InteractionSemanticActionDispatchRecordId;
+    use crate::action_dispatch_route::InteractionSemanticActionDispatchRouteId;
+    use crate::admitted_action::InteractionAdmittedSemanticActionId;
     use crate::effect_request::{
         InteractionEffectRequestDenialBehavior, InteractionEffectRequestDescriptorId,
-        InteractionEffectRequestKind,
-        InteractionEffectRequestLifecyclePrecondition,
+        InteractionEffectRequestKind, InteractionEffectRequestLifecyclePrecondition,
         InteractionEffectRequestPrepareCommitRelationship,
         InteractionEffectRequestRuntimeCapability, InteractionEffectRequestScope,
         InteractionEffectRequestTargetPolicy, InteractionEffectRequestUiCapability,
@@ -162,11 +169,6 @@ mod tests {
         InteractionEffectRequestTraceReason, InteractionEffectRequestTraceReport,
         InteractionEffectRequestTraceStatus,
     };
-    use crate::action_admission::InteractionActionAdmissionPolicyGateNamespace;
-    use crate::action_binding::InteractionActionName;
-    use crate::action_dispatch_record::InteractionSemanticActionDispatchRecordId;
-    use crate::action_dispatch_route::InteractionSemanticActionDispatchRouteId;
-    use crate::admitted_action::InteractionAdmittedSemanticActionId;
     use crate::interaction::InteractionIntentKind;
 
     fn effect_trace(
@@ -202,14 +204,18 @@ mod tests {
             },
             requested_effect: kind,
             target_policy: match kind {
-                InteractionEffectRequestKind::CloseWindow => InteractionEffectRequestTargetPolicy::Optional,
+                InteractionEffectRequestKind::CloseWindow => {
+                    InteractionEffectRequestTargetPolicy::Optional
+                }
                 InteractionEffectRequestKind::PrepareEffect
                 | InteractionEffectRequestKind::CommitEffect
                 | InteractionEffectRequestKind::RollbackEffect
                 | InteractionEffectRequestKind::QuarantineTarget => {
                     InteractionEffectRequestTargetPolicy::Required
                 }
-                InteractionEffectRequestKind::Unknown => InteractionEffectRequestTargetPolicy::Ignored,
+                InteractionEffectRequestKind::Unknown => {
+                    InteractionEffectRequestTargetPolicy::Ignored
+                }
             },
             required_ui_capability: ui_capability,
             required_runtime_capability: runtime_capability,
@@ -229,7 +235,8 @@ mod tests {
                     InteractionEffectRequestLifecyclePrecondition::Unknown
                 }
             },
-            trace_requirement: crate::action_admission::InteractionActionAdmissionTraceRequirement::Required,
+            trace_requirement:
+                crate::action_admission::InteractionActionAdmissionTraceRequirement::Required,
             denial_behavior: match kind {
                 InteractionEffectRequestKind::CloseWindow
                 | InteractionEffectRequestKind::PrepareEffect
@@ -238,7 +245,9 @@ mod tests {
                 | InteractionEffectRequestKind::QuarantineTarget => {
                     InteractionEffectRequestDenialBehavior::VisibleRequired
                 }
-                InteractionEffectRequestKind::Unknown => InteractionEffectRequestDenialBehavior::Unknown,
+                InteractionEffectRequestKind::Unknown => {
+                    InteractionEffectRequestDenialBehavior::Unknown
+                }
             },
             prepare_commit_relationship: match kind {
                 InteractionEffectRequestKind::CommitEffect => {
@@ -366,14 +375,18 @@ mod tests {
 
         let summary = summarize_interaction_effect_requests(&traces);
 
-        assert!(summary.ui_capabilities.contains(&InteractionEffectRequestUiCapabilityCount {
-            capability: InteractionEffectRequestUiCapability::EffectControl,
-            count: 2,
-        }));
-        assert!(summary.ui_capabilities.contains(&InteractionEffectRequestUiCapabilityCount {
-            capability: InteractionEffectRequestUiCapability::WindowLifecycle,
-            count: 1,
-        }));
+        assert!(summary
+            .ui_capabilities
+            .contains(&InteractionEffectRequestUiCapabilityCount {
+                capability: InteractionEffectRequestUiCapability::EffectControl,
+                count: 2,
+            }));
+        assert!(summary
+            .ui_capabilities
+            .contains(&InteractionEffectRequestUiCapabilityCount {
+                capability: InteractionEffectRequestUiCapability::WindowLifecycle,
+                count: 1,
+            }));
     }
 
     #[test]
@@ -401,18 +414,18 @@ mod tests {
 
         let summary = summarize_interaction_effect_requests(&traces);
 
-        assert!(summary
-            .runtime_capabilities
-            .contains(&InteractionEffectRequestRuntimeCapabilityCount {
+        assert!(summary.runtime_capabilities.contains(
+            &InteractionEffectRequestRuntimeCapabilityCount {
                 capability: InteractionEffectRequestRuntimeCapability::EffectControl,
                 count: 2,
-            }));
-        assert!(summary
-            .runtime_capabilities
-            .contains(&InteractionEffectRequestRuntimeCapabilityCount {
+            }
+        ));
+        assert!(summary.runtime_capabilities.contains(
+            &InteractionEffectRequestRuntimeCapabilityCount {
                 capability: InteractionEffectRequestRuntimeCapability::WindowLifecycle,
                 count: 1,
-            }));
+            }
+        ));
     }
 
     #[test]
@@ -440,9 +453,18 @@ mod tests {
 
         let summary = summarize_interaction_effect_requests(&traces);
 
-        assert_eq!(summary.kinds[0].kind, InteractionEffectRequestKind::RollbackEffect);
-        assert_eq!(summary.kinds[1].kind, InteractionEffectRequestKind::PrepareEffect);
-        assert_eq!(summary.kinds[2].kind, InteractionEffectRequestKind::CloseWindow);
+        assert_eq!(
+            summary.kinds[0].kind,
+            InteractionEffectRequestKind::RollbackEffect
+        );
+        assert_eq!(
+            summary.kinds[1].kind,
+            InteractionEffectRequestKind::PrepareEffect
+        );
+        assert_eq!(
+            summary.kinds[2].kind,
+            InteractionEffectRequestKind::CloseWindow
+        );
         assert_eq!(
             summary.ui_capabilities[0].capability,
             InteractionEffectRequestUiCapability::TargetQuarantine

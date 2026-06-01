@@ -20,12 +20,14 @@ fn fixture_text(rel: &str) -> String {
 
 fn parse_validate_lower() -> HelloIrModule {
     let input = fixture_text("tests/fixtures/pending/hello/positive_hello_verbose_directional.sm");
-    let parsed = parse_hello_file(&input)
-        .unwrap_or_else(|err| panic!("parser unexpectedly rejected canonical hello fixture: {err}"));
+    let parsed = parse_hello_file(&input).unwrap_or_else(|err| {
+        panic!("parser unexpectedly rejected canonical hello fixture: {err}")
+    });
     let checked = validate_hello_file(parsed)
         .unwrap_or_else(|err| panic!("sema unexpectedly rejected canonical hello fixture: {err}"));
-    lower_hello_checked_file(&checked)
-        .unwrap_or_else(|err| panic!("lowering unexpectedly rejected canonical hello fixture: {err}"))
+    lower_hello_checked_file(&checked).unwrap_or_else(|err| {
+        panic!("lowering unexpectedly rejected canonical hello fixture: {err}")
+    })
 }
 
 fn render_conceptual_semcode(module: &HelloIrModule) -> String {
@@ -47,11 +49,11 @@ fn render_conceptual_semcode(module: &HelloIrModule) -> String {
                 ));
             }
             HelloIrStmt::ObserveText(observe) => {
-                out.push_str(&format!(
-                    "request_observation_text {}\n",
-                    observe.text
-                ));
-                assert_eq!(observe.observation_class, HelloIrObservationClass::Controlled);
+                out.push_str(&format!("request_observation_text {}\n", observe.text));
+                assert_eq!(
+                    observe.observation_class,
+                    HelloIrObservationClass::Controlled
+                );
             }
             HelloIrStmt::CompleteQuad(complete) => {
                 out.push_str(&format!("complete_quad {}\n", render_quad(complete.value)));
@@ -71,14 +73,16 @@ fn render_quad(value: HelloIrQuadLit) -> &'static str {
 }
 
 fn fixture_body_lines() -> String {
-    fixture_text("tests/fixtures/pending/hello_semcode/positive_hello_verbose_conceptual.semcode.txt")
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            !trimmed.is_empty() && !trimmed.starts_with('#')
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    fixture_text(
+        "tests/fixtures/pending/hello_semcode/positive_hello_verbose_conceptual.semcode.txt",
+    )
+    .lines()
+    .filter(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty() && !trimmed.starts_with('#')
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 #[test]

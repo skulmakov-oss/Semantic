@@ -22,8 +22,7 @@ use crate::prepared_effect_result::{
     InteractionPreparedEffectResultId,
 };
 use crate::runtime_capability_mapping::{
-    InteractionRuntimeCapabilityMappingDescriptorId,
-    InteractionRuntimeCapabilityNamespace,
+    InteractionRuntimeCapabilityMappingDescriptorId, InteractionRuntimeCapabilityNamespace,
 };
 use crate::runtime_capability_mapping_result::InteractionRuntimeCapabilityMappingResultId;
 use crate::ui_capability_admission::InteractionUiCapabilityAdmissionDescriptorId;
@@ -86,7 +85,8 @@ pub fn describe_interaction_commit_boundary(
         runtime_capability_mapping_descriptor_id: prepared_result
             .runtime_capability_mapping_descriptor_id,
         ui_capability_admission_result_id: prepared_result.ui_capability_admission_result_id,
-        ui_capability_admission_descriptor_id: prepared_result.ui_capability_admission_descriptor_id,
+        ui_capability_admission_descriptor_id: prepared_result
+            .ui_capability_admission_descriptor_id,
         effect_request_descriptor_id: prepared_result.effect_request_descriptor_id,
         source_admitted_action_id: prepared_result.source_admitted_action_id,
         dispatch_record_id: prepared_result.dispatch_record_id,
@@ -160,8 +160,7 @@ mod tests {
     use crate::prepared_effect::describe_interaction_prepared_effect;
     use crate::prepared_effect_result::{
         record_interaction_prepared_effect_denied_result,
-        record_interaction_prepared_effect_result,
-        InteractionPreparedEffectDenialReason,
+        record_interaction_prepared_effect_result, InteractionPreparedEffectDenialReason,
         InteractionPreparedEffectMissingRequirement,
     };
     use crate::runtime_capability_mapping::describe_interaction_runtime_capability_mapping;
@@ -201,7 +200,8 @@ mod tests {
             &record_interaction_ui_capability_admitted_result(&admission),
         )
         .expect("admitted result should produce mapping descriptor");
-        let mapping_result = record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
+        let mapping_result =
+            record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
         let prepared_descriptor = describe_interaction_prepared_effect(&mapping_result)
             .expect("mapped result should produce prepared effect descriptor");
 
@@ -215,7 +215,8 @@ mod tests {
             &record_interaction_ui_capability_admitted_result(&admission),
         )
         .expect("admitted result should produce mapping descriptor");
-        let mapping_result = record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
+        let mapping_result =
+            record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
         let prepared_descriptor = describe_interaction_prepared_effect(&mapping_result)
             .expect("mapped result should produce prepared effect descriptor");
 
@@ -254,7 +255,10 @@ mod tests {
             .expect("prepared result should produce commit boundary descriptor");
 
         assert_eq!(descriptor.prepared_effect_result_id, result.id);
-        assert_eq!(descriptor.prepared_effect_descriptor_id, result.descriptor_id);
+        assert_eq!(
+            descriptor.prepared_effect_descriptor_id,
+            result.descriptor_id
+        );
         assert_eq!(
             descriptor.runtime_capability_mapping_result_id,
             result.runtime_capability_mapping_result_id
@@ -271,12 +275,21 @@ mod tests {
             descriptor.ui_capability_admission_descriptor_id,
             result.ui_capability_admission_descriptor_id
         );
-        assert_eq!(descriptor.effect_request_descriptor_id, result.effect_request_descriptor_id);
-        assert_eq!(descriptor.source_admitted_action_id, result.source_admitted_action_id);
+        assert_eq!(
+            descriptor.effect_request_descriptor_id,
+            result.effect_request_descriptor_id
+        );
+        assert_eq!(
+            descriptor.source_admitted_action_id,
+            result.source_admitted_action_id
+        );
         assert_eq!(descriptor.dispatch_record_id, result.dispatch_record_id);
         assert_eq!(descriptor.dispatch_route_id, result.dispatch_route_id);
         assert_eq!(descriptor.requested_effect, result.requested_effect);
-        assert_eq!(descriptor.declared_ui_capability, result.declared_ui_capability);
+        assert_eq!(
+            descriptor.declared_ui_capability,
+            result.declared_ui_capability
+        );
         assert_eq!(
             descriptor.declared_runtime_capability_requirement,
             result.declared_runtime_capability_requirement
@@ -285,10 +298,16 @@ mod tests {
             descriptor.runtime_capability_namespace,
             result.runtime_capability_namespace
         );
-        assert_eq!(descriptor.lifecycle_precondition, result.lifecycle_precondition);
+        assert_eq!(
+            descriptor.lifecycle_precondition,
+            result.lifecycle_precondition
+        );
         assert_eq!(descriptor.target_policy, result.target_policy);
         assert_eq!(descriptor.trace_requirement, result.trace_requirement);
-        assert_eq!(descriptor.policy_gate_namespace, result.policy_gate_namespace);
+        assert_eq!(
+            descriptor.policy_gate_namespace,
+            result.policy_gate_namespace
+        );
         assert_eq!(descriptor.scope, result.scope);
     }
 
@@ -299,7 +318,10 @@ mod tests {
         let descriptor = describe_interaction_commit_boundary(&result)
             .expect("prepared result should produce commit boundary descriptor");
 
-        assert_eq!(descriptor.audit_requirement, InteractionCommitAuditRequirement::Required);
+        assert_eq!(
+            descriptor.audit_requirement,
+            InteractionCommitAuditRequirement::Required
+        );
         assert_eq!(
             descriptor.future_committed_effect_shape,
             InteractionCommitBoundaryFutureCommittedEffectShape::CommitOrDenyWithReason

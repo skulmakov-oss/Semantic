@@ -87,8 +87,7 @@ impl UiBackendAdapter for NullBackend {
                 DrawCommand::FillRect { rect, color } => {
                     println!(
                         "  FillRect {{ x:{} y:{} w:{} h:{} }} color {{ r:{} g:{} b:{} }}",
-                        rect.x, rect.y, rect.width, rect.height,
-                        color.r, color.g, color.b
+                        rect.x, rect.y, rect.width, rect.height, color.r, color.g, color.b
                     );
                 }
                 DrawCommand::DrawText { text, x, y, color } => {
@@ -113,8 +112,8 @@ fn main() {
     let config = WindowConfig::new("Semantic UI Demo", 800, 600);
     let backend = NullBackend::new();
 
-    let mut session = DesktopSession::create(backend, config)
-        .expect("NullBackend::create_window must succeed");
+    let mut session =
+        DesktopSession::create(backend, config).expect("NullBackend::create_window must succeed");
     assert_eq!(session.state(), SessionState::Created);
     println!("Session state: {:?}", session.state());
 
@@ -151,12 +150,7 @@ fn main() {
                 Rect::new(50, 50, 200, 100),
                 Color::rgb(70, 130, 180), // steel-blue panel
             );
-            frame.draw_text(
-                format!("Frame #{}", token.frame_id),
-                60,
-                90,
-                Color::WHITE,
-            );
+            frame.draw_text(format!("Frame #{}", token.frame_id), 60, 90, Color::WHITE);
 
             // Submit the frame to the backend.
             // In a real backend this would block until vsync.
@@ -197,8 +191,7 @@ mod tests {
     fn null_backend_demo_runs_without_panic() {
         let config = WindowConfig::new("Test Window", 640, 480);
         let backend = NullBackend::new();
-        let mut session =
-            DesktopSession::create(backend, config).expect("create must succeed");
+        let mut session = DesktopSession::create(backend, config).expect("create must succeed");
 
         let mut frame_count = 0u32;
         session

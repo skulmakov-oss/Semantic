@@ -17,12 +17,10 @@ use crate::effect_request::{
     InteractionEffectRequestUiCapability,
 };
 use crate::runtime_capability_mapping::{
-    InteractionRuntimeCapabilityMappingDescriptorId,
-    InteractionRuntimeCapabilityNamespace,
+    InteractionRuntimeCapabilityMappingDescriptorId, InteractionRuntimeCapabilityNamespace,
 };
 use crate::runtime_capability_mapping_result::{
-    InteractionRuntimeCapabilityMappingDecisionStatus,
-    InteractionRuntimeCapabilityMappingResult,
+    InteractionRuntimeCapabilityMappingDecisionStatus, InteractionRuntimeCapabilityMappingResult,
     InteractionRuntimeCapabilityMappingResultId,
 };
 use crate::ui_capability_admission::InteractionUiCapabilityAdmissionDescriptorId;
@@ -268,8 +266,14 @@ mod tests {
             descriptor.source_admitted_action_id,
             mapping_result.source_admitted_action_id
         );
-        assert_eq!(descriptor.dispatch_record_id, mapping_result.dispatch_record_id);
-        assert_eq!(descriptor.dispatch_route_id, mapping_result.dispatch_route_id);
+        assert_eq!(
+            descriptor.dispatch_record_id,
+            mapping_result.dispatch_record_id
+        );
+        assert_eq!(
+            descriptor.dispatch_route_id,
+            mapping_result.dispatch_route_id
+        );
         assert_eq!(descriptor.requested_effect, mapping_result.requested_effect);
         assert_eq!(
             descriptor.declared_ui_capability,
@@ -288,8 +292,14 @@ mod tests {
             mapping_result.lifecycle_precondition
         );
         assert_eq!(descriptor.target_policy, mapping_result.target_policy);
-        assert_eq!(descriptor.trace_requirement, mapping_result.trace_requirement);
-        assert_eq!(descriptor.policy_gate_namespace, mapping_result.policy_gate_namespace);
+        assert_eq!(
+            descriptor.trace_requirement,
+            mapping_result.trace_requirement
+        );
+        assert_eq!(
+            descriptor.policy_gate_namespace,
+            mapping_result.policy_gate_namespace
+        );
         assert_eq!(descriptor.scope, mapping_result.scope);
     }
 

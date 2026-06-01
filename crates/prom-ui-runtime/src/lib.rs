@@ -30,11 +30,11 @@
 extern crate alloc;
 
 pub mod adapter_boundary;
-pub mod boundary_registry;
 pub mod admission_facade;
-pub mod visual_tokens;
-pub mod layout_primitives;
+pub mod boundary_registry;
 pub mod component_metadata;
+pub mod layout_primitives;
+pub mod visual_tokens;
 
 pub use adapter_boundary::{
     AdapterRequestId, DrawBatchId, FrameId, RecordingAdapter, UiAdapterFailure,
@@ -195,10 +195,7 @@ pub trait UiBackendAdapter {
     /// The backend controls iteration timing; the closure signals whether to
     /// continue. In Wave 3 the backend reconciles `LoopControl::ExitRequested`
     /// with platform-native close events.
-    fn run_event_loop<F: FnMut(LoopControl)>(
-        &mut self,
-        on_event: F,
-    ) -> Result<(), UiRuntimeError>;
+    fn run_event_loop<F: FnMut(LoopControl)>(&mut self, on_event: F) -> Result<(), UiRuntimeError>;
     /// Submit a completed `DrawFrame` to the backend for rendering.
     ///
     /// Called at the end of each frame after the application callback has
@@ -480,7 +477,12 @@ pub struct Rect {
 
 impl Rect {
     pub const fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 }
 
@@ -860,7 +862,10 @@ mod tests {
         assert_eq!(gate.state(), SessionState::Closed);
 
         for op in all_ui_ops() {
-            assert!(gate.apply(op).is_err(), "{op:?} should be rejected in Closed");
+            assert!(
+                gate.apply(op).is_err(),
+                "{op:?} should be rejected in Closed"
+            );
         }
     }
 
@@ -1393,7 +1398,12 @@ mod tests {
         assert!(!frame.is_empty());
 
         let cmds = frame.commands();
-        assert_eq!(cmds[0], DrawCommand::Clear { color: Color::BLACK });
+        assert_eq!(
+            cmds[0],
+            DrawCommand::Clear {
+                color: Color::BLACK
+            }
+        );
         assert_eq!(
             cmds[1],
             DrawCommand::FillRect {
@@ -1435,7 +1445,9 @@ mod tests {
             }
         }
 
-        let mut backend = DrawCapturingBackend { captured: alloc::vec::Vec::new() };
+        let mut backend = DrawCapturingBackend {
+            captured: alloc::vec::Vec::new(),
+        };
 
         let mut frame = DrawFrame::new();
         frame.clear(Color::BLUE);
@@ -1443,7 +1455,10 @@ mod tests {
         backend.draw_frame(&frame).expect("draw_frame must succeed");
 
         assert_eq!(backend.captured.len(), 2);
-        assert_eq!(backend.captured[0], DrawCommand::Clear { color: Color::BLUE });
+        assert_eq!(
+            backend.captured[0],
+            DrawCommand::Clear { color: Color::BLUE }
+        );
         assert_eq!(
             backend.captured[1],
             DrawCommand::FillRect {

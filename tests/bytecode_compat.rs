@@ -5,10 +5,10 @@ use semantic_language::frontend::{
 use semantic_language::prom_abi::{AbiValue, RecordingHostAbi};
 use semantic_language::prom_cap::{CapabilityKind, CapabilityManifest};
 use semantic_language::semcode_format::{
-    header_spec_from_magic, CAP_CLOCK_READ, CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH,
-    CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE,
-    CAP_TEXT_VALUES, CAP_CLOSURE_VALUES, MAGIC0, MAGIC1, MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6,
-    MAGIC7, MAGIC8, MAGIC9, MAGIC10,
+    header_spec_from_magic, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_EVENT_POST, CAP_F64_MATH,
+    CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY,
+    CAP_STATE_UPDATE, CAP_TEXT_VALUES, MAGIC0, MAGIC1, MAGIC10, MAGIC2, MAGIC3, MAGIC4, MAGIC5,
+    MAGIC6, MAGIC7, MAGIC8, MAGIC9,
 };
 use semantic_language::semcode_vm::{
     disasm_semcode, run_semcode, run_verified_semcode_with_host_and_capabilities, RuntimeError,

@@ -31,9 +31,7 @@ pub enum HelloPendingPolicyResult {
 }
 
 #[cfg(feature = "std")]
-pub fn evaluate_hello_pending_policy(
-    input: &HelloPendingPolicyInput,
-) -> HelloPendingPolicyResult {
+pub fn evaluate_hello_pending_policy(input: &HelloPendingPolicyInput) -> HelloPendingPolicyResult {
     if input.capability_observation_sink != "present" || !input.sink_available {
         return HelloPendingPolicyResult::Deny {
             reason: HelloPendingPolicyReason::MissingObservationCapability,

@@ -82,8 +82,14 @@ fn execution_summary(rel: &str) -> String {
     verified_names.sort();
     disasm_names.sort();
 
-    assert_eq!(ir_names, verified_names, "IR and verifier surface drifted for {rel}");
-    assert_eq!(verified_names, disasm_names, "verifier and disasm surface drifted for {rel}");
+    assert_eq!(
+        ir_names, verified_names,
+        "IR and verifier surface drifted for {rel}"
+    );
+    assert_eq!(
+        verified_names, disasm_names,
+        "verifier and disasm surface drifted for {rel}"
+    );
 
     format!(
         "program={}\nsema:warnings={} laws={}\nir:names={}\nsemcode:magic={} rev={}\nverify:names={}\ndisasm:names={}\nrun=ok\n",
@@ -192,7 +198,8 @@ fn g1_execution_integrity_repeated_compiles_are_byte_stable() {
 
 #[test]
 fn g1_execution_integrity_malformed_semcode_rejects_before_execution() {
-    let src = source_text("examples/qualification/g1_real_program_trial/rule_state_decision/src/main.sm");
+    let src =
+        source_text("examples/qualification/g1_real_program_trial/rule_state_decision/src/main.sm");
     let mut bytes = compile_program_to_semcode(&src).expect("compile");
 
     let code_offset = first_function_code_offset(&bytes);
@@ -207,7 +214,8 @@ fn g1_execution_integrity_malformed_semcode_rejects_before_execution() {
         "expected InvalidStringTable in verifier rejection, got: {reject:?}"
     );
 
-    let runtime_err = run_semcode(&bytes).expect_err("raw runtime path must reject malformed semcode");
+    let runtime_err =
+        run_semcode(&bytes).expect_err("raw runtime path must reject malformed semcode");
     let rendered = format!("{runtime_err}");
     assert!(
         rendered.contains("bad SemCode format") || rendered.contains("string"),

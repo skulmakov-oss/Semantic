@@ -193,7 +193,10 @@ pub(crate) fn update_cache_index(
     let gh = graph_hash.unwrap_or(0);
     entries.insert(
         root_key,
-        format!("FP={:016x}\tGH={:016x}\tMC={}", fingerprint, gh, module_count),
+        format!(
+            "FP={:016x}\tGH={:016x}\tMC={}",
+            fingerprint, gh, module_count
+        ),
     );
     let mut out = String::from("EXOIDX v2\n");
     for (key, value) in entries {
@@ -269,7 +272,10 @@ fn collect_module_graph(
         return Ok(());
     }
     if !visiting.insert(canonical.clone()) {
-        return Err(format!("cyclic import while scanning '{}'", canonical.display()));
+        return Err(format!(
+            "cyclic import while scanning '{}'",
+            canonical.display()
+        ));
     }
     let source = std::fs::read_to_string(&canonical)
         .map_err(|e| format!("read '{}': {}", canonical.display(), e))?;

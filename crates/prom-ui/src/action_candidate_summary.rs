@@ -111,15 +111,14 @@ fn is_effect_capable(policy: Option<InteractionActionEffectPolicy>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::action_binding::InteractionActionName;
     use crate::action_binding_stream::{
         trace_interaction_action_binding_stream, InteractionActionBindingTraceStreamModel,
         InteractionActionBindingTraceStreamReport, InteractionActionBindingTraceStreamStats,
     };
-    use crate::action_binding::InteractionActionName;
     use crate::action_binding_trace::InteractionActionBindingTraceReason;
     use crate::interaction::{
-        ElementId, InteractionIntentId, InteractionIntentKind, InteractionSource,
-        InteractionTarget,
+        ElementId, InteractionIntentId, InteractionIntentKind, InteractionSource, InteractionTarget,
     };
     use crate::raw_event::{RawUiEventId, RawUiEventKind};
     use crate::trace::{
@@ -246,25 +245,33 @@ mod tests {
 
         let summary = summarize_interaction_action_candidates(&stream);
 
-        assert!(summary.reasons.contains(&InteractionActionBindingReasonCount {
-            reason: InteractionActionBindingTraceReason::BindingIgnoresTarget,
-            count: 1,
-        }));
+        assert!(summary
+            .reasons
+            .contains(&InteractionActionBindingReasonCount {
+                reason: InteractionActionBindingTraceReason::BindingIgnoresTarget,
+                count: 1,
+            }));
 
-        assert!(summary.reasons.contains(&InteractionActionBindingReasonCount {
-            reason: InteractionActionBindingTraceReason::BindingRequiresTarget,
-            count: 1,
-        }));
+        assert!(summary
+            .reasons
+            .contains(&InteractionActionBindingReasonCount {
+                reason: InteractionActionBindingTraceReason::BindingRequiresTarget,
+                count: 1,
+            }));
 
-        assert!(summary.reasons.contains(&InteractionActionBindingReasonCount {
-            reason: InteractionActionBindingTraceReason::NoBindingForIntent,
-            count: 1,
-        }));
+        assert!(summary
+            .reasons
+            .contains(&InteractionActionBindingReasonCount {
+                reason: InteractionActionBindingTraceReason::NoBindingForIntent,
+                count: 1,
+            }));
 
-        assert!(summary.reasons.contains(&InteractionActionBindingReasonCount {
-            reason: InteractionActionBindingTraceReason::IntentUnclassified,
-            count: 1,
-        }));
+        assert!(summary
+            .reasons
+            .contains(&InteractionActionBindingReasonCount {
+                reason: InteractionActionBindingTraceReason::IntentUnclassified,
+                count: 1,
+            }));
     }
 
     #[test]
@@ -307,8 +314,14 @@ mod tests {
         let stream = trace_interaction_action_binding_stream(&model);
         let summary = summarize_interaction_action_candidates(&stream);
 
-        assert_eq!(summary.actions[0].action, InteractionActionName::SelectTraceEvent);
-        assert_eq!(summary.actions[1].action, InteractionActionName::CloseWindow);
+        assert_eq!(
+            summary.actions[0].action,
+            InteractionActionName::SelectTraceEvent
+        );
+        assert_eq!(
+            summary.actions[1].action,
+            InteractionActionName::CloseWindow
+        );
         assert_eq!(
             summary.reasons[0].reason,
             InteractionActionBindingTraceReason::BindingRequiresTarget

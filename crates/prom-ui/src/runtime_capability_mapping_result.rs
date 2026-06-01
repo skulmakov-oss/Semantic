@@ -18,8 +18,7 @@ use crate::effect_request::{
     InteractionEffectRequestUiCapability,
 };
 use crate::runtime_capability_mapping::{
-    InteractionRuntimeCapabilityMappingDescriptor,
-    InteractionRuntimeCapabilityMappingDescriptorId,
+    InteractionRuntimeCapabilityMappingDescriptor, InteractionRuntimeCapabilityMappingDescriptorId,
     InteractionRuntimeCapabilityNamespace,
 };
 use crate::ui_capability_admission::{
@@ -129,8 +128,7 @@ fn build_result(
         missing_requirement,
         requested_effect: descriptor.requested_effect,
         declared_ui_capability: descriptor.declared_ui_capability,
-        declared_runtime_capability_requirement: descriptor
-            .declared_runtime_capability_requirement,
+        declared_runtime_capability_requirement: descriptor.declared_runtime_capability_requirement,
         runtime_mapping_requirement: descriptor.runtime_mapping_requirement,
         runtime_capability_namespace: descriptor.runtime_capability_namespace,
         lifecycle_precondition: descriptor.lifecycle_precondition,
@@ -143,11 +141,17 @@ fn build_result(
 
 impl InteractionRuntimeCapabilityMappingResult {
     pub const fn is_mapped(&self) -> bool {
-        matches!(self.status, InteractionRuntimeCapabilityMappingDecisionStatus::Mapped)
+        matches!(
+            self.status,
+            InteractionRuntimeCapabilityMappingDecisionStatus::Mapped
+        )
     }
 
     pub const fn is_denied(&self) -> bool {
-        matches!(self.status, InteractionRuntimeCapabilityMappingDecisionStatus::Denied)
+        matches!(
+            self.status,
+            InteractionRuntimeCapabilityMappingDecisionStatus::Denied
+        )
     }
 
     pub const fn grants_runtime_capability(&self) -> bool {
@@ -183,8 +187,8 @@ impl InteractionRuntimeCapabilityMappingResult {
 mod tests {
     use super::*;
     use crate::action_admission::{
-        InteractionActionAdmissionEffectRelationship, InteractionActionAdmissionPolicyGateNamespace,
-        InteractionActionAdmissionTraceRequirement,
+        InteractionActionAdmissionEffectRelationship,
+        InteractionActionAdmissionPolicyGateNamespace, InteractionActionAdmissionTraceRequirement,
     };
     use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
     use crate::action_dispatch_record::{
@@ -223,7 +227,8 @@ mod tests {
             block_reason: InteractionSemanticActionDispatchBlockReason::None,
             trace_reason: InteractionSemanticActionDispatchTraceReason::RouteRecorded,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
-            effect_relationship: InteractionActionAdmissionEffectRelationship::MayRequestEffectAfterAdmission,
+            effect_relationship:
+                InteractionActionAdmissionEffectRelationship::MayRequestEffectAfterAdmission,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::CoreUi,
             effect_eligibility:
                 InteractionSemanticActionDispatchEffectEligibility::RequiresFutureEffectBoundary,
@@ -251,9 +256,15 @@ mod tests {
 
         let result = record_interaction_runtime_capability_mapped_result(&descriptor);
 
-        assert_eq!(result.status, InteractionRuntimeCapabilityMappingDecisionStatus::Mapped);
+        assert_eq!(
+            result.status,
+            InteractionRuntimeCapabilityMappingDecisionStatus::Mapped
+        );
         assert_eq!(result.descriptor_id, descriptor.id);
-        assert_eq!(result.id, InteractionRuntimeCapabilityMappingResultId(descriptor.id.0));
+        assert_eq!(
+            result.id,
+            InteractionRuntimeCapabilityMappingResultId(descriptor.id.0)
+        );
     }
 
     #[test]
@@ -266,9 +277,15 @@ mod tests {
             InteractionRuntimeCapabilityMappingMissingRequirement::Policy,
         );
 
-        assert_eq!(result.status, InteractionRuntimeCapabilityMappingDecisionStatus::Denied);
+        assert_eq!(
+            result.status,
+            InteractionRuntimeCapabilityMappingDecisionStatus::Denied
+        );
         assert_eq!(result.descriptor_id, descriptor.id);
-        assert_eq!(result.id, InteractionRuntimeCapabilityMappingResultId(descriptor.id.0));
+        assert_eq!(
+            result.id,
+            InteractionRuntimeCapabilityMappingResultId(descriptor.id.0)
+        );
     }
 
     #[test]
@@ -285,12 +302,21 @@ mod tests {
             result.ui_capability_admission_descriptor_id,
             descriptor.ui_capability_admission_descriptor_id
         );
-        assert_eq!(result.effect_request_descriptor_id, descriptor.effect_request_descriptor_id);
-        assert_eq!(result.source_admitted_action_id, descriptor.source_admitted_action_id);
+        assert_eq!(
+            result.effect_request_descriptor_id,
+            descriptor.effect_request_descriptor_id
+        );
+        assert_eq!(
+            result.source_admitted_action_id,
+            descriptor.source_admitted_action_id
+        );
         assert_eq!(result.dispatch_record_id, descriptor.dispatch_record_id);
         assert_eq!(result.dispatch_route_id, descriptor.dispatch_route_id);
         assert_eq!(result.requested_effect, descriptor.requested_effect);
-        assert_eq!(result.declared_ui_capability, descriptor.declared_ui_capability);
+        assert_eq!(
+            result.declared_ui_capability,
+            descriptor.declared_ui_capability
+        );
         assert_eq!(
             result.declared_runtime_capability_requirement,
             descriptor.declared_runtime_capability_requirement
@@ -303,10 +329,16 @@ mod tests {
             result.runtime_capability_namespace,
             descriptor.runtime_capability_namespace
         );
-        assert_eq!(result.lifecycle_precondition, descriptor.lifecycle_precondition);
+        assert_eq!(
+            result.lifecycle_precondition,
+            descriptor.lifecycle_precondition
+        );
         assert_eq!(result.target_policy, descriptor.target_policy);
         assert_eq!(result.trace_requirement, descriptor.trace_requirement);
-        assert_eq!(result.policy_gate_namespace, descriptor.policy_gate_namespace);
+        assert_eq!(
+            result.policy_gate_namespace,
+            descriptor.policy_gate_namespace
+        );
         assert_eq!(result.scope, descriptor.scope);
     }
 
@@ -316,7 +348,10 @@ mod tests {
 
         let result = record_interaction_runtime_capability_mapped_result(&descriptor);
 
-        assert_eq!(result.denial_reason, InteractionRuntimeCapabilityMappingDenialReason::None);
+        assert_eq!(
+            result.denial_reason,
+            InteractionRuntimeCapabilityMappingDenialReason::None
+        );
         assert_eq!(
             result.missing_requirement,
             InteractionRuntimeCapabilityMappingMissingRequirement::None

@@ -39,4 +39,3 @@ pub fn run_default_opt_passes(functions: &mut Vec<IrFunction>) -> OptReport {
     *functions = module.functions;
     report
 }
-

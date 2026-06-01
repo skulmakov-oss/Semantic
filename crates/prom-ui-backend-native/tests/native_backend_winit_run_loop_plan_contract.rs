@@ -2,12 +2,9 @@
 
 use prom_ui_backend_native::{
     winit_placeholder::{
-        current_native_backend_winit_run_loop_plan,
-        native_backend_winit_run_loop_plan_available,
-        native_backend_winit_run_loop_readiness,
-        NativeBackendWinitRunLoopOwnership,
-        NativeBackendWinitRunLoopReadiness,
-        NativeBackendWinitRunLoopStage,
+        current_native_backend_winit_run_loop_plan, native_backend_winit_run_loop_plan_available,
+        native_backend_winit_run_loop_readiness, NativeBackendWinitRunLoopOwnership,
+        NativeBackendWinitRunLoopReadiness, NativeBackendWinitRunLoopStage,
     },
     NativeBackend,
 };
@@ -23,7 +20,10 @@ fn native_backend_winit_run_loop_plan_is_available() {
 fn current_plan_is_manual_app_state_run() {
     let plan = current_native_backend_winit_run_loop_plan();
 
-    assert_eq!(plan.stage, NativeBackendWinitRunLoopStage::ManualAppStateRun);
+    assert_eq!(
+        plan.stage,
+        NativeBackendWinitRunLoopStage::ManualAppStateRun
+    );
     assert_eq!(
         plan.ownership,
         NativeBackendWinitRunLoopOwnership::ConsumesBackendReturnsSummary

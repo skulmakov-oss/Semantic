@@ -1,8 +1,7 @@
 use prom_audit::hello_observation_audit::{
     build_hello_observation_audit_event, HelloObservationAuditEvent,
-    HelloObservationAuditEventKind, HelloObservationAuditLinkage,
-    HelloObservationAuditPayloadRef, HelloObservationAuditPolicyClass,
-    HelloObservationAuditSequenceIndex,
+    HelloObservationAuditEventKind, HelloObservationAuditLinkage, HelloObservationAuditPayloadRef,
+    HelloObservationAuditPolicyClass, HelloObservationAuditSequenceIndex,
 };
 use prom_cap::hello_observation_capability::{
     evaluate_hello_observation_capability, HelloObservationCapability,
@@ -38,10 +37,7 @@ struct InMemoryHelloObservationSink {
 }
 
 impl HelloObservationSink for InMemoryHelloObservationSink {
-    fn observe(
-        &mut self,
-        event: HelloObservationEvent,
-    ) -> Result<(), HelloObservationSinkError> {
+    fn observe(&mut self, event: HelloObservationEvent) -> Result<(), HelloObservationSinkError> {
         let expected_index = self.events.len() as u64;
         if event.sequence_index.0 != expected_index {
             return Err(HelloObservationSinkError::NondeterministicOrder);
@@ -60,7 +56,8 @@ fn fixture_path(name: &str) -> PathBuf {
 }
 
 fn parse_fixture_kv(path: &Path) -> BTreeMap<String, String> {
-    let text = fs::read_to_string(path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
+    let text =
+        fs::read_to_string(path).unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
     let mut map = BTreeMap::new();
     for raw_line in text.lines() {
         let line = raw_line.trim();
@@ -78,18 +75,14 @@ fn parse_fixture_kv(path: &Path) -> BTreeMap<String, String> {
 }
 
 fn parse_bool_or(map: &BTreeMap<String, String>, key: &str, default: bool) -> bool {
-    map.get(key)
-        .map(|value| value == "true")
-        .unwrap_or(default)
+    map.get(key).map(|value| value == "true").unwrap_or(default)
 }
 
 fn parse_requested_host_channel(map: &BTreeMap<String, String>) -> Option<String> {
     map.get("requested_host_channel").cloned()
 }
 
-fn capability_requested_host_channel(
-    map: &BTreeMap<String, String>,
-) -> Option<&'static str> {
+fn capability_requested_host_channel(map: &BTreeMap<String, String>) -> Option<&'static str> {
     match map.get("requested_host_channel").map(String::as_str) {
         Some("stdout") => Some("stdout"),
         Some("print") => Some("print"),
@@ -140,7 +133,9 @@ fn to_capability_context(map: &BTreeMap<String, String>) -> HelloObservationCapa
     }
 }
 
-fn audit_policy_class_from_input(input: &HelloPendingPolicyInput) -> HelloObservationAuditPolicyClass {
+fn audit_policy_class_from_input(
+    input: &HelloPendingPolicyInput,
+) -> HelloObservationAuditPolicyClass {
     if input.audit_policy == "required" {
         HelloObservationAuditPolicyClass::Required
     } else {
@@ -150,13 +145,9 @@ fn audit_policy_class_from_input(input: &HelloPendingPolicyInput) -> HelloObserv
 
 fn denial_reason_from_pending(reason: HelloPendingPolicyReason) -> &'static str {
     match reason {
-        HelloPendingPolicyReason::MissingObservationCapability => {
-            "missing_observation_capability"
-        }
+        HelloPendingPolicyReason::MissingObservationCapability => "missing_observation_capability",
         HelloPendingPolicyReason::StdoutNotDefaultSink => "stdout_not_default_sink",
-        HelloPendingPolicyReason::AuditRequiredButUnavailable => {
-            "audit_required_but_unavailable"
-        }
+        HelloPendingPolicyReason::AuditRequiredButUnavailable => "audit_required_but_unavailable",
         HelloPendingPolicyReason::NondeterministicSinkConfiguration => {
             "nondeterministic_sink_configuration"
         }
@@ -183,10 +174,7 @@ fn stable_payload_hash(text: &str) -> u64 {
     hash
 }
 
-fn build_controlled_observation_event(
-    text: &str,
-    sequence_index: u64,
-) -> HelloObservationEvent {
+fn build_controlled_observation_event(text: &str, sequence_index: u64) -> HelloObservationEvent {
     HelloObservationEvent {
         operation_kind: "controlled_observation_text",
         observation_class: HelloObservationClass::ControlledText,
@@ -223,12 +211,19 @@ fn run_isolated_harness(path: &Path) -> (HelloIsolatedHarnessResult, usize, usiz
     let mut sink = InMemoryHelloObservationSink::default();
     let text = "Hello, World!";
     let sink_event = build_controlled_observation_event(text, 0);
-    sink.observe(sink_event).expect("controlled sink must admit one ordered event");
+    sink.observe(sink_event)
+        .expect("controlled sink must admit one ordered event");
     assert_eq!(sink.events.len(), 1);
     assert_eq!(sink.events[0].operation_kind, "controlled_observation_text");
-    assert_eq!(sink.events[0].observation_class, HelloObservationClass::ControlledText);
+    assert_eq!(
+        sink.events[0].observation_class,
+        HelloObservationClass::ControlledText
+    );
     assert_eq!(sink.events[0].text, text);
-    assert_eq!(sink.events[0].sequence_index, HelloObservationSequenceIndex(0));
+    assert_eq!(
+        sink.events[0].sequence_index,
+        HelloObservationSequenceIndex(0)
+    );
 
     let linkage = HelloObservationAuditLinkage {
         verifier_admission_ref: Some(1),
@@ -242,10 +237,16 @@ fn run_isolated_harness(path: &Path) -> (HelloIsolatedHarnessResult, usize, usiz
         linkage,
     );
 
-    assert_eq!(audit_event.event_kind, HelloObservationAuditEventKind::Observation);
+    assert_eq!(
+        audit_event.event_kind,
+        HelloObservationAuditEventKind::Observation
+    );
     assert_eq!(audit_event.operation_kind, "controlled_observation_text");
     assert_eq!(audit_event.observation_class, "controlled");
-    assert_eq!(audit_event.sequence_index, HelloObservationAuditSequenceIndex(0));
+    assert_eq!(
+        audit_event.sequence_index,
+        HelloObservationAuditSequenceIndex(0)
+    );
     assert_eq!(
         audit_event.payload_ref,
         HelloObservationAuditPayloadRef::LiteralTextHash(stable_payload_hash(text))
@@ -297,11 +298,7 @@ fn assert_fixture_outcome(
 #[test]
 fn hello_isolated_policy_harness_covers_all_pending_policy_fixtures() {
     let fixtures = [
-        (
-            "positive_observation_policy_admitted.toml",
-            "admit",
-            None,
-        ),
+        ("positive_observation_policy_admitted.toml", "admit", None),
         (
             "negative_missing_observation_capability.toml",
             "deny",

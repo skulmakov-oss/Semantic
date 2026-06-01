@@ -117,6 +117,7 @@ fn facade_stage_draw_frame_has_expected_shape() {
     let _f: fn(
         &mut NativeBackendWinitApp,
         &DrawFrame,
-    ) -> Result<NativeBackendWinitAppDrawTranscript, prom_ui_runtime::UiRuntimeError> =
+    )
+        -> Result<NativeBackendWinitAppDrawTranscript, prom_ui_runtime::UiRuntimeError> =
         NativeBackendWinitApp::stage_draw_frame;
 }

@@ -76,7 +76,8 @@ pub fn describe_interaction_ui_capability_admission(
         runtime_mapping_requirement: map_runtime_mapping_requirement(
             effect_request.required_runtime_capability,
         ),
-        future_result_shape: InteractionUiCapabilityAdmissionFutureResultShape::AdmitOrDenyWithReason,
+        future_result_shape:
+            InteractionUiCapabilityAdmissionFutureResultShape::AdmitOrDenyWithReason,
     }
 }
 
@@ -136,9 +137,6 @@ impl InteractionUiCapabilityAdmissionDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effect_request::{
-        describe_interaction_effect_request, InteractionEffectRequestDescriptor,
-    };
     use crate::action_admission::{
         InteractionActionAdmissionPolicyGateNamespace, InteractionActionAdmissionTraceRequirement,
     };
@@ -156,6 +154,9 @@ mod tests {
         InteractionSemanticActionDispatchTraceStatus,
     };
     use crate::admitted_action::InteractionAdmittedSemanticActionId;
+    use crate::effect_request::{
+        describe_interaction_effect_request, InteractionEffectRequestDescriptor,
+    };
     use crate::interaction::InteractionIntentKind;
 
     fn effect_request_descriptor() -> InteractionEffectRequestDescriptor {
@@ -197,7 +198,8 @@ mod tests {
             block_reason: InteractionSemanticActionDispatchBlockReason::None,
             trace_reason: InteractionSemanticActionDispatchTraceReason::RouteRecorded,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
-            effect_relationship: crate::action_admission::InteractionActionAdmissionEffectRelationship::NoEffect,
+            effect_relationship:
+                crate::action_admission::InteractionActionAdmissionEffectRelationship::NoEffect,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::WorkbenchLocal,
             effect_eligibility:
                 InteractionSemanticActionDispatchEffectEligibility::RequiresFutureEffectBoundary,
@@ -213,11 +215,11 @@ mod tests {
 
         let admission = describe_interaction_ui_capability_admission(&effect_request);
 
+        assert_eq!(admission.effect_request_descriptor_id, effect_request.id);
         assert_eq!(
-            admission.effect_request_descriptor_id,
-            effect_request.id
+            admission.id,
+            InteractionUiCapabilityAdmissionDescriptorId(21)
         );
-        assert_eq!(admission.id, InteractionUiCapabilityAdmissionDescriptorId(21));
     }
 
     #[test]
@@ -230,19 +232,37 @@ mod tests {
             admission.source_admitted_action_id,
             effect_request.source_admitted_action_id
         );
-        assert_eq!(admission.dispatch_record_id, effect_request.dispatch_record_id);
-        assert_eq!(admission.dispatch_route_id, effect_request.dispatch_route_id);
+        assert_eq!(
+            admission.dispatch_record_id,
+            effect_request.dispatch_record_id
+        );
+        assert_eq!(
+            admission.dispatch_route_id,
+            effect_request.dispatch_route_id
+        );
         assert_eq!(admission.requested_effect, effect_request.requested_effect);
-        assert_eq!(admission.declared_ui_capability, effect_request.required_ui_capability);
+        assert_eq!(
+            admission.declared_ui_capability,
+            effect_request.required_ui_capability
+        );
         assert_eq!(
             admission.declared_runtime_capability_requirement,
             effect_request.required_runtime_capability
         );
-        assert_eq!(admission.lifecycle_precondition, effect_request.lifecycle_precondition);
+        assert_eq!(
+            admission.lifecycle_precondition,
+            effect_request.lifecycle_precondition
+        );
         assert_eq!(admission.target_policy, effect_request.target_policy);
         assert_eq!(admission.denial_behavior, effect_request.denial_behavior);
-        assert_eq!(admission.trace_requirement, effect_request.trace_requirement);
-        assert_eq!(admission.policy_gate_namespace, effect_request.policy_gate_namespace);
+        assert_eq!(
+            admission.trace_requirement,
+            effect_request.trace_requirement
+        );
+        assert_eq!(
+            admission.policy_gate_namespace,
+            effect_request.policy_gate_namespace
+        );
         assert_eq!(admission.scope, effect_request.scope);
     }
 

@@ -982,18 +982,10 @@ impl CoreExecutor {
             }
             match self.step(program, &mut frames, frame_index, instr) {
                 Ok(Some(value)) => {
-                    return CoreResult::returned(
-                        value,
-                        self.config.fuel - fuel.remaining(),
-                    )
+                    return CoreResult::returned(value, self.config.fuel - fuel.remaining())
                 }
                 Ok(None) => {}
-                Err(trap) => {
-                    return CoreResult::trapped(
-                        trap,
-                        self.config.fuel - fuel.remaining(),
-                    )
-                }
+                Err(trap) => return CoreResult::trapped(trap, self.config.fuel - fuel.remaining()),
             }
         }
     }

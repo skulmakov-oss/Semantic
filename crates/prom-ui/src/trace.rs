@@ -66,9 +66,7 @@ pub struct InteractionIntentTraceReport {
     pub rule: InteractionIntentMappingRule,
 }
 
-pub fn trace_raw_event_to_interaction_intent(
-    event: &RawUiEvent,
-) -> InteractionIntentTraceReport {
+pub fn trace_raw_event_to_interaction_intent(event: &RawUiEvent) -> InteractionIntentTraceReport {
     let intent = map_raw_event_to_interaction_intent(event);
     let status = if intent.is_classified() {
         InteractionIntentTraceStatus::Classified
@@ -124,9 +122,7 @@ fn classify_trace(
             InteractionIntentTraceReason::FocusMapping,
             InteractionIntentMappingRule::PointerLeaveBlur,
         ),
-        RawUiEventKind::PointerUp
-        | RawUiEventKind::PointerMove
-        | RawUiEventKind::KeyUp => (
+        RawUiEventKind::PointerUp | RawUiEventKind::PointerMove | RawUiEventKind::KeyUp => (
             InteractionIntentTraceReason::DeliberatelyUnmapped,
             InteractionIntentMappingRule::None,
         ),
@@ -174,10 +170,7 @@ fn classify_direct_mapping(
     rule: InteractionIntentMappingRule,
 ) -> (InteractionIntentTraceReason, InteractionIntentMappingRule) {
     if target.is_none() {
-        (
-            InteractionIntentTraceReason::UnknownTarget,
-            rule,
-        )
+        (InteractionIntentTraceReason::UnknownTarget, rule)
     } else {
         (mapped_reason, rule)
     }
@@ -188,17 +181,23 @@ fn classify_key_trace(
     target: Option<InteractionTarget>,
 ) -> (InteractionIntentTraceReason, InteractionIntentMappingRule) {
     match &event.payload {
-        RawUiEventPayload::Key { key: RawKeyCode::Enter } => classify_direct_mapping(
+        RawUiEventPayload::Key {
+            key: RawKeyCode::Enter,
+        } => classify_direct_mapping(
             target,
             InteractionIntentTraceReason::KeyMapping,
             InteractionIntentMappingRule::KeyEnterSubmit,
         ),
-        RawUiEventPayload::Key { key: RawKeyCode::Escape } => classify_direct_mapping(
+        RawUiEventPayload::Key {
+            key: RawKeyCode::Escape,
+        } => classify_direct_mapping(
             target,
             InteractionIntentTraceReason::KeyMapping,
             InteractionIntentMappingRule::KeyEscapeCancel,
         ),
-        RawUiEventPayload::Key { key: RawKeyCode::Space } => classify_direct_mapping(
+        RawUiEventPayload::Key {
+            key: RawKeyCode::Space,
+        } => classify_direct_mapping(
             target,
             InteractionIntentTraceReason::KeyMapping,
             InteractionIntentMappingRule::KeySpaceActivate,

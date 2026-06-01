@@ -1,16 +1,14 @@
 use super::*;
 use crate::semcode_format::{
-    write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC2,
-    MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, MAGIC10, MAGIC11, MAGIC12, MAGIC13,
-    MAGIC14, MAGIC15, MAGIC16,
-    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+    write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC10,
+    MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6,
+    MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG,
 };
 use sm_front::types::{
     AdtCtorExpr, AdtPatternItem, ClosureCapturePolicy, ClosureLiteral, ClosureType,
-    ClosureValueFamily,
-    MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget,
+    ClosureValueFamily, MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget,
     SequenceCollectionFamily, SequenceType,
 };
 use sm_front::{CallArg, LoopExpr, TuplePatternItem};
@@ -783,14 +781,8 @@ pub fn lower_function_to_ir(
     type_check_function_with_table(func, arena, fn_table)?;
     let empty_records = RecordTable::new();
     let empty_adts = AdtTable::new();
-    let lowered = lower_function_to_ir_with_tables(
-        func,
-        arena,
-        fn_table,
-        &empty_records,
-        &empty_adts,
-        &[],
-    )?;
+    let lowered =
+        lower_function_to_ir_with_tables(func, arena, fn_table, &empty_records, &empty_adts, &[])?;
     if !lowered.lifted.is_empty() {
         return Err(FrontendError {
             pos: 0,
@@ -1443,7 +1435,12 @@ fn emit_instr(
             write_u16_le(out, *map);
             write_u16_le(out, *key);
         }
-        IrInstr::MapGet { dst, map, key, default_val } => {
+        IrInstr::MapGet {
+            dst,
+            map,
+            key,
+            default_val,
+        } => {
             out.push(Opcode::MapGet.byte());
             write_u16_le(out, *dst);
             write_u16_le(out, *map);
@@ -1757,27 +1754,35 @@ fn has_v3_fx_math_instr(funcs: &[IrFunction]) -> bool {
 }
 
 fn has_v4_state_query_instr(funcs: &[IrFunction]) -> bool {
-    funcs
-        .iter()
-        .any(|f| f.instrs.iter().any(|i| matches!(i, IrInstr::StateQuery { .. })))
+    funcs.iter().any(|f| {
+        f.instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::StateQuery { .. }))
+    })
 }
 
 fn has_v5_state_update_instr(funcs: &[IrFunction]) -> bool {
-    funcs
-        .iter()
-        .any(|f| f.instrs.iter().any(|i| matches!(i, IrInstr::StateUpdate { .. })))
+    funcs.iter().any(|f| {
+        f.instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::StateUpdate { .. }))
+    })
 }
 
 fn has_v6_event_post_instr(funcs: &[IrFunction]) -> bool {
-    funcs
-        .iter()
-        .any(|f| f.instrs.iter().any(|i| matches!(i, IrInstr::EventPost { .. })))
+    funcs.iter().any(|f| {
+        f.instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::EventPost { .. }))
+    })
 }
 
 fn has_v7_clock_read_instr(funcs: &[IrFunction]) -> bool {
-    funcs
-        .iter()
-        .any(|f| f.instrs.iter().any(|i| matches!(i, IrInstr::ClockRead { .. })))
+    funcs.iter().any(|f| {
+        f.instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::ClockRead { .. }))
+    })
 }
 
 fn has_v8_text_instr(funcs: &[IrFunction]) -> bool {
@@ -1841,17 +1846,17 @@ fn has_v14_map_instr(funcs: &[IrFunction]) -> bool {
 
 fn has_v15_prng_instr(funcs: &[IrFunction]) -> bool {
     funcs.iter().any(|f| {
-        f.instrs.iter().any(|i| {
-            matches!(i, IrInstr::RngSeed { .. } | IrInstr::RngNextI32 { .. })
-        })
+        f.instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::RngSeed { .. } | IrInstr::RngNextI32 { .. }))
     })
 }
 
 fn has_v10_closure_instr(funcs: &[IrFunction]) -> bool {
     funcs.iter().any(|f| {
-        f.instrs.iter().any(|i| {
-            matches!(i, IrInstr::MakeClosure { .. } | IrInstr::ClosureCall { .. })
-        })
+        f.instrs
+            .iter()
+            .any(|i| matches!(i, IrInstr::MakeClosure { .. } | IrInstr::ClosureCall { .. }))
     })
 }
 
@@ -3069,8 +3074,7 @@ fn lower_expr_with_expected(
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
                         pos: 0,
-                        message: "builtin 'len' takes exactly one positional argument"
-                            .to_string(),
+                        message: "builtin 'len' takes exactly one positional argument".to_string(),
                     });
                 }
                 let (src, arg_ty) = lower_expr_with_expected(
@@ -3330,10 +3334,9 @@ fn lower_expr_with_expected(
                     None => {
                         return Err(FrontendError {
                             pos: 0,
-                            message:
-                                "map_empty() requires a contextual Map(K, V) type; \
+                            message: "map_empty() requires a contextual Map(K, V) type; \
                                  use 'let q: Map(K, V) = map_empty()'"
-                                    .to_string(),
+                                .to_string(),
                         })
                     }
                 };
@@ -3352,25 +3355,48 @@ fn lower_expr_with_expected(
                 }
                 let (map_reg, map_ty) = lower_expr_with_expected(
                     args[0].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    None, ret_ty.clone(), closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    None,
+                    ret_ty.clone(),
+                    closure_state,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
                         pos: 0,
                         message: format!(
-                            "builtin 'map_contains' first argument must be Map, got {:?}", map_ty
+                            "builtin 'map_contains' first argument must be Map, got {:?}",
+                            map_ty
                         ),
                     });
                 };
                 let key_ty = map_type.key.as_ref().clone();
                 let (key_reg, _) = lower_expr_with_expected(
                     args[1].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    Some(key_ty), ret_ty, closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(key_ty),
+                    ret_ty,
+                    closure_state,
                 )?;
                 let dst = alloc(next);
-                out.push(IrInstr::MapContains { dst, map: map_reg, key: key_reg });
+                out.push(IrInstr::MapContains {
+                    dst,
+                    map: map_reg,
+                    key: key_reg,
+                });
                 return Ok((dst, Type::Bool));
             }
             // builtin map_get(Map(K, V), K, V) -> V
@@ -3378,20 +3404,30 @@ fn lower_expr_with_expected(
                 if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
                         pos: 0,
-                        message:
-                            "builtin 'map_get' takes exactly three positional arguments".to_string(),
+                        message: "builtin 'map_get' takes exactly three positional arguments"
+                            .to_string(),
                     });
                 }
                 let (map_reg, map_ty) = lower_expr_with_expected(
                     args[0].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    None, ret_ty.clone(), closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    None,
+                    ret_ty.clone(),
+                    closure_state,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
                         pos: 0,
                         message: format!(
-                            "builtin 'map_get' first argument must be Map, got {:?}", map_ty
+                            "builtin 'map_get' first argument must be Map, got {:?}",
+                            map_ty
                         ),
                     });
                 };
@@ -3399,16 +3435,39 @@ fn lower_expr_with_expected(
                 let val_ty = map_type.val.as_ref().clone();
                 let (key_reg, _) = lower_expr_with_expected(
                     args[1].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    Some(key_ty), ret_ty.clone(), closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(key_ty),
+                    ret_ty.clone(),
+                    closure_state,
                 )?;
                 let (default_reg, _) = lower_expr_with_expected(
                     args[2].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    Some(val_ty.clone()), ret_ty, closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(val_ty.clone()),
+                    ret_ty,
+                    closure_state,
                 )?;
                 let dst = alloc(next);
-                out.push(IrInstr::MapGet { dst, map: map_reg, key: key_reg, default_val: default_reg });
+                out.push(IrInstr::MapGet {
+                    dst,
+                    map: map_reg,
+                    key: key_reg,
+                    default_val: default_reg,
+                });
                 return Ok((dst, val_ty));
             }
             // builtin map_set(Map(K, V), K, V) -> Map(K, V)
@@ -3416,20 +3475,30 @@ fn lower_expr_with_expected(
                 if args.len() != 3 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
                         pos: 0,
-                        message:
-                            "builtin 'map_set' takes exactly three positional arguments".to_string(),
+                        message: "builtin 'map_set' takes exactly three positional arguments"
+                            .to_string(),
                     });
                 }
                 let (map_reg, map_ty) = lower_expr_with_expected(
                     args[0].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    None, ret_ty.clone(), closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    None,
+                    ret_ty.clone(),
+                    closure_state,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
                         pos: 0,
                         message: format!(
-                            "builtin 'map_set' first argument must be Map, got {:?}", map_ty
+                            "builtin 'map_set' first argument must be Map, got {:?}",
+                            map_ty
                         ),
                     });
                 };
@@ -3437,17 +3506,40 @@ fn lower_expr_with_expected(
                 let val_ty = map_type.val.as_ref().clone();
                 let (key_reg, _) = lower_expr_with_expected(
                     args[1].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    Some(key_ty), ret_ty.clone(), closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(key_ty),
+                    ret_ty.clone(),
+                    closure_state,
                 )?;
                 let (val_reg, _) = lower_expr_with_expected(
                     args[2].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    Some(val_ty), ret_ty, closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(val_ty),
+                    ret_ty,
+                    closure_state,
                 )?;
                 let dst = alloc(next);
                 let ret_map_ty = map_ty.clone();
-                out.push(IrInstr::MapSet { dst, map: map_reg, key: key_reg, val: val_reg });
+                out.push(IrInstr::MapSet {
+                    dst,
+                    map: map_reg,
+                    key: key_reg,
+                    val: val_reg,
+                });
                 return Ok((dst, ret_map_ty));
             }
             // builtin print(msg: text) -> ()
@@ -3457,14 +3549,23 @@ fn lower_expr_with_expected(
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
                         pos: 0,
-                        message: "builtin 'print' takes exactly one positional argument (msg: text)"
-                            .to_string(),
+                        message:
+                            "builtin 'print' takes exactly one positional argument (msg: text)"
+                                .to_string(),
                     });
                 }
                 let (arg_reg, _) = lower_expr(
                     args[0].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    ret_ty, closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    closure_state,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::Call {
@@ -3484,8 +3585,16 @@ fn lower_expr_with_expected(
                 }
                 let (arg_reg, _) = lower_expr(
                     args[0].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    ret_ty, closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    closure_state,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::Call {
@@ -3505,11 +3614,23 @@ fn lower_expr_with_expected(
                 }
                 let (seed_reg, _) = lower_expr_with_expected(
                     args[0].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    Some(Type::I32), ret_ty, closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(Type::I32),
+                    ret_ty,
+                    closure_state,
                 )?;
                 let dst = alloc(next);
-                out.push(IrInstr::RngSeed { dst, seed: seed_reg });
+                out.push(IrInstr::RngSeed {
+                    dst,
+                    seed: seed_reg,
+                });
                 return Ok((dst, Type::Unit));
             }
             // builtin random_next_i32(lo: i32, hi: i32) -> i32
@@ -3524,16 +3645,38 @@ fn lower_expr_with_expected(
                 }
                 let (lo_reg, _) = lower_expr_with_expected(
                     args[0].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    Some(Type::I32), ret_ty.clone(), closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(Type::I32),
+                    ret_ty.clone(),
+                    closure_state,
                 )?;
                 let (hi_reg, _) = lower_expr_with_expected(
                     args[1].value,
-                    arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                    Some(Type::I32), ret_ty, closure_state,
+                    arena,
+                    next,
+                    out,
+                    env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    Some(Type::I32),
+                    ret_ty,
+                    closure_state,
                 )?;
                 let dst = alloc(next);
-                out.push(IrInstr::RngNextI32 { dst, lo: lo_reg, hi: hi_reg });
+                out.push(IrInstr::RngNextI32 {
+                    dst,
+                    lo: lo_reg,
+                    hi: hi_reg,
+                });
                 return Ok((dst, Type::I32));
             }
             let sig = if let Some(s) = fn_table.get(name) {
@@ -3826,8 +3969,9 @@ fn lower_expr_with_expected(
                     if lt != Type::I32 || rt != Type::I32 {
                         return Err(FrontendError {
                             pos: 0,
-                            message: "relational lowering currently requires same-family i32 operands"
-                                .to_string(),
+                            message:
+                                "relational lowering currently requires same-family i32 operands"
+                                    .to_string(),
                         });
                     }
                     match op {
@@ -4810,12 +4954,9 @@ fn lower_for_each_stmt(
             adt_table,
         );
     }
-    if let Some((item_ty, next_fn_name)) = resolve_explicit_iterable_loop_contract(
-        &iterable_ty,
-        trait_name,
-        arena,
-        &ctx.impls,
-    )? {
+    if let Some((item_ty, next_fn_name)) =
+        resolve_explicit_iterable_loop_contract(&iterable_ty, trait_name, arena, &ctx.impls)?
+    {
         return lower_for_explicit_iterable_stmt_from_reg(
             name,
             iterable_reg,
@@ -5177,10 +5318,13 @@ fn bind_let_else_tuple_items(
                 });
             }
             // M9.4 Wave 1: nested tuple lowering is deferred.
-            TuplePatternItem::Nested(_) => return Err(FrontendError {
-                pos: 0,
-                message: "nested tuple lowering is not yet implemented in the IR backend".to_string(),
-            }),
+            TuplePatternItem::Nested(_) => {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "nested tuple lowering is not yet implemented in the IR backend"
+                        .to_string(),
+                })
+            }
         }
     }
 
@@ -5569,8 +5713,7 @@ fn lower_stmt(
         Stmt::Break(None) => {
             let frame = ctx.loop_stack.last().ok_or(FrontendError {
                 pos: 0,
-                message: "bare break is allowed only inside while or statement loop"
-                    .to_string(),
+                message: "bare break is allowed only inside while or statement loop".to_string(),
             })?;
             if !matches!(frame.kind, LoopLoweringFrameKind::Control) {
                 return Err(FrontendError {
@@ -5651,8 +5794,7 @@ fn lower_stmt(
             if !matches!(frame.kind, LoopLoweringFrameKind::Control) {
                 return Err(FrontendError {
                     pos: 0,
-                    message: "continue is allowed only inside while or statement loop"
-                        .to_string(),
+                    message: "continue is allowed only inside while or statement loop".to_string(),
                 });
             }
             ctx.instrs.push(IrInstr::Jmp {
@@ -6522,11 +6664,11 @@ fn lower_std_form_ctor_expr(
                     loop_stack,
                     fn_table,
                     record_table,
-                adt_table,
-                item_expected.clone(),
-                ret_ty,
-                closure_state,
-            )?;
+                    adt_table,
+                    item_expected.clone(),
+                    ret_ty,
+                    closure_state,
+                )?;
                 if let Some(expected_item) = item_expected {
                     if item_ty != expected_item {
                         return Err(FrontendError {
@@ -7325,18 +7467,15 @@ fn lower_loop_expr_stmt(
         }),
         Stmt::While { .. } => Err(FrontendError {
             pos: 0,
-            message: "loop expression body currently does not allow while statement"
-                .to_string(),
+            message: "loop expression body currently does not allow while statement".to_string(),
         }),
         Stmt::Loop { .. } => Err(FrontendError {
             pos: 0,
-            message: "loop expression body currently does not allow statement loop"
-                .to_string(),
+            message: "loop expression body currently does not allow statement loop".to_string(),
         }),
         Stmt::ForEach { .. } => Err(FrontendError {
             pos: 0,
-            message: "loop expression body currently does not allow iterable for-each"
-                .to_string(),
+            message: "loop expression body currently does not allow iterable for-each".to_string(),
         }),
         Stmt::Guard { .. } | Stmt::Return(..) | Stmt::Continue => Err(FrontendError {
             pos: 0,
@@ -8198,8 +8337,7 @@ fn lower_expr_stmt_with_parts(
             if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
                     pos: 0,
-                    message: "builtin 'len' takes exactly one positional argument"
-                        .to_string(),
+                    message: "builtin 'len' takes exactly one positional argument".to_string(),
                 });
             }
             let (src, arg_ty) = lower_expr_with_expected(
@@ -8236,8 +8374,7 @@ fn lower_expr_stmt_with_parts(
             if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                 return Err(FrontendError {
                     pos: 0,
-                    message: "builtin 'is_empty' takes exactly one positional argument"
-                        .to_string(),
+                    message: "builtin 'is_empty' takes exactly one positional argument".to_string(),
                 });
             }
             let (src, arg_ty) = lower_expr_with_expected(
@@ -8453,25 +8590,48 @@ fn lower_expr_stmt_with_parts(
             }
             let (map_reg, map_ty) = lower_expr_with_expected(
                 args[0].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                None, ret_ty.clone(), closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                None,
+                ret_ty.clone(),
+                closure_state,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
                     pos: 0,
                     message: format!(
-                        "builtin 'map_contains' first argument must be Map, got {:?}", map_ty
+                        "builtin 'map_contains' first argument must be Map, got {:?}",
+                        map_ty
                     ),
                 });
             };
             let key_ty = map_type.key.as_ref().clone();
             let (key_reg, _) = lower_expr_with_expected(
                 args[1].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                Some(key_ty), ret_ty, closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                Some(key_ty),
+                ret_ty,
+                closure_state,
             )?;
             let dst = alloc(next);
-            out.push(IrInstr::MapContains { dst, map: map_reg, key: key_reg });
+            out.push(IrInstr::MapContains {
+                dst,
+                map: map_reg,
+                key: key_reg,
+            });
             return Ok(());
         }
         // builtin map_get(Map(K,V), K, V) as statement
@@ -8485,14 +8645,24 @@ fn lower_expr_stmt_with_parts(
             }
             let (map_reg, map_ty) = lower_expr_with_expected(
                 args[0].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                None, ret_ty.clone(), closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                None,
+                ret_ty.clone(),
+                closure_state,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
                     pos: 0,
                     message: format!(
-                        "builtin 'map_get' first argument must be Map, got {:?}", map_ty
+                        "builtin 'map_get' first argument must be Map, got {:?}",
+                        map_ty
                     ),
                 });
             };
@@ -8500,16 +8670,39 @@ fn lower_expr_stmt_with_parts(
             let val_ty = map_type.val.as_ref().clone();
             let (key_reg, _) = lower_expr_with_expected(
                 args[1].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                Some(key_ty), ret_ty.clone(), closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                Some(key_ty),
+                ret_ty.clone(),
+                closure_state,
             )?;
             let (default_reg, _) = lower_expr_with_expected(
                 args[2].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                Some(val_ty), ret_ty, closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                Some(val_ty),
+                ret_ty,
+                closure_state,
             )?;
             let dst = alloc(next);
-            out.push(IrInstr::MapGet { dst, map: map_reg, key: key_reg, default_val: default_reg });
+            out.push(IrInstr::MapGet {
+                dst,
+                map: map_reg,
+                key: key_reg,
+                default_val: default_reg,
+            });
             return Ok(());
         }
         // builtin map_set(Map(K,V), K, V) as statement
@@ -8523,14 +8716,24 @@ fn lower_expr_stmt_with_parts(
             }
             let (map_reg, map_ty) = lower_expr_with_expected(
                 args[0].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                None, ret_ty.clone(), closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                None,
+                ret_ty.clone(),
+                closure_state,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
                     pos: 0,
                     message: format!(
-                        "builtin 'map_set' first argument must be Map, got {:?}", map_ty
+                        "builtin 'map_set' first argument must be Map, got {:?}",
+                        map_ty
                     ),
                 });
             };
@@ -8538,16 +8741,39 @@ fn lower_expr_stmt_with_parts(
             let val_ty = map_type.val.as_ref().clone();
             let (key_reg, _) = lower_expr_with_expected(
                 args[1].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                Some(key_ty), ret_ty.clone(), closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                Some(key_ty),
+                ret_ty.clone(),
+                closure_state,
             )?;
             let (val_reg, _) = lower_expr_with_expected(
                 args[2].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                Some(val_ty), ret_ty, closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                Some(val_ty),
+                ret_ty,
+                closure_state,
             )?;
             let dst = alloc(next);
-            out.push(IrInstr::MapSet { dst, map: map_reg, key: key_reg, val: val_reg });
+            out.push(IrInstr::MapSet {
+                dst,
+                map: map_reg,
+                key: key_reg,
+                val: val_reg,
+            });
             return Ok(());
         }
         // builtin print(msg: text) as statement
@@ -8561,8 +8787,16 @@ fn lower_expr_stmt_with_parts(
             }
             let (arg_reg, _) = lower_expr(
                 args[0].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                ret_ty, closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                ret_ty,
+                closure_state,
             )?;
             out.push(IrInstr::Call {
                 dst: None,
@@ -8583,11 +8817,23 @@ fn lower_expr_stmt_with_parts(
             }
             let (seed_reg, _) = lower_expr_with_expected(
                 args[0].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                Some(Type::I32), ret_ty, closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                Some(Type::I32),
+                ret_ty,
+                closure_state,
             )?;
             let dst = alloc(next);
-            out.push(IrInstr::RngSeed { dst, seed: seed_reg });
+            out.push(IrInstr::RngSeed {
+                dst,
+                seed: seed_reg,
+            });
             return Ok(());
         }
         // builtin random_next_i32(lo, hi) as statement — valid (discards i32 result)
@@ -8602,16 +8848,38 @@ fn lower_expr_stmt_with_parts(
             }
             let (lo_reg, _) = lower_expr_with_expected(
                 args[0].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                Some(Type::I32), ret_ty.clone(), closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                Some(Type::I32),
+                ret_ty.clone(),
+                closure_state,
             )?;
             let (hi_reg, _) = lower_expr_with_expected(
                 args[1].value,
-                arena, next, out, env, loop_stack, fn_table, record_table, adt_table,
-                Some(Type::I32), ret_ty, closure_state,
+                arena,
+                next,
+                out,
+                env,
+                loop_stack,
+                fn_table,
+                record_table,
+                adt_table,
+                Some(Type::I32),
+                ret_ty,
+                closure_state,
             )?;
             let dst = alloc(next);
-            out.push(IrInstr::RngNextI32 { dst, lo: lo_reg, hi: hi_reg });
+            out.push(IrInstr::RngNextI32 {
+                dst,
+                lo: lo_reg,
+                hi: hi_reg,
+            });
             return Ok(());
         }
         let sig = if let Some(s) = fn_table.get(name) {
@@ -8831,7 +9099,8 @@ fn tuple_access_path_from_expr(expr_id: ExprId, arena: &AstArena) -> Option<Acce
     match arena.expr(expr_id) {
         Expr::Var(name) => Some(AccessPath::new(*name)),
         Expr::SequenceIndex(index_expr) => {
-            let Expr::NumericLiteral(NumericLiteral::I32(index)) = arena.expr(index_expr.index) else {
+            let Expr::NumericLiteral(NumericLiteral::I32(index)) = arena.expr(index_expr.index)
+            else {
                 return None;
             };
             if *index < 0 {
@@ -8885,7 +9154,8 @@ fn append_record_update_write_events_from_expr(
             for field in &update_expr.fields {
                 append_record_update_write_events_from_expr(field.value, arena, ownership_events);
             }
-            if let Some(record_path) = direct_record_access_path_from_expr(update_expr.base, arena) {
+            if let Some(record_path) = direct_record_access_path_from_expr(update_expr.base, arena)
+            {
                 for field in &update_expr.fields {
                     ownership_events.push(OwnershipPathEvent {
                         kind: OwnershipPathEventKind::Write,
@@ -8949,7 +9219,11 @@ fn append_record_update_write_events_from_expr(
                 if let Some(guard) = arm.guard {
                     append_record_update_write_events_from_expr(guard, arena, ownership_events);
                 }
-                append_record_update_write_events_from_expr(arm.block.tail, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    arm.block.tail,
+                    arena,
+                    ownership_events,
+                );
             }
             if let Some(default) = &match_expr.default {
                 append_record_update_write_events_from_expr(default.tail, arena, ownership_events);
@@ -9554,8 +9828,7 @@ mod opt_tests {
             .iter()
             .any(|instr| matches!(instr, IrInstr::SequenceGet { .. })));
 
-        let bytes =
-            compile_program_to_semcode(src).expect("ordered sequence semcode should emit");
+        let bytes = compile_program_to_semcode(src).expect("ordered sequence semcode should emit");
         assert_eq!(&bytes[0..8], b"SEMCODE9");
     }
 
@@ -9903,7 +10176,10 @@ mod opt_tests {
             .iter()
             .find(|func| program.arena.symbol_name(func.name) == "main")
             .expect("main fn");
-        let Stmt::Let { name: pair_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+        let Stmt::Let {
+            name: pair_name, ..
+        } = program.arena.stmt(main_fn.body[0])
+        else {
             panic!("expected pair binding");
         };
         assert_eq!(
@@ -9959,10 +10235,16 @@ mod opt_tests {
             .iter()
             .find(|func| program.arena.symbol_name(func.name) == "main")
             .expect("main fn");
-        let Stmt::Let { name: count_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+        let Stmt::Let {
+            name: count_name, ..
+        } = program.arena.stmt(main_fn.body[0])
+        else {
             panic!("expected count binding");
         };
-        let Stmt::Let { name: ready_name, .. } = program.arena.stmt(main_fn.body[1]) else {
+        let Stmt::Let {
+            name: ready_name, ..
+        } = program.arena.stmt(main_fn.body[1])
+        else {
             panic!("expected ready binding");
         };
         assert_eq!(
@@ -10289,8 +10571,8 @@ mod opt_tests {
             }
         "#;
 
-        let err = compile_program_to_ir(src)
-            .expect_err("wrong executable Iterable contract must reject");
+        let err =
+            compile_program_to_ir(src).expect_err("wrong executable Iterable contract must reject");
         assert!(err
             .message
             .contains("fn next(self: Self, index: i32) -> Option(Item)"));

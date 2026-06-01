@@ -131,10 +131,7 @@ fn failed_poll_preserves_event_payload() {
         .poll_events(&mut buffer)
         .expect_err("poll before run must fail");
 
-    assert!(matches!(
-        err,
-        UiRuntimeError::LifecycleViolation { .. }
-    ));
+    assert!(matches!(err, UiRuntimeError::LifecycleViolation { .. }));
 
     let raw_events = buffer.drain();
     assert_eq!(raw_events.len(), 2);
@@ -160,10 +157,7 @@ fn failed_tick_preserves_event_payload() {
         })
         .expect_err("tick before run must fail");
 
-    assert!(matches!(
-        err,
-        UiRuntimeError::LifecycleViolation { .. }
-    ));
+    assert!(matches!(err, UiRuntimeError::LifecycleViolation { .. }));
 
     assert!(!callback_called);
 

@@ -1,9 +1,8 @@
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
-    read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC11, MAGIC12,
-    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG,
+    read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC11, MAGIC12, OWNERSHIP_EVENT_KIND_BORROW,
+    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
 use sm_runtime_core::RuntimeTrap;
 use sm_verify::verify_semcode;
@@ -936,12 +935,12 @@ fn parse_function_layout(code: &[u8]) -> FunctionLayout {
         }
     }
 
-    let ownership_start = if cursor + 4 <= code.len() && &code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG
-    {
-        Some(cursor)
-    } else {
-        None
-    };
+    let ownership_start =
+        if cursor + 4 <= code.len() && &code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG {
+            Some(cursor)
+        } else {
+            None
+        };
 
     if ownership_start.is_some() {
         cursor += OWNERSHIP_SECTION_TAG.len();
@@ -958,8 +957,7 @@ fn parse_function_layout(code: &[u8]) -> FunctionLayout {
                         let _ = read_u16_le(code, &mut cursor).expect("ownership component value");
                     }
                     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => {
-                        let _ =
-                            read_u32_le(code, &mut cursor).expect("ownership component value");
+                        let _ = read_u32_le(code, &mut cursor).expect("ownership component value");
                     }
                     _ => panic!("unexpected ownership component kind 0x{kind:02x}"),
                 }

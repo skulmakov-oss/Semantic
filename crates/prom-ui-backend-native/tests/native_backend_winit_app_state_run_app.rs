@@ -3,8 +3,7 @@
 use prom_ui_backend_native::{
     winit_placeholder::{
         native_backend_winit_app_state_run_app_available,
-        run_native_backend_winit_app_state_until_close,
-        NativeBackendWinitAppStateRunError,
+        run_native_backend_winit_app_state_until_close, NativeBackendWinitAppStateRunError,
         NativeBackendWinitAppStateSummary,
     },
     NativeBackend,
@@ -34,10 +33,9 @@ fn native_backend_winit_app_state_run_app_requires_staged_config() {
 fn native_backend_winit_app_state_run_app_has_expected_function_shape() {
     let _f: fn(
         NativeBackend,
-    ) -> Result<
-        NativeBackendWinitAppStateSummary,
-        NativeBackendWinitAppStateRunError,
-    > = run_native_backend_winit_app_state_until_close;
+    )
+        -> Result<NativeBackendWinitAppStateSummary, NativeBackendWinitAppStateRunError> =
+        run_native_backend_winit_app_state_until_close;
 }
 
 #[test]

@@ -265,7 +265,11 @@ fn synthesize_selected_executable_module(
         if !functions_by_name.contains_key(&selected) {
             return Err(format!(
                 "selected executable helper import '{}' in '{}' is missing symbol '{}'",
-                module.path.file_name().unwrap_or_default().to_string_lossy(),
+                module
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy(),
                 module.path.display(),
                 selected
             ));
@@ -291,7 +295,11 @@ fn synthesize_selected_executable_module(
         if !public_names.insert(public_name.clone()) {
             return Err(format!(
                 "selected executable helper import '{}' in '{}' binds duplicate public symbol '{}'",
-                module.path.file_name().unwrap_or_default().to_string_lossy(),
+                module
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy(),
                 module.path.display(),
                 public_name
             ));
@@ -309,7 +317,11 @@ fn synthesize_selected_executable_module(
         let func = functions_by_name.get(&original).ok_or_else(|| {
             format!(
                 "selected executable helper import '{}' in '{}' is missing symbol '{}'",
-                module.path.file_name().unwrap_or_default().to_string_lossy(),
+                module
+                    .path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy(),
                 module.path.display(),
                 original
             )
@@ -601,14 +613,22 @@ fn collect_local_calls_from_stmt(
         | Stmt::Let { value, .. }
         | Stmt::Discard { value, .. }
         | Stmt::Assign { value, .. }
-        | Stmt::AssignTuple { value, .. } => collect_local_calls_from_expr(arena, *value, functions_by_name, out),
-        Stmt::Break(Some(value)) => collect_local_calls_from_expr(arena, *value, functions_by_name, out),
+        | Stmt::AssignTuple { value, .. } => {
+            collect_local_calls_from_expr(arena, *value, functions_by_name, out)
+        }
+        Stmt::Break(Some(value)) => {
+            collect_local_calls_from_expr(arena, *value, functions_by_name, out)
+        }
         Stmt::Break(None) | Stmt::Continue => {}
         Stmt::LetTuple { value, .. } | Stmt::LetRecord { value, .. } => {
             collect_local_calls_from_expr(arena, *value, functions_by_name, out);
         }
-        Stmt::LetElseRecord { value, else_return, .. }
-        | Stmt::LetElseTuple { value, else_return, .. } => {
+        Stmt::LetElseRecord {
+            value, else_return, ..
+        }
+        | Stmt::LetElseTuple {
+            value, else_return, ..
+        } => {
             collect_local_calls_from_expr(arena, *value, functions_by_name, out);
             if let Some(expr) = else_return {
                 collect_local_calls_from_expr(arena, *expr, functions_by_name, out);
@@ -637,13 +657,20 @@ fn collect_local_calls_from_stmt(
                 collect_local_calls_from_stmt(arena, *stmt, functions_by_name, out);
             }
         }
-        Stmt::Guard { condition, else_return } => {
+        Stmt::Guard {
+            condition,
+            else_return,
+        } => {
             collect_local_calls_from_expr(arena, *condition, functions_by_name, out);
             if let Some(expr) = else_return {
                 collect_local_calls_from_expr(arena, *expr, functions_by_name, out);
             }
         }
-        Stmt::If { condition, then_block, else_block } => {
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
             collect_local_calls_from_expr(arena, *condition, functions_by_name, out);
             for stmt in then_block {
                 collect_local_calls_from_stmt(arena, *stmt, functions_by_name, out);
@@ -652,7 +679,11 @@ fn collect_local_calls_from_stmt(
                 collect_local_calls_from_stmt(arena, *stmt, functions_by_name, out);
             }
         }
-        Stmt::Match { scrutinee, arms, default } => {
+        Stmt::Match {
+            scrutinee,
+            arms,
+            default,
+        } => {
             collect_local_calls_from_expr(arena, *scrutinee, functions_by_name, out);
             for arm in arms {
                 if let Some(guard) = arm.guard {
@@ -727,7 +758,9 @@ fn collect_local_calls_from_expr(
                 collect_local_calls_from_expr(arena, arg.value, functions_by_name, out);
             }
         }
-        Expr::Unary(_, inner) => collect_local_calls_from_expr(arena, *inner, functions_by_name, out),
+        Expr::Unary(_, inner) => {
+            collect_local_calls_from_expr(arena, *inner, functions_by_name, out)
+        }
         Expr::Binary(left, _, right) => {
             collect_local_calls_from_expr(arena, *left, functions_by_name, out);
             collect_local_calls_from_expr(arena, *right, functions_by_name, out);

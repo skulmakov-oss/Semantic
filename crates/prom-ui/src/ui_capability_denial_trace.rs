@@ -96,8 +96,7 @@ pub fn trace_interaction_ui_capability_denial(
         retry_hint: map_retry_hint(result.denial_reason),
         requested_effect: result.requested_effect,
         declared_ui_capability: result.declared_ui_capability,
-        declared_runtime_capability_requirement: result
-            .declared_runtime_capability_requirement,
+        declared_runtime_capability_requirement: result.declared_runtime_capability_requirement,
         lifecycle_precondition: result.lifecycle_precondition,
         target_policy: result.target_policy,
         denial_behavior: result.denial_behavior,
@@ -215,7 +214,8 @@ mod tests {
             block_reason: InteractionSemanticActionDispatchBlockReason::None,
             trace_reason: InteractionSemanticActionDispatchTraceReason::RouteRecorded,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
-            effect_relationship: InteractionActionAdmissionEffectRelationship::MayRequestEffectAfterAdmission,
+            effect_relationship:
+                InteractionActionAdmissionEffectRelationship::MayRequestEffectAfterAdmission,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::CoreUi,
             effect_eligibility:
                 InteractionSemanticActionDispatchEffectEligibility::RequiresFutureEffectBoundary,
@@ -252,7 +252,10 @@ mod tests {
         let trace = trace_interaction_ui_capability_denial(&result)
             .expect("denied result should produce trace");
 
-        assert_eq!(trace.status, InteractionUiCapabilityDenialTraceStatus::Traced);
+        assert_eq!(
+            trace.status,
+            InteractionUiCapabilityDenialTraceStatus::Traced
+        );
         assert_eq!(trace.result_id, result.id);
         assert_eq!(trace.id, InteractionUiCapabilityDenialTraceId(result.id.0));
     }
@@ -282,7 +285,10 @@ mod tests {
             trace.effect_request_descriptor_id,
             result.effect_request_descriptor_id
         );
-        assert_eq!(trace.source_admitted_action_id, result.source_admitted_action_id);
+        assert_eq!(
+            trace.source_admitted_action_id,
+            result.source_admitted_action_id
+        );
         assert_eq!(trace.dispatch_record_id, result.dispatch_record_id);
         assert_eq!(trace.dispatch_route_id, result.dispatch_route_id);
         assert_eq!(trace.denial_reason, result.denial_reason);

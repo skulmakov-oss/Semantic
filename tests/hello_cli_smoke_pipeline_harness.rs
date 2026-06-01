@@ -3,8 +3,8 @@ use std::vec::Vec;
 
 use prom_audit::hello_observation_audit::{
     build_hello_observation_audit_event, HelloObservationAuditEvent,
-    HelloObservationAuditEventKind, HelloObservationAuditLinkage,
-    HelloObservationAuditPayloadRef, HelloObservationAuditPolicyClass,
+    HelloObservationAuditEventKind, HelloObservationAuditLinkage, HelloObservationAuditPayloadRef,
+    HelloObservationAuditPolicyClass,
 };
 use prom_cap::hello_observation_capability::{
     evaluate_hello_observation_capability, HelloObservationCapabilityContext,
@@ -67,10 +67,7 @@ struct InMemorySink {
 }
 
 impl HelloObservationSink for InMemorySink {
-    fn observe(
-        &mut self,
-        event: HelloObservationEvent,
-    ) -> Result<(), HelloObservationSinkError> {
+    fn observe(&mut self, event: HelloObservationEvent) -> Result<(), HelloObservationSinkError> {
         if self.reject {
             return Err(HelloObservationSinkError::Denied);
         }
@@ -101,15 +98,12 @@ fn parse_validate_lower(rel: &str) -> Result<sm_ir::hello_ir::HelloIrModule, &'s
 fn canonical_observation_literal(module: &HelloRealSemCodeModule) -> &str {
     assert_eq!(module.ops.len(), 4);
     match &module.ops[..] {
-        [
-            HelloRealSemCodeOp::DeclareLocalQuad { name, value },
-            HelloRealSemCodeOp::RequireQuadEq {
-                name: require_name,
-                expected,
-            },
-            HelloRealSemCodeOp::ObserveTextLiteral { text },
-            HelloRealSemCodeOp::CompleteQuad { value: complete_value },
-        ] => {
+        [HelloRealSemCodeOp::DeclareLocalQuad { name, value }, HelloRealSemCodeOp::RequireQuadEq {
+            name: require_name,
+            expected,
+        }, HelloRealSemCodeOp::ObserveTextLiteral { text }, HelloRealSemCodeOp::CompleteQuad {
+            value: complete_value,
+        }] => {
             assert_eq!(name, "boot");
             assert_eq!(value, "T");
             assert_eq!(require_name, "boot");
@@ -146,9 +140,7 @@ fn skeleton_to_admission_input(module: &HelloRealSemCodeModule) -> HelloRealSemC
                 }
             }
             HelloRealSemCodeOp::ObserveTextLiteral { text } => {
-                HelloRealSemCodeAdmissionOp::ObserveTextLiteral {
-                    text: text.clone(),
-                }
+                HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text: text.clone() }
             }
             HelloRealSemCodeOp::CompleteQuad { value } => {
                 HelloRealSemCodeAdmissionOp::CompleteQuad {
@@ -179,7 +171,10 @@ fn audit_after_route(
 ) -> HelloObservationAuditDecision {
     match route_result {
         HelloObservationRouteResult::Routed => {
-            if matches!(audit_policy_class, HelloObservationAuditPolicyClass::Deferred) {
+            if matches!(
+                audit_policy_class,
+                HelloObservationAuditPolicyClass::Deferred
+            ) {
                 HelloObservationAuditDecision::Deferred
             } else {
                 HelloObservationAuditDecision::Recorded(build_hello_observation_audit_event(
@@ -219,7 +214,10 @@ fn canonical_cli_smoke_pipeline() -> HelloCliSmokeAcceptedDetails {
         requested_host_channel: None,
     };
     let capability_decision = evaluate_hello_observation_capability(&capability_context);
-    assert_eq!(capability_decision, HelloObservationCapabilityDecision::Allow);
+    assert_eq!(
+        capability_decision,
+        HelloObservationCapabilityDecision::Allow
+    );
 
     let mut sink = InMemorySink::default();
     let route_result = route_hello_observation_to_sink(
@@ -292,7 +290,8 @@ fn classify_cli_smoke_fixture(rel: &str) -> HelloCliSmokeHarnessResult {
     );
 
     let admission_input = skeleton_to_admission_input(&semcode);
-    if admit_hello_real_semcode_skeleton(&admission_input) != HelloRealSemCodeAdmissionDecision::Admit
+    if admit_hello_real_semcode_skeleton(&admission_input)
+        != HelloRealSemCodeAdmissionDecision::Admit
     {
         return HelloCliSmokeHarnessResult::Rejected { stage: "verify" };
     }
@@ -379,15 +378,12 @@ fn hello_cli_smoke_pipeline_harness_accepts_canonical_verbose_fixture() {
     assert_eq!(details.semcode.ops.len(), 4);
 
     match &details.semcode.ops[..] {
-        [
-            HelloRealSemCodeOp::DeclareLocalQuad { name, value },
-            HelloRealSemCodeOp::RequireQuadEq {
-                name: req_name,
-                expected,
-            },
-            HelloRealSemCodeOp::ObserveTextLiteral { text },
-            HelloRealSemCodeOp::CompleteQuad { value: complete_value },
-        ] => {
+        [HelloRealSemCodeOp::DeclareLocalQuad { name, value }, HelloRealSemCodeOp::RequireQuadEq {
+            name: req_name,
+            expected,
+        }, HelloRealSemCodeOp::ObserveTextLiteral { text }, HelloRealSemCodeOp::CompleteQuad {
+            value: complete_value,
+        }] => {
             assert_eq!(name, "boot");
             assert_eq!(value, "T");
             assert_eq!(req_name, "boot");
@@ -406,8 +402,12 @@ require_quad_eq boot T
 observe_text_literal \"Hello, World!\"
 complete_quad T"
     );
-    assert!(details.rendered_semcode.contains("observe_text_literal \"Hello, World!\""));
-    assert!(!details.rendered_semcode.contains("request_observation_text"));
+    assert!(details
+        .rendered_semcode
+        .contains("observe_text_literal \"Hello, World!\""));
+    assert!(!details
+        .rendered_semcode
+        .contains("request_observation_text"));
     assert!(!details.rendered_semcode.contains("print"));
     assert!(!details.rendered_semcode.contains("stdout"));
     assert!(!details.rendered_semcode.contains("io.write"));
@@ -417,20 +417,26 @@ complete_quad T"
     assert_eq!(details.sink_events.len(), 1);
     let event = &details.sink_events[0];
     assert_eq!(event.operation_kind, "controlled_observation_text");
-    assert_eq!(event.observation_class, HelloObservationClass::ControlledText);
+    assert_eq!(
+        event.observation_class,
+        HelloObservationClass::ControlledText
+    );
     assert_eq!(event.text, "Hello, World!");
     assert_eq!(event.sequence_index, HelloObservationSequenceIndex(0));
 
     match &details.audit_decision {
         HelloObservationAuditDecision::Recorded(event) => {
-            assert_eq!(event.event_kind, HelloObservationAuditEventKind::Observation);
+            assert_eq!(
+                event.event_kind,
+                HelloObservationAuditEventKind::Observation
+            );
             assert_eq!(event.operation_kind, "controlled_observation_text");
             assert_eq!(event.observation_class, "controlled");
             assert_eq!(
                 event.payload_ref,
-                HelloObservationAuditPayloadRef::LiteralTextHash(
-                    deterministic_text_hash("Hello, World!")
-                )
+                HelloObservationAuditPayloadRef::LiteralTextHash(deterministic_text_hash(
+                    "Hello, World!"
+                ))
             );
             assert_eq!(event.sequence_index.0, 0);
             assert_eq!(

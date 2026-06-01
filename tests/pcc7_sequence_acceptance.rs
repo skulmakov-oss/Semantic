@@ -13,15 +13,17 @@ fn cli_ok(args: Vec<String>, context: &str) {
 }
 
 fn mk_temp_dir(prefix: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!(
-        "{}_{}_{}",
-        prefix,
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos()
-    ));
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!(
+            "{}_{}_{}",
+            prefix,
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir
 }
@@ -69,7 +71,9 @@ fn pcc7_sequence_iteration_fixture_passes_full_cli_path() {
 
 #[test]
 fn pcc7_sequence_len_empty_contains_fixture_passes_full_cli_path() {
-    check_run_compile_verify("tests/fixtures/pcc7_sequence/positive_sequence_len_empty_contains.sm");
+    check_run_compile_verify(
+        "tests/fixtures/pcc7_sequence/positive_sequence_len_empty_contains.sm",
+    );
 }
 
 #[test]

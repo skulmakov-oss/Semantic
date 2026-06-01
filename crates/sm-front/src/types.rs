@@ -258,16 +258,24 @@ impl PatternPath {
         Self { elems: Vec::new() }
     }
     pub fn tuple_index(&self, idx: usize) -> Self {
-        let mut e = self.elems.clone(); e.push(PatternPathElem::TupleIndex(idx)); Self { elems: e }
+        let mut e = self.elems.clone();
+        e.push(PatternPathElem::TupleIndex(idx));
+        Self { elems: e }
     }
     pub fn variant(&self, name: SymbolId) -> Self {
-        let mut e = self.elems.clone(); e.push(PatternPathElem::Variant(name)); Self { elems: e }
+        let mut e = self.elems.clone();
+        e.push(PatternPathElem::Variant(name));
+        Self { elems: e }
     }
     pub fn variant_field(&self, idx: usize) -> Self {
-        let mut e = self.elems.clone(); e.push(PatternPathElem::VariantField(idx)); Self { elems: e }
+        let mut e = self.elems.clone();
+        e.push(PatternPathElem::VariantField(idx));
+        Self { elems: e }
     }
     pub fn record_field(&self, name: SymbolId) -> Self {
-        let mut e = self.elems.clone(); e.push(PatternPathElem::RecordField(name)); Self { elems: e }
+        let mut e = self.elems.clone();
+        e.push(PatternPathElem::RecordField(name));
+        Self { elems: e }
     }
 }
 
@@ -347,7 +355,10 @@ pub enum ValueAvailability {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AdtPatternItem {
     /// M9.5 Wave A: binding now carries explicit capture mode (default `Move`).
-    Bind { name: SymbolId, capture: CaptureMode },
+    Bind {
+        name: SymbolId,
+        capture: CaptureMode,
+    },
     Discard,
 }
 
@@ -366,7 +377,10 @@ pub struct RecordPatternItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecordPatternTarget {
-    Bind { name: SymbolId, capture: CaptureMode },
+    Bind {
+        name: SymbolId,
+        capture: CaptureMode,
+    },
     Discard,
     QuadLiteral(QuadVal),
 }
@@ -544,7 +558,10 @@ pub struct RangeExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum TuplePatternItem {
     /// M9.5 Wave A: binding now carries explicit capture mode (default `Move`).
-    Bind { name: SymbolId, capture: CaptureMode },
+    Bind {
+        name: SymbolId,
+        capture: CaptureMode,
+    },
     Discard,
     QuadLiteral(QuadVal),
     /// M9.4 Wave 1: nested tuple destructuring — `(a, (b, c))` beyond one level.
@@ -760,11 +777,25 @@ pub struct ValidationVariantPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValidationCheck {
-    RequiredField { field: SymbolId },
-    FieldType { field: SymbolId, ty: Type },
-    TaggedUnionBranch { variant: SymbolId },
-    TaggedUnionBranchRequiredField { variant: SymbolId, field: SymbolId },
-    TaggedUnionBranchFieldType { variant: SymbolId, field: SymbolId, ty: Type },
+    RequiredField {
+        field: SymbolId,
+    },
+    FieldType {
+        field: SymbolId,
+        ty: Type,
+    },
+    TaggedUnionBranch {
+        variant: SymbolId,
+    },
+    TaggedUnionBranchRequiredField {
+        variant: SymbolId,
+        field: SymbolId,
+    },
+    TaggedUnionBranchFieldType {
+        variant: SymbolId,
+        field: SymbolId,
+        ty: Type,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1222,7 +1253,10 @@ mod tests {
         let decl = RecordDecl {
             name,
             type_params: vec![t_param],
-            fields: vec![RecordField { name: field_name, ty: Type::TypeVar(t_param) }],
+            fields: vec![RecordField {
+                name: field_name,
+                ty: Type::TypeVar(t_param),
+            }],
         };
         assert_eq!(decl.type_params, vec![t_param]);
         assert_eq!(decl.fields[0].ty, Type::TypeVar(t_param));
@@ -1253,7 +1287,10 @@ mod tests {
         let mut arena = AstArena::default();
         let t = arena.intern_symbol("T");
         let display = arena.intern_symbol("Display");
-        let bound = TraitBound { param: t, bound: display };
+        let bound = TraitBound {
+            param: t,
+            bound: display,
+        };
         assert_eq!(bound.param, t);
         assert_eq!(bound.bound, display);
     }
@@ -1308,7 +1345,10 @@ mod tests {
         let func = Function {
             name,
             type_params: vec![t_param],
-            trait_bounds: vec![TraitBound { param: t_param, bound: display }],
+            trait_bounds: vec![TraitBound {
+                param: t_param,
+                bound: display,
+            }],
             params: vec![(param, Type::TypeVar(t_param))],
             param_defaults: vec![None],
             requires: vec![],
@@ -1361,20 +1401,32 @@ mod tests {
     fn kw_trait_and_kw_impl_lex_to_reserved_tokens() {
         use crate::lexer::lex_tokens;
         let tokens = lex_tokens("trait Display { }").unwrap();
-        assert!(tokens.iter().any(|t| t.kind == TokenKind::KwTrait),
-            "expected KwTrait token from 'trait'");
+        assert!(
+            tokens.iter().any(|t| t.kind == TokenKind::KwTrait),
+            "expected KwTrait token from 'trait'"
+        );
         let tokens2 = lex_tokens("impl Display for MyRecord { }").unwrap();
-        assert!(tokens2.iter().any(|t| t.kind == TokenKind::KwImpl),
-            "expected KwImpl token from 'impl'");
-        assert!(tokens2.iter().any(|t| t.kind == TokenKind::KwFor),
-            "expected KwFor token from 'for'");
+        assert!(
+            tokens2.iter().any(|t| t.kind == TokenKind::KwImpl),
+            "expected KwImpl token from 'impl'"
+        );
+        assert!(
+            tokens2.iter().any(|t| t.kind == TokenKind::KwFor),
+            "expected KwFor token from 'for'"
+        );
     }
 
     // M9.4 Wave 1 — richer pattern surface owner layer
 
     #[test]
     fn nested_tuple_pattern_item_owner_layer_is_stable() {
-        let inner = vec![TuplePatternItem::Bind { name: SymbolId(0), capture: CaptureMode::Move }, TuplePatternItem::Discard];
+        let inner = vec![
+            TuplePatternItem::Bind {
+                name: SymbolId(0),
+                capture: CaptureMode::Move,
+            },
+            TuplePatternItem::Discard,
+        ];
         let nested = TuplePatternItem::Nested(inner);
         assert!(matches!(nested, TuplePatternItem::Nested(ref items) if items.len() == 2));
     }
@@ -1404,8 +1456,14 @@ mod tests {
 
     #[test]
     fn int_range_pattern_owner_layer_is_stable() {
-        let range_pat = MatchPattern::IntRange(IntRangePattern { start: 1, end: 5, inclusive: true });
-        assert!(matches!(&range_pat, MatchPattern::IntRange(r) if r.start == 1 && r.end == 5 && r.inclusive));
+        let range_pat = MatchPattern::IntRange(IntRangePattern {
+            start: 1,
+            end: 5,
+            inclusive: true,
+        });
+        assert!(
+            matches!(&range_pat, MatchPattern::IntRange(r) if r.start == 1 && r.end == 5 && r.inclusive)
+        );
     }
 
     #[test]
@@ -1413,8 +1471,14 @@ mod tests {
         let mut arena = AstArena::default();
         let value_id = arena.alloc_expr(Expr::BoolLiteral(true));
         let unit_id = arena.alloc_expr(Expr::QuadLiteral(QuadVal::N));
-        let then_block = BlockExpr { statements: vec![], tail: unit_id };
-        let else_block = BlockExpr { statements: vec![], tail: unit_id };
+        let then_block = BlockExpr {
+            statements: vec![],
+            tail: unit_id,
+        };
+        let else_block = BlockExpr {
+            statements: vec![],
+            tail: unit_id,
+        };
         let if_let = IfLetExpr {
             pattern: MatchPattern::Wildcard,
             value: value_id,
@@ -1436,44 +1500,102 @@ mod tests {
 
     #[test]
     fn tuple_pattern_bind_carries_capture_mode() {
-        let item_move = TuplePatternItem::Bind { name: SymbolId(1), capture: CaptureMode::Move };
-        let item_borrow = TuplePatternItem::Bind { name: SymbolId(1), capture: CaptureMode::Borrow };
-        assert!(matches!(item_move, TuplePatternItem::Bind { capture: CaptureMode::Move, .. }));
-        assert!(matches!(item_borrow, TuplePatternItem::Bind { capture: CaptureMode::Borrow, .. }));
+        let item_move = TuplePatternItem::Bind {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+        };
+        let item_borrow = TuplePatternItem::Bind {
+            name: SymbolId(1),
+            capture: CaptureMode::Borrow,
+        };
+        assert!(matches!(
+            item_move,
+            TuplePatternItem::Bind {
+                capture: CaptureMode::Move,
+                ..
+            }
+        ));
+        assert!(matches!(
+            item_borrow,
+            TuplePatternItem::Bind {
+                capture: CaptureMode::Borrow,
+                ..
+            }
+        ));
         // Two bindings of same name but different capture mode are distinct.
         assert_ne!(item_move, item_borrow);
     }
 
     #[test]
     fn adt_pattern_bind_carries_capture_mode() {
-        let item_move = AdtPatternItem::Bind { name: SymbolId(2), capture: CaptureMode::Move };
-        let item_borrow = AdtPatternItem::Bind { name: SymbolId(2), capture: CaptureMode::Borrow };
-        assert!(matches!(item_move, AdtPatternItem::Bind { capture: CaptureMode::Move, .. }));
-        assert!(matches!(item_borrow, AdtPatternItem::Bind { capture: CaptureMode::Borrow, .. }));
+        let item_move = AdtPatternItem::Bind {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+        };
+        let item_borrow = AdtPatternItem::Bind {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+        };
+        assert!(matches!(
+            item_move,
+            AdtPatternItem::Bind {
+                capture: CaptureMode::Move,
+                ..
+            }
+        ));
+        assert!(matches!(
+            item_borrow,
+            AdtPatternItem::Bind {
+                capture: CaptureMode::Borrow,
+                ..
+            }
+        ));
         assert_ne!(item_move, item_borrow);
     }
 
     #[test]
     fn tuple_pattern_default_is_move() {
         // Default capture in parser-generated nodes is Move; Borrow requires explicit `ref`.
-        let item = TuplePatternItem::Bind { name: SymbolId(3), capture: CaptureMode::Move };
-        let TuplePatternItem::Bind { capture, .. } = item else { panic!("expected Bind") };
-        assert_eq!(capture, CaptureMode::Move, "default tuple binding capture must be Move");
+        let item = TuplePatternItem::Bind {
+            name: SymbolId(3),
+            capture: CaptureMode::Move,
+        };
+        let TuplePatternItem::Bind { capture, .. } = item else {
+            panic!("expected Bind")
+        };
+        assert_eq!(
+            capture,
+            CaptureMode::Move,
+            "default tuple binding capture must be Move"
+        );
     }
 
     #[test]
     fn adt_pattern_default_is_move() {
-        let item = AdtPatternItem::Bind { name: SymbolId(4), capture: CaptureMode::Move };
-        let AdtPatternItem::Bind { capture, .. } = item else { panic!("expected Bind") };
-        assert_eq!(capture, CaptureMode::Move, "default ADT binding capture must be Move");
+        let item = AdtPatternItem::Bind {
+            name: SymbolId(4),
+            capture: CaptureMode::Move,
+        };
+        let AdtPatternItem::Bind { capture, .. } = item else {
+            panic!("expected Bind")
+        };
+        assert_eq!(
+            capture,
+            CaptureMode::Move,
+            "default ADT binding capture must be Move"
+        );
     }
 
     #[test]
     fn record_pattern_bind_carries_capture_mode() {
-        let item_move =
-            RecordPatternTarget::Bind { name: SymbolId(5), capture: CaptureMode::Move };
-        let item_borrow =
-            RecordPatternTarget::Bind { name: SymbolId(5), capture: CaptureMode::Borrow };
+        let item_move = RecordPatternTarget::Bind {
+            name: SymbolId(5),
+            capture: CaptureMode::Move,
+        };
+        let item_borrow = RecordPatternTarget::Bind {
+            name: SymbolId(5),
+            capture: CaptureMode::Borrow,
+        };
         assert!(matches!(
             item_move,
             RecordPatternTarget::Bind {
@@ -1493,9 +1615,18 @@ mod tests {
 
     #[test]
     fn record_pattern_default_is_move() {
-        let item = RecordPatternTarget::Bind { name: SymbolId(6), capture: CaptureMode::Move };
-        let RecordPatternTarget::Bind { capture, .. } = item else { panic!("expected Bind") };
-        assert_eq!(capture, CaptureMode::Move, "default record binding capture must be Move");
+        let item = RecordPatternTarget::Bind {
+            name: SymbolId(6),
+            capture: CaptureMode::Move,
+        };
+        let RecordPatternTarget::Bind { capture, .. } = item else {
+            panic!("expected Bind")
+        };
+        assert_eq!(
+            capture,
+            CaptureMode::Move,
+            "default record binding capture must be Move"
+        );
     }
 
     // M9.5 Wave B — KwRef token owner layer
@@ -1504,8 +1635,10 @@ mod tests {
     fn kw_ref_lexes_to_reserved_token() {
         use crate::lexer::lex_tokens;
         let tokens = lex_tokens("ref x").unwrap();
-        assert!(tokens.iter().any(|t| t.kind == TokenKind::KwRef),
-            "expected KwRef token from 'ref'");
+        assert!(
+            tokens.iter().any(|t| t.kind == TokenKind::KwRef),
+            "expected KwRef token from 'ref'"
+        );
     }
 
     // M9.5 Wave C — PatternPath / BindingPlan owner layer

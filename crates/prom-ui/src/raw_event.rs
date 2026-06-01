@@ -9,8 +9,7 @@ use alloc::string::String;
 
 use crate::interaction::{
     ElementId, InteractionIntentDescriptor, InteractionIntentId, InteractionIntentKind,
-    InteractionModifiers, InteractionSource, InteractionTarget, RegionId, SurfaceId,
-    WindowId,
+    InteractionModifiers, InteractionSource, InteractionTarget, RegionId, SurfaceId, WindowId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -68,21 +67,11 @@ pub struct RawTextInput {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RawUiEventPayload {
     None,
-    Pointer {
-        button: RawPointerButton,
-    },
-    Key {
-        key: RawKeyCode,
-    },
+    Pointer { button: RawPointerButton },
+    Key { key: RawKeyCode },
     Text(RawTextInput),
-    Wheel {
-        delta_x: i32,
-        delta_y: i32,
-    },
-    Resize {
-        width: u32,
-        height: u32,
-    },
+    Wheel { delta_x: i32, delta_y: i32 },
+    Resize { width: u32, height: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -121,9 +110,7 @@ impl RawUiEvent {
     }
 }
 
-pub fn map_raw_event_to_interaction_intent(
-    event: &RawUiEvent,
-) -> InteractionIntentDescriptor {
+pub fn map_raw_event_to_interaction_intent(event: &RawUiEvent) -> InteractionIntentDescriptor {
     let source = map_source(event.kind);
     let kind = map_kind(event.kind, &event.payload);
     let target = map_target(event.target);
@@ -161,15 +148,15 @@ fn map_kind(kind: RawUiEventKind, payload: &RawUiEventPayload) -> InteractionInt
         RawUiEventKind::PointerEnter => InteractionIntentKind::Focus,
         RawUiEventKind::PointerLeave => InteractionIntentKind::Blur,
         RawUiEventKind::KeyDown => match payload {
-            RawUiEventPayload::Key { key: RawKeyCode::Enter } => {
-                InteractionIntentKind::Submit
-            }
-            RawUiEventPayload::Key { key: RawKeyCode::Escape } => {
-                InteractionIntentKind::Cancel
-            }
-            RawUiEventPayload::Key { key: RawKeyCode::Space } => {
-                InteractionIntentKind::Activate
-            }
+            RawUiEventPayload::Key {
+                key: RawKeyCode::Enter,
+            } => InteractionIntentKind::Submit,
+            RawUiEventPayload::Key {
+                key: RawKeyCode::Escape,
+            } => InteractionIntentKind::Cancel,
+            RawUiEventPayload::Key {
+                key: RawKeyCode::Space,
+            } => InteractionIntentKind::Activate,
             RawUiEventPayload::Key {
                 key:
                     RawKeyCode::ArrowUp
@@ -224,7 +211,10 @@ mod tests {
         assert_eq!(intent.id, InteractionIntentId(10));
         assert_eq!(intent.source, InteractionSource::Pointer);
         assert_eq!(intent.kind, InteractionIntentKind::Activate);
-        assert_eq!(intent.target, Some(InteractionTarget::Element(ElementId(7))));
+        assert_eq!(
+            intent.target,
+            Some(InteractionTarget::Element(ElementId(7)))
+        );
         assert!(intent.is_classified());
     }
 
@@ -271,9 +261,7 @@ mod tests {
             RawUiEventKind::TextInput,
             RawUiEventTarget::Element(ElementId(3)),
             InteractionModifiers::default(),
-            RawUiEventPayload::Text(RawTextInput {
-                text: "abc".into(),
-            }),
+            RawUiEventPayload::Text(RawTextInput { text: "abc".into() }),
         );
 
         let intent = map_raw_event_to_interaction_intent(&event);

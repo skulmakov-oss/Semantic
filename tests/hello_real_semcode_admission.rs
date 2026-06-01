@@ -1,17 +1,14 @@
 use std::path::PathBuf;
 
-use sm_emit::hello_real_semcode::{
-    emit_hello_real_semcode_skeleton, HelloRealSemCodeOp,
-};
+use sm_emit::hello_real_semcode::{emit_hello_real_semcode_skeleton, HelloRealSemCodeOp};
 use sm_front::hello_parser::parse_hello_file;
 use sm_front::hello_sema::validate_hello_file;
 use sm_ir::hello_ir::lower_hello_checked_file;
 use sm_verify::hello_real_semcode_admission::{
-    admit_controlled_text_observation_shape,
-    admit_hello_real_semcode_skeleton, HelloRealSemCodeAdmissionDecision,
-    HelloRealSemCodeAdmissionError, HelloRealSemCodeAdmissionInput,
-    HelloRealSemCodeAdmissionOp, builtin_call_controlled_observation_admission,
-    ControlledObservationAdmissionKind,
+    admit_controlled_text_observation_shape, admit_hello_real_semcode_skeleton,
+    builtin_call_controlled_observation_admission, ControlledObservationAdmissionKind,
+    HelloRealSemCodeAdmissionDecision, HelloRealSemCodeAdmissionError,
+    HelloRealSemCodeAdmissionInput, HelloRealSemCodeAdmissionOp,
 };
 use std::vec::Vec;
 
@@ -29,12 +26,14 @@ fn fixture_text(rel: &str) -> String {
 
 fn parse_validate_lower() -> sm_ir::hello_ir::HelloIrModule {
     let input = fixture_text("tests/fixtures/pending/hello/positive_hello_verbose_directional.sm");
-    let parsed = parse_hello_file(&input)
-        .unwrap_or_else(|err| panic!("parser unexpectedly rejected canonical hello fixture: {err}"));
+    let parsed = parse_hello_file(&input).unwrap_or_else(|err| {
+        panic!("parser unexpectedly rejected canonical hello fixture: {err}")
+    });
     let checked = validate_hello_file(parsed)
         .unwrap_or_else(|err| panic!("sema unexpectedly rejected canonical hello fixture: {err}"));
-    lower_hello_checked_file(&checked)
-        .unwrap_or_else(|err| panic!("lowering unexpectedly rejected canonical hello fixture: {err}"))
+    lower_hello_checked_file(&checked).unwrap_or_else(|err| {
+        panic!("lowering unexpectedly rejected canonical hello fixture: {err}")
+    })
 }
 
 fn render_text_literal(text: &str) -> String {
@@ -58,9 +57,7 @@ fn skeleton_to_admission_input(ops: &[HelloRealSemCodeOp]) -> HelloRealSemCodeAd
                 }
             }
             HelloRealSemCodeOp::ObserveTextLiteral { text } => {
-                HelloRealSemCodeAdmissionOp::ObserveTextLiteral {
-                    text: text.clone(),
-                }
+                HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text: text.clone() }
             }
             HelloRealSemCodeOp::CompleteQuad { value } => {
                 HelloRealSemCodeAdmissionOp::CompleteQuad {
@@ -141,7 +138,10 @@ fn hello_real_semcode_admission_rejects_order_and_shape_mutations() {
     if let HelloRealSemCodeAdmissionOp::DeclareLocalQuad { value, .. } = &mut wrong_value.ops[0] {
         *value = "F".to_string();
     }
-    assert_reject(wrong_value, HelloRealSemCodeAdmissionError::UnsupportedShape);
+    assert_reject(
+        wrong_value,
+        HelloRealSemCodeAdmissionError::UnsupportedShape,
+    );
 
     let mut wrong_completion = canonical.clone();
     if let HelloRealSemCodeAdmissionOp::CompleteQuad { value } = &mut wrong_completion.ops[3] {
@@ -173,7 +173,10 @@ fn hello_real_semcode_admission_rejects_stdout_print_and_generic_io_text() {
     if let HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text } = &mut io_write.ops[2] {
         *text = render_text_literal("io.write");
     }
-    assert_reject(io_write, HelloRealSemCodeAdmissionError::GenericIoNotAllowed);
+    assert_reject(
+        io_write,
+        HelloRealSemCodeAdmissionError::GenericIoNotAllowed,
+    );
 }
 
 #[test]
@@ -184,7 +187,10 @@ fn hello_real_semcode_admission_rejects_opcode_and_bytecode_markers() {
     if let HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text } = &mut opcode.ops[2] {
         *text = render_text_literal("opcode");
     }
-    assert_reject(opcode, HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed);
+    assert_reject(
+        opcode,
+        HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed,
+    );
 
     let mut bytecode = canonical.clone();
     if let HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text } = &mut bytecode.ops[2] {

@@ -115,16 +115,13 @@ mod tests {
     use super::*;
     use crate::action_admission::{
         InteractionActionAdmissionCapabilityRequirement,
-        InteractionActionAdmissionDenialVisibility,
-        InteractionActionAdmissionDescriptor,
-        InteractionActionAdmissionDescriptorId,
-        InteractionActionAdmissionEffectRelationship,
+        InteractionActionAdmissionDenialVisibility, InteractionActionAdmissionDescriptor,
+        InteractionActionAdmissionDescriptorId, InteractionActionAdmissionEffectRelationship,
         InteractionActionAdmissionFutureResultShape,
         InteractionActionAdmissionLifecycleRequirement,
         InteractionActionAdmissionPolicyGateNamespace,
         InteractionActionAdmissionTargetOwnershipRequirement,
-        InteractionActionAdmissionTargetRequirement,
-        InteractionActionAdmissionTraceRequirement,
+        InteractionActionAdmissionTargetRequirement, InteractionActionAdmissionTraceRequirement,
     };
     use crate::action_admission_result::{
         record_interaction_action_admitted_result, record_interaction_action_denied_result,
@@ -143,14 +140,12 @@ mod tests {
             target_ownership_requirement:
                 InteractionActionAdmissionTargetOwnershipRequirement::NotRequired,
             lifecycle_requirement: InteractionActionAdmissionLifecycleRequirement::SessionActive,
-            capability_requirement:
-                InteractionActionAdmissionCapabilityRequirement::DesktopSession,
+            capability_requirement: InteractionActionAdmissionCapabilityRequirement::DesktopSession,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
             effect_relationship: InteractionActionAdmissionEffectRelationship::NoEffect,
             denial_visibility: InteractionActionAdmissionDenialVisibility::Required,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::CoreUi,
-            future_result_shape:
-                InteractionActionAdmissionFutureResultShape::AdmitOrDenyWithReason,
+            future_result_shape: InteractionActionAdmissionFutureResultShape::AdmitOrDenyWithReason,
         }
     }
 
@@ -164,14 +159,12 @@ mod tests {
             target_ownership_requirement:
                 InteractionActionAdmissionTargetOwnershipRequirement::RequiredWhenTargetPresent,
             lifecycle_requirement: InteractionActionAdmissionLifecycleRequirement::SessionActive,
-            capability_requirement:
-                InteractionActionAdmissionCapabilityRequirement::InputPoll,
+            capability_requirement: InteractionActionAdmissionCapabilityRequirement::InputPoll,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
             effect_relationship: InteractionActionAdmissionEffectRelationship::NoEffect,
             denial_visibility: InteractionActionAdmissionDenialVisibility::Required,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::CoreUi,
-            future_result_shape:
-                InteractionActionAdmissionFutureResultShape::AdmitOrDenyWithReason,
+            future_result_shape: InteractionActionAdmissionFutureResultShape::AdmitOrDenyWithReason,
         }
     }
 
@@ -191,7 +184,10 @@ mod tests {
         assert_eq!(trace.result_id, result.id);
         assert_eq!(trace.descriptor_id, result.descriptor_id);
         assert_eq!(trace.action, result.action);
-        assert_eq!(trace.denial_reason, InteractionActionAdmissionDenialReason::MissingTarget);
+        assert_eq!(
+            trace.denial_reason,
+            InteractionActionAdmissionDenialReason::MissingTarget
+        );
     }
 
     #[test]

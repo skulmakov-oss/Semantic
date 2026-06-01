@@ -58,8 +58,9 @@ fn run_public_numeric_pipeline(rel: &str) {
         &format!("smc compile for {input}"),
     );
 
-    let bytes = std::fs::read(&out)
-        .unwrap_or_else(|err| panic!("compiled numeric artifact for {input} was not readable: {err}"));
+    let bytes = std::fs::read(&out).unwrap_or_else(|err| {
+        panic!("compiled numeric artifact for {input} was not readable: {err}")
+    });
     assert!(
         !bytes.is_empty(),
         "expected emitted numeric artifact for {input} to be non-empty"
@@ -91,8 +92,9 @@ fn compile_numeric_fixture_to_bytes(rel: &str, out_tag: &str) -> Vec<u8> {
         ],
         &format!("smc compile for {input}"),
     );
-    let bytes = std::fs::read(&out)
-        .unwrap_or_else(|err| panic!("compiled numeric artifact for {input} was not readable: {err}"));
+    let bytes = std::fs::read(&out).unwrap_or_else(|err| {
+        panic!("compiled numeric artifact for {input} was not readable: {err}")
+    });
     cli_ok(
         vec!["verify".to_string(), out_arg.clone()],
         &format!("smc verify for {out_arg}"),
@@ -203,11 +205,7 @@ fn pcc2_invalid_numeric_cases_have_stable_diagnostics() {
             "E0201",
             "type mismatch in let",
         ),
-        (
-            "negative_i32_plus_bool.sm",
-            "E0201",
-            "I32",
-        ),
+        ("negative_i32_plus_bool.sm", "E0201", "I32"),
         (
             "negative_i32_comparison_against_bool.sm",
             "E0201",
@@ -243,11 +241,7 @@ fn pcc2_invalid_numeric_compile_path_does_not_verify() {
             "E0201",
             "type mismatch in let",
         ),
-        (
-            "negative_i32_plus_bool.sm",
-            "E0201",
-            "I32",
-        ),
+        ("negative_i32_plus_bool.sm", "E0201", "I32"),
         (
             "negative_i32_comparison_against_bool.sm",
             "E0201",

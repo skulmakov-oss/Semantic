@@ -29,8 +29,5 @@ pub enum HelloObservationSinkError {
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub trait HelloObservationSink {
-    fn observe(
-        &mut self,
-        event: HelloObservationEvent,
-    ) -> Result<(), HelloObservationSinkError>;
+    fn observe(&mut self, event: HelloObservationEvent) -> Result<(), HelloObservationSinkError>;
 }

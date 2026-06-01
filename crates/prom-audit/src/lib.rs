@@ -184,7 +184,9 @@ impl AuditReplayArchive {
         out.push_str("session\t");
         out.push_str(display_execution_context(self.session.context));
         out.push('\t');
-        out.push_str(&escape_archive_field(&self.session.capability_manifest.schema));
+        out.push_str(&escape_archive_field(
+            &self.session.capability_manifest.schema,
+        ));
         out.push('\t');
         out.push_str(display_manifest_version(
             self.session.capability_manifest.version,
@@ -226,9 +228,7 @@ impl AuditReplayArchive {
             .ok_or_else(|| AuditReplayArchiveFormatError::new("missing archive header"))?;
         let header_parts = split_archive_line(header);
         if header_parts.len() != 2 || header_parts[0] != AUDIT_REPLAY_ARCHIVE_MAGIC {
-            return Err(AuditReplayArchiveFormatError::new(
-                "invalid archive header",
-            ));
+            return Err(AuditReplayArchiveFormatError::new("invalid archive header"));
         }
         let format_version = parse_u32_field(header_parts[1], "archive format version")?;
         if format_version != AUDIT_REPLAY_ARCHIVE_FORMAT_VERSION {
@@ -376,9 +376,7 @@ impl MultiSessionReplayArchive {
         out
     }
 
-    pub fn from_canonical_text(
-        src: &str,
-    ) -> Result<Self, MultiSessionReplayArchiveFormatError> {
+    pub fn from_canonical_text(src: &str) -> Result<Self, MultiSessionReplayArchiveFormatError> {
         let mut lines = src.lines();
         let header = lines.next().ok_or_else(|| {
             MultiSessionReplayArchiveFormatError::new("missing multi-session archive header")
@@ -410,9 +408,11 @@ impl MultiSessionReplayArchive {
                 "invalid multi-session archive session-count line",
             ));
         }
-        let expected_session_count =
-            parse_usize_field(session_count_parts[1], "multi-session archive session count")
-                .map_err(|err| MultiSessionReplayArchiveFormatError::new(err.message))?;
+        let expected_session_count = parse_usize_field(
+            session_count_parts[1],
+            "multi-session archive session count",
+        )
+        .map_err(|err| MultiSessionReplayArchiveFormatError::new(err.message))?;
 
         let mut sessions = Vec::with_capacity(expected_session_count);
         while let Some(line) = lines.next() {
@@ -442,9 +442,7 @@ impl MultiSessionReplayArchive {
             let mut archive_text = String::new();
             for index in 0..expected_archive_line_count {
                 let archive_line = lines.next().ok_or_else(|| {
-                    MultiSessionReplayArchiveFormatError::new(
-                        "missing embedded audit archive line",
-                    )
+                    MultiSessionReplayArchiveFormatError::new("missing embedded audit archive line")
                 })?;
                 let archive_parts = split_archive_line(archive_line);
                 if archive_parts.is_empty() || archive_parts[0] != "archive" {
@@ -452,13 +450,11 @@ impl MultiSessionReplayArchive {
                         "invalid embedded audit archive line",
                     ));
                 }
-                let embedded_line = archive_line
-                    .strip_prefix("archive\t")
-                    .ok_or_else(|| {
-                        MultiSessionReplayArchiveFormatError::new(
-                            "embedded audit archive line missing prefix payload",
-                        )
-                    })?;
+                let embedded_line = archive_line.strip_prefix("archive\t").ok_or_else(|| {
+                    MultiSessionReplayArchiveFormatError::new(
+                        "embedded audit archive line missing prefix payload",
+                    )
+                })?;
                 archive_text.push_str(embedded_line);
                 if index + 1 != expected_archive_line_count {
                     archive_text.push('\n');
@@ -745,9 +741,7 @@ fn decode_event_kind(parts: &[&str]) -> Result<AuditEventKind, AuditReplayArchiv
         }
         "note" => {
             if parts.len() != 2 {
-                return Err(AuditReplayArchiveFormatError::new(
-                    "invalid note payload",
-                ));
+                return Err(AuditReplayArchiveFormatError::new("invalid note payload"));
             }
             Ok(AuditEventKind::Note {
                 message: unescape_archive_field(parts[1])?,
@@ -768,9 +762,7 @@ fn display_execution_context(context: ExecutionContext) -> &'static str {
     }
 }
 
-fn parse_execution_context(
-    raw: &str,
-) -> Result<ExecutionContext, AuditReplayArchiveFormatError> {
+fn parse_execution_context(raw: &str) -> Result<ExecutionContext, AuditReplayArchiveFormatError> {
     match raw {
         "pure-compute" => Ok(ExecutionContext::PureCompute),
         "verified-local" => Ok(ExecutionContext::VerifiedLocal),
@@ -823,9 +815,7 @@ fn display_controlled_observation_audit_decision(
     }
 }
 
-fn parse_capability_kind(
-    raw: &str,
-) -> Result<CapabilityKind, AuditReplayArchiveFormatError> {
+fn parse_capability_kind(raw: &str) -> Result<CapabilityKind, AuditReplayArchiveFormatError> {
     match raw {
         "GateRead" => Ok(CapabilityKind::GateRead),
         "GateWrite" => Ok(CapabilityKind::GateWrite),
@@ -855,53 +845,38 @@ fn parse_controlled_observation_audit_decision(
     }
 }
 
-fn parse_bool_field(
-    raw: &str,
-    label: &str,
-) -> Result<bool, AuditReplayArchiveFormatError> {
+fn parse_bool_field(raw: &str, label: &str) -> Result<bool, AuditReplayArchiveFormatError> {
     match raw {
         "true" => Ok(true),
         "false" => Ok(false),
-        _ => Err(AuditReplayArchiveFormatError::new(format!("invalid {}", label))),
+        _ => Err(AuditReplayArchiveFormatError::new(format!(
+            "invalid {}",
+            label
+        ))),
     }
 }
 
-fn parse_u16_field(
-    raw: &str,
-    label: &str,
-) -> Result<u16, AuditReplayArchiveFormatError> {
+fn parse_u16_field(raw: &str, label: &str) -> Result<u16, AuditReplayArchiveFormatError> {
     raw.parse::<u16>()
         .map_err(|_| AuditReplayArchiveFormatError::new(format!("invalid {}", label)))
 }
 
-fn parse_u32_field(
-    raw: &str,
-    label: &str,
-) -> Result<u32, AuditReplayArchiveFormatError> {
+fn parse_u32_field(raw: &str, label: &str) -> Result<u32, AuditReplayArchiveFormatError> {
     raw.parse::<u32>()
         .map_err(|_| AuditReplayArchiveFormatError::new(format!("invalid {}", label)))
 }
 
-fn parse_u64_field(
-    raw: &str,
-    label: &str,
-) -> Result<u64, AuditReplayArchiveFormatError> {
+fn parse_u64_field(raw: &str, label: &str) -> Result<u64, AuditReplayArchiveFormatError> {
     raw.parse::<u64>()
         .map_err(|_| AuditReplayArchiveFormatError::new(format!("invalid {}", label)))
 }
 
-fn parse_i32_field(
-    raw: &str,
-    label: &str,
-) -> Result<i32, AuditReplayArchiveFormatError> {
+fn parse_i32_field(raw: &str, label: &str) -> Result<i32, AuditReplayArchiveFormatError> {
     raw.parse::<i32>()
         .map_err(|_| AuditReplayArchiveFormatError::new(format!("invalid {}", label)))
 }
 
-fn parse_usize_field(
-    raw: &str,
-    label: &str,
-) -> Result<usize, AuditReplayArchiveFormatError> {
+fn parse_usize_field(raw: &str, label: &str) -> Result<usize, AuditReplayArchiveFormatError> {
     raw.parse::<usize>()
         .map_err(|_| AuditReplayArchiveFormatError::new(format!("invalid {}", label)))
 }
@@ -912,21 +887,20 @@ fn parse_optional_event_id(
     if raw == "none" {
         return Ok(None);
     }
-    Ok(Some(AuditEventId(parse_u64_field(raw, "replay last event id")?)))
+    Ok(Some(AuditEventId(parse_u64_field(
+        raw,
+        "replay last event id",
+    )?)))
 }
 
-fn parse_optional_u64(
-    raw: &str,
-) -> Result<Option<u64>, AuditReplayArchiveFormatError> {
+fn parse_optional_u64(raw: &str) -> Result<Option<u64>, AuditReplayArchiveFormatError> {
     if raw == "none" {
         return Ok(None);
     }
     Ok(Some(parse_u64_field(raw, "optional u64")?))
 }
 
-fn parse_optional_string(
-    raw: &str,
-) -> Result<Option<String>, AuditReplayArchiveFormatError> {
+fn parse_optional_string(raw: &str) -> Result<Option<String>, AuditReplayArchiveFormatError> {
     if raw == "none" {
         return Ok(None);
     }
@@ -952,9 +926,7 @@ fn escape_archive_field(value: &str) -> String {
     escaped
 }
 
-fn unescape_archive_field(
-    value: &str,
-) -> Result<String, AuditReplayArchiveFormatError> {
+fn unescape_archive_field(value: &str) -> Result<String, AuditReplayArchiveFormatError> {
     let mut out = String::new();
     let mut chars = value.chars();
     while let Some(ch) = chars.next() {
@@ -985,10 +957,8 @@ fn unescape_archive_field(
 mod tests {
     use super::*;
     use crate::hello_observation_audit::{
-        apply_controlled_observation_audit_policy,
-        ControlledObservationAuditDecision,
-        ControlledObservationAuditResult,
-        HelloObservationAuditLinkage,
+        apply_controlled_observation_audit_policy, ControlledObservationAuditDecision,
+        ControlledObservationAuditResult, HelloObservationAuditLinkage,
     };
 
     fn sample_session() -> AuditSessionMetadata {
@@ -1246,10 +1216,7 @@ mod tests {
 
         let archive = trail.replay_archive();
 
-        assert_eq!(
-            archive.format_version,
-            AUDIT_REPLAY_ARCHIVE_FORMAT_VERSION
-        );
+        assert_eq!(archive.format_version, AUDIT_REPLAY_ARCHIVE_FORMAT_VERSION);
         assert_eq!(archive.session, trail.session().clone());
         assert_eq!(archive.events, trail.events());
         assert_eq!(archive.replay.event_count, 2);
@@ -1386,8 +1353,7 @@ archive\tsession\tkernel-bound\tprom.cap.manifest\tv1\ttrue\n\
 archive\tevents\t0\n\
 archive\treplay\t0\tnone\n";
 
-        let err =
-            MultiSessionReplayArchive::from_canonical_text(text).expect_err("must reject");
+        let err = MultiSessionReplayArchive::from_canonical_text(text).expect_err("must reject");
 
         assert!(err.message.contains("session count mismatch"));
     }
@@ -1403,8 +1369,7 @@ archive\tsession\tkernel-bound\tprom.cap.manifest\tv1\ttrue\n\
 archive\tevents\t0\n\
 archive\treplay\t0\tnone\n";
 
-        let err =
-            MultiSessionReplayArchive::from_canonical_text(text).expect_err("must reject");
+        let err = MultiSessionReplayArchive::from_canonical_text(text).expect_err("must reject");
 
         assert!(err.message.contains("monotonic"));
     }

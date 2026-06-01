@@ -19,10 +19,13 @@ fn native_backend_winit_app_facade_is_available() {
 fn native_backend_winit_app_facade_requires_staged_window_config() {
     let backend = NativeBackend::new();
 
-    let err = NativeBackendWinitApp::new(backend)
-        .expect_err("facade must require staged WindowConfig");
+    let err =
+        NativeBackendWinitApp::new(backend).expect_err("facade must require staged WindowConfig");
 
-    assert!(matches!(err, NativeBackendWinitAppError::MissingWindowConfig));
+    assert!(matches!(
+        err,
+        NativeBackendWinitAppError::MissingWindowConfig
+    ));
 }
 
 #[test]
@@ -32,8 +35,8 @@ fn native_backend_winit_app_facade_accepts_staged_window_config() {
 
     backend.create_window(&config).unwrap();
 
-    let facade = NativeBackendWinitApp::new(backend)
-        .expect("facade must accept staged WindowConfig");
+    let facade =
+        NativeBackendWinitApp::new(backend).expect("facade must accept staged WindowConfig");
 
     let staged = facade
         .backend()

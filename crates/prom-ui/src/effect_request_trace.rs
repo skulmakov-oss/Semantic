@@ -16,9 +16,9 @@ use crate::effect_request::{
     InteractionEffectRequestDenialBehavior, InteractionEffectRequestDescriptor,
     InteractionEffectRequestDescriptorId, InteractionEffectRequestKind,
     InteractionEffectRequestLifecyclePrecondition,
-    InteractionEffectRequestPrepareCommitRelationship,
-    InteractionEffectRequestRuntimeCapability, InteractionEffectRequestScope,
-    InteractionEffectRequestTargetPolicy, InteractionEffectRequestUiCapability,
+    InteractionEffectRequestPrepareCommitRelationship, InteractionEffectRequestRuntimeCapability,
+    InteractionEffectRequestScope, InteractionEffectRequestTargetPolicy,
+    InteractionEffectRequestUiCapability,
 };
 use crate::interaction::InteractionIntentKind;
 
@@ -113,8 +113,8 @@ impl InteractionEffectRequestTraceReport {
 mod tests {
     use super::*;
     use crate::action_admission::{
-        InteractionActionAdmissionEffectRelationship, InteractionActionAdmissionPolicyGateNamespace,
-        InteractionActionAdmissionTraceRequirement,
+        InteractionActionAdmissionEffectRelationship,
+        InteractionActionAdmissionPolicyGateNamespace, InteractionActionAdmissionTraceRequirement,
     };
     use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
     use crate::action_dispatch_record::{
@@ -207,7 +207,10 @@ mod tests {
         let trace = trace_interaction_effect_request(&descriptor);
 
         assert_eq!(trace.descriptor_id, descriptor.id);
-        assert_eq!(trace.source_admitted_action_id, descriptor.source_admitted_action_id);
+        assert_eq!(
+            trace.source_admitted_action_id,
+            descriptor.source_admitted_action_id
+        );
         assert_eq!(trace.dispatch_record_id, descriptor.dispatch_record_id);
         assert_eq!(trace.dispatch_route_id, descriptor.dispatch_route_id);
     }
@@ -230,19 +233,28 @@ mod tests {
         let trace = trace_interaction_effect_request(&descriptor);
 
         assert_eq!(trace.target_policy, descriptor.target_policy);
-        assert_eq!(trace.required_ui_capability, descriptor.required_ui_capability);
+        assert_eq!(
+            trace.required_ui_capability,
+            descriptor.required_ui_capability
+        );
         assert_eq!(
             trace.required_runtime_capability,
             descriptor.required_runtime_capability
         );
-        assert_eq!(trace.lifecycle_precondition, descriptor.lifecycle_precondition);
+        assert_eq!(
+            trace.lifecycle_precondition,
+            descriptor.lifecycle_precondition
+        );
         assert_eq!(trace.trace_requirement, descriptor.trace_requirement);
         assert_eq!(trace.denial_behavior, descriptor.denial_behavior);
         assert_eq!(
             trace.prepare_commit_relationship,
             descriptor.prepare_commit_relationship
         );
-        assert_eq!(trace.policy_gate_namespace, descriptor.policy_gate_namespace);
+        assert_eq!(
+            trace.policy_gate_namespace,
+            descriptor.policy_gate_namespace
+        );
         assert_eq!(trace.scope, descriptor.scope);
     }
 

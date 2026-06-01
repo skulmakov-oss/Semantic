@@ -1258,7 +1258,10 @@ Import "dep/second.sm" *
 Import "dep/third.sm" *
 "#;
         let plan = build_import_resolution_plan_core(&parse_import_directives(src));
-        assert_eq!(plan.wildcard_imports, vec!["dep/first.sm", "dep/second.sm", "dep/third.sm"]);
+        assert_eq!(
+            plan.wildcard_imports,
+            vec!["dep/first.sm", "dep/second.sm", "dep/third.sm"]
+        );
     }
 
     #[test]
@@ -1334,7 +1337,11 @@ Import pub "a.sm"
 
         let export_sets = build_export_sets_core(&modules, &dep_lookup).expect("export sets");
         let root = export_sets.get("root.sm").expect("root set");
-        let names: Vec<&str> = root.items.iter().map(|item| item.public_name.as_str()).collect();
+        let names: Vec<&str> = root
+            .items
+            .iter()
+            .map(|item| item.public_name.as_str())
+            .collect();
         assert_eq!(names, vec!["Root", "B1", "A1", "A2"]);
     }
 

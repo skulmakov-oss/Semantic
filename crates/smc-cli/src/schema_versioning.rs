@@ -246,7 +246,10 @@ pub fn format_schema_migration_metadata(artifact: &SchemaMigrationMetadataArtifa
                                         out.push_str(&field_change.field_name);
                                         out.push_str(": ");
                                         out.push_str(
-                                            field_change.next_type.as_deref().unwrap_or("<unknown>"),
+                                            field_change
+                                                .next_type
+                                                .as_deref()
+                                                .unwrap_or("<unknown>"),
                                         );
                                     }
                                     SchemaFieldChangeKind::Removed => {
@@ -269,7 +272,10 @@ pub fn format_schema_migration_metadata(artifact: &SchemaMigrationMetadataArtifa
                                         );
                                         out.push_str(" -> ");
                                         out.push_str(
-                                            field_change.next_type.as_deref().unwrap_or("<unknown>"),
+                                            field_change
+                                                .next_type
+                                                .as_deref()
+                                                .unwrap_or("<unknown>"),
                                         );
                                     }
                                 }
@@ -337,7 +343,8 @@ pub fn classify_record_schema_compatibility(
         build_adt_table(&previous_program).map_err(schema_compatibility_build_error)?;
     let next_record_table =
         build_record_table(&next_program).map_err(schema_compatibility_build_error)?;
-    let next_adt_table = build_adt_table(&next_program).map_err(schema_compatibility_build_error)?;
+    let next_adt_table =
+        build_adt_table(&next_program).map_err(schema_compatibility_build_error)?;
 
     let mut next_by_name = BTreeMap::new();
     for field in next_fields {
@@ -374,8 +381,9 @@ pub fn classify_record_schema_compatibility(
                     &next_program.arena,
                 )
                 .map_err(schema_compatibility_build_error)?;
-                let next_type_text = display_schema_compatibility_type(&next_type, &next_program.arena)
-                    .map_err(schema_compatibility_build_error)?;
+                let next_type_text =
+                    display_schema_compatibility_type(&next_type, &next_program.arena)
+                        .map_err(schema_compatibility_build_error)?;
                 if previous_type != next_type {
                     compatibility = SchemaCompatibilityKind::Breaking;
                     changes.push(SchemaFieldChange {
@@ -487,7 +495,8 @@ pub fn classify_tagged_union_schema_compatibility(
         build_adt_table(&previous_program).map_err(schema_compatibility_build_error)?;
     let next_record_table =
         build_record_table(&next_program).map_err(schema_compatibility_build_error)?;
-    let next_adt_table = build_adt_table(&next_program).map_err(schema_compatibility_build_error)?;
+    let next_adt_table =
+        build_adt_table(&next_program).map_err(schema_compatibility_build_error)?;
 
     let mut next_by_name = BTreeMap::new();
     for variant in next_variants {
@@ -599,12 +608,15 @@ fn require_schema_version<'a>(
     schema: &'a SchemaDecl,
     arena: &AstArena,
 ) -> Result<&'a SchemaVersion, SchemaCompatibilityBuildError> {
-    schema.version.as_ref().ok_or_else(|| SchemaCompatibilityBuildError {
-        message: format!(
-            "schema '{}' compatibility requires explicit version metadata",
-            resolve_symbol_name(arena, schema.name).unwrap_or("<invalid-schema>")
-        ),
-    })
+    schema
+        .version
+        .as_ref()
+        .ok_or_else(|| SchemaCompatibilityBuildError {
+            message: format!(
+                "schema '{}' compatibility requires explicit version metadata",
+                resolve_symbol_name(arena, schema.name).unwrap_or("<invalid-schema>")
+            ),
+        })
 }
 
 fn migration_review_for_compatibility(
@@ -690,13 +702,9 @@ fn classify_variant_field_changes(
         if previous_names.contains(&field_name) {
             continue;
         }
-        let next_type = canonicalize_declared_type(
-            &field.ty,
-            next_record_table,
-            next_adt_table,
-            next_arena,
-        )
-        .map_err(schema_compatibility_build_error)?;
+        let next_type =
+            canonicalize_declared_type(&field.ty, next_record_table, next_adt_table, next_arena)
+                .map_err(schema_compatibility_build_error)?;
         let next_type_text = display_schema_compatibility_type(&next_type, next_arena)
             .map_err(schema_compatibility_build_error)?;
         changes.push(SchemaFieldChange {
@@ -710,10 +718,7 @@ fn classify_variant_field_changes(
     Ok(changes)
 }
 
-fn display_schema_compatibility_type(
-    ty: &Type,
-    arena: &AstArena,
-) -> Result<String, FrontendError> {
+fn display_schema_compatibility_type(ty: &Type, arena: &AstArena) -> Result<String, FrontendError> {
     Ok(match ty {
         Type::Quad => "quad".to_string(),
         Type::QVec(width) => format!("qvec({})", width),
@@ -805,9 +810,8 @@ fn main() {
 }
 "#;
 
-        let report =
-            classify_record_schema_compatibility(previous, next, "Telemetry")
-                .expect("record-shaped schema compatibility should classify");
+        let report = classify_record_schema_compatibility(previous, next, "Telemetry")
+            .expect("record-shaped schema compatibility should classify");
 
         assert_eq!(report.previous_version, 1);
         assert_eq!(report.next_version, 2);
@@ -841,9 +845,8 @@ fn main() {
 }
 "#;
 
-        let report =
-            classify_record_schema_compatibility(previous, next, "Envelope")
-                .expect("breaking compatibility should still classify");
+        let report = classify_record_schema_compatibility(previous, next, "Envelope")
+            .expect("breaking compatibility should still classify");
 
         assert_eq!(report.compatibility, SchemaCompatibilityKind::Breaking);
         assert_eq!(report.changes.len(), 2);
@@ -946,7 +949,10 @@ fn main() {
         assert_eq!(report.compatibility, SchemaCompatibilityKind::Additive);
         assert_eq!(report.variant_changes.len(), 1);
         assert_eq!(report.variant_changes[0].variant_name, "Data");
-        assert_eq!(report.variant_changes[0].kind, SchemaVariantChangeKind::Added);
+        assert_eq!(
+            report.variant_changes[0].kind,
+            SchemaVariantChangeKind::Added
+        );
         assert!(report.variant_changes[0].field_changes.is_empty());
     }
 

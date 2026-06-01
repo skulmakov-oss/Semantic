@@ -166,19 +166,12 @@ fn multiple_frame_payloads_are_captured_independently() {
     let frames = captured_frames.borrow();
     assert_eq!(frames.len(), 2);
 
-    assert_eq!(
-        frames[0],
-        vec![DrawCommand::Clear {
-            color: Color::RED
-        }]
-    );
+    assert_eq!(frames[0], vec![DrawCommand::Clear { color: Color::RED }]);
 
     assert_eq!(
         frames[1],
         vec![
-            DrawCommand::Clear {
-                color: Color::BLUE,
-            },
+            DrawCommand::Clear { color: Color::BLUE },
             DrawCommand::FillRect {
                 rect: Rect::new(9, 8, 7, 6),
                 color: Color::WHITE,

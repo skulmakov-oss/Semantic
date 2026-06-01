@@ -122,11 +122,31 @@ fn assert_invalid_numeric_compile_path_does_not_verify(rel: &str) {
 #[test]
 fn pcc2_numeric_assignment_mismatches_have_stable_diagnostics() {
     let cases = [
-        ("negative_bool_assigned_from_i32.sm", "E0201", "type mismatch in let"),
-        ("negative_i32_assigned_from_bool.sm", "E0201", "type mismatch in let"),
-        ("negative_i32_assigned_from_f64.sm", "E0201", "type mismatch in let"),
-        ("negative_f64_assigned_from_i32.sm", "E0201", "type mismatch in let"),
-        ("negative_u32_assigned_from_i32.sm", "E0201", "type mismatch in let"),
+        (
+            "negative_bool_assigned_from_i32.sm",
+            "E0201",
+            "type mismatch in let",
+        ),
+        (
+            "negative_i32_assigned_from_bool.sm",
+            "E0201",
+            "type mismatch in let",
+        ),
+        (
+            "negative_i32_assigned_from_f64.sm",
+            "E0201",
+            "type mismatch in let",
+        ),
+        (
+            "negative_f64_assigned_from_i32.sm",
+            "E0201",
+            "type mismatch in let",
+        ),
+        (
+            "negative_u32_assigned_from_i32.sm",
+            "E0201",
+            "type mismatch in let",
+        ),
         (
             "negative_fx_assigned_from_f64_expr.sm",
             "E0201",
@@ -142,9 +162,21 @@ fn pcc2_numeric_assignment_mismatches_have_stable_diagnostics() {
 #[test]
 fn pcc2_numeric_arithmetic_mismatches_have_stable_diagnostics() {
     let cases = [
-        ("negative_i32_plus_bool.sm", "E0201", &["I32", "Bool", "arithmetic"][..]),
-        ("negative_i32_plus_f64.sm", "E0201", &["I32", "F64", "arithmetic"][..]),
-        ("negative_fx_plus_f64.sm", "E0201", &["Fx", "F64", "arithmetic"][..]),
+        (
+            "negative_i32_plus_bool.sm",
+            "E0201",
+            &["I32", "Bool", "arithmetic"][..],
+        ),
+        (
+            "negative_i32_plus_f64.sm",
+            "E0201",
+            &["I32", "F64", "arithmetic"][..],
+        ),
+        (
+            "negative_fx_plus_f64.sm",
+            "E0201",
+            &["Fx", "F64", "arithmetic"][..],
+        ),
     ];
 
     for (rel, code, needles) in cases {

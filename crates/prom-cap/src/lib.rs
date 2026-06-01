@@ -7,7 +7,7 @@ pub mod hello_observation_capability;
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use prom_abi::HostCallId;
-use prom_ui::{UiCapabilityKind, UiOperationId, required_ui_capability};
+use prom_ui::{required_ui_capability, UiCapabilityKind, UiOperationId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityKind {
@@ -210,10 +210,11 @@ pub trait UiCapabilityChecker {
     fn require_ui(&self, capability: UiCapabilityKind) -> Result<(), UiCapabilityDenied>;
 
     fn require_ui_op(&self, op: UiOperationId) -> Result<(), UiCapabilityDenied> {
-        self.require_ui(required_ui_capability(op)).map_err(|mut denied| {
-            denied.operation = Some(op);
-            denied
-        })
+        self.require_ui(required_ui_capability(op))
+            .map_err(|mut denied| {
+                denied.operation = Some(op);
+                denied
+            })
     }
 }
 
@@ -497,7 +498,9 @@ mod tests {
         assert!(manifest.allows_ui(UiCapabilityKind::DesktopSession));
         assert!(manifest.allows_ui(UiCapabilityKind::InputPoll));
         assert!(!manifest.allows_ui(UiCapabilityKind::FrameEmit));
-        manifest.require_ui(UiCapabilityKind::DesktopSession).expect("must admit");
+        manifest
+            .require_ui(UiCapabilityKind::DesktopSession)
+            .expect("must admit");
     }
 
     #[test]

@@ -22,8 +22,7 @@ use crate::ui_capability_admission::{
     InteractionUiCapabilityAdmissionRuntimeMappingRequirement,
 };
 use crate::ui_capability_admission_result::{
-    InteractionUiCapabilityAdmissionDecisionStatus,
-    InteractionUiCapabilityAdmissionResult,
+    InteractionUiCapabilityAdmissionDecisionStatus, InteractionUiCapabilityAdmissionResult,
     InteractionUiCapabilityAdmissionResultId,
 };
 
@@ -99,8 +98,7 @@ pub fn describe_interaction_runtime_capability_mapping(
         dispatch_route_id: result.dispatch_route_id,
         requested_effect: result.requested_effect,
         declared_ui_capability: result.declared_ui_capability,
-        declared_runtime_capability_requirement: result
-            .declared_runtime_capability_requirement,
+        declared_runtime_capability_requirement: result.declared_runtime_capability_requirement,
         runtime_mapping_requirement: result.runtime_mapping_requirement,
         runtime_capability_namespace: map_runtime_capability_namespace(
             result.declared_runtime_capability_requirement,
@@ -110,7 +108,8 @@ pub fn describe_interaction_runtime_capability_mapping(
         trace_requirement: result.trace_requirement,
         policy_gate_namespace: result.policy_gate_namespace,
         scope: result.scope,
-        future_result_shape: InteractionRuntimeCapabilityMappingFutureResultShape::MapOrDenyWithReason,
+        future_result_shape:
+            InteractionRuntimeCapabilityMappingFutureResultShape::MapOrDenyWithReason,
     })
 }
 
@@ -171,8 +170,8 @@ impl InteractionRuntimeCapabilityMappingDescriptor {
 mod tests {
     use super::*;
     use crate::action_admission::{
-        InteractionActionAdmissionEffectRelationship, InteractionActionAdmissionPolicyGateNamespace,
-        InteractionActionAdmissionTraceRequirement,
+        InteractionActionAdmissionEffectRelationship,
+        InteractionActionAdmissionPolicyGateNamespace, InteractionActionAdmissionTraceRequirement,
     };
     use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
     use crate::action_dispatch_record::{
@@ -215,7 +214,8 @@ mod tests {
             block_reason: InteractionSemanticActionDispatchBlockReason::None,
             trace_reason: InteractionSemanticActionDispatchTraceReason::RouteRecorded,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
-            effect_relationship: InteractionActionAdmissionEffectRelationship::MayRequestEffectAfterAdmission,
+            effect_relationship:
+                InteractionActionAdmissionEffectRelationship::MayRequestEffectAfterAdmission,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::CoreUi,
             effect_eligibility:
                 InteractionSemanticActionDispatchEffectEligibility::RequiresFutureEffectBoundary,
@@ -254,7 +254,10 @@ mod tests {
         let descriptor = describe_interaction_runtime_capability_mapping(&result)
             .expect("admitted required result should produce mapping descriptor");
 
-        assert_eq!(descriptor.id, InteractionRuntimeCapabilityMappingDescriptorId(71));
+        assert_eq!(
+            descriptor.id,
+            InteractionRuntimeCapabilityMappingDescriptorId(71)
+        );
         assert_eq!(descriptor.ui_capability_admission_result_id, result.id);
     }
 
@@ -316,7 +319,10 @@ mod tests {
         assert_eq!(descriptor.dispatch_record_id, result.dispatch_record_id);
         assert_eq!(descriptor.dispatch_route_id, result.dispatch_route_id);
         assert_eq!(descriptor.requested_effect, result.requested_effect);
-        assert_eq!(descriptor.declared_ui_capability, result.declared_ui_capability);
+        assert_eq!(
+            descriptor.declared_ui_capability,
+            result.declared_ui_capability
+        );
         assert_eq!(
             descriptor.declared_runtime_capability_requirement,
             result.declared_runtime_capability_requirement
@@ -325,10 +331,16 @@ mod tests {
             descriptor.runtime_mapping_requirement,
             result.runtime_mapping_requirement
         );
-        assert_eq!(descriptor.lifecycle_precondition, result.lifecycle_precondition);
+        assert_eq!(
+            descriptor.lifecycle_precondition,
+            result.lifecycle_precondition
+        );
         assert_eq!(descriptor.target_policy, result.target_policy);
         assert_eq!(descriptor.trace_requirement, result.trace_requirement);
-        assert_eq!(descriptor.policy_gate_namespace, result.policy_gate_namespace);
+        assert_eq!(
+            descriptor.policy_gate_namespace,
+            result.policy_gate_namespace
+        );
         assert_eq!(descriptor.scope, result.scope);
         assert_eq!(
             descriptor.future_result_shape,
@@ -344,10 +356,12 @@ mod tests {
 
         let window_descriptor = describe_interaction_runtime_capability_mapping(&window)
             .expect("window lifecycle should produce mapping descriptor");
-        let effect_control_descriptor = describe_interaction_runtime_capability_mapping(&effect_control)
-            .expect("effect control should produce mapping descriptor");
-        let target_quarantine_descriptor = describe_interaction_runtime_capability_mapping(&target_quarantine)
-            .expect("target quarantine should produce mapping descriptor");
+        let effect_control_descriptor =
+            describe_interaction_runtime_capability_mapping(&effect_control)
+                .expect("effect control should produce mapping descriptor");
+        let target_quarantine_descriptor =
+            describe_interaction_runtime_capability_mapping(&target_quarantine)
+                .expect("target quarantine should produce mapping descriptor");
 
         assert_eq!(
             window_descriptor.runtime_capability_namespace,
