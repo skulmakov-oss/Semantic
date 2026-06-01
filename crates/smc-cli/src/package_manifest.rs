@@ -781,7 +781,6 @@ fn resolve_manifest_context(
 
 #[derive(Debug)]
 struct ParsedSemanticTomlManifest {
-    manifest: PackageManifest,
     entry: String,
 }
 
@@ -938,7 +937,7 @@ fn parse_semantic_toml_manifest(
             )
         }
     })?;
-    Ok(ParsedSemanticTomlManifest { manifest, entry })
+    Ok(ParsedSemanticTomlManifest { entry })
 }
 fn resolve_relative_import_path(base: &Path, spec: &str) -> PathBuf {
     let path = append_default_module_extension(spec);
