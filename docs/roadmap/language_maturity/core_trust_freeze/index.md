@@ -21,6 +21,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 - Golden trace evidence: `CTF-E1 — selected PCC golden trace coverage`
 - Collection replay evidence: `CTF-E2 — collection determinism replay coverage`
 - Trap taxonomy evidence: `CTF-E3 — trap taxonomy regression coverage`
+- Capability denial replay evidence: `CTF-E4 — denied-effect replay coverage`
 - Waypoint review: `docs/roadmap/language_maturity/core_trust_freeze/ctf_waypoint_review_after_wp1_wp4.md`
 - Evidence backlog: `docs/roadmap/language_maturity/core_trust_freeze/ctf_evidence_backlog.md`
 - Promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/freeze_candidate_promotion_rules.md`
@@ -49,6 +50,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 | `7hell_report_contract.md` | Does future 7hell reporting remain stable and deterministic? |
 | `7hell_diagnostics_boundary_decision.md` | Has Diagnostics Hell been classified without changing execution behavior? |
 | `7hell_diag_report_quality_seam_audit.md` | Has the future Diagnostics Hell report-quality seam been located safely? |
+| `capability_denial_replay.md` | Has denied-effect replay evidence been planned without widening capability behavior? |
 
 ## PR requirement
 
