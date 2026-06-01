@@ -2378,10 +2378,16 @@ fn render_controlled_observation_envelope(
 
 fn cmd_run(args: &[String]) -> Result<(), String> {
     if args.len() != 1 {
-        return Err("usage: smc run <input.sm>".to_string());
+        return Err("usage: smc run <input.sm|project-root>".to_string());
     }
     let input = args[0].as_str();
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
+    let src = read_source_with_package_admission(&root)?;
     let bytes = compile_program_to_semcode(&src).map_err(|e| e.to_string())?;
     let envelope = render_controlled_observation_envelope(&bytes)?;
     for line in envelope.rendered_lines {
@@ -2451,7 +2457,7 @@ fn usage() -> String {
         "  smc explain <error-code|--list>",
         "  smc repl",
         "  smc verify <input.smc>",
-        "  smc run <input.sm>",
+        "  smc run <input.sm|project-root>",
         "  smc run-smc <input.smc>",
         "  smc disasm <input.smc>",
     ]
