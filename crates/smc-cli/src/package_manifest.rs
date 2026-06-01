@@ -446,7 +446,16 @@ pub(crate) fn resolve_project_root_check_entry(root: &Path) -> Result<PathBuf, S
             .map_err(|e| format!("failed to read '{}': {}", semantic_toml.display(), e))?;
         let project_manifest = parse_semantic_toml_manifest(&semantic_toml, &source)
             .map_err(|e| format!("failed to parse '{}': {}", semantic_toml.display(), e))?;
-        return Ok(root.join(project_manifest.entry));
+        let entry_path = root.join(&project_manifest.entry);
+        if !entry_path.is_file() {
+            return Err(format!(
+                "semantic.toml manifest '{}' entry '{}' resolves to missing file '{}'",
+                semantic_toml.display(),
+                project_manifest.entry,
+                entry_path.display()
+            ));
+        }
+        return Ok(entry_path);
     }
 
     let package_manifest = root.join(PACKAGE_MANIFEST_FILE_NAME);
@@ -461,7 +470,6 @@ pub(crate) fn resolve_project_root_check_entry(root: &Path) -> Result<PathBuf, S
         PACKAGE_MANIFEST_FILE_NAME
     ))
 }
-
 pub fn resolve_package_import_path(
     importer_module: &Path,
     spec: &str,
@@ -879,12 +887,21 @@ fn parse_semantic_toml_manifest(
         }
     }
 
-    let package_name = parsed
-        .package_name
-        .ok_or_else(|| "semantic.toml missing [package].name".to_string())?;
+    let package_name = parsed.package_name.ok_or_else(|| {
+        format!(
+            "semantic.toml manifest '{}' is missing required [package].name",
+            manifest_path.display()
+        )
+    })?;
     let entry = parsed
         .project_entry
         .unwrap_or_else(|| "src/main.sm".to_string());
+    if entry.trim().is_empty() {
+        return Err(format!(
+            "semantic.toml manifest '{}' has empty [project].entry",
+            manifest_path.display()
+        ));
+    }
     let entry_path = Path::new(&entry);
     let module_root = entry_path
         .parent()
@@ -897,22 +914,32 @@ fn parse_semantic_toml_manifest(
             }
         })
         .unwrap_or_else(|| ".".to_string());
-    let _ = manifest_path;
-    Ok(ParsedSemanticTomlManifest {
-        manifest: PackageManifest::new(
-            PackageIdentity {
-                name: package_name,
-                root: PackageRoot {
-                    manifest_dir: ".".to_string(),
-                    module_root,
-                },
+    let manifest = PackageManifest::new(
+        PackageIdentity {
+            name: package_name,
+            root: PackageRoot {
+                manifest_dir: ".".to_string(),
+                module_root,
             },
-            Vec::new(),
-        ),
-        entry,
-    })
+        },
+        Vec::new(),
+    );
+    validate_package_manifest_baseline(&manifest).map_err(|e| {
+        if e.code == PackageManifestValidationCode::EmptyPackageName {
+            format!(
+                "semantic.toml manifest '{}' has empty [package].name",
+                manifest_path.display()
+            )
+        } else {
+            format!(
+                "semantic.toml manifest '{}' is invalid: {}",
+                manifest_path.display(),
+                e
+            )
+        }
+    })?;
+    Ok(ParsedSemanticTomlManifest { manifest, entry })
 }
-
 fn resolve_relative_import_path(base: &Path, spec: &str) -> PathBuf {
     let path = append_default_module_extension(spec);
     if path.is_absolute() {
