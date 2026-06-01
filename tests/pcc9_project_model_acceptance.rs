@@ -52,21 +52,34 @@ fn cli_compile_project_root_ok(dir: &std::path::Path, out_name: &str, context: &
     );
     assert!(out.is_file(), "{context} did not write requested output");
     cli_ok(
-        vec!["verify".to_string(), out_arg],
+        vec!["verify".to_string(), out_arg.clone()],
         &format!("{context} produced unverifiable SemCode"),
+    );
+    cli_ok(
+        vec!["run-smc".to_string(), out_arg],
+        &format!("{context} run-smc failed"),
     );
     out
 }
 
-fn cli_compile_project_root_err(dir: &std::path::Path, out_name: &str, context: &str) -> String {
+fn cli_compile_project_root_err_no_overwrite(
+    dir: &std::path::Path,
+    out_name: &str,
+    context: &str,
+) -> String {
     let input = normalize_path(dir);
     let out = dir.join(out_name);
     let out_arg = normalize_path(&out);
+    std::fs::write(&out, "sentinel").expect("write sentinel");
     let err = cli_err(
         vec!["compile".to_string(), input, "-o".to_string(), out_arg],
         context,
     );
-    assert!(!out.exists(), "{context} unexpectedly wrote output");
+    let content = std::fs::read_to_string(&out).expect("read out file");
+    assert_eq!(
+        content, "sentinel",
+        "{context} overwrote existing file on compilation failure"
+    );
     err
 }
 
@@ -123,6 +136,19 @@ fn cli_compile_dot_ok(dir: &std::path::Path, out_name: &str, context: &str) -> P
     cli_ok(
         vec!["verify".to_string(), normalize_path(&out)],
         &format!("{context} produced unverifiable SemCode"),
+    );
+    let output2 = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("run-smc")
+        .arg(out_name)
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc run-smc: {err}"));
+    assert!(
+        output2.status.success(),
+        "{context} run-smc failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output2.status.code(),
+        String::from_utf8_lossy(&output2.stdout),
+        String::from_utf8_lossy(&output2.stderr)
     );
     out
 }
@@ -557,7 +583,7 @@ name = "app"
     )
     .expect("write manifest");
 
-    let err = cli_compile_project_root_err(
+    let err = cli_compile_project_root_err_no_overwrite(
         &dir,
         "invalid-out.smc",
         "smc compile for invalid manifest project root",
@@ -638,7 +664,7 @@ entry = "examples/missing.sm"
     )
     .expect("write manifest");
 
-    let err = cli_compile_project_root_err(
+    let err = cli_compile_project_root_err_no_overwrite(
         &dir,
         "missing-out.smc",
         "smc compile for missing entry file project root",
@@ -720,7 +746,7 @@ entry = "../escape.sm"
     )
     .expect("write manifest");
 
-    let err = cli_compile_project_root_err(
+    let err = cli_compile_project_root_err_no_overwrite(
         &dir,
         "escape-out.smc",
         "smc compile for escaped entry project root",
