@@ -83,6 +83,54 @@ fn cli_compile_project_root_err_no_overwrite(
     err
 }
 
+fn assert_stale_artifact_protected<F>(
+    dir: &std::path::Path,
+    out_name: &str,
+    mutate: F,
+    context: &str,
+) where
+    F: FnOnce(&std::path::Path),
+{
+    let out = cli_compile_project_root_ok(dir, out_name, &format!("{context} (initial compile)"));
+    let original_bytes = std::fs::read(&out).unwrap_or_else(|err| {
+        panic!(
+            "{context}: failed to read original bytes of {}: {err}",
+            out.display()
+        )
+    });
+    mutate(dir);
+    let input = normalize_path(dir);
+    let out_arg = normalize_path(&out);
+    let _err = cli_err(
+        vec![
+            "compile".to_string(),
+            input,
+            "-o".to_string(),
+            out_arg.clone(),
+        ],
+        &format!("{context} (failing compile expected)"),
+    );
+    assert!(out.is_file(), "{context}: out.smc was deleted");
+    let current_bytes = std::fs::read(&out).unwrap_or_else(|err| {
+        panic!(
+            "{context}: failed to read current bytes of {}: {err}",
+            out.display()
+        )
+    });
+    assert_eq!(
+        original_bytes, current_bytes,
+        "{context}: out.smc was overwritten or modified on compilation failure"
+    );
+    cli_ok(
+        vec!["verify".to_string(), out_arg.clone()],
+        &format!("{context}: verification failed for original artifact after failed compile"),
+    );
+    cli_ok(
+        vec!["run-smc".to_string(), out_arg],
+        &format!("{context}: run-smc failed for original artifact after failed compile"),
+    );
+}
+
 fn cli_check_dot_ok(dir: &std::path::Path, context: &str) {
     let output = Command::new(env!("CARGO_BIN_EXE_smc"))
         .arg("check")
@@ -921,6 +969,173 @@ module_root src
 
     let resolved = resolve_package_import_path(&importer, "math::core.sm").expect("resolve");
     assert_eq!(normalize_path(&resolved), normalize_path(&dep));
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_stale_artifact_protected_when_semantic_toml_becomes_malformed() {
+    let dir = mk_temp_dir("pcc9_stale_malformed");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_stale_artifact_protected(
+        &dir,
+        "out.smc",
+        |d| {
+            std::fs::write(
+                d.join("semantic.toml"),
+                r#"
+[package
+name = "app"
+"#,
+            )
+            .expect("write malformed toml");
+        },
+        "malformed semantic.toml protection",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_stale_artifact_protected_when_package_name_missing() {
+    let dir = mk_temp_dir("pcc9_stale_missing_package_name");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_stale_artifact_protected(
+        &dir,
+        "out.smc",
+        |d| {
+            std::fs::write(
+                d.join("semantic.toml"),
+                r#"
+[package]
+
+[project]
+entry = "src/main.sm"
+"#,
+            )
+            .expect("write missing package name toml");
+        },
+        "missing package name protection",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_stale_artifact_protected_when_project_entry_empty() {
+    let dir = mk_temp_dir("pcc9_stale_empty_entry");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_stale_artifact_protected(
+        &dir,
+        "out.smc",
+        |d| {
+            std::fs::write(
+                d.join("semantic.toml"),
+                r#"
+[package]
+name = "app"
+
+[project]
+entry = ""
+"#,
+            )
+            .expect("write empty entry toml");
+        },
+        "empty entry protection",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_stale_artifact_protected_when_project_entry_missing_file() {
+    let dir = mk_temp_dir("pcc9_stale_missing_file");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_stale_artifact_protected(
+        &dir,
+        "out.smc",
+        |d| {
+            std::fs::write(
+                d.join("semantic.toml"),
+                r#"
+[package]
+name = "app"
+
+[project]
+entry = "src/missing.sm"
+"#,
+            )
+            .expect("write missing entry file toml");
+        },
+        "missing entry file protection",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_stale_artifact_protected_when_project_entry_path_escapes() {
+    let dir = mk_temp_dir("pcc9_stale_path_escape");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_stale_artifact_protected(
+        &dir,
+        "out.smc",
+        |d| {
+            std::fs::write(
+                d.join("semantic.toml"),
+                r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+            )
+            .expect("write path escape toml");
+        },
+        "path escape protection",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_stale_artifact_protected_when_semantic_toml_preferred_over_package_manifest_and_semantic_toml_invalid(
+) {
+    let dir = mk_temp_dir("pcc9_stale_preferred_invalid");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("examples").join("main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_stale_artifact_protected(
+        &dir,
+        "out.smc",
+        |d| {
+            std::fs::write(
+                d.join("semantic.toml"),
+                r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+            )
+            .expect("write invalid toml");
+        },
+        "semantic.toml priority invalid protection",
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
