@@ -32,9 +32,30 @@ fn cli_check_project_root_ok(dir: &std::path::Path, context: &str) {
     cli_ok(vec!["check".to_string(), input], context);
 }
 
+fn cli_run_project_root_ok(dir: &std::path::Path, context: &str) {
+    let input = normalize_path(dir);
+    cli_ok(vec!["run".to_string(), input], context);
+}
+
 fn cli_check_dot_ok(dir: &std::path::Path, context: &str) {
     let output = Command::new(env!("CARGO_BIN_EXE_smc"))
         .arg("check")
+        .arg(".")
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn cli_run_dot_ok(dir: &std::path::Path, context: &str) {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("run")
         .arg(".")
         .current_dir(dir)
         .output()
@@ -156,10 +177,7 @@ fn write_source(path: &std::path::Path) {
     std::fs::write(path, "fn main() { return; }\n").expect("write source");
 }
 
-fn full_project_root_package_baseline_check_path() {
-    let dir = mk_temp_dir("pcc9_project_root_package_acceptance");
-    let src_dir = dir.join("src");
-    std::fs::create_dir_all(&src_dir).expect("mkdir src");
+fn write_package_manifest_baseline(dir: &std::path::Path) {
     std::fs::write(
         dir.join(PACKAGE_MANIFEST_FILE_NAME),
         r#"
@@ -169,7 +187,14 @@ manifest_dir .
 module_root src
 "#,
     )
-    .expect("write manifest");
+    .expect("write package manifest");
+}
+
+fn full_project_root_package_baseline_check_path() {
+    let dir = mk_temp_dir("pcc9_project_root_package_acceptance");
+    let src_dir = dir.join("src");
+    std::fs::create_dir_all(&src_dir).expect("mkdir src");
+    write_package_manifest_baseline(&dir);
     std::fs::write(src_dir.join("main.sm"), "fn main() { return; }\n").expect("write entry");
 
     let input = normalize_path(&dir);
@@ -177,6 +202,16 @@ module_root src
         vec!["check".to_string(), input.clone()],
         &format!("smc check for package baseline project root {input}"),
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn full_project_root_package_baseline_run_path() {
+    let dir = mk_temp_dir("pcc9_project_root_package_run_acceptance");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+
+    cli_run_project_root_ok(&dir, "smc run for package baseline project root");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -197,12 +232,28 @@ fn pcc9_project_root_package_baseline_still_passes_check_entrypoint() {
 }
 
 #[test]
+fn pcc9_project_root_package_baseline_still_runs_entrypoint() {
+    full_project_root_package_baseline_run_path();
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_explicit_entry_passes_check() {
     let dir = mk_temp_dir("pcc9_project_root_semantic_explicit_entry");
     write_semantic_toml(&dir, Some("src/main.sm"));
     write_source(&dir.join("src").join("main.sm"));
 
     cli_check_project_root_ok(&dir, "smc check for semantic.toml explicit entry");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_semantic_toml_explicit_entry_runs() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_explicit_entry_run");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    cli_run_project_root_ok(&dir, "smc run for semantic.toml explicit entry");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -219,6 +270,17 @@ fn pcc9_project_root_semantic_toml_default_entry_passes_check() {
 }
 
 #[test]
+fn pcc9_project_root_semantic_toml_default_entry_runs() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_default_entry_run");
+    write_semantic_toml(&dir, None);
+    write_source(&dir.join("src").join("main.sm"));
+
+    cli_run_project_root_ok(&dir, "smc run for semantic.toml default entry");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_nested_entry_passes_check() {
     let dir = mk_temp_dir("pcc9_project_root_semantic_nested_entry");
     write_semantic_toml(&dir, Some("examples/main.sm"));
@@ -230,25 +292,39 @@ fn pcc9_project_root_semantic_toml_nested_entry_passes_check() {
 }
 
 #[test]
+fn pcc9_project_root_semantic_toml_nested_entry_runs() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_nested_entry_run");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_source(&dir.join("examples").join("main.sm"));
+
+    cli_run_project_root_ok(&dir, "smc run for semantic.toml nested entry");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_is_preferred_over_package_manifest() {
     let dir = mk_temp_dir("pcc9_project_root_semantic_preferred");
     write_semantic_toml(&dir, Some("examples/main.sm"));
-    std::fs::write(
-        dir.join(PACKAGE_MANIFEST_FILE_NAME),
-        r#"
-format 1
-package app
-manifest_dir .
-module_root src
-"#,
-    )
-    .expect("write package manifest");
+    write_package_manifest_baseline(&dir);
     write_source(&dir.join("examples").join("main.sm"));
 
     cli_check_project_root_ok(
         &dir,
         "smc check prefers semantic.toml over Semantic.package",
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_semantic_toml_is_preferred_over_package_manifest_for_run() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_preferred_run");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("examples").join("main.sm"));
+
+    cli_run_project_root_ok(&dir, "smc run prefers semantic.toml over Semantic.package");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -261,6 +337,18 @@ fn pcc9_project_root_check_dot_matches_absolute_project_root() {
 
     cli_check_project_root_ok(&dir, "smc check for absolute project root");
     cli_check_dot_ok(&dir, "smc check dot from project root");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_run_dot_matches_absolute_project_root() {
+    let dir = mk_temp_dir("pcc9_project_root_run_dot");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    cli_run_project_root_ok(&dir, "smc run for absolute project root");
+    cli_run_dot_ok(&dir, "smc run dot from project root");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -281,6 +369,31 @@ name = "app"
     let err = cli_err(
         vec!["check".to_string(), input.clone()],
         &format!("smc check for invalid manifest project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("malformed"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_run_rejects_invalid_semantic_toml_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_run_invalid_syntax");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package
+name = "app"
+"#,
+    )
+    .expect("write manifest");
+
+    let input = normalize_path(&dir);
+    let err = cli_err(
+        vec!["run".to_string(), input.clone()],
+        &format!("smc run for invalid manifest project root {input}"),
     );
     assert!(err.contains("semantic.toml"), "{err}");
     assert!(err.contains("malformed"), "{err}");
@@ -314,6 +427,34 @@ entry = "src/main.sm"
 }
 
 #[test]
+fn pcc9_project_root_run_rejects_missing_entry_file_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_run_missing_entry_file");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package]
+name = "app"
+
+[project]
+entry = "examples/missing.sm"
+"#,
+    )
+    .expect("write manifest");
+
+    let input = normalize_path(&dir);
+    let err = cli_err(
+        vec!["run".to_string(), input.clone()],
+        &format!("smc run for missing entry file project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("missing file"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_rejects_empty_package_name() {
     let dir = mk_temp_dir("pcc9_project_root_empty_package_name");
     std::fs::write(
@@ -335,6 +476,34 @@ entry = "src/main.sm"
     );
     assert!(err.contains("semantic.toml"), "{err}");
     assert!(err.contains("empty [package].name"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_run_rejects_path_escape_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_run_path_escape");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+    )
+    .expect("write manifest");
+
+    let input = normalize_path(&dir);
+    let err = cli_err(
+        vec!["run".to_string(), input.clone()],
+        &format!("smc run for escaped entry project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("must not escape the project root"), "{err}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }

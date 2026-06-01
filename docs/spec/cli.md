@@ -56,7 +56,7 @@ Current accepted usage forms are:
 - `smc explain <error-code|--list>`
 - `smc repl`
 - `smc verify <input.smc>`
-- `smc run <input.sm>`
+- `smc run <input.sm|project-root>`
 - `smc run-smc <input.smc>`
 - `smc disasm <input.smc>`
 
@@ -112,7 +112,7 @@ Current output rules:
 
 Current execution-facing commands follow this split:
 
-- `smc run <input.sm>` compiles source input and executes the produced in-memory SemCode path
+- `smc run <input.sm|project-root>` resolves source input, then compiles and executes the produced in-memory SemCode path
 - `smc verify <input.smc>` performs verifier admission without execution
 - `smc run-smc <input.smc>` executes compiled SemCode through the verified artifact path
 
@@ -130,6 +130,7 @@ Current rule:
 - source-reading commands inherit the current executable bundle admission boundary
 - `smc check` also accepts a bounded admitted project-root entrypoint through `Semantic.package` + `src/main.sm`
 - project-root `smc check` also resolves a minimal `semantic.toml` manifest when present
+- project-root `smc run` uses the same bounded project entry resolution, then follows the existing verifier-first source execution route
 - widening package resolution, helper import loading, or source-root admission is a public CLI and source-boundary change
 
 ## Tooling Helper Rule
