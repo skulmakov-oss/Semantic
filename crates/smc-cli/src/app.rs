@@ -1732,7 +1732,7 @@ fn cmd_hash_ir(args: &[String]) -> Result<(), String> {
 fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "usage: smc hash-smc <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--trace-cache]"
+            "usage: smc hash-smc <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--trace-cache]"
                 .to_string(),
         );
     }
@@ -1765,23 +1765,28 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
+    let src = read_source_with_package_admission(&root)?;
     let prev_graph_hash = read_graph_hash(Path::new(CACHE_GRAPH_FILE));
-    let graph_hash_now = if let Ok(snapshot) = ModuleGraphSnapshot::read_from_root(Path::new(input))
-    {
+    let graph_hash_now = if let Ok(snapshot) = ModuleGraphSnapshot::read_from_root(&root) {
         let hash = snapshot.hash(CACHE_SCHEMA_VERSION);
         let _ = snapshot.write_to(Path::new(CACHE_GRAPH_FILE), CACHE_SCHEMA_VERSION);
         Some(hash)
     } else {
         None
     };
-    let exb_key = smc_pack_key(Path::new(input), &src, profile, opt, debug_symbols)?;
+    let exb_key = smc_pack_key(&root, &src, profile, opt, debug_symbols)?;
     if trace_cache_enabled && prev_graph_hash.is_some() && prev_graph_hash != graph_hash_now {
         trace_cache(
             true,
             CacheEvent::Invalidate,
             CacheReason::GraphChanged,
-            Path::new(input),
+            &root,
             "GRAPH",
             &format!("{:016x}", exb_key),
         );
@@ -1793,7 +1798,7 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
                 trace_cache_enabled,
                 CacheEvent::Hit,
                 CacheReason::Reused,
-                Path::new(input),
+                &root,
                 "SMCP",
                 &format!("{:016x}", exb_key),
             );
@@ -1804,7 +1809,7 @@ fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
                 trace_cache_enabled,
                 CacheEvent::Miss,
                 reason,
-                Path::new(input),
+                &root,
                 "SMCP",
                 &format!("{:016x}", exb_key),
             );
@@ -2487,7 +2492,7 @@ fn usage() -> String {
         "  smc dump-bytecode <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
         "  smc hash-ast <input.sm|project-root>",
         "  smc hash-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
-        "  smc hash-smc <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
+        "  smc hash-smc <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
         "  smc snapshots [--update]",
         "  smc features",
         "  smc explain <error-code|--list>",
