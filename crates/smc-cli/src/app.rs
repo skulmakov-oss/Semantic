@@ -1647,7 +1647,7 @@ fn cmd_hash_ast(args: &[String]) -> Result<(), String> {
 fn cmd_hash_ir(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "usage: smc hash-ir <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]"
+            "usage: smc hash-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]"
                 .to_string(),
         );
     }
@@ -1676,9 +1676,15 @@ fn cmd_hash_ir(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
+    let src = read_source_with_package_admission(&root)?;
     let parser_profile = cli_profile();
-    let ir_key = ir_pack_key(Path::new(input), &src, profile, opt)?;
+    let ir_key = ir_pack_key(&root, &src, profile, opt)?;
     let ir_pack = cache_ir_file_for_key(ir_key)?;
     let text = if let Some(cached) = load_text_pack(&ir_pack, PACK_KIND_IR)? {
         cached
@@ -2480,7 +2486,7 @@ fn usage() -> String {
         "  smc dump-ir <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
         "  smc dump-bytecode <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
         "  smc hash-ast <input.sm|project-root>",
-        "  smc hash-ir <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
+        "  smc hash-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
         "  smc hash-smc <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
         "  smc snapshots [--update]",
         "  smc features",
