@@ -1,0 +1,79 @@
+{
+  "taxonomy_id": "CTF-E3-PCC9-MANIFEST-MISSING-FIELD-DIAGNOSTIC-001",
+  "pcc": "PCC-9",
+  "surface": "Project manifest missing package directive",
+  "source_fixture": "tests/fixtures/pcc9_project_model_diagnostics/negative_manifest_missing_package/Semantic.package",
+  "failure_layer": "project-diagnostic",
+  "expected_status": "reject",
+  "stable_error_code": "MissingPackageDirective",
+  "stable_message_needle": "explicit package directive",
+  "trap_class": null,
+  "candidate_class": null,
+  "summary_hash": "56522c94108c8e76",
+  "boundary": "project-adjacent manifest diagnostic only; not project-root execution; no semantic.toml",
+  "all_runs_equal": true,
+  "replay_count": 5,
+  "runs": [
+  {
+    "run_index": 1,
+    "failure_layer": "project-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "5249c7a8169bc683",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "MissingPackageDirective",
+    "stable_message_needle": "explicit package directive",
+    "trap_class": null,
+    "candidate_class": null
+  },
+  {
+    "run_index": 2,
+    "failure_layer": "project-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "5249c7a8169bc683",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "MissingPackageDirective",
+    "stable_message_needle": "explicit package directive",
+    "trap_class": null,
+    "candidate_class": null
+  },
+  {
+    "run_index": 3,
+    "failure_layer": "project-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "5249c7a8169bc683",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "MissingPackageDirective",
+    "stable_message_needle": "explicit package directive",
+    "trap_class": null,
+    "candidate_class": null
+  },
+  {
+    "run_index": 4,
+    "failure_layer": "project-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "5249c7a8169bc683",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "MissingPackageDirective",
+    "stable_message_needle": "explicit package directive",
+    "trap_class": null,
+    "candidate_class": null
+  },
+  {
+    "run_index": 5,
+    "failure_layer": "project-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "5249c7a8169bc683",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "MissingPackageDirective",
+    "stable_message_needle": "explicit package directive",
+    "trap_class": null,
+    "candidate_class": null
+  }
+]
+
+}

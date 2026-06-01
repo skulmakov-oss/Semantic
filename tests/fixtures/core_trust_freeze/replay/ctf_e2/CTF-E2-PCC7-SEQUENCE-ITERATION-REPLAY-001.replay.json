@@ -1,0 +1,63 @@
+{
+  "replay_id": "CTF-E2-PCC7-SEQUENCE-ITERATION-REPLAY-001",
+  "pcc": "PCC-7",
+  "surface": "Sequence iteration",
+  "source_fixture": "tests/fixtures/pcc7_sequence/positive_sequence_iteration.sm",
+  "replay_class": ["check", "ir", "semcode", "verifier", "vm"],
+  "replay_count": 5,
+  "expected_status": "accept",
+  "source_hash": "4cc5edb44a9c8f32",
+  "summary_hash": "a96c664aa1af91c0",
+  "verifier_status": "accept",
+  "vm_status": "ok",
+  "all_runs_equal": true,
+  "boundary": "current admitted PCC-7 Sequence baseline only; no Map iteration policy widening",
+  "runs": [
+  {
+    "run_index": 1,
+    "check_status": "accept",
+    "source_hash": "4cc5edb44a9c8f32",
+    "ir_shape_hash": "ce7adee40a6f3732",
+    "semcode_hash": "1c23e431a66f8383",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  },
+  {
+    "run_index": 2,
+    "check_status": "accept",
+    "source_hash": "4cc5edb44a9c8f32",
+    "ir_shape_hash": "ce7adee40a6f3732",
+    "semcode_hash": "1c23e431a66f8383",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  },
+  {
+    "run_index": 3,
+    "check_status": "accept",
+    "source_hash": "4cc5edb44a9c8f32",
+    "ir_shape_hash": "ce7adee40a6f3732",
+    "semcode_hash": "1c23e431a66f8383",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  },
+  {
+    "run_index": 4,
+    "check_status": "accept",
+    "source_hash": "4cc5edb44a9c8f32",
+    "ir_shape_hash": "ce7adee40a6f3732",
+    "semcode_hash": "1c23e431a66f8383",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  },
+  {
+    "run_index": 5,
+    "check_status": "accept",
+    "source_hash": "4cc5edb44a9c8f32",
+    "ir_shape_hash": "ce7adee40a6f3732",
+    "semcode_hash": "1c23e431a66f8383",
+    "verifier_status": "accept",
+    "vm_status": "ok"
+  }
+]
+
+}

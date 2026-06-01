@@ -13,6 +13,7 @@ Related:
 - `practical_core_feature_matrix_live_audit.md`
 - `practical_core_completion_v0_3.md`
 - `core_trust_freeze/index.md`
+- `7hell_report_contract.md`
 
 ## 1. Purpose
 
@@ -386,7 +387,27 @@ Overall result:
 | only pass/skip | `pass-with-skips` |
 | any not_implemented | `incomplete` |
 
-## 15. Fixture growth rule
+## 15. Report Contract Split
+
+The stage taxonomy and command intent live in this document.
+
+The stable report shape is defined in:
+
+- `7hell_report_contract.md`
+
+`7hell_report_contract.md` owns:
+
+- human report structure;
+- JSON report schema;
+- diagnostic object shape;
+- evidence references;
+- CTF references;
+- boundary records;
+- versioning rules.
+
+This split does not implement 7hell.
+
+## 16. Fixture Growth Rule
 
 Each PCC phase must add or assign fixtures to `7hell`.
 
@@ -416,7 +437,7 @@ The decision may be:
 - fixture assigned to follow-up PR;
 - not applicable with reason.
 
-## 16. CTF relationship
+## 17. CTF relationship
 
 `7hell` does not replace CTF.
 
@@ -448,7 +469,7 @@ CTF touched: none
 7hell coverage: contract/docs only
 ```
 
-## 17. Blocking rule
+## 18. Blocking rule
 
 PCC-1 remains blocked until the following are true:
 
@@ -463,7 +484,7 @@ After this document lands, the remaining blocker is not the contract itself, but
 whether the team chooses to implement the skeleton before or during the first
 PCC-1 implementation PR.
 
-## 18. Out of scope
+## 19. Out of scope
 
 Out of scope for this contract:
 
@@ -475,7 +496,7 @@ Out of scope for this contract:
 - UI visualization of 7hell;
 - Workbench integration.
 
-## 19. Acceptance checklist
+## 20. Acceptance checklist
 
 This PR is complete when:
 
@@ -491,7 +512,7 @@ This PR is complete when:
 - implementation remains out of scope;
 - no code is changed.
 
-## 20. Final state
+## 21. Final state
 
 After this document:
 
@@ -501,3 +522,15 @@ PCC-0.5 Live Audit = scaffolded
 PCC-0.6 7hell Qualification Contract = seeded
 PCC-1 Control Flow = still blocked until audit and skeleton decisions are handled
 ```
+
+## PCC-4..PCC-9 Stage Mapping
+
+The PCC-4..PCC-9 evidence-to-stage mapping is defined in:
+
+- `7hell_pcc4_pcc9_stage_mapping.md`
+
+The fixture growth rule is constrained by `7hell_pcc4_pcc9_stage_mapping.md`, which maps PCC-4..PCC-9 evidence into 7hell stages.
+
+7HELL-WP2 is docs-only; implementation remains future work.
+
+Any future command implementation must follow `7hell_skeleton_to_runner_transition.md`.

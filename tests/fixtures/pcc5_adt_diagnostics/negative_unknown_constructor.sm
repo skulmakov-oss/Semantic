@@ -1,0 +1,9 @@
+enum Direction {
+    Up,
+    Right,
+}
+
+fn main() {
+    let dir: Direction = Direction::Left;
+    return;
+}

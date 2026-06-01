@@ -1,0 +1,10 @@
+fn sequence_size(values: Sequence(i32)) -> i32 {
+    return len(values);
+}
+
+fn main() {
+    let values: Sequence(i32) = [7, 8, 9];
+    assert(sequence_size(values) == 3);
+    assert(sequence_size([1, 2, 3, 4]) == 4);
+    return;
+}

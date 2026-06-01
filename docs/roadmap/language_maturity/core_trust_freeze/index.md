@@ -12,6 +12,26 @@ CTF exists because each PCC feature can change execution semantics. Runtime valu
 
 CTF is not a final phase after PCC. It runs across PCC.
 
+## Waypoints
+
+- Current sync waypoint: `docs/roadmap/language_maturity/core_trust_freeze/ctf_wp1_pcc4_pcc9_sync.md`
+- Runtime / trap follow-up: `CTF-WP2 — RuntimeValue and trap registry sync after PCC`
+- Determinism / verifier-first follow-up: `CTF-WP3 — determinism and verifier-first policy sync after PCC`
+- Golden trace / capability follow-up: `CTF-WP4 — golden trace and capability/effect denial policy sync after PCC`
+- Golden trace evidence: `CTF-E1 — selected PCC golden trace coverage`
+- Collection replay evidence: `CTF-E2 — collection determinism replay coverage`
+- Trap taxonomy evidence: `CTF-E3 — trap taxonomy regression coverage`
+- Waypoint review: `docs/roadmap/language_maturity/core_trust_freeze/ctf_waypoint_review_after_wp1_wp4.md`
+- Evidence backlog: `docs/roadmap/language_maturity/core_trust_freeze/ctf_evidence_backlog.md`
+- Promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/freeze_candidate_promotion_rules.md`
+- Evidence backlog / promotion waypoint: `CTF-WP5 — define CTF evidence backlog and freeze-candidate promotion rules`
+- Project-root trust policy: `docs/roadmap/language_maturity/core_trust_freeze/project_root_trust_policy.md`
+- Project-root trust waypoint: `CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I`
+- 7hell report contract: `docs/roadmap/language_maturity/7hell_report_contract.md`
+- 7hell PCC stage mapping: `docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md`
+- 7hell initial fixture selection: `docs/roadmap/language_maturity/7hell_initial_fixture_selection.md`
+- PCC waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
+
 ## Files
 
 | File | Owner question |
@@ -23,6 +43,8 @@ CTF is not a final phase after PCC. It runs across PCC.
 | `verifier_first_policy.md` | Does public execution still require admission before VM run? |
 | `golden_trace_policy.md` | Does the change require new or updated golden traces? |
 | `capability_effect_denial_matrix.md` | Did host/effect/capability behavior change? |
+| `project_root_trust_policy.md` | Does future project-root support preserve verifier-first trust? |
+| `7hell_report_contract.md` | Does future 7hell reporting remain stable and deterministic? |
 
 ## PR requirement
 

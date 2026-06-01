@@ -1,0 +1,4 @@
+fn main() {
+    let res: Result(i32, text) = Result::Err(5);
+    return;
+}

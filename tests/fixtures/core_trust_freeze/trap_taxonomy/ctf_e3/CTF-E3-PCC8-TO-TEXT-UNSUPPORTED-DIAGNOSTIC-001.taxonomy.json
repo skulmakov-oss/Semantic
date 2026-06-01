@@ -1,0 +1,79 @@
+{
+  "taxonomy_id": "CTF-E3-PCC8-TO-TEXT-UNSUPPORTED-DIAGNOSTIC-001",
+  "pcc": "PCC-8",
+  "surface": "Unsupported to_text(record)",
+  "source_fixture": "tests/fixtures/pcc8_stdlib_diagnostics/negative_to_text_record.sm",
+  "failure_layer": "check-diagnostic",
+  "expected_status": "reject",
+  "stable_error_code": "E0201",
+  "stable_message_needle": "builtin 'to_text' does not yet support record type 'Probe'",
+  "trap_class": null,
+  "candidate_class": null,
+  "summary_hash": "c91823d3ae385fe2",
+  "boundary": "compile/check-time diagnostic only; not a VM trap; no universal reflection",
+  "all_runs_equal": true,
+  "replay_count": 5,
+  "runs": [
+  {
+    "run_index": 1,
+    "failure_layer": "check-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "72bcdbd97cc1504d",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "E0201",
+    "stable_message_needle": "builtin 'to_text' does not yet support record type 'Probe'",
+    "trap_class": null,
+    "candidate_class": null
+  },
+  {
+    "run_index": 2,
+    "failure_layer": "check-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "72bcdbd97cc1504d",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "E0201",
+    "stable_message_needle": "builtin 'to_text' does not yet support record type 'Probe'",
+    "trap_class": null,
+    "candidate_class": null
+  },
+  {
+    "run_index": 3,
+    "failure_layer": "check-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "72bcdbd97cc1504d",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "E0201",
+    "stable_message_needle": "builtin 'to_text' does not yet support record type 'Probe'",
+    "trap_class": null,
+    "candidate_class": null
+  },
+  {
+    "run_index": 4,
+    "failure_layer": "check-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "72bcdbd97cc1504d",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "E0201",
+    "stable_message_needle": "builtin 'to_text' does not yet support record type 'Probe'",
+    "trap_class": null,
+    "candidate_class": null
+  },
+  {
+    "run_index": 5,
+    "failure_layer": "check-diagnostic",
+    "observed_status": "reject",
+    "source_hash": "72bcdbd97cc1504d",
+    "ir_shape_hash": null,
+    "semcode_hash": null,
+    "stable_error_code": "E0201",
+    "stable_message_needle": "builtin 'to_text' does not yet support record type 'Probe'",
+    "trap_class": null,
+    "candidate_class": null
+  }
+]
+
+}

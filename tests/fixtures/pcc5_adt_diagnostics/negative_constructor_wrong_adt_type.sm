@@ -1,0 +1,14 @@
+enum Direction {
+    Up,
+    Right,
+}
+
+enum Signal {
+    Red,
+    Green,
+}
+
+fn main() {
+    let signal: Signal = Direction::Right;
+    return;
+}

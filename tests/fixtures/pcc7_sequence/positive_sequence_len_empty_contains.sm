@@ -1,0 +1,18 @@
+fn main() {
+    let values: Sequence(i32) = [1, 2, 3];
+    let size: i32 = len(values);
+    assert(size == 3);
+
+    let empty: Sequence(i32) = [];
+    let result: bool = is_empty(empty);
+    assert(result == true);
+
+    let nonempty: Sequence(i32) = [4, 5, 6];
+    let result2: bool = is_empty(nonempty);
+    assert(result2 == false);
+
+    let found: bool = contains(values, 2);
+    assert(found == true);
+    let missing: bool = contains(values, 99);
+    assert(missing == false);
+}

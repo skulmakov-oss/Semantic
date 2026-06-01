@@ -1,0 +1,21 @@
+enum Direction {
+    Up,
+    Right,
+    Down,
+    Left,
+}
+
+fn label(dir: Direction) -> text {
+    let out: text = match dir {
+        Direction::Up => { "Up" }
+        Direction::Right => { "Right" }
+        Direction::Down => { "Down" }
+        Direction::Left => { "Left" }
+    };
+    return out;
+}
+
+fn main() {
+    assert(label(Direction::Right) == "Right");
+    return;
+}

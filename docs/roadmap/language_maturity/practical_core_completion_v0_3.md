@@ -206,6 +206,14 @@ DoD:
 [ ] first fixture group is attached to PCC-1
 ```
 
+Qualification report contract:
+
+- `docs/roadmap/language_maturity/7hell_report_contract.md`
+
+7HELL-WP2 maps PCC-4..PCC-9 evidence into the 7hell stage model; this is a docs-only mapping and stage execution remains future work.
+7HELL-WP3 defines skeleton-to-runner transition rules before S2 implementation.
+7HELL-WR2 records the post-S1..S7 and E1..E5 waypoint review once E5 is merged.
+
 ## 7. CTF-0 — Core Trust Freeze directory
 
 Core Trust Freeze is not a post-PCC phase. It is a parallel lane.
@@ -379,6 +387,19 @@ Scope:
 - verifier / VM path;
 - diagnostics.
 
+Live audit:
+
+- `docs/roadmap/language_maturity/pcc4_records_live_audit.md`
+
+Closeout note:
+
+```text
+PCC-4A/B/C/D evidence is complete for the current Practical Core scope.
+Positive and negative fixture coverage exists.
+PCC-4 is closed for current scope.
+Further aggregate work moves to PCC-5 ADT + Basic Match, then PCC-6 Option / Result, PCC-7 Collections v0, and PCC-8 Stdlib v0.
+```
+
 DoD:
 
 ```text
@@ -399,6 +420,19 @@ Scope:
 - initial exhaustiveness policy or explicit non-exhaustive limitation;
 - lowering and VM path.
 
+Live audit:
+
+- `docs/roadmap/language_maturity/pcc5_adt_match_live_audit.md`
+
+PCC-5 boundary note:
+
+```text
+records are closed as nominal value aggregates;
+ADT is a separate aggregate family;
+collections are not records;
+host ABI stays closed to record values.
+```
+
 DoD:
 
 ```text
@@ -406,6 +440,18 @@ DoD:
 [ ] match fixtures pass full pipeline
 [ ] non-supported match shapes fail cleanly
 [ ] verifier and VM agree on ADT carrier rules
+```
+
+PCC-5 closeout note:
+
+```text
+PCC-5A/B/C/D/E evidence chain is complete for the current Practical Core scope.
+Positive ADT declaration / constructor fixtures exist.
+Positive basic ADT match fixtures exist.
+Negative ADT/match diagnostics fixtures exist.
+PCC-5 is closed for the current Practical Core scope.
+Future aggregate work moves to PCC-6 Option / Result, PCC-7 Collections v0,
+and PCC-8 Stdlib v0.
 ```
 
 ## 14. PCC-6 — Option / Result
@@ -418,6 +464,10 @@ Scope:
 - match helpers;
 - minimal helper functions if needed for examples.
 
+Live audit:
+
+- `docs/roadmap/language_maturity/pcc6_option_result_live_audit.md`
+
 DoD:
 
 ```text
@@ -426,6 +476,18 @@ DoD:
 [ ] canonical failure-flow examples exist
 [ ] diagnostics for invalid payload usage are stable
 ```
+
+PCC-6 closeout note:
+
+- PCC-6 is closed for the current Practical Core scope.
+- Evidence lives in `pcc6_option_result_live_audit.md`.
+- Dedicated test suites now cover positive Option standard-form fixtures,
+  positive Result standard-form fixtures, and negative Option / Result
+  diagnostics.
+- Further aggregate work remains assigned to later PCC phases:
+  - `PCC-7` Collections v0
+  - `PCC-8` Stdlib v0
+  - `PCC-9` Project Model v0
 
 ## 15. PCC-7 — Collections v0
 
@@ -444,6 +506,37 @@ DoD:
 [ ] index / iteration behavior is deterministic
 [ ] failure behavior is trap-or-diagnostic stable
 [ ] 7hell includes practical collection fixtures
+```
+
+Live audit:
+
+- `docs/roadmap/language_maturity/pcc7_collections_live_audit.md`
+
+PCC-7 closeout note:
+
+```text
+PCC-7 is closed for the current Practical Core fixture-backed scope.
+Evidence lives in `pcc7_collections_live_audit.md`.
+Dedicated test suites now cover positive Sequence<T> fixtures, positive
+Map<K,V> fixtures, and negative collection diagnostics / trap fixtures.
+Bounded open items remain:
+- Map missing-key policy;
+- Map iteration policy;
+- assignment / aliasing policy;
+- memory / quota evidence.
+Further work remains assigned to later phases or explicit policy tracks:
+- `PCC-8` Stdlib v0;
+- `PCC-9` Project Model v0;
+- optional future collection policy track if needed.
+```
+
+Bounded scope note:
+
+```text
+PCC-7 closeout does not claim Map missing-key completeness, Map iteration
+completeness, assignment / aliasing completeness, or memory / quota
+completeness.
+Those remain bounded policy or future-work items.
 ```
 
 ## 16. PCC-8 — Stdlib v0
@@ -473,6 +566,27 @@ DoD:
 [ ] canonical examples avoid internal debug helpers
 ```
 
+Live audit:
+
+- `docs/roadmap/language_maturity/pcc8_stdlib_live_audit.md`
+- `docs/roadmap/language_maturity/pcc8_stdlib_public_contract.md`
+
+PCC-8 is closed for the current admitted Stdlib v0 helper surface.
+Evidence lives in `pcc8_stdlib_live_audit.md`.
+The public helper boundary lives in `pcc8_stdlib_public_contract.md`.
+Dedicated test suites now cover positive basic helper fixtures and helper
+diagnostics / runtime traps.
+Bounded open items remain:
+
+- `std.math`;
+- broad stdlib expansion;
+- universal reflection / broad `to_text`;
+- public `debug_render`;
+- formatting macros;
+- IO/capability expansion.
+
+Further practical-core work moves to PCC-9 Project Model v0.
+
 ## 17. PCC-9 — Project Model v0
 
 Scope:
@@ -485,14 +599,48 @@ Scope:
 - deterministic module roots;
 - project-level 7hell.
 
+Roadmap artifacts:
+
+- live audit: `docs/roadmap/language_maturity/pcc9_project_model_live_audit.md`
+- contract freeze: `docs/roadmap/language_maturity/pcc9_project_model_contract.md`
+- waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`
+- CTF sync waypoint: `docs/roadmap/language_maturity/core_trust_freeze/ctf_wp1_pcc4_pcc9_sync.md`
+- CTF follow-up: `CTF-WP2 — docs(core-trust-freeze): update runtime value and trap registry after PCC`
+- CTF follow-up: `CTF-WP3 — docs(core-trust-freeze): update determinism and verifier-first evidence after PCC`
+- CTF follow-up: `CTF-WP4 — docs(core-trust-freeze): update golden trace and capability denial policy after PCC`
+- CTF evidence: `CTF-E1 — test(core-trust-freeze): add golden trace coverage for selected PCC fixture surfaces`
+- CTF evidence: `CTF-E2 — test(core-trust-freeze): add collection determinism replay coverage`
+- CTF evidence: `CTF-E3 — test(core-trust-freeze): add trap taxonomy regression coverage`
+- CTF waypoint: `CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I`
+- CTF waypoint review: `docs/roadmap/language_maturity/core_trust_freeze/ctf_waypoint_review_after_wp1_wp4.md`
+- CTF backlog / promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/ctf_evidence_backlog.md`
+- CTF backlog / promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/freeze_candidate_promotion_rules.md`
+- CTF waypoint: `CTF-WP5 — docs(core-trust-freeze): define CTF evidence backlog and freeze-candidate promotion rules`
+
+PCC-9 is closed for the current admitted manifest / project-adjacent baseline.
+The current evidence is bounded to the existing package-manifest baseline and
+project-adjacent helpers; project-root `check` / `run` and `smc new` remain
+explicit follow-up work unless separately evidenced.
+
+Checkpoint outcome:
+
+- bounded current manifest / project-adjacent baseline is closed;
+- project-root workflow, `semantic.toml` parser / loader, `smc new`, package
+  registry, dependency resolver, and workspace remain open;
+- the next step is CTF synchronization and qualification planning.
+
 DoD:
 
 ```text
 [ ] minimal project layout is documented
 [ ] project check/run works or is explicitly scoped as follow-up
-[ ] project-level diagnostics are stable
-[ ] project fixtures exist
+[x] project-level diagnostics are stable for the admitted manifest baseline
+[x] project fixtures exist for the admitted manifest baseline
 ```
+
+PCC-9 remains closed only for the current admitted manifest / project-adjacent
+baseline. The remaining project-root flow, `semantic.toml` parser / loader,
+`smc new`, and project-level 7hell remain explicit follow-up work.
 
 ## 18. Waypoint review rule
 

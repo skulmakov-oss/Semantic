@@ -1,0 +1,22 @@
+Semantic 7hell qualification
+target: tests/fixtures/7hell_e1/valid_minimal.sm
+mode: single-file
+profile: default
+
+[1/7] Syntax Hell                   PASS
+  summary: single-file check accepted
+[2/7] Type Hell                     PASS
+  summary: single-file check accepted
+[3/7] Lowering Hell                 PASS
+  summary: SemCode emitted for verifier admission
+[4/7] Verifier Hell                 PASS
+  summary: SemCode verifier accepted program (1 function(s))
+[5/7] VM Hell                       PASS
+  summary: VM executed verified SemCode successfully
+[6/7] Practical Hell                PASS
+  summary: Practical qualification completed without host-visible rendering (0 observation(s), 0 audit record(s))
+[7/7] User Pain / Diagnostics Hell  NOT_IMPLEMENTED
+  summary: 7HELL-S7 does not wire diagnostics
+
+result: INCOMPLETE
+boundary: S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure

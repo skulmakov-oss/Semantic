@@ -1,0 +1,4 @@
+fn main() {
+    let res: Result(i32, text) = Result::Ok(true);
+    return;
+}

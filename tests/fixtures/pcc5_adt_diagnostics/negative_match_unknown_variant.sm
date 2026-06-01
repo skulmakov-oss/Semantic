@@ -1,0 +1,13 @@
+enum Direction {
+    Up,
+    Right,
+}
+
+fn main() {
+    let dir: Direction = Direction::Right;
+    let code: i32 = match dir {
+        Direction::Up => { 1 }
+        Direction::Left => { 2 }
+    };
+    return;
+}

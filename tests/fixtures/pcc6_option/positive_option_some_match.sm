@@ -1,0 +1,9 @@
+fn main() {
+    let opt: Option(i32) = Option::Some(7);
+    let value: i32 = match opt {
+        Option::Some(v) => { v }
+        Option::None => { 0 }
+    };
+    assert(value == 7);
+    return;
+}

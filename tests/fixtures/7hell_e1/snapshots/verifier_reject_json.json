@@ -1,0 +1,109 @@
+{
+  "schema": "semantic.7hell.report.v0",
+  "tool": "smc 7hell",
+  "target": {
+    "kind": "single-file",
+    "display": "tests/fixtures/7hell_e1/verifier_reject.synthetic.sm",
+    "normalized": "tests/fixtures/7hell_e1/verifier_reject.synthetic.sm"
+  },
+  "profile": "default",
+  "result": "fail",
+  "stages": [
+    {
+      "index": 1,
+      "name": "Syntax Hell",
+      "key": "syntax",
+      "status": "pass",
+      "summary": "single-file check accepted",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 2,
+      "name": "Type Hell",
+      "key": "type",
+      "status": "pass",
+      "summary": "single-file check accepted",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 3,
+      "name": "Lowering Hell",
+      "key": "lowering",
+      "status": "pass",
+      "summary": "SemCode emitted for verifier admission",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 4,
+      "name": "Verifier Hell",
+      "key": "verifier",
+      "status": "fail",
+      "summary": "code: UnknownOpcode; category: verifier; summary: unknown opcode 0xff",
+      "diagnostic_ids": ["D001"],
+      "evidence_ids": [],
+      "blocked_by": null
+    },
+    {
+      "index": 5,
+      "name": "VM Hell",
+      "key": "vm",
+      "status": "blocked",
+      "summary": "VM execution intentionally not implemented in 7HELL-S5",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": "vm"
+    },
+    {
+      "index": 6,
+      "name": "Practical Hell",
+      "key": "practical",
+      "status": "blocked",
+      "summary": "blocked until VM execution is available",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": "vm"
+    },
+    {
+      "index": 7,
+      "name": "User Pain / Diagnostics Hell",
+      "key": "diagnostics",
+      "status": "not_implemented",
+      "summary": "7HELL-S7 does not wire diagnostics",
+      "diagnostic_ids": [],
+      "evidence_ids": [],
+      "blocked_by": null
+    }
+  ],
+  "diagnostics": [
+    {
+      "id": "D001",
+      "stage": "verifier",
+      "kind": "verifier-rejection",
+      "code": "UnknownOpcode",
+      "category": "verifier",
+      "message_needle": "unknown opcode 0xff",
+      "severity": "error",
+      "source": {
+        "file": "tests/fixtures/7hell_e1/verifier_reject.synthetic.sm",
+        "line": null,
+        "column": null
+      }
+    }
+  ],
+  "evidence": [],
+  "ctf": [],
+  "boundaries": [
+    {
+      "id": "B001",
+      "scope": "7hell-single-file",
+      "status": "s7-practical-qualification-only",
+      "reason": "S7 non-rendering Practical qualification only; no raw observation text, host-visible output, project-root, cache route, temp .smc, CI gate, release readiness, or CTF closure"
+    }
+  ]
+}

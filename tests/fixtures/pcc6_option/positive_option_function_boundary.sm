@@ -1,0 +1,20 @@
+fn choose_value(flag: bool) -> Option(i32) {
+    if flag {
+        return Option::Some(9);
+    }
+    return Option::None;
+}
+
+fn unwrap_or_zero(opt: Option(i32)) -> i32 {
+    let value: i32 = match opt {
+        Option::Some(v) => { v }
+        Option::None => { 0 }
+    };
+    return value;
+}
+
+fn main() {
+    assert(unwrap_or_zero(choose_value(true)) == 9);
+    assert(unwrap_or_zero(choose_value(false)) == 0);
+    return;
+}

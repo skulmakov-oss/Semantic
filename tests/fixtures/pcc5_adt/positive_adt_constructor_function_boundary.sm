@@ -1,0 +1,19 @@
+enum Direction {
+    Up,
+    Right,
+    Down,
+    Left,
+}
+
+fn choose_right() -> Direction {
+    return Direction::Right;
+}
+
+fn accept_direction(dir: Direction) -> Direction {
+    return dir;
+}
+
+fn main() {
+    let dir: Direction = accept_direction(choose_right());
+    return;
+}
