@@ -107,7 +107,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
 fn cmd_compile(args: &[String]) -> Result<(), String> {
     if args.len() < 3 {
         return Err(
-            "usage: smc compile <input.sm> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]"
+            "usage: smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]"
                 .to_string(),
         );
     }
@@ -153,7 +153,13 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
     }
     let out = out.ok_or_else(|| "missing -o <out.smc>".to_string())?;
     let t0 = Instant::now();
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
+    let src = read_source_with_package_admission(&root)?;
     let t_read = Instant::now();
     let parser_profile = cli_profile();
     let bytes = compile_program_to_semcode_with_options_debug(&src, profile, opt, debug_symbols)
@@ -2441,7 +2447,7 @@ fn cmd_disasm(args: &[String]) -> Result<(), String> {
 fn usage() -> String {
     [
         "Semantic Language toolchain v0",
-        "  smc compile <input.sm> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]",
+        "  smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]",
         "  smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]",
         "  smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]",
         "  smc watch <input.sm> [--metrics] [--color auto|always|never]",
