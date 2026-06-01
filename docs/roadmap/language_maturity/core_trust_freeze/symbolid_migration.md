@@ -40,3 +40,11 @@ PCC must not accidentally reintroduce string-based execution paths while adding 
 [ ] Are debug names clearly separated from semantic identity?
 [ ] Does this require a new registry row?
 ```
+
+## CTF-WP7 Follow-up
+
+The SymbolId hot-path audit boundary is recorded in:
+
+- `docs/roadmap/language_maturity/core_trust_freeze/symbolid_hot_path_audit.md`
+
+This registry remains a draft registry until the audit is completed and linked evidence is added.

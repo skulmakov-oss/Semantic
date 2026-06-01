@@ -27,7 +27,7 @@ It prevents uncontrolled jump from docs-sync to release claims.
 | CTF-BL-006 | Project-root trust policy | define trust impact before project-root check/run implementation | project-root remains open | CTF-WP6 | done | project model freeze |
 | CTF-BL-007 | 7hell report shape | define stable qualification report surface | readiness needs stable qualification output | 7HELL-WP1 | done | readiness |
 | CTF-BL-008 | Capability denial replay | replay denied-effect behavior once capability surfaces widen | capability denial must be deterministic | CTF-E4 | ready-for-task | capability freeze |
-| CTF-BL-009 | SymbolId / hot-path audit | verify PCC value/name surfaces do not regress into string hot paths | freeze-candidate names need hot-path discipline | future CTF-WP/E | planned | runtime performance/trust |
+| CTF-BL-009 | SymbolId / hot-path audit | verify PCC value/name surfaces do not regress into string hot paths | freeze-candidate names need hot-path discipline | CTF-WP7 | ready-for-task | runtime performance/trust |
 
 Status values allowed:
 
