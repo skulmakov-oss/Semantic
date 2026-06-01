@@ -1343,3 +1343,230 @@ fn pcc9_dump_ast_path_escape_fails_without_fallback() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn cli_dump_ir_ok(input_path: &std::path::Path, context: &str) -> String {
+    let input = normalize_path(input_path);
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-ir")
+        .arg(input)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn cli_dump_ir_dot_ok(dir: &std::path::Path, context: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-ir")
+        .arg(".")
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn cli_dump_ir_err(input_path: &std::path::Path, context: &str) -> String {
+    let input = normalize_path(input_path);
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-ir")
+        .arg(input)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        !output.status.success(),
+        "{context} expected failure but got success\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    String::from_utf8_lossy(&output.stderr).to_string()
+}
+
+#[test]
+fn pcc9_dump_ir_semantic_toml_explicit_entry() {
+    let dir = mk_temp_dir("pcc9_dump_ir_explicit");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &entry_file,
+        "fn main() { return; }\nfn explicit_main() { return; }\n",
+    )
+    .expect("write file");
+
+    let ir = cli_dump_ir_ok(&dir, "dump-ir with semantic.toml explicit entry");
+    assert!(
+        ir.contains("explicit_main"),
+        "IR should contain explicit_main: {ir}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ir_semantic_toml_default_entry() {
+    let dir = mk_temp_dir("pcc9_dump_ir_default");
+    write_semantic_toml(&dir, None);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &entry_file,
+        "fn main() { return; }\nfn default_main() { return; }\n",
+    )
+    .expect("write file");
+
+    let ir = cli_dump_ir_ok(&dir, "dump-ir with semantic.toml default entry");
+    assert!(
+        ir.contains("default_main"),
+        "IR should contain default_main: {ir}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ir_semantic_toml_nested_entry() {
+    let dir = mk_temp_dir("pcc9_dump_ir_nested");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    let entry_file = dir.join("examples").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &entry_file,
+        "fn main() { return; }\nfn nested_main() { return; }\n",
+    )
+    .expect("write file");
+
+    let ir = cli_dump_ir_ok(&dir, "dump-ir with semantic.toml nested entry");
+    assert!(
+        ir.contains("nested_main"),
+        "IR should contain nested_main: {ir}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ir_prefers_semantic_toml_over_package_manifest() {
+    let dir = mk_temp_dir("pcc9_dump_ir_preferred");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_package_manifest_baseline(&dir);
+    let toml_entry = dir.join("examples").join("main.sm");
+    std::fs::create_dir_all(toml_entry.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &toml_entry,
+        "fn main() { return; }\nfn toml_main() { return; }\n",
+    )
+    .expect("write file");
+
+    let pkg_entry = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(pkg_entry.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &pkg_entry,
+        "fn main() { return; }\nfn pkg_main() { return; }\n",
+    )
+    .expect("write file");
+
+    let ir = cli_dump_ir_ok(&dir, "dump-ir prefers semantic.toml over Semantic.package");
+    assert!(ir.contains("toml_main"), "IR should contain toml_main: {ir}");
+    assert!(!ir.contains("pkg_main"), "IR should not contain pkg_main: {ir}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ir_package_baseline_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_ir_package_baseline");
+    write_package_manifest_baseline(&dir);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &entry_file,
+        "fn main() { return; }\nfn pkg_fallback() { return; }\n",
+    )
+    .expect("write file");
+
+    let ir = cli_dump_ir_ok(&dir, "dump-ir fallback to Semantic.package");
+    assert!(
+        ir.contains("pkg_fallback"),
+        "IR should contain pkg_fallback: {ir}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ir_dot_works_from_root() {
+    let dir = mk_temp_dir("pcc9_dump_ir_dot");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &entry_file,
+        "fn main() { return; }\nfn dot_main() { return; }\n",
+    )
+    .expect("write file");
+
+    let ir = cli_dump_ir_dot_ok(&dir, "dump-ir . from project root");
+    assert!(ir.contains("dot_main"), "IR should contain dot_main: {ir}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ir_invalid_semantic_toml_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_ir_invalid_toml");
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package
+name = "app"
+"#,
+    )
+    .expect("write malformed toml");
+    write_package_manifest_baseline(&dir);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(
+        &entry_file,
+        "fn main() { return; }\nfn pkg_main() { return; }\n",
+    )
+    .expect("write file");
+
+    let err = cli_dump_ir_err(&dir, "dump-ir with invalid semantic.toml");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ir_missing_entry_file_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_ir_missing_file");
+    write_semantic_toml(&dir, Some("src/missing.sm"));
+
+    let err = cli_dump_ir_err(&dir, "dump-ir with missing entry file");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ir_path_escape_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_ir_path_escape");
+    write_semantic_toml(&dir, Some("../escape.sm"));
+
+    let err = cli_dump_ir_err(&dir, "dump-ir with path escape entry");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
