@@ -1,106 +1,161 @@
 # Semantic DNA
 
-Этот документ фиксирует архитектурную ДНК Semantic: что мы заимствуем, что сознательно не берём, и что остаётся уникальным слоем EXO.
+This document defines the architectural DNA of Semantic: what the project intentionally learns from other systems, what it deliberately rejects, and what remains unique to Semantic itself.
 
-## Принципы
+## Principles
 
-- Не копирование синтаксиса, а заимствование сильных инженерных решений.
-- Приоритет: читаемость Logos + строгая семантика + предсказуемая VM.
-- Любая фича должна укладываться в цепочку: `Source -> AST -> IR -> Bytecode -> VM`.
+- Do not copy syntax for its own sake; extract strong engineering decisions and adapt them to Semantic's execution model.
+- Prioritize readable Logos, strict semantics, verifier-first execution, and a predictable VM.
+- Every feature must fit the staged pipeline: `Source -> AST -> IR -> SemCode -> Verifier -> VM`.
+- Language design must remain deterministic at compile time and at runtime.
+- Public concepts must stay stable, minimal, and explainable.
 
-## Заимствования
+## Borrowed Engineering Ideas
 
 ### Python
 
-- `INDENT/DEDENT` как дисциплина блоков для Logos frontend.
-- `logical line + continuation depth` для читаемых многострочных выражений.
-- дружелюбные диагностики: `Expected X, got Y`, caret, hints.
-- docstring-подобные комментарии для метаданных `Law/Entity`.
-- REPL-культура для короткого цикла разработки.
+Semantic adopts:
 
-Не берём:
+- `INDENT` / `DEDENT` as a disciplined block model for the Logos frontend.
+- Logical lines and continuation depth for readable multi-line expressions.
+- Friendly diagnostics: `Expected X, got Y`, caret rendering, and actionable hints.
+- Docstring-like metadata comments for `Law` and `Entity` declarations.
+- A REPL culture for short development cycles and fast feedback.
 
-- динамическую типизацию;
-- runtime monkey-patching;
-- неявную магию выполнения.
+Semantic does not adopt:
+
+- Dynamic typing as the default execution model.
+- Runtime monkey-patching.
+- Implicit execution magic.
+- Hidden mutation behind convenient syntax.
 
 ### Rust
 
-- `Span/SourceMark` на всех этапах.
-- string interning (`SymbolId`) вместо сырого `String` в AST/таблицах.
-- parser discipline (Pratt для выражений).
-- диагностическая модель с label/context.
-- no_std-готовность и zero-cost подход.
-- `enum + match` как фундамент AST/IR/VM.
-- RAII guard-паттерны и feature-gated архитектура.
+Semantic adopts:
 
-Не берём:
+- `Span` / `SourceMark` tracking across all compiler stages.
+- String interning through `SymbolId` instead of raw `String` usage in hot compiler and runtime paths.
+- Parser discipline, including Pratt-style expression parsing where appropriate.
+- Diagnostics with labels, context, and stable error codes.
+- `no_std` awareness and a low-overhead implementation style.
+- `enum` + `match` as a foundation for AST, IR, and VM models.
+- RAII-style guard patterns where they improve correctness.
+- Feature-gated architecture for controlled surface expansion.
 
-- сложность lifetime-модели в пользовательской поверхности языка;
-- macro-heavy стиль как основу DSL.
+Semantic does not adopt:
+
+- A full lifetime model exposed in the user-facing language surface.
+- Macro-heavy design as the foundation of the language.
+- Compile-time cleverness that makes diagnostics or verification opaque.
 
 ### Java
 
-- bytecode как стабильный контракт.
-- versioned binary format.
-- magic header + constant pool.
-- строгая валидация сигнатур и этапность пайплайна.
+Semantic adopts:
 
-Не берём:
+- Bytecode as a stable execution contract.
+- A versioned binary format.
+- Magic headers and structured metadata sections.
+- Constant-pool style separation where it improves determinism and compactness.
+- Strict validation between compile and execution stages.
 
-- OOP-наследование как каркас языка;
-- verbosity и checked-exception стиль.
+Semantic does not adopt:
+
+- Object-oriented inheritance as the main language frame.
+- Verbose enterprise-style structure.
+- Checked-exception style control flow.
 
 ### C++
 
-- контроль layout (repr(C)-подход там, где это нужно ABI/VM).
-- минимальный runtime overhead.
-- compile-time folding как оптимизационная дисциплина.
-- минимум heap, предсказуемая память.
+Semantic adopts:
 
-Не берём:
+- Explicit layout control where ABI or VM boundaries require it.
+- Minimal runtime overhead.
+- Compile-time folding as an optimization discipline.
+- Predictable memory behavior.
+- A strong preference for explicit ownership of low-level representations.
 
-- template/meta сложность ради самой сложности;
-- operator overloading как источник двусмысленности.
+Semantic does not adopt:
 
-### ML/Haskell
+- Template or metaprogramming complexity for its own sake.
+- Operator overloading that creates ambiguous meaning.
+- Undefined behavior as an acceptable optimization tool.
 
-- алгебраические типы и total pattern coverage.
-- явная модель данных в семантике.
+### ML / Haskell
 
-Не берём:
+Semantic adopts:
 
-- ленивость и монады как обязательную модель языка.
+- Algebraic data types as a clear data-modeling tool.
+- Pattern matching with explicit coverage expectations.
+- A preference for total and checkable semantic forms.
 
-### Lisp (позже)
+Semantic does not adopt:
 
-- AST как данные;
-- аккуратный, ограниченный macro-layer (поздний этап).
+- Laziness as the default execution model.
+- Monads as a mandatory programming model.
+- Highly abstract notation that weakens operational clarity.
 
-### Erlang/Elixir (для VectorOS позже)
+### Lisp
 
-- supervisor mindset;
-- fault isolation;
-- event-driven orchestration.
+Semantic may later adopt:
 
-### ECS/Engine world
+- Treating structured programs as data.
+- A carefully bounded macro layer.
 
-- `Entity = data`, `Law = systems`;
-- deterministic tick;
-- fixed timestep.
+Semantic does not adopt in the near term:
 
-## Что остаётся уникальным EXO
+- Fully open-ended macro expansion.
+- Runtime code rewriting as a normal programming pattern.
+- Language-level flexibility that bypasses verifier guarantees.
 
-- Квадро-логика (`N/F/T/S`) как первичная семантика.
-- Merge как базовая философия вычислений.
-- Runtime smc profiles.
-- EXO-T как тензорный IR-слой.
-- Нативная интеграция с VectorOS/Transjector.
-- Semantic VM поверх kernel-уровня.
+### Erlang / Elixir
 
-## Архитектурные инварианты
+Semantic adopts as architectural inspiration:
 
-- Любое новое расширение должно сохранять детерминизм compilation/runtime.
-- Диагностики должны быть source-anchored (`SourceMark`) и воспроизводимы.
-- no_std совместимость учитывается на этапе проектирования, а не постфактум.
-- IR и bytecode версии эволюционируют только с обратимой миграцией формата.
+- Fault isolation.
+- Supervisor-style thinking.
+- Event-driven orchestration.
+- Clear boundaries between a failing unit and the surrounding system.
+
+Semantic does not adopt:
+
+- Actor-style concurrency as an early core requirement.
+- Distributed runtime semantics as part of the initial language core.
+
+### ECS / Engine Architecture
+
+Semantic adopts:
+
+- `Entity = data`, `Law = system-like rule` as a useful modeling analogy.
+- Deterministic ticks.
+- Fixed-step execution where reproducibility matters.
+- Separation between state, rule evaluation, and effects.
+
+Semantic does not adopt:
+
+- Frame-driven game-engine assumptions as a universal model.
+- Implicit global mutable state.
+- Performance shortcuts that break deterministic replay.
+
+## What Remains Unique to Semantic
+
+- Native quad logic (`N` / `F` / `T` / `S`) as a first-class semantic domain.
+- Conflict and unknown states represented explicitly instead of being collapsed into boolean logic.
+- Merge-oriented computation as a core design philosophy.
+- Verifier-first execution: a program is not executed merely because it was parsed or compiled.
+- SemCode as a deterministic, versioned execution contract.
+- Runtime profiles for controlled feature activation.
+- A VM designed for deterministic semantic programs rather than general scripting convenience.
+- A strict boundary between compiler semantics, execution semantics, and host-side effects.
+- Capability-gated integration with external systems.
+- Local auditability and reproducible execution traces as part of the system model.
+
+## Architectural Invariants
+
+- Every new extension must preserve deterministic compilation and deterministic runtime behavior.
+- Diagnostics must be source-anchored through `SourceMark` / `Span` and reproducible across runs.
+- `no_std` and `alloc` boundaries must be considered during design, not added after implementation.
+- IR and SemCode versions may evolve only through explicit compatibility and migration rules.
+- The VM must execute only verified SemCode.
+- Host effects must pass through explicit capability and ABI boundaries.
+- Runtime hot paths must avoid string-heavy representations where compact IDs are available.
+- Any feature that weakens verification, determinism, or auditability is outside the core DNA.
