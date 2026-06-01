@@ -4,8 +4,7 @@ use crate::incremental::{
     update_cache_index, CacheEvent, CacheReason, ModuleGraphSnapshot,
 };
 use crate::package_manifest::{
-    admit_package_entry_module, parse_package_manifest_baseline, resolve_package_import_path,
-    validate_package_manifest_baseline, PACKAGE_MANIFEST_FILE_NAME,
+    admit_package_entry_module, resolve_package_import_path, resolve_project_root_check_entry,
 };
 use crate::{format_path, FormatterMode};
 use prom_audit::hello_observation_audit::{
@@ -233,47 +232,6 @@ fn resolve_color_mode(mode: ColorMode) -> bool {
         ColorMode::Never => false,
         ColorMode::Auto => env::var("NO_COLOR").is_err(),
     }
-}
-
-fn resolve_project_root_check_entry(input: &Path) -> Result<PathBuf, String> {
-    let manifest_path = input.join(PACKAGE_MANIFEST_FILE_NAME);
-    let manifest_source = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("failed to read '{}': {}", manifest_path.display(), e))?;
-    let manifest = parse_package_manifest_baseline(&manifest_source)
-        .map_err(|e| format!("failed to parse '{}': {}", manifest_path.display(), e))?;
-    validate_package_manifest_baseline(&manifest)
-        .map_err(|e| format!("failed to validate '{}': {}", manifest_path.display(), e))?;
-
-    let package_root = input
-        .join(&manifest.package.root.manifest_dir)
-        .canonicalize()
-        .map_err(|e| {
-            format!(
-                "failed to resolve package root '{}' relative to '{}': {}",
-                manifest.package.root.manifest_dir,
-                manifest_path.display(),
-                e
-            )
-        })?;
-    let module_root = package_root
-        .join(&manifest.package.root.module_root)
-        .canonicalize()
-        .map_err(|e| {
-            format!(
-                "failed to resolve package module_root '{}' relative to '{}': {}",
-                manifest.package.root.module_root,
-                package_root.display(),
-                e
-            )
-        })?;
-    let entry = module_root.join("main.sm");
-    if !entry.is_file() {
-        return Err(format!(
-            "project-root check requires '{}' to exist",
-            entry.display()
-        ));
-    }
-    Ok(entry)
 }
 
 fn color_wrap(enabled: bool, s: &str, code: &str) -> String {

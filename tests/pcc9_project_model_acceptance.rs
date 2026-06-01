@@ -82,8 +82,14 @@ fn full_project_root_check_path() {
     let src_dir = dir.join("src");
     std::fs::create_dir_all(&src_dir).expect("mkdir src");
     std::fs::write(
-        dir.join(PACKAGE_MANIFEST_FILE_NAME),
-        read_fixture("package_manifest_entry_admission/Semantic.package"),
+        dir.join("semantic.toml"),
+        r#"
+[package]
+name = "app"
+
+[project]
+entry = "src/main.sm"
+"#,
     )
     .expect("write manifest");
     std::fs::write(src_dir.join("main.sm"), "fn main() { return; }\n").expect("write entry");
