@@ -1,6 +1,4 @@
-use std::{
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 #[path = "support/executable_bundle_support.rs"]
 mod executable_bundle_support;
@@ -203,7 +201,10 @@ fn render_suite(scenarios: &[ScenarioBaseline]) -> String {
         out.push_str(&format!("{}\n", render_stage("ir", scenario.ir)));
         out.push_str(&format!("{}\n", render_stage("emit", scenario.emit)));
         out.push_str(&format!("{}\n", render_stage("verify", scenario.verify)));
-        out.push_str(&format!("{}\n\n", render_stage("runtime", scenario.runtime)));
+        out.push_str(&format!(
+            "{}\n\n",
+            render_stage("runtime", scenario.runtime)
+        ));
     }
     out
 }

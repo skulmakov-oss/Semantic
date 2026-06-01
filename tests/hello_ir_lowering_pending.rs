@@ -37,18 +37,17 @@ fn hello_ir_lowering_pending_verbose_fixture_lowers_in_order() {
     assert_eq!(module.entry.body.len(), 4);
 
     match &module.entry.body[..] {
-        [
-            HelloIrStmt::LocalQuad(state),
-            HelloIrStmt::RequireQuadEq(require),
-            HelloIrStmt::ObserveText(observe),
-            HelloIrStmt::CompleteQuad(complete),
-        ] => {
+        [HelloIrStmt::LocalQuad(state), HelloIrStmt::RequireQuadEq(require), HelloIrStmt::ObserveText(observe), HelloIrStmt::CompleteQuad(complete)] =>
+        {
             assert_eq!(state.symbol, "boot");
             assert_eq!(state.value, HelloIrQuadLit::T);
             assert_eq!(require.symbol, "boot");
             assert_eq!(require.expected, HelloIrQuadLit::T);
             assert_eq!(observe.text, "\"Hello, World!\"");
-            assert_eq!(observe.observation_class, HelloIrObservationClass::Controlled);
+            assert_eq!(
+                observe.observation_class,
+                HelloIrObservationClass::Controlled
+            );
             assert_eq!(complete.value, HelloIrQuadLit::T);
         }
         other => panic!("unexpected Hello IR shape: {other:?}"),
@@ -57,11 +56,14 @@ fn hello_ir_lowering_pending_verbose_fixture_lowers_in_order() {
 
 #[test]
 fn hello_ir_lowering_pending_minimal_observe_shape_is_rejected() {
-    let checked = parse_validate("tests/fixtures/pending/hello/positive_hello_minimal_observe_directional.sm");
-    let err = lower_hello_checked_file(&checked)
-        .expect_err("secondary Hello shape should not lower yet");
+    let checked = parse_validate(
+        "tests/fixtures/pending/hello/positive_hello_minimal_observe_directional.sm",
+    );
+    let err =
+        lower_hello_checked_file(&checked).expect_err("secondary Hello shape should not lower yet");
     assert!(
-        err.message.contains("secondary Hello shape is not admitted for IR lowering"),
+        err.message
+            .contains("secondary Hello shape is not admitted for IR lowering"),
         "expected secondary-shape IR rejection, got: {}",
         err.message
     );

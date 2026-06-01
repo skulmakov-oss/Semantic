@@ -1,7 +1,6 @@
 use crate::types::{
-    AdtCtorExpr, AdtMatchPattern, AdtPatternItem, BindingPlan, BindingPlanItem,
-    CaptureMode, MatchPattern, NumericLiteral, PathAvailability, PatternPath, RecordPatternTarget,
-    ScrutineeUse,
+    AdtCtorExpr, AdtMatchPattern, AdtPatternItem, BindingPlan, BindingPlanItem, CaptureMode,
+    MatchPattern, NumericLiteral, PathAvailability, PatternPath, RecordPatternTarget, ScrutineeUse,
 };
 use crate::*;
 use alloc::collections::{BTreeMap, BTreeSet};
@@ -339,11 +338,23 @@ fn type_check_function_with_tables(
         .map(|(name, ty)| {
             Ok((
                 *name,
-                canonicalize_declared_type_generic(ty, record_table, adt_table, arena, &func.type_params)?,
+                canonicalize_declared_type_generic(
+                    ty,
+                    record_table,
+                    adt_table,
+                    arena,
+                    &func.type_params,
+                )?,
             ))
         })
         .collect::<Result<Vec<_>, FrontendError>>()?;
-    let canonical_ret = canonicalize_declared_type_generic(&func.ret, record_table, adt_table, arena, &func.type_params)?;
+    let canonical_ret = canonicalize_declared_type_generic(
+        &func.ret,
+        record_table,
+        adt_table,
+        arena,
+        &func.type_params,
+    )?;
     for (name, ty) in &canonical_params {
         // Skip executable-type check for TypeVar — substitution happens at call site.
         if matches!(ty, Type::TypeVar(_)) && is_generic {
@@ -396,7 +407,7 @@ fn type_check_function_with_tables(
                 adt_table,
                 Type::Unit,
                 &mut default_loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if let Err(err) = ensure_const_initializer_safe(*default_expr, arena, &empty_env) {
                 return Err(FrontendError {
@@ -418,8 +429,24 @@ fn type_check_function_with_tables(
         }
     }
     check_requires_clauses(func, arena, table, record_table, adt_table, impl_list)?;
-    check_ensures_clauses(func, arena, table, record_table, adt_table, &canonical_ret, impl_list)?;
-    check_invariant_clauses(func, arena, table, record_table, adt_table, &canonical_ret, impl_list)?;
+    check_ensures_clauses(
+        func,
+        arena,
+        table,
+        record_table,
+        adt_table,
+        &canonical_ret,
+        impl_list,
+    )?;
+    check_invariant_clauses(
+        func,
+        arena,
+        table,
+        record_table,
+        adt_table,
+        &canonical_ret,
+        impl_list,
+    )?;
     let mut env = ScopeEnv::with_params(&canonical_params);
     let mut loop_stack = Vec::new();
     for stmt in &func.body {
@@ -432,7 +459,7 @@ fn type_check_function_with_tables(
             record_table,
             adt_table,
             &mut loop_stack,
-        impl_list,
+            impl_list,
         )?;
     }
     Ok(())
@@ -455,7 +482,13 @@ fn check_requires_clauses(
         .map(|(name, ty)| {
             Ok((
                 *name,
-                canonicalize_declared_type_generic(ty, record_table, adt_table, arena, &func.type_params)?,
+                canonicalize_declared_type_generic(
+                    ty,
+                    record_table,
+                    adt_table,
+                    arena,
+                    &func.type_params,
+                )?,
             ))
         })
         .collect::<Result<Vec<_>, FrontendError>>()?;
@@ -470,9 +503,15 @@ fn check_requires_clauses(
             table,
             record_table,
             adt_table,
-            canonicalize_declared_type_generic(&func.ret, record_table, adt_table, arena, &func.type_params)?,
+            canonicalize_declared_type_generic(
+                &func.ret,
+                record_table,
+                adt_table,
+                arena,
+                &func.type_params,
+            )?,
             &mut loop_stack,
-        impl_list,
+            impl_list,
         )?;
         if condition_ty != Type::Bool {
             return Err(FrontendError {
@@ -506,7 +545,13 @@ fn check_ensures_clauses(
         .map(|(name, ty)| {
             Ok((
                 *name,
-                canonicalize_declared_type_generic(ty, record_table, adt_table, arena, &func.type_params)?,
+                canonicalize_declared_type_generic(
+                    ty,
+                    record_table,
+                    adt_table,
+                    arena,
+                    &func.type_params,
+                )?,
             ))
         })
         .collect::<Result<Vec<_>, FrontendError>>()?;
@@ -528,7 +573,7 @@ fn check_ensures_clauses(
             adt_table,
             canonical_ret.clone(),
             &mut loop_stack,
-        impl_list,
+            impl_list,
         )?;
         if condition_ty != Type::Bool {
             return Err(FrontendError {
@@ -563,7 +608,13 @@ fn check_invariant_clauses(
         .map(|(name, ty)| {
             Ok((
                 *name,
-                canonicalize_declared_type_generic(ty, record_table, adt_table, arena, &func.type_params)?,
+                canonicalize_declared_type_generic(
+                    ty,
+                    record_table,
+                    adt_table,
+                    arena,
+                    &func.type_params,
+                )?,
             ))
         })
         .collect::<Result<Vec<_>, FrontendError>>()?;
@@ -585,7 +636,7 @@ fn check_invariant_clauses(
             adt_table,
             canonical_ret.clone(),
             &mut loop_stack,
-        impl_list,
+            impl_list,
         )?;
         if condition_ty != Type::Bool {
             return Err(FrontendError {
@@ -700,7 +751,7 @@ fn check_stmt(
                     Some(expected_ty.clone()),
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 ensure_binding_value_type(
                     expected_ty.clone(),
@@ -720,7 +771,7 @@ fn check_stmt(
                     adt_table,
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 vt
             };
@@ -759,7 +810,7 @@ fn check_stmt(
                     Some(expected_ty.clone()),
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 ensure_binding_value_type(
                     expected_ty.clone(),
@@ -779,7 +830,7 @@ fn check_stmt(
                     adt_table,
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 vt
             };
@@ -817,7 +868,7 @@ fn check_stmt(
                     Some(expected_ty.clone()),
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 ensure_binding_value_type(
                     expected_ty.clone(),
@@ -837,7 +888,7 @@ fn check_stmt(
                     adt_table,
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 vt
             };
@@ -881,7 +932,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if value_ty != Type::Record(*record_name) {
                 return Err(FrontendError {
@@ -934,7 +985,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if value_ty != Type::Record(*record_name) {
                 return Err(FrontendError {
@@ -955,7 +1006,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty,
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             let mut saw_refutable_item = false;
             for item in items {
@@ -1055,7 +1106,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             let final_ty = if let Some(ann) = ty {
                 let expected_ty = canonicalize_declared_type(ann, record_table, adt_table, arena)?;
@@ -1095,7 +1146,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty,
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             // M9.10 Wave B: validate QuadLiteral items before building plan.
             for (item, item_ty) in items.iter().zip(item_tys.iter()) {
@@ -1148,7 +1199,7 @@ fn check_stmt(
                     Some(expected_ty.clone()),
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 ensure_binding_value_type(
                     expected_ty,
@@ -1187,7 +1238,7 @@ fn check_stmt(
                 Some(target_ty.clone()),
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             ensure_binding_value_type(
                 target_ty,
@@ -1207,7 +1258,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             let Type::Tuple(item_tys) = value_ty else {
                 return Err(FrontendError {
@@ -1268,7 +1319,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if range_ty != Type::RangeI32 {
                 return Err(FrontendError {
@@ -1289,7 +1340,7 @@ fn check_stmt(
                     record_table,
                     adt_table,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
             }
             body_env.pop_scope();
@@ -1444,11 +1495,12 @@ fn check_stmt(
                 return Ok(());
             }
             let detail = match &iterable_ty {
-                Type::Adt(_) if has_explicit_iterable_impl(
-                    &iterable_ty,
-                    desugaring.trait_name,
-                    impl_list,
-                )? =>
+                Type::Adt(_)
+                    if has_explicit_iterable_impl(
+                        &iterable_ty,
+                        desugaring.trait_name,
+                        impl_list,
+                    )? =>
                 {
                     iterable_for_impl_out_of_scope_message().to_string()
                 }
@@ -1474,8 +1526,7 @@ fn check_stmt(
         Stmt::Break(None) => {
             let frame = loop_stack.last().ok_or(FrontendError {
                 pos: 0,
-                message: "bare break is allowed only inside while or statement loop"
-                    .to_string(),
+                message: "bare break is allowed only inside while or statement loop".to_string(),
             })?;
             if !matches!(frame.kind, LoopTypeFrameKind::Control) {
                 return Err(FrontendError {
@@ -1505,8 +1556,7 @@ fn check_stmt(
             if !matches!(frame.kind, LoopTypeFrameKind::Expression) {
                 return Err(FrontendError {
                     pos: 0,
-                    message: "break with value is allowed only inside loop expression"
-                        .to_string(),
+                    message: "break with value is allowed only inside loop expression".to_string(),
                 });
             }
             if let Some(expected) = &frame.break_ty {
@@ -1532,8 +1582,7 @@ fn check_stmt(
             if !matches!(frame.kind, LoopTypeFrameKind::Control) {
                 return Err(FrontendError {
                     pos: 0,
-                    message: "continue is allowed only inside while or statement loop"
-                        .to_string(),
+                    message: "continue is allowed only inside while or statement loop".to_string(),
                 });
             }
             Ok(())
@@ -1551,7 +1600,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if condition_ty != Type::Bool {
                 return Err(FrontendError {
@@ -1570,7 +1619,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty,
                 loop_stack,
-            impl_list,
+                impl_list,
             )
         }
         Stmt::If {
@@ -1587,7 +1636,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if ct != Type::Bool {
                 return Err(FrontendError {
@@ -1609,7 +1658,7 @@ fn check_stmt(
                     record_table,
                     adt_table,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
             }
             then_env.pop_scope();
@@ -1626,7 +1675,7 @@ fn check_stmt(
                     record_table,
                     adt_table,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
             }
             else_env.pop_scope();
@@ -1646,13 +1695,17 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             // M9.4 Wave 3: widen to also allow i32/u32 (for int range patterns).
             if !matches!(
                 st,
-                Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _)
-                    | Type::I32 | Type::U32
+                Type::Quad
+                    | Type::Adt(_)
+                    | Type::Option(_)
+                    | Type::Result(_, _)
+                    | Type::I32
+                    | Type::U32
             ) {
                 return Err(FrontendError {
                     pos: 0,
@@ -1679,7 +1732,7 @@ fn check_stmt(
                     adt_table,
                     ret_ty.clone(),
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 for s in &arm.block {
                     check_stmt(
@@ -1691,7 +1744,7 @@ fn check_stmt(
                         record_table,
                         adt_table,
                         loop_stack,
-                    impl_list,
+                        impl_list,
                     )?;
                 }
                 arm_env.pop_scope();
@@ -1730,7 +1783,7 @@ fn check_stmt(
                         record_table,
                         adt_table,
                         loop_stack,
-                    impl_list,
+                        impl_list,
                     )?;
                 }
                 def_env.pop_scope();
@@ -1746,7 +1799,7 @@ fn check_stmt(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Stmt::Expr(e) => {
             if check_builtin_assert_stmt(
@@ -1758,7 +1811,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )? {
                 return Ok(());
             }
@@ -1771,7 +1824,7 @@ fn check_stmt(
                 adt_table,
                 ret_ty,
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             Ok(())
         }
@@ -1831,7 +1884,7 @@ fn infer_expr_type(
             None,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::Closure(closure) => infer_closure_literal_type(
             closure,
@@ -1843,7 +1896,7 @@ fn infer_expr_type(
             None,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::NumericLiteral(literal) => match literal {
             NumericLiteral::I32(_) => Ok(Type::I32),
@@ -1861,7 +1914,7 @@ fn infer_expr_type(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             let end_ty = infer_expr_type(
                 range_expr.end,
@@ -1872,7 +1925,7 @@ fn infer_expr_type(
                 adt_table,
                 ret_ty,
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if start_ty != Type::I32 || end_ty != Type::I32 {
                 return Err(FrontendError {
@@ -1897,7 +1950,7 @@ fn infer_expr_type(
                     adt_table,
                     ret_ty.clone(),
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 if item_ty == Type::RangeI32 {
                     return Err(FrontendError {
@@ -1920,7 +1973,7 @@ fn infer_expr_type(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::RecordField(field_expr) => infer_record_field_access_type(
             field_expr,
@@ -1931,7 +1984,7 @@ fn infer_expr_type(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::SequenceIndex(index_expr) => infer_sequence_index_type(
             index_expr,
@@ -1942,7 +1995,7 @@ fn infer_expr_type(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::RecordUpdate(update_expr) => infer_record_update_type(
             update_expr,
@@ -1953,7 +2006,7 @@ fn infer_expr_type(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::AdtCtor(ctor_expr) => infer_adt_ctor_type(
             ctor_expr,
@@ -1965,7 +2018,7 @@ fn infer_expr_type(
             None,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::Var(v) => {
             // M9.9: path check moved to top of infer_expr_type via expr_access_path.
@@ -1983,7 +2036,7 @@ fn infer_expr_type(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::If(if_expr) => {
             let cond_ty = infer_expr_type(
@@ -1995,7 +2048,7 @@ fn infer_expr_type(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -2014,7 +2067,7 @@ fn infer_expr_type(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             let else_ty = infer_value_block_type(
                 &if_expr.else_block,
@@ -2025,7 +2078,7 @@ fn infer_expr_type(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if then_ty != else_ty {
                 return Err(FrontendError {
@@ -2047,7 +2100,7 @@ fn infer_expr_type(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::Loop(loop_expr) => infer_loop_expr_type(
             loop_expr,
@@ -2058,7 +2111,7 @@ fn infer_expr_type(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         // M9.4 Wave 3: if-let expression typecheck.
         Expr::IfLet(if_let) => {
@@ -2079,8 +2132,12 @@ fn infer_expr_type(
             // M9.5 Wave C: build binding plan, validate conflicts, apply to then-env.
             let mut plan = BindingPlan::default();
             build_match_pattern_plan(
-                &if_let.pattern, &value_ty, &PatternPath::root(),
-                &mut plan, arena, adt_table,
+                &if_let.pattern,
+                &value_ty,
+                &PatternPath::root(),
+                &mut plan,
+                arena,
+                adt_table,
             )?;
             validate_binding_plan_conflicts(&plan)?;
             // M9.8: reject if new plan conflicts with prior path-state of scrutinee.
@@ -2139,8 +2196,7 @@ fn infer_expr_type(
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
                         pos: 0,
-                        message: "builtin 'len' takes exactly one positional argument"
-                            .to_string(),
+                        message: "builtin 'len' takes exactly one positional argument".to_string(),
                     });
                 }
                 let arg_ty = infer_expr_type(
@@ -2355,10 +2411,9 @@ fn infer_expr_type(
             if resolve_symbol_name(arena, *name)? == "map_empty" {
                 return Err(FrontendError {
                     pos: 0,
-                    message:
-                        "map_empty() requires a contextual Map(K, V) type; \
+                    message: "map_empty() requires a contextual Map(K, V) type; \
                          use 'let q: Map(K, V) = map_empty()'"
-                            .to_string(),
+                        .to_string(),
                 });
             }
             // builtin map_contains(Map(K, V), K) -> bool
@@ -2607,20 +2662,26 @@ fn infer_expr_type(
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
                         pos: 0,
-                        message: "builtin 'print' takes exactly one positional argument (msg: text)"
-                            .to_string(),
+                        message:
+                            "builtin 'print' takes exactly one positional argument (msg: text)"
+                                .to_string(),
                     });
                 }
                 let arg_ty = infer_expr_type(
                     args[0].value,
-                    arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    loop_stack,
+                    impl_list,
                 )?;
                 if arg_ty != Type::Text {
                     return Err(FrontendError {
                         pos: 0,
-                        message: format!(
-                            "builtin 'print' expects text, got {:?}", arg_ty
-                        ),
+                        message: format!("builtin 'print' expects text, got {:?}", arg_ty),
                     });
                 }
                 return Ok(Type::Unit);
@@ -2635,15 +2696,21 @@ fn infer_expr_type(
                 }
                 let arg_ty = infer_expr_type(
                     args[0].value,
-                    arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    loop_stack,
+                    impl_list,
                 )?;
                 match &arg_ty {
                     Type::Text | Type::Bool | Type::I32 | Type::U32 | Type::Quad => {
                         return Ok(Type::Text);
                     }
                     Type::Record(sym) => {
-                        let name_str = resolve_symbol_name(arena, *sym)
-                            .unwrap_or("<unknown>");
+                        let name_str = resolve_symbol_name(arena, *sym).unwrap_or("<unknown>");
                         return Err(FrontendError {
                             pos: 0,
                             message: format!(
@@ -2673,13 +2740,21 @@ fn infer_expr_type(
                 }
                 let seed_ty = infer_expr_type(
                     args[0].value,
-                    arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    loop_stack,
+                    impl_list,
                 )?;
                 if seed_ty != Type::I32 {
                     return Err(FrontendError {
                         pos: 0,
                         message: format!(
-                            "builtin 'random_seed' expects i32 seed, got {:?}", seed_ty
+                            "builtin 'random_seed' expects i32 seed, got {:?}",
+                            seed_ty
                         ),
                     });
                 }
@@ -2697,17 +2772,32 @@ fn infer_expr_type(
                 }
                 let lo_ty = infer_expr_type(
                     args[0].value,
-                    arena, env, table, record_table, adt_table, ret_ty.clone(), loop_stack, impl_list,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty.clone(),
+                    loop_stack,
+                    impl_list,
                 )?;
                 let hi_ty = infer_expr_type(
                     args[1].value,
-                    arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+                    arena,
+                    env,
+                    table,
+                    record_table,
+                    adt_table,
+                    ret_ty,
+                    loop_stack,
+                    impl_list,
                 )?;
                 if lo_ty != Type::I32 {
                     return Err(FrontendError {
                         pos: 0,
                         message: format!(
-                            "builtin 'random_next_i32' lo must be i32, got {:?}", lo_ty
+                            "builtin 'random_next_i32' lo must be i32, got {:?}",
+                            lo_ty
                         ),
                     });
                 }
@@ -2715,7 +2805,8 @@ fn infer_expr_type(
                     return Err(FrontendError {
                         pos: 0,
                         message: format!(
-                            "builtin 'random_next_i32' hi must be i32, got {:?}", hi_ty
+                            "builtin 'random_next_i32' hi must be i32, got {:?}",
+                            hi_ty
                         ),
                     });
                 }
@@ -2754,7 +2845,7 @@ fn infer_expr_type(
                     Some(closure_ty.param.as_ref().clone()),
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 ensure_binding_value_type(
                     closure_ty.param.as_ref().clone(),
@@ -2798,7 +2889,7 @@ fn infer_expr_type(
                             adt_table,
                             ret_ty.clone(),
                             loop_stack,
-                        impl_list,
+                            impl_list,
                         )?;
                         subst.insert(*tid, at);
                     }
@@ -2839,9 +2930,8 @@ fn infer_expr_type(
                     }
                 }
                 // Substitute TypeVar → concrete in all param types and ret.
-                let concrete_params: Vec<Type> = sig.params.iter()
-                    .map(|p| subst_apply(p, &subst))
-                    .collect();
+                let concrete_params: Vec<Type> =
+                    sig.params.iter().map(|p| subst_apply(p, &subst)).collect();
                 let concrete_ret = subst_apply(&sig.ret, &subst);
                 // Second pass: check every argument against its concrete type.
                 for (i, arg) in ordered_args.iter().enumerate() {
@@ -2856,7 +2946,7 @@ fn infer_expr_type(
                         Some(expected_ty.clone()),
                         ret_ty.clone(),
                         loop_stack,
-                    impl_list,
+                        impl_list,
                     )?;
                     if at != expected_ty {
                         if expected_ty == Type::Fx && is_numeric_for_fx_gap(&at) {
@@ -2896,7 +2986,7 @@ fn infer_expr_type(
                     Some(expected_ty.clone()),
                     ret_ty.clone(),
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 if at != expected_ty {
                     if expected_ty == Type::Fx && is_numeric_for_fx_gap(&at) {
@@ -2937,7 +3027,7 @@ fn infer_expr_type(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             let measured = measured_numeric_parts(&t);
             match op {
@@ -2988,7 +3078,7 @@ fn infer_expr_type(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             let rt = infer_expr_type(
                 *r,
@@ -2999,7 +3089,7 @@ fn infer_expr_type(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             match op {
                 BinaryOp::Eq | BinaryOp::Ne => {
@@ -3084,8 +3174,9 @@ fn infer_expr_type(
                         }
                         return Err(FrontendError {
                             pos: 0,
-                            message: "text concatenation currently admits only text + text operands"
-                                .to_string(),
+                            message:
+                                "text concatenation currently admits only text + text operands"
+                                    .to_string(),
                         });
                     }
                     if lt == Type::I32 && rt == Type::I32 {
@@ -3487,8 +3578,8 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("text concatenation with scalar must still reject");
+        let err =
+            typecheck_source(src).expect_err("text concatenation with scalar must still reject");
         assert!(err
             .message
             .contains("text concatenation currently admits only text + text operands"));
@@ -3586,7 +3677,9 @@ mod tests {
 
         let err =
             typecheck_source(src).expect_err("sequence indexing on non-sequence base must reject");
-        assert!(err.message.contains("sequence indexing requires Sequence(type) base"));
+        assert!(err
+            .message
+            .contains("sequence indexing requires Sequence(type) base"));
     }
 
     #[test]
@@ -3601,7 +3694,9 @@ mod tests {
 
         let err =
             typecheck_source(src).expect_err("sequence indexing with non-i32 index must reject");
-        assert!(err.message.contains("sequence indexing currently requires i32 index"));
+        assert!(err
+            .message
+            .contains("sequence indexing currently requires i32 index"));
     }
 
     #[test]
@@ -3943,7 +4038,9 @@ mod tests {
         "#;
 
         let err = typecheck_source(src).expect_err("bare break outside loop must reject");
-        assert!(err.message.contains("bare break is allowed only inside while or statement loop"));
+        assert!(err
+            .message
+            .contains("bare break is allowed only inside while or statement loop"));
     }
 
     #[test]
@@ -3955,7 +4052,9 @@ mod tests {
         "#;
 
         let err = typecheck_source(src).expect_err("continue outside loop must reject");
-        assert!(err.message.contains("continue is allowed only inside while or statement loop"));
+        assert!(err
+            .message
+            .contains("continue is allowed only inside while or statement loop"));
     }
 
     #[test]
@@ -5095,7 +5194,8 @@ mod tests {
             }
         "#;
 
-        let err = typecheck_source(src).expect_err("wrong executable Iterable contract must reject");
+        let err =
+            typecheck_source(src).expect_err("wrong executable Iterable contract must reject");
         assert!(err
             .message
             .contains("fn next(self: Self, index: i32) -> Option(Item)"));
@@ -6367,9 +6467,9 @@ mod tests {
 
         let err = typecheck_source(src)
             .expect_err("mul/div/mod on unit-carrying values must reject in first wave");
-        assert!(err
-            .message
-            .contains("*, /, % on unit-carrying values are rejected in the first-wave units surface"));
+        assert!(err.message.contains(
+            "*, /, % on unit-carrying values are rejected in the first-wave units surface"
+        ));
     }
 
     // ── M9.1 Wave 3: generic call-site substitution ──────────────────────────
@@ -6435,8 +6535,7 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("bool assigned to i32 binding must reject");
+        let err = typecheck_source(src).expect_err("bool assigned to i32 binding must reject");
         assert!(
             err.message.contains("type mismatch") || err.message.contains("bool"),
             "unexpected error: {}",
@@ -6471,8 +6570,8 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("duplicate impl must be rejected by coherence check");
+        let err =
+            typecheck_source(src).expect_err("duplicate impl must be rejected by coherence check");
         assert!(
             err.message.contains("duplicate") || err.message.contains("impl"),
             "unexpected error: {}",
@@ -6500,10 +6599,11 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("impl missing required method must be rejected");
+        let err = typecheck_source(src).expect_err("impl missing required method must be rejected");
         assert!(
-            err.message.contains("bye") || err.message.contains("missing") || err.message.contains("method"),
+            err.message.contains("bye")
+                || err.message.contains("missing")
+                || err.message.contains("method"),
             "unexpected error: {}",
             err.message
         );
@@ -6528,10 +6628,12 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("impl method with wrong return type must be rejected");
+        let err =
+            typecheck_source(src).expect_err("impl method with wrong return type must be rejected");
         assert!(
-            err.message.contains("count") || err.message.contains("return type") || err.message.contains("mismatch"),
+            err.message.contains("count")
+                || err.message.contains("return type")
+                || err.message.contains("mismatch"),
             "unexpected error: {}",
             err.message
         );
@@ -6732,10 +6834,12 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("call with unsatisfied trait bound must be rejected");
+        let err =
+            typecheck_source(src).expect_err("call with unsatisfied trait bound must be rejected");
         assert!(
-            err.message.contains("Printable") || err.message.contains("implement") || err.message.contains("trait"),
+            err.message.contains("Printable")
+                || err.message.contains("implement")
+                || err.message.contains("trait"),
             "unexpected error: {}",
             err.message
         );
@@ -6821,11 +6925,13 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("int range pattern on bool must reject");
+        let err = typecheck_source(src).expect_err("int range pattern on bool must reject");
         assert!(
-            err.message.contains("i32") || err.message.contains("u32") || err.message.contains("scrutinee"),
-            "unexpected error: {}", err.message
+            err.message.contains("i32")
+                || err.message.contains("u32")
+                || err.message.contains("scrutinee"),
+            "unexpected error: {}",
+            err.message
         );
     }
 
@@ -6841,11 +6947,13 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("inverted range bounds must reject");
+        let err = typecheck_source(src).expect_err("inverted range bounds must reject");
         assert!(
-            err.message.contains("start") || err.message.contains("end") || err.message.contains("<="),
-            "unexpected error: {}", err.message
+            err.message.contains("start")
+                || err.message.contains("end")
+                || err.message.contains("<="),
+            "unexpected error: {}",
+            err.message
         );
     }
 
@@ -6877,11 +6985,11 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("nested tuple arity mismatch must reject");
+        let err = typecheck_source(src).expect_err("nested tuple arity mismatch must reject");
         assert!(
             err.message.contains("arity") || err.message.contains("mismatch"),
-            "unexpected error: {}", err.message
+            "unexpected error: {}",
+            err.message
         );
     }
 
@@ -6913,11 +7021,13 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("if-let branch type mismatch must reject");
+        let err = typecheck_source(src).expect_err("if-let branch type mismatch must reject");
         assert!(
-            err.message.contains("mismatch") || err.message.contains("bool") || err.message.contains("i32"),
-            "unexpected error: {}", err.message
+            err.message.contains("mismatch")
+                || err.message.contains("bool")
+                || err.message.contains("i32"),
+            "unexpected error: {}",
+            err.message
         );
     }
 
@@ -6984,12 +7094,10 @@ mod tests {
 
         let binding = env.binding(source).expect("source binding must exist");
         assert!(binding.path_state.iter().any(|(path, state)| {
-            *state == PathAvailability::Borrowed
-                && *path == PatternPath::root().tuple_index(0)
+            *state == PathAvailability::Borrowed && *path == PatternPath::root().tuple_index(0)
         }));
         assert!(binding.path_state.iter().any(|(path, state)| {
-            *state == PathAvailability::Moved
-                && *path == PatternPath::root().tuple_index(1)
+            *state == PathAvailability::Moved && *path == PatternPath::root().tuple_index(1)
         }));
     }
 
@@ -7013,7 +7121,9 @@ mod tests {
 
     #[test]
     fn plain_record_ref_binding_preserves_record_field_path_state() {
-        use crate::types::{PathAvailability, PatternPath, RecordDecl, RecordField, RecordPatternItem};
+        use crate::types::{
+            PathAvailability, PatternPath, RecordDecl, RecordField, RecordPatternItem,
+        };
 
         let mut arena = AstArena::default();
         let source = arena.intern_symbol("source");
@@ -7055,8 +7165,14 @@ mod tests {
                 name: record_name,
                 type_params: Vec::new(),
                 fields: vec![
-                    RecordField { name: camera, ty: Type::Quad },
-                    RecordField { name: quality, ty: Type::F64 },
+                    RecordField {
+                        name: camera,
+                        ty: Type::Quad,
+                    },
+                    RecordField {
+                        name: quality,
+                        ty: Type::F64,
+                    },
                 ],
             },
         );
@@ -7081,8 +7197,7 @@ mod tests {
                 && *path == PatternPath::root().record_field(camera)
         }));
         assert!(binding.path_state.iter().any(|(path, state)| {
-            *state == PathAvailability::Moved
-                && *path == PatternPath::root().record_field(quality)
+            *state == PathAvailability::Moved && *path == PatternPath::root().record_field(quality)
         }));
     }
 
@@ -7127,12 +7242,19 @@ mod tests {
         let mut plan = BindingPlan::default();
         let path = PatternPath::root().tuple_index(0);
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Borrow, path: path.clone(), ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Borrow,
+            path: path.clone(),
+            ty: Type::I32,
         });
         plan.push(BindingPlanItem {
-            name: SymbolId(2), capture: CaptureMode::Borrow, path, ty: Type::I32,
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path,
+            ty: Type::I32,
         });
-        validate_binding_plan_conflicts(&plan).expect("two borrows of same path should not conflict");
+        validate_binding_plan_conflicts(&plan)
+            .expect("two borrows of same path should not conflict");
     }
 
     #[test]
@@ -7143,16 +7265,23 @@ mod tests {
         let mut plan = BindingPlan::default();
         let path = PatternPath::root().tuple_index(0);
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Move, path: path.clone(), ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: path.clone(),
+            ty: Type::I32,
         });
         plan.push(BindingPlanItem {
-            name: SymbolId(2), capture: CaptureMode::Borrow, path, ty: Type::I32,
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path,
+            ty: Type::I32,
         });
         let err = validate_binding_plan_conflicts(&plan)
             .expect_err("move+borrow same path must conflict");
         assert!(
             err.message.contains("conflicting") || err.message.contains("capture"),
-            "unexpected: {}", err.message
+            "unexpected: {}",
+            err.message
         );
     }
 
@@ -7163,8 +7292,10 @@ mod tests {
         };
         let mut plan = BindingPlan::default();
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Move,
-            path: PatternPath::root().tuple_index(0), ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
         });
         assert_eq!(scrutinee_use_from_plan(&plan), ScrutineeUse::Consumed);
     }
@@ -7176,8 +7307,10 @@ mod tests {
         };
         let mut plan = BindingPlan::default();
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Borrow,
-            path: PatternPath::root().tuple_index(0), ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Borrow,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
         });
         assert_eq!(scrutinee_use_from_plan(&plan), ScrutineeUse::Preserved);
     }
@@ -7266,11 +7399,14 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src)
-            .expect_err("inconsistent or-pattern capture modes must reject");
+        let err =
+            typecheck_source(src).expect_err("inconsistent or-pattern capture modes must reject");
         assert!(
-            err.message.contains("same") || err.message.contains("capture") || err.message.contains("alternative"),
-            "unexpected error: {}", err.message
+            err.message.contains("same")
+                || err.message.contains("capture")
+                || err.message.contains("alternative"),
+            "unexpected error: {}",
+            err.message
         );
     }
 
@@ -7286,16 +7422,23 @@ mod tests {
         let mut plan = BindingPlan::default();
         let path = PatternPath::root().variant(SymbolId(0)).variant_field(0);
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Move, path: path.clone(), ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: path.clone(),
+            ty: Type::I32,
         });
         plan.push(BindingPlanItem {
-            name: SymbolId(2), capture: CaptureMode::Borrow, path, ty: Type::I32,
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path,
+            ty: Type::I32,
         });
         let err = validate_binding_plan_conflicts(&plan)
             .expect_err("move+borrow same path must conflict");
         assert!(
             err.message.contains("conflicting") || err.message.contains("capture"),
-            "unexpected error: {}", err.message
+            "unexpected error: {}",
+            err.message
         );
     }
 
@@ -7308,10 +7451,16 @@ mod tests {
         let mut plan = BindingPlan::default();
         let path = PatternPath::root().tuple_index(0);
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Borrow, path: path.clone(), ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Borrow,
+            path: path.clone(),
+            ty: Type::I32,
         });
         plan.push(BindingPlanItem {
-            name: SymbolId(2), capture: CaptureMode::Borrow, path, ty: Type::I32,
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path,
+            ty: Type::I32,
         });
         validate_binding_plan_conflicts(&plan).expect("double-borrow same path must not conflict");
     }
@@ -7325,7 +7474,11 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(1);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Moved);
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Moved,
+        );
         // Accessing root.1 (different sibling) should be allowed.
         env.check_path_available(sym, &PatternPath::root().tuple_index(1))
             .expect("sibling path of moved path should remain available");
@@ -7338,13 +7491,19 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(2);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Moved);
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Moved,
+        );
         // Accessing root (the whole variable) overlaps with root.0 that was moved → reject.
-        let err = env.check_path_available(sym, &PatternPath::root())
+        let err = env
+            .check_path_available(sym, &PatternPath::root())
             .expect_err("use of whole var after partial move must reject");
         assert!(
             err.message.contains("partially moved") || err.message.contains("moved"),
-            "unexpected: {}", err.message
+            "unexpected: {}",
+            err.message
         );
     }
 
@@ -7357,12 +7516,10 @@ mod tests {
         env.insert(sym, Type::I32);
         let path = PatternPath::root().tuple_index(0);
         env.mark_path_state(sym, path.clone(), PathAvailability::Moved);
-        let err = env.check_path_available(sym, &path)
+        let err = env
+            .check_path_available(sym, &path)
             .expect_err("re-use of moved child path must reject");
-        assert!(
-            err.message.contains("moved"),
-            "unexpected: {}", err.message
-        );
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
     }
 
     #[test]
@@ -7373,7 +7530,8 @@ mod tests {
         let sym = SymbolId(4);
         env.insert(sym, Type::I32);
         env.mark_consumed(sym);
-        let err = env.check_path_available(sym, &PatternPath::root())
+        let err = env
+            .check_path_available(sym, &PatternPath::root())
             .expect_err("whole-consumed var must be blocked");
         assert!(err.message.contains("moved"), "unexpected: {}", err.message);
     }
@@ -7385,7 +7543,11 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(5);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Borrowed);
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Borrowed,
+        );
         env.check_path_available(sym, &PatternPath::root().tuple_index(0))
             .expect("borrow-only path should not block reads");
     }
@@ -7399,13 +7561,19 @@ mod tests {
         let sym = SymbolId(10);
         env.insert(sym, Type::I32);
         // Borrow root.0
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Borrowed);
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Borrowed,
+        );
         // Now try to move root.0 — must reject
-        let err = env.check_capture_allowed(sym, &PatternPath::root().tuple_index(0), CaptureMode::Move)
+        let err = env
+            .check_capture_allowed(sym, &PatternPath::root().tuple_index(0), CaptureMode::Move)
             .expect_err("move after borrow of same path must reject");
         assert!(
             err.message.contains("borrow") || err.message.contains("cannot move"),
-            "unexpected: {}", err.message
+            "unexpected: {}",
+            err.message
         );
     }
 
@@ -7415,12 +7583,22 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(11);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Moved);
-        let err = env.check_capture_allowed(sym, &PatternPath::root().tuple_index(0), CaptureMode::Borrow)
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Moved,
+        );
+        let err = env
+            .check_capture_allowed(
+                sym,
+                &PatternPath::root().tuple_index(0),
+                CaptureMode::Borrow,
+            )
             .expect_err("borrow after move of same path must reject");
         assert!(
             err.message.contains("moved") || err.message.contains("cannot borrow"),
-            "unexpected: {}", err.message
+            "unexpected: {}",
+            err.message
         );
     }
 
@@ -7430,9 +7608,17 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(12);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Borrowed);
-        env.check_capture_allowed(sym, &PatternPath::root().tuple_index(0), CaptureMode::Borrow)
-            .expect("borrow after borrow of same path must be ok");
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Borrowed,
+        );
+        env.check_capture_allowed(
+            sym,
+            &PatternPath::root().tuple_index(0),
+            CaptureMode::Borrow,
+        )
+        .expect("borrow after borrow of same path must be ok");
     }
 
     #[test]
@@ -7442,7 +7628,11 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(13);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Borrowed);
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Borrowed,
+        );
         env.check_capture_allowed(sym, &PatternPath::root().tuple_index(1), CaptureMode::Move)
             .expect("move of sibling of borrowed path must be ok");
     }
@@ -7472,7 +7662,7 @@ mod tests {
         let mut arena = AstArena::default();
         let sym = SymbolId(7);
         let base = arena.alloc_expr(Expr::Var(sym));
-        let idx  = arena.alloc_expr(Expr::NumericLiteral(NumericLiteral::I32(2)));
+        let idx = arena.alloc_expr(Expr::NumericLiteral(NumericLiteral::I32(2)));
         let expr = arena.alloc_expr(Expr::SequenceIndex(SequenceIndexExpr { base, index: idx }));
         let result = expr_access_path(expr, &arena);
         assert_eq!(result, Some((sym, PatternPath::root().tuple_index(2))));
@@ -7480,12 +7670,15 @@ mod tests {
 
     #[test]
     fn expr_access_path_sequence_index_non_literal_is_none() {
-        use crate::types::{SequenceIndexExpr};
+        use crate::types::SequenceIndexExpr;
         let mut arena = AstArena::default();
         let sym = SymbolId(7);
-        let base     = arena.alloc_expr(Expr::Var(sym));
-        let dyn_idx  = arena.alloc_expr(Expr::Var(SymbolId(8)));
-        let expr = arena.alloc_expr(Expr::SequenceIndex(SequenceIndexExpr { base, index: dyn_idx }));
+        let base = arena.alloc_expr(Expr::Var(sym));
+        let dyn_idx = arena.alloc_expr(Expr::Var(SymbolId(8)));
+        let expr = arena.alloc_expr(Expr::SequenceIndex(SequenceIndexExpr {
+            base,
+            index: dyn_idx,
+        }));
         // dynamic index → cannot determine path statically
         assert_eq!(expr_access_path(expr, &arena), None);
     }
@@ -7497,13 +7690,25 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(50);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Moved);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(1), PathAvailability::Moved);
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Moved,
+        );
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(1),
+            PathAvailability::Moved,
+        );
         // Now add root — should subsume both children.
         env.mark_path_state(sym, PatternPath::root(), PathAvailability::Moved);
         // Only one entry should remain: root.
         let binding = env.binding(sym).expect("binding must exist");
-        assert_eq!(binding.path_state.len(), 1, "root should subsume child entries");
+        assert_eq!(
+            binding.path_state.len(),
+            1,
+            "root should subsume child entries"
+        );
         assert_eq!(binding.path_state[0].0, PatternPath::root());
     }
 
@@ -7515,9 +7720,17 @@ mod tests {
         let sym = SymbolId(51);
         env.insert(sym, Type::I32);
         env.mark_path_state(sym, PatternPath::root(), PathAvailability::Moved);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Moved);
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Moved,
+        );
         let binding = env.binding(sym).expect("binding must exist");
-        assert_eq!(binding.path_state.len(), 1, "child must be suppressed when parent already present");
+        assert_eq!(
+            binding.path_state.len(),
+            1,
+            "child must be suppressed when parent already present"
+        );
     }
 
     #[test]
@@ -7527,7 +7740,11 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(60);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Moved);
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Moved,
+        );
         env.check_path_available(sym, &PatternPath::root().tuple_index(1))
             .expect("sibling of moved path must be accessible");
     }
@@ -7539,10 +7756,19 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(61);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Moved);
-        let err = env.check_path_available(sym, &PatternPath::root())
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Moved,
+        );
+        let err = env
+            .check_path_available(sym, &PatternPath::root())
             .expect_err("whole-var access after child move must be blocked");
-        assert!(err.message.contains("moved"), "error must mention moved: {}", err.message);
+        assert!(
+            err.message.contains("moved"),
+            "error must mention moved: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -7552,10 +7778,19 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(62);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root().tuple_index(0), PathAvailability::Moved);
-        let err = env.check_path_available(sym, &PatternPath::root().tuple_index(0))
+        env.mark_path_state(
+            sym,
+            PatternPath::root().tuple_index(0),
+            PathAvailability::Moved,
+        );
+        let err = env
+            .check_path_available(sym, &PatternPath::root().tuple_index(0))
             .expect_err("access of moved path must be blocked");
-        assert!(err.message.contains("moved"), "error must mention moved: {}", err.message);
+        assert!(
+            err.message.contains("moved"),
+            "error must mention moved: {}",
+            err.message
+        );
     }
 
     // M9.6 — prefix-overlap conflict detection
@@ -7568,18 +7803,25 @@ mod tests {
         };
         let mut plan = BindingPlan::default();
         let parent = PatternPath::root().tuple_index(0);
-        let child  = PatternPath::root().tuple_index(0).tuple_index(1);
+        let child = PatternPath::root().tuple_index(0).tuple_index(1);
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Move, path: parent, ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: parent,
+            ty: Type::I32,
         });
         plan.push(BindingPlanItem {
-            name: SymbolId(2), capture: CaptureMode::Borrow, path: child, ty: Type::I32,
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: child,
+            ty: Type::I32,
         });
         let err = validate_binding_plan_conflicts(&plan)
             .expect_err("prefix-overlap move+borrow must conflict");
         assert!(
             err.message.contains("conflicting") || err.message.contains("overlapping"),
-            "unexpected: {}", err.message
+            "unexpected: {}",
+            err.message
         );
     }
 
@@ -7591,12 +7833,18 @@ mod tests {
         };
         let mut plan = BindingPlan::default();
         let parent = PatternPath::root();
-        let child  = PatternPath::root().tuple_index(0);
+        let child = PatternPath::root().tuple_index(0);
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Move, path: parent, ty: Type::Quad,
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: parent,
+            ty: Type::Quad,
         });
         plan.push(BindingPlanItem {
-            name: SymbolId(2), capture: CaptureMode::Move, path: child, ty: Type::I32,
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: child,
+            ty: Type::I32,
         });
         validate_binding_plan_conflicts(&plan)
             .expect_err("prefix-overlap double-move must conflict");
@@ -7610,15 +7858,18 @@ mod tests {
         };
         let mut plan = BindingPlan::default();
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Move,
-            path: PatternPath::root().tuple_index(0), ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
         });
         plan.push(BindingPlanItem {
-            name: SymbolId(2), capture: CaptureMode::Move,
-            path: PatternPath::root().tuple_index(1), ty: Type::I32,
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: PatternPath::root().tuple_index(1),
+            ty: Type::I32,
         });
-        validate_binding_plan_conflicts(&plan)
-            .expect("distinct sibling paths must not conflict");
+        validate_binding_plan_conflicts(&plan).expect("distinct sibling paths must not conflict");
     }
 
     #[test]
@@ -7629,12 +7880,18 @@ mod tests {
         };
         let mut plan = BindingPlan::default();
         let parent = PatternPath::root().tuple_index(0);
-        let child  = PatternPath::root().tuple_index(0).tuple_index(1);
+        let child = PatternPath::root().tuple_index(0).tuple_index(1);
         plan.push(BindingPlanItem {
-            name: SymbolId(1), capture: CaptureMode::Borrow, path: parent, ty: Type::I32,
+            name: SymbolId(1),
+            capture: CaptureMode::Borrow,
+            path: parent,
+            ty: Type::I32,
         });
         plan.push(BindingPlanItem {
-            name: SymbolId(2), capture: CaptureMode::Borrow, path: child, ty: Type::I32,
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: child,
+            ty: Type::I32,
         });
         validate_binding_plan_conflicts(&plan)
             .expect("prefix-overlap double-borrow must not conflict");
@@ -7645,30 +7902,47 @@ mod tests {
     #[test]
     fn let_tuple_marks_moved_paths_on_source_var() {
         // `let (a, b) = src;` should typecheck — both paths move from src.
-        typecheck_source(r#"
+        typecheck_source(
+            r#"
             fn f(src: (i32, i32)) { let (a, b) = src; }
             fn main() { return; }
-        "#).expect("let-tuple destructure must typecheck");
+        "#,
+        )
+        .expect("let-tuple destructure must typecheck");
     }
 
     #[test]
     fn let_tuple_rejects_second_destructure_of_same_source() {
         // After `let (a, b) = src;` (move), `let (c, d) = src;` must be rejected.
-        let err = typecheck_source(r#"
+        let err = typecheck_source(
+            r#"
             fn f(src: (i32, i32)) { let (a, b) = src; let (c, d) = src; }
             fn main() { return; }
-        "#).expect_err("second move-destructure of same source must fail");
-        assert!(err.message.contains("moved"), "error must mention moved: {}", err.message);
+        "#,
+        )
+        .expect_err("second move-destructure of same source must fail");
+        assert!(
+            err.message.contains("moved"),
+            "error must mention moved: {}",
+            err.message
+        );
     }
 
     #[test]
     fn let_tuple_partial_move_then_full_destructure_rejected() {
         // After `let (a, _) = src;`, trying to destructure src again must fail.
-        let err = typecheck_source(r#"
+        let err = typecheck_source(
+            r#"
             fn f(src: (i32, i32)) { let (a, _) = src; let (b, c) = src; }
             fn main() { return; }
-        "#).expect_err("second destructure after partial move must fail");
-        assert!(err.message.contains("moved"), "error must mention moved: {}", err.message);
+        "#,
+        )
+        .expect_err("second destructure after partial move must fail");
+        assert!(
+            err.message.contains("moved"),
+            "error must mention moved: {}",
+            err.message
+        );
     }
 }
 
@@ -7712,7 +7986,7 @@ fn check_builtin_assert_stmt(
         adt_table,
         ret_ty,
         loop_stack,
-    impl_list,
+        impl_list,
     )?;
     if cond_ty != Type::Bool {
         return Err(FrontendError {
@@ -7752,7 +8026,7 @@ fn infer_value_block_type(
                     record_table,
                     adt_table,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
             }
             _ => {
@@ -7772,7 +8046,7 @@ fn infer_value_block_type(
         adt_table,
         ret_ty,
         loop_stack,
-    impl_list,
+        impl_list,
     )?;
     block_env.pop_scope();
     Ok(tail_ty)
@@ -7798,13 +8072,12 @@ fn infer_match_expr_type(
         adt_table,
         ret_ty.clone(),
         loop_stack,
-    impl_list,
+        impl_list,
     )?;
     // M9.4 Wave 3: widen to also allow i32/u32 (for int range patterns).
     if !matches!(
         scrutinee_ty,
-        Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _)
-            | Type::I32 | Type::U32
+        Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _) | Type::I32 | Type::U32
     ) {
         return Err(FrontendError {
             pos: 0,
@@ -7830,7 +8103,7 @@ fn infer_match_expr_type(
             adt_table,
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         let arm_ty = infer_value_block_type(
             &arm.block,
@@ -7841,7 +8114,7 @@ fn infer_match_expr_type(
             adt_table,
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         if let Some(ref expected) = result_ty {
             if *expected != arm_ty {
@@ -7868,7 +8141,7 @@ fn infer_match_expr_type(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         if let Some(expected) = result_ty {
             if expected != default_ty {
@@ -7933,7 +8206,7 @@ fn infer_loop_expr_type(
             adt_table,
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
     }
     body_env.pop_scope();
@@ -7966,18 +8239,15 @@ fn check_loop_expr_stmt(
         }),
         Stmt::While { .. } => Err(FrontendError {
             pos: 0,
-            message: "loop expression body currently does not allow while statement"
-                .to_string(),
+            message: "loop expression body currently does not allow while statement".to_string(),
         }),
         Stmt::Loop { .. } => Err(FrontendError {
             pos: 0,
-            message: "loop expression body currently does not allow statement loop"
-                .to_string(),
+            message: "loop expression body currently does not allow statement loop".to_string(),
         }),
         Stmt::ForEach { .. } => Err(FrontendError {
             pos: 0,
-            message: "loop expression body currently does not allow iterable for-each"
-                .to_string(),
+            message: "loop expression body currently does not allow iterable for-each".to_string(),
         }),
         Stmt::Guard { .. } | Stmt::Return(..) | Stmt::Continue => Err(FrontendError {
             pos: 0,
@@ -7998,7 +8268,7 @@ fn check_loop_expr_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -8020,7 +8290,7 @@ fn check_loop_expr_stmt(
                     adt_table,
                     ret_ty.clone(),
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
             }
             then_env.pop_scope();
@@ -8037,7 +8307,7 @@ fn check_loop_expr_stmt(
                     adt_table,
                     ret_ty.clone(),
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
             }
             else_env.pop_scope();
@@ -8057,13 +8327,17 @@ fn check_loop_expr_stmt(
                 adt_table,
                 ret_ty.clone(),
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             // M9.4 Wave 3: widen to also allow i32/u32 (for int range patterns).
             if !matches!(
                 st,
-                Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _)
-                    | Type::I32 | Type::U32
+                Type::Quad
+                    | Type::Adt(_)
+                    | Type::Option(_)
+                    | Type::Result(_, _)
+                    | Type::I32
+                    | Type::U32
             ) {
                 return Err(FrontendError {
                     pos: 0,
@@ -8096,7 +8370,7 @@ fn check_loop_expr_stmt(
                     adt_table,
                     ret_ty.clone(),
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 for stmt in &arm.block {
                     check_loop_expr_stmt(
@@ -8108,7 +8382,7 @@ fn check_loop_expr_stmt(
                         adt_table,
                         ret_ty.clone(),
                         loop_stack,
-                    impl_list,
+                        impl_list,
                     )?;
                 }
                 arm_env.pop_scope();
@@ -8127,7 +8401,7 @@ fn check_loop_expr_stmt(
                     adt_table,
                     ret_ty.clone(),
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
             }
             def_env.pop_scope();
@@ -8142,16 +8416,13 @@ fn check_loop_expr_stmt(
             record_table,
             adt_table,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
     }
 }
 
 /// Coherence check: at most one impl per (trait_name, for_type) pair.
-fn validate_trait_coherence(
-    impls: &[ImplDecl],
-    arena: &AstArena,
-) -> Result<(), FrontendError> {
+fn validate_trait_coherence(impls: &[ImplDecl], arena: &AstArena) -> Result<(), FrontendError> {
     let mut seen: BTreeSet<(SymbolId, SymbolId)> = BTreeSet::new();
     for imp in impls {
         let key = (imp.trait_name, imp.for_type);
@@ -8946,7 +9217,13 @@ fn ensure_type_resolved(
             context,
         ),
         Type::Map(map) => {
-            ensure_type_resolved(map.key.as_ref(), record_table, adt_table, arena, context.clone())?;
+            ensure_type_resolved(
+                map.key.as_ref(),
+                record_table,
+                adt_table,
+                arena,
+                context.clone(),
+            )?;
             ensure_type_resolved(map.val.as_ref(), record_table, adt_table, arena, context)
         }
         Type::Result(ok_ty, err_ty) => {
@@ -9279,7 +9556,7 @@ fn infer_record_literal_type(
             Some(expected_ty.clone()),
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         ensure_binding_value_type(
             expected_ty.clone(),
@@ -9329,7 +9606,7 @@ fn infer_record_field_access_type(
         adt_table,
         ret_ty,
         loop_stack,
-    impl_list,
+        impl_list,
     )?;
     let Type::Record(record_name) = base_ty else {
         return Err(FrontendError {
@@ -9359,7 +9636,7 @@ fn infer_record_field_access_type(
                 resolve_symbol_name(arena, record_name)?,
                 resolve_symbol_name(arena, field_expr.field)?
             ),
-    })?;
+        })?;
     canonicalize_declared_type(&field.ty, record_table, adt_table, arena)
 }
 
@@ -9384,7 +9661,7 @@ fn infer_sequence_index_type(
         adt_table,
         ret_ty.clone(),
         loop_stack,
-    impl_list,
+        impl_list,
     )?;
     let Type::Sequence(sequence_ty) = base_ty else {
         return Err(FrontendError {
@@ -9404,7 +9681,7 @@ fn infer_sequence_index_type(
         adt_table,
         ret_ty,
         loop_stack,
-    impl_list,
+        impl_list,
     )?;
     if index_ty != Type::I32 {
         return Err(FrontendError {
@@ -9438,7 +9715,7 @@ fn infer_record_update_type(
         adt_table,
         ret_ty.clone(),
         loop_stack,
-    impl_list,
+        impl_list,
     )?;
     let Type::Record(record_name) = base_ty else {
         return Err(FrontendError {
@@ -9500,7 +9777,7 @@ fn infer_record_update_type(
             Some(expected_ty.clone()),
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         ensure_binding_value_type(
             expected_ty.clone(),
@@ -9539,7 +9816,7 @@ fn infer_adt_ctor_type(
         expected,
         ret_ty.clone(),
         loop_stack,
-    impl_list,
+        impl_list,
     )? {
         return Ok(ty);
     }
@@ -9592,7 +9869,7 @@ fn infer_adt_ctor_type(
             Some(canonical_expected.clone()),
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         ensure_binding_value_type(
             canonical_expected,
@@ -9653,7 +9930,7 @@ fn infer_expr_type_with_expected(
                     item_expected,
                     ret_ty.clone(),
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 if item_ty == Type::RangeI32 {
                     return Err(FrontendError {
@@ -9677,7 +9954,7 @@ fn infer_expr_type_with_expected(
             expected.as_ref(),
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::SequenceIndex(index_expr) => infer_sequence_index_type(
             index_expr,
@@ -9688,7 +9965,7 @@ fn infer_expr_type_with_expected(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::Closure(closure) => infer_closure_literal_type(
             closure,
@@ -9700,7 +9977,7 @@ fn infer_expr_type_with_expected(
             expected.as_ref(),
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::AdtCtor(ctor_expr) => infer_adt_ctor_type(
             ctor_expr,
@@ -9712,7 +9989,7 @@ fn infer_expr_type_with_expected(
             expected.as_ref(),
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         ),
         Expr::Call(name, args) => {
             // Special case: map_empty() uses contextual type
@@ -9723,10 +10000,9 @@ fn infer_expr_type_with_expected(
                         _ => {
                             return Err(FrontendError {
                                 pos: 0,
-                                message:
-                                    "map_empty() requires a contextual Map(K, V) type; \
+                                message: "map_empty() requires a contextual Map(K, V) type; \
                                      use 'let q: Map(K, V) = map_empty()'"
-                                        .to_string(),
+                                    .to_string(),
                             })
                         }
                     }
@@ -9741,7 +10017,7 @@ fn infer_expr_type_with_expected(
                 adt_table,
                 ret_ty,
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             Ok(
                 lift_literal_to_expected_type(expected.as_ref(), &actual, expr_id, arena)
@@ -9758,7 +10034,7 @@ fn infer_expr_type_with_expected(
                 adt_table,
                 ret_ty,
                 loop_stack,
-            impl_list,
+                impl_list,
             )?;
             Ok(
                 lift_literal_to_expected_type(expected.as_ref(), &actual, expr_id, arena)
@@ -9815,7 +10091,7 @@ fn infer_sequence_literal_type(
             Some(expected_item.clone()),
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         ensure_binding_value_type(
             expected_item.clone(),
@@ -9835,7 +10111,7 @@ fn infer_sequence_literal_type(
             adt_table,
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?
     };
 
@@ -9850,7 +10126,7 @@ fn infer_sequence_literal_type(
             Some(first_ty.clone()),
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         ensure_binding_value_type(
             first_ty.clone(),
@@ -9922,7 +10198,7 @@ fn infer_closure_literal_type(
         Some(expected_closure.ret.as_ref().clone()),
         ret_ty,
         loop_stack,
-    impl_list,
+        impl_list,
     )?;
     ensure_binding_value_type(
         expected_closure.ret.as_ref().clone(),
@@ -9970,7 +10246,7 @@ fn infer_std_form_ctor_type(
                         Some(expected_item.clone()),
                         ret_ty,
                         loop_stack,
-                    impl_list,
+                        impl_list,
                     )?;
                     ensure_binding_value_type(
                         expected_item.clone(),
@@ -9990,7 +10266,7 @@ fn infer_std_form_ctor_type(
                         adt_table,
                         ret_ty,
                         loop_stack,
-                    impl_list,
+                        impl_list,
                     )?
                 };
                 Ok(Some(Type::Option(Box::new(item_ty))))
@@ -10056,7 +10332,7 @@ fn infer_std_form_ctor_type(
                     Some(expected_payload.clone()),
                     ret_ty,
                     loop_stack,
-                impl_list,
+                    impl_list,
                 )?;
                 ensure_binding_value_type(
                     expected_payload,
@@ -10181,9 +10457,8 @@ fn missing_exhaustive_sum_variants<'a>(
                 }
                 if let MatchPattern::Adt(adt_pat) = alt {
                     if resolve_symbol_name(arena, adt_pat.adt_name)? == family.family_name {
-                        covered.insert(
-                            resolve_symbol_name(arena, adt_pat.variant_name)?.to_string(),
-                        );
+                        covered
+                            .insert(resolve_symbol_name(arena, adt_pat.variant_name)?.to_string());
                     }
                 }
             }
@@ -10244,7 +10519,7 @@ fn check_match_guard(
             adt_table,
             ret_ty,
             loop_stack,
-        impl_list,
+            impl_list,
         )?;
         if guard_ty != Type::Bool {
             return Err(FrontendError {
@@ -10280,7 +10555,7 @@ fn check_return_payload(
             Some(ret_ty.clone()),
             ret_ty.clone(),
             loop_stack,
-        impl_list,
+            impl_list,
         )?
     } else {
         Type::Unit
@@ -10396,7 +10671,9 @@ fn ensure_const_initializer_safe(
 /// Multiple borrows of the same path are allowed.
 /// M9.6: returns true if every element of `a` is a prefix of `b`.
 fn path_is_prefix(a: &PatternPath, b: &PatternPath) -> bool {
-    if a.elems.len() > b.elems.len() { return false; }
+    if a.elems.len() > b.elems.len() {
+        return false;
+    }
     a.elems.iter().zip(&b.elems).all(|(x, y)| x == y)
 }
 
@@ -10462,7 +10739,8 @@ pub(crate) fn build_tuple_pattern_plan(
         return Err(FrontendError {
             pos: 0,
             message: format!(
-                "tuple pattern requires tuple scrutinee, got {:?}", expected_ty
+                "tuple pattern requires tuple scrutinee, got {:?}",
+                expected_ty
             ),
         });
     };
@@ -10471,7 +10749,8 @@ pub(crate) fn build_tuple_pattern_plan(
             pos: 0,
             message: format!(
                 "tuple pattern arity mismatch: pattern has {} items, value has {}",
-                items.len(), tuple_items.len()
+                items.len(),
+                tuple_items.len()
             ),
         });
     }
@@ -10555,8 +10834,8 @@ pub(crate) fn build_adt_pattern_plan(
     arena: &AstArena,
     adt_table: &AdtTable,
 ) -> Result<(), FrontendError> {
-    let family = resolve_match_family_spec(expected_ty, arena, adt_table)?
-        .ok_or_else(|| FrontendError {
+    let family =
+        resolve_match_family_spec(expected_ty, arena, adt_table)?.ok_or_else(|| FrontendError {
             pos: 0,
             message: "ADT pattern plan: scrutinee is not a sum type".to_string(),
         })?;
@@ -10589,8 +10868,10 @@ pub(crate) fn build_adt_pattern_plan(
             pos: 0,
             message: format!(
                 "ADT pattern '{}::{}' arity mismatch: pattern has {} items, variant has {}",
-                family.family_name, variant_name_str,
-                pat.items.len(), variant.payload.len()
+                family.family_name,
+                variant_name_str,
+                pat.items.len(),
+                variant.payload.len()
             ),
         });
     }
@@ -10650,10 +10931,19 @@ pub(crate) fn build_match_pattern_plan(
                 });
             }
             let mut first_plan = BindingPlan::default();
-            build_match_pattern_plan(&alts[0], expected_ty, base, &mut first_plan, arena, adt_table)?;
+            build_match_pattern_plan(
+                &alts[0],
+                expected_ty,
+                base,
+                &mut first_plan,
+                arena,
+                adt_table,
+            )?;
             validate_binding_plan_conflicts(&first_plan)?;
 
-            let baseline: Vec<(u32, CaptureMode)> = first_plan.items.iter()
+            let baseline: Vec<(u32, CaptureMode)> = first_plan
+                .items
+                .iter()
                 .map(|it| (it.name.0, it.capture))
                 .collect();
 
@@ -10662,7 +10952,9 @@ pub(crate) fn build_match_pattern_plan(
                 build_match_pattern_plan(alt, expected_ty, base, &mut alt_plan, arena, adt_table)?;
                 validate_binding_plan_conflicts(&alt_plan)?;
 
-                let shape: Vec<(u32, CaptureMode)> = alt_plan.items.iter()
+                let shape: Vec<(u32, CaptureMode)> = alt_plan
+                    .items
+                    .iter()
                     .map(|it| (it.name.0, it.capture))
                     .collect();
 
@@ -10695,7 +10987,14 @@ pub(crate) fn build_and_apply_match_plan<'e>(
     adt_table: &AdtTable,
 ) -> Result<(BindingPlan, ScopeEnv), FrontendError> {
     let mut plan = BindingPlan::default();
-    build_match_pattern_plan(pattern, scrutinee_ty, &PatternPath::root(), &mut plan, arena, adt_table)?;
+    build_match_pattern_plan(
+        pattern,
+        scrutinee_ty,
+        &PatternPath::root(),
+        &mut plan,
+        arena,
+        adt_table,
+    )?;
     validate_binding_plan_conflicts(&plan)?;
     let mut arm_env = env.clone();
     arm_env.push_scope();
@@ -10713,7 +11012,9 @@ pub(crate) fn validate_plan_against_scrutinee_state(
     arena: &AstArena,
     plan: &BindingPlan,
 ) -> Result<(), FrontendError> {
-    let Expr::Var(name) = arena.expr(scrutinee_expr) else { return Ok(()); };
+    let Expr::Var(name) = arena.expr(scrutinee_expr) else {
+        return Ok(());
+    };
     for item in &plan.items {
         env.check_capture_allowed(*name, &item.path, item.capture)?;
     }
@@ -10794,7 +11095,15 @@ fn infer_expr_type_no_check(
             })
         }
         _ => infer_expr_type(
-            expr_id, arena, env, table, record_table, adt_table, ret_ty, loop_stack, impl_list,
+            expr_id,
+            arena,
+            env,
+            table,
+            record_table,
+            adt_table,
+            ret_ty,
+            loop_stack,
+            impl_list,
         ),
     }
 }
@@ -10806,11 +11115,13 @@ pub(crate) fn apply_plans_to_scrutinee(
     arena: &AstArena,
     env: &mut ScopeEnv,
 ) {
-    let Expr::Var(var_name) = arena.expr(scrutinee_expr) else { return; };
+    let Expr::Var(var_name) = arena.expr(scrutinee_expr) else {
+        return;
+    };
     for plan in plans {
         for item in &plan.items {
             let avail = match item.capture {
-                CaptureMode::Move   => PathAvailability::Moved,
+                CaptureMode::Move => PathAvailability::Moved,
                 CaptureMode::Borrow => PathAvailability::Borrowed,
             };
             env.mark_path_state(*var_name, item.path.clone(), avail);

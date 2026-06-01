@@ -12,11 +12,14 @@ fn repo_path(rel: &str) -> PathBuf {
 }
 
 fn fixture_path(rel: &str) -> PathBuf {
-    repo_path(&format!("tests/fixtures/pcc9_project_model_diagnostics/{rel}"))
+    repo_path(&format!(
+        "tests/fixtures/pcc9_project_model_diagnostics/{rel}"
+    ))
 }
 
 fn fixture_text(rel: &str) -> String {
-    std::fs::read_to_string(fixture_path(rel)).unwrap_or_else(|err| panic!("read fixture {rel}: {err}"))
+    std::fs::read_to_string(fixture_path(rel))
+        .unwrap_or_else(|err| panic!("read fixture {rel}: {err}"))
 }
 
 fn mk_temp_dir(prefix: &str) -> PathBuf {
@@ -48,7 +51,10 @@ fn assert_manifest_validate_error(rel: &str, code: PackageManifestValidationCode
     let source = fixture_text(rel);
     let manifest = parse_package_manifest_baseline(&source).expect("parse");
     let err = validate_package_manifest_baseline(&manifest).expect_err("must reject");
-    assert_eq!(err.code, code, "unexpected validation code for {rel}: {err:?}");
+    assert_eq!(
+        err.code, code,
+        "unexpected validation code for {rel}: {err:?}"
+    );
     assert!(
         err.message.contains(needle),
         "expected validation error containing '{needle}' for {rel}, got: {}",
@@ -56,7 +62,12 @@ fn assert_manifest_validate_error(rel: &str, code: PackageManifestValidationCode
     );
 }
 
-fn assert_entry_admission_error(rel: &str, entry_rel: &str, code: PackageModuleAdmissionCode, needle: &str) {
+fn assert_entry_admission_error(
+    rel: &str,
+    entry_rel: &str,
+    code: PackageModuleAdmissionCode,
+    needle: &str,
+) {
     let dir = mk_temp_dir("pcc9_entry_admission_error");
     std::fs::create_dir_all(dir.join("src")).expect("mkdir src");
     let manifest_path = dir.join(PACKAGE_MANIFEST_FILE_NAME);
@@ -69,7 +80,10 @@ fn assert_entry_admission_error(rel: &str, entry_rel: &str, code: PackageModuleA
     std::fs::write(&entry, "fn main() { return; }").expect("write entry");
 
     let err = admit_package_entry_module(&entry).expect_err("must reject");
-    assert_eq!(err.code, code, "unexpected entry admission code for {rel}: {err:?}");
+    assert_eq!(
+        err.code, code,
+        "unexpected entry admission code for {rel}: {err:?}"
+    );
     assert!(
         err.message.contains(needle),
         "expected entry admission error containing '{needle}' for {rel}, got: {}",
@@ -108,13 +122,15 @@ module_root src
     .expect("write dep manifest");
 
     let importer = app_dir.join("main.sm");
-    std::fs::write(&importer, format!("Import \"{import}\"\nfn main() {{ return; }}\n"))
-        .expect("write importer");
+    std::fs::write(
+        &importer,
+        format!("Import \"{import}\"\nfn main() {{ return; }}\n"),
+    )
+    .expect("write importer");
 
     let err = resolve_package_import_path(&importer, import).expect_err("must reject");
     assert_eq!(
-        err.code,
-        code,
+        err.code, code,
         "unexpected import resolution code for {rel}: {err:?}"
     );
     assert!(

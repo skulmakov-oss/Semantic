@@ -141,11 +141,11 @@ fn update_mode() -> bool {
 
 fn write_text(path: &PathBuf, text: &str) {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).unwrap_or_else(|err| {
-            panic!("create_dir_all failed for {}: {err}", parent.display())
-        });
+        fs::create_dir_all(parent)
+            .unwrap_or_else(|err| panic!("create_dir_all failed for {}: {err}", parent.display()));
     }
-    fs::write(path, text).unwrap_or_else(|err| panic!("write failed for {}: {err}", path.display()));
+    fs::write(path, text)
+        .unwrap_or_else(|err| panic!("write failed for {}: {err}", path.display()));
 }
 
 fn assert_text_file(path: &PathBuf, got: &str) {
@@ -158,7 +158,12 @@ fn assert_text_file(path: &PathBuf, got: &str) {
         &fs::read_to_string(path)
             .unwrap_or_else(|err| panic!("read failed for {}: {err}", path.display())),
     );
-    assert_eq!(expected, got, "replay artifact drifted at {}", path.display());
+    assert_eq!(
+        expected,
+        got,
+        "replay artifact drifted at {}",
+        path.display()
+    );
 }
 
 fn json_escape(text: &str) -> String {
@@ -183,7 +188,9 @@ fn render_manifest() -> String {
     out.push_str("Status: checked-in replay selection\n");
     out.push_str("Owner: language maturity / execution contract\n");
     out.push_str("Scope: admitted PCC-7 collection replay evidence only\n");
-    out.push_str("Non-goal: collection policy changes, project-root determinism, or release freeze\n\n");
+    out.push_str(
+        "Non-goal: collection policy changes, project-root determinism, or release freeze\n\n",
+    );
     out.push_str("| replay_id | pcc | surface | source_fixture | artifact | expected_status |\n");
     out.push_str("| --- | --- | --- | --- | --- | --- |\n");
     for case in TRACE_CASES {

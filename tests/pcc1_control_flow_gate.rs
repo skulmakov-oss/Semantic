@@ -157,7 +157,10 @@ fn pcc1_control_flow_repeated_pipeline_is_stable() {
     let input = "tests/fixtures/pcc1_control_flow/positive_loop_break_continue.sm";
     let first = compile_verify_run_smc(input, "repeated_first.smc");
     let second = compile_verify_run_smc(input, "repeated_second.smc");
-    assert_eq!(first, second, "emitted SemCode drifted across repeated PCC-1 gate runs");
+    assert_eq!(
+        first, second,
+        "emitted SemCode drifted across repeated PCC-1 gate runs"
+    );
 }
 
 #[test]
@@ -224,8 +227,12 @@ fn pcc1_continue_after_nested_loop_outside_loop_rejects() {
 
 #[test]
 fn pcc1_nested_control_flow_repeated_pipeline_is_stable() {
-    let input = "tests/fixtures/pcc1_control_flow/positive_nested_loop_break_then_outer_continue.sm";
+    let input =
+        "tests/fixtures/pcc1_control_flow/positive_nested_loop_break_then_outer_continue.sm";
     let first = compile_verify_run_smc(input, "nested_repeated_first.smc");
     let second = compile_verify_run_smc(input, "nested_repeated_second.smc");
-    assert_eq!(first, second, "nested control-flow emitted SemCode drifted across repeated PCC-1 gate runs");
+    assert_eq!(
+        first, second,
+        "nested control-flow emitted SemCode drifted across repeated PCC-1 gate runs"
+    );
 }

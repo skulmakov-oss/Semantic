@@ -1,6 +1,5 @@
 use prom_ui_runtime::component_metadata::{
-    find_ui_component, ui_components, UiComponentAdmission, UiComponentDomain,
-    UiComponentKind,
+    find_ui_component, ui_components, UiComponentAdmission, UiComponentDomain, UiComponentKind,
 };
 
 #[test]
@@ -26,7 +25,10 @@ fn ui_component_registry_contains_required_metadata_roles() {
     ];
 
     for id in required {
-        assert!(find_ui_component(id).is_some(), "missing component metadata: {id}");
+        assert!(
+            find_ui_component(id).is_some(),
+            "missing component metadata: {id}"
+        );
     }
 }
 

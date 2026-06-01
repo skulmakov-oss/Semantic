@@ -7,14 +7,11 @@
 
 use crate::action_binding::{
     find_interaction_action_binding_by_intent, InteractionActionAdmissionPolicy,
-    InteractionActionBindingDescriptor, InteractionActionBindingId,
-    InteractionActionEffectPolicy, InteractionActionName, InteractionActionTargetPolicy,
-    InteractionActionTracePolicy,
+    InteractionActionBindingDescriptor, InteractionActionBindingId, InteractionActionEffectPolicy,
+    InteractionActionName, InteractionActionTargetPolicy, InteractionActionTracePolicy,
 };
 use crate::interaction::{InteractionIntentId, InteractionIntentKind};
-use crate::trace::{
-    InteractionIntentTraceReport, InteractionIntentTraceStatus,
-};
+use crate::trace::{InteractionIntentTraceReport, InteractionIntentTraceStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InteractionActionBindingTraceStatus {
@@ -50,13 +47,22 @@ pub struct InteractionActionBindingTraceReport {
 pub fn trace_interaction_action_binding(
     intent_trace: &InteractionIntentTraceReport,
 ) -> InteractionActionBindingTraceReport {
-    if matches!(intent_trace.status, InteractionIntentTraceStatus::Unclassified) {
-        return unbound_report(intent_trace, InteractionActionBindingTraceReason::IntentUnclassified);
+    if matches!(
+        intent_trace.status,
+        InteractionIntentTraceStatus::Unclassified
+    ) {
+        return unbound_report(
+            intent_trace,
+            InteractionActionBindingTraceReason::IntentUnclassified,
+        );
     }
 
     match find_interaction_action_binding_by_intent(intent_trace.intent_kind) {
         Some(binding) => bound_report(intent_trace, binding),
-        None => unbound_report(intent_trace, InteractionActionBindingTraceReason::NoBindingForIntent),
+        None => unbound_report(
+            intent_trace,
+            InteractionActionBindingTraceReason::NoBindingForIntent,
+        ),
     }
 }
 
@@ -140,7 +146,10 @@ mod tests {
 
         let report = trace_interaction_action_binding(&intent_trace);
 
-        assert_eq!(report.binding_status, InteractionActionBindingTraceStatus::Bound);
+        assert_eq!(
+            report.binding_status,
+            InteractionActionBindingTraceStatus::Bound
+        );
         assert_eq!(report.action, Some(InteractionActionName::CloseWindow));
         assert_eq!(
             report.reason,
@@ -164,7 +173,10 @@ mod tests {
 
         let report = trace_interaction_action_binding(&intent_trace);
 
-        assert_eq!(report.binding_status, InteractionActionBindingTraceStatus::Bound);
+        assert_eq!(
+            report.binding_status,
+            InteractionActionBindingTraceStatus::Bound
+        );
         assert_eq!(report.action, Some(InteractionActionName::SelectTraceEvent));
         assert_eq!(
             report.target_policy,
@@ -192,7 +204,10 @@ mod tests {
 
         let report = trace_interaction_action_binding(&intent_trace);
 
-        assert_eq!(report.binding_status, InteractionActionBindingTraceStatus::Unbound);
+        assert_eq!(
+            report.binding_status,
+            InteractionActionBindingTraceStatus::Unbound
+        );
         assert_eq!(
             report.reason,
             InteractionActionBindingTraceReason::IntentUnclassified
@@ -217,7 +232,10 @@ mod tests {
 
         let report = trace_interaction_action_binding(&intent_trace);
 
-        assert_eq!(report.binding_status, InteractionActionBindingTraceStatus::Unbound);
+        assert_eq!(
+            report.binding_status,
+            InteractionActionBindingTraceStatus::Unbound
+        );
         assert_eq!(
             report.reason,
             InteractionActionBindingTraceReason::NoBindingForIntent

@@ -2,12 +2,12 @@ use std::vec::Vec;
 
 use prom_audit::hello_observation_audit::{
     build_hello_observation_audit_event, HelloObservationAuditEvent,
-    HelloObservationAuditLinkage, HelloObservationAuditPayloadRef,
-    HelloObservationAuditPolicyClass, HelloObservationAuditEventKind,
+    HelloObservationAuditEventKind, HelloObservationAuditLinkage, HelloObservationAuditPayloadRef,
+    HelloObservationAuditPolicyClass,
 };
 use sm_runtime_core::hello_observation_route::{
-    route_hello_observation_to_sink, HelloObservationRouteError,
-    HelloObservationRouteInput, HelloObservationRouteResult,
+    route_hello_observation_to_sink, HelloObservationRouteError, HelloObservationRouteInput,
+    HelloObservationRouteResult,
 };
 use sm_runtime_core::hello_observation_sink::{
     HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
@@ -28,10 +28,7 @@ struct InMemorySink {
 }
 
 impl HelloObservationSink for InMemorySink {
-    fn observe(
-        &mut self,
-        event: HelloObservationEvent,
-    ) -> Result<(), HelloObservationSinkError> {
+    fn observe(&mut self, event: HelloObservationEvent) -> Result<(), HelloObservationSinkError> {
         if self.reject {
             return Err(HelloObservationSinkError::Denied);
         }
@@ -98,7 +95,10 @@ fn hello_observation_audit_decision_records_required_routed_observation() {
     assert_eq!(sink.events.len(), 1);
     let event = &sink.events[0];
     assert_eq!(event.operation_kind, "controlled_observation_text");
-    assert_eq!(event.observation_class, HelloObservationClass::ControlledText);
+    assert_eq!(
+        event.observation_class,
+        HelloObservationClass::ControlledText
+    );
     assert_eq!(event.text, "Hello, World!");
     assert_eq!(event.sequence_index, HelloObservationSequenceIndex(0));
 
@@ -116,7 +116,10 @@ fn hello_observation_audit_decision_records_required_routed_observation() {
 
     match decision {
         HelloObservationAuditDecision::Recorded(recorded) => {
-            assert_eq!(recorded.event_kind, HelloObservationAuditEventKind::Observation);
+            assert_eq!(
+                recorded.event_kind,
+                HelloObservationAuditEventKind::Observation
+            );
             assert_eq!(recorded.operation_kind, "controlled_observation_text");
             assert_eq!(recorded.observation_class, "controlled");
             assert_eq!(
@@ -197,9 +200,7 @@ fn hello_observation_audit_decision_does_not_record_for_not_routed_variants() {
         let route_result = route_with_sink(true, forbidden, 1, &mut sink);
         assert_eq!(
             route_result,
-            HelloObservationRouteResult::NotRouted(
-                HelloObservationRouteError::ForbiddenHostOutput
-            )
+            HelloObservationRouteResult::NotRouted(HelloObservationRouteError::ForbiddenHostOutput)
         );
         assert_eq!(
             audit_after_route(
@@ -217,10 +218,15 @@ fn hello_observation_audit_decision_does_not_record_for_not_routed_variants() {
         );
     }
 
-    let sink_rejected = route_with_sink(true, "Hello, World!", 2, &mut InMemorySink {
-        events: Vec::new(),
-        reject: true,
-    });
+    let sink_rejected = route_with_sink(
+        true,
+        "Hello, World!",
+        2,
+        &mut InMemorySink {
+            events: Vec::new(),
+            reject: true,
+        },
+    );
     assert_eq!(
         sink_rejected,
         HelloObservationRouteResult::NotRouted(HelloObservationRouteError::SinkRejected)

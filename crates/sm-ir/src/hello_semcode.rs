@@ -1,6 +1,6 @@
 use crate::hello_ir::{
-    HelloIrCompleteQuad, HelloIrLocalQuad, HelloIrModule, HelloIrObserveText,
-    HelloIrQuadLit, HelloIrRequireQuadEq, HelloIrStmt,
+    HelloIrCompleteQuad, HelloIrLocalQuad, HelloIrModule, HelloIrObserveText, HelloIrQuadLit,
+    HelloIrRequireQuadEq, HelloIrStmt,
 };
 use crate::FrontendError;
 use std::string::String;
@@ -49,7 +49,10 @@ pub fn render_hello_conceptual_semcode(
     }
 
     if lines.is_empty() {
-        return Err(FrontendError::syntax(0, "Hello conceptual SemCode requires at least one statement"));
+        return Err(FrontendError::syntax(
+            0,
+            "Hello conceptual SemCode requires at least one statement",
+        ));
     }
 
     Ok(lines)

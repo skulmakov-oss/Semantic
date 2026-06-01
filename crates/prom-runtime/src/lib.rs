@@ -691,12 +691,7 @@ mod tests {
             vec![RuleCondition::equals("fact.alpha", FactValue::Bool(true))],
         )
         .with_effects(vec![
-            RuleEffect::state_write(
-                "fact.beta",
-                FactValue::I32(2),
-                "window.beta",
-                "derive beta",
-            ),
+            RuleEffect::state_write("fact.beta", FactValue::I32(2), "window.beta", "derive beta"),
             RuleEffect::state_write(
                 "fact.gamma",
                 FactValue::Text("ready".to_string()),
@@ -773,10 +768,7 @@ mod tests {
             .apply_rule_state_write_effects(&mut state, &rule, &rules, &mut audit)
             .expect_err("audit-note execution is not admitted in first wave");
 
-        assert_eq!(
-            err.code,
-            RuleEffectExecutionCode::UnsupportedEffectFamily
-        );
+        assert_eq!(err.code, RuleEffectExecutionCode::UnsupportedEffectFamily);
         assert_eq!(err.rule_id.0, "rule.alpha");
         assert_eq!(err.effect_ordinal, 0);
         assert!(audit.events().is_empty());
@@ -845,10 +837,7 @@ mod tests {
             .apply_rule_audit_note_effects(&mut audit, &rule)
             .expect_err("state-write execution is not admitted in audit-note slice");
 
-        assert_eq!(
-            err.code,
-            RuleEffectExecutionCode::UnsupportedEffectFamily
-        );
+        assert_eq!(err.code, RuleEffectExecutionCode::UnsupportedEffectFamily);
         assert_eq!(err.rule_id.0, "rule.alpha");
         assert_eq!(err.effect_ordinal, 0);
         assert!(audit.events().is_empty());

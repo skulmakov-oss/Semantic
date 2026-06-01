@@ -5,8 +5,8 @@
 //! VM/Host ABI calls, or runtime mutation.
 
 use crate::action_admission::{
-    InteractionActionAdmissionEffectRelationship,
-    InteractionActionAdmissionPolicyGateNamespace, InteractionActionAdmissionTraceRequirement,
+    InteractionActionAdmissionEffectRelationship, InteractionActionAdmissionPolicyGateNamespace,
+    InteractionActionAdmissionTraceRequirement,
 };
 use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
 use crate::admitted_action::{
@@ -158,10 +158,8 @@ mod tests {
     };
     use crate::action_admission_result::InteractionActionAdmissionResultId;
     use crate::admitted_action::{
-        InteractionAdmittedSemanticAction,
-        InteractionAdmittedSemanticActionDispatchReadiness,
-        InteractionAdmittedSemanticActionEffectReadiness,
-        InteractionAdmittedSemanticActionId,
+        InteractionAdmittedSemanticAction, InteractionAdmittedSemanticActionDispatchReadiness,
+        InteractionAdmittedSemanticActionEffectReadiness, InteractionAdmittedSemanticActionId,
     };
 
     fn close_admitted_action() -> InteractionAdmittedSemanticAction {
@@ -215,7 +213,8 @@ mod tests {
     #[test]
     fn workbench_local_maps_to_workbench_candidate() {
         let mut action = select_admitted_action();
-        action.policy_gate_namespace = InteractionActionAdmissionPolicyGateNamespace::WorkbenchLocal;
+        action.policy_gate_namespace =
+            InteractionActionAdmissionPolicyGateNamespace::WorkbenchLocal;
 
         let route = describe_interaction_semantic_action_dispatch_route(&action);
 

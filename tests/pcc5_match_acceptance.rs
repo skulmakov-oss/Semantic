@@ -13,15 +13,17 @@ fn cli_ok(args: Vec<String>, context: &str) {
 }
 
 fn mk_temp_dir(prefix: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(format!(
-        "{}_{}_{}",
-        prefix,
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos()
-    ));
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!(
+            "{}_{}_{}",
+            prefix,
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir
 }
@@ -69,5 +71,7 @@ fn pcc5_match_function_boundary_fixture_passes_full_cli_path() {
 
 #[test]
 fn pcc5_match_constructor_from_function_fixture_passes_full_cli_path() {
-    check_run_compile_verify("tests/fixtures/pcc5_match/positive_match_constructor_from_function.sm");
+    check_run_compile_verify(
+        "tests/fixtures/pcc5_match/positive_match_constructor_from_function.sm",
+    );
 }

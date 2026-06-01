@@ -1,20 +1,19 @@
 use crate::semcode_format::{
     header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8,
-    supported_headers, Opcode, SemcodeFormatError, SemcodeHeaderSpec,
-    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG,
+    supported_headers, Opcode, SemcodeFormatError, SemcodeHeaderSpec, OWNERSHIP_EVENT_KIND_BORROW,
+    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
 use crate::QuadVal;
 use prom_abi::{AbiError, AbiValue, HostCallId, PrometheusHostAbi};
 use prom_cap::{CapabilityChecker, CapabilityDenied, UiCapabilityChecker, UiCapabilityDenied};
 use prom_ui::UiOperationId;
+use sm_runtime_core::hello_observation_sink::{
+    HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
+};
 use sm_runtime_core::{
     AccessPath, AdtCarrier, ExecutionConfig, ExecutionContext, QuotaExceeded, QuotaKind,
     RecordCarrier, RuntimeQuotas, RuntimeSymbolTable, RuntimeTrap, SymbolId,
-};
-use sm_runtime_core::hello_observation_sink::{
-    HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
 };
 use sm_verify::verify_semcode;
 use sm_verify::RejectReport;
@@ -129,10 +128,7 @@ impl<'a> HelloObservationRuntime<'a> {
         }
     }
 
-    fn record_controlled_text_observation(
-        &mut self,
-        text: String,
-    ) -> Result<(), RuntimeError> {
+    fn record_controlled_text_observation(&mut self, text: String) -> Result<(), RuntimeError> {
         if matches!(
             text.as_str(),
             "stdout" | "print" | "io.write" | "file" | "network" | "stdin"
@@ -160,10 +156,16 @@ impl<'a> HelloObservationRuntime<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
     BadHeader,
-    UnsupportedBytecodeVersion { found: String, supported: String },
+    UnsupportedBytecodeVersion {
+        found: String,
+        supported: String,
+    },
     BadFormat(String),
     UnknownFunction(String),
-    InvalidJumpAddress { func: String, addr: usize },
+    InvalidJumpAddress {
+        func: String,
+        addr: usize,
+    },
     TypeMismatchRuntime(String),
     StackUnderflow,
     StackOverflow,
@@ -352,7 +354,11 @@ pub fn run_verified_semcode_with_ui_capabilities<
         prng_state: 0,
     };
     push_frame(&mut vm, "main", Vec::new(), None)?;
-    let mut bridge = PrometheusUiVmHost { host, capabilities, ui_capabilities };
+    let mut bridge = PrometheusUiVmHost {
+        host,
+        capabilities,
+        ui_capabilities,
+    };
     let mut observation = HelloObservationRuntime::discard();
     exec_loop(&mut vm, &mut bridge, &mut observation)
 }
@@ -1075,9 +1081,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
         self.capabilities
             .require_call(HostCallId::EventPost)
             .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .event_post(signal)
-            .map_err(RuntimeError::HostAbi)
+        self.host.event_post(signal).map_err(RuntimeError::HostAbi)
     }
 
     fn clock_read(&mut self) -> Result<Value, RuntimeError> {
@@ -1154,9 +1158,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker, U: UiCapabilityChecker> VmH
         self.capabilities
             .require_call(HostCallId::EventPost)
             .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .event_post(signal)
-            .map_err(RuntimeError::HostAbi)
+        self.host.event_post(signal).map_err(RuntimeError::HostAbi)
     }
 
     fn clock_read(&mut self) -> Result<Value, RuntimeError> {
@@ -2476,7 +2478,9 @@ fn as_text(v: Value) -> Result<String, RuntimeError> {
     if let Value::Text(x) = v {
         Ok(x)
     } else {
-        Err(RuntimeError::TypeMismatchRuntime("expected text".to_string()))
+        Err(RuntimeError::TypeMismatchRuntime(
+            "expected text".to_string(),
+        ))
     }
 }
 
@@ -3367,7 +3371,10 @@ mod tests {
             frame.borrowed_paths[0].components,
             vec![PathComponent::TupleIndex(0)]
         );
-        assert_eq!(vm.symbols.resolve(frame.borrowed_paths[0].root), Some("pair"));
+        assert_eq!(
+            vm.symbols.resolve(frame.borrowed_paths[0].root),
+            Some("pair")
+        );
     }
 
     #[test]
@@ -4116,7 +4123,10 @@ mod tests {
         assert_eq!(events.len(), 1);
         let event = &events[0];
         assert_eq!(event.operation_kind, "controlled_observation_text");
-        assert_eq!(event.observation_class, HelloObservationClass::ControlledText);
+        assert_eq!(
+            event.observation_class,
+            HelloObservationClass::ControlledText
+        );
         assert_eq!(event.text, "Hello, World!");
         assert_eq!(event.sequence_index, HelloObservationSequenceIndex(0));
     }
@@ -4416,12 +4426,7 @@ mod tests {
             root,
             borrowed_components,
         );
-        append_ownership_event(
-            &mut out,
-            OWNERSHIP_EVENT_KIND_WRITE,
-            root,
-            write_components,
-        );
+        append_ownership_event(&mut out, OWNERSHIP_EVENT_KIND_WRITE, root, write_components);
         out
     }
 

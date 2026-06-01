@@ -5,8 +5,8 @@ use prom_cap::hello_observation_capability::{
     HelloObservationCapabilityDecision, HelloObservationCapabilityDenial,
 };
 use sm_runtime_core::hello_observation_route::{
-    route_hello_observation_to_sink, HelloObservationRouteError,
-    HelloObservationRouteInput, HelloObservationRouteResult,
+    route_hello_observation_to_sink, HelloObservationRouteError, HelloObservationRouteInput,
+    HelloObservationRouteResult,
 };
 use sm_runtime_core::hello_observation_sink::{
     HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
@@ -27,10 +27,7 @@ struct InMemorySink {
 }
 
 impl HelloObservationSink for InMemorySink {
-    fn observe(
-        &mut self,
-        event: HelloObservationEvent,
-    ) -> Result<(), HelloObservationSinkError> {
+    fn observe(&mut self, event: HelloObservationEvent) -> Result<(), HelloObservationSinkError> {
         if self.reject {
             return Err(HelloObservationSinkError::Denied);
         }
@@ -88,7 +85,10 @@ fn hello_capability_gated_route_routes_admitted_hello_only_after_allow() {
     assert_eq!(sink.events.len(), 1);
     let event = &sink.events[0];
     assert_eq!(event.operation_kind, "controlled_observation_text");
-    assert_eq!(event.observation_class, HelloObservationClass::ControlledText);
+    assert_eq!(
+        event.observation_class,
+        HelloObservationClass::ControlledText
+    );
     assert_eq!(event.text, "Hello, World!");
     assert_eq!(event.sequence_index, HelloObservationSequenceIndex(0));
 }
@@ -98,66 +98,66 @@ fn hello_capability_gated_route_denies_before_route_when_capability_denied() {
     for (context, expected_reason) in [
         (
             HelloObservationCapabilityContext {
-            observation_sink_present: false,
-            sink_available: true,
-            requested_host_channel: None,
-        },
+                observation_sink_present: false,
+                sink_available: true,
+                requested_host_channel: None,
+            },
             HelloObservationCapabilityDenial::MissingObservationCapability,
         ),
         (
             HelloObservationCapabilityContext {
-            observation_sink_present: true,
-            sink_available: false,
-            requested_host_channel: None,
-        },
+                observation_sink_present: true,
+                sink_available: false,
+                requested_host_channel: None,
+            },
             HelloObservationCapabilityDenial::SinkUnavailable,
         ),
         (
             HelloObservationCapabilityContext {
-            observation_sink_present: true,
-            sink_available: true,
-            requested_host_channel: Some("stdout"),
-        },
+                observation_sink_present: true,
+                sink_available: true,
+                requested_host_channel: Some("stdout"),
+            },
             HelloObservationCapabilityDenial::StdoutNotDefaultSink,
         ),
         (
             HelloObservationCapabilityContext {
-            observation_sink_present: true,
-            sink_available: true,
-            requested_host_channel: Some("print"),
-        },
+                observation_sink_present: true,
+                sink_available: true,
+                requested_host_channel: Some("print"),
+            },
             HelloObservationCapabilityDenial::GenericIoNotAllowed,
         ),
         (
             HelloObservationCapabilityContext {
-            observation_sink_present: true,
-            sink_available: true,
-            requested_host_channel: Some("io.write"),
-        },
+                observation_sink_present: true,
+                sink_available: true,
+                requested_host_channel: Some("io.write"),
+            },
             HelloObservationCapabilityDenial::GenericIoNotAllowed,
         ),
         (
             HelloObservationCapabilityContext {
-            observation_sink_present: true,
-            sink_available: true,
-            requested_host_channel: Some("file"),
-        },
+                observation_sink_present: true,
+                sink_available: true,
+                requested_host_channel: Some("file"),
+            },
             HelloObservationCapabilityDenial::GenericIoNotAllowed,
         ),
         (
             HelloObservationCapabilityContext {
-            observation_sink_present: true,
-            sink_available: true,
-            requested_host_channel: Some("network"),
-        },
+                observation_sink_present: true,
+                sink_available: true,
+                requested_host_channel: Some("network"),
+            },
             HelloObservationCapabilityDenial::GenericIoNotAllowed,
         ),
         (
             HelloObservationCapabilityContext {
-            observation_sink_present: true,
-            sink_available: true,
-            requested_host_channel: Some("stdin"),
-        },
+                observation_sink_present: true,
+                sink_available: true,
+                requested_host_channel: Some("stdin"),
+            },
             HelloObservationCapabilityDenial::GenericIoNotAllowed,
         ),
     ] {

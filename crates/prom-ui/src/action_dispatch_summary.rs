@@ -8,8 +8,7 @@
 use alloc::vec::Vec;
 
 use crate::action_dispatch_route::{
-    InteractionSemanticActionDispatchEffectEligibility,
-    InteractionSemanticActionDispatchRouteKind,
+    InteractionSemanticActionDispatchEffectEligibility, InteractionSemanticActionDispatchRouteKind,
 };
 use crate::action_dispatch_trace::{
     InteractionSemanticActionDispatchTraceReason, InteractionSemanticActionDispatchTraceReport,
@@ -260,15 +259,19 @@ mod tests {
 
         let summary = summarize_interaction_semantic_action_dispatches(&traces);
 
-        assert!(summary.routes.contains(&InteractionSemanticActionDispatchRouteCount {
-            route: InteractionSemanticActionDispatchRouteKind::LocalUiStateCandidate,
-            count: 2,
-        }));
+        assert!(summary
+            .routes
+            .contains(&InteractionSemanticActionDispatchRouteCount {
+                route: InteractionSemanticActionDispatchRouteKind::LocalUiStateCandidate,
+                count: 2,
+            }));
 
-        assert!(summary.routes.contains(&InteractionSemanticActionDispatchRouteCount {
-            route: InteractionSemanticActionDispatchRouteKind::Unknown,
-            count: 1,
-        }));
+        assert!(summary
+            .routes
+            .contains(&InteractionSemanticActionDispatchRouteCount {
+                route: InteractionSemanticActionDispatchRouteKind::Unknown,
+                count: 1,
+            }));
     }
 
     #[test]
@@ -277,23 +280,19 @@ mod tests {
 
         let summary = summarize_interaction_semantic_action_dispatches(&traces);
 
-        assert!(
-            summary
-                .reasons
-                .contains(&InteractionSemanticActionDispatchTraceReasonCount {
-                    reason: InteractionSemanticActionDispatchTraceReason::RouteRecorded,
-                    count: 1,
-                })
-        );
+        assert!(summary
+            .reasons
+            .contains(&InteractionSemanticActionDispatchTraceReasonCount {
+                reason: InteractionSemanticActionDispatchTraceReason::RouteRecorded,
+                count: 1,
+            }));
 
-        assert!(
-            summary
-                .reasons
-                .contains(&InteractionSemanticActionDispatchTraceReasonCount {
-                    reason: InteractionSemanticActionDispatchTraceReason::MissingRoute,
-                    count: 1,
-                })
-        );
+        assert!(summary
+            .reasons
+            .contains(&InteractionSemanticActionDispatchTraceReasonCount {
+                reason: InteractionSemanticActionDispatchTraceReason::MissingRoute,
+                count: 1,
+            }));
     }
 
     #[test]

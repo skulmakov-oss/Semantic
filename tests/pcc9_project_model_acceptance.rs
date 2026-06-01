@@ -18,7 +18,8 @@ fn fixture_path(rel: &str) -> String {
 }
 
 fn read_fixture(rel: &str) -> String {
-    std::fs::read_to_string(fixture_path(rel)).unwrap_or_else(|err| panic!("read fixture {rel}: {err}"))
+    std::fs::read_to_string(fixture_path(rel))
+        .unwrap_or_else(|err| panic!("read fixture {rel}: {err}"))
 }
 
 fn cli_ok(args: Vec<String>, context: &str) {
@@ -40,8 +41,7 @@ fn mk_temp_dir(prefix: &str) -> PathBuf {
 }
 
 fn normalize_path(path: &std::path::Path) -> String {
-    path
-        .to_string_lossy()
+    path.to_string_lossy()
         .replace('\\', "/")
         .trim_start_matches("//?/")
         .to_string()
@@ -158,8 +158,11 @@ module_root src
 
     let importer = app_src.join("main.sm");
     let dep = math_src.join("core.sm");
-    std::fs::write(&importer, "Import \"math::core.sm\"\nfn main() { return; }\n")
-        .expect("write importer");
+    std::fs::write(
+        &importer,
+        "Import \"math::core.sm\"\nfn main() { return; }\n",
+    )
+    .expect("write importer");
     std::fs::write(&dep, "fn core() { return; }\n").expect("write dep");
 
     let resolved = resolve_package_import_path(&importer, "math::core.sm").expect("resolve");

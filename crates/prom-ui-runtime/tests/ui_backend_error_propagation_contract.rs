@@ -121,8 +121,5 @@ fn lifecycle_error_takes_precedence_before_backend_draw_error() {
     let frame = DrawFrame::new();
     let err = session.submit_frame(&frame).unwrap_err();
 
-    assert!(matches!(
-        err,
-        UiRuntimeError::LifecycleViolation { .. }
-    ));
+    assert!(matches!(err, UiRuntimeError::LifecycleViolation { .. }));
 }

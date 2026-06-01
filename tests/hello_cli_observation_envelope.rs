@@ -18,10 +18,7 @@ fn mk_temp_dir(prefix: &str) -> PathBuf {
 
 fn smc_output(args: &[&str]) -> Output {
     let exe = env!("CARGO_BIN_EXE_smc");
-    Command::new(exe)
-        .args(args)
-        .output()
-        .expect("run smc")
+    Command::new(exe).args(args).output().expect("run smc")
 }
 
 fn assert_stdout_exact(output: &Output, expected: &str) {
@@ -59,11 +56,14 @@ fn assert_no_stdout_payload(output: &Output) {
 fn smc_run_renders_controlled_observation_payload_once() {
     let temp = mk_temp_dir("smc_cli_source_run");
     let source = temp.join("hello.sm");
-    std::fs::write(&source, r#"
+    std::fs::write(
+        &source,
+        r#"
 fn main() {
     print("Hello, World!");
 }
-"#)
+"#,
+    )
     .expect("write source fixture");
     let source_arg = source.to_string_lossy().replace('\\', "/");
     let output = smc_output(&["run", &source_arg]);
@@ -75,11 +75,14 @@ fn main() {
 fn smc_run_smc_renders_controlled_observation_payload_once() {
     let temp = mk_temp_dir("smc_cli_observation_envelope");
     let source = temp.join("hello.sm");
-    std::fs::write(&source, r#"
+    std::fs::write(
+        &source,
+        r#"
 fn main() {
     print("Hello, World!");
 }
-"#)
+"#,
+    )
     .expect("write source fixture");
     let artifact = temp.join("hello_world.smc");
     let source_arg = source.to_string_lossy().replace('\\', "/");

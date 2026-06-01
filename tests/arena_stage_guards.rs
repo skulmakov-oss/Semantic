@@ -89,8 +89,7 @@ fn raw_stmt_storage_is_confined_to_ast_arena() {
 
 #[test]
 fn crystalfold_stage_order_stays_cleanup_then_fold() {
-    let passes =
-        fs::read_to_string("crates/sm-ir/src/passes/mod.rs").expect("read passes mod");
+    let passes = fs::read_to_string("crates/sm-ir/src/passes/mod.rs").expect("read passes mod");
     let cleanup_idx = passes
         .find("let cleanup = cleanup::StructuralCleanupPass;")
         .expect("cleanup stage exists");

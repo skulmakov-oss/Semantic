@@ -21,7 +21,10 @@ fn hello_observation_audit_skeleton_builds_controlled_observation_event() {
         sample_linkage(),
     );
 
-    assert_eq!(event.event_kind, HelloObservationAuditEventKind::Observation);
+    assert_eq!(
+        event.event_kind,
+        HelloObservationAuditEventKind::Observation
+    );
     assert_eq!(event.operation_kind, "controlled_observation_text");
     assert_eq!(event.observation_class, "controlled");
     assert_eq!(
@@ -29,7 +32,10 @@ fn hello_observation_audit_skeleton_builds_controlled_observation_event() {
         HelloObservationAuditPayloadRef::LiteralTextHash(0xfeed_beef)
     );
     assert_eq!(event.sequence_index.0, 7);
-    assert_eq!(event.audit_policy_class, HelloObservationAuditPolicyClass::Required);
+    assert_eq!(
+        event.audit_policy_class,
+        HelloObservationAuditPolicyClass::Required
+    );
     assert_eq!(event.linkage, sample_linkage());
 }
 

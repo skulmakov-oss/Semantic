@@ -154,12 +154,18 @@ pub fn build_generated_wire_contract(
                         })
                     })
                     .collect::<Result<Vec<_>, GeneratedWireContractBuildError>>()?;
-                patch_types.push(WirePatchTypeContract { schema_name, fields });
+                patch_types.push(WirePatchTypeContract {
+                    schema_name,
+                    fields,
+                });
             }
         }
     }
 
-    Ok(GeneratedWireContractArtifact::new(tagged_unions, patch_types))
+    Ok(GeneratedWireContractArtifact::new(
+        tagged_unions,
+        patch_types,
+    ))
 }
 
 pub fn format_generated_wire_contract(artifact: &GeneratedWireContractArtifact) -> String {
@@ -280,10 +286,7 @@ mod tests {
             artifact.format_version,
             GENERATED_WIRE_CONTRACT_FORMAT_VERSION
         );
-        assert_eq!(
-            artifact.generator_name,
-            GENERATED_WIRE_CONTRACT_GENERATOR
-        );
+        assert_eq!(artifact.generator_name, GENERATED_WIRE_CONTRACT_GENERATOR);
         assert_eq!(
             artifact.generator_version,
             GENERATED_WIRE_CONTRACT_GENERATOR_VERSION
@@ -377,7 +380,10 @@ wire schema Telemetry {
         assert!(artifact.tagged_unions[0].variants[0].fields.is_empty());
         assert_eq!(artifact.tagged_unions[0].variants[1].name, "Data");
         assert_eq!(artifact.tagged_unions[0].variants[1].fields.len(), 2);
-        assert_eq!(artifact.tagged_unions[0].variants[1].fields[0].name, "count");
+        assert_eq!(
+            artifact.tagged_unions[0].variants[1].fields[0].name,
+            "count"
+        );
         assert_eq!(artifact.tagged_unions[0].variants[1].fields[0].ty, "i32");
         assert_eq!(
             artifact.tagged_unions[0].variants[1].fields[1].name,

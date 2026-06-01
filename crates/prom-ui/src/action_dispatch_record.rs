@@ -5,14 +5,14 @@
 //! or runtime mutation.
 
 use crate::action_admission::{
-    InteractionActionAdmissionEffectRelationship,
-    InteractionActionAdmissionPolicyGateNamespace, InteractionActionAdmissionTraceRequirement,
+    InteractionActionAdmissionEffectRelationship, InteractionActionAdmissionPolicyGateNamespace,
+    InteractionActionAdmissionTraceRequirement,
 };
 use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
 use crate::action_dispatch_route::{
     InteractionSemanticActionDispatchEffectEligibility,
-    InteractionSemanticActionDispatchRouteDescriptor,
-    InteractionSemanticActionDispatchRouteId, InteractionSemanticActionDispatchRouteKind,
+    InteractionSemanticActionDispatchRouteDescriptor, InteractionSemanticActionDispatchRouteId,
+    InteractionSemanticActionDispatchRouteKind,
 };
 use crate::admitted_action::InteractionAdmittedSemanticActionId;
 use crate::interaction::InteractionIntentKind;
@@ -99,7 +99,10 @@ const fn block_reason_for_route(
 
 impl InteractionSemanticActionDispatchRecord {
     pub const fn is_recorded(&self) -> bool {
-        matches!(self.status, InteractionSemanticActionDispatchRecordStatus::Recorded)
+        matches!(
+            self.status,
+            InteractionSemanticActionDispatchRecordStatus::Recorded
+        )
     }
 
     pub const fn is_blocked(&self) -> bool {
@@ -130,14 +133,13 @@ mod tests {
         InteractionActionAdmissionEffectRelationship,
         InteractionActionAdmissionPolicyGateNamespace, InteractionActionAdmissionTraceRequirement,
     };
+    use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
     use crate::action_dispatch_route::{
         InteractionSemanticActionDispatchEffectEligibility,
-        InteractionSemanticActionDispatchRouteDescriptor,
-        InteractionSemanticActionDispatchRouteId,
+        InteractionSemanticActionDispatchRouteDescriptor, InteractionSemanticActionDispatchRouteId,
         InteractionSemanticActionDispatchRouteKind,
     };
     use crate::admitted_action::InteractionAdmittedSemanticActionId;
-    use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
     use crate::interaction::InteractionIntentKind;
 
     fn local_route() -> InteractionSemanticActionDispatchRouteDescriptor {
@@ -166,8 +168,14 @@ mod tests {
         assert_eq!(record.action, route.action);
         assert_eq!(record.source_intent, route.source_intent);
         assert_eq!(record.binding_id, route.binding_id);
-        assert_eq!(record.status, InteractionSemanticActionDispatchRecordStatus::Recorded);
-        assert_eq!(record.block_reason, InteractionSemanticActionDispatchBlockReason::None);
+        assert_eq!(
+            record.status,
+            InteractionSemanticActionDispatchRecordStatus::Recorded
+        );
+        assert_eq!(
+            record.block_reason,
+            InteractionSemanticActionDispatchBlockReason::None
+        );
     }
 
     #[test]
@@ -197,8 +205,14 @@ mod tests {
 
         let record = record_interaction_semantic_action_dispatch(&route);
 
-        assert_eq!(record.status, InteractionSemanticActionDispatchRecordStatus::Recorded);
-        assert_eq!(record.block_reason, InteractionSemanticActionDispatchBlockReason::None);
+        assert_eq!(
+            record.status,
+            InteractionSemanticActionDispatchRecordStatus::Recorded
+        );
+        assert_eq!(
+            record.block_reason,
+            InteractionSemanticActionDispatchBlockReason::None
+        );
         assert_eq!(
             record.effect_eligibility,
             InteractionSemanticActionDispatchEffectEligibility::RequiresFutureEffectBoundary

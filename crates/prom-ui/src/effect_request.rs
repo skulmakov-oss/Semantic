@@ -10,7 +10,9 @@ use crate::action_admission::{
 };
 use crate::action_binding::InteractionActionName;
 use crate::action_dispatch_record::InteractionSemanticActionDispatchRecordId;
-use crate::action_dispatch_route::{InteractionSemanticActionDispatchEffectEligibility, InteractionSemanticActionDispatchRouteId};
+use crate::action_dispatch_route::{
+    InteractionSemanticActionDispatchEffectEligibility, InteractionSemanticActionDispatchRouteId,
+};
 use crate::action_dispatch_trace::{
     InteractionSemanticActionDispatchTraceReport, InteractionSemanticActionDispatchTraceStatus,
 };
@@ -184,7 +186,9 @@ const fn map_ui_capability(action: InteractionActionName) -> InteractionEffectRe
         InteractionActionName::CloseWindow => InteractionEffectRequestUiCapability::WindowLifecycle,
         InteractionActionName::PrepareEffect
         | InteractionActionName::CommitEffect
-        | InteractionActionName::RollbackEffect => InteractionEffectRequestUiCapability::EffectControl,
+        | InteractionActionName::RollbackEffect => {
+            InteractionEffectRequestUiCapability::EffectControl
+        }
         InteractionActionName::QuarantineTarget => {
             InteractionEffectRequestUiCapability::TargetQuarantine
         }
@@ -229,7 +233,9 @@ const fn map_lifecycle_precondition(
     action: InteractionActionName,
 ) -> InteractionEffectRequestLifecyclePrecondition {
     match action {
-        InteractionActionName::CloseWindow => InteractionEffectRequestLifecyclePrecondition::WindowAlive,
+        InteractionActionName::CloseWindow => {
+            InteractionEffectRequestLifecyclePrecondition::WindowAlive
+        }
         InteractionActionName::PrepareEffect
         | InteractionActionName::CommitEffect
         | InteractionActionName::RollbackEffect => {
@@ -249,7 +255,9 @@ const fn map_lifecycle_precondition(
     }
 }
 
-const fn map_denial_behavior(action: InteractionActionName) -> InteractionEffectRequestDenialBehavior {
+const fn map_denial_behavior(
+    action: InteractionActionName,
+) -> InteractionEffectRequestDenialBehavior {
     match action {
         InteractionActionName::CloseWindow
         | InteractionActionName::PrepareEffect
@@ -291,7 +299,9 @@ const fn map_prepare_commit_relationship(
         | InteractionActionName::AcknowledgeError
         | InteractionActionName::OpenDenialReason
         | InteractionActionName::PinTrace
-        | InteractionActionName::Unknown => InteractionEffectRequestPrepareCommitRelationship::Unknown,
+        | InteractionActionName::Unknown => {
+            InteractionEffectRequestPrepareCommitRelationship::Unknown
+        }
     }
 }
 
@@ -299,7 +309,9 @@ const fn map_scope(
     namespace: InteractionActionAdmissionPolicyGateNamespace,
 ) -> InteractionEffectRequestScope {
     match namespace {
-        InteractionActionAdmissionPolicyGateNamespace::CoreUi => InteractionEffectRequestScope::CoreUi,
+        InteractionActionAdmissionPolicyGateNamespace::CoreUi => {
+            InteractionEffectRequestScope::CoreUi
+        }
         InteractionActionAdmissionPolicyGateNamespace::WorkbenchLocal => {
             InteractionEffectRequestScope::WorkbenchLocal
         }
@@ -397,7 +409,8 @@ mod tests {
             block_reason: InteractionSemanticActionDispatchBlockReason::None,
             trace_reason: InteractionSemanticActionDispatchTraceReason::RouteRecorded,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
-            effect_relationship: crate::action_admission::InteractionActionAdmissionEffectRelationship::NoEffect,
+            effect_relationship:
+                crate::action_admission::InteractionActionAdmissionEffectRelationship::NoEffect,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::WorkbenchLocal,
             effect_eligibility: InteractionSemanticActionDispatchEffectEligibility::NoEffect,
         }
@@ -411,7 +424,10 @@ mod tests {
             .expect("effect candidate trace should produce descriptor");
 
         assert_eq!(descriptor.id, InteractionEffectRequestDescriptorId(11));
-        assert_eq!(descriptor.source_admitted_action_id, trace.admitted_action_id);
+        assert_eq!(
+            descriptor.source_admitted_action_id,
+            trace.admitted_action_id
+        );
         assert_eq!(descriptor.dispatch_record_id, trace.record_id);
         assert_eq!(descriptor.dispatch_route_id, trace.route_id);
         assert_eq!(descriptor.action, trace.action);
@@ -463,7 +479,10 @@ mod tests {
             descriptor.prepare_commit_relationship,
             InteractionEffectRequestPrepareCommitRelationship::PrepareThenCommit
         );
-        assert_eq!(descriptor.policy_gate_namespace, trace.policy_gate_namespace);
+        assert_eq!(
+            descriptor.policy_gate_namespace,
+            trace.policy_gate_namespace
+        );
         assert_eq!(descriptor.scope, InteractionEffectRequestScope::CoreUi);
     }
 
@@ -498,7 +517,10 @@ mod tests {
             descriptor.lifecycle_precondition,
             InteractionEffectRequestLifecyclePrecondition::WindowAlive
         );
-        assert_eq!(descriptor.scope, InteractionEffectRequestScope::WorkbenchLocal);
+        assert_eq!(
+            descriptor.scope,
+            InteractionEffectRequestScope::WorkbenchLocal
+        );
     }
 
     #[test]

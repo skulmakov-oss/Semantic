@@ -5,7 +5,10 @@ use prom_cap::hello_observation_capability::{
     HelloObservationCapabilityDecision, HelloObservationCapabilityDenial,
     HelloObservationCapabilityPolicy,
 };
-use prom_cap::{CapabilityKind, CapabilityManifest, CapabilitySurfaceClass, required_capability_for_call, capability_surface_class};
+use prom_cap::{
+    capability_surface_class, required_capability_for_call, CapabilityKind, CapabilityManifest,
+    CapabilitySurfaceClass,
+};
 
 fn allow_context() -> HelloObservationCapabilityContext {
     HelloObservationCapabilityContext {
@@ -92,7 +95,8 @@ fn hello_observation_capability_skeleton_denies_generic_io_fallbacks() {
 }
 
 #[test]
-fn hello_observation_capability_skeleton_requires_explicit_controlled_observation_sink_capability() {
+fn hello_observation_capability_skeleton_requires_explicit_controlled_observation_sink_capability()
+{
     let mut manifest = CapabilityManifest::new();
     let context = allow_context();
 
@@ -151,4 +155,3 @@ fn hello_observation_capability_skeleton_keeps_existing_host_call_mapping_unchan
         CapabilityKind::PulseEmit
     );
 }
-

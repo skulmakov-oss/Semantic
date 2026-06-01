@@ -296,17 +296,17 @@ fn validate_tagged_union_document(
     if document.fields.len() != 1 {
         diagnostics.push(ConfigValidationDiagnostic {
             path: "<root>".to_string(),
-            message:
-                "tagged-union config document must contain exactly one variant object field"
-                    .to_string(),
+            message: "tagged-union config document must contain exactly one variant object field"
+                .to_string(),
         });
         return;
     }
 
     let selected = &document.fields[0];
-    let Some(variant_plan) = variants.iter().find(|variant| {
-        contract.program.arena.symbol_name(variant.name) == selected.key.as_str()
-    }) else {
+    let Some(variant_plan) = variants
+        .iter()
+        .find(|variant| contract.program.arena.symbol_name(variant.name) == selected.key.as_str())
+    else {
         diagnostics.push(ConfigValidationDiagnostic {
             path: selected.key.clone(),
             message: format!("unknown tagged-union variant '{}'", selected.key),
@@ -391,7 +391,13 @@ fn validate_value_against_type(
                 ));
                 return;
             };
-            validate_object_entries_against_record_decl(entries, record_decl, contract, path, diagnostics);
+            validate_object_entries_against_record_decl(
+                entries,
+                record_decl,
+                contract,
+                path,
+                diagnostics,
+            );
         }
         Type::Option(_)
         | Type::Result(_, _)
@@ -421,7 +427,8 @@ fn validate_integer_number(
     fits: impl Fn(&str) -> bool,
 ) {
     match value {
-        ConfigValue::Number(number) if number.kind == ConfigNumberKind::Integer && fits(&number.raw) => {}
+        ConfigValue::Number(number)
+            if number.kind == ConfigNumberKind::Integer && fits(&number.raw) => {}
         _ => diagnostics.push(type_mismatch(
             path,
             &format!("expected {} integer value", label),
@@ -510,7 +517,10 @@ fn display_config_type(ty: &Type, contract: &ConfigContract) -> String {
                 .join(", ")
         ),
         Type::Sequence(sequence) => {
-            format!("ordered-sequence<{}>", display_config_type(sequence.item.as_ref(), contract))
+            format!(
+                "ordered-sequence<{}>",
+                display_config_type(sequence.item.as_ref(), contract)
+            )
         }
         Type::Map(map) => format!(
             "Map({}, {})",
@@ -662,7 +672,9 @@ impl<'a> ConfigParser<'a> {
         self.expect_byte(b'"', "'\"'")?;
         let mut out = String::new();
         loop {
-            let ch = self.bump().ok_or_else(|| self.error("unterminated string"))?;
+            let ch = self
+                .bump()
+                .ok_or_else(|| self.error("unterminated string"))?;
             match ch {
                 b'"' => break,
                 b'\\' => {
@@ -696,7 +708,9 @@ impl<'a> ConfigParser<'a> {
     }
 
     fn parse_quad(&mut self) -> Result<QuadVal, ConfigParseError> {
-        let ch = self.bump().ok_or_else(|| self.error("expected quad literal"))?;
+        let ch = self
+            .bump()
+            .ok_or_else(|| self.error("expected quad literal"))?;
         let quad = match ch {
             b'N' => QuadVal::N,
             b'F' => QuadVal::F,
@@ -1044,8 +1058,7 @@ api schema ApiPayload {
             .expect_err("validation should reject unknown variant");
 
         assert!(err.diagnostics.iter().any(|diag| {
-            diag.path == "Missing"
-                && diag.message == "unknown tagged-union variant 'Missing'"
+            diag.path == "Missing" && diag.message == "unknown tagged-union variant 'Missing'"
         }));
     }
 
@@ -1064,8 +1077,7 @@ api schema ApiPayload {
             .expect_err("validation should reject non-object payload");
 
         assert!(err.diagnostics.iter().any(|diag| {
-            diag.path == "Data"
-                && diag.message == "expected object payload for variant 'Data'"
+            diag.path == "Data" && diag.message == "expected object payload for variant 'Data'"
         }));
     }
 }

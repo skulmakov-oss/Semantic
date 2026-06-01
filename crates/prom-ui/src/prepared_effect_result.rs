@@ -21,8 +21,7 @@ use crate::prepared_effect::{
     InteractionPreparedEffectDescriptorId,
 };
 use crate::runtime_capability_mapping::{
-    InteractionRuntimeCapabilityMappingDescriptorId,
-    InteractionRuntimeCapabilityNamespace,
+    InteractionRuntimeCapabilityMappingDescriptorId, InteractionRuntimeCapabilityNamespace,
 };
 use crate::runtime_capability_mapping_result::InteractionRuntimeCapabilityMappingResultId;
 use crate::ui_capability_admission::InteractionUiCapabilityAdmissionDescriptorId;
@@ -119,7 +118,8 @@ fn build_result(
         id: InteractionPreparedEffectResultId(descriptor.id.0),
         descriptor_id: descriptor.id,
         runtime_capability_mapping_result_id: descriptor.runtime_capability_mapping_result_id,
-        runtime_capability_mapping_descriptor_id: descriptor.runtime_capability_mapping_descriptor_id,
+        runtime_capability_mapping_descriptor_id: descriptor
+            .runtime_capability_mapping_descriptor_id,
         ui_capability_admission_result_id: descriptor.ui_capability_admission_result_id,
         ui_capability_admission_descriptor_id: descriptor.ui_capability_admission_descriptor_id,
         effect_request_descriptor_id: descriptor.effect_request_descriptor_id,
@@ -131,8 +131,7 @@ fn build_result(
         missing_requirement,
         requested_effect: descriptor.requested_effect,
         declared_ui_capability: descriptor.declared_ui_capability,
-        declared_runtime_capability_requirement: descriptor
-            .declared_runtime_capability_requirement,
+        declared_runtime_capability_requirement: descriptor.declared_runtime_capability_requirement,
         runtime_capability_namespace: descriptor.runtime_capability_namespace,
         lifecycle_precondition: descriptor.lifecycle_precondition,
         target_policy: descriptor.target_policy,
@@ -145,7 +144,10 @@ fn build_result(
 
 impl InteractionPreparedEffectResult {
     pub const fn is_prepared(&self) -> bool {
-        matches!(self.status, InteractionPreparedEffectDecisionStatus::Prepared)
+        matches!(
+            self.status,
+            InteractionPreparedEffectDecisionStatus::Prepared
+        )
     }
 
     pub const fn is_denied(&self) -> bool {
@@ -234,7 +236,8 @@ mod tests {
             &crate::ui_capability_admission_result::record_interaction_ui_capability_admitted_result(&admission),
         )
         .expect("admitted result should produce mapping descriptor");
-        let mapping_result = record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
+        let mapping_result =
+            record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
 
         describe_interaction_prepared_effect(&mapping_result)
             .expect("mapped result should produce prepared effect descriptor")
@@ -246,9 +249,15 @@ mod tests {
 
         let result = record_interaction_prepared_effect_result(&descriptor);
 
-        assert_eq!(result.status, InteractionPreparedEffectDecisionStatus::Prepared);
+        assert_eq!(
+            result.status,
+            InteractionPreparedEffectDecisionStatus::Prepared
+        );
         assert_eq!(result.descriptor_id, descriptor.id);
-        assert_eq!(result.id, InteractionPreparedEffectResultId(descriptor.id.0));
+        assert_eq!(
+            result.id,
+            InteractionPreparedEffectResultId(descriptor.id.0)
+        );
     }
 
     #[test]
@@ -261,9 +270,15 @@ mod tests {
             InteractionPreparedEffectMissingRequirement::Policy,
         );
 
-        assert_eq!(result.status, InteractionPreparedEffectDecisionStatus::Denied);
+        assert_eq!(
+            result.status,
+            InteractionPreparedEffectDecisionStatus::Denied
+        );
         assert_eq!(result.descriptor_id, descriptor.id);
-        assert_eq!(result.id, InteractionPreparedEffectResultId(descriptor.id.0));
+        assert_eq!(
+            result.id,
+            InteractionPreparedEffectResultId(descriptor.id.0)
+        );
     }
 
     #[test]
@@ -317,7 +332,10 @@ mod tests {
         );
         assert_eq!(result.target_policy, descriptor.target_policy);
         assert_eq!(result.trace_requirement, descriptor.trace_requirement);
-        assert_eq!(result.policy_gate_namespace, descriptor.policy_gate_namespace);
+        assert_eq!(
+            result.policy_gate_namespace,
+            descriptor.policy_gate_namespace
+        );
         assert_eq!(result.scope, descriptor.scope);
     }
 

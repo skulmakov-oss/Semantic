@@ -11,10 +11,7 @@ struct InMemoryHelloObservationSink {
 }
 
 impl HelloObservationSink for InMemoryHelloObservationSink {
-    fn observe(
-        &mut self,
-        event: HelloObservationEvent,
-    ) -> Result<(), HelloObservationSinkError> {
+    fn observe(&mut self, event: HelloObservationEvent) -> Result<(), HelloObservationSinkError> {
         self.events.push(event);
         Ok(())
     }
@@ -38,9 +35,18 @@ fn hello_observation_sink_skeleton_preserves_deterministic_order() {
         .expect("second observation should store locally");
 
     assert_eq!(sink.events.len(), 2);
-    assert_eq!(sink.events[0].sequence_index, HelloObservationSequenceIndex(0));
-    assert_eq!(sink.events[1].sequence_index, HelloObservationSequenceIndex(1));
-    assert_eq!(sink.events[0].observation_class, HelloObservationClass::ControlledText);
+    assert_eq!(
+        sink.events[0].sequence_index,
+        HelloObservationSequenceIndex(0)
+    );
+    assert_eq!(
+        sink.events[1].sequence_index,
+        HelloObservationSequenceIndex(1)
+    );
+    assert_eq!(
+        sink.events[0].observation_class,
+        HelloObservationClass::ControlledText
+    );
     assert_eq!(sink.events[0].operation_kind, "controlled_observation_text");
     assert_ne!(sink.events[0].operation_kind, "print");
     assert_ne!(sink.events[0].operation_kind, "stdout");
@@ -56,8 +62,8 @@ fn hello_observation_sink_skeleton_stores_controlled_text_only_locally() {
         .expect("controlled observation should stay local to the test sink");
 
     assert_eq!(sink.events, vec![event]);
-    assert!(sink.events.iter().all(|evt| matches!(
-        evt.observation_class,
-        HelloObservationClass::ControlledText
-    )));
+    assert!(sink
+        .events
+        .iter()
+        .all(|evt| matches!(evt.observation_class, HelloObservationClass::ControlledText)));
 }

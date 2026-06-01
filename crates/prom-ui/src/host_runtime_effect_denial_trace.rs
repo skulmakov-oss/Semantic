@@ -37,8 +37,7 @@ use crate::host_runtime_effect::{
 use crate::host_runtime_effect_result::{
     InteractionHostRuntimeEffectBoundaryDenialReason,
     InteractionHostRuntimeEffectBoundaryMissingRequirement,
-    InteractionHostRuntimeEffectBoundaryResult,
-    InteractionHostRuntimeEffectBoundaryResultId,
+    InteractionHostRuntimeEffectBoundaryResult, InteractionHostRuntimeEffectBoundaryResultId,
 };
 use crate::prepared_effect::InteractionPreparedEffectDescriptorId;
 use crate::prepared_effect_result::InteractionPreparedEffectResultId;
@@ -310,7 +309,8 @@ mod tests {
         let ui_result = record_interaction_ui_capability_admitted_result(&admission);
         let mapping_descriptor = describe_interaction_runtime_capability_mapping(&ui_result)
             .expect("admitted result should produce mapping descriptor");
-        let mapping_result = record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
+        let mapping_result =
+            record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
         let prepared_descriptor = describe_interaction_prepared_effect(&mapping_result)
             .expect("mapped result should produce prepared effect descriptor");
         let prepared_result = record_interaction_prepared_effect_result(&prepared_descriptor);
@@ -337,8 +337,8 @@ mod tests {
         }
     }
 
-    fn denied_result() -> crate::host_runtime_effect_result::InteractionHostRuntimeEffectBoundaryResult
-    {
+    fn denied_result(
+    ) -> crate::host_runtime_effect_result::InteractionHostRuntimeEffectBoundaryResult {
         host_runtime_result(
             InteractionHostRuntimeEffectBoundaryDecisionStatus::Denied,
             InteractionHostRuntimeEffectBoundaryDenialReason::PolicyDenied,
@@ -346,8 +346,8 @@ mod tests {
         )
     }
 
-    fn admitted_result() -> crate::host_runtime_effect_result::InteractionHostRuntimeEffectBoundaryResult
-    {
+    fn admitted_result(
+    ) -> crate::host_runtime_effect_result::InteractionHostRuntimeEffectBoundaryResult {
         host_runtime_result(
             InteractionHostRuntimeEffectBoundaryDecisionStatus::AdmittedToHostPath,
             InteractionHostRuntimeEffectBoundaryDenialReason::None,
@@ -362,9 +362,15 @@ mod tests {
         let trace = trace_interaction_host_runtime_effect_denial(&result)
             .expect("denied result should produce trace");
 
-        assert_eq!(trace.status, InteractionHostRuntimeEffectDenialTraceStatus::Traced);
+        assert_eq!(
+            trace.status,
+            InteractionHostRuntimeEffectDenialTraceStatus::Traced
+        );
         assert_eq!(trace.result_id, result.id);
-        assert_eq!(trace.id, InteractionHostRuntimeEffectDenialTraceId(result.id.0));
+        assert_eq!(
+            trace.id,
+            InteractionHostRuntimeEffectDenialTraceId(result.id.0)
+        );
     }
 
     #[test]
@@ -381,12 +387,30 @@ mod tests {
             .expect("denied result should produce trace");
 
         assert_eq!(trace.descriptor_id, result.descriptor_id);
-        assert_eq!(trace.committed_effect_record_id, result.committed_effect_record_id);
-        assert_eq!(trace.committed_effect_descriptor_id, result.committed_effect_descriptor_id);
-        assert_eq!(trace.commit_boundary_result_id, result.commit_boundary_result_id);
-        assert_eq!(trace.commit_boundary_descriptor_id, result.commit_boundary_descriptor_id);
-        assert_eq!(trace.prepared_effect_result_id, result.prepared_effect_result_id);
-        assert_eq!(trace.prepared_effect_descriptor_id, result.prepared_effect_descriptor_id);
+        assert_eq!(
+            trace.committed_effect_record_id,
+            result.committed_effect_record_id
+        );
+        assert_eq!(
+            trace.committed_effect_descriptor_id,
+            result.committed_effect_descriptor_id
+        );
+        assert_eq!(
+            trace.commit_boundary_result_id,
+            result.commit_boundary_result_id
+        );
+        assert_eq!(
+            trace.commit_boundary_descriptor_id,
+            result.commit_boundary_descriptor_id
+        );
+        assert_eq!(
+            trace.prepared_effect_result_id,
+            result.prepared_effect_result_id
+        );
+        assert_eq!(
+            trace.prepared_effect_descriptor_id,
+            result.prepared_effect_descriptor_id
+        );
         assert_eq!(
             trace.runtime_capability_mapping_result_id,
             result.runtime_capability_mapping_result_id
@@ -395,13 +419,22 @@ mod tests {
             trace.runtime_capability_mapping_descriptor_id,
             result.runtime_capability_mapping_descriptor_id
         );
-        assert_eq!(trace.ui_capability_admission_result_id, result.ui_capability_admission_result_id);
+        assert_eq!(
+            trace.ui_capability_admission_result_id,
+            result.ui_capability_admission_result_id
+        );
         assert_eq!(
             trace.ui_capability_admission_descriptor_id,
             result.ui_capability_admission_descriptor_id
         );
-        assert_eq!(trace.effect_request_descriptor_id, result.effect_request_descriptor_id);
-        assert_eq!(trace.source_admitted_action_id, result.source_admitted_action_id);
+        assert_eq!(
+            trace.effect_request_descriptor_id,
+            result.effect_request_descriptor_id
+        );
+        assert_eq!(
+            trace.source_admitted_action_id,
+            result.source_admitted_action_id
+        );
         assert_eq!(trace.dispatch_record_id, result.dispatch_record_id);
         assert_eq!(trace.dispatch_route_id, result.dispatch_route_id);
         assert_eq!(trace.denial_reason, result.denial_reason);
@@ -412,7 +445,10 @@ mod tests {
             trace.declared_runtime_capability_requirement,
             result.declared_runtime_capability_requirement
         );
-        assert_eq!(trace.runtime_capability_namespace, result.runtime_capability_namespace);
+        assert_eq!(
+            trace.runtime_capability_namespace,
+            result.runtime_capability_namespace
+        );
         assert_eq!(trace.lifecycle_precondition, result.lifecycle_precondition);
         assert_eq!(trace.target_policy, result.target_policy);
         assert_eq!(trace.trace_requirement, result.trace_requirement);
@@ -420,10 +456,16 @@ mod tests {
         assert_eq!(trace.scope, result.scope);
         assert_eq!(trace.audit_requirement, result.audit_requirement);
         assert_eq!(trace.audit_visibility, result.audit_visibility);
-        assert_eq!(trace.runtime_mutation_requirement, result.runtime_mutation_requirement);
+        assert_eq!(
+            trace.runtime_mutation_requirement,
+            result.runtime_mutation_requirement
+        );
         assert_eq!(trace.host_path_requirement, result.host_path_requirement);
         assert_eq!(trace.record_status, result.record_status);
-        assert_eq!(trace.runtime_mutation_status, result.runtime_mutation_status);
+        assert_eq!(
+            trace.runtime_mutation_status,
+            result.runtime_mutation_status
+        );
         assert_eq!(trace.host_path_status, result.host_path_status);
         assert_eq!(
             trace.future_host_path_requirement,

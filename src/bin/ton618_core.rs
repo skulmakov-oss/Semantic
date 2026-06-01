@@ -11,7 +11,6 @@ use std::collections::HashMap;
 use std::env;
 use std::process::ExitCode;
 
-
 use language::{
     compile_human_program, execute_machine_program, parse_machine_program, render_machine_program,
 };
@@ -485,1621 +484,1620 @@ fn lang_run_machine_usage() -> String {
 }
 
 mod parser {
-//! Compatibility-only parser/profile helpers for the retained TON618 CLI shim.
+    //! Compatibility-only parser/profile helpers for the retained TON618 CLI shim.
 
-#![allow(dead_code)]
+    #![allow(dead_code)]
 
-use crate::{QuadroReg, F, N, S, T};
-use std::collections::HashMap;
-use sm_profile::ParserProfile;
-#[cfg(test)]
-use sm_profile::{train_profile, TrainingSample};
+    use crate::{QuadroReg, F, N, S, T};
+    use sm_profile::ParserProfile;
+    #[cfg(test)]
+    use sm_profile::{train_profile, TrainingSample};
+    use std::collections::HashMap;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnaryOp {
-    Not,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BinaryOp {
-    Or,
-    Xor,
-    And,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Expr<'a> {
-    State(u8),
-    Ident(&'a str),
-    Unary {
-        op: UnaryOp,
-        expr: Box<Expr<'a>>,
-    },
-    Binary {
-        op: BinaryOp,
-        left: Box<Expr<'a>>,
-        right: Box<Expr<'a>>,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Assignment<'a> {
-    pub target: &'a str,
-    pub expr: Expr<'a>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ParseError {
-    pub position: usize,
-    pub message: &'static str,
-}
-
-impl core::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "parse error at {}: {}", self.position, self.message)
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for ParseError {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EvalError<'a> {
-    pub ident: &'a str,
-    pub message: &'static str,
-}
-
-impl<'a> core::fmt::Display for EvalError<'a> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "eval error for '{}': {}", self.ident, self.message)
-    }
-}
-
-#[cfg(feature = "std")]
-impl<'a> std::error::Error for EvalError<'a> {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProgramError {
-    pub line: usize,
-    pub column: usize,
-    pub message: String,
-}
-
-impl core::fmt::Display for ProgramError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "program error at line {}, column {}: {}",
-            self.line, self.column, self.message
-        )
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for ProgramError {}
-
-pub fn parse_expression(input: &str) -> Result<Expr<'_>, ParseError> {
-    let mut p = Parser::new(input);
-    let expr = p.parse_expr()?;
-    p.skip_ws();
-    if p.is_eof() {
-        Ok(expr)
-    } else {
-        Err(p.err("unexpected trailing input"))
-    }
-}
-
-pub fn parse_assignment(input: &str) -> Result<Assignment<'_>, ParseError> {
-    let mut p = Parser::new(input);
-    let target = p.parse_identifier()?;
-    p.skip_ws();
-    if !p.eat_byte(b'=') {
-        return Err(p.err("expected '=' after identifier"));
-    }
-    let expr = p.parse_expr()?;
-    p.skip_ws();
-    if !p.is_eof() {
-        return Err(p.err("unexpected trailing input"));
-    }
-    Ok(Assignment { target, expr })
-}
-
-pub fn eval_expression<'a, R>(
-    expr: &'a Expr<'a>,
-    resolve_ident: &R,
-) -> Result<QuadroReg, EvalError<'a>>
-where
-    R: Fn(&'a str) -> Option<QuadroReg>,
-{
-    match expr {
-        Expr::State(state) => Ok(fill_state(*state)),
-        Expr::Ident(name) => resolve_ident(name).ok_or(EvalError {
-            ident: name,
-            message: "unknown identifier",
-        }),
-        Expr::Unary { op, expr } => {
-            let v = eval_expression(expr, resolve_ident)?;
-            match op {
-                UnaryOp::Not => Ok(v.inverse()),
-            }
-        }
-        Expr::Binary { op, left, right } => {
-            let l = eval_expression(left, resolve_ident)?;
-            let r = eval_expression(right, resolve_ident)?;
-            match op {
-                BinaryOp::Or => Ok(l.merge(r)),
-                BinaryOp::Xor => Ok(l.raw_delta(r)),
-                BinaryOp::And => Ok(l.intersect(r)),
-            }
-        }
-    }
-}
-
-pub fn eval_assignment<'a, R>(
-    assignment: &'a Assignment<'a>,
-    resolve_ident: &R,
-) -> Result<(&'a str, QuadroReg), EvalError<'a>>
-where
-    R: Fn(&'a str) -> Option<QuadroReg>,
-{
-    let value = eval_expression(&assignment.expr, resolve_ident)?;
-    Ok((assignment.target, value))
-}
-
-pub fn execute_program(
-    program: &str,
-    env: &mut HashMap<String, QuadroReg>,
-) -> Result<(), ProgramError> {
-    for (line_idx, raw_line) in program.lines().enumerate() {
-        let line_no = line_idx + 1;
-        let line = strip_comment(raw_line).trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        let assignment = parse_assignment(line).map_err(|e| ProgramError {
-            line: line_no,
-            column: e.position + 1,
-            message: e.message.to_string(),
-        })?;
-
-        let (target, value) = eval_assignment(&assignment, &|name| env.get(name).copied())
-            .map_err(|e| ProgramError {
-                line: line_no,
-                column: 1,
-                message: format!("{} ('{}')", e.message, e.ident),
-            })?;
-
-        env.insert(target.to_string(), value);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum UnaryOp {
+        Not,
     }
 
-    Ok(())
-}
-
-pub fn execute_program_with_profile(
-    program: &str,
-    env: &mut HashMap<String, QuadroReg>,
-    profile: &ParserProfile,
-) -> Result<(), ProgramError> {
-    for (line_idx, raw_line) in program.lines().enumerate() {
-        let line_no = line_idx + 1;
-        let line = strip_comment(raw_line).trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        let normalized = profile.normalize(line);
-        let assignment = parse_assignment(&normalized).map_err(|e| ProgramError {
-            line: line_no,
-            column: e.position + 1,
-            message: e.message.to_string(),
-        })?;
-
-        let (target, value) = eval_assignment(&assignment, &|name| env.get(name).copied())
-            .map_err(|e| ProgramError {
-                line: line_no,
-                column: 1,
-                message: format!("{} ('{}')", e.message, e.ident),
-            })?;
-
-        env.insert(target.to_string(), value);
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum BinaryOp {
+        Or,
+        Xor,
+        And,
     }
 
-    Ok(())
-}
-
-#[inline]
-fn strip_comment(line: &str) -> &str {
-    let slash = line.find("//");
-    let hash = line.find('#');
-    match (slash, hash) {
-        (Some(a), Some(b)) => &line[..a.min(b)],
-        (Some(a), None) => &line[..a],
-        (None, Some(b)) => &line[..b],
-        (None, None) => line,
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Expr<'a> {
+        State(u8),
+        Ident(&'a str),
+        Unary {
+            op: UnaryOp,
+            expr: Box<Expr<'a>>,
+        },
+        Binary {
+            op: BinaryOp,
+            left: Box<Expr<'a>>,
+            right: Box<Expr<'a>>,
+        },
     }
-}
 
-#[inline]
-fn fill_state(state: u8) -> QuadroReg {
-    debug_assert!(state <= 0b11);
-    match state {
-        N => QuadroReg::from_raw(0),
-        F => QuadroReg::from_raw(crate::LSB_MASK),
-        T => QuadroReg::from_raw(crate::MSB_MASK),
-        S => QuadroReg::from_raw(u64::MAX),
-        _ => unreachable!("invalid quadit state"),
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Assignment<'a> {
+        pub target: &'a str,
+        pub expr: Expr<'a>,
     }
-}
 
-struct Parser<'a> {
-    src: &'a str,
-    bytes: &'a [u8],
-    pos: usize,
-}
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ParseError {
+        pub position: usize,
+        pub message: &'static str,
+    }
 
-impl<'a> Parser<'a> {
-    fn new(src: &'a str) -> Self {
-        Self {
-            src,
-            bytes: src.as_bytes(),
-            pos: 0,
+    impl core::fmt::Display for ParseError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(f, "parse error at {}: {}", self.position, self.message)
         }
     }
 
-    fn is_eof(&self) -> bool {
-        self.pos >= self.bytes.len()
+    #[cfg(feature = "std")]
+    impl std::error::Error for ParseError {}
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct EvalError<'a> {
+        pub ident: &'a str,
+        pub message: &'static str,
     }
 
-    fn err(&self, message: &'static str) -> ParseError {
-        ParseError {
-            position: self.pos,
-            message,
+    impl<'a> core::fmt::Display for EvalError<'a> {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(f, "eval error for '{}': {}", self.ident, self.message)
         }
     }
 
-    fn peek(&self) -> Option<u8> {
-        self.bytes.get(self.pos).copied()
+    #[cfg(feature = "std")]
+    impl<'a> std::error::Error for EvalError<'a> {}
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct ProgramError {
+        pub line: usize,
+        pub column: usize,
+        pub message: String,
     }
 
-    fn bump(&mut self) -> Option<u8> {
-        let ch = self.peek()?;
-        self.pos += 1;
-        Some(ch)
+    impl core::fmt::Display for ProgramError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(
+                f,
+                "program error at line {}, column {}: {}",
+                self.line, self.column, self.message
+            )
+        }
     }
 
-    fn eat_byte(&mut self, expected: u8) -> bool {
-        if self.peek() == Some(expected) {
-            self.pos += 1;
-            true
+    #[cfg(feature = "std")]
+    impl std::error::Error for ProgramError {}
+
+    pub fn parse_expression(input: &str) -> Result<Expr<'_>, ParseError> {
+        let mut p = Parser::new(input);
+        let expr = p.parse_expr()?;
+        p.skip_ws();
+        if p.is_eof() {
+            Ok(expr)
         } else {
-            false
+            Err(p.err("unexpected trailing input"))
         }
     }
 
-    fn skip_ws(&mut self) {
-        while let Some(ch) = self.peek() {
-            if ch.is_ascii_whitespace() {
+    pub fn parse_assignment(input: &str) -> Result<Assignment<'_>, ParseError> {
+        let mut p = Parser::new(input);
+        let target = p.parse_identifier()?;
+        p.skip_ws();
+        if !p.eat_byte(b'=') {
+            return Err(p.err("expected '=' after identifier"));
+        }
+        let expr = p.parse_expr()?;
+        p.skip_ws();
+        if !p.is_eof() {
+            return Err(p.err("unexpected trailing input"));
+        }
+        Ok(Assignment { target, expr })
+    }
+
+    pub fn eval_expression<'a, R>(
+        expr: &'a Expr<'a>,
+        resolve_ident: &R,
+    ) -> Result<QuadroReg, EvalError<'a>>
+    where
+        R: Fn(&'a str) -> Option<QuadroReg>,
+    {
+        match expr {
+            Expr::State(state) => Ok(fill_state(*state)),
+            Expr::Ident(name) => resolve_ident(name).ok_or(EvalError {
+                ident: name,
+                message: "unknown identifier",
+            }),
+            Expr::Unary { op, expr } => {
+                let v = eval_expression(expr, resolve_ident)?;
+                match op {
+                    UnaryOp::Not => Ok(v.inverse()),
+                }
+            }
+            Expr::Binary { op, left, right } => {
+                let l = eval_expression(left, resolve_ident)?;
+                let r = eval_expression(right, resolve_ident)?;
+                match op {
+                    BinaryOp::Or => Ok(l.merge(r)),
+                    BinaryOp::Xor => Ok(l.raw_delta(r)),
+                    BinaryOp::And => Ok(l.intersect(r)),
+                }
+            }
+        }
+    }
+
+    pub fn eval_assignment<'a, R>(
+        assignment: &'a Assignment<'a>,
+        resolve_ident: &R,
+    ) -> Result<(&'a str, QuadroReg), EvalError<'a>>
+    where
+        R: Fn(&'a str) -> Option<QuadroReg>,
+    {
+        let value = eval_expression(&assignment.expr, resolve_ident)?;
+        Ok((assignment.target, value))
+    }
+
+    pub fn execute_program(
+        program: &str,
+        env: &mut HashMap<String, QuadroReg>,
+    ) -> Result<(), ProgramError> {
+        for (line_idx, raw_line) in program.lines().enumerate() {
+            let line_no = line_idx + 1;
+            let line = strip_comment(raw_line).trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let assignment = parse_assignment(line).map_err(|e| ProgramError {
+                line: line_no,
+                column: e.position + 1,
+                message: e.message.to_string(),
+            })?;
+
+            let (target, value) = eval_assignment(&assignment, &|name| env.get(name).copied())
+                .map_err(|e| ProgramError {
+                    line: line_no,
+                    column: 1,
+                    message: format!("{} ('{}')", e.message, e.ident),
+                })?;
+
+            env.insert(target.to_string(), value);
+        }
+
+        Ok(())
+    }
+
+    pub fn execute_program_with_profile(
+        program: &str,
+        env: &mut HashMap<String, QuadroReg>,
+        profile: &ParserProfile,
+    ) -> Result<(), ProgramError> {
+        for (line_idx, raw_line) in program.lines().enumerate() {
+            let line_no = line_idx + 1;
+            let line = strip_comment(raw_line).trim();
+            if line.is_empty() {
+                continue;
+            }
+
+            let normalized = profile.normalize(line);
+            let assignment = parse_assignment(&normalized).map_err(|e| ProgramError {
+                line: line_no,
+                column: e.position + 1,
+                message: e.message.to_string(),
+            })?;
+
+            let (target, value) = eval_assignment(&assignment, &|name| env.get(name).copied())
+                .map_err(|e| ProgramError {
+                    line: line_no,
+                    column: 1,
+                    message: format!("{} ('{}')", e.message, e.ident),
+                })?;
+
+            env.insert(target.to_string(), value);
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn strip_comment(line: &str) -> &str {
+        let slash = line.find("//");
+        let hash = line.find('#');
+        match (slash, hash) {
+            (Some(a), Some(b)) => &line[..a.min(b)],
+            (Some(a), None) => &line[..a],
+            (None, Some(b)) => &line[..b],
+            (None, None) => line,
+        }
+    }
+
+    #[inline]
+    fn fill_state(state: u8) -> QuadroReg {
+        debug_assert!(state <= 0b11);
+        match state {
+            N => QuadroReg::from_raw(0),
+            F => QuadroReg::from_raw(crate::LSB_MASK),
+            T => QuadroReg::from_raw(crate::MSB_MASK),
+            S => QuadroReg::from_raw(u64::MAX),
+            _ => unreachable!("invalid quadit state"),
+        }
+    }
+
+    struct Parser<'a> {
+        src: &'a str,
+        bytes: &'a [u8],
+        pos: usize,
+    }
+
+    impl<'a> Parser<'a> {
+        fn new(src: &'a str) -> Self {
+            Self {
+                src,
+                bytes: src.as_bytes(),
+                pos: 0,
+            }
+        }
+
+        fn is_eof(&self) -> bool {
+            self.pos >= self.bytes.len()
+        }
+
+        fn err(&self, message: &'static str) -> ParseError {
+            ParseError {
+                position: self.pos,
+                message,
+            }
+        }
+
+        fn peek(&self) -> Option<u8> {
+            self.bytes.get(self.pos).copied()
+        }
+
+        fn bump(&mut self) -> Option<u8> {
+            let ch = self.peek()?;
+            self.pos += 1;
+            Some(ch)
+        }
+
+        fn eat_byte(&mut self, expected: u8) -> bool {
+            if self.peek() == Some(expected) {
                 self.pos += 1;
+                true
             } else {
-                break;
+                false
             }
         }
-    }
 
-    fn parse_expr(&mut self) -> Result<Expr<'a>, ParseError> {
-        self.parse_or()
-    }
-
-    fn parse_or(&mut self) -> Result<Expr<'a>, ParseError> {
-        let mut left = self.parse_xor()?;
-        loop {
-            self.skip_ws();
-            if !self.eat_byte(b'|') {
-                break;
+        fn skip_ws(&mut self) {
+            while let Some(ch) = self.peek() {
+                if ch.is_ascii_whitespace() {
+                    self.pos += 1;
+                } else {
+                    break;
+                }
             }
-            let right = self.parse_xor()?;
-            left = Expr::Binary {
-                op: BinaryOp::Or,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
         }
-        Ok(left)
-    }
 
-    fn parse_xor(&mut self) -> Result<Expr<'a>, ParseError> {
-        let mut left = self.parse_and()?;
-        loop {
-            self.skip_ws();
-            if !self.eat_byte(b'^') {
-                break;
-            }
-            let right = self.parse_and()?;
-            left = Expr::Binary {
-                op: BinaryOp::Xor,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+        fn parse_expr(&mut self) -> Result<Expr<'a>, ParseError> {
+            self.parse_or()
         }
-        Ok(left)
-    }
 
-    fn parse_and(&mut self) -> Result<Expr<'a>, ParseError> {
-        let mut left = self.parse_unary()?;
-        loop {
-            self.skip_ws();
-            if !self.eat_byte(b'&') {
-                break;
-            }
-            let right = self.parse_unary()?;
-            left = Expr::Binary {
-                op: BinaryOp::And,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
-        }
-        Ok(left)
-    }
-
-    fn parse_unary(&mut self) -> Result<Expr<'a>, ParseError> {
-        self.skip_ws();
-        if self.eat_byte(b'!') {
-            return Ok(Expr::Unary {
-                op: UnaryOp::Not,
-                expr: Box::new(self.parse_unary()?),
-            });
-        }
-        self.parse_primary()
-    }
-
-    fn parse_primary(&mut self) -> Result<Expr<'a>, ParseError> {
-        self.skip_ws();
-        match self.peek() {
-            Some(b'(') => {
-                self.bump();
-                let expr = self.parse_expr()?;
+        fn parse_or(&mut self) -> Result<Expr<'a>, ParseError> {
+            let mut left = self.parse_xor()?;
+            loop {
                 self.skip_ws();
-                if !self.eat_byte(b')') {
-                    return Err(self.err("expected ')'"));
+                if !self.eat_byte(b'|') {
+                    break;
                 }
-                Ok(expr)
-            }
-            Some(ch) if is_ident_start(ch) => {
-                let ident = self.parse_identifier()?;
-                match ident {
-                    "N" => Ok(Expr::State(N)),
-                    "F" => Ok(Expr::State(F)),
-                    "T" => Ok(Expr::State(T)),
-                    "S" => Ok(Expr::State(S)),
-                    _ => Ok(Expr::Ident(ident)),
-                }
-            }
-            Some(_) => Err(self.err("unexpected token")),
-            None => Err(self.err("unexpected end of input")),
-        }
-    }
-
-    fn parse_identifier(&mut self) -> Result<&'a str, ParseError> {
-        self.skip_ws();
-        let start = self.pos;
-        let first = self.peek().ok_or_else(|| self.err("expected identifier"))?;
-        if !is_ident_start(first) {
-            return Err(self.err("expected identifier"));
-        }
-        self.pos += 1;
-        while let Some(ch) = self.peek() {
-            if is_ident_continue(ch) {
-                self.pos += 1;
-            } else {
-                break;
-            }
-        }
-        self.src
-            .get(start..self.pos)
-            .ok_or_else(|| self.err("invalid utf-8 boundary"))
-    }
-}
-
-#[inline]
-fn is_ident_start(ch: u8) -> bool {
-    ch.is_ascii_alphabetic() || ch == b'_'
-}
-
-#[inline]
-fn is_ident_continue(ch: u8) -> bool {
-    ch.is_ascii_alphanumeric() || ch == b'_'
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_respects_precedence() {
-        let expr = parse_expression("T | F & N ^ S").expect("must parse");
-        let expected = Expr::Binary {
-            op: BinaryOp::Or,
-            left: Box::new(Expr::State(T)),
-            right: Box::new(Expr::Binary {
-                op: BinaryOp::Xor,
-                left: Box::new(Expr::Binary {
-                    op: BinaryOp::And,
-                    left: Box::new(Expr::State(F)),
-                    right: Box::new(Expr::State(N)),
-                }),
-                right: Box::new(Expr::State(S)),
-            }),
-        };
-        assert_eq!(expr, expected);
-    }
-
-    #[test]
-    fn parse_parentheses_and_unary() {
-        let expr = parse_expression("!(a | T) & _x2").expect("must parse");
-        let expected = Expr::Binary {
-            op: BinaryOp::And,
-            left: Box::new(Expr::Unary {
-                op: UnaryOp::Not,
-                expr: Box::new(Expr::Binary {
+                let right = self.parse_xor()?;
+                left = Expr::Binary {
                     op: BinaryOp::Or,
-                    left: Box::new(Expr::Ident("a")),
-                    right: Box::new(Expr::State(T)),
-                }),
-            }),
-            right: Box::new(Expr::Ident("_x2")),
-        };
-        assert_eq!(expr, expected);
-    }
-
-    #[test]
-    fn parse_assignment_ok() {
-        let parsed = parse_assignment("out = a & !F").expect("must parse");
-        assert_eq!(parsed.target, "out");
-        assert_eq!(
-            parsed.expr,
-            Expr::Binary {
-                op: BinaryOp::And,
-                left: Box::new(Expr::Ident("a")),
-                right: Box::new(Expr::Unary {
-                    op: UnaryOp::Not,
-                    expr: Box::new(Expr::State(F)),
-                }),
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
             }
-        );
+            Ok(left)
+        }
+
+        fn parse_xor(&mut self) -> Result<Expr<'a>, ParseError> {
+            let mut left = self.parse_and()?;
+            loop {
+                self.skip_ws();
+                if !self.eat_byte(b'^') {
+                    break;
+                }
+                let right = self.parse_and()?;
+                left = Expr::Binary {
+                    op: BinaryOp::Xor,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            }
+            Ok(left)
+        }
+
+        fn parse_and(&mut self) -> Result<Expr<'a>, ParseError> {
+            let mut left = self.parse_unary()?;
+            loop {
+                self.skip_ws();
+                if !self.eat_byte(b'&') {
+                    break;
+                }
+                let right = self.parse_unary()?;
+                left = Expr::Binary {
+                    op: BinaryOp::And,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                };
+            }
+            Ok(left)
+        }
+
+        fn parse_unary(&mut self) -> Result<Expr<'a>, ParseError> {
+            self.skip_ws();
+            if self.eat_byte(b'!') {
+                return Ok(Expr::Unary {
+                    op: UnaryOp::Not,
+                    expr: Box::new(self.parse_unary()?),
+                });
+            }
+            self.parse_primary()
+        }
+
+        fn parse_primary(&mut self) -> Result<Expr<'a>, ParseError> {
+            self.skip_ws();
+            match self.peek() {
+                Some(b'(') => {
+                    self.bump();
+                    let expr = self.parse_expr()?;
+                    self.skip_ws();
+                    if !self.eat_byte(b')') {
+                        return Err(self.err("expected ')'"));
+                    }
+                    Ok(expr)
+                }
+                Some(ch) if is_ident_start(ch) => {
+                    let ident = self.parse_identifier()?;
+                    match ident {
+                        "N" => Ok(Expr::State(N)),
+                        "F" => Ok(Expr::State(F)),
+                        "T" => Ok(Expr::State(T)),
+                        "S" => Ok(Expr::State(S)),
+                        _ => Ok(Expr::Ident(ident)),
+                    }
+                }
+                Some(_) => Err(self.err("unexpected token")),
+                None => Err(self.err("unexpected end of input")),
+            }
+        }
+
+        fn parse_identifier(&mut self) -> Result<&'a str, ParseError> {
+            self.skip_ws();
+            let start = self.pos;
+            let first = self.peek().ok_or_else(|| self.err("expected identifier"))?;
+            if !is_ident_start(first) {
+                return Err(self.err("expected identifier"));
+            }
+            self.pos += 1;
+            while let Some(ch) = self.peek() {
+                if is_ident_continue(ch) {
+                    self.pos += 1;
+                } else {
+                    break;
+                }
+            }
+            self.src
+                .get(start..self.pos)
+                .ok_or_else(|| self.err("invalid utf-8 boundary"))
+        }
     }
 
-    #[test]
-    fn parse_errors_are_reported() {
-        let err = parse_expression("(T | F").expect_err("must fail");
-        assert_eq!(err.message, "expected ')'");
-
-        let err = parse_assignment("1bad = T").expect_err("must fail");
-        assert_eq!(err.message, "expected identifier");
+    #[inline]
+    fn is_ident_start(ch: u8) -> bool {
+        ch.is_ascii_alphabetic() || ch == b'_'
     }
 
-    #[test]
-    fn eval_expression_operators_work_on_registers() {
-        let mut vars = HashMap::new();
-        let mut a = QuadroReg::new();
-        a = a.set_by_mask(1_u64 << (0 * 2), T);
-        a = a.set_by_mask(1_u64 << (1 * 2), F);
-        let mut b = QuadroReg::new();
-        b = b.set_by_mask(1_u64 << (0 * 2), F);
-        b = b.set_by_mask(1_u64 << (1 * 2), T);
-        vars.insert("a", a);
-        vars.insert("b", b);
-
-        let expr = parse_expression("!(a & b) | (a ^ b)").expect("must parse");
-        let got = eval_expression(&expr, &|name| vars.get(name).copied()).expect("must eval");
-
-        let expected = a.intersect(b).inverse().merge(a.raw_delta(b));
-        assert_eq!(got.raw(), expected.raw());
+    #[inline]
+    fn is_ident_continue(ch: u8) -> bool {
+        ch.is_ascii_alphanumeric() || ch == b'_'
     }
 
-    #[test]
-    fn eval_assignment_returns_target_and_value() {
-        let mut vars = HashMap::new();
-        let x = QuadroReg::from_raw(0x1234_5678_9abc_def0);
-        let y = QuadroReg::from_raw(0x0f0f_f0f0_55aa_a55a);
-        vars.insert("x", x);
-        vars.insert("y", y);
+    #[cfg(test)]
+    mod tests {
+        use super::*;
 
-        let stmt = parse_assignment("out = x & y").expect("must parse");
-        let (target, value) =
-            eval_assignment(&stmt, &|name| vars.get(name).copied()).expect("must eval");
+        #[test]
+        fn parse_respects_precedence() {
+            let expr = parse_expression("T | F & N ^ S").expect("must parse");
+            let expected = Expr::Binary {
+                op: BinaryOp::Or,
+                left: Box::new(Expr::State(T)),
+                right: Box::new(Expr::Binary {
+                    op: BinaryOp::Xor,
+                    left: Box::new(Expr::Binary {
+                        op: BinaryOp::And,
+                        left: Box::new(Expr::State(F)),
+                        right: Box::new(Expr::State(N)),
+                    }),
+                    right: Box::new(Expr::State(S)),
+                }),
+            };
+            assert_eq!(expr, expected);
+        }
 
-        assert_eq!(target, "out");
-        assert_eq!(value.raw(), x.intersect(y).raw());
-    }
+        #[test]
+        fn parse_parentheses_and_unary() {
+            let expr = parse_expression("!(a | T) & _x2").expect("must parse");
+            let expected = Expr::Binary {
+                op: BinaryOp::And,
+                left: Box::new(Expr::Unary {
+                    op: UnaryOp::Not,
+                    expr: Box::new(Expr::Binary {
+                        op: BinaryOp::Or,
+                        left: Box::new(Expr::Ident("a")),
+                        right: Box::new(Expr::State(T)),
+                    }),
+                }),
+                right: Box::new(Expr::Ident("_x2")),
+            };
+            assert_eq!(expr, expected);
+        }
 
-    #[test]
-    fn eval_unknown_identifier_fails() {
-        let expr = parse_expression("a | T").expect("must parse");
-        let err = eval_expression(&expr, &|_| None).expect_err("must fail");
-        assert_eq!(err.ident, "a");
-        assert_eq!(err.message, "unknown identifier");
-    }
+        #[test]
+        fn parse_assignment_ok() {
+            let parsed = parse_assignment("out = a & !F").expect("must parse");
+            assert_eq!(parsed.target, "out");
+            assert_eq!(
+                parsed.expr,
+                Expr::Binary {
+                    op: BinaryOp::And,
+                    left: Box::new(Expr::Ident("a")),
+                    right: Box::new(Expr::Unary {
+                        op: UnaryOp::Not,
+                        expr: Box::new(Expr::State(F)),
+                    }),
+                }
+            );
+        }
 
-    #[test]
-    fn execute_program_updates_context_in_order() {
-        let mut env = HashMap::<String, QuadroReg>::new();
-        let program = r#"
+        #[test]
+        fn parse_errors_are_reported() {
+            let err = parse_expression("(T | F").expect_err("must fail");
+            assert_eq!(err.message, "expected ')'");
+
+            let err = parse_assignment("1bad = T").expect_err("must fail");
+            assert_eq!(err.message, "expected identifier");
+        }
+
+        #[test]
+        fn eval_expression_operators_work_on_registers() {
+            let mut vars = HashMap::new();
+            let mut a = QuadroReg::new();
+            a = a.set_by_mask(1_u64 << (0 * 2), T);
+            a = a.set_by_mask(1_u64 << (1 * 2), F);
+            let mut b = QuadroReg::new();
+            b = b.set_by_mask(1_u64 << (0 * 2), F);
+            b = b.set_by_mask(1_u64 << (1 * 2), T);
+            vars.insert("a", a);
+            vars.insert("b", b);
+
+            let expr = parse_expression("!(a & b) | (a ^ b)").expect("must parse");
+            let got = eval_expression(&expr, &|name| vars.get(name).copied()).expect("must eval");
+
+            let expected = a.intersect(b).inverse().merge(a.raw_delta(b));
+            assert_eq!(got.raw(), expected.raw());
+        }
+
+        #[test]
+        fn eval_assignment_returns_target_and_value() {
+            let mut vars = HashMap::new();
+            let x = QuadroReg::from_raw(0x1234_5678_9abc_def0);
+            let y = QuadroReg::from_raw(0x0f0f_f0f0_55aa_a55a);
+            vars.insert("x", x);
+            vars.insert("y", y);
+
+            let stmt = parse_assignment("out = x & y").expect("must parse");
+            let (target, value) =
+                eval_assignment(&stmt, &|name| vars.get(name).copied()).expect("must eval");
+
+            assert_eq!(target, "out");
+            assert_eq!(value.raw(), x.intersect(y).raw());
+        }
+
+        #[test]
+        fn eval_unknown_identifier_fails() {
+            let expr = parse_expression("a | T").expect("must parse");
+            let err = eval_expression(&expr, &|_| None).expect_err("must fail");
+            assert_eq!(err.ident, "a");
+            assert_eq!(err.message, "unknown identifier");
+        }
+
+        #[test]
+        fn execute_program_updates_context_in_order() {
+            let mut env = HashMap::<String, QuadroReg>::new();
+            let program = r#"
 			a = T
 			b = !a
 			c = a ^ b
 		"#;
 
-        execute_program(program, &mut env).expect("must execute");
+            execute_program(program, &mut env).expect("must execute");
 
-        assert_eq!(
-            env.get("a").copied(),
-            Some(QuadroReg::from_raw(crate::MSB_MASK))
-        );
-        assert_eq!(
-            env.get("b").copied(),
-            Some(QuadroReg::from_raw(crate::LSB_MASK))
-        );
-        assert_eq!(env.get("c").copied(), Some(QuadroReg::from_raw(u64::MAX)));
-    }
+            assert_eq!(
+                env.get("a").copied(),
+                Some(QuadroReg::from_raw(crate::MSB_MASK))
+            );
+            assert_eq!(
+                env.get("b").copied(),
+                Some(QuadroReg::from_raw(crate::LSB_MASK))
+            );
+            assert_eq!(env.get("c").copied(), Some(QuadroReg::from_raw(u64::MAX)));
+        }
 
-    #[test]
-    fn execute_program_supports_comments_and_blanks() {
-        let mut env = HashMap::<String, QuadroReg>::new();
-        let program = r#"
+        #[test]
+        fn execute_program_supports_comments_and_blanks() {
+            let mut env = HashMap::<String, QuadroReg>::new();
+            let program = r#"
 			# set initial value
 			x = F // inline comment
 
 			y = !x
 		"#;
 
-        execute_program(program, &mut env).expect("must execute");
-        assert_eq!(
-            env.get("x").copied(),
-            Some(QuadroReg::from_raw(crate::LSB_MASK))
-        );
-        assert_eq!(
-            env.get("y").copied(),
-            Some(QuadroReg::from_raw(crate::MSB_MASK))
-        );
-    }
+            execute_program(program, &mut env).expect("must execute");
+            assert_eq!(
+                env.get("x").copied(),
+                Some(QuadroReg::from_raw(crate::LSB_MASK))
+            );
+            assert_eq!(
+                env.get("y").copied(),
+                Some(QuadroReg::from_raw(crate::MSB_MASK))
+            );
+        }
 
-    #[test]
-    fn execute_program_reports_line_for_eval_error() {
-        let mut env = HashMap::<String, QuadroReg>::new();
-        let program = "a = T\nb = z & a";
-        let err = execute_program(program, &mut env).expect_err("must fail");
+        #[test]
+        fn execute_program_reports_line_for_eval_error() {
+            let mut env = HashMap::<String, QuadroReg>::new();
+            let program = "a = T\nb = z & a";
+            let err = execute_program(program, &mut env).expect_err("must fail");
 
-        assert_eq!(err.line, 2);
-        assert_eq!(err.column, 1);
-        assert!(err.message.contains("unknown identifier"));
-        assert!(err.message.contains("z"));
-    }
+            assert_eq!(err.line, 2);
+            assert_eq!(err.column, 1);
+            assert!(err.message.contains("unknown identifier"));
+            assert!(err.message.contains("z"));
+        }
 
-    #[test]
-    fn execute_program_reports_line_for_parse_error() {
-        let mut env = HashMap::<String, QuadroReg>::new();
-        let program = "a = T\nbad line";
-        let err = execute_program(program, &mut env).expect_err("must fail");
+        #[test]
+        fn execute_program_reports_line_for_parse_error() {
+            let mut env = HashMap::<String, QuadroReg>::new();
+            let program = "a = T\nbad line";
+            let err = execute_program(program, &mut env).expect_err("must fail");
 
-        assert_eq!(err.line, 2);
-        assert!(err.column >= 1);
-    }
+            assert_eq!(err.line, 2);
+            assert!(err.column >= 1);
+        }
 
-    #[test]
-    fn train_profile_learns_aliases_from_examples() {
-        let samples = [
-            TrainingSample {
-                input: "out = a AND b",
-                target: "out = a & b",
-            },
-            TrainingSample {
-                input: "q = a OR b",
-                target: "q = a | b",
-            },
-            TrainingSample {
-                input: "x = NOT FALSE",
-                target: "x = ! F",
-            },
-            TrainingSample {
-                input: "y = TRUE XOR x",
-                target: "y = T ^ x",
-            },
-        ];
-        let profile = train_profile(&samples);
+        #[test]
+        fn train_profile_learns_aliases_from_examples() {
+            let samples = [
+                TrainingSample {
+                    input: "out = a AND b",
+                    target: "out = a & b",
+                },
+                TrainingSample {
+                    input: "q = a OR b",
+                    target: "q = a | b",
+                },
+                TrainingSample {
+                    input: "x = NOT FALSE",
+                    target: "x = ! F",
+                },
+                TrainingSample {
+                    input: "y = TRUE XOR x",
+                    target: "y = T ^ x",
+                },
+            ];
+            let profile = train_profile(&samples);
 
-        assert_eq!(profile.aliases.get("AND"), Some(&"&".to_string()));
-        assert_eq!(profile.aliases.get("OR"), Some(&"|".to_string()));
-        assert_eq!(profile.aliases.get("NOT"), Some(&"!".to_string()));
-        assert_eq!(profile.aliases.get("TRUE"), Some(&"T".to_string()));
-        assert_eq!(profile.aliases.get("FALSE"), Some(&"F".to_string()));
-        assert_eq!(profile.aliases.get("XOR"), Some(&"^".to_string()));
-        assert_eq!(profile.normalize("z = TRUE AND NOT a"), "z = T & ! a");
-    }
+            assert_eq!(profile.aliases.get("AND"), Some(&"&".to_string()));
+            assert_eq!(profile.aliases.get("OR"), Some(&"|".to_string()));
+            assert_eq!(profile.aliases.get("NOT"), Some(&"!".to_string()));
+            assert_eq!(profile.aliases.get("TRUE"), Some(&"T".to_string()));
+            assert_eq!(profile.aliases.get("FALSE"), Some(&"F".to_string()));
+            assert_eq!(profile.aliases.get("XOR"), Some(&"^".to_string()));
+            assert_eq!(profile.normalize("z = TRUE AND NOT a"), "z = T & ! a");
+        }
 
-    #[test]
-    fn execute_program_with_profile_uses_trained_aliases() {
-        let samples = [
-            TrainingSample {
-                input: "out = a AND b",
-                target: "out = a & b",
-            },
-            TrainingSample {
-                input: "q = a OR b",
-                target: "q = a | b",
-            },
-            TrainingSample {
-                input: "x = NOT FALSE",
-                target: "x = ! F",
-            },
-            TrainingSample {
-                input: "y = TRUE XOR x",
-                target: "y = T ^ x",
-            },
-        ];
-        let profile = train_profile(&samples);
+        #[test]
+        fn execute_program_with_profile_uses_trained_aliases() {
+            let samples = [
+                TrainingSample {
+                    input: "out = a AND b",
+                    target: "out = a & b",
+                },
+                TrainingSample {
+                    input: "q = a OR b",
+                    target: "q = a | b",
+                },
+                TrainingSample {
+                    input: "x = NOT FALSE",
+                    target: "x = ! F",
+                },
+                TrainingSample {
+                    input: "y = TRUE XOR x",
+                    target: "y = T ^ x",
+                },
+            ];
+            let profile = train_profile(&samples);
 
-        let mut env = HashMap::<String, QuadroReg>::new();
-        env.insert("a".to_string(), QuadroReg::from_raw(crate::MSB_MASK));
-        env.insert("b".to_string(), QuadroReg::from_raw(crate::LSB_MASK));
+            let mut env = HashMap::<String, QuadroReg>::new();
+            env.insert("a".to_string(), QuadroReg::from_raw(crate::MSB_MASK));
+            env.insert("b".to_string(), QuadroReg::from_raw(crate::LSB_MASK));
 
-        let program = r#"
+            let program = r#"
 			x = NOT FALSE
 			y = TRUE XOR x
 			out = y OR (a AND b)
 		"#;
-        execute_program_with_profile(program, &mut env, &profile).expect("must execute");
+            execute_program_with_profile(program, &mut env, &profile).expect("must execute");
 
-        let x = QuadroReg::from_raw(crate::LSB_MASK).inverse();
-        let y = QuadroReg::from_raw(crate::MSB_MASK).raw_delta(x);
-        let out = y.merge(
-            QuadroReg::from_raw(crate::MSB_MASK).intersect(QuadroReg::from_raw(crate::LSB_MASK)),
-        );
-        assert_eq!(env.get("out").copied(), Some(out));
+            let x = QuadroReg::from_raw(crate::LSB_MASK).inverse();
+            let y = QuadroReg::from_raw(crate::MSB_MASK).raw_delta(x);
+            let out = y.merge(
+                QuadroReg::from_raw(crate::MSB_MASK)
+                    .intersect(QuadroReg::from_raw(crate::LSB_MASK)),
+            );
+            assert_eq!(env.get("out").copied(), Some(out));
+        }
+
+        #[test]
+        fn profile_json_roundtrip() {
+            let mut profile = ParserProfile::default();
+            profile.add_alias("AND", "&");
+            profile.add_alias("TRUE", "T");
+
+            let json = profile.to_json().expect("serialize");
+            let restored = ParserProfile::from_json(&json).expect("deserialize");
+            assert_eq!(restored, profile);
+        }
+
+        #[test]
+        fn profile_save_and_load_file() {
+            let mut profile = ParserProfile::default();
+            profile.add_alias("OR", "|");
+            profile.add_alias("NOT", "!");
+
+            let path = std::env::temp_dir().join("smcode_parser_profile_test.json");
+            profile.save_to_file(&path).expect("save");
+            let loaded = ParserProfile::load_from_file(&path).expect("load");
+            let _ = std::fs::remove_file(&path);
+
+            assert_eq!(loaded, profile);
+        }
     }
-
-    #[test]
-    fn profile_json_roundtrip() {
-        let mut profile = ParserProfile::default();
-        profile.add_alias("AND", "&");
-        profile.add_alias("TRUE", "T");
-
-        let json = profile.to_json().expect("serialize");
-        let restored = ParserProfile::from_json(&json).expect("deserialize");
-        assert_eq!(restored, profile);
-    }
-
-    #[test]
-    fn profile_save_and_load_file() {
-        let mut profile = ParserProfile::default();
-        profile.add_alias("OR", "|");
-        profile.add_alias("NOT", "!");
-
-        let path = std::env::temp_dir().join("smcode_parser_profile_test.json");
-        profile.save_to_file(&path).expect("save");
-        let loaded = ParserProfile::load_from_file(&path).expect("load");
-        let _ = std::fs::remove_file(&path);
-
-        assert_eq!(loaded, profile);
-    }
-}
-
 }
 
 mod language {
-//! Compatibility-only language helpers for the retained TON618 CLI shim.
+    //! Compatibility-only language helpers for the retained TON618 CLI shim.
 
-use super::parser::{parse_assignment, BinaryOp as PBinaryOp, Expr, UnaryOp};
-use super::{QuadroReg, F, N, S, T};
-use sm_profile::ParserProfile;
-use std::collections::HashMap;
+    use super::parser::{parse_assignment, BinaryOp as PBinaryOp, Expr, UnaryOp};
+    use super::{QuadroReg, F, N, S, T};
+    use sm_profile::ParserProfile;
+    use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MachineProgram {
-    pub instructions: Vec<MachineInstr>,
-}
-
-impl MachineProgram {
-    pub fn new() -> Self {
-        Self {
-            instructions: Vec::new(),
-        }
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct MachineProgram {
+        pub instructions: Vec<MachineInstr>,
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MachineInstr {
-    SetState {
-        dst: String,
-        state: u8,
-    },
-    Mov {
-        dst: String,
-        src: String,
-    },
-    Not {
-        dst: String,
-        src: String,
-    },
-    And {
-        dst: String,
-        lhs: String,
-        rhs: String,
-    },
-    Or {
-        dst: String,
-        lhs: String,
-        rhs: String,
-    },
-    Xor {
-        dst: String,
-        lhs: String,
-        rhs: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompileError {
-    pub line: usize,
-    pub column: usize,
-    pub message: String,
-}
-
-impl core::fmt::Display for CompileError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "compile error at line {}, column {}: {}",
-            self.line, self.column, self.message
-        )
-    }
-}
-
-impl std::error::Error for CompileError {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MachineParseError {
-    pub line: usize,
-    pub column: usize,
-    pub message: String,
-}
-
-impl core::fmt::Display for MachineParseError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "machine parse error at line {}, column {}: {}",
-            self.line, self.column, self.message
-        )
-    }
-}
-
-impl std::error::Error for MachineParseError {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeError {
-    pub ip: usize,
-    pub message: String,
-}
-
-impl core::fmt::Display for RuntimeError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(
-            f,
-            "runtime error at instruction {}: {}",
-            self.ip, self.message
-        )
-    }
-}
-
-impl std::error::Error for RuntimeError {}
-
-pub fn compile_human_program(
-    program: &str,
-    profile: Option<&ParserProfile>,
-) -> Result<MachineProgram, CompileError> {
-    let mut out = MachineProgram::new();
-    let mut lower = LoweringCtx::new();
-
-    for (line_idx, raw_line) in program.lines().enumerate() {
-        let line_no = line_idx + 1;
-        let line = strip_comment(raw_line).trim();
-        if line.is_empty() {
-            continue;
-        }
-        let normalized = if let Some(p) = profile {
-            p.normalize(line)
-        } else {
-            line.to_string()
-        };
-
-        let assignment = parse_assignment(&normalized).map_err(|e| CompileError {
-            line: line_no,
-            column: e.position + 1,
-            message: e.message.to_string(),
-        })?;
-
-        let src = lower.lower_expr(&assignment.expr);
-        let dst = assignment.target.to_string();
-        if src != dst {
-            lower.instructions.push(MachineInstr::Mov { dst, src });
+    impl MachineProgram {
+        pub fn new() -> Self {
+            Self {
+                instructions: Vec::new(),
+            }
         }
     }
 
-    out.instructions = optimize_machine_program(&MachineProgram {
-        instructions: lower.instructions,
-    })
-    .instructions;
-    Ok(out)
-}
-
-pub fn optimize_machine_program(program: &MachineProgram) -> MachineProgram {
-    let folded = fold_and_simplify(&program.instructions);
-    let dce = eliminate_dead_temps(&folded);
-    MachineProgram { instructions: dce }
-}
-
-pub fn render_machine_program(program: &MachineProgram) -> String {
-    let mut out = String::new();
-    for instr in &program.instructions {
-        match instr {
-            MachineInstr::SetState { dst, state } => {
-                out.push_str("SET ");
-                out.push_str(dst);
-                out.push(' ');
-                out.push_str(match *state {
-                    N => "N",
-                    F => "F",
-                    T => "T",
-                    S => "S",
-                    _ => "N",
-                });
-            }
-            MachineInstr::Mov { dst, src } => {
-                out.push_str("MOV ");
-                out.push_str(dst);
-                out.push(' ');
-                out.push_str(src);
-            }
-            MachineInstr::Not { dst, src } => {
-                out.push_str("NOT ");
-                out.push_str(dst);
-                out.push(' ');
-                out.push_str(src);
-            }
-            MachineInstr::And { dst, lhs, rhs } => {
-                out.push_str("AND ");
-                out.push_str(dst);
-                out.push(' ');
-                out.push_str(lhs);
-                out.push(' ');
-                out.push_str(rhs);
-            }
-            MachineInstr::Or { dst, lhs, rhs } => {
-                out.push_str("OR ");
-                out.push_str(dst);
-                out.push(' ');
-                out.push_str(lhs);
-                out.push(' ');
-                out.push_str(rhs);
-            }
-            MachineInstr::Xor { dst, lhs, rhs } => {
-                out.push_str("XOR ");
-                out.push_str(dst);
-                out.push(' ');
-                out.push_str(lhs);
-                out.push(' ');
-                out.push_str(rhs);
-            }
-        }
-        out.push('\n');
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum MachineInstr {
+        SetState {
+            dst: String,
+            state: u8,
+        },
+        Mov {
+            dst: String,
+            src: String,
+        },
+        Not {
+            dst: String,
+            src: String,
+        },
+        And {
+            dst: String,
+            lhs: String,
+            rhs: String,
+        },
+        Or {
+            dst: String,
+            lhs: String,
+            rhs: String,
+        },
+        Xor {
+            dst: String,
+            lhs: String,
+            rhs: String,
+        },
     }
-    out
-}
 
-pub fn parse_machine_program(src: &str) -> Result<MachineProgram, MachineParseError> {
-    let mut program = MachineProgram::new();
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct CompileError {
+        pub line: usize,
+        pub column: usize,
+        pub message: String,
+    }
 
-    for (line_idx, raw_line) in src.lines().enumerate() {
-        let line_no = line_idx + 1;
-        let line = strip_comment(raw_line).trim();
-        if line.is_empty() {
-            continue;
+    impl core::fmt::Display for CompileError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(
+                f,
+                "compile error at line {}, column {}: {}",
+                self.line, self.column, self.message
+            )
+        }
+    }
+
+    impl std::error::Error for CompileError {}
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct MachineParseError {
+        pub line: usize,
+        pub column: usize,
+        pub message: String,
+    }
+
+    impl core::fmt::Display for MachineParseError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(
+                f,
+                "machine parse error at line {}, column {}: {}",
+                self.line, self.column, self.message
+            )
+        }
+    }
+
+    impl std::error::Error for MachineParseError {}
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct RuntimeError {
+        pub ip: usize,
+        pub message: String,
+    }
+
+    impl core::fmt::Display for RuntimeError {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            write!(
+                f,
+                "runtime error at instruction {}: {}",
+                self.ip, self.message
+            )
+        }
+    }
+
+    impl std::error::Error for RuntimeError {}
+
+    pub fn compile_human_program(
+        program: &str,
+        profile: Option<&ParserProfile>,
+    ) -> Result<MachineProgram, CompileError> {
+        let mut out = MachineProgram::new();
+        let mut lower = LoweringCtx::new();
+
+        for (line_idx, raw_line) in program.lines().enumerate() {
+            let line_no = line_idx + 1;
+            let line = strip_comment(raw_line).trim();
+            if line.is_empty() {
+                continue;
+            }
+            let normalized = if let Some(p) = profile {
+                p.normalize(line)
+            } else {
+                line.to_string()
+            };
+
+            let assignment = parse_assignment(&normalized).map_err(|e| CompileError {
+                line: line_no,
+                column: e.position + 1,
+                message: e.message.to_string(),
+            })?;
+
+            let src = lower.lower_expr(&assignment.expr);
+            let dst = assignment.target.to_string();
+            if src != dst {
+                lower.instructions.push(MachineInstr::Mov { dst, src });
+            }
         }
 
-        let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.is_empty() {
-            continue;
+        out.instructions = optimize_machine_program(&MachineProgram {
+            instructions: lower.instructions,
+        })
+        .instructions;
+        Ok(out)
+    }
+
+    pub fn optimize_machine_program(program: &MachineProgram) -> MachineProgram {
+        let folded = fold_and_simplify(&program.instructions);
+        let dce = eliminate_dead_temps(&folded);
+        MachineProgram { instructions: dce }
+    }
+
+    pub fn render_machine_program(program: &MachineProgram) -> String {
+        let mut out = String::new();
+        for instr in &program.instructions {
+            match instr {
+                MachineInstr::SetState { dst, state } => {
+                    out.push_str("SET ");
+                    out.push_str(dst);
+                    out.push(' ');
+                    out.push_str(match *state {
+                        N => "N",
+                        F => "F",
+                        T => "T",
+                        S => "S",
+                        _ => "N",
+                    });
+                }
+                MachineInstr::Mov { dst, src } => {
+                    out.push_str("MOV ");
+                    out.push_str(dst);
+                    out.push(' ');
+                    out.push_str(src);
+                }
+                MachineInstr::Not { dst, src } => {
+                    out.push_str("NOT ");
+                    out.push_str(dst);
+                    out.push(' ');
+                    out.push_str(src);
+                }
+                MachineInstr::And { dst, lhs, rhs } => {
+                    out.push_str("AND ");
+                    out.push_str(dst);
+                    out.push(' ');
+                    out.push_str(lhs);
+                    out.push(' ');
+                    out.push_str(rhs);
+                }
+                MachineInstr::Or { dst, lhs, rhs } => {
+                    out.push_str("OR ");
+                    out.push_str(dst);
+                    out.push(' ');
+                    out.push_str(lhs);
+                    out.push(' ');
+                    out.push_str(rhs);
+                }
+                MachineInstr::Xor { dst, lhs, rhs } => {
+                    out.push_str("XOR ");
+                    out.push_str(dst);
+                    out.push(' ');
+                    out.push_str(lhs);
+                    out.push(' ');
+                    out.push_str(rhs);
+                }
+            }
+            out.push('\n');
         }
-        let op = parts[0].to_ascii_uppercase();
-        let instr = match op.as_str() {
-            "SET" => {
-                if parts.len() != 3 {
-                    return Err(parse_err(line_no, "SET expects: SET <dst> <N|F|T|S>"));
-                }
-                let state = parse_state(parts[2])
-                    .ok_or_else(|| parse_err(line_no, "invalid SET state, expected N|F|T|S"))?;
-                MachineInstr::SetState {
-                    dst: parts[1].to_string(),
-                    state,
-                }
+        out
+    }
+
+    pub fn parse_machine_program(src: &str) -> Result<MachineProgram, MachineParseError> {
+        let mut program = MachineProgram::new();
+
+        for (line_idx, raw_line) in src.lines().enumerate() {
+            let line_no = line_idx + 1;
+            let line = strip_comment(raw_line).trim();
+            if line.is_empty() {
+                continue;
             }
-            "MOV" => {
-                if parts.len() != 3 {
-                    return Err(parse_err(line_no, "MOV expects: MOV <dst> <src>"));
-                }
-                MachineInstr::Mov {
-                    dst: parts[1].to_string(),
-                    src: parts[2].to_string(),
-                }
+
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.is_empty() {
+                continue;
             }
-            "NOT" => {
-                if parts.len() != 3 {
-                    return Err(parse_err(line_no, "NOT expects: NOT <dst> <src>"));
+            let op = parts[0].to_ascii_uppercase();
+            let instr = match op.as_str() {
+                "SET" => {
+                    if parts.len() != 3 {
+                        return Err(parse_err(line_no, "SET expects: SET <dst> <N|F|T|S>"));
+                    }
+                    let state = parse_state(parts[2])
+                        .ok_or_else(|| parse_err(line_no, "invalid SET state, expected N|F|T|S"))?;
+                    MachineInstr::SetState {
+                        dst: parts[1].to_string(),
+                        state,
+                    }
                 }
-                MachineInstr::Not {
-                    dst: parts[1].to_string(),
-                    src: parts[2].to_string(),
+                "MOV" => {
+                    if parts.len() != 3 {
+                        return Err(parse_err(line_no, "MOV expects: MOV <dst> <src>"));
+                    }
+                    MachineInstr::Mov {
+                        dst: parts[1].to_string(),
+                        src: parts[2].to_string(),
+                    }
                 }
-            }
-            "AND" | "OR" | "XOR" => {
-                if parts.len() != 4 {
+                "NOT" => {
+                    if parts.len() != 3 {
+                        return Err(parse_err(line_no, "NOT expects: NOT <dst> <src>"));
+                    }
+                    MachineInstr::Not {
+                        dst: parts[1].to_string(),
+                        src: parts[2].to_string(),
+                    }
+                }
+                "AND" | "OR" | "XOR" => {
+                    if parts.len() != 4 {
+                        return Err(parse_err(
+                            line_no,
+                            "AND/OR/XOR expects: <OP> <dst> <lhs> <rhs>",
+                        ));
+                    }
+                    match op.as_str() {
+                        "AND" => MachineInstr::And {
+                            dst: parts[1].to_string(),
+                            lhs: parts[2].to_string(),
+                            rhs: parts[3].to_string(),
+                        },
+                        "OR" => MachineInstr::Or {
+                            dst: parts[1].to_string(),
+                            lhs: parts[2].to_string(),
+                            rhs: parts[3].to_string(),
+                        },
+                        _ => MachineInstr::Xor {
+                            dst: parts[1].to_string(),
+                            lhs: parts[2].to_string(),
+                            rhs: parts[3].to_string(),
+                        },
+                    }
+                }
+                _ => {
                     return Err(parse_err(
                         line_no,
-                        "AND/OR/XOR expects: <OP> <dst> <lhs> <rhs>",
-                    ));
+                        "unknown instruction, expected SET|MOV|NOT|AND|OR|XOR",
+                    ))
                 }
-                match op.as_str() {
-                    "AND" => MachineInstr::And {
-                        dst: parts[1].to_string(),
-                        lhs: parts[2].to_string(),
-                        rhs: parts[3].to_string(),
-                    },
-                    "OR" => MachineInstr::Or {
-                        dst: parts[1].to_string(),
-                        lhs: parts[2].to_string(),
-                        rhs: parts[3].to_string(),
-                    },
-                    _ => MachineInstr::Xor {
-                        dst: parts[1].to_string(),
-                        lhs: parts[2].to_string(),
-                        rhs: parts[3].to_string(),
-                    },
-                }
-            }
-            _ => {
-                return Err(parse_err(
-                    line_no,
-                    "unknown instruction, expected SET|MOV|NOT|AND|OR|XOR",
-                ))
-            }
-        };
-        program.instructions.push(instr);
+            };
+            program.instructions.push(instr);
+        }
+
+        Ok(program)
     }
 
-    Ok(program)
-}
+    pub fn execute_machine_program(
+        program: &MachineProgram,
+        env: &mut HashMap<String, QuadroReg>,
+    ) -> Result<(), RuntimeError> {
+        for (ip, instr) in program.instructions.iter().enumerate() {
+            match instr {
+                MachineInstr::SetState { dst, state } => {
+                    env.insert(dst.clone(), fill_state(*state));
+                }
+                MachineInstr::Mov { dst, src } => {
+                    let v = *env
+                        .get(src)
+                        .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", src)))?;
+                    env.insert(dst.clone(), v);
+                }
+                MachineInstr::Not { dst, src } => {
+                    let v = *env
+                        .get(src)
+                        .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", src)))?;
+                    env.insert(dst.clone(), v.inverse());
+                }
+                MachineInstr::And { dst, lhs, rhs } => {
+                    let lv = *env
+                        .get(lhs)
+                        .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", lhs)))?;
+                    let rv = *env
+                        .get(rhs)
+                        .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", rhs)))?;
+                    env.insert(dst.clone(), lv.intersect(rv));
+                }
+                MachineInstr::Or { dst, lhs, rhs } => {
+                    let lv = *env
+                        .get(lhs)
+                        .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", lhs)))?;
+                    let rv = *env
+                        .get(rhs)
+                        .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", rhs)))?;
+                    env.insert(dst.clone(), lv.merge(rv));
+                }
+                MachineInstr::Xor { dst, lhs, rhs } => {
+                    let lv = *env
+                        .get(lhs)
+                        .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", lhs)))?;
+                    let rv = *env
+                        .get(rhs)
+                        .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", rhs)))?;
+                    env.insert(dst.clone(), lv.raw_delta(rv));
+                }
+            }
+        }
+        Ok(())
+    }
 
-pub fn execute_machine_program(
-    program: &MachineProgram,
-    env: &mut HashMap<String, QuadroReg>,
-) -> Result<(), RuntimeError> {
-    for (ip, instr) in program.instructions.iter().enumerate() {
+    struct LoweringCtx {
+        instructions: Vec<MachineInstr>,
+        next_temp: usize,
+    }
+
+    impl LoweringCtx {
+        fn new() -> Self {
+            Self {
+                instructions: Vec::new(),
+                next_temp: 0,
+            }
+        }
+
+        fn tmp(&mut self) -> String {
+            let n = self.next_temp;
+            self.next_temp += 1;
+            format!("__t{}", n)
+        }
+
+        fn lower_expr(&mut self, expr: &Expr<'_>) -> String {
+            match expr {
+                Expr::State(state) => {
+                    let dst = self.tmp();
+                    self.instructions.push(MachineInstr::SetState {
+                        dst: dst.clone(),
+                        state: *state,
+                    });
+                    dst
+                }
+                Expr::Ident(name) => (*name).to_string(),
+                Expr::Unary { op, expr } => {
+                    let src = self.lower_expr(expr);
+                    let dst = self.tmp();
+                    match op {
+                        UnaryOp::Not => self.instructions.push(MachineInstr::Not {
+                            dst: dst.clone(),
+                            src,
+                        }),
+                    }
+                    dst
+                }
+                Expr::Binary { op, left, right } => {
+                    let lhs = self.lower_expr(left);
+                    let rhs = self.lower_expr(right);
+                    let dst = self.tmp();
+                    match op {
+                        PBinaryOp::And => self.instructions.push(MachineInstr::And {
+                            dst: dst.clone(),
+                            lhs,
+                            rhs,
+                        }),
+                        PBinaryOp::Or => self.instructions.push(MachineInstr::Or {
+                            dst: dst.clone(),
+                            lhs,
+                            rhs,
+                        }),
+                        PBinaryOp::Xor => self.instructions.push(MachineInstr::Xor {
+                            dst: dst.clone(),
+                            lhs,
+                            rhs,
+                        }),
+                    }
+                    dst
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn fill_state(state: u8) -> QuadroReg {
+        match state {
+            N => QuadroReg::from_raw(0),
+            F => QuadroReg::from_raw(crate::LSB_MASK),
+            T => QuadroReg::from_raw(crate::MSB_MASK),
+            S => QuadroReg::from_raw(u64::MAX),
+            _ => QuadroReg::from_raw(0),
+        }
+    }
+
+    #[inline]
+    fn parse_state(s: &str) -> Option<u8> {
+        match s {
+            "N" => Some(N),
+            "F" => Some(F),
+            "T" => Some(T),
+            "S" => Some(S),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    fn strip_comment(line: &str) -> &str {
+        let slash = line.find("//");
+        let hash = line.find('#');
+        match (slash, hash) {
+            (Some(a), Some(b)) => &line[..a.min(b)],
+            (Some(a), None) => &line[..a],
+            (None, Some(b)) => &line[..b],
+            (None, None) => line,
+        }
+    }
+
+    #[inline]
+    fn parse_err(line: usize, message: &str) -> MachineParseError {
+        MachineParseError {
+            line,
+            column: 1,
+            message: message.to_string(),
+        }
+    }
+
+    #[inline]
+    fn rt_err(ip: usize, message: String) -> RuntimeError {
+        RuntimeError { ip, message }
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Value {
+        Const(u8),
+        Alias(String),
+        Unknown,
+    }
+
+    fn fold_and_simplify(input: &[MachineInstr]) -> Vec<MachineInstr> {
+        let mut out = Vec::with_capacity(input.len());
+        let mut values: HashMap<String, Value> = HashMap::new();
+
+        for instr in input {
+            match instr {
+                MachineInstr::SetState { dst, state } => {
+                    values.insert(dst.clone(), Value::Const(*state));
+                    out.push(MachineInstr::SetState {
+                        dst: dst.clone(),
+                        state: *state,
+                    });
+                }
+                MachineInstr::Mov { dst, src } => {
+                    let resolved = resolve_alias(src, &values);
+                    let src_v = read_value(&resolved, &values);
+                    if dst == &resolved {
+                        values.insert(dst.clone(), src_v);
+                        continue;
+                    }
+                    match src_v {
+                        Value::Const(c) => {
+                            values.insert(dst.clone(), Value::Const(c));
+                            out.push(MachineInstr::SetState {
+                                dst: dst.clone(),
+                                state: c,
+                            });
+                        }
+                        _ => {
+                            values.insert(dst.clone(), Value::Alias(resolved.clone()));
+                            out.push(MachineInstr::Mov {
+                                dst: dst.clone(),
+                                src: resolved,
+                            });
+                        }
+                    }
+                }
+                MachineInstr::Not { dst, src } => {
+                    let src_r = resolve_alias(src, &values);
+                    match read_value(&src_r, &values) {
+                        Value::Const(c) => {
+                            let r = inverse_state(c);
+                            values.insert(dst.clone(), Value::Const(r));
+                            out.push(MachineInstr::SetState {
+                                dst: dst.clone(),
+                                state: r,
+                            });
+                        }
+                        _ => {
+                            values.insert(dst.clone(), Value::Unknown);
+                            out.push(MachineInstr::Not {
+                                dst: dst.clone(),
+                                src: src_r,
+                            });
+                        }
+                    }
+                }
+                MachineInstr::And { dst, lhs, rhs } => {
+                    let lhs_r = resolve_alias(lhs, &values);
+                    let rhs_r = resolve_alias(rhs, &values);
+                    let lhs_v = read_value(&lhs_r, &values);
+                    let rhs_v = read_value(&rhs_r, &values);
+                    let simplified = simplify_binary("AND", dst, &lhs_r, &rhs_r, &lhs_v, &rhs_v);
+                    track_result_value(&mut values, &simplified);
+                    out.push(simplified);
+                }
+                MachineInstr::Or { dst, lhs, rhs } => {
+                    let lhs_r = resolve_alias(lhs, &values);
+                    let rhs_r = resolve_alias(rhs, &values);
+                    let lhs_v = read_value(&lhs_r, &values);
+                    let rhs_v = read_value(&rhs_r, &values);
+                    let simplified = simplify_binary("OR", dst, &lhs_r, &rhs_r, &lhs_v, &rhs_v);
+                    track_result_value(&mut values, &simplified);
+                    out.push(simplified);
+                }
+                MachineInstr::Xor { dst, lhs, rhs } => {
+                    let lhs_r = resolve_alias(lhs, &values);
+                    let rhs_r = resolve_alias(rhs, &values);
+                    let lhs_v = read_value(&lhs_r, &values);
+                    let rhs_v = read_value(&rhs_r, &values);
+                    let simplified = simplify_binary("XOR", dst, &lhs_r, &rhs_r, &lhs_v, &rhs_v);
+                    track_result_value(&mut values, &simplified);
+                    out.push(simplified);
+                }
+            }
+        }
+
+        out
+    }
+
+    fn eliminate_dead_temps(input: &[MachineInstr]) -> Vec<MachineInstr> {
+        let mut live: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut keep = vec![false; input.len()];
+
+        for (i, instr) in input.iter().enumerate().rev() {
+            let def = defined_var(instr);
+            let uses = used_vars(instr);
+            let must_keep = def
+                .as_ref()
+                .map(|d| !is_temp(d) || live.contains(d))
+                .unwrap_or(true);
+            if must_keep {
+                keep[i] = true;
+                if let Some(d) = def {
+                    live.remove(&d);
+                }
+                for u in uses {
+                    live.insert(u);
+                }
+            }
+        }
+
+        let mut out = Vec::with_capacity(input.len());
+        for (i, instr) in input.iter().enumerate() {
+            if keep[i] {
+                out.push(instr.clone());
+            }
+        }
+        out
+    }
+
+    fn defined_var(instr: &MachineInstr) -> Option<String> {
         match instr {
-            MachineInstr::SetState { dst, state } => {
-                env.insert(dst.clone(), fill_state(*state));
-            }
-            MachineInstr::Mov { dst, src } => {
-                let v = *env
-                    .get(src)
-                    .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", src)))?;
-                env.insert(dst.clone(), v);
-            }
-            MachineInstr::Not { dst, src } => {
-                let v = *env
-                    .get(src)
-                    .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", src)))?;
-                env.insert(dst.clone(), v.inverse());
-            }
-            MachineInstr::And { dst, lhs, rhs } => {
-                let lv = *env
-                    .get(lhs)
-                    .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", lhs)))?;
-                let rv = *env
-                    .get(rhs)
-                    .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", rhs)))?;
-                env.insert(dst.clone(), lv.intersect(rv));
-            }
-            MachineInstr::Or { dst, lhs, rhs } => {
-                let lv = *env
-                    .get(lhs)
-                    .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", lhs)))?;
-                let rv = *env
-                    .get(rhs)
-                    .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", rhs)))?;
-                env.insert(dst.clone(), lv.merge(rv));
-            }
-            MachineInstr::Xor { dst, lhs, rhs } => {
-                let lv = *env
-                    .get(lhs)
-                    .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", lhs)))?;
-                let rv = *env
-                    .get(rhs)
-                    .ok_or_else(|| rt_err(ip, format!("unknown variable '{}'", rhs)))?;
-                env.insert(dst.clone(), lv.raw_delta(rv));
-            }
-        }
-    }
-    Ok(())
-}
-
-struct LoweringCtx {
-    instructions: Vec<MachineInstr>,
-    next_temp: usize,
-}
-
-impl LoweringCtx {
-    fn new() -> Self {
-        Self {
-            instructions: Vec::new(),
-            next_temp: 0,
+            MachineInstr::SetState { dst, .. } => Some(dst.clone()),
+            MachineInstr::Mov { dst, .. } => Some(dst.clone()),
+            MachineInstr::Not { dst, .. } => Some(dst.clone()),
+            MachineInstr::And { dst, .. } => Some(dst.clone()),
+            MachineInstr::Or { dst, .. } => Some(dst.clone()),
+            MachineInstr::Xor { dst, .. } => Some(dst.clone()),
         }
     }
 
-    fn tmp(&mut self) -> String {
-        let n = self.next_temp;
-        self.next_temp += 1;
-        format!("__t{}", n)
+    fn used_vars(instr: &MachineInstr) -> Vec<String> {
+        match instr {
+            MachineInstr::SetState { .. } => Vec::new(),
+            MachineInstr::Mov { src, .. } => vec![src.clone()],
+            MachineInstr::Not { src, .. } => vec![src.clone()],
+            MachineInstr::And { lhs, rhs, .. } => vec![lhs.clone(), rhs.clone()],
+            MachineInstr::Or { lhs, rhs, .. } => vec![lhs.clone(), rhs.clone()],
+            MachineInstr::Xor { lhs, rhs, .. } => vec![lhs.clone(), rhs.clone()],
+        }
     }
 
-    fn lower_expr(&mut self, expr: &Expr<'_>) -> String {
-        match expr {
-            Expr::State(state) => {
-                let dst = self.tmp();
-                self.instructions.push(MachineInstr::SetState {
-                    dst: dst.clone(),
-                    state: *state,
-                });
-                dst
-            }
-            Expr::Ident(name) => (*name).to_string(),
-            Expr::Unary { op, expr } => {
-                let src = self.lower_expr(expr);
-                let dst = self.tmp();
-                match op {
-                    UnaryOp::Not => self.instructions.push(MachineInstr::Not {
-                        dst: dst.clone(),
-                        src,
-                    }),
+    #[inline]
+    fn is_temp(name: &str) -> bool {
+        name.starts_with("__t")
+    }
+
+    fn resolve_alias(name: &str, values: &HashMap<String, Value>) -> String {
+        let mut cur = name.to_string();
+        let mut steps = 0usize;
+        while steps < 64 {
+            match values.get(&cur) {
+                Some(Value::Alias(next)) if next != &cur => {
+                    cur = next.clone();
+                    steps += 1;
                 }
-                dst
-            }
-            Expr::Binary { op, left, right } => {
-                let lhs = self.lower_expr(left);
-                let rhs = self.lower_expr(right);
-                let dst = self.tmp();
-                match op {
-                    PBinaryOp::And => self.instructions.push(MachineInstr::And {
-                        dst: dst.clone(),
-                        lhs,
-                        rhs,
-                    }),
-                    PBinaryOp::Or => self.instructions.push(MachineInstr::Or {
-                        dst: dst.clone(),
-                        lhs,
-                        rhs,
-                    }),
-                    PBinaryOp::Xor => self.instructions.push(MachineInstr::Xor {
-                        dst: dst.clone(),
-                        lhs,
-                        rhs,
-                    }),
-                }
-                dst
+                _ => break,
             }
         }
+        cur
     }
-}
 
-#[inline]
-fn fill_state(state: u8) -> QuadroReg {
-    match state {
-        N => QuadroReg::from_raw(0),
-        F => QuadroReg::from_raw(crate::LSB_MASK),
-        T => QuadroReg::from_raw(crate::MSB_MASK),
-        S => QuadroReg::from_raw(u64::MAX),
-        _ => QuadroReg::from_raw(0),
+    fn read_value(name: &str, values: &HashMap<String, Value>) -> Value {
+        match values.get(name) {
+            Some(v) => v.clone(),
+            None => Value::Unknown,
+        }
     }
-}
 
-#[inline]
-fn parse_state(s: &str) -> Option<u8> {
-    match s {
-        "N" => Some(N),
-        "F" => Some(F),
-        "T" => Some(T),
-        "S" => Some(S),
-        _ => None,
-    }
-}
-
-#[inline]
-fn strip_comment(line: &str) -> &str {
-    let slash = line.find("//");
-    let hash = line.find('#');
-    match (slash, hash) {
-        (Some(a), Some(b)) => &line[..a.min(b)],
-        (Some(a), None) => &line[..a],
-        (None, Some(b)) => &line[..b],
-        (None, None) => line,
-    }
-}
-
-#[inline]
-fn parse_err(line: usize, message: &str) -> MachineParseError {
-    MachineParseError {
-        line,
-        column: 1,
-        message: message.to_string(),
-    }
-}
-
-#[inline]
-fn rt_err(ip: usize, message: String) -> RuntimeError {
-    RuntimeError { ip, message }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Value {
-    Const(u8),
-    Alias(String),
-    Unknown,
-}
-
-fn fold_and_simplify(input: &[MachineInstr]) -> Vec<MachineInstr> {
-    let mut out = Vec::with_capacity(input.len());
-    let mut values: HashMap<String, Value> = HashMap::new();
-
-    for instr in input {
+    fn track_result_value(values: &mut HashMap<String, Value>, instr: &MachineInstr) {
         match instr {
             MachineInstr::SetState { dst, state } => {
                 values.insert(dst.clone(), Value::Const(*state));
-                out.push(MachineInstr::SetState {
-                    dst: dst.clone(),
-                    state: *state,
-                });
             }
             MachineInstr::Mov { dst, src } => {
-                let resolved = resolve_alias(src, &values);
-                let src_v = read_value(&resolved, &values);
-                if dst == &resolved {
-                    values.insert(dst.clone(), src_v);
-                    continue;
-                }
-                match src_v {
-                    Value::Const(c) => {
-                        values.insert(dst.clone(), Value::Const(c));
-                        out.push(MachineInstr::SetState {
-                            dst: dst.clone(),
-                            state: c,
-                        });
-                    }
-                    _ => {
-                        values.insert(dst.clone(), Value::Alias(resolved.clone()));
-                        out.push(MachineInstr::Mov {
-                            dst: dst.clone(),
-                            src: resolved,
-                        });
-                    }
-                }
+                values.insert(dst.clone(), Value::Alias(src.clone()));
             }
-            MachineInstr::Not { dst, src } => {
-                let src_r = resolve_alias(src, &values);
-                match read_value(&src_r, &values) {
-                    Value::Const(c) => {
-                        let r = inverse_state(c);
-                        values.insert(dst.clone(), Value::Const(r));
-                        out.push(MachineInstr::SetState {
-                            dst: dst.clone(),
-                            state: r,
-                        });
-                    }
-                    _ => {
-                        values.insert(dst.clone(), Value::Unknown);
-                        out.push(MachineInstr::Not {
-                            dst: dst.clone(),
-                            src: src_r,
-                        });
-                    }
-                }
-            }
-            MachineInstr::And { dst, lhs, rhs } => {
-                let lhs_r = resolve_alias(lhs, &values);
-                let rhs_r = resolve_alias(rhs, &values);
-                let lhs_v = read_value(&lhs_r, &values);
-                let rhs_v = read_value(&rhs_r, &values);
-                let simplified = simplify_binary("AND", dst, &lhs_r, &rhs_r, &lhs_v, &rhs_v);
-                track_result_value(&mut values, &simplified);
-                out.push(simplified);
-            }
-            MachineInstr::Or { dst, lhs, rhs } => {
-                let lhs_r = resolve_alias(lhs, &values);
-                let rhs_r = resolve_alias(rhs, &values);
-                let lhs_v = read_value(&lhs_r, &values);
-                let rhs_v = read_value(&rhs_r, &values);
-                let simplified = simplify_binary("OR", dst, &lhs_r, &rhs_r, &lhs_v, &rhs_v);
-                track_result_value(&mut values, &simplified);
-                out.push(simplified);
-            }
-            MachineInstr::Xor { dst, lhs, rhs } => {
-                let lhs_r = resolve_alias(lhs, &values);
-                let rhs_r = resolve_alias(rhs, &values);
-                let lhs_v = read_value(&lhs_r, &values);
-                let rhs_v = read_value(&rhs_r, &values);
-                let simplified = simplify_binary("XOR", dst, &lhs_r, &rhs_r, &lhs_v, &rhs_v);
-                track_result_value(&mut values, &simplified);
-                out.push(simplified);
+            MachineInstr::Not { dst, .. }
+            | MachineInstr::And { dst, .. }
+            | MachineInstr::Or { dst, .. }
+            | MachineInstr::Xor { dst, .. } => {
+                values.insert(dst.clone(), Value::Unknown);
             }
         }
     }
 
-    out
-}
-
-fn eliminate_dead_temps(input: &[MachineInstr]) -> Vec<MachineInstr> {
-    let mut live: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut keep = vec![false; input.len()];
-
-    for (i, instr) in input.iter().enumerate().rev() {
-        let def = defined_var(instr);
-        let uses = used_vars(instr);
-        let must_keep = def
-            .as_ref()
-            .map(|d| !is_temp(d) || live.contains(d))
-            .unwrap_or(true);
-        if must_keep {
-            keep[i] = true;
-            if let Some(d) = def {
-                live.remove(&d);
-            }
-            for u in uses {
-                live.insert(u);
-            }
-        }
-    }
-
-    let mut out = Vec::with_capacity(input.len());
-    for (i, instr) in input.iter().enumerate() {
-        if keep[i] {
-            out.push(instr.clone());
-        }
-    }
-    out
-}
-
-fn defined_var(instr: &MachineInstr) -> Option<String> {
-    match instr {
-        MachineInstr::SetState { dst, .. } => Some(dst.clone()),
-        MachineInstr::Mov { dst, .. } => Some(dst.clone()),
-        MachineInstr::Not { dst, .. } => Some(dst.clone()),
-        MachineInstr::And { dst, .. } => Some(dst.clone()),
-        MachineInstr::Or { dst, .. } => Some(dst.clone()),
-        MachineInstr::Xor { dst, .. } => Some(dst.clone()),
-    }
-}
-
-fn used_vars(instr: &MachineInstr) -> Vec<String> {
-    match instr {
-        MachineInstr::SetState { .. } => Vec::new(),
-        MachineInstr::Mov { src, .. } => vec![src.clone()],
-        MachineInstr::Not { src, .. } => vec![src.clone()],
-        MachineInstr::And { lhs, rhs, .. } => vec![lhs.clone(), rhs.clone()],
-        MachineInstr::Or { lhs, rhs, .. } => vec![lhs.clone(), rhs.clone()],
-        MachineInstr::Xor { lhs, rhs, .. } => vec![lhs.clone(), rhs.clone()],
-    }
-}
-
-#[inline]
-fn is_temp(name: &str) -> bool {
-    name.starts_with("__t")
-}
-
-fn resolve_alias(name: &str, values: &HashMap<String, Value>) -> String {
-    let mut cur = name.to_string();
-    let mut steps = 0usize;
-    while steps < 64 {
-        match values.get(&cur) {
-            Some(Value::Alias(next)) if next != &cur => {
-                cur = next.clone();
-                steps += 1;
-            }
-            _ => break,
-        }
-    }
-    cur
-}
-
-fn read_value(name: &str, values: &HashMap<String, Value>) -> Value {
-    match values.get(name) {
-        Some(v) => v.clone(),
-        None => Value::Unknown,
-    }
-}
-
-fn track_result_value(values: &mut HashMap<String, Value>, instr: &MachineInstr) {
-    match instr {
-        MachineInstr::SetState { dst, state } => {
-            values.insert(dst.clone(), Value::Const(*state));
-        }
-        MachineInstr::Mov { dst, src } => {
-            values.insert(dst.clone(), Value::Alias(src.clone()));
-        }
-        MachineInstr::Not { dst, .. }
-        | MachineInstr::And { dst, .. }
-        | MachineInstr::Or { dst, .. }
-        | MachineInstr::Xor { dst, .. } => {
-            values.insert(dst.clone(), Value::Unknown);
-        }
-    }
-}
-
-fn simplify_binary(
-    op: &str,
-    dst: &str,
-    lhs: &str,
-    rhs: &str,
-    lhs_v: &Value,
-    rhs_v: &Value,
-) -> MachineInstr {
-    match (lhs_v, rhs_v) {
-        (Value::Const(a), Value::Const(b)) => {
-            return MachineInstr::SetState {
-                dst: dst.to_string(),
-                state: apply_state_binary(op, *a, *b),
-            };
-        }
-        _ => {}
-    }
-
-    if lhs == rhs {
-        return match op {
-            "XOR" => MachineInstr::SetState {
-                dst: dst.to_string(),
-                state: N,
-            },
-            _ => MachineInstr::Mov {
-                dst: dst.to_string(),
-                src: lhs.to_string(),
-            },
-        };
-    }
-
-    match op {
-        "AND" => {
-            if is_const_state(lhs_v, N) || is_const_state(rhs_v, N) {
+    fn simplify_binary(
+        op: &str,
+        dst: &str,
+        lhs: &str,
+        rhs: &str,
+        lhs_v: &Value,
+        rhs_v: &Value,
+    ) -> MachineInstr {
+        match (lhs_v, rhs_v) {
+            (Value::Const(a), Value::Const(b)) => {
                 return MachineInstr::SetState {
+                    dst: dst.to_string(),
+                    state: apply_state_binary(op, *a, *b),
+                };
+            }
+            _ => {}
+        }
+
+        if lhs == rhs {
+            return match op {
+                "XOR" => MachineInstr::SetState {
                     dst: dst.to_string(),
                     state: N,
-                };
-            }
-            if is_const_state(lhs_v, S) {
-                return MachineInstr::Mov {
-                    dst: dst.to_string(),
-                    src: rhs.to_string(),
-                };
-            }
-            if is_const_state(rhs_v, S) {
-                return MachineInstr::Mov {
+                },
+                _ => MachineInstr::Mov {
                     dst: dst.to_string(),
                     src: lhs.to_string(),
-                };
+                },
+            };
+        }
+
+        match op {
+            "AND" => {
+                if is_const_state(lhs_v, N) || is_const_state(rhs_v, N) {
+                    return MachineInstr::SetState {
+                        dst: dst.to_string(),
+                        state: N,
+                    };
+                }
+                if is_const_state(lhs_v, S) {
+                    return MachineInstr::Mov {
+                        dst: dst.to_string(),
+                        src: rhs.to_string(),
+                    };
+                }
+                if is_const_state(rhs_v, S) {
+                    return MachineInstr::Mov {
+                        dst: dst.to_string(),
+                        src: lhs.to_string(),
+                    };
+                }
+                MachineInstr::And {
+                    dst: dst.to_string(),
+                    lhs: lhs.to_string(),
+                    rhs: rhs.to_string(),
+                }
             }
-            MachineInstr::And {
+            "OR" => {
+                if is_const_state(lhs_v, S) || is_const_state(rhs_v, S) {
+                    return MachineInstr::SetState {
+                        dst: dst.to_string(),
+                        state: S,
+                    };
+                }
+                if is_const_state(lhs_v, N) {
+                    return MachineInstr::Mov {
+                        dst: dst.to_string(),
+                        src: rhs.to_string(),
+                    };
+                }
+                if is_const_state(rhs_v, N) {
+                    return MachineInstr::Mov {
+                        dst: dst.to_string(),
+                        src: lhs.to_string(),
+                    };
+                }
+                MachineInstr::Or {
+                    dst: dst.to_string(),
+                    lhs: lhs.to_string(),
+                    rhs: rhs.to_string(),
+                }
+            }
+            "XOR" => {
+                if is_const_state(lhs_v, N) {
+                    return MachineInstr::Mov {
+                        dst: dst.to_string(),
+                        src: rhs.to_string(),
+                    };
+                }
+                if is_const_state(rhs_v, N) {
+                    return MachineInstr::Mov {
+                        dst: dst.to_string(),
+                        src: lhs.to_string(),
+                    };
+                }
+                MachineInstr::Xor {
+                    dst: dst.to_string(),
+                    lhs: lhs.to_string(),
+                    rhs: rhs.to_string(),
+                }
+            }
+            _ => MachineInstr::Xor {
                 dst: dst.to_string(),
                 lhs: lhs.to_string(),
                 rhs: rhs.to_string(),
-            }
+            },
         }
-        "OR" => {
-            if is_const_state(lhs_v, S) || is_const_state(rhs_v, S) {
-                return MachineInstr::SetState {
-                    dst: dst.to_string(),
-                    state: S,
-                };
-            }
-            if is_const_state(lhs_v, N) {
-                return MachineInstr::Mov {
-                    dst: dst.to_string(),
-                    src: rhs.to_string(),
-                };
-            }
-            if is_const_state(rhs_v, N) {
-                return MachineInstr::Mov {
-                    dst: dst.to_string(),
-                    src: lhs.to_string(),
-                };
-            }
-            MachineInstr::Or {
-                dst: dst.to_string(),
-                lhs: lhs.to_string(),
-                rhs: rhs.to_string(),
-            }
-        }
-        "XOR" => {
-            if is_const_state(lhs_v, N) {
-                return MachineInstr::Mov {
-                    dst: dst.to_string(),
-                    src: rhs.to_string(),
-                };
-            }
-            if is_const_state(rhs_v, N) {
-                return MachineInstr::Mov {
-                    dst: dst.to_string(),
-                    src: lhs.to_string(),
-                };
-            }
-            MachineInstr::Xor {
-                dst: dst.to_string(),
-                lhs: lhs.to_string(),
-                rhs: rhs.to_string(),
-            }
-        }
-        _ => MachineInstr::Xor {
-            dst: dst.to_string(),
-            lhs: lhs.to_string(),
-            rhs: rhs.to_string(),
-        },
     }
-}
 
-#[inline]
-fn is_const_state(v: &Value, state: u8) -> bool {
-    matches!(v, Value::Const(s) if *s == state)
-}
-
-#[inline]
-fn inverse_state(state: u8) -> u8 {
-    ((state & 0b10) >> 1) | ((state & 0b01) << 1)
-}
-
-#[inline]
-fn apply_state_binary(op: &str, a: u8, b: u8) -> u8 {
-    match op {
-        "AND" => a & b,
-        "OR" => a | b,
-        "XOR" => a ^ b,
-        _ => a ^ b,
+    #[inline]
+    fn is_const_state(v: &Value, state: u8) -> bool {
+        matches!(v, Value::Const(s) if *s == state)
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use sm_profile::{train_profile, TrainingSample};
+    #[inline]
+    fn inverse_state(state: u8) -> u8 {
+        ((state & 0b10) >> 1) | ((state & 0b01) << 1)
+    }
 
-    #[test]
-    fn compile_and_execute_human_program_with_profile() {
-        let profile = train_profile(&[
-            TrainingSample {
-                input: "x = TRUE",
-                target: "x = T",
-            },
-            TrainingSample {
-                input: "y = FALSE",
-                target: "y = F",
-            },
-            TrainingSample {
-                input: "out = x AND y",
-                target: "out = x & y",
-            },
-            TrainingSample {
-                input: "z = NOT out",
-                target: "z = ! out",
-            },
-        ]);
+    #[inline]
+    fn apply_state_binary(op: &str, a: u8, b: u8) -> u8 {
+        match op {
+            "AND" => a & b,
+            "OR" => a | b,
+            "XOR" => a ^ b,
+            _ => a ^ b,
+        }
+    }
 
-        let human = r#"
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use sm_profile::{train_profile, TrainingSample};
+
+        #[test]
+        fn compile_and_execute_human_program_with_profile() {
+            let profile = train_profile(&[
+                TrainingSample {
+                    input: "x = TRUE",
+                    target: "x = T",
+                },
+                TrainingSample {
+                    input: "y = FALSE",
+                    target: "y = F",
+                },
+                TrainingSample {
+                    input: "out = x AND y",
+                    target: "out = x & y",
+                },
+                TrainingSample {
+                    input: "z = NOT out",
+                    target: "z = ! out",
+                },
+            ]);
+
+            let human = r#"
 			x = TRUE
 			y = FALSE
 			out = x AND y
 			z = NOT out
 		"#;
-        let program = compile_human_program(human, Some(&profile)).expect("compile");
-        let mut env = HashMap::<String, QuadroReg>::new();
-        execute_machine_program(&program, &mut env).expect("run");
+            let program = compile_human_program(human, Some(&profile)).expect("compile");
+            let mut env = HashMap::<String, QuadroReg>::new();
+            execute_machine_program(&program, &mut env).expect("run");
 
-        let expected_out =
-            QuadroReg::from_raw(crate::MSB_MASK).intersect(QuadroReg::from_raw(crate::LSB_MASK));
-        let expected_z = expected_out.inverse();
-        assert_eq!(env.get("z").copied(), Some(expected_z));
-    }
+            let expected_out = QuadroReg::from_raw(crate::MSB_MASK)
+                .intersect(QuadroReg::from_raw(crate::LSB_MASK));
+            let expected_z = expected_out.inverse();
+            assert_eq!(env.get("z").copied(), Some(expected_z));
+        }
 
-    #[test]
-    fn machine_text_parse_and_run() {
-        let src = r#"
+        #[test]
+        fn machine_text_parse_and_run() {
+            let src = r#"
 			SET a T
 			SET b F
 			AND out a b
 			NOT inv out
 		"#;
-        let program = parse_machine_program(src).expect("parse");
-        let mut env = HashMap::<String, QuadroReg>::new();
-        execute_machine_program(&program, &mut env).expect("run");
-        assert!(env.contains_key("inv"));
+            let program = parse_machine_program(src).expect("parse");
+            let mut env = HashMap::<String, QuadroReg>::new();
+            execute_machine_program(&program, &mut env).expect("run");
+            assert!(env.contains_key("inv"));
+        }
+
+        #[test]
+        fn machine_parse_rejects_bad_instruction() {
+            let err = parse_machine_program("BAD x y").expect_err("must fail");
+            assert_eq!(err.line, 1);
+            assert!(err.message.contains("unknown instruction"));
+        }
+
+        #[test]
+        fn optimizer_folds_constants_and_eliminates_temps() {
+            let profile = train_profile(&[
+                TrainingSample {
+                    input: "x = TRUE",
+                    target: "x = T",
+                },
+                TrainingSample {
+                    input: "y = FALSE",
+                    target: "y = F",
+                },
+                TrainingSample {
+                    input: "out = x AND y",
+                    target: "out = x & y",
+                },
+            ]);
+            let human = "x = TRUE\ny = FALSE\nout = x AND y\n";
+            let program = compile_human_program(human, Some(&profile)).expect("compile");
+
+            assert!(program
+                .instructions
+                .iter()
+                .all(|i| !format!("{:?}", i).contains("__t")));
+            assert!(program.instructions.len() <= 3);
+        }
+
+        #[test]
+        fn optimizer_removes_redundant_moves() {
+            let p = MachineProgram {
+                instructions: vec![
+                    MachineInstr::SetState {
+                        dst: "a".to_string(),
+                        state: T,
+                    },
+                    MachineInstr::Mov {
+                        dst: "b".to_string(),
+                        src: "a".to_string(),
+                    },
+                    MachineInstr::Mov {
+                        dst: "c".to_string(),
+                        src: "b".to_string(),
+                    },
+                ],
+            };
+            let o = optimize_machine_program(&p);
+            assert_eq!(
+                o.instructions,
+                vec![
+                    MachineInstr::SetState {
+                        dst: "a".to_string(),
+                        state: T,
+                    },
+                    MachineInstr::SetState {
+                        dst: "b".to_string(),
+                        state: T,
+                    },
+                    MachineInstr::SetState {
+                        dst: "c".to_string(),
+                        state: T,
+                    },
+                ]
+            );
+        }
     }
-
-    #[test]
-    fn machine_parse_rejects_bad_instruction() {
-        let err = parse_machine_program("BAD x y").expect_err("must fail");
-        assert_eq!(err.line, 1);
-        assert!(err.message.contains("unknown instruction"));
-    }
-
-    #[test]
-    fn optimizer_folds_constants_and_eliminates_temps() {
-        let profile = train_profile(&[
-            TrainingSample {
-                input: "x = TRUE",
-                target: "x = T",
-            },
-            TrainingSample {
-                input: "y = FALSE",
-                target: "y = F",
-            },
-            TrainingSample {
-                input: "out = x AND y",
-                target: "out = x & y",
-            },
-        ]);
-        let human = "x = TRUE\ny = FALSE\nout = x AND y\n";
-        let program = compile_human_program(human, Some(&profile)).expect("compile");
-
-        assert!(program
-            .instructions
-            .iter()
-            .all(|i| !format!("{:?}", i).contains("__t")));
-        assert!(program.instructions.len() <= 3);
-    }
-
-    #[test]
-    fn optimizer_removes_redundant_moves() {
-        let p = MachineProgram {
-            instructions: vec![
-                MachineInstr::SetState {
-                    dst: "a".to_string(),
-                    state: T,
-                },
-                MachineInstr::Mov {
-                    dst: "b".to_string(),
-                    src: "a".to_string(),
-                },
-                MachineInstr::Mov {
-                    dst: "c".to_string(),
-                    src: "b".to_string(),
-                },
-            ],
-        };
-        let o = optimize_machine_program(&p);
-        assert_eq!(
-            o.instructions,
-            vec![
-                MachineInstr::SetState {
-                    dst: "a".to_string(),
-                    state: T,
-                },
-                MachineInstr::SetState {
-                    dst: "b".to_string(),
-                    state: T,
-                },
-                MachineInstr::SetState {
-                    dst: "c".to_string(),
-                    state: T,
-                },
-            ]
-        );
-    }
-}
-
 }
 
 #[cfg(test)]
@@ -2134,4 +2132,3 @@ mod tests {
         assert!(parse_seed_pair("a=X").is_err());
     }
 }
-

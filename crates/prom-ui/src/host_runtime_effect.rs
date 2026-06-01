@@ -137,7 +137,8 @@ pub fn describe_interaction_host_runtime_effect_boundary(
         runtime_capability_mapping_descriptor_id: committed_record
             .runtime_capability_mapping_descriptor_id,
         ui_capability_admission_result_id: committed_record.ui_capability_admission_result_id,
-        ui_capability_admission_descriptor_id: committed_record.ui_capability_admission_descriptor_id,
+        ui_capability_admission_descriptor_id: committed_record
+            .ui_capability_admission_descriptor_id,
         effect_request_descriptor_id: committed_record.effect_request_descriptor_id,
         source_admitted_action_id: committed_record.source_admitted_action_id,
         dispatch_record_id: committed_record.dispatch_record_id,
@@ -258,7 +259,8 @@ mod tests {
         let ui_result = record_interaction_ui_capability_admitted_result(&admission);
         let mapping_descriptor = describe_interaction_runtime_capability_mapping(&ui_result)
             .expect("admitted result should produce mapping descriptor");
-        let mapping_result = record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
+        let mapping_result =
+            record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
         let prepared_descriptor = describe_interaction_prepared_effect(&mapping_result)
             .expect("mapped result should produce prepared effect descriptor");
         let prepared_result = record_interaction_prepared_effect_result(&prepared_descriptor);
@@ -291,11 +293,26 @@ mod tests {
         let descriptor = describe_interaction_host_runtime_effect_boundary(&record)
             .expect("committed record should produce host runtime effect boundary descriptor");
 
-        assert_eq!(descriptor.committed_effect_descriptor_id, record.descriptor_id);
-        assert_eq!(descriptor.commit_boundary_result_id, record.commit_boundary_result_id);
-        assert_eq!(descriptor.commit_boundary_descriptor_id, record.commit_boundary_descriptor_id);
-        assert_eq!(descriptor.prepared_effect_result_id, record.prepared_effect_result_id);
-        assert_eq!(descriptor.prepared_effect_descriptor_id, record.prepared_effect_descriptor_id);
+        assert_eq!(
+            descriptor.committed_effect_descriptor_id,
+            record.descriptor_id
+        );
+        assert_eq!(
+            descriptor.commit_boundary_result_id,
+            record.commit_boundary_result_id
+        );
+        assert_eq!(
+            descriptor.commit_boundary_descriptor_id,
+            record.commit_boundary_descriptor_id
+        );
+        assert_eq!(
+            descriptor.prepared_effect_result_id,
+            record.prepared_effect_result_id
+        );
+        assert_eq!(
+            descriptor.prepared_effect_descriptor_id,
+            record.prepared_effect_descriptor_id
+        );
         assert_eq!(
             descriptor.runtime_capability_mapping_result_id,
             record.runtime_capability_mapping_result_id
@@ -304,33 +321,63 @@ mod tests {
             descriptor.runtime_capability_mapping_descriptor_id,
             record.runtime_capability_mapping_descriptor_id
         );
-        assert_eq!(descriptor.ui_capability_admission_result_id, record.ui_capability_admission_result_id);
+        assert_eq!(
+            descriptor.ui_capability_admission_result_id,
+            record.ui_capability_admission_result_id
+        );
         assert_eq!(
             descriptor.ui_capability_admission_descriptor_id,
             record.ui_capability_admission_descriptor_id
         );
-        assert_eq!(descriptor.effect_request_descriptor_id, record.effect_request_descriptor_id);
-        assert_eq!(descriptor.source_admitted_action_id, record.source_admitted_action_id);
+        assert_eq!(
+            descriptor.effect_request_descriptor_id,
+            record.effect_request_descriptor_id
+        );
+        assert_eq!(
+            descriptor.source_admitted_action_id,
+            record.source_admitted_action_id
+        );
         assert_eq!(descriptor.dispatch_record_id, record.dispatch_record_id);
         assert_eq!(descriptor.dispatch_route_id, record.dispatch_route_id);
         assert_eq!(descriptor.requested_effect, record.requested_effect);
-        assert_eq!(descriptor.declared_ui_capability, record.declared_ui_capability);
+        assert_eq!(
+            descriptor.declared_ui_capability,
+            record.declared_ui_capability
+        );
         assert_eq!(
             descriptor.declared_runtime_capability_requirement,
             record.declared_runtime_capability_requirement
         );
-        assert_eq!(descriptor.runtime_capability_namespace, record.runtime_capability_namespace);
-        assert_eq!(descriptor.lifecycle_precondition, record.lifecycle_precondition);
+        assert_eq!(
+            descriptor.runtime_capability_namespace,
+            record.runtime_capability_namespace
+        );
+        assert_eq!(
+            descriptor.lifecycle_precondition,
+            record.lifecycle_precondition
+        );
         assert_eq!(descriptor.target_policy, record.target_policy);
         assert_eq!(descriptor.trace_requirement, record.trace_requirement);
-        assert_eq!(descriptor.policy_gate_namespace, record.policy_gate_namespace);
+        assert_eq!(
+            descriptor.policy_gate_namespace,
+            record.policy_gate_namespace
+        );
         assert_eq!(descriptor.scope, record.scope);
         assert_eq!(descriptor.audit_requirement, record.audit_requirement);
         assert_eq!(descriptor.audit_visibility, record.audit_visibility);
-        assert_eq!(descriptor.runtime_mutation_requirement, record.runtime_mutation_requirement);
-        assert_eq!(descriptor.host_path_requirement, record.host_path_requirement);
+        assert_eq!(
+            descriptor.runtime_mutation_requirement,
+            record.runtime_mutation_requirement
+        );
+        assert_eq!(
+            descriptor.host_path_requirement,
+            record.host_path_requirement
+        );
         assert_eq!(descriptor.record_status, record.record_status);
-        assert_eq!(descriptor.runtime_mutation_status, record.runtime_mutation_status);
+        assert_eq!(
+            descriptor.runtime_mutation_status,
+            record.runtime_mutation_status
+        );
         assert_eq!(descriptor.host_path_status, record.host_path_status);
     }
 

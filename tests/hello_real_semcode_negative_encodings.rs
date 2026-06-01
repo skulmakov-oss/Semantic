@@ -1,17 +1,14 @@
 use std::path::PathBuf;
 use std::vec::Vec;
 
-use sm_emit::hello_real_semcode::{
-    emit_hello_real_semcode_skeleton, HelloRealSemCodeOp,
-};
+use sm_emit::hello_real_semcode::{emit_hello_real_semcode_skeleton, HelloRealSemCodeOp};
 use sm_front::hello_parser::parse_hello_file;
 use sm_front::hello_sema::validate_hello_file;
 use sm_ir::hello_ir::lower_hello_checked_file;
 use sm_verify::hello_real_semcode_admission::{
-    admit_controlled_text_observation_shape,
-    admit_hello_real_semcode_skeleton, HelloRealSemCodeAdmissionDecision,
-    HelloRealSemCodeAdmissionError, HelloRealSemCodeAdmissionInput,
-    HelloRealSemCodeAdmissionOp,
+    admit_controlled_text_observation_shape, admit_hello_real_semcode_skeleton,
+    HelloRealSemCodeAdmissionDecision, HelloRealSemCodeAdmissionError,
+    HelloRealSemCodeAdmissionInput, HelloRealSemCodeAdmissionOp,
 };
 
 fn repo_path(rel: &str) -> String {
@@ -28,12 +25,14 @@ fn fixture_text(rel: &str) -> String {
 
 fn parse_validate_lower() -> sm_ir::hello_ir::HelloIrModule {
     let input = fixture_text("tests/fixtures/pending/hello/positive_hello_verbose_directional.sm");
-    let parsed = parse_hello_file(&input)
-        .unwrap_or_else(|err| panic!("parser unexpectedly rejected canonical hello fixture: {err}"));
+    let parsed = parse_hello_file(&input).unwrap_or_else(|err| {
+        panic!("parser unexpectedly rejected canonical hello fixture: {err}")
+    });
     let checked = validate_hello_file(parsed)
         .unwrap_or_else(|err| panic!("sema unexpectedly rejected canonical hello fixture: {err}"));
-    lower_hello_checked_file(&checked)
-        .unwrap_or_else(|err| panic!("lowering unexpectedly rejected canonical hello fixture: {err}"))
+    lower_hello_checked_file(&checked).unwrap_or_else(|err| {
+        panic!("lowering unexpectedly rejected canonical hello fixture: {err}")
+    })
 }
 
 fn render_text_literal(text: &str) -> String {
@@ -57,9 +56,7 @@ fn skeleton_to_admission_input(ops: &[HelloRealSemCodeOp]) -> HelloRealSemCodeAd
                 }
             }
             HelloRealSemCodeOp::ObserveTextLiteral { text } => {
-                HelloRealSemCodeAdmissionOp::ObserveTextLiteral {
-                    text: text.clone(),
-                }
+                HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text: text.clone() }
             }
             HelloRealSemCodeOp::CompleteQuad { value } => {
                 HelloRealSemCodeAdmissionOp::CompleteQuad {
@@ -101,13 +98,28 @@ fn hello_real_semcode_negative_encodings_accept_canonical_and_reject_forbidden_v
     for (replacement, expected) in [
         ("stdout", HelloRealSemCodeAdmissionError::StdoutNotAllowed),
         ("print", HelloRealSemCodeAdmissionError::PrintNotAllowed),
-        ("io.write", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
+        (
+            "io.write",
+            HelloRealSemCodeAdmissionError::GenericIoNotAllowed,
+        ),
         ("file", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
-        ("network", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
+        (
+            "network",
+            HelloRealSemCodeAdmissionError::GenericIoNotAllowed,
+        ),
         ("stdin", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
-        ("opcode", HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed),
-        ("bytecode", HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed),
-        ("Not Hello", HelloRealSemCodeAdmissionError::NonTextObservation),
+        (
+            "opcode",
+            HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed,
+        ),
+        (
+            "bytecode",
+            HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed,
+        ),
+        (
+            "Not Hello",
+            HelloRealSemCodeAdmissionError::NonTextObservation,
+        ),
     ] {
         let mut input = canonical.clone();
         if let HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text } = &mut input.ops[2] {
@@ -176,13 +188,28 @@ fn hello_real_semcode_controlled_observation_admission_rejects_forbidden_text_ma
     for (replacement, expected) in [
         ("stdout", HelloRealSemCodeAdmissionError::StdoutNotAllowed),
         ("print", HelloRealSemCodeAdmissionError::PrintNotAllowed),
-        ("io.write", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
+        (
+            "io.write",
+            HelloRealSemCodeAdmissionError::GenericIoNotAllowed,
+        ),
         ("file", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
-        ("network", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
+        (
+            "network",
+            HelloRealSemCodeAdmissionError::GenericIoNotAllowed,
+        ),
         ("stdin", HelloRealSemCodeAdmissionError::GenericIoNotAllowed),
-        ("opcode", HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed),
-        ("bytecode", HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed),
-        ("Not Hello", HelloRealSemCodeAdmissionError::NonTextObservation),
+        (
+            "opcode",
+            HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed,
+        ),
+        (
+            "bytecode",
+            HelloRealSemCodeAdmissionError::OpcodeOrBytecodeNotAllowed,
+        ),
+        (
+            "Not Hello",
+            HelloRealSemCodeAdmissionError::NonTextObservation,
+        ),
     ] {
         assert_eq!(
             admit_controlled_text_observation_shape(&render_text_literal(replacement)),

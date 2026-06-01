@@ -79,44 +79,32 @@ pub fn admit_hello_real_semcode_skeleton(
                 HelloRealSemCodeAdmissionError::MissingRequirement,
             )
         }
-        [
-            HelloRealSemCodeAdmissionOp::DeclareLocalQuad { .. },
-            HelloRealSemCodeAdmissionOp::RequireQuadEq { .. },
-        ] => HelloRealSemCodeAdmissionDecision::Reject(
-            HelloRealSemCodeAdmissionError::MissingObservation,
-        ),
-        [
-            HelloRealSemCodeAdmissionOp::DeclareLocalQuad { .. },
-            HelloRealSemCodeAdmissionOp::ObserveTextLiteral { .. },
-            HelloRealSemCodeAdmissionOp::CompleteQuad { .. },
-        ] => HelloRealSemCodeAdmissionDecision::Reject(
-            HelloRealSemCodeAdmissionError::MissingRequirement,
-        ),
-        [
-            HelloRealSemCodeAdmissionOp::DeclareLocalQuad { .. },
-            HelloRealSemCodeAdmissionOp::RequireQuadEq { .. },
-            HelloRealSemCodeAdmissionOp::CompleteQuad { .. },
-        ] => HelloRealSemCodeAdmissionDecision::Reject(
-            HelloRealSemCodeAdmissionError::MissingObservation,
-        ),
-        [
-            HelloRealSemCodeAdmissionOp::DeclareLocalQuad { .. },
-            HelloRealSemCodeAdmissionOp::RequireQuadEq { .. },
-            HelloRealSemCodeAdmissionOp::ObserveTextLiteral { .. },
-        ] => HelloRealSemCodeAdmissionDecision::Reject(
-            HelloRealSemCodeAdmissionError::MissingCompletion,
-        ),
-        [
-            HelloRealSemCodeAdmissionOp::DeclareLocalQuad { name, value },
-            HelloRealSemCodeAdmissionOp::RequireQuadEq {
-                name: require_name,
-                expected,
-            },
-            HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text },
-            HelloRealSemCodeAdmissionOp::CompleteQuad {
-                value: completion_value,
-            },
-        ] => {
+        [HelloRealSemCodeAdmissionOp::DeclareLocalQuad { .. }, HelloRealSemCodeAdmissionOp::RequireQuadEq { .. }] => {
+            HelloRealSemCodeAdmissionDecision::Reject(
+                HelloRealSemCodeAdmissionError::MissingObservation,
+            )
+        }
+        [HelloRealSemCodeAdmissionOp::DeclareLocalQuad { .. }, HelloRealSemCodeAdmissionOp::ObserveTextLiteral { .. }, HelloRealSemCodeAdmissionOp::CompleteQuad { .. }] => {
+            HelloRealSemCodeAdmissionDecision::Reject(
+                HelloRealSemCodeAdmissionError::MissingRequirement,
+            )
+        }
+        [HelloRealSemCodeAdmissionOp::DeclareLocalQuad { .. }, HelloRealSemCodeAdmissionOp::RequireQuadEq { .. }, HelloRealSemCodeAdmissionOp::CompleteQuad { .. }] => {
+            HelloRealSemCodeAdmissionDecision::Reject(
+                HelloRealSemCodeAdmissionError::MissingObservation,
+            )
+        }
+        [HelloRealSemCodeAdmissionOp::DeclareLocalQuad { .. }, HelloRealSemCodeAdmissionOp::RequireQuadEq { .. }, HelloRealSemCodeAdmissionOp::ObserveTextLiteral { .. }] => {
+            HelloRealSemCodeAdmissionDecision::Reject(
+                HelloRealSemCodeAdmissionError::MissingCompletion,
+            )
+        }
+        [HelloRealSemCodeAdmissionOp::DeclareLocalQuad { name, value }, HelloRealSemCodeAdmissionOp::RequireQuadEq {
+            name: require_name,
+            expected,
+        }, HelloRealSemCodeAdmissionOp::ObserveTextLiteral { text }, HelloRealSemCodeAdmissionOp::CompleteQuad {
+            value: completion_value,
+        }] => {
             if name != "boot" || value != "T" {
                 return HelloRealSemCodeAdmissionDecision::Reject(
                     HelloRealSemCodeAdmissionError::UnsupportedShape,
@@ -142,14 +130,8 @@ pub fn admit_hello_real_semcode_skeleton(
 
             HelloRealSemCodeAdmissionDecision::Admit
         }
-        [
-            HelloRealSemCodeAdmissionOp::RequireQuadEq { .. },
-            ..
-        ]
-        | [
-            HelloRealSemCodeAdmissionOp::ObserveTextLiteral { .. },
-            ..
-        ]
+        [HelloRealSemCodeAdmissionOp::RequireQuadEq { .. }, ..]
+        | [HelloRealSemCodeAdmissionOp::ObserveTextLiteral { .. }, ..]
         | [HelloRealSemCodeAdmissionOp::CompleteQuad { .. }, ..] => {
             HelloRealSemCodeAdmissionDecision::Reject(
                 HelloRealSemCodeAdmissionError::InvalidOperationOrder,

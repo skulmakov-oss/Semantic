@@ -35,9 +35,7 @@ pub fn route_hello_observation_to_sink<S: HelloObservationSink>(
     sink: &mut S,
 ) -> HelloObservationRouteResult {
     if !input.admitted {
-        return HelloObservationRouteResult::NotRouted(
-            HelloObservationRouteError::NotAdmitted,
-        );
+        return HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NotAdmitted);
     }
 
     match input.text.as_str() {
@@ -51,18 +49,14 @@ pub fn route_hello_observation_to_sink<S: HelloObservationSink>(
 
             match sink.observe(event) {
                 Ok(()) => HelloObservationRouteResult::Routed,
-                Err(_) => HelloObservationRouteResult::NotRouted(
-                    HelloObservationRouteError::SinkRejected,
-                ),
+                Err(_) => {
+                    HelloObservationRouteResult::NotRouted(HelloObservationRouteError::SinkRejected)
+                }
             }
         }
         "stdout" | "print" | "io.write" | "file" | "network" | "stdin" => {
-            HelloObservationRouteResult::NotRouted(
-                HelloObservationRouteError::ForbiddenHostOutput,
-            )
+            HelloObservationRouteResult::NotRouted(HelloObservationRouteError::ForbiddenHostOutput)
         }
-        _ => HelloObservationRouteResult::NotRouted(
-            HelloObservationRouteError::NonControlledText,
-        ),
+        _ => HelloObservationRouteResult::NotRouted(HelloObservationRouteError::NonControlledText),
     }
 }

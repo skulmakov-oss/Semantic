@@ -109,10 +109,7 @@ impl UiRuntimeEffectRequest {
         )
     }
 
-    pub const fn poll_events_for_window(
-        request_id: AdapterRequestId,
-        window_id: WindowId,
-    ) -> Self {
+    pub const fn poll_events_for_window(request_id: AdapterRequestId, window_id: WindowId) -> Self {
         Self::new(
             request_id,
             UiRuntimeEffect::PollEvents,
@@ -267,15 +264,15 @@ impl<A: UiRuntimeAdapter> UiAdmissionFacade<A> {
 /// lifecycle state, window ownership, draw batch contents, or backend support.
 fn target_shape_is_valid(effect_id: UiRuntimeEffect, target: &UiAdapterTarget) -> bool {
     match effect_id {
-        UiRuntimeEffect::WindowCreate => target.frame_id.is_none() && target.draw_batch_id.is_none(),
+        UiRuntimeEffect::WindowCreate => {
+            target.frame_id.is_none() && target.draw_batch_id.is_none()
+        }
         UiRuntimeEffect::WindowClose => {
             target.window_id.is_some()
                 && target.frame_id.is_none()
                 && target.draw_batch_id.is_none()
         }
-        UiRuntimeEffect::PollEvents => {
-            target.frame_id.is_none() && target.draw_batch_id.is_none()
-        }
+        UiRuntimeEffect::PollEvents => target.frame_id.is_none() && target.draw_batch_id.is_none(),
         UiRuntimeEffect::BeginFrame => {
             target.window_id.is_some()
                 && target.frame_id.is_none()
@@ -342,13 +339,14 @@ mod tests {
 
     #[test]
     fn admission_result_helpers_identify_submitted() {
-        let result = UiAdmissionResult::submitted(UiAdapterResult::performed(
-            UiAdapterValue::Unit,
-        ));
+        let result = UiAdmissionResult::submitted(UiAdapterResult::performed(UiAdapterValue::Unit));
 
         assert!(result.is_submitted());
         assert!(!result.is_rejected());
-        assert!(matches!(result.as_submitted(), Some(UiAdapterResult::Performed(UiAdapterValue::Unit))));
+        assert!(matches!(
+            result.as_submitted(),
+            Some(UiAdapterResult::Performed(UiAdapterValue::Unit))
+        ));
         assert_eq!(result.as_rejected(), None);
     }
 
@@ -462,7 +460,10 @@ mod tests {
 
         assert_eq!(request.request_id, AdapterRequestId(7_006));
         assert_eq!(request.effect_id, UiRuntimeEffect::EndFrame);
-        assert_eq!(request.target, UiAdapterTarget::frame(WindowId(47), FrameId(48)));
+        assert_eq!(
+            request.target,
+            UiAdapterTarget::frame(WindowId(47), FrameId(48))
+        );
     }
 
     #[test]
@@ -713,7 +714,10 @@ mod tests {
             UiAdmissionResult::Submitted(UiAdapterResult::Performed(UiAdapterValue::Unit))
         ));
         assert_eq!(facade.adapter().requests().len(), 1);
-        assert_eq!(facade.adapter().requests()[0].effect_id, UiRuntimeEffect::SubmitDrawCommands);
+        assert_eq!(
+            facade.adapter().requests()[0].effect_id,
+            UiRuntimeEffect::SubmitDrawCommands
+        );
         assert_eq!(facade.adapter().requests()[0].target, target);
     }
 
@@ -794,7 +798,11 @@ mod tests {
             (UiRuntimeEffect::WindowCreate, TargetShape::WindowOnly, true),
             (UiRuntimeEffect::WindowCreate, TargetShape::Frame, false),
             (UiRuntimeEffect::WindowCreate, TargetShape::DrawBatch, false),
-            (UiRuntimeEffect::WindowCreate, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::WindowCreate,
+                TargetShape::FrameWithoutWindow,
+                false,
+            ),
             (
                 UiRuntimeEffect::WindowCreate,
                 TargetShape::DrawBatchWithoutFrame,
@@ -809,7 +817,11 @@ mod tests {
             (UiRuntimeEffect::WindowClose, TargetShape::WindowOnly, true),
             (UiRuntimeEffect::WindowClose, TargetShape::Frame, false),
             (UiRuntimeEffect::WindowClose, TargetShape::DrawBatch, false),
-            (UiRuntimeEffect::WindowClose, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::WindowClose,
+                TargetShape::FrameWithoutWindow,
+                false,
+            ),
             (
                 UiRuntimeEffect::WindowClose,
                 TargetShape::DrawBatchWithoutFrame,
@@ -824,7 +836,11 @@ mod tests {
             (UiRuntimeEffect::PollEvents, TargetShape::WindowOnly, true),
             (UiRuntimeEffect::PollEvents, TargetShape::Frame, false),
             (UiRuntimeEffect::PollEvents, TargetShape::DrawBatch, false),
-            (UiRuntimeEffect::PollEvents, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::PollEvents,
+                TargetShape::FrameWithoutWindow,
+                false,
+            ),
             (
                 UiRuntimeEffect::PollEvents,
                 TargetShape::DrawBatchWithoutFrame,
@@ -839,7 +855,11 @@ mod tests {
             (UiRuntimeEffect::BeginFrame, TargetShape::WindowOnly, true),
             (UiRuntimeEffect::BeginFrame, TargetShape::Frame, false),
             (UiRuntimeEffect::BeginFrame, TargetShape::DrawBatch, false),
-            (UiRuntimeEffect::BeginFrame, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::BeginFrame,
+                TargetShape::FrameWithoutWindow,
+                false,
+            ),
             (
                 UiRuntimeEffect::BeginFrame,
                 TargetShape::DrawBatchWithoutFrame,
@@ -860,7 +880,11 @@ mod tests {
                 TargetShape::WindowOnly,
                 false,
             ),
-            (UiRuntimeEffect::SubmitDrawCommands, TargetShape::Frame, false),
+            (
+                UiRuntimeEffect::SubmitDrawCommands,
+                TargetShape::Frame,
+                false,
+            ),
             (
                 UiRuntimeEffect::SubmitDrawCommands,
                 TargetShape::DrawBatch,
@@ -885,7 +909,11 @@ mod tests {
             (UiRuntimeEffect::EndFrame, TargetShape::WindowOnly, false),
             (UiRuntimeEffect::EndFrame, TargetShape::Frame, true),
             (UiRuntimeEffect::EndFrame, TargetShape::DrawBatch, false),
-            (UiRuntimeEffect::EndFrame, TargetShape::FrameWithoutWindow, false),
+            (
+                UiRuntimeEffect::EndFrame,
+                TargetShape::FrameWithoutWindow,
+                false,
+            ),
             (
                 UiRuntimeEffect::EndFrame,
                 TargetShape::DrawBatchWithoutFrame,
@@ -902,11 +930,8 @@ mod tests {
             let adapter = RecordingAdapter::new();
             let mut facade = UiAdmissionFacade::new(adapter);
 
-            let result = facade.submit_admitted(request(
-                1_000 + index as u64,
-                effect,
-                target_shape(shape),
-            ));
+            let result =
+                facade.submit_admitted(request(1_000 + index as u64, effect, target_shape(shape)));
 
             assert_eq!(
                 matches!(result, UiAdmissionResult::Submitted(_)),
@@ -983,7 +1008,10 @@ mod tests {
             let forwarded = &facade.adapter().requests()[0];
             assert_eq!(forwarded.request_id, request_id);
             assert_eq!(forwarded.effect_id, effect);
-            assert_eq!(forwarded.target, target, "effect={effect:?}, shape={shape:?}");
+            assert_eq!(
+                forwarded.target, target,
+                "effect={effect:?}, shape={shape:?}"
+            );
         }
     }
 
@@ -1019,10 +1047,7 @@ mod tests {
                 TargetShape::DrawBatchWithoutWindow,
             ),
             (UiRuntimeEffect::SubmitDrawCommands, TargetShape::Empty),
-            (
-                UiRuntimeEffect::SubmitDrawCommands,
-                TargetShape::WindowOnly,
-            ),
+            (UiRuntimeEffect::SubmitDrawCommands, TargetShape::WindowOnly),
             (UiRuntimeEffect::SubmitDrawCommands, TargetShape::Frame),
             (
                 UiRuntimeEffect::SubmitDrawCommands,
@@ -1040,19 +1065,22 @@ mod tests {
             (UiRuntimeEffect::EndFrame, TargetShape::WindowOnly),
             (UiRuntimeEffect::EndFrame, TargetShape::DrawBatch),
             (UiRuntimeEffect::EndFrame, TargetShape::FrameWithoutWindow),
-            (UiRuntimeEffect::EndFrame, TargetShape::DrawBatchWithoutFrame),
-            (UiRuntimeEffect::EndFrame, TargetShape::DrawBatchWithoutWindow),
+            (
+                UiRuntimeEffect::EndFrame,
+                TargetShape::DrawBatchWithoutFrame,
+            ),
+            (
+                UiRuntimeEffect::EndFrame,
+                TargetShape::DrawBatchWithoutWindow,
+            ),
         ];
 
         for (index, (effect, shape)) in cases.into_iter().enumerate() {
             let adapter = RecordingAdapter::new();
             let mut facade = UiAdmissionFacade::new(adapter);
 
-            let result = facade.submit_admitted(request(
-                3_000 + index as u64,
-                effect,
-                target_shape(shape),
-            ));
+            let result =
+                facade.submit_admitted(request(3_000 + index as u64, effect, target_shape(shape)));
 
             assert!(matches!(result, UiAdmissionResult::Rejected(_)));
             assert!(
@@ -1168,7 +1196,10 @@ mod tests {
         }
 
         assert_eq!(
-            recorded.iter().map(|request| request.effect_id).collect::<alloc::vec::Vec<_>>(),
+            recorded
+                .iter()
+                .map(|request| request.effect_id)
+                .collect::<alloc::vec::Vec<_>>(),
             alloc::vec![
                 UiRuntimeEffect::WindowCreate,
                 UiRuntimeEffect::PollEvents,
@@ -1213,10 +1244,7 @@ mod tests {
             valid_create.effect_id,
             valid_create.target.clone(),
         );
-        assert_eq!(
-            facade.adapter().requests(),
-            &[expected_create.clone()]
-        );
+        assert_eq!(facade.adapter().requests(), &[expected_create.clone()]);
 
         let invalid_result = facade.submit_admitted(invalid_submit);
         assert!(matches!(
@@ -1240,10 +1268,7 @@ mod tests {
         );
         assert_eq!(
             facade.adapter().requests(),
-            &[
-                expected_create,
-                expected_close,
-            ]
+            &[expected_create, expected_close,]
         );
     }
 }

@@ -87,8 +87,8 @@ mod tests {
     use super::*;
     use crate::interaction::{ElementId, InteractionModifiers};
     use crate::raw_event::{
-        RawKeyCode, RawPointerButton, RawUiEvent, RawUiEventId, RawUiEventKind,
-        RawUiEventPayload, RawUiEventTarget,
+        RawKeyCode, RawPointerButton, RawUiEvent, RawUiEventId, RawUiEventKind, RawUiEventPayload,
+        RawUiEventTarget,
     };
 
     fn pointer_down(id: u64) -> RawUiEvent {
@@ -198,10 +198,7 @@ mod tests {
 
     #[test]
     fn stream_does_not_filter_unclassified_reports() {
-        let model = InteractionIntentStreamModel::new(vec![
-            unknown_event(1),
-            unsupported_key(2),
-        ]);
+        let model = InteractionIntentStreamModel::new(vec![unknown_event(1), unsupported_key(2)]);
 
         let report = trace_interaction_intent_stream(&model);
 

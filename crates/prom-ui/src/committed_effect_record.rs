@@ -15,8 +15,7 @@ use crate::commit_boundary::InteractionCommitAuditRequirement;
 use crate::commit_boundary_result::InteractionCommitBoundaryResultId;
 use crate::committed_effect::{
     InteractionCommittedEffectAuditVisibility, InteractionCommittedEffectDescriptor,
-    InteractionCommittedEffectDescriptorId,
-    InteractionCommittedEffectHostPathRequirement,
+    InteractionCommittedEffectDescriptorId, InteractionCommittedEffectHostPathRequirement,
     InteractionCommittedEffectRuntimeMutationRequirement,
 };
 use crate::effect_request::{
@@ -57,7 +56,8 @@ pub struct InteractionCommittedEffectRecord {
     pub id: InteractionCommittedEffectRecordId,
     pub descriptor_id: InteractionCommittedEffectDescriptorId,
     pub commit_boundary_result_id: InteractionCommitBoundaryResultId,
-    pub commit_boundary_descriptor_id: crate::commit_boundary::InteractionCommitBoundaryDescriptorId,
+    pub commit_boundary_descriptor_id:
+        crate::commit_boundary::InteractionCommitBoundaryDescriptorId,
     pub prepared_effect_result_id: InteractionPreparedEffectResultId,
     pub prepared_effect_descriptor_id: InteractionPreparedEffectDescriptorId,
     pub runtime_capability_mapping_result_id: InteractionRuntimeCapabilityMappingResultId,
@@ -107,8 +107,7 @@ pub fn record_interaction_committed_effect(
         dispatch_route_id: descriptor.dispatch_route_id,
         requested_effect: descriptor.requested_effect,
         declared_ui_capability: descriptor.declared_ui_capability,
-        declared_runtime_capability_requirement: descriptor
-            .declared_runtime_capability_requirement,
+        declared_runtime_capability_requirement: descriptor.declared_runtime_capability_requirement,
         runtime_capability_namespace: descriptor.runtime_capability_namespace,
         lifecycle_precondition: descriptor.lifecycle_precondition,
         target_policy: descriptor.target_policy,
@@ -212,7 +211,8 @@ mod tests {
         let ui_result = record_interaction_ui_capability_admitted_result(&admission);
         let mapping_descriptor = describe_interaction_runtime_capability_mapping(&ui_result)
             .expect("admitted result should produce mapping descriptor");
-        let mapping_result = record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
+        let mapping_result =
+            record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
         let prepared_descriptor = describe_interaction_prepared_effect(&mapping_result)
             .expect("mapped result should produce prepared effect descriptor");
         let prepared_result = record_interaction_prepared_effect_result(&prepared_descriptor);
@@ -229,7 +229,10 @@ mod tests {
         let descriptor = committed_effect_descriptor();
         let record = record_interaction_committed_effect(&descriptor);
 
-        assert_eq!(record.id, InteractionCommittedEffectRecordId(descriptor.id.0));
+        assert_eq!(
+            record.id,
+            InteractionCommittedEffectRecordId(descriptor.id.0)
+        );
         assert_eq!(record.descriptor_id, descriptor.id);
     }
 
@@ -238,10 +241,22 @@ mod tests {
         let descriptor = committed_effect_descriptor();
         let record = record_interaction_committed_effect(&descriptor);
 
-        assert_eq!(record.commit_boundary_result_id, descriptor.commit_boundary_result_id);
-        assert_eq!(record.commit_boundary_descriptor_id, descriptor.commit_boundary_descriptor_id);
-        assert_eq!(record.prepared_effect_result_id, descriptor.prepared_effect_result_id);
-        assert_eq!(record.prepared_effect_descriptor_id, descriptor.prepared_effect_descriptor_id);
+        assert_eq!(
+            record.commit_boundary_result_id,
+            descriptor.commit_boundary_result_id
+        );
+        assert_eq!(
+            record.commit_boundary_descriptor_id,
+            descriptor.commit_boundary_descriptor_id
+        );
+        assert_eq!(
+            record.prepared_effect_result_id,
+            descriptor.prepared_effect_result_id
+        );
+        assert_eq!(
+            record.prepared_effect_descriptor_id,
+            descriptor.prepared_effect_descriptor_id
+        );
         assert_eq!(
             record.runtime_capability_mapping_result_id,
             descriptor.runtime_capability_mapping_result_id
@@ -250,26 +265,47 @@ mod tests {
             record.runtime_capability_mapping_descriptor_id,
             descriptor.runtime_capability_mapping_descriptor_id
         );
-        assert_eq!(record.ui_capability_admission_result_id, descriptor.ui_capability_admission_result_id);
+        assert_eq!(
+            record.ui_capability_admission_result_id,
+            descriptor.ui_capability_admission_result_id
+        );
         assert_eq!(
             record.ui_capability_admission_descriptor_id,
             descriptor.ui_capability_admission_descriptor_id
         );
-        assert_eq!(record.effect_request_descriptor_id, descriptor.effect_request_descriptor_id);
-        assert_eq!(record.source_admitted_action_id, descriptor.source_admitted_action_id);
+        assert_eq!(
+            record.effect_request_descriptor_id,
+            descriptor.effect_request_descriptor_id
+        );
+        assert_eq!(
+            record.source_admitted_action_id,
+            descriptor.source_admitted_action_id
+        );
         assert_eq!(record.dispatch_record_id, descriptor.dispatch_record_id);
         assert_eq!(record.dispatch_route_id, descriptor.dispatch_route_id);
         assert_eq!(record.requested_effect, descriptor.requested_effect);
-        assert_eq!(record.declared_ui_capability, descriptor.declared_ui_capability);
+        assert_eq!(
+            record.declared_ui_capability,
+            descriptor.declared_ui_capability
+        );
         assert_eq!(
             record.declared_runtime_capability_requirement,
             descriptor.declared_runtime_capability_requirement
         );
-        assert_eq!(record.runtime_capability_namespace, descriptor.runtime_capability_namespace);
-        assert_eq!(record.lifecycle_precondition, descriptor.lifecycle_precondition);
+        assert_eq!(
+            record.runtime_capability_namespace,
+            descriptor.runtime_capability_namespace
+        );
+        assert_eq!(
+            record.lifecycle_precondition,
+            descriptor.lifecycle_precondition
+        );
         assert_eq!(record.target_policy, descriptor.target_policy);
         assert_eq!(record.trace_requirement, descriptor.trace_requirement);
-        assert_eq!(record.policy_gate_namespace, descriptor.policy_gate_namespace);
+        assert_eq!(
+            record.policy_gate_namespace,
+            descriptor.policy_gate_namespace
+        );
         assert_eq!(record.scope, descriptor.scope);
         assert_eq!(record.audit_requirement, descriptor.audit_requirement);
         assert_eq!(record.audit_visibility, descriptor.audit_visibility);
@@ -280,8 +316,14 @@ mod tests {
         let descriptor = committed_effect_descriptor();
         let record = record_interaction_committed_effect(&descriptor);
 
-        assert_eq!(record.runtime_mutation_requirement, descriptor.runtime_mutation_requirement);
-        assert_eq!(record.host_path_requirement, descriptor.host_path_requirement);
+        assert_eq!(
+            record.runtime_mutation_requirement,
+            descriptor.runtime_mutation_requirement
+        );
+        assert_eq!(
+            record.host_path_requirement,
+            descriptor.host_path_requirement
+        );
     }
 
     #[test]
@@ -289,7 +331,10 @@ mod tests {
         let descriptor = committed_effect_descriptor();
         let record = record_interaction_committed_effect(&descriptor);
 
-        assert_eq!(record.record_status, InteractionCommittedEffectRecordStatus::Recorded);
+        assert_eq!(
+            record.record_status,
+            InteractionCommittedEffectRecordStatus::Recorded
+        );
         assert_eq!(
             record.runtime_mutation_status,
             InteractionCommittedEffectRuntimeMutationStatus::NotPerformed

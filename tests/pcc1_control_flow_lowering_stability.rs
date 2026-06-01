@@ -25,17 +25,14 @@ fn mk_temp_dir(prefix: &str) -> PathBuf {
 
 fn write_temp_source(dir: &PathBuf, name: &str, source: &str) -> PathBuf {
     let path = dir.join(name);
-    std::fs::write(&path, source).unwrap_or_else(|err| panic!("write source failed for {path:?}: {err}"));
+    std::fs::write(&path, source)
+        .unwrap_or_else(|err| panic!("write source failed for {path:?}: {err}"));
     path
 }
 
 fn compile_semcode_bytes(source: &str, out_name: &str) -> Vec<u8> {
     let dir = mk_temp_dir("smc_pcc1_control_flow_lowering_stability");
-    let input = write_temp_source(
-        &dir,
-        "input.sm",
-        source,
-    );
+    let input = write_temp_source(&dir, "input.sm", source);
     let out = dir.join(out_name);
     let input_arg = input.to_string_lossy().replace('\\', "/");
     let out_arg = out.to_string_lossy().replace('\\', "/");

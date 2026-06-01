@@ -101,13 +101,12 @@ fn hello_ir_shape_pending_preserves_statement_order_and_controlled_observation_b
 
     assert_eq!(module.entry.body.len(), 4);
     match &module.entry.body[..] {
-        [
-            HelloIrStmt::LocalQuad(_),
-            HelloIrStmt::RequireQuadEq(_),
-            HelloIrStmt::ObserveText(observe),
-            HelloIrStmt::CompleteQuad(_),
-        ] => {
-            assert_eq!(observe.observation_class, HelloIrObservationClass::Controlled);
+        [HelloIrStmt::LocalQuad(_), HelloIrStmt::RequireQuadEq(_), HelloIrStmt::ObserveText(observe), HelloIrStmt::CompleteQuad(_)] =>
+        {
+            assert_eq!(
+                observe.observation_class,
+                HelloIrObservationClass::Controlled
+            );
             let rendered = render_hello_ir(&module);
             assert!(rendered.contains("Controlled"));
             assert!(!rendered.contains("stdout"));
@@ -119,11 +118,14 @@ fn hello_ir_shape_pending_preserves_statement_order_and_controlled_observation_b
 
 #[test]
 fn hello_ir_shape_pending_secondary_shape_does_not_lower() {
-    let checked = parse_validate("tests/fixtures/pending/hello/positive_hello_minimal_observe_directional.sm");
-    let err = lower_hello_checked_file(&checked)
-        .expect_err("secondary Hello shape should not lower yet");
+    let checked = parse_validate(
+        "tests/fixtures/pending/hello/positive_hello_minimal_observe_directional.sm",
+    );
+    let err =
+        lower_hello_checked_file(&checked).expect_err("secondary Hello shape should not lower yet");
     assert!(
-        err.message.contains("secondary Hello shape is not admitted for IR lowering"),
+        err.message
+            .contains("secondary Hello shape is not admitted for IR lowering"),
         "expected secondary-shape IR rejection, got: {}",
         err.message
     );

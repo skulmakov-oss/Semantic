@@ -31,12 +31,7 @@ impl ReplayApp {
                 InputEventKind::CloseRequested => {
                     self.close_seen = true;
                     frame.clear(Color::BLACK);
-                    frame.draw_text(
-                        format!("score={} close", self.score),
-                        0,
-                        0,
-                        Color::WHITE,
-                    );
+                    frame.draw_text(format!("score={} close", self.score), 0, 0, Color::WHITE);
                     return LoopControl::ExitRequested;
                 }
                 _ => {}
@@ -44,16 +39,8 @@ impl ReplayApp {
         }
 
         frame.clear(Color::BLACK);
-        frame.fill_rect(
-            Rect::new(0, 0, self.score as u32 + 1, 8),
-            Color::GREEN,
-        );
-        frame.draw_text(
-            format!("score={}", self.score),
-            0,
-            0,
-            Color::WHITE,
-        );
+        frame.fill_rect(Rect::new(0, 0, self.score as u32 + 1, 8), Color::GREEN);
+        frame.draw_text(format!("score={}", self.score), 0, 0, Color::WHITE);
 
         LoopControl::Continue
     }

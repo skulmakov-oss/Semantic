@@ -19,23 +19,27 @@ fn fixture_text(rel: &str) -> String {
 
 fn parse_validate_lower() -> sm_ir::hello_ir::HelloIrModule {
     let input = fixture_text("tests/fixtures/pending/hello/positive_hello_verbose_directional.sm");
-    let parsed = parse_hello_file(&input)
-        .unwrap_or_else(|err| panic!("parser unexpectedly rejected canonical hello fixture: {err}"));
+    let parsed = parse_hello_file(&input).unwrap_or_else(|err| {
+        panic!("parser unexpectedly rejected canonical hello fixture: {err}")
+    });
     let checked = validate_hello_file(parsed)
         .unwrap_or_else(|err| panic!("sema unexpectedly rejected canonical hello fixture: {err}"));
-    lower_hello_checked_file(&checked)
-        .unwrap_or_else(|err| panic!("lowering unexpectedly rejected canonical hello fixture: {err}"))
+    lower_hello_checked_file(&checked).unwrap_or_else(|err| {
+        panic!("lowering unexpectedly rejected canonical hello fixture: {err}")
+    })
 }
 
 fn fixture_body_lines() -> String {
-    fixture_text("tests/fixtures/pending/hello_semcode/positive_hello_verbose_conceptual.semcode.txt")
-        .lines()
-        .filter(|line| {
-            let trimmed = line.trim();
-            !trimmed.is_empty() && !trimmed.starts_with('#')
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    fixture_text(
+        "tests/fixtures/pending/hello_semcode/positive_hello_verbose_conceptual.semcode.txt",
+    )
+    .lines()
+    .filter(|line| {
+        let trimmed = line.trim();
+        !trimmed.is_empty() && !trimmed.starts_with('#')
+    })
+    .collect::<Vec<_>>()
+    .join("\n")
 }
 
 #[test]

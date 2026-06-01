@@ -19,77 +19,46 @@
 
 extern crate alloc;
 
-pub mod interaction;
-pub mod action_binding;
-pub mod action_binding_trace;
-pub mod action_binding_stream;
-pub mod action_candidate_summary;
 pub mod action_admission;
 pub mod action_admission_result;
+pub mod action_binding;
+pub mod action_binding_stream;
+pub mod action_binding_trace;
+pub mod action_candidate_summary;
 pub mod action_denial_trace;
-pub mod admitted_action;
-pub mod action_dispatch_route;
 pub mod action_dispatch_record;
-pub mod action_dispatch_trace;
+pub mod action_dispatch_route;
 pub mod action_dispatch_summary;
-pub mod effect_request;
-pub mod effect_request_trace;
-pub mod effect_request_summary;
-pub mod ui_capability_admission;
-pub mod ui_capability_admission_result;
-pub mod ui_capability_denial_trace;
-pub mod runtime_capability_mapping;
-pub mod runtime_capability_mapping_result;
-pub mod prepared_effect;
-pub mod prepared_effect_result;
+pub mod action_dispatch_trace;
+pub mod admitted_action;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
 pub mod committed_effect;
 pub mod committed_effect_record;
+pub mod effect_request;
+pub mod effect_request_summary;
+pub mod effect_request_trace;
 pub mod host_runtime_effect;
 pub mod host_runtime_effect_denial_trace;
 pub mod host_runtime_effect_result;
 pub mod intent_stream;
+pub mod interaction;
+pub mod prepared_effect;
+pub mod prepared_effect_result;
 pub mod raw_event;
+pub mod runtime_capability_mapping;
+pub mod runtime_capability_mapping_result;
 pub mod trace;
+pub mod ui_capability_admission;
+pub mod ui_capability_admission_result;
+pub mod ui_capability_denial_trace;
 
-pub use interaction::{
-    ElementId, InteractionModifiers, InteractionSource, InteractionTarget, RegionId,
-    SurfaceId, WindowId, InteractionIntentDescriptor, InteractionIntentId,
-    InteractionIntentKind,
-};
-pub use action_binding::{
-    find_interaction_action_binding_by_action,
-    find_interaction_action_binding_by_intent,
-    interaction_action_bindings,
-    InteractionActionAdmissionPolicy,
-    InteractionActionBindingDescriptor,
-    InteractionActionBindingId,
-    InteractionActionBindingScope,
-    InteractionActionEffectPolicy,
-    InteractionActionName,
-    InteractionActionTargetPolicy,
-    InteractionActionTracePolicy,
-    INTERACTION_ACTION_BINDINGS,
-};
-pub use action_binding_trace::{
-    trace_interaction_action_binding, InteractionActionBindingTraceReason,
-    InteractionActionBindingTraceReport, InteractionActionBindingTraceStatus,
-};
-pub use action_binding_stream::{
-    trace_interaction_action_binding_stream, InteractionActionBindingTraceStreamModel,
-    InteractionActionBindingTraceStreamReport, InteractionActionBindingTraceStreamStats,
-};
-pub use action_candidate_summary::{
-    summarize_interaction_action_candidates, InteractionActionBindingReasonCount,
-    InteractionActionCandidateCount, InteractionActionCandidateSummary,
-};
 pub use action_admission::{
     describe_interaction_action_admission, InteractionActionAdmissionCapabilityRequirement,
     InteractionActionAdmissionDenialVisibility, InteractionActionAdmissionDescriptor,
     InteractionActionAdmissionDescriptorId, InteractionActionAdmissionEffectRelationship,
-    InteractionActionAdmissionFutureResultShape,
-    InteractionActionAdmissionLifecycleRequirement, InteractionActionAdmissionPolicyGateNamespace,
+    InteractionActionAdmissionFutureResultShape, InteractionActionAdmissionLifecycleRequirement,
+    InteractionActionAdmissionPolicyGateNamespace,
     InteractionActionAdmissionTargetOwnershipRequirement,
     InteractionActionAdmissionTargetRequirement, InteractionActionAdmissionTraceRequirement,
 };
@@ -99,123 +68,63 @@ pub use action_admission_result::{
     InteractionActionAdmissionMissingRequirement, InteractionActionAdmissionResult,
     InteractionActionAdmissionResultId,
 };
+pub use action_binding::{
+    find_interaction_action_binding_by_action, find_interaction_action_binding_by_intent,
+    interaction_action_bindings, InteractionActionAdmissionPolicy,
+    InteractionActionBindingDescriptor, InteractionActionBindingId, InteractionActionBindingScope,
+    InteractionActionEffectPolicy, InteractionActionName, InteractionActionTargetPolicy,
+    InteractionActionTracePolicy, INTERACTION_ACTION_BINDINGS,
+};
+pub use action_binding_stream::{
+    trace_interaction_action_binding_stream, InteractionActionBindingTraceStreamModel,
+    InteractionActionBindingTraceStreamReport, InteractionActionBindingTraceStreamStats,
+};
+pub use action_binding_trace::{
+    trace_interaction_action_binding, InteractionActionBindingTraceReason,
+    InteractionActionBindingTraceReport, InteractionActionBindingTraceStatus,
+};
+pub use action_candidate_summary::{
+    summarize_interaction_action_candidates, InteractionActionBindingReasonCount,
+    InteractionActionCandidateCount, InteractionActionCandidateSummary,
+};
 pub use action_denial_trace::{
     trace_interaction_action_denial, InteractionActionDenialRetryHint,
     InteractionActionDenialTrace, InteractionActionDenialTraceId,
-};
-pub use admitted_action::{
-    build_interaction_admitted_semantic_action, InteractionAdmittedSemanticAction,
-    InteractionAdmittedSemanticActionDispatchReadiness,
-    InteractionAdmittedSemanticActionEffectReadiness, InteractionAdmittedSemanticActionId,
-};
-pub use action_dispatch_route::{
-    describe_interaction_semantic_action_dispatch_route,
-    InteractionSemanticActionDispatchEffectEligibility,
-    InteractionSemanticActionDispatchRouteDescriptor,
-    InteractionSemanticActionDispatchRouteId,
-    InteractionSemanticActionDispatchRouteKind,
 };
 pub use action_dispatch_record::{
     record_interaction_semantic_action_dispatch, InteractionSemanticActionDispatchBlockReason,
     InteractionSemanticActionDispatchRecord, InteractionSemanticActionDispatchRecordId,
     InteractionSemanticActionDispatchRecordStatus,
 };
+pub use action_dispatch_route::{
+    describe_interaction_semantic_action_dispatch_route,
+    InteractionSemanticActionDispatchEffectEligibility,
+    InteractionSemanticActionDispatchRouteDescriptor, InteractionSemanticActionDispatchRouteId,
+    InteractionSemanticActionDispatchRouteKind,
+};
+pub use action_dispatch_summary::{
+    summarize_interaction_semantic_action_dispatches, InteractionSemanticActionDispatchRouteCount,
+    InteractionSemanticActionDispatchSummary, InteractionSemanticActionDispatchTraceReasonCount,
+};
 pub use action_dispatch_trace::{
     trace_interaction_semantic_action_dispatch, InteractionSemanticActionDispatchTraceReason,
     InteractionSemanticActionDispatchTraceReport, InteractionSemanticActionDispatchTraceStatus,
 };
-pub use action_dispatch_summary::{
-    summarize_interaction_semantic_action_dispatches,
-    InteractionSemanticActionDispatchRouteCount, InteractionSemanticActionDispatchSummary,
-    InteractionSemanticActionDispatchTraceReasonCount,
-};
-pub use effect_request::{
-    describe_interaction_effect_request, InteractionEffectRequestDenialBehavior,
-    InteractionEffectRequestDescriptor, InteractionEffectRequestDescriptorId,
-    InteractionEffectRequestKind, InteractionEffectRequestLifecyclePrecondition,
-    InteractionEffectRequestPrepareCommitRelationship, InteractionEffectRequestRuntimeCapability,
-    InteractionEffectRequestScope, InteractionEffectRequestTargetPolicy,
-    InteractionEffectRequestUiCapability,
-};
-pub use effect_request_trace::{
-    trace_interaction_effect_request, InteractionEffectRequestTraceReason,
-    InteractionEffectRequestTraceReport, InteractionEffectRequestTraceStatus,
-};
-pub use effect_request_summary::{
-    summarize_interaction_effect_requests, InteractionEffectRequestKindCount,
-    InteractionEffectRequestRuntimeCapabilityCount, InteractionEffectRequestSummary,
-    InteractionEffectRequestUiCapabilityCount,
-};
-pub use ui_capability_admission::{
-    describe_interaction_ui_capability_admission,
-    InteractionUiCapabilityAdmissionDescriptor,
-    InteractionUiCapabilityAdmissionDescriptorId,
-    InteractionUiCapabilityAdmissionFutureResultShape,
-    InteractionUiCapabilityAdmissionRuntimeMappingRequirement,
-};
-pub use ui_capability_admission_result::{
-    record_interaction_ui_capability_admitted_result,
-    record_interaction_ui_capability_denied_result,
-    InteractionUiCapabilityAdmissionDecisionStatus,
-    InteractionUiCapabilityAdmissionDenialReason,
-    InteractionUiCapabilityAdmissionMissingRequirement,
-    InteractionUiCapabilityAdmissionResult,
-    InteractionUiCapabilityAdmissionResultId,
-};
-pub use ui_capability_denial_trace::{
-    trace_interaction_ui_capability_denial,
-    InteractionUiCapabilityDenialRetryHint,
-    InteractionUiCapabilityDenialTrace,
-    InteractionUiCapabilityDenialTraceId,
-    InteractionUiCapabilityDenialTraceStatus,
-};
-pub use runtime_capability_mapping::{
-    describe_interaction_runtime_capability_mapping,
-    InteractionRuntimeCapabilityMappingDescriptor,
-    InteractionRuntimeCapabilityMappingDescriptorId,
-    InteractionRuntimeCapabilityMappingFutureResultShape,
-    InteractionRuntimeCapabilityNamespace,
-};
-pub use runtime_capability_mapping_result::{
-    record_interaction_runtime_capability_denied_result,
-    record_interaction_runtime_capability_mapped_result,
-    InteractionRuntimeCapabilityMappingDecisionStatus,
-    InteractionRuntimeCapabilityMappingDenialReason,
-    InteractionRuntimeCapabilityMappingMissingRequirement,
-    InteractionRuntimeCapabilityMappingResult,
-    InteractionRuntimeCapabilityMappingResultId,
-};
-pub use prepared_effect::{
-    describe_interaction_prepared_effect,
-    InteractionPreparedEffectCommitRequirement,
-    InteractionPreparedEffectDescriptor,
-    InteractionPreparedEffectDescriptorId,
-    InteractionPreparedEffectStatusShape,
-};
-pub use prepared_effect_result::{
-    record_interaction_prepared_effect_denied_result,
-    record_interaction_prepared_effect_result,
-    InteractionPreparedEffectDecisionStatus,
-    InteractionPreparedEffectDenialReason,
-    InteractionPreparedEffectMissingRequirement,
-    InteractionPreparedEffectResult,
-    InteractionPreparedEffectResultId,
+pub use admitted_action::{
+    build_interaction_admitted_semantic_action, InteractionAdmittedSemanticAction,
+    InteractionAdmittedSemanticActionDispatchReadiness,
+    InteractionAdmittedSemanticActionEffectReadiness, InteractionAdmittedSemanticActionId,
 };
 pub use commit_boundary::{
-    describe_interaction_commit_boundary,
-    InteractionCommitAuditRequirement,
-    InteractionCommitBoundaryDescriptor,
-    InteractionCommitBoundaryDescriptorId,
+    describe_interaction_commit_boundary, InteractionCommitAuditRequirement,
+    InteractionCommitBoundaryDescriptor, InteractionCommitBoundaryDescriptorId,
     InteractionCommitBoundaryFutureCommittedEffectShape,
 };
 pub use commit_boundary_result::{
     record_interaction_commit_boundary_committed_result,
-    record_interaction_commit_boundary_denied_result,
-    InteractionCommitBoundaryDecisionStatus,
-    InteractionCommitBoundaryDenialReason,
-    InteractionCommitBoundaryMissingRequirement,
-    InteractionCommitBoundaryResult,
-    InteractionCommitBoundaryResultId,
+    record_interaction_commit_boundary_denied_result, InteractionCommitBoundaryDecisionStatus,
+    InteractionCommitBoundaryDenialReason, InteractionCommitBoundaryMissingRequirement,
+    InteractionCommitBoundaryResult, InteractionCommitBoundaryResultId,
 };
 pub use committed_effect::{
     describe_interaction_committed_effect, InteractionCommittedEffectAuditVisibility,
@@ -228,13 +137,28 @@ pub use committed_effect_record::{
     InteractionCommittedEffectRecord, InteractionCommittedEffectRecordId,
     InteractionCommittedEffectRecordStatus, InteractionCommittedEffectRuntimeMutationStatus,
 };
+pub use effect_request::{
+    describe_interaction_effect_request, InteractionEffectRequestDenialBehavior,
+    InteractionEffectRequestDescriptor, InteractionEffectRequestDescriptorId,
+    InteractionEffectRequestKind, InteractionEffectRequestLifecyclePrecondition,
+    InteractionEffectRequestPrepareCommitRelationship, InteractionEffectRequestRuntimeCapability,
+    InteractionEffectRequestScope, InteractionEffectRequestTargetPolicy,
+    InteractionEffectRequestUiCapability,
+};
+pub use effect_request_summary::{
+    summarize_interaction_effect_requests, InteractionEffectRequestKindCount,
+    InteractionEffectRequestRuntimeCapabilityCount, InteractionEffectRequestSummary,
+    InteractionEffectRequestUiCapabilityCount,
+};
+pub use effect_request_trace::{
+    trace_interaction_effect_request, InteractionEffectRequestTraceReason,
+    InteractionEffectRequestTraceReport, InteractionEffectRequestTraceStatus,
+};
 pub use host_runtime_effect::{
-    describe_interaction_host_runtime_effect_boundary,
-    InteractionHostRuntimeAuditWriteRequirement,
+    describe_interaction_host_runtime_effect_boundary, InteractionHostRuntimeAuditWriteRequirement,
     InteractionHostRuntimeEffectBoundaryDecisionShape,
     InteractionHostRuntimeEffectBoundaryDescriptor,
-    InteractionHostRuntimeEffectBoundaryDescriptorId,
-    InteractionHostRuntimeEffectPathRequirement,
+    InteractionHostRuntimeEffectBoundaryDescriptorId, InteractionHostRuntimeEffectPathRequirement,
     InteractionHostRuntimeMutationRequirement,
 };
 pub use host_runtime_effect_denial_trace::{
@@ -248,20 +172,65 @@ pub use host_runtime_effect_result::{
     InteractionHostRuntimeEffectBoundaryDecisionStatus,
     InteractionHostRuntimeEffectBoundaryDenialReason,
     InteractionHostRuntimeEffectBoundaryMissingRequirement,
-    InteractionHostRuntimeEffectBoundaryResult,
-    InteractionHostRuntimeEffectBoundaryResultId,
+    InteractionHostRuntimeEffectBoundaryResult, InteractionHostRuntimeEffectBoundaryResultId,
 };
 pub use intent_stream::{
-    trace_interaction_intent_stream, InteractionIntentStreamModel,
-    InteractionIntentStreamReport, InteractionIntentStreamStats,
+    trace_interaction_intent_stream, InteractionIntentStreamModel, InteractionIntentStreamReport,
+    InteractionIntentStreamStats,
+};
+pub use interaction::{
+    ElementId, InteractionIntentDescriptor, InteractionIntentId, InteractionIntentKind,
+    InteractionModifiers, InteractionSource, InteractionTarget, RegionId, SurfaceId, WindowId,
+};
+pub use prepared_effect::{
+    describe_interaction_prepared_effect, InteractionPreparedEffectCommitRequirement,
+    InteractionPreparedEffectDescriptor, InteractionPreparedEffectDescriptorId,
+    InteractionPreparedEffectStatusShape,
+};
+pub use prepared_effect_result::{
+    record_interaction_prepared_effect_denied_result, record_interaction_prepared_effect_result,
+    InteractionPreparedEffectDecisionStatus, InteractionPreparedEffectDenialReason,
+    InteractionPreparedEffectMissingRequirement, InteractionPreparedEffectResult,
+    InteractionPreparedEffectResultId,
 };
 pub use raw_event::{
-    map_raw_event_to_interaction_intent, RawKeyCode, RawPointerButton, RawTextInput,
-    RawUiEvent, RawUiEventId, RawUiEventKind, RawUiEventPayload, RawUiEventTarget,
+    map_raw_event_to_interaction_intent, RawKeyCode, RawPointerButton, RawTextInput, RawUiEvent,
+    RawUiEventId, RawUiEventKind, RawUiEventPayload, RawUiEventTarget,
+};
+pub use runtime_capability_mapping::{
+    describe_interaction_runtime_capability_mapping, InteractionRuntimeCapabilityMappingDescriptor,
+    InteractionRuntimeCapabilityMappingDescriptorId,
+    InteractionRuntimeCapabilityMappingFutureResultShape, InteractionRuntimeCapabilityNamespace,
+};
+pub use runtime_capability_mapping_result::{
+    record_interaction_runtime_capability_denied_result,
+    record_interaction_runtime_capability_mapped_result,
+    InteractionRuntimeCapabilityMappingDecisionStatus,
+    InteractionRuntimeCapabilityMappingDenialReason,
+    InteractionRuntimeCapabilityMappingMissingRequirement,
+    InteractionRuntimeCapabilityMappingResult, InteractionRuntimeCapabilityMappingResultId,
 };
 pub use trace::{
     trace_raw_event_to_interaction_intent, InteractionIntentMappingRule,
     InteractionIntentTraceReason, InteractionIntentTraceReport, InteractionIntentTraceStatus,
+};
+pub use ui_capability_admission::{
+    describe_interaction_ui_capability_admission, InteractionUiCapabilityAdmissionDescriptor,
+    InteractionUiCapabilityAdmissionDescriptorId,
+    InteractionUiCapabilityAdmissionFutureResultShape,
+    InteractionUiCapabilityAdmissionRuntimeMappingRequirement,
+};
+pub use ui_capability_admission_result::{
+    record_interaction_ui_capability_admitted_result,
+    record_interaction_ui_capability_denied_result, InteractionUiCapabilityAdmissionDecisionStatus,
+    InteractionUiCapabilityAdmissionDenialReason,
+    InteractionUiCapabilityAdmissionMissingRequirement, InteractionUiCapabilityAdmissionResult,
+    InteractionUiCapabilityAdmissionResultId,
+};
+pub use ui_capability_denial_trace::{
+    trace_interaction_ui_capability_denial, InteractionUiCapabilityDenialRetryHint,
+    InteractionUiCapabilityDenialTrace, InteractionUiCapabilityDenialTraceId,
+    InteractionUiCapabilityDenialTraceStatus,
 };
 
 /// Marker for the UI application boundary capability family.

@@ -26,7 +26,10 @@ fn ui_visual_token_registry_contains_required_semantic_roles() {
     ];
 
     for id in required {
-        assert!(find_ui_visual_token(id).is_some(), "missing visual token: {id}");
+        assert!(
+            find_ui_visual_token(id).is_some(),
+            "missing visual token: {id}"
+        );
     }
 }
 

@@ -17,8 +17,7 @@ fn normalize(text: &str) -> String {
 }
 
 fn read_text(path: &Path) -> String {
-    std::fs::read_to_string(path)
-        .unwrap_or_else(|err| panic!("read {}: {}", path.display(), err))
+    std::fs::read_to_string(path).unwrap_or_else(|err| panic!("read {}: {}", path.display(), err))
 }
 
 fn assert_snapshot(path: &Path, got: &str) {

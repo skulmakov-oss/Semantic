@@ -6,8 +6,7 @@
 
 use crate::action_admission::{
     InteractionActionAdmissionDescriptor, InteractionActionAdmissionDescriptorId,
-    InteractionActionAdmissionEffectRelationship,
-    InteractionActionAdmissionPolicyGateNamespace,
+    InteractionActionAdmissionEffectRelationship, InteractionActionAdmissionPolicyGateNamespace,
     InteractionActionAdmissionTraceRequirement,
 };
 use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
@@ -100,11 +99,17 @@ pub fn record_interaction_action_denied_result(
 
 impl InteractionActionAdmissionResult {
     pub const fn is_admitted(&self) -> bool {
-        matches!(self.status, InteractionActionAdmissionDecisionStatus::Admitted)
+        matches!(
+            self.status,
+            InteractionActionAdmissionDecisionStatus::Admitted
+        )
     }
 
     pub const fn is_denied(&self) -> bool {
-        matches!(self.status, InteractionActionAdmissionDecisionStatus::Denied)
+        matches!(
+            self.status,
+            InteractionActionAdmissionDecisionStatus::Denied
+        )
     }
 
     pub const fn requires_denial_trace(&self) -> bool {
@@ -121,16 +126,13 @@ mod tests {
     use super::*;
     use crate::action_admission::{
         InteractionActionAdmissionCapabilityRequirement,
-        InteractionActionAdmissionDenialVisibility,
-        InteractionActionAdmissionDescriptor,
-        InteractionActionAdmissionDescriptorId,
-        InteractionActionAdmissionEffectRelationship,
+        InteractionActionAdmissionDenialVisibility, InteractionActionAdmissionDescriptor,
+        InteractionActionAdmissionDescriptorId, InteractionActionAdmissionEffectRelationship,
         InteractionActionAdmissionFutureResultShape,
         InteractionActionAdmissionLifecycleRequirement,
         InteractionActionAdmissionPolicyGateNamespace,
         InteractionActionAdmissionTargetOwnershipRequirement,
-        InteractionActionAdmissionTargetRequirement,
-        InteractionActionAdmissionTraceRequirement,
+        InteractionActionAdmissionTargetRequirement, InteractionActionAdmissionTraceRequirement,
     };
     use crate::action_binding::{InteractionActionBindingId, InteractionActionName};
     use crate::interaction::InteractionIntentKind;
@@ -145,14 +147,12 @@ mod tests {
             target_ownership_requirement:
                 InteractionActionAdmissionTargetOwnershipRequirement::NotRequired,
             lifecycle_requirement: InteractionActionAdmissionLifecycleRequirement::SessionActive,
-            capability_requirement:
-                InteractionActionAdmissionCapabilityRequirement::DesktopSession,
+            capability_requirement: InteractionActionAdmissionCapabilityRequirement::DesktopSession,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
             effect_relationship: InteractionActionAdmissionEffectRelationship::NoEffect,
             denial_visibility: InteractionActionAdmissionDenialVisibility::Required,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::CoreUi,
-            future_result_shape:
-                InteractionActionAdmissionFutureResultShape::AdmitOrDenyWithReason,
+            future_result_shape: InteractionActionAdmissionFutureResultShape::AdmitOrDenyWithReason,
         }
     }
 
@@ -166,14 +166,12 @@ mod tests {
             target_ownership_requirement:
                 InteractionActionAdmissionTargetOwnershipRequirement::RequiredWhenTargetPresent,
             lifecycle_requirement: InteractionActionAdmissionLifecycleRequirement::SessionActive,
-            capability_requirement:
-                InteractionActionAdmissionCapabilityRequirement::InputPoll,
+            capability_requirement: InteractionActionAdmissionCapabilityRequirement::InputPoll,
             trace_requirement: InteractionActionAdmissionTraceRequirement::Required,
             effect_relationship: InteractionActionAdmissionEffectRelationship::NoEffect,
             denial_visibility: InteractionActionAdmissionDenialVisibility::Required,
             policy_gate_namespace: InteractionActionAdmissionPolicyGateNamespace::CoreUi,
-            future_result_shape:
-                InteractionActionAdmissionFutureResultShape::AdmitOrDenyWithReason,
+            future_result_shape: InteractionActionAdmissionFutureResultShape::AdmitOrDenyWithReason,
         }
     }
 
@@ -183,7 +181,10 @@ mod tests {
 
         let result = record_interaction_action_admitted_result(&descriptor);
 
-        assert_eq!(result.status, InteractionActionAdmissionDecisionStatus::Admitted);
+        assert_eq!(
+            result.status,
+            InteractionActionAdmissionDecisionStatus::Admitted
+        );
         assert_eq!(result.descriptor_id, descriptor.id);
         assert_eq!(result.action, descriptor.action);
         assert_eq!(result.source_intent, descriptor.source_intent);
@@ -215,7 +216,10 @@ mod tests {
             InteractionActionAdmissionMissingRequirement::Target,
         );
 
-        assert_eq!(result.status, InteractionActionAdmissionDecisionStatus::Denied);
+        assert_eq!(
+            result.status,
+            InteractionActionAdmissionDecisionStatus::Denied
+        );
         assert_eq!(
             result.denial_reason,
             Some(InteractionActionAdmissionDenialReason::MissingTarget)

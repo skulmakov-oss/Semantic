@@ -716,9 +716,7 @@ pub mod winit_placeholder {
             }
         }
 
-        pub const fn completed_from_summary(
-            summary: NativeBackendWinitAppStateSummary,
-        ) -> Self {
+        pub const fn completed_from_summary(summary: NativeBackendWinitAppStateSummary) -> Self {
             Self {
                 status: NativeBackendWinitAppRunTranscriptStatus::Completed,
 
@@ -757,8 +755,10 @@ pub mod winit_placeholder {
         }
 
         pub fn completed_cleanly(&self) -> bool {
-            matches!(self.status, NativeBackendWinitAppRunTranscriptStatus::Completed)
-                && self.staged_window_config
+            matches!(
+                self.status,
+                NativeBackendWinitAppRunTranscriptStatus::Completed
+            ) && self.staged_window_config
                 && self.event_loop_requested
                 && self.app_state_created
                 && self.run_app_requested
@@ -807,9 +807,7 @@ pub mod winit_placeholder {
             }
         }
 
-        pub const fn from_run_transcript(
-            transcript: NativeBackendWinitAppRunTranscript,
-        ) -> Self {
+        pub const fn from_run_transcript(transcript: NativeBackendWinitAppRunTranscript) -> Self {
             let status = if transcript.close_requested {
                 NativeBackendWinitAppEventTranscriptStatus::CloseObserved
             } else if transcript.window_event_calls > 0 || transcript.staged_event_count > 0 {
@@ -876,8 +874,10 @@ pub mod winit_placeholder {
         }
 
         pub fn accepted_one_frame(&self) -> bool {
-            matches!(self.status, NativeBackendWinitAppDrawStagingStatus::Submitted)
-                && self.submitted_delta == 1
+            matches!(
+                self.status,
+                NativeBackendWinitAppDrawStagingStatus::Submitted
+            ) && self.submitted_delta == 1
                 && self.submitted_after == self.submitted_before.saturating_add(1)
         }
     }
@@ -973,8 +973,10 @@ pub mod winit_placeholder {
         }
 
         pub fn completed_without_renderer(&self) -> bool {
-            matches!(self.status, NativeBackendWinitAppFacadeTranscriptStatus::Completed)
-                && !self.rendered_or_presented()
+            matches!(
+                self.status,
+                NativeBackendWinitAppFacadeTranscriptStatus::Completed
+            ) && !self.rendered_or_presented()
         }
     }
 
@@ -1120,7 +1122,9 @@ pub mod winit_placeholder {
 
             let after = self.backend.submitted_frames();
 
-            Ok(NativeBackendWinitAppDrawTranscript::submitted(before, after))
+            Ok(NativeBackendWinitAppDrawTranscript::submitted(
+                before, after,
+            ))
         }
     }
 
@@ -1277,10 +1281,7 @@ pub mod winit_placeholder {
             self.window_event_calls = self.window_event_calls.saturating_add(1);
 
             if let Some(input) = translate_winit_window_event(&event) {
-                if matches!(
-                    &input.kind,
-                    prom_ui_runtime::InputEventKind::CloseRequested
-                ) {
+                if matches!(&input.kind, prom_ui_runtime::InputEventKind::CloseRequested) {
                     self.close_requested = true;
                     self.backend.push_pending_event(input);
                     event_loop.exit();
@@ -1431,10 +1432,7 @@ impl NativeBackend {
     /// The created native window is not retained by `NativeBackend`.
     pub fn run_winit_smoke_from_staged_config(
         &self,
-    ) -> Result<
-        winit_placeholder::WinitRunAppSmokeResult,
-        NativeBackendWinitSmokeError,
-    > {
+    ) -> Result<winit_placeholder::WinitRunAppSmokeResult, NativeBackendWinitSmokeError> {
         let config = self
             .window_config
             .clone()

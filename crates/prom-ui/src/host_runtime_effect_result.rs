@@ -30,10 +30,8 @@ use crate::effect_request::{
     InteractionEffectRequestUiCapability,
 };
 use crate::host_runtime_effect::{
-    InteractionHostRuntimeAuditWriteRequirement,
-    InteractionHostRuntimeEffectBoundaryDescriptor,
-    InteractionHostRuntimeEffectBoundaryDescriptorId,
-    InteractionHostRuntimeEffectPathRequirement,
+    InteractionHostRuntimeAuditWriteRequirement, InteractionHostRuntimeEffectBoundaryDescriptor,
+    InteractionHostRuntimeEffectBoundaryDescriptorId, InteractionHostRuntimeEffectPathRequirement,
     InteractionHostRuntimeMutationRequirement,
 };
 use crate::prepared_effect::InteractionPreparedEffectDescriptorId;
@@ -176,8 +174,7 @@ fn build_result(
         missing_requirement,
         requested_effect: descriptor.requested_effect,
         declared_ui_capability: descriptor.declared_ui_capability,
-        declared_runtime_capability_requirement: descriptor
-            .declared_runtime_capability_requirement,
+        declared_runtime_capability_requirement: descriptor.declared_runtime_capability_requirement,
         runtime_capability_namespace: descriptor.runtime_capability_namespace,
         lifecycle_precondition: descriptor.lifecycle_precondition,
         target_policy: descriptor.target_policy,
@@ -300,7 +297,8 @@ mod tests {
         let ui_result = record_interaction_ui_capability_admitted_result(&admission);
         let mapping_descriptor = describe_interaction_runtime_capability_mapping(&ui_result)
             .expect("admitted result should produce mapping descriptor");
-        let mapping_result = record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
+        let mapping_result =
+            record_interaction_runtime_capability_mapped_result(&mapping_descriptor);
         let prepared_descriptor = describe_interaction_prepared_effect(&mapping_result)
             .expect("mapped result should produce prepared effect descriptor");
         let prepared_result = record_interaction_prepared_effect_result(&prepared_descriptor);
@@ -324,7 +322,10 @@ mod tests {
             result.status,
             InteractionHostRuntimeEffectBoundaryDecisionStatus::AdmittedToHostPath
         );
-        assert_eq!(result.id, InteractionHostRuntimeEffectBoundaryResultId(descriptor.id.0));
+        assert_eq!(
+            result.id,
+            InteractionHostRuntimeEffectBoundaryResultId(descriptor.id.0)
+        );
     }
 
     #[test]
@@ -340,7 +341,10 @@ mod tests {
             result.status,
             InteractionHostRuntimeEffectBoundaryDecisionStatus::Denied
         );
-        assert_eq!(result.id, InteractionHostRuntimeEffectBoundaryResultId(descriptor.id.0));
+        assert_eq!(
+            result.id,
+            InteractionHostRuntimeEffectBoundaryResultId(descriptor.id.0)
+        );
     }
 
     #[test]
@@ -349,12 +353,30 @@ mod tests {
         let result = record_interaction_host_runtime_effect_boundary_admitted_result(&descriptor);
 
         assert_eq!(result.descriptor_id, descriptor.id);
-        assert_eq!(result.committed_effect_record_id, descriptor.committed_effect_record_id);
-        assert_eq!(result.committed_effect_descriptor_id, descriptor.committed_effect_descriptor_id);
-        assert_eq!(result.commit_boundary_result_id, descriptor.commit_boundary_result_id);
-        assert_eq!(result.commit_boundary_descriptor_id, descriptor.commit_boundary_descriptor_id);
-        assert_eq!(result.prepared_effect_result_id, descriptor.prepared_effect_result_id);
-        assert_eq!(result.prepared_effect_descriptor_id, descriptor.prepared_effect_descriptor_id);
+        assert_eq!(
+            result.committed_effect_record_id,
+            descriptor.committed_effect_record_id
+        );
+        assert_eq!(
+            result.committed_effect_descriptor_id,
+            descriptor.committed_effect_descriptor_id
+        );
+        assert_eq!(
+            result.commit_boundary_result_id,
+            descriptor.commit_boundary_result_id
+        );
+        assert_eq!(
+            result.commit_boundary_descriptor_id,
+            descriptor.commit_boundary_descriptor_id
+        );
+        assert_eq!(
+            result.prepared_effect_result_id,
+            descriptor.prepared_effect_result_id
+        );
+        assert_eq!(
+            result.prepared_effect_descriptor_id,
+            descriptor.prepared_effect_descriptor_id
+        );
         assert_eq!(
             result.runtime_capability_mapping_result_id,
             descriptor.runtime_capability_mapping_result_id
@@ -363,33 +385,63 @@ mod tests {
             result.runtime_capability_mapping_descriptor_id,
             descriptor.runtime_capability_mapping_descriptor_id
         );
-        assert_eq!(result.ui_capability_admission_result_id, descriptor.ui_capability_admission_result_id);
+        assert_eq!(
+            result.ui_capability_admission_result_id,
+            descriptor.ui_capability_admission_result_id
+        );
         assert_eq!(
             result.ui_capability_admission_descriptor_id,
             descriptor.ui_capability_admission_descriptor_id
         );
-        assert_eq!(result.effect_request_descriptor_id, descriptor.effect_request_descriptor_id);
-        assert_eq!(result.source_admitted_action_id, descriptor.source_admitted_action_id);
+        assert_eq!(
+            result.effect_request_descriptor_id,
+            descriptor.effect_request_descriptor_id
+        );
+        assert_eq!(
+            result.source_admitted_action_id,
+            descriptor.source_admitted_action_id
+        );
         assert_eq!(result.dispatch_record_id, descriptor.dispatch_record_id);
         assert_eq!(result.dispatch_route_id, descriptor.dispatch_route_id);
         assert_eq!(result.requested_effect, descriptor.requested_effect);
-        assert_eq!(result.declared_ui_capability, descriptor.declared_ui_capability);
+        assert_eq!(
+            result.declared_ui_capability,
+            descriptor.declared_ui_capability
+        );
         assert_eq!(
             result.declared_runtime_capability_requirement,
             descriptor.declared_runtime_capability_requirement
         );
-        assert_eq!(result.runtime_capability_namespace, descriptor.runtime_capability_namespace);
-        assert_eq!(result.lifecycle_precondition, descriptor.lifecycle_precondition);
+        assert_eq!(
+            result.runtime_capability_namespace,
+            descriptor.runtime_capability_namespace
+        );
+        assert_eq!(
+            result.lifecycle_precondition,
+            descriptor.lifecycle_precondition
+        );
         assert_eq!(result.target_policy, descriptor.target_policy);
         assert_eq!(result.trace_requirement, descriptor.trace_requirement);
-        assert_eq!(result.policy_gate_namespace, descriptor.policy_gate_namespace);
+        assert_eq!(
+            result.policy_gate_namespace,
+            descriptor.policy_gate_namespace
+        );
         assert_eq!(result.scope, descriptor.scope);
         assert_eq!(result.audit_requirement, descriptor.audit_requirement);
         assert_eq!(result.audit_visibility, descriptor.audit_visibility);
-        assert_eq!(result.runtime_mutation_requirement, descriptor.runtime_mutation_requirement);
-        assert_eq!(result.host_path_requirement, descriptor.host_path_requirement);
+        assert_eq!(
+            result.runtime_mutation_requirement,
+            descriptor.runtime_mutation_requirement
+        );
+        assert_eq!(
+            result.host_path_requirement,
+            descriptor.host_path_requirement
+        );
         assert_eq!(result.record_status, descriptor.record_status);
-        assert_eq!(result.runtime_mutation_status, descriptor.runtime_mutation_status);
+        assert_eq!(
+            result.runtime_mutation_status,
+            descriptor.runtime_mutation_status
+        );
         assert_eq!(result.host_path_status, descriptor.host_path_status);
         assert_eq!(
             result.future_host_path_requirement,
@@ -454,10 +506,12 @@ mod tests {
 
     #[test]
     fn generation_is_deterministic() {
-        let left =
-            record_interaction_host_runtime_effect_boundary_admitted_result(&host_runtime_descriptor());
-        let right =
-            record_interaction_host_runtime_effect_boundary_admitted_result(&host_runtime_descriptor());
+        let left = record_interaction_host_runtime_effect_boundary_admitted_result(
+            &host_runtime_descriptor(),
+        );
+        let right = record_interaction_host_runtime_effect_boundary_admitted_result(
+            &host_runtime_descriptor(),
+        );
 
         assert_eq!(left, right);
     }

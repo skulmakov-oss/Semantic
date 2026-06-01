@@ -103,4 +103,3 @@ pub fn require_hello_observation_sink_capability<C: CapabilityChecker>(
         ),
     }
 }
-

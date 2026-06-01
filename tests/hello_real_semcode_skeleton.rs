@@ -1,8 +1,7 @@
 use std::path::PathBuf;
 
 use sm_emit::hello_real_semcode::{
-    emit_hello_real_semcode_skeleton, render_hello_real_semcode_skeleton_text,
-    HelloRealSemCodeOp,
+    emit_hello_real_semcode_skeleton, render_hello_real_semcode_skeleton_text, HelloRealSemCodeOp,
 };
 use sm_front::hello_parser::parse_hello_file;
 use sm_front::hello_sema::validate_hello_file;
@@ -22,12 +21,14 @@ fn fixture_text(rel: &str) -> String {
 
 fn parse_validate_lower() -> sm_ir::hello_ir::HelloIrModule {
     let input = fixture_text("tests/fixtures/pending/hello/positive_hello_verbose_directional.sm");
-    let parsed = parse_hello_file(&input)
-        .unwrap_or_else(|err| panic!("parser unexpectedly rejected canonical hello fixture: {err}"));
+    let parsed = parse_hello_file(&input).unwrap_or_else(|err| {
+        panic!("parser unexpectedly rejected canonical hello fixture: {err}")
+    });
     let checked = validate_hello_file(parsed)
         .unwrap_or_else(|err| panic!("sema unexpectedly rejected canonical hello fixture: {err}"));
-    lower_hello_checked_file(&checked)
-        .unwrap_or_else(|err| panic!("lowering unexpectedly rejected canonical hello fixture: {err}"))
+    lower_hello_checked_file(&checked).unwrap_or_else(|err| {
+        panic!("lowering unexpectedly rejected canonical hello fixture: {err}")
+    })
 }
 
 #[test]
@@ -38,12 +39,12 @@ fn hello_real_semcode_skeleton_emits_decided_operation_order() {
 
     assert_eq!(semcode.ops.len(), 4);
     match &semcode.ops[..] {
-        [
-            HelloRealSemCodeOp::DeclareLocalQuad { name, value },
-            HelloRealSemCodeOp::RequireQuadEq { name: req_name, expected },
-            HelloRealSemCodeOp::ObserveTextLiteral { text },
-            HelloRealSemCodeOp::CompleteQuad { value: complete_value },
-        ] => {
+        [HelloRealSemCodeOp::DeclareLocalQuad { name, value }, HelloRealSemCodeOp::RequireQuadEq {
+            name: req_name,
+            expected,
+        }, HelloRealSemCodeOp::ObserveTextLiteral { text }, HelloRealSemCodeOp::CompleteQuad {
+            value: complete_value,
+        }] => {
             assert_eq!(name, "boot");
             assert_eq!(value, "T");
             assert_eq!(req_name, "boot");

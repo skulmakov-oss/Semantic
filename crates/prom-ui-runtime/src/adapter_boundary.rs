@@ -414,8 +414,9 @@ mod tests {
 
     #[test]
     fn recording_adapter_preserves_failed_result() {
-        let mut adapter =
-            RecordingAdapter::with_result(UiAdapterResult::failed(UiAdapterFailureKind::BackendUnavailable));
+        let mut adapter = RecordingAdapter::with_result(UiAdapterResult::failed(
+            UiAdapterFailureKind::BackendUnavailable,
+        ));
         let request = UiAdapterRequest::new(
             AdapterRequestId(6),
             UiRuntimeEffect::EndFrame,
@@ -510,7 +511,10 @@ mod tests {
         assert_ne!(rejected, invalid);
         assert_ne!(platform_failure, backend_unavailable);
         assert_ne!(rejected, platform_failure);
-        assert_eq!(UiAdapterRejectKind::UnsupportedEffect, UiAdapterRejectKind::UnsupportedEffect);
+        assert_eq!(
+            UiAdapterRejectKind::UnsupportedEffect,
+            UiAdapterRejectKind::UnsupportedEffect
+        );
         assert_ne!(
             UiAdapterRejectKind::UnsupportedEffect,
             UiAdapterRejectKind::InvalidRequest

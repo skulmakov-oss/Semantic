@@ -224,7 +224,10 @@ fn load_module_recursive(
         let (code, message) = if reexport_only_cycle {
             (
                 "E0243",
-                format!("symbol re-export cycle detected: {}", cycle_chain.join(" -> ")),
+                format!(
+                    "symbol re-export cycle detected: {}",
+                    cycle_chain.join(" -> ")
+                ),
             )
         } else {
             (
@@ -233,13 +236,7 @@ fn load_module_recursive(
             )
         };
         return Err(SemanticError {
-            diag: render_diag(
-                DiagLevel::Error,
-                code,
-                message,
-                SourceMark::default(),
-                "",
-            ),
+            diag: render_diag(DiagLevel::Error, code, message, SourceMark::default(), ""),
         });
     }
 
@@ -906,7 +903,9 @@ mod tests {
 
     fn resolve_test_import(importer_module_id: &str, spec: &str) -> String {
         let importer = std::path::Path::new(importer_module_id);
-        let base = importer.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let base = importer
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
         let mut spec_path = PathBuf::from(spec);
         if spec_path.extension().is_none() {
             spec_path.set_extension("exo");
@@ -1000,7 +999,8 @@ Law "CheckSignal" [priority 10]:
         modules.insert(dep.to_string(), dep_src.as_bytes().to_vec());
         let provider = MapProvider { modules };
 
-        let report = check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
+        let report =
+            check_file_with_provider(std::path::Path::new(root), &provider).expect("provider");
         assert!(report
             .scheduled_laws
             .iter()
@@ -1221,7 +1221,9 @@ Law "A" [priority 1]:
         };
         let err = build_export_sets(&loaded, &provider).expect_err("must fail cycle");
         assert!(err.to_string().contains("E0243"));
-        assert!(err.to_string().contains("/virtual/a.sm -> /virtual/b.sm -> /virtual/a.sm"));
+        assert!(err
+            .to_string()
+            .contains("/virtual/a.sm -> /virtual/b.sm -> /virtual/a.sm"));
     }
 
     #[test]

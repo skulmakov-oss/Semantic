@@ -52,13 +52,11 @@ fn desktop_session_lifecycle_gated_api_surface_roundtrips() {
     submit_result.unwrap();
     assert_eq!(session.state(), SessionState::Running);
 
-    let control: Result<LoopControl, UiRuntimeError> = session.tick_frame(
-        &mut buffer,
-        |_events, frame| {
+    let control: Result<LoopControl, UiRuntimeError> =
+        session.tick_frame(&mut buffer, |_events, frame| {
             frame.clear(Color::BLUE);
             LoopControl::Continue
-        },
-    );
+        });
     assert_eq!(control.unwrap(), LoopControl::Continue);
     assert_eq!(session.state(), SessionState::Running);
 

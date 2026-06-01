@@ -2,15 +2,15 @@ use crate::lexer::lex_tokens;
 use crate::types::{
     AdtCtorExpr, AdtDecl, AdtMatchPattern, AdtPatternItem, AdtVariant, AstArena, BinaryOp,
     BlockExpr, CallArg, CaptureMode, ClosureCapturePolicy, ClosureLiteral, ClosureValueFamily,
-    Expr, ExprId, FrontendError, Function, IfExpr, IfLetExpr, ImplDecl, IntRangePattern, IterableLoopDesugaring, LogosEntity,
-    LogosEntityField, LogosEntityFieldKind, LogosLaw, LogosProgram, LogosSystem, LogosWhen,
-    ExecutableImport, ExecutableImportSelectItem, LoopExpr, MatchArm, MatchExpr, MatchExprArm,
-    MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr, RecordDecl, RecordField,
-    RecordFieldExpr, RecordInitField, RecordLiteralExpr, RecordPatternItem, RecordPatternTarget,
-    RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole, SchemaShape, SchemaVariant,
-    SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral, SequenceType, MapType,
-    Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind, TraitBound,
-    TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
+    ExecutableImport, ExecutableImportSelectItem, Expr, ExprId, FrontendError, Function, IfExpr,
+    IfLetExpr, ImplDecl, IntRangePattern, IterableLoopDesugaring, LogosEntity, LogosEntityField,
+    LogosEntityFieldKind, LogosLaw, LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType,
+    MatchArm, MatchExpr, MatchExprArm, MatchPattern, NumericLiteral, Program, QuadVal, RangeExpr,
+    RecordDecl, RecordField, RecordFieldExpr, RecordInitField, RecordLiteralExpr,
+    RecordPatternItem, RecordPatternTarget, RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole,
+    SchemaShape, SchemaVariant, SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr,
+    SequenceLiteral, SequenceType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token,
+    TokenKind, TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp,
 };
 use crate::CompilePolicyView;
 use alloc::format;
@@ -291,7 +291,10 @@ impl<'a> Parser<'a> {
             // Optional `: TraitName` bound on this parameter.
             if self.eat(TokenKind::Colon) {
                 let bound_name = self.expect_symbol()?;
-                bounds.push(TraitBound { param: param_id, bound: bound_name });
+                bounds.push(TraitBound {
+                    param: param_id,
+                    bound: bound_name,
+                });
             }
             if self.eat(TokenKind::Comma) {
                 continue;
@@ -349,7 +352,11 @@ impl<'a> Parser<'a> {
         })?;
         self.expect(TokenKind::RBrace, "expected '}' to close trait body")?;
         self.pop_type_param_scope(type_params.len());
-        Ok(TraitDecl { name, type_params, methods })
+        Ok(TraitDecl {
+            name,
+            type_params,
+            methods,
+        })
     }
 
     /// Parse an abstract method signature inside a trait body:
@@ -371,7 +378,10 @@ impl<'a> Parser<'a> {
                 break;
             }
         }
-        self.expect(TokenKind::RParen, "expected ')' after trait method parameters")?;
+        self.expect(
+            TokenKind::RParen,
+            "expected ')' after trait method parameters",
+        )?;
         let ret = if self.eat(TokenKind::Implies) {
             self.parse_type()?
         } else {
@@ -407,7 +417,12 @@ impl<'a> Parser<'a> {
         })?;
         self.expect(TokenKind::RBrace, "expected '}' to close impl body")?;
         self.pop_type_param_scope(type_params.len());
-        Ok(ImplDecl { trait_name, for_type, type_params, methods })
+        Ok(ImplDecl {
+            trait_name,
+            for_type,
+            type_params,
+            methods,
+        })
     }
 
     fn parse_record_decl(&mut self) -> Result<RecordDecl, FrontendError> {
@@ -434,7 +449,11 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokenKind::RBrace, "expected '}' after record declaration")?;
         self.pop_type_param_scope(type_params.len());
-        Ok(RecordDecl { name, type_params, fields })
+        Ok(RecordDecl {
+            name,
+            type_params,
+            fields,
+        })
     }
 
     fn parse_schema_decl(&mut self) -> Result<SchemaDecl, FrontendError> {
@@ -671,7 +690,11 @@ impl<'a> Parser<'a> {
         }
         self.expect(TokenKind::RBrace, "expected '}' after enum declaration")?;
         self.pop_type_param_scope(type_params.len());
-        Ok(AdtDecl { name, type_params, variants })
+        Ok(AdtDecl {
+            name,
+            type_params,
+            variants,
+        })
     }
 
     fn parse_adt_variant_payload_types(&mut self) -> Result<Vec<Type>, FrontendError> {
@@ -773,7 +796,9 @@ impl<'a> Parser<'a> {
                 // M9.4 Wave 3: if any item is Nested, emit LetElseTuple (no else arm)
                 // so the typecheck path can handle recursive binding.
                 // Note: `=` and `value` are already consumed above.
-                let has_nested = items.iter().any(|i| matches!(i, TuplePatternItem::Nested(_)));
+                let has_nested = items
+                    .iter()
+                    .any(|i| matches!(i, TuplePatternItem::Nested(_)));
                 if has_nested {
                     self.expect(TokenKind::Semi, "expected ';'")?;
                     return Ok(self.arena.alloc_stmt(Stmt::LetElseTuple {
@@ -1034,9 +1059,15 @@ impl<'a> Parser<'a> {
                 TuplePatternItem::QuadLiteral(QuadVal::S)
             } else if self.eat(TokenKind::KwRef) {
                 // M9.5 Wave B: `ref x` — borrow binding in tuple patterns.
-                TuplePatternItem::Bind { name: self.expect_symbol()?, capture: CaptureMode::Borrow }
+                TuplePatternItem::Bind {
+                    name: self.expect_symbol()?,
+                    capture: CaptureMode::Borrow,
+                }
             } else {
-                TuplePatternItem::Bind { name: self.expect_symbol()?, capture: CaptureMode::Move }
+                TuplePatternItem::Bind {
+                    name: self.expect_symbol()?,
+                    capture: CaptureMode::Move,
+                }
             };
             if let TuplePatternItem::Bind { name, .. } = item {
                 if items.iter().any(|existing| {
@@ -1149,7 +1180,10 @@ impl<'a> Parser<'a> {
                     capture: CaptureMode::Move,
                 }
             };
-            if let RecordPatternTarget::Bind { name: target_name, .. } = target {
+            if let RecordPatternTarget::Bind {
+                name: target_name, ..
+            } = target
+            {
                 if items.iter().any(|existing| {
                     matches!(
                         existing.target,
@@ -1623,10 +1657,12 @@ impl<'a> Parser<'a> {
             break;
         }
         self.expect(TokenKind::RBracket, "expected ']' after sequence literal")?;
-        Ok(self.arena.alloc_expr(Expr::SequenceLiteral(SequenceLiteral {
-            family: SequenceCollectionFamily::OrderedSequence,
-            items,
-        })))
+        Ok(self
+            .arena
+            .alloc_expr(Expr::SequenceLiteral(SequenceLiteral {
+                family: SequenceCollectionFamily::OrderedSequence,
+                items,
+            })))
     }
 
     fn parse_adt_ctor_payload_exprs(&mut self) -> Result<Vec<ExprId>, FrontendError> {
@@ -1829,7 +1865,8 @@ impl<'a> Parser<'a> {
 
         if from_pipeline {
             self.ensure_short_lambda_capture_free(body, param)?;
-            let arg = pipeline_input.expect("pipeline input must be provided for pipeline short lambda");
+            let arg =
+                pipeline_input.expect("pipeline input must be provided for pipeline short lambda");
             return self.build_short_lambda_apply(param, body, arg);
         }
 
@@ -2453,7 +2490,8 @@ impl<'a> Parser<'a> {
         if self.check(TokenKind::Num) {
             let text = self.peek().text.clone();
             // Only admit plain integer literals (no suffix, no decimal point).
-            let is_plain_int = !text.contains('.') && !text.contains("i32") && !text.contains("u32");
+            let is_plain_int =
+                !text.contains('.') && !text.contains("i32") && !text.contains("u32");
             if is_plain_int {
                 // Lookahead: is the token after the number `..` or `..=`?
                 // We need to consume the number then check.
@@ -2466,13 +2504,18 @@ impl<'a> Parser<'a> {
                     if !self.check(TokenKind::Num) {
                         return Err(FrontendError {
                             pos: self.pos(),
-                            message: "expected integer literal after '..' in range pattern".to_string(),
+                            message: "expected integer literal after '..' in range pattern"
+                                .to_string(),
                         });
                     }
                     let end_text = self.advance().text;
                     let start = parse_i64_pattern_bound(&num_text)?;
                     let end = parse_i64_pattern_bound(&end_text)?;
-                    return Ok(MatchPattern::IntRange(IntRangePattern { start, end, inclusive }));
+                    return Ok(MatchPattern::IntRange(IntRangePattern {
+                        start,
+                        end,
+                        inclusive,
+                    }));
                 }
                 // Not a range — put the number back by returning an error explaining
                 // plain numeric patterns aren't supported outside ranges.
@@ -2502,7 +2545,8 @@ impl<'a> Parser<'a> {
         }
         Err(FrontendError {
             pos: self.pos(),
-            message: "expected match pattern: N|F|T|S | _ | Type::Variant | int..int | pat | pat".to_string(),
+            message: "expected match pattern: N|F|T|S | _ | Type::Variant | int..int | pat | pat"
+                .to_string(),
         })
     }
 
@@ -2519,9 +2563,15 @@ impl<'a> Parser<'a> {
                 items.push(AdtPatternItem::Discard);
             } else if self.eat(TokenKind::KwRef) {
                 // M9.5 Wave B: `ref x` — borrow binding in ADT patterns.
-                items.push(AdtPatternItem::Bind { name: self.expect_symbol()?, capture: CaptureMode::Borrow });
+                items.push(AdtPatternItem::Bind {
+                    name: self.expect_symbol()?,
+                    capture: CaptureMode::Borrow,
+                });
             } else if self.check(TokenKind::Ident) {
-                items.push(AdtPatternItem::Bind { name: self.expect_symbol()?, capture: CaptureMode::Move });
+                items.push(AdtPatternItem::Bind {
+                    name: self.expect_symbol()?,
+                    capture: CaptureMode::Move,
+                });
             } else {
                 return Err(FrontendError {
                     pos: self.pos(),
@@ -2697,7 +2747,10 @@ impl<'a> Parser<'a> {
                     let _ = self.advance();
                     self.expect(TokenKind::LParen, "expected '(' after Sequence type name")?;
                     let item = self.parse_type()?;
-                    self.expect(TokenKind::RParen, "expected ')' after Sequence type argument")?;
+                    self.expect(
+                        TokenKind::RParen,
+                        "expected ')' after Sequence type argument",
+                    )?;
                     Type::Sequence(SequenceType {
                         family: SequenceCollectionFamily::OrderedSequence,
                         item: Box::new(item),
@@ -2717,7 +2770,10 @@ impl<'a> Parser<'a> {
                     let _ = self.advance();
                     self.expect(TokenKind::LParen, "expected '(' after Map type name")?;
                     let key = self.parse_type()?;
-                    self.expect(TokenKind::Comma, "expected ',' between Map key and value types")?;
+                    self.expect(
+                        TokenKind::Comma,
+                        "expected ',' between Map key and value types",
+                    )?;
                     let val = self.parse_type()?;
                     self.expect(TokenKind::RParen, "expected ')' after Map type arguments")?;
                     Type::Map(MapType {
@@ -3369,14 +3425,20 @@ impl<'a> Parser<'a> {
     /// rather than `Ident`, but are conventional type-parameter names.
     fn expect_type_param_name(&mut self) -> Result<SymbolId, FrontendError> {
         let i = self.next_non_layout_idx();
-        let is_type_param_name = self.tokens.get(i).map(|t| matches!(
-            t.kind,
-            TokenKind::Ident
-            | TokenKind::QuadT
-            | TokenKind::QuadF
-            | TokenKind::QuadS
-            | TokenKind::QuadN
-        )).unwrap_or(false);
+        let is_type_param_name = self
+            .tokens
+            .get(i)
+            .map(|t| {
+                matches!(
+                    t.kind,
+                    TokenKind::Ident
+                        | TokenKind::QuadT
+                        | TokenKind::QuadF
+                        | TokenKind::QuadS
+                        | TokenKind::QuadN
+                )
+            })
+            .unwrap_or(false);
         if is_type_param_name {
             let name = self.advance().text;
             Ok(self.arena.intern_symbol(&name))
@@ -3444,7 +3506,8 @@ fn parse_i64_pattern_bound(text: &str) -> Result<i64, FrontendError> {
     if suffix.is_some() {
         return Err(FrontendError {
             pos: 0,
-            message: "range pattern bound does not accept a type suffix; use a plain integer".to_string(),
+            message: "range pattern bound does not accept a type suffix; use a plain integer"
+                .to_string(),
         });
     }
     if let Some(hex) = core.strip_prefix("0x").or_else(|| core.strip_prefix("0X")) {
@@ -3613,7 +3676,9 @@ fn main() { return; }
         let import = &program.imports[0];
         assert_eq!(import.spec, "helper.sm");
         assert_eq!(
-            import.alias.map(|sym| program.arena.symbol_name(sym).to_string()),
+            import
+                .alias
+                .map(|sym| program.arena.symbol_name(sym).to_string()),
             Some("Helpers".to_string())
         );
         assert_eq!(import.select_items.len(), 2);
@@ -3981,7 +4046,10 @@ fn main() {
         };
 
         assert_eq!(program.arena.symbol_name(*name), "values");
-        assert_eq!(sequence_ty.family, SequenceCollectionFamily::OrderedSequence);
+        assert_eq!(
+            sequence_ty.family,
+            SequenceCollectionFamily::OrderedSequence
+        );
         assert_eq!(sequence_ty.item.as_ref(), &Type::I32);
         assert!(matches!(
             program.arena.expr(*value),
@@ -4247,7 +4315,8 @@ fn main() {
             ty: Some(Type::Closure(closure_ty)),
             value,
             ..
-        } = program.arena.stmt(func.body[0]) else {
+        } = program.arena.stmt(func.body[0])
+        else {
             panic!("expected typed let closure statement");
         };
         assert_eq!(closure_ty.family, ClosureValueFamily::UnaryDirect);
@@ -4602,7 +4671,10 @@ fn main() {
         };
         assert_eq!(program.arena.symbol_name(pat.adt_name), "Maybe");
         assert_eq!(program.arena.symbol_name(pat.variant_name), "Some");
-        assert!(matches!(pat.items.as_slice(), [AdtPatternItem::Bind { .. }]));
+        assert!(matches!(
+            pat.items.as_slice(),
+            [AdtPatternItem::Bind { .. }]
+        ));
         assert!(match_expr.default.is_some());
     }
 
@@ -5252,7 +5324,10 @@ fn main() {
         let main = &program.functions[0];
         match program.arena.stmt(main.body[1]) {
             Stmt::While { condition, body } => {
-                assert!(matches!(program.arena.expr(*condition), Expr::Binary(_, _, _)));
+                assert!(matches!(
+                    program.arena.expr(*condition),
+                    Expr::Binary(_, _, _)
+                ));
                 assert_eq!(body.len(), 1);
                 assert!(matches!(program.arena.stmt(body[0]), Stmt::Assign { .. }));
             }
@@ -5290,7 +5365,10 @@ fn main() {
                 };
                 assert_eq!(program.arena.symbol_name(pat.adt_name), "Option");
                 assert_eq!(program.arena.symbol_name(pat.variant_name), "Some");
-                assert!(matches!(pat.items.as_slice(), [AdtPatternItem::Bind { .. }]));
+                assert!(matches!(
+                    pat.items.as_slice(),
+                    [AdtPatternItem::Bind { .. }]
+                ));
             }
             other => panic!("expected match stmt, got {:?}", other),
         }
@@ -5305,7 +5383,10 @@ fn main() {
                 };
                 assert_eq!(program.arena.symbol_name(pat.adt_name), "Result");
                 assert_eq!(program.arena.symbol_name(pat.variant_name), "Err");
-                assert!(matches!(pat.items.as_slice(), [AdtPatternItem::Bind { .. }]));
+                assert!(matches!(
+                    pat.items.as_slice(),
+                    [AdtPatternItem::Bind { .. }]
+                ));
             }
             other => panic!("expected match stmt, got {:?}", other),
         }
@@ -5575,15 +5656,13 @@ fn main() {
         assert_eq!(program.arena.symbol_name(*record_name), "DecisionContext");
         assert_eq!(items.len(), 2);
         assert_eq!(program.arena.symbol_name(items[0].field), "camera");
-        assert!(
-            matches!(
-                items[0].target,
-                RecordPatternTarget::Bind {
-                    name,
-                    capture: CaptureMode::Move
-                } if program.arena.symbol_name(name) == "seen_camera"
-            )
-        );
+        assert!(matches!(
+            items[0].target,
+            RecordPatternTarget::Bind {
+                name,
+                capture: CaptureMode::Move
+            } if program.arena.symbol_name(name) == "seen_camera"
+        ));
         assert_eq!(program.arena.symbol_name(items[1].field), "quality");
         assert!(matches!(items[1].target, RecordPatternTarget::Discard));
         assert!(matches!(program.arena.expr(*value), Expr::RecordLiteral(_)));
@@ -5657,15 +5736,13 @@ fn main() {
         let Stmt::LetRecord { items, .. } = program.arena.stmt(main.body[0]) else {
             panic!("expected record destructuring bind");
         };
-        assert!(
-            matches!(
-                items[0].target,
-                RecordPatternTarget::Bind {
-                    name,
-                    capture: CaptureMode::Move
-                } if program.arena.symbol_name(name) == "camera"
-            )
-        );
+        assert!(matches!(
+            items[0].target,
+            RecordPatternTarget::Bind {
+                name,
+                capture: CaptureMode::Move
+            } if program.arena.symbol_name(name) == "camera"
+        ));
         assert!(matches!(items[1].target, RecordPatternTarget::Discard));
 
         let Stmt::LetElseRecord { items, .. } = program.arena.stmt(main.body[1]) else {
@@ -5675,15 +5752,13 @@ fn main() {
             items[0].target,
             RecordPatternTarget::QuadLiteral(QuadVal::T)
         ));
-        assert!(
-            matches!(
-                items[1].target,
-                RecordPatternTarget::Bind {
-                    name,
-                    capture: CaptureMode::Move
-                } if program.arena.symbol_name(name) == "quality"
-            )
-        );
+        assert!(matches!(
+            items[1].target,
+            RecordPatternTarget::Bind {
+                name,
+                capture: CaptureMode::Move
+            } if program.arena.symbol_name(name) == "quality"
+        ));
     }
 
     #[test]
@@ -5821,15 +5896,13 @@ fn main() {
             items[0].target,
             RecordPatternTarget::QuadLiteral(QuadVal::T)
         ));
-        assert!(
-            matches!(
-                items[1].target,
-                RecordPatternTarget::Bind {
-                    name,
-                    capture: CaptureMode::Move
-                } if program.arena.symbol_name(name) == "score"
-            )
-        );
+        assert!(matches!(
+            items[1].target,
+            RecordPatternTarget::Bind {
+                name,
+                capture: CaptureMode::Move
+            } if program.arena.symbol_name(name) == "score"
+        ));
         assert!(matches!(program.arena.expr(*value), Expr::RecordLiteral(_)));
         assert!(else_return.is_none());
     }
@@ -6414,8 +6487,14 @@ fn main() {
             .expect("Iterable trait and impl surface should parse");
         assert_eq!(program.traits.len(), 1);
         assert_eq!(program.impls.len(), 1);
-        assert_eq!(program.arena.symbol_name(program.traits[0].name), "Iterable");
-        assert_eq!(program.arena.symbol_name(program.impls[0].trait_name), "Iterable");
+        assert_eq!(
+            program.arena.symbol_name(program.traits[0].name),
+            "Iterable"
+        );
+        assert_eq!(
+            program.arena.symbol_name(program.impls[0].trait_name),
+            "Iterable"
+        );
     }
 
     #[test]
@@ -6606,11 +6685,11 @@ fn main() -> i32 {
     return v;
 }
 "#;
-        let err = parse_src(src)
-            .expect_err("range pattern missing end bound must reject");
+        let err = parse_src(src).expect_err("range pattern missing end bound must reject");
         assert!(
             err.message.contains("integer literal") || err.message.contains("range"),
-            "unexpected error: {}", err.message
+            "unexpected error: {}",
+            err.message
         );
     }
 }

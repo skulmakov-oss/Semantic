@@ -9,7 +9,9 @@ fn repo_path(rel: &str) -> String {
 }
 
 fn fixture_path(rel: &str) -> String {
-    repo_path(&format!("tests/fixtures/pcc6_option_result_diagnostics/{rel}"))
+    repo_path(&format!(
+        "tests/fixtures/pcc6_option_result_diagnostics/{rel}"
+    ))
 }
 
 fn cli_err(args: Vec<String>, context: &str) -> String {
