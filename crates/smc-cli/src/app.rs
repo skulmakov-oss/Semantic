@@ -1613,12 +1613,18 @@ fn load_cache_entry(path: &Path, expected_fp: u64) -> Result<Option<CacheEntry>,
 
 fn cmd_hash_ast(args: &[String]) -> Result<(), String> {
     if args.len() != 1 {
-        return Err("usage: smc hash-ast <input.sm>".to_string());
+        return Err("usage: smc hash-ast <input.sm|project-root>".to_string());
     }
     let input = args[0].as_str();
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
+    let src = read_source_with_package_admission(&root)?;
     let parser_profile = cli_profile();
-    let ast_key = ast_pack_key(Path::new(input), &src)?;
+    let ast_key = ast_pack_key(&root, &src)?;
     let ast_pack = cache_ast_file_for_key(ast_key)?;
     let text = if let Some(cached) = load_text_pack(&ast_pack, PACK_KIND_AST)? {
         cached
@@ -2473,7 +2479,7 @@ fn usage() -> String {
         "  smc dump-ast <input.sm>",
         "  smc dump-ir <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
         "  smc dump-bytecode <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
-        "  smc hash-ast <input.sm>",
+        "  smc hash-ast <input.sm|project-root>",
         "  smc hash-ir <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
         "  smc hash-smc <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
         "  smc snapshots [--update]",
