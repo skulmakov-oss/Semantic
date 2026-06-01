@@ -1478,8 +1478,14 @@ fn pcc9_dump_ir_prefers_semantic_toml_over_package_manifest() {
     .expect("write file");
 
     let ir = cli_dump_ir_ok(&dir, "dump-ir prefers semantic.toml over Semantic.package");
-    assert!(ir.contains("toml_main"), "IR should contain toml_main: {ir}");
-    assert!(!ir.contains("pkg_main"), "IR should not contain pkg_main: {ir}");
+    assert!(
+        ir.contains("toml_main"),
+        "IR should contain toml_main: {ir}"
+    );
+    assert!(
+        !ir.contains("pkg_main"),
+        "IR should not contain pkg_main: {ir}"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1566,6 +1572,209 @@ fn pcc9_dump_ir_path_escape_fails_without_fallback() {
     write_semantic_toml(&dir, Some("../escape.sm"));
 
     let err = cli_dump_ir_err(&dir, "dump-ir with path escape entry");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn cli_dump_bytecode_ok(input_path: &std::path::Path, context: &str) -> String {
+    let input = normalize_path(input_path);
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-bytecode")
+        .arg(input)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn cli_dump_bytecode_dot_ok(dir: &std::path::Path, context: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-bytecode")
+        .arg(".")
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn cli_dump_bytecode_err(input_path: &std::path::Path, context: &str) -> String {
+    let input = normalize_path(input_path);
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-bytecode")
+        .arg(input)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        !output.status.success(),
+        "{context} expected failure but got success\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    String::from_utf8_lossy(&output.stderr).to_string()
+}
+
+#[test]
+fn pcc9_dump_bytecode_semantic_toml_explicit_entry() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_explicit");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let bytes = cli_dump_bytecode_ok(&dir, "dump-bytecode with semantic.toml explicit entry");
+    assert!(
+        bytes.contains("0000:"),
+        "Bytecode should contain offset 0000: {bytes}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_bytecode_semantic_toml_default_entry() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_default");
+    write_semantic_toml(&dir, None);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let bytes = cli_dump_bytecode_ok(&dir, "dump-bytecode with semantic.toml default entry");
+    assert!(
+        bytes.contains("0000:"),
+        "Bytecode should contain offset 0000: {bytes}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_bytecode_semantic_toml_nested_entry() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_nested");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    let entry_file = dir.join("examples").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let bytes = cli_dump_bytecode_ok(&dir, "dump-bytecode with semantic.toml nested entry");
+    assert!(
+        bytes.contains("0000:"),
+        "Bytecode should contain offset 0000: {bytes}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_bytecode_prefers_semantic_toml_over_package_manifest() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_preferred");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_package_manifest_baseline(&dir);
+    let toml_entry = dir.join("examples").join("main.sm");
+    std::fs::create_dir_all(toml_entry.parent().unwrap()).expect("mkdir");
+    std::fs::write(&toml_entry, "fn main() { return; }\n").expect("write file");
+
+    let pkg_entry = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(pkg_entry.parent().unwrap()).expect("mkdir");
+    std::fs::write(&pkg_entry, "fn main() { return; }\n").expect("write file");
+
+    let bytes = cli_dump_bytecode_ok(
+        &dir,
+        "dump-bytecode prefers semantic.toml over Semantic.package",
+    );
+    assert!(
+        bytes.contains("0000:"),
+        "Bytecode should contain offset 0000: {bytes}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_bytecode_package_baseline_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_package_baseline");
+    write_package_manifest_baseline(&dir);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let bytes = cli_dump_bytecode_ok(&dir, "dump-bytecode fallback to Semantic.package");
+    assert!(
+        bytes.contains("0000:"),
+        "Bytecode should contain offset 0000: {bytes}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_bytecode_dot_works_from_root() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_dot");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let bytes = cli_dump_bytecode_dot_ok(&dir, "dump-bytecode . from project root");
+    assert!(
+        bytes.contains("0000:"),
+        "Bytecode should contain offset 0000: {bytes}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_bytecode_invalid_semantic_toml_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_invalid_toml");
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package
+name = "app"
+"#,
+    )
+    .expect("write malformed toml");
+    write_package_manifest_baseline(&dir);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let err = cli_dump_bytecode_err(&dir, "dump-bytecode with invalid semantic.toml");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_bytecode_missing_entry_file_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_missing_file");
+    write_semantic_toml(&dir, Some("src/missing.sm"));
+
+    let err = cli_dump_bytecode_err(&dir, "dump-bytecode with missing entry file");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_bytecode_path_escape_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_bytecode_path_escape");
+    write_semantic_toml(&dir, Some("../escape.sm"));
+
+    let err = cli_dump_bytecode_err(&dir, "dump-bytecode with path escape entry");
     assert!(!err.is_empty(), "expected error output");
 
     let _ = std::fs::remove_dir_all(&dir);

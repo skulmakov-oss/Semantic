@@ -963,7 +963,7 @@ fn cmd_dump_ir(args: &[String]) -> Result<(), String> {
 fn cmd_dump_bytecode(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "usage: smc dump-bytecode <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]"
+            "usage: smc dump-bytecode <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]"
                 .to_string(),
         );
     }
@@ -994,9 +994,15 @@ fn cmd_dump_bytecode(args: &[String]) -> Result<(), String> {
         }
         i += 1;
     }
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
+    let src = read_source_with_package_admission(&root)?;
     let _parser_profile = cli_profile();
-    let exb_key = smc_pack_key(Path::new(input), &src, profile, opt, debug_symbols)?;
+    let exb_key = smc_pack_key(&root, &src, profile, opt, debug_symbols)?;
     let exb_pack = cache_smc_file_for_key(exb_key)?;
     let bytes = if let Some(cached) = load_blob_pack(&exb_pack, PACK_KIND_SMC)? {
         cached
