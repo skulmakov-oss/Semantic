@@ -6,16 +6,12 @@ Set-StrictMode -Version Latest
 # This script provides a repeatable local pre-admission signal. It does not
 # replace GitHub Actions and must not be treated as a release gate by itself.
 #
-# Intentionally excluded for now:
-# cargo fmt --check
+# Formatting gate:
+# cargo fmt --all --check
 #
-# Reason:
-# Existing formatting baseline drift causes unrelated failures. Formatting
-# baseline normalization must be handled by a separate dedicated PR.
-#
-# This script does not run cargo fmt. Do not use formatting as part of behavior
-# PRs until the formatting baseline is normalized. After any manual formatting
-# attempt, inspect `git diff --name-only` and revert unrelated churn.
+# This script includes formatting because the baseline has been normalized.
+# Do not use formatting as a substitute for behavior checks. After any manual
+# formatting attempt, inspect `git diff --name-only` and revert unrelated churn.
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
@@ -63,6 +59,10 @@ Invoke-LocalCiStep "cargo test --all-targets --quiet" {
 
 Invoke-LocalCiStep "cargo check --no-default-features --quiet" {
     cargo check --no-default-features --quiet
+}
+
+Invoke-LocalCiStep "cargo fmt --all --check" {
+    cargo fmt --all --check
 }
 
 Invoke-LocalCiStep "verify release bundle process" {
