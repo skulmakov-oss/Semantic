@@ -130,8 +130,8 @@ The stable public contract lives in `docs/spec/*` and the release/status languag
 The active implementation focus is **M-Hello**:
 
 ```text
-#477 — M-Hello: admit minimal verified Hello World observation surface
-#673 — PR-M-HELLO-12A-5: cli: render controlled observation envelope
+M-Hello — admit minimal verified Hello World observation surface
+M-Hello — cli: render controlled observation envelope
 ```
 
 This track is deliberately narrow. It is not adding general stdout or broad I/O. It is building one verified observation path:
@@ -153,7 +153,7 @@ Recent M-Hello work has moved the observation path through the required lower la
 - controlled observation audit policy;
 - CLI rendering envelope for `smc run` and `smc run-smc`.
 
-The current open PR keeps source-run and verified-artifact routes separate and renders only after verifier admission, VM collection, capability allow, and audit decision.
+The current M-Hello track keeps source-run and verified-artifact routes separate and renders only after verifier admission, VM collection, capability allow, and audit decision.
 
 ### Current guarantees / design posture
 
