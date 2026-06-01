@@ -28,7 +28,7 @@ Use the following table during PCC live audit and post-7hell trust synchronizati
 | `Option(T)` | freeze-candidate | PCC-6 | Current standard-form Option only. |
 | `Result(T,E)` | freeze-candidate | PCC-6 | Current standard-form Result only. |
 | `Sequence<T>` | freeze-candidate | PCC-7 | Current admitted Sequence fixture-backed surface only. |
-| `Map<K,V>` | freeze-candidate | PCC-7 | Current admitted Map baseline only; missing-key / iteration / quota policy remains open. |
+| `Map<K,V>` | freeze-candidate | PCC-7 | Current admitted Map baseline only; missing-key / iteration / quota policy remains open. See `map_open_edge_policy.md`. |
 | controlled observation carrier / event | out-of-pcc | M-Hello / 7hell | Narrow controlled-observation evidence exists, but this is not general stdout and not a general runtime value family in this trust lane. |
 | project manifest metadata | audit-needed | PCC-9 | Current Semantic.package manifest baseline only; not a runtime value unless later represented in VM/runtime. |
 | closure values | out-of-pcc unless audited | post-PCC / current-main audit | Do not widen in PCC unless explicitly pulled in. |
@@ -83,7 +83,7 @@ Boundary notes:
 - ADT: current constructors / basic match only;
 - Option / Result: standard forms only, no exception semantics;
 - Sequence: current positive / negative fixture-backed operations only;
-- Map: current baseline only; missing-key behavior, iteration policy, and memory/quota remain open;
+- Map: current baseline only; missing-key behavior, iteration policy, and memory/quota remain open; see `map_open_edge_policy.md`;
 - text / to_text: no universal reflection; debug_render remains internal-only;
 - controlled observation carrier / event: narrow verified-observation evidence exists, but it is not a general stdout family and stays separate from raw observation text;
 - Project Model: Semantic.package baseline is project-adjacent evidence, not a runtime value family unless runtime representation is later introduced.

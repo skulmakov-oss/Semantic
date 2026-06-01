@@ -22,7 +22,7 @@ It prevents uncontrolled jump from docs-sync to release claims.
 | CTF-BL-001 | Golden trace selection | choose representative PCC fixture surfaces for trace promotion | PCC fixtures are not golden traces | CTF-E1 | done | trace freeze |
 | CTF-BL-002 | Golden trace artifacts | add selected source/type/IR/SemCode/verifier/VM trace samples | protect byte/result/diagnostic stability | CTF-E1 | done | trace freeze |
 | CTF-BL-003 | Collection determinism replay | repeated-run evidence for Sequence/Map admitted baseline | collection determinism is bounded but not deeply replay-backed | CTF-E2 | done | determinism freeze |
-| CTF-BL-004 | Map open-edge policy | decide missing-key / iteration / quota evidence boundary | Map remains bounded-open | CTF-WP / future PCC-7 follow-up | planned | collections freeze |
+| CTF-BL-004 | Map open-edge policy | decide missing-key / iteration / quota evidence boundary | Map remains bounded-open | CTF-WP8 | ready-for-task | collections freeze |
 | CTF-BL-005 | Trap taxonomy regression | map fixture-backed failure surfaces to stable trap/diagnostic categories | avoid compile diagnostics vs VM trap confusion | CTF-E3 | done | trap freeze |
 | CTF-BL-006 | Project-root trust policy | define trust impact before project-root check/run implementation | project-root remains open | CTF-WP6 | done | project model freeze |
 | CTF-BL-007 | 7hell report shape | define stable qualification report surface | readiness needs stable qualification output | 7HELL-WP1 | done | readiness |
