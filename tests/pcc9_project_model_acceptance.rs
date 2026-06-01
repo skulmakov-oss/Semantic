@@ -77,9 +77,34 @@ fn full_cli_path(file_rel: &str) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn full_project_root_check_path() {
+    let dir = mk_temp_dir("pcc9_project_root_acceptance");
+    let src_dir = dir.join("src");
+    std::fs::create_dir_all(&src_dir).expect("mkdir src");
+    std::fs::write(
+        dir.join(PACKAGE_MANIFEST_FILE_NAME),
+        read_fixture("package_manifest_entry_admission/Semantic.package"),
+    )
+    .expect("write manifest");
+    std::fs::write(src_dir.join("main.sm"), "fn main() { return; }\n").expect("write entry");
+
+    let input = normalize_path(&dir);
+    cli_ok(
+        vec!["check".to_string(), input.clone()],
+        &format!("smc check for project root {input}"),
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn pcc9_single_file_baseline_passes_full_cli_path() {
     full_cli_path("tests/fixtures/pcc9_project_model/single_file_baseline/main.sm");
+}
+
+#[test]
+fn pcc9_project_root_baseline_passes_check_entrypoint() {
+    full_project_root_check_path();
 }
 
 #[test]
