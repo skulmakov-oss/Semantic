@@ -1139,3 +1139,207 @@ entry = "../escape.sm"
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+fn cli_dump_ast_ok(input_path: &std::path::Path, context: &str) -> String {
+    let input = normalize_path(input_path);
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-ast")
+        .arg(input)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn cli_dump_ast_dot_ok(dir: &std::path::Path, context: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-ast")
+        .arg(".")
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn cli_dump_ast_err(input_path: &std::path::Path, context: &str) -> String {
+    let input = normalize_path(input_path);
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("dump-ast")
+        .arg(input)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        !output.status.success(),
+        "{context} expected failure but got success\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    String::from_utf8_lossy(&output.stderr).to_string()
+}
+
+#[test]
+fn pcc9_dump_ast_semantic_toml_explicit_entry() {
+    let dir = mk_temp_dir("pcc9_dump_ast_explicit");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn explicit_main() { return; }\n").expect("write file");
+
+    let ast = cli_dump_ast_ok(&dir, "dump-ast with semantic.toml explicit entry");
+    assert!(
+        ast.contains("explicit_main"),
+        "AST should contain explicit_main: {ast}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ast_semantic_toml_default_entry() {
+    let dir = mk_temp_dir("pcc9_dump_ast_default");
+    write_semantic_toml(&dir, None);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn default_main() { return; }\n").expect("write file");
+
+    let ast = cli_dump_ast_ok(&dir, "dump-ast with semantic.toml default entry");
+    assert!(
+        ast.contains("default_main"),
+        "AST should contain default_main: {ast}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ast_semantic_toml_nested_entry() {
+    let dir = mk_temp_dir("pcc9_dump_ast_nested");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    let entry_file = dir.join("examples").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn nested_main() { return; }\n").expect("write file");
+
+    let ast = cli_dump_ast_ok(&dir, "dump-ast with semantic.toml nested entry");
+    assert!(
+        ast.contains("nested_main"),
+        "AST should contain nested_main: {ast}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ast_prefers_semantic_toml_over_package_manifest() {
+    let dir = mk_temp_dir("pcc9_dump_ast_preferred");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_package_manifest_baseline(&dir);
+    let toml_entry = dir.join("examples").join("main.sm");
+    std::fs::create_dir_all(toml_entry.parent().unwrap()).expect("mkdir");
+    std::fs::write(&toml_entry, "fn toml_main() { return; }\n").expect("write file");
+
+    let pkg_entry = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(pkg_entry.parent().unwrap()).expect("mkdir");
+    std::fs::write(&pkg_entry, "fn pkg_main() { return; }\n").expect("write file");
+
+    let ast = cli_dump_ast_ok(&dir, "dump-ast prefers semantic.toml over Semantic.package");
+    assert!(
+        ast.contains("toml_main"),
+        "AST should contain toml_main: {ast}"
+    );
+    assert!(
+        !ast.contains("pkg_main"),
+        "AST should not contain pkg_main: {ast}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ast_package_baseline_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_ast_package_baseline");
+    write_package_manifest_baseline(&dir);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn pkg_fallback() { return; }\n").expect("write file");
+
+    let ast = cli_dump_ast_ok(&dir, "dump-ast fallback to Semantic.package");
+    assert!(
+        ast.contains("pkg_fallback"),
+        "AST should contain pkg_fallback: {ast}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ast_dot_works_from_root() {
+    let dir = mk_temp_dir("pcc9_dump_ast_dot");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn dot_main() { return; }\n").expect("write file");
+
+    let ast = cli_dump_ast_dot_ok(&dir, "dump-ast . from project root");
+    assert!(
+        ast.contains("dot_main"),
+        "AST should contain dot_main: {ast}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ast_invalid_semantic_toml_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_ast_invalid_toml");
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package
+name = "app"
+"#,
+    )
+    .expect("write malformed toml");
+    write_package_manifest_baseline(&dir);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn pkg_main() { return; }\n").expect("write file");
+
+    let err = cli_dump_ast_err(&dir, "dump-ast with invalid semantic.toml");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ast_missing_entry_file_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_ast_missing_file");
+    write_semantic_toml(&dir, Some("src/missing.sm"));
+
+    let err = cli_dump_ast_err(&dir, "dump-ast with missing entry file");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_dump_ast_path_escape_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_dump_ast_path_escape");
+    write_semantic_toml(&dir, Some("../escape.sm"));
+
+    let err = cli_dump_ast_err(&dir, "dump-ast with path escape entry");
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

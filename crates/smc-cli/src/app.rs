@@ -846,12 +846,18 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
 fn cmd_dump_ast(args: &[String]) -> Result<(), String> {
     if args.len() != 1 {
-        return Err("usage: smc dump-ast <input.sm>".to_string());
+        return Err("usage: smc dump-ast <input.sm|project-root>".to_string());
     }
     let input = args[0].as_str();
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
+    let src = read_source_with_package_admission(&root)?;
     let parser_profile = cli_profile();
-    let ast_key = ast_pack_key(Path::new(input), &src)?;
+    let ast_key = ast_pack_key(&root, &src)?;
     let ast_pack = cache_ast_file_for_key(ast_key)?;
     if let Some(cached) = load_text_pack(&ast_pack, PACK_KIND_AST)? {
         println!("{}", cached);
