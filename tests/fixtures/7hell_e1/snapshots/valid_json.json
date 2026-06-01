@@ -73,8 +73,8 @@
       "index": 7,
       "name": "User Pain / Diagnostics Hell",
       "key": "diagnostics",
-      "status": "not_implemented",
-      "summary": "7HELL-S7 does not wire diagnostics",
+      "status": "pass",
+      "summary": "report quality accepted: stage/status/reason/diagnostic boundary is structurally usable",
       "diagnostic_ids": [],
       "evidence_ids": [],
       "blocked_by": null

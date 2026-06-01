@@ -5,8 +5,8 @@ use std::process::ExitCode;
 use sm_emit::{compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
 use sm_front::FrontendError;
 use sm_verify::{verify_semcode, RejectReport, VerifiedProgram};
-use smc_cli::{CliPipeline, ControlledObservationQualificationEnvelope};
 use sm_vm::{run_verified_semcode, RuntimeError as VmRuntimeError};
+use smc_cli::{CliPipeline, ControlledObservationQualificationEnvelope};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SevenHellOutputMode {
@@ -132,6 +132,19 @@ struct SevenHellReport {
     boundary: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DiagnosticsHellStatus {
+    Pass,
+    Fail,
+    Incomplete,
+}
+
+struct DiagnosticsHellFinding {
+    status: DiagnosticsHellStatus,
+    summary: String,
+    diagnostic_ids: Vec<String>,
+}
+
 struct SevenHellRenderOutput {
     rendered: String,
     success: bool,
@@ -139,7 +152,10 @@ struct SevenHellRenderOutput {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if matches!(args.first().map(|s| s.as_str()), Some("7hell" | "seven-hell")) {
+    if matches!(
+        args.first().map(|s| s.as_str()),
+        Some("7hell" | "seven-hell")
+    ) {
         return match run_7hell_command(&args[1..]) {
             Ok(code) => code,
             Err(e) => {
@@ -189,7 +205,10 @@ fn parse_7hell_args(args: &[String]) -> Result<(String, SevenHellOutputMode), St
     Ok((target, output_mode))
 }
 
-fn execute_7hell_single_file(target: &str, output_mode: SevenHellOutputMode) -> SevenHellRenderOutput {
+fn execute_7hell_single_file(
+    target: &str,
+    output_mode: SevenHellOutputMode,
+) -> SevenHellRenderOutput {
     let target_display = display_path_for_report(target);
     let report = match fs::read_to_string(Path::new(target)) {
         Ok(source) => match smc_cli::CliPipeline::semantic_check_source(&source) {
@@ -237,6 +256,7 @@ fn execute_7hell_single_file(target: &str, output_mode: SevenHellOutputMode) -> 
             boundary_denial_diagnostic(&target_display),
         ),
     };
+    let report = apply_diagnostics_hell_report_quality(report);
     let success = matches!(report.result, SevenHellResult::Incomplete);
     SevenHellRenderOutput {
         rendered: render_7hell_report(&report, output_mode),
@@ -274,12 +294,16 @@ fn display_path_for_report(path: &str) -> String {
 }
 
 #[cfg(test)]
-fn build_verified_7hell_report(target_display: String, verified: VerifiedProgram) -> SevenHellReport {
+fn build_verified_7hell_report(
+    target_display: String,
+    verified: VerifiedProgram,
+) -> SevenHellReport {
     build_practical_passed_7hell_report(
         target_display,
         verified,
         ControlledObservationQualificationEnvelope {
-            capability_decision: prom_cap::hello_observation_capability::HelloObservationCapabilityDecision::Allow,
+            capability_decision:
+                prom_cap::hello_observation_capability::HelloObservationCapabilityDecision::Allow,
             audit_results: Vec::new(),
             observations: Vec::new(),
         },
@@ -287,7 +311,10 @@ fn build_verified_7hell_report(target_display: String, verified: VerifiedProgram
 }
 
 #[allow(dead_code)]
-fn build_vm_passed_7hell_report(target_display: String, verified: VerifiedProgram) -> SevenHellReport {
+fn build_vm_passed_7hell_report(
+    target_display: String,
+    verified: VerifiedProgram,
+) -> SevenHellReport {
     SevenHellReport {
         target_display: target_display.clone(),
         target_normalized: target_display,
@@ -773,7 +800,10 @@ fn build_vm_failed_7hell_report(
     }
 }
 
-fn build_check_failed_7hell_report(target_display: String, diagnostic: SevenHellDiagnostic) -> SevenHellReport {
+fn build_check_failed_7hell_report(
+    target_display: String,
+    diagnostic: SevenHellDiagnostic,
+) -> SevenHellReport {
     let failure_on_type = diagnostic.stage == "type";
     let mut diagnostics = Vec::new();
     let diag_id = diagnostic.id.clone();
@@ -894,6 +924,232 @@ fn failure_stage_summary(diagnostic: &SevenHellDiagnostic) -> String {
         "code: {}; category: {}; summary: {}",
         diagnostic.code, diagnostic.category, diagnostic.message_needle
     )
+}
+
+fn apply_diagnostics_hell_report_quality(mut report: SevenHellReport) -> SevenHellReport {
+    let finding = evaluate_7hell_report_quality(&report);
+    let status = match finding.status {
+        DiagnosticsHellStatus::Pass => SevenHellStageStatus::Pass,
+        DiagnosticsHellStatus::Fail => SevenHellStageStatus::Fail,
+        DiagnosticsHellStatus::Incomplete => SevenHellStageStatus::NotImplemented,
+    };
+
+    if matches!(finding.status, DiagnosticsHellStatus::Fail) {
+        report.result = SevenHellResult::Fail;
+    }
+
+    report.stages[6] = stage_report(
+        7,
+        "User Pain / Diagnostics Hell",
+        "diagnostics",
+        status,
+        finding.summary,
+        None,
+        finding.diagnostic_ids,
+    );
+    report
+}
+
+fn evaluate_7hell_report_quality(report: &SevenHellReport) -> DiagnosticsHellFinding {
+    let mut failures = Vec::new();
+    let mut incomplete = Vec::new();
+
+    if report.stages[6].index != 7 || report.stages[6].key != "diagnostics" {
+        incomplete.push("diagnostics stage slot is not recognizable".to_string());
+    }
+    if report.target_display.trim().is_empty() {
+        failures.push("target display is empty".to_string());
+    }
+    if report.target_normalized.trim().is_empty() {
+        failures.push("target normalized path is empty".to_string());
+    }
+    if report.boundary_status.trim().is_empty() {
+        failures.push("boundary status is empty".to_string());
+    }
+    if report.boundary.trim().is_empty() {
+        failures.push("boundary reason is empty".to_string());
+    }
+
+    for (idx, stage) in report.stages.iter().enumerate() {
+        if stage.index != idx + 1 {
+            failures.push(format!("stage {} has non-sequential index", idx + 1));
+        }
+        if stage.name.trim().is_empty() {
+            failures.push(format!("stage {} name is empty", stage.index));
+        }
+        if stage.key.trim().is_empty() {
+            failures.push(format!("stage {} key is empty", stage.index));
+        }
+        if stage.summary.trim().is_empty() {
+            failures.push(format!("stage {} summary is empty", stage.index));
+        }
+        if matches!(stage.status, SevenHellStageStatus::Blocked) && stage.blocked_by.is_none() {
+            failures.push(format!(
+                "stage {} is blocked without blocked_by",
+                stage.index
+            ));
+        }
+        if matches!(stage.status, SevenHellStageStatus::Fail)
+            && stage.diagnostic_ids.is_empty()
+            && stage.summary.trim().is_empty()
+        {
+            failures.push(format!(
+                "stage {} failed without diagnostic id or usable summary",
+                stage.index
+            ));
+        }
+        for diagnostic_id in &stage.diagnostic_ids {
+            match report
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.id == *diagnostic_id)
+            {
+                Some(diagnostic) if diagnostic.stage == stage.key => {}
+                Some(_) => failures.push(format!(
+                    "stage {} references diagnostic id {} from another stage",
+                    stage.index, diagnostic_id
+                )),
+                None => failures.push(format!(
+                    "stage {} references missing diagnostic id {}",
+                    stage.index, diagnostic_id
+                )),
+            }
+        }
+        if contains_forbidden_readiness_claim(&stage.summary) {
+            failures.push(format!(
+                "stage {} summary contains forbidden readiness claim",
+                stage.index
+            ));
+        }
+        if contains_raw_output_leakage_indicator(&stage.summary) {
+            failures.push(format!(
+                "stage {} summary contains raw output leakage indicator",
+                stage.index
+            ));
+        }
+    }
+
+    for diagnostic in &report.diagnostics {
+        if diagnostic.id.trim().is_empty() {
+            failures.push("diagnostic id is empty".to_string());
+        }
+        if diagnostic.stage.trim().is_empty() {
+            failures.push(format!("diagnostic {} stage is empty", diagnostic.id));
+        }
+        if diagnostic.code.trim().is_empty() {
+            failures.push(format!("diagnostic {} code is empty", diagnostic.id));
+        }
+        if diagnostic.category.trim().is_empty() {
+            failures.push(format!("diagnostic {} category is empty", diagnostic.id));
+        }
+        if diagnostic.message_needle.trim().is_empty() {
+            failures.push(format!(
+                "diagnostic {} message needle is empty",
+                diagnostic.id
+            ));
+        }
+        if diagnostic.severity.trim().is_empty() {
+            failures.push(format!("diagnostic {} severity is empty", diagnostic.id));
+        }
+        if diagnostic.source.file.trim().is_empty() {
+            failures.push(format!("diagnostic {} source file is empty", diagnostic.id));
+        }
+        if !report
+            .stages
+            .iter()
+            .any(|stage| stage.key == diagnostic.stage)
+        {
+            failures.push(format!(
+                "diagnostic {} refers to unknown stage {}",
+                diagnostic.id, diagnostic.stage
+            ));
+        }
+        if report
+            .diagnostics
+            .iter()
+            .filter(|candidate| candidate.id == diagnostic.id)
+            .count()
+            > 1
+        {
+            failures.push(format!("diagnostic id {} is duplicated", diagnostic.id));
+        }
+        if contains_forbidden_readiness_claim(&diagnostic.message_needle) {
+            failures.push(format!(
+                "diagnostic {} contains forbidden readiness claim",
+                diagnostic.id
+            ));
+        }
+        if contains_raw_output_leakage_indicator(&diagnostic.message_needle) {
+            failures.push(format!(
+                "diagnostic {} contains raw output leakage indicator",
+                diagnostic.id
+            ));
+        }
+    }
+
+    if contains_forbidden_readiness_claim(report.boundary)
+        || contains_forbidden_readiness_claim(report.boundary_status)
+    {
+        failures.push("boundary contains forbidden readiness claim".to_string());
+    }
+    if contains_raw_output_leakage_indicator(report.boundary)
+        || contains_raw_output_leakage_indicator(report.boundary_status)
+    {
+        failures.push("boundary contains raw output leakage indicator".to_string());
+    }
+
+    if !failures.is_empty() {
+        return DiagnosticsHellFinding {
+            status: DiagnosticsHellStatus::Fail,
+            summary: format!("report quality rejected: {}", failures.join("; ")),
+            diagnostic_ids: vec![],
+        };
+    }
+
+    if !incomplete.is_empty() {
+        return DiagnosticsHellFinding {
+            status: DiagnosticsHellStatus::Incomplete,
+            summary: format!("report quality incomplete: {}", incomplete.join("; ")),
+            diagnostic_ids: vec![],
+        };
+    }
+
+    DiagnosticsHellFinding {
+        status: DiagnosticsHellStatus::Pass,
+        summary:
+            "report quality accepted: stage/status/reason/diagnostic boundary is structurally usable"
+                .to_string(),
+        diagnostic_ids: vec![],
+    }
+}
+
+fn contains_forbidden_readiness_claim(value: &str) -> bool {
+    let value = value.to_ascii_lowercase();
+    [
+        "release ready",
+        "release-ready",
+        "release readiness claimed",
+        "ctf closure claimed",
+        "ctf closed",
+        "ctf complete",
+        "final pass",
+        "\"result\": \"pass\"",
+    ]
+    .iter()
+    .any(|needle| value.contains(needle))
+}
+
+fn contains_raw_output_leakage_indicator(value: &str) -> bool {
+    let value = value.to_ascii_lowercase();
+    [
+        "rendered_lines",
+        "raw_text",
+        "stdout",
+        "stderr",
+        "hello, world!",
+    ]
+    .iter()
+    .any(|needle| value.contains(needle))
 }
 
 fn render_7hell_report(report: &SevenHellReport, output_mode: SevenHellOutputMode) -> String {
@@ -1040,13 +1296,22 @@ fn render_json_diagnostics(diagnostics: &[SevenHellDiagnostic]) -> String {
 fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenHellDiagnostic {
     let first_line = error_text.lines().next().unwrap_or(error_text);
     let code = extract_error_code(first_line).unwrap_or_else(|| "unknown".to_string());
-    let message_needle = extract_error_message(first_line).unwrap_or_else(|| "check failed".to_string());
+    let message_needle =
+        extract_error_message(first_line).unwrap_or_else(|| "check failed".to_string());
     let (line, column) = extract_error_location(first_line);
 
     let (stage, kind, category) = match code.as_str() {
         "E0201" => ("type", SevenHellDiagnosticKind::CheckDiagnostic, "type"),
-        "E0000" => ("syntax", SevenHellDiagnosticKind::SyntaxDiagnostic, "syntax"),
-        c if c.starts_with('E') => ("syntax", SevenHellDiagnosticKind::SyntaxDiagnostic, "syntax"),
+        "E0000" => (
+            "syntax",
+            SevenHellDiagnosticKind::SyntaxDiagnostic,
+            "syntax",
+        ),
+        c if c.starts_with('E') => (
+            "syntax",
+            SevenHellDiagnosticKind::SyntaxDiagnostic,
+            "syntax",
+        ),
         _ => ("syntax", SevenHellDiagnosticKind::CheckDiagnostic, "check"),
     };
 
@@ -1066,7 +1331,10 @@ fn diagnostic_from_check_error(error_text: &str, target_display: &str) -> SevenH
     }
 }
 
-fn diagnostic_from_compile_error(error: &FrontendError, target_display: &str) -> SevenHellDiagnostic {
+fn diagnostic_from_compile_error(
+    error: &FrontendError,
+    target_display: &str,
+) -> SevenHellDiagnostic {
     SevenHellDiagnostic {
         id: "D001".to_string(),
         stage: "lowering",
@@ -1083,8 +1351,14 @@ fn diagnostic_from_compile_error(error: &FrontendError, target_display: &str) ->
     }
 }
 
-fn diagnostic_from_verifier_error(report: &RejectReport, target_display: &str) -> SevenHellDiagnostic {
-    let diagnostic = report.diagnostics.first().expect("verifier rejection diagnostic");
+fn diagnostic_from_verifier_error(
+    report: &RejectReport,
+    target_display: &str,
+) -> SevenHellDiagnostic {
+    let diagnostic = report
+        .diagnostics
+        .first()
+        .expect("verifier rejection diagnostic");
     SevenHellDiagnostic {
         id: "D001".to_string(),
         stage: "verifier",
@@ -1275,6 +1549,31 @@ mod tests {
         base
     }
 
+    fn verified_program() -> VerifiedProgram {
+        VerifiedProgram {
+            header: sm_emit::SemcodeHeaderSpec {
+                magic: *b"SEMC0000",
+                epoch: 0,
+                rev: 0,
+                capabilities: 0,
+            },
+            functions: vec![sm_verify::VerifiedFunction {
+                name: "main".to_string(),
+                code_len: 0,
+                string_count: 0,
+                debug_symbol_count: 0,
+            }],
+        }
+    }
+
+    fn well_formed_7hell_report() -> SevenHellReport {
+        build_verified_7hell_report("program.sm".to_string(), verified_program())
+    }
+
+    fn syntax_diagnostic() -> SevenHellDiagnostic {
+        diagnostic_from_check_error("[E0000]: syntax failed at line 1:1", "program.sm")
+    }
+
     #[test]
     fn parses_7hell_target() {
         let args = vec!["program.sm".to_string()];
@@ -1291,24 +1590,85 @@ mod tests {
     }
 
     #[test]
+    fn evaluator_passes_well_formed_report() {
+        let report = well_formed_7hell_report();
+        let finding = evaluate_7hell_report_quality(&report);
+
+        assert!(matches!(finding.status, DiagnosticsHellStatus::Pass));
+        assert!(finding.summary.contains("report quality accepted"));
+        assert!(finding.diagnostic_ids.is_empty());
+    }
+
+    #[test]
+    fn evaluator_fails_empty_stage_summary() {
+        let mut report = well_formed_7hell_report();
+        report.stages[0].summary.clear();
+
+        let finding = evaluate_7hell_report_quality(&report);
+
+        assert!(matches!(finding.status, DiagnosticsHellStatus::Fail));
+        assert!(finding.summary.contains("stage 1 summary is empty"));
+    }
+
+    #[test]
+    fn evaluator_fails_missing_blocked_by() {
+        let mut report =
+            build_check_failed_7hell_report("program.sm".to_string(), syntax_diagnostic());
+        report.stages[2].blocked_by = None;
+
+        let finding = evaluate_7hell_report_quality(&report);
+
+        assert!(matches!(finding.status, DiagnosticsHellStatus::Fail));
+        assert!(finding
+            .summary
+            .contains("stage 3 is blocked without blocked_by"));
+    }
+
+    #[test]
+    fn evaluator_fails_missing_diagnostic_reference() {
+        let mut report =
+            build_check_failed_7hell_report("program.sm".to_string(), syntax_diagnostic());
+        report.stages[0].diagnostic_ids = vec!["D404".to_string()];
+
+        let finding = evaluate_7hell_report_quality(&report);
+
+        assert!(matches!(finding.status, DiagnosticsHellStatus::Fail));
+        assert!(finding
+            .summary
+            .contains("stage 1 references missing diagnostic id D404"));
+    }
+
+    #[test]
+    fn evaluator_fails_raw_output_leakage_indicator() {
+        let mut report = well_formed_7hell_report();
+        report.stages[5].summary = "rendered_lines leaked through report".to_string();
+
+        let finding = evaluate_7hell_report_quality(&report);
+
+        assert!(matches!(finding.status, DiagnosticsHellStatus::Fail));
+        assert!(finding
+            .summary
+            .contains("stage 6 summary contains raw output leakage indicator"));
+    }
+
+    #[test]
+    fn evaluator_does_not_change_execution_result_to_pass() {
+        let report = apply_diagnostics_hell_report_quality(well_formed_7hell_report());
+
+        assert!(matches!(report.result, SevenHellResult::Incomplete));
+        assert!(matches!(
+            report.stages[6].status,
+            SevenHellStageStatus::Pass
+        ));
+
+        let rendered = render_7hell_report(&report, SevenHellOutputMode::Json);
+        assert!(rendered.contains("\"result\": \"incomplete\""));
+        assert!(!rendered.contains("\"result\": \"pass\""));
+    }
+
+    #[test]
     fn renders_incomplete_human_s2_pass() {
-        let report = build_verified_7hell_report(
-            "program.sm".to_string(),
-            VerifiedProgram {
-                header: sm_emit::SemcodeHeaderSpec {
-                    magic: *b"SEMC0000",
-                    epoch: 0,
-                    rev: 0,
-                    capabilities: 0,
-                },
-                functions: vec![sm_verify::VerifiedFunction {
-                    name: "main".to_string(),
-                    code_len: 0,
-                    string_count: 0,
-                    debug_symbol_count: 0,
-                }],
-            },
-        );
+        let report = apply_diagnostics_hell_report_quality(well_formed_7hell_report());
         let rendered = render_7hell_report(&report, SevenHellOutputMode::Human);
         assert!(rendered.contains("Semantic 7hell qualification"));
         assert!(rendered.contains("[1/7] Syntax Hell"));
@@ -1319,6 +1679,10 @@ mod tests {
         assert!(rendered.contains("[6/7] Practical Hell"));
         assert!(rendered.contains("PASS"));
         assert!(!rendered.contains("BLOCKED"));
+        assert!(rendered.contains("[7/7] User Pain / Diagnostics Hell  PASS"));
+        assert!(rendered.contains(
+            "report quality accepted: stage/status/reason/diagnostic boundary is structurally usable"
+        ));
         assert!(rendered.contains("Practical qualification completed without host-visible rendering (0 observation(s), 0 audit record(s))"));
         assert!(rendered.contains("result: INCOMPLETE"));
         assert!(rendered.contains(
@@ -1329,23 +1693,7 @@ mod tests {
 
     #[test]
     fn renders_json_s2_pass_schema() {
-        let report = build_verified_7hell_report(
-            "program.sm".to_string(),
-            VerifiedProgram {
-                header: sm_emit::SemcodeHeaderSpec {
-                    magic: *b"SEMC0000",
-                    epoch: 0,
-                    rev: 0,
-                    capabilities: 0,
-                },
-                functions: vec![sm_verify::VerifiedFunction {
-                    name: "main".to_string(),
-                    code_len: 0,
-                    string_count: 0,
-                    debug_symbol_count: 0,
-                }],
-            },
-        );
+        let report = apply_diagnostics_hell_report_quality(well_formed_7hell_report());
         let rendered = render_7hell_report(&report, SevenHellOutputMode::Json);
         assert!(rendered.contains("\"schema\": \"semantic.7hell.report.v0\""));
         assert!(rendered.contains("\"result\": \"incomplete\""));
@@ -1353,7 +1701,7 @@ mod tests {
         assert!(rendered.contains("\"key\": \"verifier\""));
         assert!(rendered.contains("\"key\": \"diagnostics\""));
         assert!(rendered.contains("\"status\": \"pass\""));
-        assert!(rendered.contains("\"status\": \"not_implemented\""));
+        assert!(!rendered.contains("\"status\": \"not_implemented\""));
         assert!(rendered.contains("\"scope\": \"7hell-single-file\""));
         assert!(rendered.contains("\"status\": \"s7-practical-qualification-only\""));
         assert!(rendered.contains("\"diagnostics\": []"));
@@ -1373,13 +1721,16 @@ fn main() {
         )
         .expect("write source");
 
-        let outcome = execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Human);
+        let outcome =
+            execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Human);
         assert!(outcome.success);
         assert!(outcome.rendered.contains("Syntax Hell"));
         assert!(outcome.rendered.contains("PASS"));
         assert!(outcome.rendered.contains("[6/7] Practical Hell"));
         assert!(outcome.rendered.contains("Practical qualification completed without host-visible rendering (0 observation(s), 0 audit record(s))"));
-        assert!(outcome.rendered.contains("VM executed verified SemCode successfully"));
+        assert!(outcome
+            .rendered
+            .contains("VM executed verified SemCode successfully"));
         assert!(outcome.rendered.contains("result: INCOMPLETE"));
         assert!(!outcome.rendered.contains("result: PASS"));
         assert!(outcome.rendered.contains(
@@ -1395,7 +1746,8 @@ fn main() {
         let entry = dir.join("program.sm");
         std::fs::write(&entry, "fn main(").expect("write source");
 
-        let outcome = execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Json);
+        let outcome =
+            execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Json);
         assert!(!outcome.success);
         assert!(outcome.rendered.contains("\"result\": \"fail\""));
         assert!(outcome.rendered.contains("\"status\": \"fail\""));
@@ -1414,7 +1766,8 @@ fn main() {
         let entry = dir.join("program.sm");
         std::fs::write(&entry, "fn main(").expect("write source");
 
-        let outcome = execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Human);
+        let outcome =
+            execute_7hell_single_file(&entry.to_string_lossy(), SevenHellOutputMode::Human);
         assert!(outcome.rendered.contains("Syntax Hell"));
         assert!(outcome.rendered.contains("FAIL"));
         assert!(outcome.rendered.contains("code: E0000"));
@@ -1452,7 +1805,10 @@ fn main() {
             }],
         };
         let diagnostic = diagnostic_from_verifier_error(&report, &target);
-        let seven = build_verifier_failed_7hell_report(target.clone(), diagnostic);
+        let seven = apply_diagnostics_hell_report_quality(build_verifier_failed_7hell_report(
+            target.clone(),
+            diagnostic,
+        ));
         let rendered = render_7hell_report(&seven, SevenHellOutputMode::Json);
 
         assert!(rendered.contains("\"kind\": \"verifier-rejection\""));
@@ -1466,17 +1822,21 @@ fn main() {
             .join("tests/fixtures/7hell_e1/snapshots/verifier_reject_json.json");
         let expected = std::fs::read_to_string(&snapshot)
             .unwrap_or_else(|err| panic!("read {}: {}", snapshot.display(), err));
-        assert_eq!(expected.replace("\r\n", "\n"), rendered.replace("\r\n", "\n"));
+        assert_eq!(
+            expected.replace("\r\n", "\n"),
+            rendered.replace("\r\n", "\n")
+        );
     }
 
     #[test]
     fn practical_failure_json_snapshot() {
         let target = "tests/fixtures/7hell_e1/practical_failure.synthetic.sm".to_string();
-        let diagnostic = diagnostic_from_practical_error(
-            "controlled observation capability denied",
-            &target,
-        );
-        let report = build_practical_failed_7hell_report(target.clone(), diagnostic);
+        let diagnostic =
+            diagnostic_from_practical_error("controlled observation capability denied", &target);
+        let report = apply_diagnostics_hell_report_quality(build_practical_failed_7hell_report(
+            target.clone(),
+            diagnostic,
+        ));
         let rendered = render_7hell_report(&report, SevenHellOutputMode::Json);
 
         assert!(rendered.contains("\"stage\": \"practical\""));
@@ -1489,7 +1849,9 @@ fn main() {
         assert!(rendered.contains("\"key\": \"vm\""));
         assert!(rendered.contains("\"status\": \"pass\""));
         assert!(rendered.contains("\"key\": \"diagnostics\""));
-        assert!(rendered.contains("\"status\": \"not_implemented\""));
+        assert!(rendered.contains(
+            "report quality accepted: stage/status/reason/diagnostic boundary is structurally usable"
+        ));
         assert!(!rendered.contains("\"kind\": \"vm-trap\""));
         assert!(!rendered.contains("\"kind\": \"verifier-rejection\""));
         assert!(!rendered.contains("\"kind\": \"project-diagnostic\""));
@@ -1503,7 +1865,10 @@ fn main() {
             .join("tests/fixtures/7hell_e1/snapshots/practical_failure_json.json");
         let expected = std::fs::read_to_string(&snapshot)
             .unwrap_or_else(|err| panic!("read {}: {}", snapshot.display(), err));
-        assert_eq!(expected.replace("\r\n", "\n"), rendered.replace("\r\n", "\n"));
+        assert_eq!(
+            expected.replace("\r\n", "\n"),
+            rendered.replace("\r\n", "\n")
+        );
     }
 
     #[test]
