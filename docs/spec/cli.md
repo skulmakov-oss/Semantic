@@ -41,7 +41,7 @@ The admitted `smc` command surface is currently:
 Current accepted usage forms are:
 
 - `smc compile <input.sm> -o|--out <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--metrics]`
-- `smc check <input.sm> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]`
+- `smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc watch <input.sm> [--metrics] [--color auto|always|never]`
 - `smc fmt [--check] <path>`
@@ -128,6 +128,7 @@ Commands that ingest source input through `<input.sm>` operate through the curre
 Current rule:
 
 - source-reading commands inherit the current executable bundle admission boundary
+- `smc check` also accepts a bounded admitted project-root entrypoint through `Semantic.package` + `src/main.sm`
 - widening package resolution, helper import loading, or source-root admission is a public CLI and source-boundary change
 
 ## Tooling Helper Rule

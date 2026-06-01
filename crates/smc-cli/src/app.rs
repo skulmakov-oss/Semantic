@@ -3,7 +3,10 @@ use crate::incremental::{
     emit_trace, module_graph_fingerprint, module_graph_module_count, read_graph_hash,
     update_cache_index, CacheEvent, CacheReason, ModuleGraphSnapshot,
 };
-use crate::package_manifest::{admit_package_entry_module, resolve_package_import_path};
+use crate::package_manifest::{
+    admit_package_entry_module, parse_package_manifest_baseline, resolve_package_import_path,
+    validate_package_manifest_baseline, PACKAGE_MANIFEST_FILE_NAME,
+};
 use crate::{format_path, FormatterMode};
 use prom_audit::hello_observation_audit::{
     apply_controlled_observation_audit_policy, ControlledObservationAuditDecision,
@@ -232,6 +235,47 @@ fn resolve_color_mode(mode: ColorMode) -> bool {
     }
 }
 
+fn resolve_project_root_check_entry(input: &Path) -> Result<PathBuf, String> {
+    let manifest_path = input.join(PACKAGE_MANIFEST_FILE_NAME);
+    let manifest_source = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("failed to read '{}': {}", manifest_path.display(), e))?;
+    let manifest = parse_package_manifest_baseline(&manifest_source)
+        .map_err(|e| format!("failed to parse '{}': {}", manifest_path.display(), e))?;
+    validate_package_manifest_baseline(&manifest)
+        .map_err(|e| format!("failed to validate '{}': {}", manifest_path.display(), e))?;
+
+    let package_root = input
+        .join(&manifest.package.root.manifest_dir)
+        .canonicalize()
+        .map_err(|e| {
+            format!(
+                "failed to resolve package root '{}' relative to '{}': {}",
+                manifest.package.root.manifest_dir,
+                manifest_path.display(),
+                e
+            )
+        })?;
+    let module_root = package_root
+        .join(&manifest.package.root.module_root)
+        .canonicalize()
+        .map_err(|e| {
+            format!(
+                "failed to resolve package module_root '{}' relative to '{}': {}",
+                manifest.package.root.module_root,
+                package_root.display(),
+                e
+            )
+        })?;
+    let entry = module_root.join("main.sm");
+    if !entry.is_file() {
+        return Err(format!(
+            "project-root check requires '{}' to exist",
+            entry.display()
+        ));
+    }
+    Ok(entry)
+}
+
 fn color_wrap(enabled: bool, s: &str, code: &str) -> String {
     if enabled {
         format!("\x1b[{}m{}\x1b[0m", code, s)
@@ -260,12 +304,17 @@ fn print_diag_colored(enabled: bool, text: &str) {
 fn cmd_check(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "usage: smc check <input.sm> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>]"
+            "usage: smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>]"
                 .to_string(),
         );
     }
     let input = args[0].as_str();
-    let root = PathBuf::from(input);
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
     let mut no_cache = false;
     let mut metrics = false;
     let mut trace_cache_enabled = false;
@@ -307,7 +356,7 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
         );
     }
     let t0 = Instant::now();
-    let src = read_source_with_package_admission(Path::new(input))?;
+    let src = read_source_with_package_admission(&root)?;
     let t_read = Instant::now();
     let prev_graph_hash = read_graph_hash(Path::new(CACHE_GRAPH_FILE));
     let mut graph_hash_now = None;
@@ -376,9 +425,9 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
 
     let provider = CliFsModuleProvider;
     let parser_profile = cli_profile();
-    let root_canon = Path::new(input)
+    let root_canon = root
         .canonicalize()
-        .map_err(|e| format!("failed to resolve '{}': {}", input, e))?;
+        .map_err(|e| format!("failed to resolve '{}': {}", root.display(), e))?;
     let report = check_file_with_provider_and_profile(&root_canon, &provider, &parser_profile)
         .or_else(|_| check_source_with_profile(&src, &parser_profile))
         .map_err(|e| e.to_string())?;
@@ -2429,7 +2478,7 @@ fn usage() -> String {
     [
         "Semantic Language toolchain v0",
         "  smc compile <input.sm> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]",
-        "  smc check <input.sm> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]",
+        "  smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]",
         "  smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]",
         "  smc watch <input.sm> [--metrics] [--color auto|always|never]",
         "  smc fmt [--check] <path>",
