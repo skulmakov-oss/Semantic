@@ -27,6 +27,21 @@ fn cli_ok(args: Vec<String>, context: &str) {
     smc_cli::run(args).unwrap_or_else(|err| panic!("{context} failed: {err}"));
 }
 
+fn cli_stdout(args: Vec<String>, context: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .args(args)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
 fn cli_check_project_root_ok(dir: &std::path::Path, context: &str) {
     let input = normalize_path(dir);
     cli_ok(vec!["check".to_string(), input], context);
@@ -35,6 +50,32 @@ fn cli_check_project_root_ok(dir: &std::path::Path, context: &str) {
 fn cli_run_project_root_ok(dir: &std::path::Path, context: &str) {
     let input = normalize_path(dir);
     cli_ok(vec!["run".to_string(), input], context);
+}
+
+fn cli_hash_ast_project_root_output(dir: &std::path::Path, context: &str) -> String {
+    let input = normalize_path(dir);
+    cli_stdout(vec!["hash-ast".to_string(), input], context)
+}
+
+fn cli_hash_ast_project_root_output_dot(dir: &std::path::Path, context: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg("hash-ast")
+        .arg(".")
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn cli_hash_ast_file_output(path: &std::path::Path, context: &str) -> String {
+    cli_stdout(vec!["hash-ast".to_string(), normalize_path(path)], context)
 }
 
 fn cli_compile_project_root_ok(dir: &std::path::Path, out_name: &str, context: &str) -> PathBuf {
@@ -348,6 +389,31 @@ fn full_project_root_package_baseline_run_path() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn full_project_root_package_baseline_hash_ast_path() {
+    let dir = mk_temp_dir("pcc9_project_root_package_hash_ast_acceptance");
+    write_package_manifest_baseline(&dir);
+    let entry = dir.join("src").join("main.sm");
+    write_source(&entry);
+
+    let root_hash =
+        cli_hash_ast_project_root_output(&dir, "smc hash-ast for package baseline project root");
+    let file_hash = cli_hash_ast_file_output(&entry, "smc hash-ast for resolved package entry");
+    assert_eq!(
+        root_hash, file_hash,
+        "project-root hash must match resolved file hash"
+    );
+    assert_eq!(
+        root_hash,
+        cli_hash_ast_project_root_output(
+            &dir,
+            "smc hash-ast for package baseline project root second run"
+        ),
+        "project-root hash must be deterministic across repeated runs"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn full_project_root_package_baseline_compile_path() {
     let dir = mk_temp_dir("pcc9_project_root_package_compile_acceptance");
     write_package_manifest_baseline(&dir);
@@ -383,6 +449,11 @@ fn pcc9_project_root_package_baseline_still_runs_entrypoint() {
 }
 
 #[test]
+fn pcc9_project_root_package_baseline_still_hashes_entrypoint() {
+    full_project_root_package_baseline_hash_ast_path();
+}
+
+#[test]
 fn pcc9_project_root_package_baseline_still_compiles_entrypoint() {
     full_project_root_package_baseline_compile_path();
 }
@@ -405,6 +476,32 @@ fn pcc9_project_root_semantic_toml_explicit_entry_runs() {
     write_source(&dir.join("src").join("main.sm"));
 
     cli_run_project_root_ok(&dir, "smc run for semantic.toml explicit entry");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_semantic_toml_explicit_entry_hashes() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_explicit_entry_hash");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry = dir.join("src").join("main.sm");
+    write_source(&entry);
+
+    let root_hash =
+        cli_hash_ast_project_root_output(&dir, "smc hash-ast for semantic.toml explicit entry");
+    let file_hash = cli_hash_ast_file_output(&entry, "smc hash-ast for explicit resolved entry");
+    assert_eq!(
+        root_hash, file_hash,
+        "project-root hash must match resolved file hash"
+    );
+    assert_eq!(
+        root_hash,
+        cli_hash_ast_project_root_output(
+            &dir,
+            "smc hash-ast for semantic.toml explicit entry second run"
+        ),
+        "project-root hash must be deterministic across repeated runs"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -443,6 +540,32 @@ fn pcc9_project_root_semantic_toml_default_entry_runs() {
 }
 
 #[test]
+fn pcc9_project_root_semantic_toml_default_entry_hashes() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_default_entry_hash");
+    write_semantic_toml(&dir, None);
+    let entry = dir.join("src").join("main.sm");
+    write_source(&entry);
+
+    let root_hash =
+        cli_hash_ast_project_root_output(&dir, "smc hash-ast for semantic.toml default entry");
+    let file_hash = cli_hash_ast_file_output(&entry, "smc hash-ast for default resolved entry");
+    assert_eq!(
+        root_hash, file_hash,
+        "project-root hash must match resolved file hash"
+    );
+    assert_eq!(
+        root_hash,
+        cli_hash_ast_project_root_output(
+            &dir,
+            "smc hash-ast for semantic.toml default entry second run"
+        ),
+        "project-root hash must be deterministic across repeated runs"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_default_entry_compiles() {
     let dir = mk_temp_dir("pcc9_project_root_semantic_default_entry_compile");
     write_semantic_toml(&dir, None);
@@ -471,6 +594,32 @@ fn pcc9_project_root_semantic_toml_nested_entry_runs() {
     write_source(&dir.join("examples").join("main.sm"));
 
     cli_run_project_root_ok(&dir, "smc run for semantic.toml nested entry");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_semantic_toml_nested_entry_hashes() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_nested_entry_hash");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    let entry = dir.join("examples").join("main.sm");
+    write_source(&entry);
+
+    let root_hash =
+        cli_hash_ast_project_root_output(&dir, "smc hash-ast for semantic.toml nested entry");
+    let file_hash = cli_hash_ast_file_output(&entry, "smc hash-ast for nested resolved entry");
+    assert_eq!(
+        root_hash, file_hash,
+        "project-root hash must match resolved file hash"
+    );
+    assert_eq!(
+        root_hash,
+        cli_hash_ast_project_root_output(
+            &dir,
+            "smc hash-ast for semantic.toml nested entry second run"
+        ),
+        "project-root hash must be deterministic across repeated runs"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -509,6 +658,35 @@ fn pcc9_project_root_semantic_toml_is_preferred_over_package_manifest_for_run() 
     write_source(&dir.join("examples").join("main.sm"));
 
     cli_run_project_root_ok(&dir, "smc run prefers semantic.toml over Semantic.package");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_semantic_toml_is_preferred_over_package_manifest_for_hash_ast() {
+    let dir = mk_temp_dir("pcc9_project_root_semantic_preferred_hash");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_package_manifest_baseline(&dir);
+    let entry = dir.join("examples").join("main.sm");
+    write_source(&entry);
+
+    let root_hash = cli_hash_ast_project_root_output(
+        &dir,
+        "smc hash-ast prefers semantic.toml over Semantic.package",
+    );
+    let file_hash = cli_hash_ast_file_output(&entry, "smc hash-ast for preferred resolved entry");
+    assert_eq!(
+        root_hash, file_hash,
+        "project-root hash must match resolved file hash"
+    );
+    assert_eq!(
+        root_hash,
+        cli_hash_ast_project_root_output(
+            &dir,
+            "smc hash-ast prefers semantic.toml over Semantic.package second run"
+        ),
+        "project-root hash must be deterministic across repeated runs"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -554,6 +732,29 @@ fn pcc9_project_root_run_dot_matches_absolute_project_root() {
 }
 
 #[test]
+fn pcc9_project_root_hash_ast_dot_matches_absolute_project_root() {
+    let dir = mk_temp_dir("pcc9_project_root_hash_ast_dot");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry = dir.join("src").join("main.sm");
+    write_source(&entry);
+
+    let root_hash =
+        cli_hash_ast_project_root_output(&dir, "smc hash-ast for absolute project root");
+    let dot_hash = cli_hash_ast_project_root_output_dot(&dir, "smc hash-ast dot from project root");
+    let file_hash = cli_hash_ast_file_output(&entry, "smc hash-ast for absolute resolved entry");
+    assert_eq!(
+        root_hash, file_hash,
+        "project-root hash must match resolved file hash"
+    );
+    assert_eq!(
+        dot_hash, file_hash,
+        "smc hash-ast . must match resolved file hash"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_compile_dot_writes_requested_output() {
     let dir = mk_temp_dir("pcc9_project_root_compile_dot");
     write_semantic_toml(&dir, Some("src/main.sm"));
@@ -565,6 +766,31 @@ fn pcc9_project_root_compile_dot_writes_requested_output() {
         "smc compile absolute project root",
     );
     cli_compile_dot_ok(&dir, "dot-out.smc", "smc compile dot from project root");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_hash_ast_rejects_invalid_semantic_toml_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_hash_ast_invalid_syntax");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package
+name = "app"
+"#,
+    )
+    .expect("write manifest");
+
+    let input = normalize_path(&dir);
+    let err = cli_err(
+        vec!["hash-ast".to_string(), input.clone()],
+        &format!("smc hash-ast for invalid manifest project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("malformed"), "{err}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -588,6 +814,34 @@ name = "app"
     );
     assert!(err.contains("semantic.toml"), "{err}");
     assert!(err.contains("malformed"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_hash_ast_rejects_missing_entry_file_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_hash_ast_missing_entry_file");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package]
+name = "app"
+
+[project]
+entry = "examples/missing.sm"
+"#,
+    )
+    .expect("write manifest");
+
+    let input = normalize_path(&dir);
+    let err = cli_err(
+        vec!["hash-ast".to_string(), input.clone()],
+        &format!("smc hash-ast for missing entry file project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("missing file"), "{err}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -643,6 +897,34 @@ name = "app"
 }
 
 #[test]
+fn pcc9_project_root_hash_ast_rejects_path_escape_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_hash_ast_path_escape");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+    )
+    .expect("write manifest");
+
+    let input = normalize_path(&dir);
+    let err = cli_err(
+        vec!["hash-ast".to_string(), input.clone()],
+        &format!("smc hash-ast for escaped entry project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("must not escape the project root"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn pcc9_project_root_semantic_toml_rejects_missing_package_name() {
     let dir = mk_temp_dir("pcc9_project_root_missing_package_name");
     std::fs::write(
@@ -660,6 +942,33 @@ entry = "src/main.sm"
     let err = cli_err(
         vec!["check".to_string(), input.clone()],
         &format!("smc check for missing package name project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("missing required [package].name"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_hash_ast_rejects_missing_package_name_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_hash_ast_missing_package_name");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package]
+
+[project]
+entry = "src/main.sm"
+"#,
+    )
+    .expect("write manifest");
+
+    let input = normalize_path(&dir);
+    let err = cli_err(
+        vec!["hash-ast".to_string(), input.clone()],
+        &format!("smc hash-ast for missing package name project root {input}"),
     );
     assert!(err.contains("semantic.toml"), "{err}");
     assert!(err.contains("missing required [package].name"), "{err}");
@@ -745,6 +1054,34 @@ entry = "src/main.sm"
     );
     assert!(err.contains("semantic.toml"), "{err}");
     assert!(err.contains("empty [package].name"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_hash_ast_rejects_empty_entry_without_fallback() {
+    let dir = mk_temp_dir("pcc9_project_root_hash_ast_empty_entry");
+    write_package_manifest_baseline(&dir);
+    write_source(&dir.join("src").join("main.sm"));
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package]
+name = "app"
+
+[project]
+entry = ""
+"#,
+    )
+    .expect("write manifest");
+
+    let input = normalize_path(&dir);
+    let err = cli_err(
+        vec!["hash-ast".to_string(), input.clone()],
+        &format!("smc hash-ast for empty entry project root {input}"),
+    );
+    assert!(err.contains("semantic.toml"), "{err}");
+    assert!(err.contains("empty [project].entry"), "{err}");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
