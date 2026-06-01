@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub const PACKAGE_MANIFEST_BASELINE_VERSION: u32 = 1;
 pub const PACKAGE_MANIFEST_FILE_NAME: &str = "Semantic.package";
+pub const SEMANTIC_TOML_FILE_NAME: &str = "semantic.toml";
 pub const PACKAGE_IMPORT_SEPARATOR: &str = "::";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -438,6 +439,29 @@ pub fn admit_package_entry_module(
     }))
 }
 
+pub(crate) fn resolve_project_root_check_entry(root: &Path) -> Result<PathBuf, String> {
+    let semantic_toml = root.join(SEMANTIC_TOML_FILE_NAME);
+    if semantic_toml.is_file() {
+        let source = std::fs::read_to_string(&semantic_toml)
+            .map_err(|e| format!("failed to read '{}': {}", semantic_toml.display(), e))?;
+        let project_manifest = parse_semantic_toml_manifest(&semantic_toml, &source)
+            .map_err(|e| format!("failed to parse '{}': {}", semantic_toml.display(), e))?;
+        return Ok(root.join(project_manifest.entry));
+    }
+
+    let package_manifest = root.join(PACKAGE_MANIFEST_FILE_NAME);
+    if package_manifest.is_file() {
+        return Ok(root.join("src/main.sm"));
+    }
+
+    Err(format!(
+        "project root '{}' must contain '{}' or '{}'",
+        root.display(),
+        SEMANTIC_TOML_FILE_NAME,
+        PACKAGE_MANIFEST_FILE_NAME
+    ))
+}
+
 pub fn resolve_package_import_path(
     importer_module: &Path,
     spec: &str,
@@ -536,9 +560,13 @@ fn split_manifest_tokens(
 fn find_nearest_manifest(entry_canonical: &Path) -> Option<PathBuf> {
     let mut current = entry_canonical.parent();
     while let Some(dir) = current {
-        let candidate = dir.join(PACKAGE_MANIFEST_FILE_NAME);
-        if candidate.is_file() {
-            return Some(candidate);
+        let semantic_toml = dir.join(SEMANTIC_TOML_FILE_NAME);
+        if semantic_toml.is_file() {
+            return Some(semantic_toml);
+        }
+        let package_manifest = dir.join(PACKAGE_MANIFEST_FILE_NAME);
+        if package_manifest.is_file() {
+            return Some(package_manifest);
         }
         current = dir.parent();
     }
@@ -560,11 +588,23 @@ fn load_and_validate_manifest(
             code: PackageModuleAdmissionCode::ManifestReadFailed,
             message: format!("failed to read '{}': {}", manifest_path.display(), e),
         })?;
-    let manifest =
+    let manifest = if manifest_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == SEMANTIC_TOML_FILE_NAME)
+    {
+        parse_semantic_toml_manifest(manifest_path, &source)
+            .map(|project_manifest| project_manifest.manifest)
+            .map_err(|e| PackageModuleAdmissionError {
+                code: PackageModuleAdmissionCode::ManifestParseFailed,
+                message: format!("failed to parse '{}': {}", manifest_path.display(), e),
+            })?
+    } else {
         parse_package_manifest_baseline(&source).map_err(|e| PackageModuleAdmissionError {
             code: PackageModuleAdmissionCode::ManifestParseFailed,
             message: format!("failed to parse '{}': {}", manifest_path.display(), e),
-        })?;
+        })?
+    };
     validate_package_manifest_baseline(&manifest).map_err(|e| PackageModuleAdmissionError {
         code: PackageModuleAdmissionCode::ManifestValidationFailed,
         message: format!("failed to validate '{}': {}", manifest_path.display(), e),
@@ -728,6 +768,148 @@ fn resolve_manifest_context(
         manifest,
         package_root,
         module_root,
+    })
+}
+
+#[derive(Debug)]
+struct ParsedSemanticTomlManifest {
+    manifest: PackageManifest,
+    entry: String,
+}
+
+fn parse_semantic_toml_manifest(
+    manifest_path: &Path,
+    source: &str,
+) -> Result<ParsedSemanticTomlManifest, String> {
+    #[derive(Debug, Default)]
+    struct ParsedSemanticTomlFields {
+        package_name: Option<String>,
+        project_entry: Option<String>,
+    }
+
+    fn parse_toml_string(value: &str, line_no: usize, field: &str) -> Result<String, String> {
+        let trimmed = value.trim();
+        if trimmed.len() < 2 || !trimmed.starts_with('"') || !trimmed.ends_with('"') {
+            return Err(format!(
+                "line {}: {} must be a double-quoted string",
+                line_no, field
+            ));
+        }
+        Ok(trimmed[1..trimmed.len() - 1].to_string())
+    }
+
+    fn normalize_project_entry(entry: &str) -> Result<String, String> {
+        let path = Path::new(entry);
+        if path.is_absolute() {
+            return Err(format!("project entry '{}' must be relative", entry));
+        }
+        if path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+        {
+            return Err(format!(
+                "project entry '{}' must not escape the project root",
+                entry
+            ));
+        }
+        Ok(path.to_string_lossy().replace('\\', "/"))
+    }
+
+    let mut parsed = ParsedSemanticTomlFields::default();
+    let mut section: Option<String> = None;
+
+    for (index, raw_line) in source.lines().enumerate() {
+        let line_no = index + 1;
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') {
+            if !line.ends_with(']') {
+                return Err(format!("line {}: malformed TOML section header", line_no));
+            }
+            section = Some(line[1..line.len() - 1].trim().to_string());
+            continue;
+        }
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("line {}: expected 'key = \"value\"' entry", line_no))?;
+        let key = key.trim();
+        let value = value.trim();
+        match section.as_deref() {
+            Some("package") => match key {
+                "name" => {
+                    parsed.package_name = Some(parse_toml_string(value, line_no, "package.name")?);
+                }
+                "version" => {}
+                other => {
+                    return Err(format!(
+                        "line {}: unsupported semantic.toml package field '{}'",
+                        line_no, other
+                    ));
+                }
+            },
+            Some("project") => match key {
+                "entry" => {
+                    parsed.project_entry = Some(normalize_project_entry(&parse_toml_string(
+                        value,
+                        line_no,
+                        "project.entry",
+                    )?)?);
+                }
+                other => {
+                    return Err(format!(
+                        "line {}: unsupported semantic.toml project field '{}'",
+                        line_no, other
+                    ));
+                }
+            },
+            Some(other) => {
+                return Err(format!(
+                    "line {}: unsupported semantic.toml section '{}'",
+                    line_no, other
+                ));
+            }
+            None => {
+                return Err(format!(
+                    "line {}: semantic.toml entries must appear inside [package] or [project]",
+                    line_no
+                ));
+            }
+        }
+    }
+
+    let package_name = parsed
+        .package_name
+        .ok_or_else(|| "semantic.toml missing [package].name".to_string())?;
+    let entry = parsed
+        .project_entry
+        .unwrap_or_else(|| "src/main.sm".to_string());
+    let entry_path = Path::new(&entry);
+    let module_root = entry_path
+        .parent()
+        .map(|parent| {
+            let value = parent.to_string_lossy().replace('\\', "/");
+            if value.is_empty() {
+                ".".to_string()
+            } else {
+                value
+            }
+        })
+        .unwrap_or_else(|| ".".to_string());
+    let _ = manifest_path;
+    Ok(ParsedSemanticTomlManifest {
+        manifest: PackageManifest::new(
+            PackageIdentity {
+                name: package_name,
+                root: PackageRoot {
+                    manifest_dir: ".".to_string(),
+                    module_root,
+                },
+            },
+            Vec::new(),
+        ),
+        entry,
     })
 }
 
@@ -950,6 +1132,52 @@ manifest_dir .
             err.code,
             PackageManifestParseCode::MissingModuleRootDirective
         );
+    }
+
+    #[test]
+    fn parse_semantic_toml_manifest_accepts_minimal_project_surface() {
+        let manifest = parse_semantic_toml_manifest(
+            Path::new("semantic.toml"),
+            r#"
+[package]
+name = "app"
+
+[project]
+entry = "src/main.sm"
+"#,
+        )
+        .expect("parse semantic.toml");
+        assert_eq!(manifest.manifest.package.name, "app");
+        assert_eq!(manifest.entry, "src/main.sm");
+        assert_eq!(manifest.manifest.package.root.manifest_dir, ".");
+        assert_eq!(manifest.manifest.package.root.module_root, "src");
+    }
+
+    #[test]
+    fn parse_semantic_toml_manifest_defaults_entry_and_rejects_escape() {
+        let manifest = parse_semantic_toml_manifest(
+            Path::new("semantic.toml"),
+            r#"
+[package]
+name = "app"
+"#,
+        )
+        .expect("parse semantic.toml with default entry");
+        assert_eq!(manifest.entry, "src/main.sm");
+        assert_eq!(manifest.manifest.package.root.module_root, "src");
+
+        let err = parse_semantic_toml_manifest(
+            Path::new("semantic.toml"),
+            r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+        )
+        .expect_err("must reject entry escape");
+        assert!(err.contains("must not escape the project root"));
     }
 
     #[test]

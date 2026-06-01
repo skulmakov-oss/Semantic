@@ -129,6 +129,7 @@ Current rule:
 
 - source-reading commands inherit the current executable bundle admission boundary
 - `smc check` also accepts a bounded admitted project-root entrypoint through `Semantic.package` + `src/main.sm`
+- project-root `smc check` also resolves a minimal `semantic.toml` manifest when present
 - widening package resolution, helper import loading, or source-root admission is a public CLI and source-boundary change
 
 ## Tooling Helper Rule
