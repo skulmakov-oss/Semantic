@@ -44,6 +44,8 @@ $TempRoot = if ($env:TEMP) {
 $ManifestPath = Join-Path $TempRoot "semantic_v1_release_bundle_manifest.json"
 $ProjectRootSmokeFixture = Join-Path $RepoRoot "examples/qualification/pcc9_project_root_minimal"
 $ProjectRootSmokeTempDir = Join-Path $TempRoot "semantic_project_root_local_ci_smoke"
+$PackageBaselineSmokeFixture = Join-Path $RepoRoot "examples/qualification/pcc9_project_root_package_baseline"
+$PackageBaselineSmokeTempDir = Join-Path $TempRoot "semantic_project_root_package_baseline_local_ci_smoke"
 $ExeSuffix = if ($IsWindows) { ".exe" } else { "" }
 $SmcBinary = Join-Path $RepoRoot "target/debug/smc$ExeSuffix"
 
@@ -88,6 +90,21 @@ Invoke-LocalCiStep "canonical project-root fixture smoke" {
     & $SmcBinary compile $ProjectRootSmokeFixture -o $ProjectRootSmokeOut
     & $SmcBinary verify $ProjectRootSmokeOut
     & $SmcBinary run-smc $ProjectRootSmokeOut
+}
+
+Invoke-LocalCiStep "package-baseline project-root fixture smoke" {
+    if (Test-Path $PackageBaselineSmokeTempDir) {
+        Remove-Item -Recurse -Force $PackageBaselineSmokeTempDir
+    }
+    New-Item -ItemType Directory -Force -Path $PackageBaselineSmokeTempDir | Out-Null
+
+    $PackageBaselineSmokeOut = Join-Path $PackageBaselineSmokeTempDir "out-package-baseline.smc"
+
+    & $SmcBinary check $PackageBaselineSmokeFixture
+    & $SmcBinary run $PackageBaselineSmokeFixture
+    & $SmcBinary compile $PackageBaselineSmokeFixture -o $PackageBaselineSmokeOut
+    & $SmcBinary verify $PackageBaselineSmokeOut
+    & $SmcBinary run-smc $PackageBaselineSmokeOut
 }
 
 Invoke-LocalCiStep "smc 7hell human smoke" {
