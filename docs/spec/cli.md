@@ -134,6 +134,7 @@ Current rule:
 - project-root `smc run` uses the same bounded project entry resolution, then follows the existing verifier-first source execution route
 - project-root `smc hash-ast` uses the same bounded project entry resolution and emits the existing AST hash for the resolved source file
 - project-root `smc hash-ir` uses the same bounded project entry resolution and emits the existing IR hash for the resolved source file
+- project-root `smc hash-smc` uses the same bounded project entry resolution and emits the existing SemCode hash for the resolved source or artifact path
 - widening package resolution, helper import loading, or source-root admission is a public CLI and source-boundary change
 
 ## Tooling Helper Rule
