@@ -50,7 +50,7 @@ Current accepted usage forms are:
 - `smc dump-bytecode <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]`
 - `smc hash-ast <input.sm|project-root>`
 - `smc hash-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]`
-- `smc hash-smc <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--trace-cache]`
+- `smc hash-smc <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--trace-cache]`
 - `smc snapshots [--update]`
 - `smc features`
 - `smc explain <error-code|--list>`
@@ -134,6 +134,7 @@ Current rule:
 - project-root `smc run` uses the same bounded project entry resolution, then follows the existing verifier-first source execution route
 - project-root `smc hash-ast` uses the same bounded project entry resolution and emits the existing AST hash for the resolved source file
 - project-root `smc hash-ir` uses the same bounded project entry resolution and emits the existing IR hash for the resolved source file
+- project-root `smc hash-smc` uses the same bounded project entry resolution and emits the existing SemCode hash for the resolved source or artifact path
 - widening package resolution, helper import loading, or source-root admission is a public CLI and source-boundary change
 
 ## Tooling Helper Rule
