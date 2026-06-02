@@ -52,83 +52,73 @@ fn cli_run_project_root_ok(dir: &std::path::Path, context: &str) {
     cli_ok(vec!["run".to_string(), input], context);
 }
 
-fn cli_hash_ast_project_root_output(dir: &std::path::Path, context: &str) -> String {
+// Shared output helpers keep the project-root acceptance matrix aligned across command families.
+fn cli_command_project_root_output(command: &str, dir: &std::path::Path, context: &str) -> String {
     let input = normalize_path(dir);
-    cli_stdout(vec!["hash-ast".to_string(), input], context)
+    cli_stdout(vec![command.to_string(), input], context)
+}
+
+fn cli_command_project_root_output_dot(
+    command: &str,
+    dir: &std::path::Path,
+    context: &str,
+) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .arg(command)
+        .arg(".")
+        .current_dir(dir)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
+}
+
+fn cli_command_file_output(command: &str, path: &std::path::Path, context: &str) -> String {
+    cli_stdout(vec![command.to_string(), normalize_path(path)], context)
+}
+
+fn cli_hash_ast_project_root_output(dir: &std::path::Path, context: &str) -> String {
+    cli_command_project_root_output("hash-ast", dir, context)
 }
 
 fn cli_hash_ast_project_root_output_dot(dir: &std::path::Path, context: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .arg("hash-ast")
-        .arg(".")
-        .current_dir(dir)
-        .output()
-        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
-    assert!(
-        output.status.success(),
-        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).to_string()
+    cli_command_project_root_output_dot("hash-ast", dir, context)
 }
 
 fn cli_hash_ast_file_output(path: &std::path::Path, context: &str) -> String {
-    cli_stdout(vec!["hash-ast".to_string(), normalize_path(path)], context)
+    cli_command_file_output("hash-ast", path, context)
 }
 
 fn cli_hash_ir_project_root_output(dir: &std::path::Path, context: &str) -> String {
-    let input = normalize_path(dir);
-    cli_stdout(vec!["hash-ir".to_string(), input], context)
+    cli_command_project_root_output("hash-ir", dir, context)
 }
 
 fn cli_hash_ir_project_root_output_dot(dir: &std::path::Path, context: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .arg("hash-ir")
-        .arg(".")
-        .current_dir(dir)
-        .output()
-        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
-    assert!(
-        output.status.success(),
-        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).to_string()
+    cli_command_project_root_output_dot("hash-ir", dir, context)
 }
 
 fn cli_hash_ir_file_output(path: &std::path::Path, context: &str) -> String {
-    cli_stdout(vec!["hash-ir".to_string(), normalize_path(path)], context)
+    cli_command_file_output("hash-ir", path, context)
 }
 
 fn cli_hash_smc_project_root_output(dir: &std::path::Path, context: &str) -> String {
-    let input = normalize_path(dir);
-    cli_stdout(vec!["hash-smc".to_string(), input], context)
+    cli_command_project_root_output("hash-smc", dir, context)
 }
 
 fn cli_hash_smc_project_root_output_dot(dir: &std::path::Path, context: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .arg("hash-smc")
-        .arg(".")
-        .current_dir(dir)
-        .output()
-        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
-    assert!(
-        output.status.success(),
-        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).to_string()
+    cli_command_project_root_output_dot("hash-smc", dir, context)
 }
 
 fn cli_hash_smc_file_output(path: &std::path::Path, context: &str) -> String {
-    cli_stdout(vec!["hash-smc".to_string(), normalize_path(path)], context)
+    cli_command_file_output("hash-smc", path, context)
 }
+
 fn cli_compile_project_root_ok(dir: &std::path::Path, out_name: &str, context: &str) -> PathBuf {
     let input = normalize_path(dir);
     let out = dir.join(out_name);
@@ -1974,20 +1964,7 @@ fn cli_dump_ast_ok(input_path: &std::path::Path, context: &str) -> String {
 }
 
 fn cli_dump_ast_dot_ok(dir: &std::path::Path, context: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .arg("dump-ast")
-        .arg(".")
-        .current_dir(dir)
-        .output()
-        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
-    assert!(
-        output.status.success(),
-        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).to_string()
+    cli_command_project_root_output_dot("dump-ast", dir, context)
 }
 
 fn cli_dump_ast_err(input_path: &std::path::Path, context: &str) -> String {
@@ -2178,20 +2155,7 @@ fn cli_dump_ir_ok(input_path: &std::path::Path, context: &str) -> String {
 }
 
 fn cli_dump_ir_dot_ok(dir: &std::path::Path, context: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .arg("dump-ir")
-        .arg(".")
-        .current_dir(dir)
-        .output()
-        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
-    assert!(
-        output.status.success(),
-        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).to_string()
+    cli_command_project_root_output_dot("dump-ir", dir, context)
 }
 
 fn cli_dump_ir_err(input_path: &std::path::Path, context: &str) -> String {
@@ -2411,20 +2375,7 @@ fn cli_dump_bytecode_ok(input_path: &std::path::Path, context: &str) -> String {
 }
 
 fn cli_dump_bytecode_dot_ok(dir: &std::path::Path, context: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .arg("dump-bytecode")
-        .arg(".")
-        .current_dir(dir)
-        .output()
-        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
-    assert!(
-        output.status.success(),
-        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).to_string()
+    cli_command_project_root_output_dot("dump-bytecode", dir, context)
 }
 
 fn cli_dump_bytecode_err(input_path: &std::path::Path, context: &str) -> String {
