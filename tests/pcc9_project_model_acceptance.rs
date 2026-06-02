@@ -42,6 +42,30 @@ fn cli_stdout(args: Vec<String>, context: &str) -> String {
     String::from_utf8_lossy(&output.stdout).to_string()
 }
 
+fn cli_output(
+    args: Vec<String>,
+    cwd: Option<&std::path::Path>,
+    context: &str,
+) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_smc"));
+    command.args(args);
+    if let Some(dir) = cwd {
+        command.current_dir(dir);
+    }
+    command
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"))
+}
+
+fn cli_command_output(
+    command: &str,
+    input: &str,
+    cwd: Option<&std::path::Path>,
+    context: &str,
+) -> std::process::Output {
+    cli_output(vec![command.to_string(), input.to_string()], cwd, context)
+}
+
 fn cli_check_project_root_ok(dir: &std::path::Path, context: &str) {
     let input = normalize_path(dir);
     cli_ok(vec!["check".to_string(), input], context);
@@ -119,6 +143,10 @@ fn cli_hash_smc_file_output(path: &std::path::Path, context: &str) -> String {
     cli_command_file_output("hash-smc", path, context)
 }
 
+fn cli_disasm_artifact_output(path: &std::path::Path, context: &str) -> String {
+    cli_stdout(vec!["disasm".to_string(), normalize_path(path)], context)
+}
+
 fn cli_compile_project_root_ok(dir: &std::path::Path, out_name: &str, context: &str) -> PathBuf {
     let input = normalize_path(dir);
     let out = dir.join(out_name);
@@ -142,6 +170,75 @@ fn cli_compile_project_root_ok(dir: &std::path::Path, out_name: &str, context: &
         &format!("{context} run-smc failed"),
     );
     out
+}
+
+fn collect_semcode_artifacts(dir: &std::path::Path, artifacts: &mut Vec<PathBuf>) {
+    for entry in std::fs::read_dir(dir)
+        .unwrap_or_else(|err| panic!("scan .smc artifacts in {}: {err}", dir.display()))
+    {
+        let entry =
+            entry.unwrap_or_else(|err| panic!("read dir entry in {}: {err}", dir.display()));
+        let path = entry.path();
+        if path.is_dir() {
+            collect_semcode_artifacts(&path, artifacts);
+        } else if path.extension().is_some_and(|ext| ext == "smc") {
+            artifacts.push(path);
+        }
+    }
+}
+
+fn assert_no_semcode_artifacts(dir: &std::path::Path, context: &str) {
+    let mut artifacts = Vec::new();
+    collect_semcode_artifacts(dir, &mut artifacts);
+    assert!(
+        artifacts.is_empty(),
+        "{context} unexpectedly created .smc artifacts: {:?}",
+        artifacts
+    );
+}
+
+fn assert_artifact_only_command_rejects_project_root_input(
+    command: &str,
+    dir: &std::path::Path,
+    context: &str,
+) {
+    let root_input = normalize_path(dir);
+
+    for (label, input, cwd) in [
+        ("absolute project root", root_input.as_str(), None),
+        ("dot from project root", ".", Some(dir)),
+    ] {
+        let output = cli_command_output(command, input, cwd, &format!("{context} ({label})"));
+        assert!(
+            !output.status.success(),
+            "{context} ({label}) unexpectedly passed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stdout.trim().is_empty(),
+            "{context} ({label}) unexpectedly wrote stdout:\n{stdout}"
+        );
+        assert!(
+            !stderr.trim().is_empty(),
+            "{context} ({label}) produced empty stderr"
+        );
+        assert!(
+            !stderr.contains("semantic.toml"),
+            "{context} ({label}) fell back to project-root manifest routing:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("project root"),
+            "{context} ({label}) leaked project-root routing markers:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("resolved entry"),
+            "{context} ({label}) leaked resolved-entry routing markers:\n{stderr}"
+        );
+        assert_no_semcode_artifacts(dir, &format!("{context} ({label})"));
+    }
 }
 
 fn cli_compile_project_root_err_no_overwrite(
@@ -464,6 +561,77 @@ fn full_project_root_package_baseline_compile_path() {
         &dir,
         "package-out.smc",
         "smc compile for package project root",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_artifact_only_commands_still_work_for_real_semcode_artifacts() {
+    let dir = mk_temp_dir("pcc9_artifact_only_positive_chain");
+    write_package_manifest_baseline(&dir);
+    let entry = dir.join("src").join("main.sm");
+    write_source(&entry);
+
+    let out = cli_compile_project_root_ok(
+        &dir,
+        "artifact-chain.smc",
+        "smc compile for artifact-only positive chain",
+    );
+    let disasm = cli_disasm_artifact_output(&out, "smc disasm for compiled artifact");
+    assert!(
+        !disasm.trim().is_empty(),
+        "smc disasm for compiled artifact returned empty output"
+    );
+    assert_eq!(
+        disasm,
+        cli_disasm_artifact_output(&out, "smc disasm for compiled artifact second run"),
+        "smc disasm for compiled artifact must be deterministic across repeated runs"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_artifact_only_disasm_rejects_project_root_inputs_without_fallback() {
+    let dir = mk_temp_dir("pcc9_artifact_only_disasm_project_root");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_artifact_only_command_rejects_project_root_input(
+        "disasm",
+        &dir,
+        "smc disasm must reject project-root inputs",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_artifact_only_verify_rejects_project_root_inputs_without_fallback() {
+    let dir = mk_temp_dir("pcc9_artifact_only_verify_project_root");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_artifact_only_command_rejects_project_root_input(
+        "verify",
+        &dir,
+        "smc verify must reject project-root inputs",
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_artifact_only_run_smc_rejects_project_root_inputs_without_fallback() {
+    let dir = mk_temp_dir("pcc9_artifact_only_run_smc_project_root");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    write_source(&dir.join("src").join("main.sm"));
+
+    assert_artifact_only_command_rejects_project_root_input(
+        "run-smc",
+        &dir,
+        "smc run-smc must reject project-root inputs",
     );
 
     let _ = std::fs::remove_dir_all(&dir);
