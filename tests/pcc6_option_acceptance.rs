@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn repo_path(rel: &str) -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -8,22 +8,19 @@ fn repo_path(rel: &str) -> String {
         .replace('\\', "/")
 }
 
+static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 fn cli_ok(args: Vec<String>, context: &str) {
     smc_cli::run(args).unwrap_or_else(|err| panic!("{context} failed: {err}"));
 }
 
 fn mk_temp_dir(prefix: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target")
-        .join(format!(
-            "{}_{}_{}",
-            prefix,
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
+    let dir = std::env::temp_dir().join("semantic-tests").join(format!(
+        "{}_{}_{}",
+        prefix,
+        std::process::id(),
+        TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir
 }
@@ -41,6 +38,9 @@ fn check_run_compile_verify(rel: &str) {
 
     let dir = mk_temp_dir("smc_pcc6_option_acceptance");
     let out = dir.join("out.smc");
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).expect("mkdir artifact parent");
+    }
     let out_arg = out.to_string_lossy().replace('\\', "/");
     cli_ok(
         vec![
