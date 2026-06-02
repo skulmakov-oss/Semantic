@@ -90,6 +90,10 @@ Invoke-LocalCiStep "canonical project-root fixture smoke" {
     & $SmcBinary compile $ProjectRootSmokeFixture -o $ProjectRootSmokeOut
     & $SmcBinary verify $ProjectRootSmokeOut
     & $SmcBinary run-smc $ProjectRootSmokeOut
+
+    if (Test-Path $ProjectRootSmokeTempDir) {
+        Remove-Item -Recurse -Force $ProjectRootSmokeTempDir
+    }
 }
 
 Invoke-LocalCiStep "package-baseline project-root fixture smoke" {
@@ -105,6 +109,10 @@ Invoke-LocalCiStep "package-baseline project-root fixture smoke" {
     & $SmcBinary compile $PackageBaselineSmokeFixture -o $PackageBaselineSmokeOut
     & $SmcBinary verify $PackageBaselineSmokeOut
     & $SmcBinary run-smc $PackageBaselineSmokeOut
+
+    if (Test-Path $PackageBaselineSmokeTempDir) {
+        Remove-Item -Recurse -Force $PackageBaselineSmokeTempDir
+    }
 }
 
 Invoke-LocalCiStep "smc 7hell human smoke" {
