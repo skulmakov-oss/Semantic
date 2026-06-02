@@ -50,7 +50,7 @@ Current accepted usage forms are:
 - `smc dump-bytecode <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]`
 - `smc hash-ast <input.sm|project-root>`
 - `smc hash-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]`
-- `smc hash-smc <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--trace-cache]`
+- `smc hash-smc <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--trace-cache]`
 - `smc snapshots [--update]`
 - `smc features`
 - `smc explain <error-code|--list>`
