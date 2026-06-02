@@ -1,0 +1,4 @@
+format 1
+package pcc9_project_root_package_baseline
+manifest_dir .
+module_root src

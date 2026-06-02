@@ -24,6 +24,12 @@ fn canonical_project_root_fixture() -> PathBuf {
     ))
 }
 
+fn package_baseline_project_root_fixture() -> PathBuf {
+    PathBuf::from(repo_path(
+        "examples/qualification/pcc9_project_root_package_baseline",
+    ))
+}
+
 fn collect_fixture_tree_entries(
     dir: &std::path::Path,
     root: &std::path::Path,
@@ -72,6 +78,27 @@ fn assert_canonical_project_root_fixture_clean(context: &str) {
     assert_eq!(
         files,
         vec!["semantic.toml".to_string(), "src/main.sm".to_string(),],
+        "{context} fixture tree contained unexpected files: {:?}",
+        files
+    );
+    assert_eq!(
+        dirs,
+        vec!["src".to_string()],
+        "{context} fixture tree contained unexpected directories: {:?}",
+        dirs
+    );
+}
+
+fn assert_package_baseline_project_root_fixture_clean(context: &str) {
+    let root = package_baseline_project_root_fixture();
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
+    collect_fixture_tree_entries(&root, &root, &mut files, &mut dirs);
+    files.sort();
+    dirs.sort();
+    assert_eq!(
+        files,
+        vec!["Semantic.package".to_string(), "src/main.sm".to_string(),],
         "{context} fixture tree contained unexpected files: {:?}",
         files
     );
@@ -2933,5 +2960,147 @@ fn pcc9_project_root_smoke_fixture_rejects_artifact_only_commands_on_project_roo
         "run-smc",
         &root,
         "smc run-smc must reject canonical project-root fixture input",
+    );
+}
+
+#[test]
+fn pcc9_project_root_package_baseline_fixture_accepts_admitted_surface() {
+    let root = package_baseline_project_root_fixture();
+    assert_package_baseline_project_root_fixture_clean(
+        "package baseline project-root fixture before checks",
+    );
+    assert_no_semcode_artifacts(&root, "package baseline project-root fixture");
+
+    cli_check_project_root_ok(&root, "smc check for package baseline project-root fixture");
+    cli_run_project_root_ok(&root, "smc run for package baseline project-root fixture");
+
+    let ast = cli_dump_ast_ok(
+        &root,
+        "smc dump-ast for package baseline project-root fixture",
+    );
+    assert!(
+        ast.contains("main"),
+        "dump-ast output should mention main: {ast}"
+    );
+    let ir = cli_dump_ir_ok(
+        &root,
+        "smc dump-ir for package baseline project-root fixture",
+    );
+    assert!(
+        ir.contains("main"),
+        "dump-ir output should mention main: {ir}"
+    );
+    let bytecode = cli_dump_bytecode_ok(
+        &root,
+        "smc dump-bytecode for package baseline project-root fixture",
+    );
+    assert!(
+        bytecode.contains("0000:"),
+        "dump-bytecode output should contain offset 0000: {bytecode}"
+    );
+
+    let ast_hash = cli_hash_ast_project_root_output(
+        &root,
+        "smc hash-ast for package baseline project-root fixture",
+    );
+    assert_eq!(
+        ast_hash,
+        cli_hash_ast_project_root_output(
+            &root,
+            "smc hash-ast for package baseline project-root fixture second run"
+        ),
+        "hash-ast must be deterministic across repeated runs"
+    );
+    let ir_hash = cli_hash_ir_project_root_output(
+        &root,
+        "smc hash-ir for package baseline project-root fixture",
+    );
+    assert_eq!(
+        ir_hash,
+        cli_hash_ir_project_root_output(
+            &root,
+            "smc hash-ir for package baseline project-root fixture second run"
+        ),
+        "hash-ir must be deterministic across repeated runs"
+    );
+    let smc_hash = cli_hash_smc_project_root_output(
+        &root,
+        "smc hash-smc for package baseline project-root fixture",
+    );
+    assert_eq!(
+        smc_hash,
+        cli_hash_smc_project_root_output(
+            &root,
+            "smc hash-smc for package baseline project-root fixture second run"
+        ),
+        "hash-smc must be deterministic across repeated runs"
+    );
+
+    let artifacts_dir = mk_temp_dir("pcc9_project_root_package_baseline_fixture_artifacts");
+    let out = cli_compile_project_root_to(
+        &root,
+        &artifacts_dir,
+        "out.smc",
+        "smc compile package baseline project-root fixture to temp output",
+    );
+    assert!(
+        out.starts_with(&artifacts_dir),
+        "compile output should stay under temp artifact dir: {}",
+        out.display()
+    );
+    assert_eq!(
+        out.parent(),
+        Some(artifacts_dir.as_path()),
+        "compile output should be written directly into the temp artifact dir"
+    );
+    cli_ok(
+        vec!["verify".to_string(), normalize_path(&out)],
+        "smc verify for package baseline project-root artifact",
+    );
+    cli_ok(
+        vec!["run-smc".to_string(), normalize_path(&out)],
+        "smc run-smc for package baseline project-root artifact",
+    );
+    let disasm = cli_disasm_artifact_output(
+        &out,
+        "smc disasm for package baseline project-root artifact",
+    );
+    assert!(
+        !disasm.trim().is_empty(),
+        "smc disasm for package baseline project-root artifact returned empty output"
+    );
+    assert_eq!(
+        disasm,
+        cli_disasm_artifact_output(
+            &out,
+            "smc disasm for package baseline project-root artifact second run"
+        ),
+        "smc disasm for package baseline project-root artifact must be deterministic"
+    );
+    assert_package_baseline_project_root_fixture_clean(
+        "package baseline project-root fixture after checks",
+    );
+    assert_no_semcode_artifacts(&root, "package baseline project-root fixture after checks");
+
+    let _ = std::fs::remove_dir_all(&artifacts_dir);
+}
+
+#[test]
+fn pcc9_project_root_package_baseline_fixture_rejects_artifact_only_commands_on_project_root() {
+    let root = package_baseline_project_root_fixture();
+    assert_artifact_only_command_rejects_project_root_input(
+        "disasm",
+        &root,
+        "smc disasm must reject package baseline project-root fixture input",
+    );
+    assert_artifact_only_command_rejects_project_root_input(
+        "verify",
+        &root,
+        "smc verify must reject package baseline project-root fixture input",
+    );
+    assert_artifact_only_command_rejects_project_root_input(
+        "run-smc",
+        &root,
+        "smc run-smc must reject package baseline project-root fixture input",
     );
 }
