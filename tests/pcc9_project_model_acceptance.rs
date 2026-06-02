@@ -24,6 +24,65 @@ fn canonical_project_root_fixture() -> PathBuf {
     ))
 }
 
+fn collect_fixture_tree_entries(
+    dir: &std::path::Path,
+    root: &std::path::Path,
+    files: &mut Vec<String>,
+    dirs: &mut Vec<String>,
+) {
+    for entry in std::fs::read_dir(dir)
+        .unwrap_or_else(|err| panic!("scan canonical fixture tree in {}: {err}", dir.display()))
+    {
+        let entry = entry.unwrap_or_else(|err| {
+            panic!("read canonical fixture entry in {}: {err}", dir.display())
+        });
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name.eq_ignore_ascii_case("thumbs.db") {
+            continue;
+        }
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "strip canonical fixture prefix from {} against {}: {err}",
+                    path.display(),
+                    root.display()
+                )
+            })
+            .to_string_lossy()
+            .replace('\\', "/");
+        if path.is_dir() {
+            dirs.push(rel.clone());
+            collect_fixture_tree_entries(&path, root, files, dirs);
+        } else {
+            files.push(rel);
+        }
+    }
+}
+
+fn assert_canonical_project_root_fixture_clean(context: &str) {
+    let root = canonical_project_root_fixture();
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
+    collect_fixture_tree_entries(&root, &root, &mut files, &mut dirs);
+    files.sort();
+    dirs.sort();
+    assert_eq!(
+        files,
+        vec!["semantic.toml".to_string(), "src/main.sm".to_string(),],
+        "{context} fixture tree contained unexpected files: {:?}",
+        files
+    );
+    assert_eq!(
+        dirs,
+        vec!["src".to_string()],
+        "{context} fixture tree contained unexpected directories: {:?}",
+        dirs
+    );
+}
+
 fn read_fixture(rel: &str) -> String {
     std::fs::read_to_string(fixture_path(rel))
         .unwrap_or_else(|err| panic!("read fixture {rel}: {err}"))
@@ -2825,6 +2884,34 @@ fn pcc9_project_root_smoke_fixture_accepts_admitted_surface() {
         "smc disasm for canonical project-root artifact must be deterministic"
     );
     assert_no_semcode_artifacts(&root, "canonical project-root smoke fixture after checks");
+
+    let _ = std::fs::remove_dir_all(&artifacts_dir);
+}
+
+#[test]
+fn pcc9_project_root_smoke_fixture_remains_source_only_after_compile() {
+    let root = canonical_project_root_fixture();
+    assert_canonical_project_root_fixture_clean("canonical project-root fixture before compile");
+
+    let artifacts_dir = mk_temp_dir("pcc9_project_root_smoke_fixture_cleanliness");
+    let out = cli_compile_project_root_to(
+        &root,
+        &artifacts_dir,
+        "out.smc",
+        "smc compile canonical project-root fixture to temp output",
+    );
+    assert!(
+        out.starts_with(&artifacts_dir),
+        "compile output should stay under temp artifact dir: {}",
+        out.display()
+    );
+    assert_eq!(
+        out.parent(),
+        Some(artifacts_dir.as_path()),
+        "compile output should be written directly into the temp artifact dir"
+    );
+
+    assert_canonical_project_root_fixture_clean("canonical project-root fixture after compile");
 
     let _ = std::fs::remove_dir_all(&artifacts_dir);
 }
