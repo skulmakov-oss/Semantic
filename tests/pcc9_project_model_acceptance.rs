@@ -3104,3 +3104,80 @@ fn pcc9_project_root_package_baseline_fixture_rejects_artifact_only_commands_on_
         "smc run-smc must reject package baseline project-root fixture input",
     );
 }
+
+#[test]
+fn pcc9_project_root_surface_inventory_guard() {
+    let fixture_roots = [
+        (
+            "semantic.toml canonical project-root fixture",
+            canonical_project_root_fixture(),
+            true,
+            false,
+        ),
+        (
+            "Semantic.package fallback project-root fixture",
+            package_baseline_project_root_fixture(),
+            false,
+            true,
+        ),
+    ];
+
+    let admitted_project_root_commands = [
+        "check",
+        "run",
+        "compile",
+        "dump-ast",
+        "dump-ir",
+        "dump-bytecode",
+        "hash-ast",
+        "hash-ir",
+        "hash-smc",
+    ];
+    let artifact_only_commands = ["disasm", "verify", "run-smc"];
+
+    assert_eq!(
+        admitted_project_root_commands,
+        [
+            "check",
+            "run",
+            "compile",
+            "dump-ast",
+            "dump-ir",
+            "dump-bytecode",
+            "hash-ast",
+            "hash-ir",
+            "hash-smc",
+        ],
+        "admitted project-root command surface changed unexpectedly",
+    );
+    assert_eq!(
+        artifact_only_commands,
+        ["disasm", "verify", "run-smc"],
+        "artifact-only command boundary changed unexpectedly",
+    );
+
+    for (label, root, has_semantic_toml, has_package_manifest) in fixture_roots {
+        assert!(
+            root.is_dir(),
+            "{label} root must exist as a directory: {}",
+            root.display()
+        );
+        assert_eq!(
+            root.join("semantic.toml").is_file(),
+            has_semantic_toml,
+            "{label} semantic.toml expectation failed at {}",
+            root.display()
+        );
+        assert_eq!(
+            root.join(PACKAGE_MANIFEST_FILE_NAME).is_file(),
+            has_package_manifest,
+            "{label} Semantic.package expectation failed at {}",
+            root.display()
+        );
+        assert!(
+            root.join("src").join("main.sm").is_file(),
+            "{label} must contain src/main.sm at {}",
+            root.display()
+        );
+    }
+}
