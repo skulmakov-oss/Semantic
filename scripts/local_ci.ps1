@@ -42,6 +42,8 @@ $TempRoot = if ($env:TEMP) {
 }
 
 $ManifestPath = Join-Path $TempRoot "semantic_v1_release_bundle_manifest.json"
+$ProjectRootSmokeFixture = Join-Path $RepoRoot "examples/qualification/pcc9_project_root_minimal"
+$ProjectRootSmokeTempDir = Join-Path $TempRoot "semantic_project_root_local_ci_smoke"
 $ExeSuffix = if ($IsWindows) { ".exe" } else { "" }
 $SmcBinary = Join-Path $RepoRoot "target/debug/smc$ExeSuffix"
 
@@ -71,6 +73,21 @@ Invoke-LocalCiStep "verify release bundle process" {
 
 Invoke-LocalCiStep "cargo build --bin smc --bin svm" {
     cargo build --bin smc --bin svm
+}
+
+Invoke-LocalCiStep "canonical project-root fixture smoke" {
+    if (Test-Path $ProjectRootSmokeTempDir) {
+        Remove-Item -Recurse -Force $ProjectRootSmokeTempDir
+    }
+    New-Item -ItemType Directory -Force -Path $ProjectRootSmokeTempDir | Out-Null
+
+    $ProjectRootSmokeOut = Join-Path $ProjectRootSmokeTempDir "out.smc"
+
+    & $SmcBinary check $ProjectRootSmokeFixture
+    & $SmcBinary run $ProjectRootSmokeFixture
+    & $SmcBinary compile $ProjectRootSmokeFixture -o $ProjectRootSmokeOut
+    & $SmcBinary verify $ProjectRootSmokeOut
+    & $SmcBinary run-smc $ProjectRootSmokeOut
 }
 
 Invoke-LocalCiStep "smc 7hell human smoke" {
