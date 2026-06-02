@@ -52,6 +52,7 @@ fn cli_run_project_root_ok(dir: &std::path::Path, context: &str) {
     cli_ok(vec!["run".to_string(), input], context);
 }
 
+// Shared output helpers keep the project-root acceptance matrix aligned across command families.
 fn cli_command_project_root_output(command: &str, dir: &std::path::Path, context: &str) -> String {
     let input = normalize_path(dir);
     cli_stdout(vec![command.to_string(), input], context)
