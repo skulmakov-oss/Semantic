@@ -24,6 +24,12 @@ fn canonical_project_root_fixture() -> PathBuf {
     ))
 }
 
+fn canonical_package_baseline_fixture() -> PathBuf {
+    PathBuf::from(repo_path(
+        "examples/qualification/pcc9_project_root_package_baseline",
+    ))
+}
+
 fn collect_fixture_tree_entries(
     dir: &std::path::Path,
     root: &std::path::Path,
@@ -62,8 +68,12 @@ fn collect_fixture_tree_entries(
     }
 }
 
-fn assert_canonical_project_root_fixture_clean(context: &str) {
-    let root = canonical_project_root_fixture();
+fn assert_fixture_tree_contents(
+    root: &std::path::Path,
+    expected_files: &[&str],
+    expected_dirs: &[&str],
+    context: &str,
+) {
     let mut files = Vec::new();
     let mut dirs = Vec::new();
     collect_fixture_tree_entries(&root, &root, &mut files, &mut dirs);
@@ -71,15 +81,36 @@ fn assert_canonical_project_root_fixture_clean(context: &str) {
     dirs.sort();
     assert_eq!(
         files,
-        vec!["semantic.toml".to_string(), "src/main.sm".to_string(),],
+        expected_files
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect::<Vec<_>>(),
         "{context} fixture tree contained unexpected files: {:?}",
         files
     );
     assert_eq!(
         dirs,
-        vec!["src".to_string()],
+        expected_dirs
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect::<Vec<_>>(),
         "{context} fixture tree contained unexpected directories: {:?}",
         dirs
+    );
+}
+
+fn assert_canonical_project_root_fixture_clean(context: &str) {
+    let root = canonical_project_root_fixture();
+    assert_fixture_tree_contents(&root, &["semantic.toml", "src/main.sm"], &["src"], context);
+}
+
+fn assert_canonical_package_baseline_fixture_clean(context: &str) {
+    let root = canonical_package_baseline_fixture();
+    assert_fixture_tree_contents(
+        &root,
+        &["Semantic.package", "src/main.sm"],
+        &["src"],
+        context,
     );
 }
 
@@ -2933,5 +2964,115 @@ fn pcc9_project_root_smoke_fixture_rejects_artifact_only_commands_on_project_roo
         "run-smc",
         &root,
         "smc run-smc must reject canonical project-root fixture input",
+    );
+}
+
+#[test]
+fn pcc9_project_root_package_baseline_fixture_accepts_admitted_surface() {
+    let root = canonical_package_baseline_fixture();
+    assert_canonical_package_baseline_fixture_clean(
+        "canonical package-baseline project-root fixture",
+    );
+
+    cli_check_project_root_ok(&root, "smc check for canonical package-baseline fixture");
+    cli_run_project_root_ok(&root, "smc run for canonical package-baseline fixture");
+
+    let ast = cli_dump_ast_ok(&root, "smc dump-ast for canonical package-baseline fixture");
+    assert!(
+        ast.contains("main"),
+        "dump-ast output should mention main: {ast}"
+    );
+    let ir = cli_dump_ir_ok(&root, "smc dump-ir for canonical package-baseline fixture");
+    assert!(
+        ir.contains("main"),
+        "dump-ir output should mention main: {ir}"
+    );
+    let bytecode = cli_dump_bytecode_ok(
+        &root,
+        "smc dump-bytecode for canonical package-baseline fixture",
+    );
+    assert!(
+        bytecode.contains("0000:"),
+        "dump-bytecode output should contain offset 0000: {bytecode}"
+    );
+
+    let ast_hash = cli_hash_ast_project_root_output(
+        &root,
+        "smc hash-ast for canonical package-baseline fixture",
+    );
+    assert_eq!(
+        ast_hash,
+        cli_hash_ast_project_root_output(
+            &root,
+            "smc hash-ast for canonical package-baseline fixture second run"
+        ),
+        "hash-ast must be deterministic across repeated runs"
+    );
+    let ir_hash = cli_hash_ir_project_root_output(
+        &root,
+        "smc hash-ir for canonical package-baseline fixture",
+    );
+    assert_eq!(
+        ir_hash,
+        cli_hash_ir_project_root_output(
+            &root,
+            "smc hash-ir for canonical package-baseline fixture second run"
+        ),
+        "hash-ir must be deterministic across repeated runs"
+    );
+    let smc_hash = cli_hash_smc_project_root_output(
+        &root,
+        "smc hash-smc for canonical package-baseline fixture",
+    );
+    assert_eq!(
+        smc_hash,
+        cli_hash_smc_project_root_output(
+            &root,
+            "smc hash-smc for canonical package-baseline fixture second run"
+        ),
+        "hash-smc must be deterministic across repeated runs"
+    );
+
+    let artifacts_dir = mk_temp_dir("pcc9_project_root_package_baseline_fixture_artifacts");
+    let out = cli_compile_project_root_to(
+        &root,
+        &artifacts_dir,
+        "out.smc",
+        "smc compile canonical package-baseline fixture to temp output",
+    );
+    assert!(
+        out.starts_with(&artifacts_dir),
+        "compile output should stay under temp artifact dir: {}",
+        out.display()
+    );
+    assert_eq!(
+        out.parent(),
+        Some(artifacts_dir.as_path()),
+        "compile output should be written directly into the temp artifact dir"
+    );
+    assert_canonical_package_baseline_fixture_clean(
+        "canonical package-baseline fixture after compile",
+    );
+
+    let _ = std::fs::remove_dir_all(&artifacts_dir);
+}
+
+#[test]
+fn pcc9_project_root_package_baseline_fixture_rejects_artifact_only_commands_on_project_root() {
+    let root = canonical_package_baseline_fixture();
+    assert_artifact_only_command_rejects_project_root_input(
+        "disasm",
+        &root,
+        "smc disasm must reject canonical package-baseline fixture input",
+    );
+    assert_artifact_only_command_rejects_project_root_input(
+        "verify",
+        &root,
+        "smc verify must reject canonical package-baseline fixture input",
+    );
+    assert_artifact_only_command_rejects_project_root_input(
+        "run-smc",
+        &root,
+        "smc run-smc must reject canonical package-baseline fixture input",
     );
 }
