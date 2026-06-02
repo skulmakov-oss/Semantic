@@ -18,6 +18,12 @@ fn fixture_path(rel: &str) -> String {
     repo_path(&format!("tests/fixtures/pcc9_project_model/{rel}"))
 }
 
+fn canonical_project_root_fixture() -> PathBuf {
+    PathBuf::from(repo_path(
+        "examples/qualification/pcc9_project_root_minimal",
+    ))
+}
+
 fn read_fixture(rel: &str) -> String {
     std::fs::read_to_string(fixture_path(rel))
         .unwrap_or_else(|err| panic!("read fixture {rel}: {err}"))
@@ -25,21 +31,6 @@ fn read_fixture(rel: &str) -> String {
 
 fn cli_ok(args: Vec<String>, context: &str) {
     smc_cli::run(args).unwrap_or_else(|err| panic!("{context} failed: {err}"));
-}
-
-fn cli_stdout(args: Vec<String>, context: &str) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
-        .args(args)
-        .output()
-        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
-    assert!(
-        output.status.success(),
-        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code(),
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).to_string()
 }
 
 fn cli_output(
@@ -64,6 +55,21 @@ fn cli_command_output(
     context: &str,
 ) -> std::process::Output {
     cli_output(vec![command.to_string(), input.to_string()], cwd, context)
+}
+
+fn cli_stdout(args: Vec<String>, context: &str) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_smc"))
+        .args(args)
+        .output()
+        .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
+    assert!(
+        output.status.success(),
+        "{context} failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).to_string()
 }
 
 fn cli_check_project_root_ok(dir: &std::path::Path, context: &str) {
@@ -169,6 +175,23 @@ fn cli_compile_project_root_ok(dir: &std::path::Path, out_name: &str, context: &
         vec!["run-smc".to_string(), out_arg],
         &format!("{context} run-smc failed"),
     );
+    out
+}
+
+fn cli_compile_project_root_to(
+    input_dir: &std::path::Path,
+    output_dir: &std::path::Path,
+    out_name: &str,
+    context: &str,
+) -> PathBuf {
+    let input = normalize_path(input_dir);
+    let out = output_dir.join(out_name);
+    let out_arg = normalize_path(&out);
+    cli_ok(
+        vec!["compile".to_string(), input, "-o".to_string(), out_arg],
+        context,
+    );
+    assert!(out.is_file(), "{context} did not write requested output");
     out
 }
 
@@ -2713,4 +2736,115 @@ fn pcc9_dump_bytecode_path_escape_fails_without_fallback() {
     assert!(!err.is_empty(), "expected error output");
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_project_root_smoke_fixture_accepts_admitted_surface() {
+    let root = canonical_project_root_fixture();
+    assert_no_semcode_artifacts(&root, "canonical project-root smoke fixture");
+
+    cli_check_project_root_ok(&root, "smc check for canonical project-root fixture");
+    cli_run_project_root_ok(&root, "smc run for canonical project-root fixture");
+
+    let ast = cli_dump_ast_ok(&root, "smc dump-ast for canonical project-root fixture");
+    assert!(
+        ast.contains("main"),
+        "dump-ast output should mention main: {ast}"
+    );
+    let ir = cli_dump_ir_ok(&root, "smc dump-ir for canonical project-root fixture");
+    assert!(
+        ir.contains("main"),
+        "dump-ir output should mention main: {ir}"
+    );
+    let bytecode = cli_dump_bytecode_ok(
+        &root,
+        "smc dump-bytecode for canonical project-root fixture",
+    );
+    assert!(
+        bytecode.contains("0000:"),
+        "dump-bytecode output should contain offset 0000: {bytecode}"
+    );
+
+    let ast_hash =
+        cli_hash_ast_project_root_output(&root, "smc hash-ast for canonical project-root fixture");
+    assert_eq!(
+        ast_hash,
+        cli_hash_ast_project_root_output(
+            &root,
+            "smc hash-ast for canonical project-root fixture second run"
+        ),
+        "hash-ast must be deterministic across repeated runs"
+    );
+    let ir_hash =
+        cli_hash_ir_project_root_output(&root, "smc hash-ir for canonical project-root fixture");
+    assert_eq!(
+        ir_hash,
+        cli_hash_ir_project_root_output(
+            &root,
+            "smc hash-ir for canonical project-root fixture second run"
+        ),
+        "hash-ir must be deterministic across repeated runs"
+    );
+    let smc_hash =
+        cli_hash_smc_project_root_output(&root, "smc hash-smc for canonical project-root fixture");
+    assert_eq!(
+        smc_hash,
+        cli_hash_smc_project_root_output(
+            &root,
+            "smc hash-smc for canonical project-root fixture second run"
+        ),
+        "hash-smc must be deterministic across repeated runs"
+    );
+
+    let artifacts_dir = mk_temp_dir("pcc9_project_root_smoke_fixture_artifacts");
+    let out = cli_compile_project_root_to(
+        &root,
+        &artifacts_dir,
+        "out.smc",
+        "smc compile canonical project-root fixture to temp output",
+    );
+    cli_ok(
+        vec!["verify".to_string(), normalize_path(&out)],
+        "smc verify for canonical project-root artifact",
+    );
+    cli_ok(
+        vec!["run-smc".to_string(), normalize_path(&out)],
+        "smc run-smc for canonical project-root artifact",
+    );
+    let disasm = cli_disasm_artifact_output(&out, "smc disasm for canonical project-root artifact");
+    assert!(
+        !disasm.trim().is_empty(),
+        "smc disasm for canonical project-root artifact returned empty output"
+    );
+    assert_eq!(
+        disasm,
+        cli_disasm_artifact_output(
+            &out,
+            "smc disasm for canonical project-root artifact second run"
+        ),
+        "smc disasm for canonical project-root artifact must be deterministic"
+    );
+    assert_no_semcode_artifacts(&root, "canonical project-root smoke fixture after checks");
+
+    let _ = std::fs::remove_dir_all(&artifacts_dir);
+}
+
+#[test]
+fn pcc9_project_root_smoke_fixture_rejects_artifact_only_commands_on_project_root() {
+    let root = canonical_project_root_fixture();
+    assert_artifact_only_command_rejects_project_root_input(
+        "disasm",
+        &root,
+        "smc disasm must reject canonical project-root fixture input",
+    );
+    assert_artifact_only_command_rejects_project_root_input(
+        "verify",
+        &root,
+        "smc verify must reject canonical project-root fixture input",
+    );
+    assert_artifact_only_command_rejects_project_root_input(
+        "run-smc",
+        &root,
+        "smc run-smc must reject canonical project-root fixture input",
+    );
 }
