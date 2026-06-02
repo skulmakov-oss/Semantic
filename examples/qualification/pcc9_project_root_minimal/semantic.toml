@@ -1,0 +1,5 @@
+[package]
+name = "pcc9_project_root_minimal"
+
+[project]
+entry = "src/main.sm"
