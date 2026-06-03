@@ -52,7 +52,7 @@ fn check_run_compile_verify(rel: &str) {
         &format!("smc compile for {input}"),
     );
     cli_ok(
-        vec!["verify".to_string(), out_arg],
+        vec!["verify".to_string(), out_arg.clone()],
         &format!("smc verify for {input}"),
     );
 
