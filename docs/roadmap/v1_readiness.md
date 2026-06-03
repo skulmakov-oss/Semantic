@@ -74,6 +74,24 @@ It is not enough for:
 
 - `public release`
 
+## Application Completeness Benchmark Contour
+
+The completed Application-Completeness evidence supports a practical-programming contour documented in:
+
+- `reports/application_completeness_benchmark_verdict.md`
+
+This contour is **landed and benchmark-qualified on main, not yet promoted to published stable or Gate-1 qualified contour**.
+
+The benchmark-qualified contour includes:
+
+- same-family `i32` relational operators and arithmetic (`+`, `-`, `*`, `/`, `%`)
+- mutable locals (`let mut` + reassignments) and loop control exits (`while`, `loop`, `break`, `continue`)
+- built-in `Sequence(T)` persistent utilities (`len`, `push`, `pop`, `prepend`, `contains`)
+- persistent functional `Map(K, V)` lookup tables
+- deterministic seeded PRNG (xorshift64)
+- narrow stdout observation (`print(text)`) under capability and audit boundaries
+- bounded project-root CLI baseline (`semantic.toml` entrypoint resolution)
+
 ## Landed On `main`, Not Yet Promised
 
 Current `main` contains widened surfaces beyond both:

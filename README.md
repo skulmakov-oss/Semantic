@@ -127,33 +127,23 @@ The stable public contract lives in `docs/spec/*` and the release/status languag
 
 ### Current active focus
 
-The active implementation focus is **M-Hello**:
+The current active hardening focus is **project-root CLI/status reconciliation and application-completeness evidence alignment**.
 
 ```text
-M-Hello — admit minimal verified Hello World observation surface
-M-Hello — cli: render controlled observation envelope
-```
-
-This track is deliberately narrow. It is not adding general stdout or broad I/O. It is building one verified observation path:
-
-```text
-source
+source (file / project-root)
   -> check
   -> compile
   -> verify
   -> run
-  -> controlled text observation
+  -> controlled observation / output
 ```
 
-Recent M-Hello work has moved the observation path through the required lower layers:
+Recent work has moved the CLI pipeline to support a bounded project-root baseline:
 
-- VM controlled observation event seam;
-- verifier-side controlled observation admission seam;
-- explicit `ControlledObservationSink` capability gate;
-- controlled observation audit policy;
-- CLI rendering envelope for `smc run` and `smc run-smc`.
-
-The current M-Hello track keeps source-run and verified-artifact routes separate and renders only after verifier admission, VM collection, capability allow, and audit decision.
+- Manifest loading and resolution of `semantic.toml` entrypoints.
+- Root-relative execution and analysis routes.
+- Deterministic compiler artifact chains and stale artifact protections.
+- Integrated local CI validation gates.
 
 ### Current guarantees / design posture
 

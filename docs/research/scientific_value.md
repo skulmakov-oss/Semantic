@@ -169,12 +169,12 @@ Research value:
 
 ### 4.6 Audit-oriented controlled observation
 
-The active M-Hello work is a deliberately narrow controlled text observation track.
+The controlled observation envelope and narrow print(text) path have landed:
 
 ```text
 verified SemCode
-  -> VM controlled observation event
-  -> ControlledObservationSink capability gate
+  -> VM controlled observation event (print / to_text)
+  -> ControlledObservationSink capability gate (CAP_STDOUT)
   -> audit decision
   -> CLI rendering envelope
 ```

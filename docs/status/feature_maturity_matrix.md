@@ -50,48 +50,39 @@ landed on main != published stable
 | Feature | Maturity level | Confidence | Evidence type | Status | Notes |
 |---|---:|---|---|---|---|
 | Native quad logic | D6 | High | Docs claim, VM/spec evidence | Stable release surface | `N / F / T / S` is a native semantic value domain. |
-| i32 relational operators | D7 | High | Roadmap note, test evidence | Qualified limited release | Covers relational/equality-style operators, not general arithmetic. |
-| Text equality | D7 | High | Roadmap note, test evidence | Qualified limited release | Same-family text equality only; does not imply formatting or concatenation. |
-| Sequence indexing and iteration | D7 | High | Roadmap note, test evidence | Qualified limited release | Qualified for the benchmark-positive baseline. |
-| First-class immutable closures | D7 | High | Roadmap note, test evidence | Qualified limited release | Immutable closure path only; mutable capture semantics are separate. |
+| i32 relational operators | D7 | High | Test evidence | Qualified limited release | Covers relational/equality-style operators (`==`, `!=`, `<`, `<=`, `>`, `=>`). |
+| same-family i32 arithmetic | D7 | High | Test evidence | Qualified application-completeness contour | Covers `+`, `-`, `*`, `/`, `%` and unary `-`. Not published stable. |
+| Mutable locals & reassignment | D7 | High | Test evidence | Qualified application-completeness contour | Supports `let mut` declarations and plain reassignments. Not published stable. |
+| Loops and control exits | D7 | High | Test evidence | Qualified application-completeness contour | Supports `while` loops, statement `loop`, and exits `break`/`continue`. Not published stable. |
+| Text concatenation and to_text | D7 | High | Test evidence | Qualified application-completeness contour | Supports `text + text` and explicit `to_text(scalar)`. Not published stable. |
+| Sequence indexing and iteration | D7 | High | Test evidence | Qualified limited release | Qualified for sequence iteration and indexing. |
+| First-class immutable closures | D7 | High | Test evidence | Qualified limited release | Immutable closure path only; mutable capture semantics are separate. |
+| Map surface | D7 | High | Test evidence | Qualified application-completeness contour | Supports `Map(K, V)` functional get, set, contains. Not published stable. |
+| Deterministic seeded PRNG | D7 | High | Test evidence | Qualified application-completeness contour | Deterministic seeded PRNG (xorshift64) via `random_seed` / `random_next_i32`. Not published stable. |
+| Controlled observation (stdout) | D7 | High | Test evidence | Qualified application-completeness contour | Narrow `print(text)` via `CAP_STDOUT` capability. Not published stable. |
+| Bounded project-root CLI baseline | D7 | High | Test evidence | Qualified application-completeness contour | Supports resolving and running routes from project root. Excludes registry, multi-package resolution, package manager semantics. Not published stable. |
 | Runtime ownership OWN0 | D6 | High | Docs claim, VM/spec evidence | Stable release surface, frozen | Tuple and direct record-field access paths only. |
-| Function contracts: `requires` / `ensures` | D5 | Medium | Docs claim, verifier spec | Implemented but unqualified | Should be split into syntax, typechecking, lowering, verifier integration, and runtime behavior in future status updates. |
-| PROMETHEUS ABI / host boundary | D6 | Medium | Docs claim, CLI evidence | Implemented but unqualified | Should be split into ABI, capability policy, audit, VM host bridge, and real effects. |
-| Units-of-measure surface | D2 | High | Docs claim, crate/status evidence | Experimental | Type/semantic surface only unless later evidence proves deeper pipeline support. |
-| Integer arithmetic | D0/D1 | Medium | Roadmap blocker | Roadmap blocker | Parser evidence should be confirmed before claiming D1. Distinct from i32 relational operators. |
-| Mutable locals / reassignment | D0/D1 | Medium | Roadmap blocker | Roadmap blocker | Parser evidence should be confirmed before claiming D1. Interaction with active borrow paths must be specified. |
-| Loops and control exits | D0/D1 | Medium | Roadmap blocker | Roadmap blocker | Parser evidence should be confirmed before claiming D1. Requires bounded execution / quota discipline. |
-| Map surface | D0 | High | Roadmap note | Roadmap | Not current stable behavior. |
-| Deterministic seeded PRNG | D0 | High | Roadmap note | Roadmap | Must remain deterministic and replay-compatible when introduced. |
-| Text concatenation / formatting | D0 | High | Roadmap note | Roadmap | Not implied by text equality. |
-| General stdout | D0 | High | Roadmap / non-goal note | Roadmap | Narrow controlled observation work must not be read as general stdout. |
+| Function contracts: `requires` / `ensures` | D5 | Medium | Docs claim, verifier spec | Implemented but unqualified | Requires syntax, typecheck, lowering, verifier and runtime qualification. |
+| PROMETHEUS ABI / host boundary | D6 | Medium | Docs claim, CLI evidence | Implemented but unqualified | Needs qualification of ABI, capability policy, audit, and host bridge. |
+| Units-of-measure surface | D2 | High | Docs claim, crate/status evidence | Experimental | Type/semantic surface only. |
 | ADT payload paths for ownership | N/A | High | Runtime ownership docs | Out of scope | Explicitly excluded from the current OWN0 slice. |
 
 ## Important distinctions
 
-### i32 relational operators are not general integer arithmetic
+### same-family i32 arithmetic is qualified
 
-The current status distinguishes between:
+The current status includes qualified support for:
 
 ```text
-i32 relational operators:
-  ==, !=, <, <=, >, >=
-
-integer arithmetic:
-  +, -, *, /, %, overflow behavior, checked arithmetic contract
+same-family i32 arithmetic:
+  +, -, *, /, %, unary -
 ```
 
-A relational operator being qualified does not imply that the full arithmetic
-surface is qualified.
+This is distinct from multi-family numeric compatibility or implicit float conversions.
 
-### Text equality is not text formatting
+### Text concatenation is not general formatting
 
-Text equality being qualified does not imply support for:
-
-- text concatenation;
-- formatted printing;
-- implicit scalar-to-text conversion;
-- general stdout.
+Text concatenation and explicit `to_text` are qualified, but general template formatting and implicit conversion of complex structures are roadmap/non-goals.
 
 ### Controlled observation is not general stdout
 
@@ -105,7 +96,7 @@ verified SemCode
   -> CLI rendering envelope
 ```
 
-It must not be read as broad I/O support.
+Narrow `print(text)` is qualified under the `CAP_STDOUT` capability, but general file I/O, command-line arguments (argv), or unconstrained stdout remain out of scope.
 
 ### OWN0 is intentionally narrow
 
