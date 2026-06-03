@@ -13,49 +13,51 @@ Semantic is a deterministic verified execution platform for source-to-SemCode wo
 | Area | Current state |
 |---|---|
 | Workspace structure | Multi-crate Rust workspace with separated frontend, IR, emission, verifier, VM, runtime core, CLI, PROMETHEUS boundary, UI/application, docs, tests, and compatibility perimeter. |
-| Source pipeline | `.sm` source can flow through check / compile-oriented tooling routes. |
+| Source pipeline | `.sm` source and directory project roots can flow through check / compile-oriented tooling routes. |
 | SemCode artifact model | SemCode exists as the executable artifact boundary and is documented as a versioned contract surface. |
 | Verifier-first posture | Public `.smc` execution is treated as verifier-first; verifier admission is a first-class architecture boundary. |
-| Deterministic VM | VM execution and disassembly are separated from source construction and CLI orchestration. |
+| Deterministic VM | VM execution and disassembly are separated from source construction and CLI orchestration. Includes deterministic seeded PRNG (xorshift64). |
 | Quad logic | `N / F / T / S` are treated as native semantic states rather than ad-hoc comments or external flags. |
+| Imperative Core | Landed same-family `i32` arithmetic (`+`, `-`, `*`, `/`, `%`), mutable locals (`let mut` + reassignment), and loop control exits (`while`, `loop`, `break`, `continue`). |
+| Data Collections | Persistent `Sequence(T)` with utility functions (`len`, `push`, `pop`, `prepend`, `contains`) and persistent `Map(K, V)` persistent lookups. |
 | Runtime ownership slice | Tuple and direct record-field access paths are documented as the current narrow/frozen ownership contract. |
-| PROMETHEUS boundary | Capability, ABI, gate, runtime, state, rule, and audit crates exist as a controlled host-boundary layer. |
-| CLI tooling | `smc` and `svm` expose check, compile, verify, run, run-smc, disassembly, inspection, hashes, snapshots, diagnostics, and related routes. |
-| Testing discipline | Contract, ownership, M-Hello, package-focused, and workspace-level test routes are documented. |
+| PROMETHEUS boundary | Capability, ABI, gate, runtime, state, rule, and audit crates exist as a controlled host-boundary layer. Narrow `print(text)` observation enabled via `CAP_STDOUT`. |
+| CLI tooling | `smc` and `svm` expose check, compile, verify, run, run-smc, disassembly, inspection, hashes (ast), snapshots, diagnostics, and related routes for both single files and project-roots. |
+| Testing discipline | Contract, ownership, M-Hello, package-focused, project-root acceptance tests, and workspace-level test routes are documented. |
 | no_std posture | A core-library `no_std` smoke check exists, scoped explicitly away from CLI/UI/full-workspace claims. |
 | Licensing | Repository licensing is aligned around Apache-2.0 with separate `NOTICE` attribution / project-scope notes. |
 
 ## Active development focus
 
-The active public focus is **M-Hello**: a narrow, verified, controlled text observation path.
+The current active hardening focus is **project-root CLI/status reconciliation and application-completeness evidence alignment**.
 
 ```text
-source
+source (file / project-root)
   -> check
   -> compile
   -> verify
   -> run
-  -> controlled text observation
+  -> output / observation
 ```
 
-This is deliberately not general stdout. The intended route is:
+The CLI pipeline has been updated to resolve entrypoints and execute routes directly from the project root under a bounded project-root baseline:
 
 ```text
-verified SemCode
-  -> VM controlled observation event
-  -> ControlledObservationSink capability gate
-  -> audit decision
-  -> CLI rendering envelope
+smc check <project-root>
+smc run <project-root>
+smc compile <project-root>
+smc dump-ast <project-root>
+smc dump-ir <project-root>
+smc dump-bytecode <project-root>
+smc hash-ast <project-root>
 ```
 
 ## Explicit non-claims
 
 Current public documentation does not claim:
 
-- general stdout;
-- broad `print` / formatting support;
-- implicit scalar-to-text conversion;
-- file / stdin / network I/O;
+- broad standard library or arbitrary host effects;
+- general file / stdin / network I/O;
 - broad host ABI widening;
 - UI-owned execution semantics;
 - full-workspace `no_std`;
@@ -66,8 +68,8 @@ Current public documentation does not claim:
 | Phase | Goal | Boundary |
 |---|---|---|
 | MVP / contract core | Keep the source -> SemCode -> verifier -> VM path stable, testable, and explainable. | No broad I/O or unstable feature promotion. |
-| Controlled observation | Finish M-Hello as a narrow verified observation path with capability and audit boundaries. | Controlled observation does not become general stdout by accident. |
-| Production hardening | Harden specs, tests, diagnostics, release artifacts, runtime contracts, and public status labels. | No public claim widens without spec + tests + verifier/VM/CLI coverage. |
+| Application Completeness | Benchmark-class execution (Q-learning headless Snake) with PRNG, Maps, same-family arithmetic, loops, and narrow stdout observation. | Controlled observation does not become general stdout by accident. |
+| Project root model | Bounded project-root CLI baseline (`semantic.toml` entrypoint resolution) and local validation workflows. Excludes full package ecosystem, registry, multi-package resolution, and package manager semantics. | Keep project manifest boundaries strict and failure diagnostics deterministic. |
 
 ## Custody and visibility note
 
@@ -84,14 +86,15 @@ A first-time reader should not treat the repository as a finished general-purpos
 The practical reading order is:
 
 1. `README.md`
-2. `docs/roadmap/public_status_model.md`
-3. `docs/spec/index.md`
-4. `docs/spec/semcode.md`
-5. `docs/spec/verifier.md`
-6. `docs/spec/vm.md`
-7. `docs/spec/runtime_ownership.md`
-8. `docs/language/semantic_hello_*`
-9. `docs/roadmap/private_custody_mode.md`, when repository custody / visibility policy is relevant
+2. `docs/status/feature_maturity_matrix.md`
+3. `docs/roadmap/public_status_model.md`
+4. `docs/spec/index.md`
+5. `docs/spec/semcode.md`
+6. `docs/spec/verifier.md`
+7. `docs/spec/vm.md`
+8. `docs/spec/runtime_ownership.md`
+9. `docs/language/semantic_hello_*`
+10. `docs/roadmap/private_custody_mode.md`, when repository custody / visibility policy is relevant
 
 ## Public communication rule
 
