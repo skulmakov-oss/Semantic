@@ -1226,7 +1226,7 @@ manifest_dir .
     }
 
     #[test]
-    fn parse_semantic_toml_manifest_accepts_minimal_project_surface() {
+    fn parse_semantic_toml_manifest_preserves_default_entry_and_manifest_shape() {
         let manifest = parse_semantic_toml_manifest(
             Path::new("semantic.toml"),
             r#"
@@ -1242,6 +1242,47 @@ entry = "src/main.sm"
         assert_eq!(manifest.entry, "src/main.sm");
         assert_eq!(manifest.manifest.package.root.manifest_dir, ".");
         assert_eq!(manifest.manifest.package.root.module_root, "src");
+        assert!(manifest.manifest.dependencies.is_empty());
+    }
+
+    #[test]
+    fn parse_semantic_toml_manifest_preserves_explicit_nested_entry_shape() {
+        let manifest = parse_semantic_toml_manifest(
+            Path::new("semantic.toml"),
+            r#"
+[package]
+name = "app"
+
+[project]
+entry = "examples/main.sm"
+"#,
+        )
+        .expect("parse semantic.toml with explicit nested entry");
+        assert_eq!(manifest.manifest.package.name, "app");
+        assert_eq!(manifest.entry, "examples/main.sm");
+        assert_eq!(manifest.manifest.package.root.manifest_dir, ".");
+        assert_eq!(manifest.manifest.package.root.module_root, "examples");
+        assert!(manifest.manifest.dependencies.is_empty());
+    }
+
+    #[test]
+    fn parse_semantic_toml_manifest_preserves_root_level_entry_shape() {
+        let manifest = parse_semantic_toml_manifest(
+            Path::new("semantic.toml"),
+            r#"
+[package]
+name = "app"
+
+[project]
+entry = "main.sm"
+"#,
+        )
+        .expect("parse semantic.toml with root-level entry");
+        assert_eq!(manifest.manifest.package.name, "app");
+        assert_eq!(manifest.entry, "main.sm");
+        assert_eq!(manifest.manifest.package.root.manifest_dir, ".");
+        assert_eq!(manifest.manifest.package.root.module_root, ".");
+        assert!(manifest.manifest.dependencies.is_empty());
     }
 
     #[test]
@@ -1256,7 +1297,44 @@ name = "app"
         .expect("parse semantic.toml with default entry");
         assert_eq!(manifest.entry, "src/main.sm");
         assert_eq!(manifest.manifest.package.root.module_root, "src");
+        assert_eq!(manifest.manifest.package.name, "app");
+        assert_eq!(manifest.manifest.package.root.manifest_dir, ".");
+        assert!(manifest.manifest.dependencies.is_empty());
 
+        let err = parse_semantic_toml_manifest(
+            Path::new("semantic.toml"),
+            r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+        )
+        .expect_err("must reject entry escape");
+        assert_eq!(
+            err.code,
+            SemanticTomlManifestErrorCode::ProjectEntryMustNotEscapeRoot
+        );
+        assert!(err.message.contains("must not escape the project root"));
+    }
+
+    #[test]
+    fn parse_semantic_toml_manifest_rejects_empty_package_name() {
+        let err = parse_semantic_toml_manifest(
+            Path::new("semantic.toml"),
+            r#"
+[package]
+name = ""
+"#,
+        )
+        .expect_err("must reject empty package name");
+        assert_eq!(err.code, SemanticTomlManifestErrorCode::EmptyPackageName);
+        assert!(err.message.contains("empty [package].name"));
+    }
+
+    #[test]
+    fn parse_semantic_toml_manifest_rejects_path_escape_entry() {
         let err = parse_semantic_toml_manifest(
             Path::new("semantic.toml"),
             r#"
@@ -1356,7 +1434,7 @@ entry = ""
 name = "app"
 
 [project]
-entry = "/abs/main.sm"
+entry = "C:/abs/main.sm"
 "#,
                 SemanticTomlManifestErrorCode::ProjectEntryMustBeRelative,
                 "must be relative",
