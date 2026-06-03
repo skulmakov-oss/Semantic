@@ -785,39 +785,84 @@ struct ParsedSemanticTomlManifest {
     entry: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticTomlManifestErrorCode {
+    MalformedSectionHeader,
+    EntryOutsideSection,
+    UnsupportedSection,
+    UnsupportedPackageField,
+    UnsupportedProjectField,
+    MissingPackageName,
+    EmptyPackageName,
+    EmptyProjectEntry,
+    ProjectEntryMustBeRelative,
+    ProjectEntryMustNotEscapeRoot,
+    InvalidStringValue,
+    InvalidKeyValueEntry,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SemanticTomlManifestError {
+    code: SemanticTomlManifestErrorCode,
+    message: String,
+}
+
+impl fmt::Display for SemanticTomlManifestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+fn semantic_toml_error(
+    code: SemanticTomlManifestErrorCode,
+    message: impl Into<String>,
+) -> SemanticTomlManifestError {
+    SemanticTomlManifestError {
+        code,
+        message: message.into(),
+    }
+}
+
 fn parse_semantic_toml_manifest(
     manifest_path: &Path,
     source: &str,
-) -> Result<ParsedSemanticTomlManifest, String> {
+) -> Result<ParsedSemanticTomlManifest, SemanticTomlManifestError> {
     #[derive(Debug, Default)]
     struct ParsedSemanticTomlFields {
         package_name: Option<String>,
         project_entry: Option<String>,
     }
 
-    fn parse_toml_string(value: &str, line_no: usize, field: &str) -> Result<String, String> {
+    fn parse_toml_string(
+        value: &str,
+        line_no: usize,
+        field: &str,
+    ) -> Result<String, SemanticTomlManifestError> {
         let trimmed = value.trim();
         if trimmed.len() < 2 || !trimmed.starts_with('"') || !trimmed.ends_with('"') {
-            return Err(format!(
-                "line {}: {} must be a double-quoted string",
-                line_no, field
+            return Err(semantic_toml_error(
+                SemanticTomlManifestErrorCode::InvalidStringValue,
+                format!("line {}: {} must be a double-quoted string", line_no, field),
             ));
         }
         Ok(trimmed[1..trimmed.len() - 1].to_string())
     }
 
-    fn normalize_project_entry(entry: &str) -> Result<String, String> {
+    fn normalize_project_entry(entry: &str) -> Result<String, SemanticTomlManifestError> {
         let path = Path::new(entry);
         if path.is_absolute() {
-            return Err(format!("project entry '{}' must be relative", entry));
+            return Err(semantic_toml_error(
+                SemanticTomlManifestErrorCode::ProjectEntryMustBeRelative,
+                format!("project entry '{}' must be relative", entry),
+            ));
         }
         if path
             .components()
             .any(|component| matches!(component, std::path::Component::ParentDir))
         {
-            return Err(format!(
-                "project entry '{}' must not escape the project root",
-                entry
+            return Err(semantic_toml_error(
+                SemanticTomlManifestErrorCode::ProjectEntryMustNotEscapeRoot,
+                format!("project entry '{}' must not escape the project root", entry),
             ));
         }
         Ok(path.to_string_lossy().replace('\\', "/"))
@@ -834,14 +879,20 @@ fn parse_semantic_toml_manifest(
         }
         if line.starts_with('[') {
             if !line.ends_with(']') {
-                return Err(format!("line {}: malformed TOML section header", line_no));
+                return Err(semantic_toml_error(
+                    SemanticTomlManifestErrorCode::MalformedSectionHeader,
+                    format!("line {}: malformed TOML section header", line_no),
+                ));
             }
             section = Some(line[1..line.len() - 1].trim().to_string());
             continue;
         }
-        let (key, value) = line
-            .split_once('=')
-            .ok_or_else(|| format!("line {}: expected 'key = \"value\"' entry", line_no))?;
+        let (key, value) = line.split_once('=').ok_or_else(|| {
+            semantic_toml_error(
+                SemanticTomlManifestErrorCode::InvalidKeyValueEntry,
+                format!("line {}: expected 'key = \"value\"' entry", line_no),
+            )
+        })?;
         let key = key.trim();
         let value = value.trim();
         match section.as_deref() {
@@ -851,9 +902,12 @@ fn parse_semantic_toml_manifest(
                 }
                 "version" => {}
                 other => {
-                    return Err(format!(
-                        "line {}: unsupported semantic.toml package field '{}'",
-                        line_no, other
+                    return Err(semantic_toml_error(
+                        SemanticTomlManifestErrorCode::UnsupportedPackageField,
+                        format!(
+                            "line {}: unsupported semantic.toml package field '{}'",
+                            line_no, other
+                        ),
                     ));
                 }
             },
@@ -866,40 +920,64 @@ fn parse_semantic_toml_manifest(
                     )?)?);
                 }
                 other => {
-                    return Err(format!(
-                        "line {}: unsupported semantic.toml project field '{}'",
-                        line_no, other
+                    return Err(semantic_toml_error(
+                        SemanticTomlManifestErrorCode::UnsupportedProjectField,
+                        format!(
+                            "line {}: unsupported semantic.toml project field '{}'",
+                            line_no, other
+                        ),
                     ));
                 }
             },
             Some(other) => {
-                return Err(format!(
-                    "line {}: unsupported semantic.toml section '{}'",
-                    line_no, other
+                return Err(semantic_toml_error(
+                    SemanticTomlManifestErrorCode::UnsupportedSection,
+                    format!(
+                        "line {}: unsupported semantic.toml section '{}'",
+                        line_no, other
+                    ),
                 ));
             }
             None => {
-                return Err(format!(
-                    "line {}: semantic.toml entries must appear inside [package] or [project]",
-                    line_no
+                return Err(semantic_toml_error(
+                    SemanticTomlManifestErrorCode::EntryOutsideSection,
+                    format!(
+                        "line {}: semantic.toml entries must appear inside [package] or [project]",
+                        line_no
+                    ),
                 ));
             }
         }
     }
 
     let package_name = parsed.package_name.ok_or_else(|| {
-        format!(
-            "semantic.toml manifest '{}' is missing required [package].name",
-            manifest_path.display()
+        semantic_toml_error(
+            SemanticTomlManifestErrorCode::MissingPackageName,
+            format!(
+                "semantic.toml manifest '{}' is missing required [package].name",
+                manifest_path.display()
+            ),
         )
     })?;
+    if package_name.trim().is_empty() {
+        return Err(semantic_toml_error(
+            SemanticTomlManifestErrorCode::EmptyPackageName,
+            format!(
+                "semantic.toml manifest '{}' has empty [package].name",
+                manifest_path.display()
+            ),
+        ));
+    }
     let entry = parsed
         .project_entry
         .unwrap_or_else(|| "src/main.sm".to_string());
     if entry.trim().is_empty() {
-        return Err(format!(
-            "semantic.toml manifest '{}' has empty [project].entry",
-            manifest_path.display()
+        return Err(semantic_toml_error(
+            SemanticTomlManifestErrorCode::EmptyProjectEntry,
+            format!(
+                "semantic.toml manifest '{}' has empty [project].entry",
+                manifest_path.display()
+            ),
         ));
     }
     let entry_path = Path::new(&entry);
@@ -924,20 +1002,6 @@ fn parse_semantic_toml_manifest(
         },
         Vec::new(),
     );
-    validate_package_manifest_baseline(&manifest).map_err(|e| {
-        if e.code == PackageManifestValidationCode::EmptyPackageName {
-            format!(
-                "semantic.toml manifest '{}' has empty [package].name",
-                manifest_path.display()
-            )
-        } else {
-            format!(
-                "semantic.toml manifest '{}' is invalid: {}",
-                manifest_path.display(),
-                e
-            )
-        }
-    })?;
     Ok(ParsedSemanticTomlManifest { manifest, entry })
 }
 fn resolve_relative_import_path(base: &Path, spec: &str) -> PathBuf {
@@ -1204,7 +1268,138 @@ entry = "../escape.sm"
 "#,
         )
         .expect_err("must reject entry escape");
-        assert!(err.contains("must not escape the project root"));
+        assert_eq!(
+            err.code,
+            SemanticTomlManifestErrorCode::ProjectEntryMustNotEscapeRoot
+        );
+        assert!(err.message.contains("must not escape the project root"));
+    }
+
+    #[test]
+    fn parse_semantic_toml_manifest_reports_structured_error_codes() {
+        let cases: &[(&str, SemanticTomlManifestErrorCode, &str)] = &[
+            (
+                r#"
+[package
+name = "app"
+"#,
+                SemanticTomlManifestErrorCode::MalformedSectionHeader,
+                "malformed TOML section header",
+            ),
+            (
+                r#"
+name = "app"
+"#,
+                SemanticTomlManifestErrorCode::EntryOutsideSection,
+                "semantic.toml entries must appear inside [package] or [project]",
+            ),
+            (
+                r#"
+[package]
+name = "app"
+
+[tool]
+foo = "bar"
+"#,
+                SemanticTomlManifestErrorCode::UnsupportedSection,
+                "unsupported semantic.toml section 'tool'",
+            ),
+            (
+                r#"
+[package]
+name = "app"
+extra = "nope"
+"#,
+                SemanticTomlManifestErrorCode::UnsupportedPackageField,
+                "unsupported semantic.toml package field 'extra'",
+            ),
+            (
+                r#"
+[package]
+name = "app"
+
+[project]
+extra = "nope"
+"#,
+                SemanticTomlManifestErrorCode::UnsupportedProjectField,
+                "unsupported semantic.toml project field 'extra'",
+            ),
+            (
+                r#"
+[package]
+"#,
+                SemanticTomlManifestErrorCode::MissingPackageName,
+                "missing required [package].name",
+            ),
+            (
+                r#"
+[package]
+name = ""
+"#,
+                SemanticTomlManifestErrorCode::EmptyPackageName,
+                "has empty [package].name",
+            ),
+            (
+                r#"
+[package]
+name = "app"
+
+[project]
+entry = ""
+"#,
+                SemanticTomlManifestErrorCode::EmptyProjectEntry,
+                "has empty [project].entry",
+            ),
+            (
+                r#"
+[package]
+name = "app"
+
+[project]
+entry = "/abs/main.sm"
+"#,
+                SemanticTomlManifestErrorCode::ProjectEntryMustBeRelative,
+                "must be relative",
+            ),
+            (
+                r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+                SemanticTomlManifestErrorCode::ProjectEntryMustNotEscapeRoot,
+                "must not escape the project root",
+            ),
+            (
+                r#"
+[package]
+name = app
+"#,
+                SemanticTomlManifestErrorCode::InvalidStringValue,
+                "must be a double-quoted string",
+            ),
+            (
+                r#"
+[package]
+name "app"
+"#,
+                SemanticTomlManifestErrorCode::InvalidKeyValueEntry,
+                "expected 'key = \"value\"' entry",
+            ),
+        ];
+
+        for (source, code, needle) in cases {
+            let err = parse_semantic_toml_manifest(Path::new("semantic.toml"), source)
+                .expect_err("must reject");
+            assert_eq!(err.code, *code, "wrong code for:\n{source}");
+            assert!(
+                err.message.contains(needle),
+                "missing '{needle}' in error message: {}",
+                err.message
+            );
+        }
     }
 
     #[test]
