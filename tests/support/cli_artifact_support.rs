@@ -8,6 +8,12 @@ static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct SourceFixturePath(PathBuf);
 
 #[derive(Debug)]
+pub(crate) struct TempSourcePath {
+    root: PathBuf,
+    path: PathBuf,
+}
+
+#[derive(Debug)]
 pub(crate) struct SemCodeArtifactPath {
     root: PathBuf,
     path: PathBuf,
@@ -21,9 +27,31 @@ fn normalize_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+pub(crate) trait SourceInputPath {
+    fn cli_arg(&self) -> String;
+}
+
 impl SourceFixturePath {
     pub(crate) fn cli_arg(&self) -> String {
         normalize_path(&self.0)
+    }
+}
+
+impl TempSourcePath {
+    pub(crate) fn cli_arg(&self) -> String {
+        normalize_path(&self.path)
+    }
+}
+
+impl SourceInputPath for SourceFixturePath {
+    fn cli_arg(&self) -> String {
+        self.cli_arg()
+    }
+}
+
+impl SourceInputPath for TempSourcePath {
+    fn cli_arg(&self) -> String {
+        self.cli_arg()
     }
 }
 
@@ -47,8 +75,34 @@ impl Drop for SemCodeArtifactPath {
     }
 }
 
+impl Drop for TempSourcePath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
 pub(crate) fn source_fixture(path: impl Into<PathBuf>) -> SourceFixturePath {
     SourceFixturePath(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path.into()))
+}
+
+pub(crate) fn temp_source_file(scope: &str, fixture_name: &str, source: &str) -> TempSourcePath {
+    let root = std::env::temp_dir()
+        .join("semantic-tests")
+        .join(scope)
+        .join(format!(
+            "{}_{}_{}_{}",
+            fixture_name,
+            std::process::id(),
+            TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+    std::fs::create_dir_all(&root).expect("mkdir");
+    let path = root.join(fixture_name);
+    std::fs::write(&path, source).expect("write temp source");
+    TempSourcePath { root, path }
 }
 
 pub(crate) fn temp_semcode_artifact(scope: &str, fixture_name: &str) -> SemCodeArtifactPath {
@@ -72,22 +126,22 @@ pub(crate) fn temp_semcode_artifact(scope: &str, fixture_name: &str) -> SemCodeA
     }
 }
 
-pub(crate) fn check_source(source: &SourceFixturePath) {
+pub(crate) fn check_source(source: &impl SourceInputPath) {
     cli_ok(
         vec!["check".to_string(), source.cli_arg()],
-        "smc check for source fixture",
+        "smc check for source input",
     );
 }
 
-pub(crate) fn run_source(source: &SourceFixturePath) {
+pub(crate) fn run_source(source: &impl SourceInputPath) {
     cli_ok(
         vec!["run".to_string(), source.cli_arg()],
-        "smc run for source fixture",
+        "smc run for source input",
     );
 }
 
 pub(crate) fn compile_source_to_artifact(
-    source: &SourceFixturePath,
+    source: &impl SourceInputPath,
     artifact: &SemCodeArtifactPath,
 ) {
     std::fs::create_dir_all(
@@ -104,7 +158,7 @@ pub(crate) fn compile_source_to_artifact(
             "-o".to_string(),
             artifact.cli_arg(),
         ],
-        "smc compile for source fixture",
+        "smc compile for source input",
     );
 }
 

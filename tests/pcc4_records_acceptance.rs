@@ -1,60 +1,19 @@
-use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+#[path = "support/cli_artifact_support.rs"]
+mod cli_artifact_support;
 
-fn cli_ok(args: Vec<String>, context: &str) {
-    smc_cli::run(args).unwrap_or_else(|err| panic!("{context} failed: {err}"));
-}
-
-fn mk_temp_dir(prefix: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "{}_{}_{}",
-        prefix,
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("clock")
-            .as_nanos()
-    ));
-    std::fs::create_dir_all(&dir).expect("mkdir");
-    dir
-}
-
-fn write_fixture(dir: &std::path::Path, name: &str, source: &str) -> String {
-    let path = dir.join(name);
-    std::fs::write(&path, source).expect("write PCC-4 fixture");
-    path.to_string_lossy().replace('\\', "/")
-}
+use cli_artifact_support::{
+    check_source, compile_source_to_artifact, run_source, temp_semcode_artifact, temp_source_file,
+    verify_artifact,
+};
 
 fn check_run_compile_verify_source(name: &str, source: &str) {
-    let dir = mk_temp_dir("smc_pcc4_records_acceptance");
-    let input = write_fixture(&dir, name, source);
+    let source = temp_source_file("pcc4-records", name, source);
+    check_source(&source);
+    run_source(&source);
 
-    cli_ok(
-        vec!["check".to_string(), input.clone()],
-        &format!("smc check for {input}"),
-    );
-    cli_ok(
-        vec!["run".to_string(), input.clone()],
-        &format!("smc run for {input}"),
-    );
-
-    let out = dir.join("out.smc");
-    let out_arg = out.to_string_lossy().replace('\\', "/");
-    cli_ok(
-        vec![
-            "compile".to_string(),
-            input.clone(),
-            "-o".to_string(),
-            out_arg.clone(),
-        ],
-        &format!("smc compile for {input}"),
-    );
-    cli_ok(
-        vec!["verify".to_string(), out_arg],
-        &format!("smc verify for {input}"),
-    );
-
-    let _ = std::fs::remove_dir_all(&dir);
+    let artifact = temp_semcode_artifact("pcc4-records", "smc_pcc4_records_acceptance");
+    compile_source_to_artifact(&source, &artifact);
+    verify_artifact(&artifact);
 }
 
 #[test]
