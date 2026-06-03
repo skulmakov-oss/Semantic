@@ -1,6 +1,3 @@
-$ErrorActionPreference = "Stop"
-Set-StrictMode -Version Latest
-
 # Local workflow-equivalent checker for Semantic.
 #
 # This script provides a repeatable local pre-admission signal. It does not
@@ -12,6 +9,15 @@ Set-StrictMode -Version Latest
 # This script includes formatting because the baseline has been normalized.
 # Do not use formatting as a substitute for behavior checks. After any manual
 # formatting attempt, inspect `git diff --name-only` and revert unrelated churn.
+
+param(
+    [switch] $MergePreflight,
+
+    [string] $BaseRef = "origin/main"
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $RepoRoot
@@ -30,6 +36,92 @@ function Invoke-LocalCiStep {
     & $Command
     if ($LASTEXITCODE -ne 0) {
         throw "local_ci step failed: $Name"
+    }
+}
+
+function Assert-CleanWorkingTreeForMergePreflight {
+    $statusLines = git status --porcelain --untracked-files=all
+    if ($LASTEXITCODE -ne 0) {
+        throw "failed to inspect working tree status before merge preflight"
+    }
+
+    $relevantLines = @(
+        $statusLines | Where-Object {
+            $_ -and ($_ -notmatch '\.claude([\\/]|$)')
+        }
+    )
+
+    if ($relevantLines.Count -gt 0) {
+        $details = $relevantLines -join [Environment]::NewLine
+        throw "merge preflight requires a clean working tree; commit/stash changes first`n$details"
+    }
+}
+
+function Invoke-LocalCiMergePreflight {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $BaseRef
+    )
+
+    Assert-CleanWorkingTreeForMergePreflight
+
+    Invoke-LocalCiStep "merge preflight against $BaseRef" {
+        git fetch origin main
+        if ($LASTEXITCODE -ne 0) {
+            throw "failed to fetch origin main for merge preflight"
+        }
+
+        $HeadSha = git rev-parse HEAD
+        if ($LASTEXITCODE -ne 0) {
+            throw "failed to capture current HEAD SHA for merge preflight"
+        }
+
+        $MergePreflightRoot = Join-Path $TempRoot "semantic_merge_preflight"
+        New-Item -ItemType Directory -Force -Path $MergePreflightRoot | Out-Null
+
+        $MergePreflightWorktree = Join-Path $MergePreflightRoot ([System.Guid]::NewGuid().ToString("N"))
+        $WorktreeCreated = $false
+
+        try {
+            git worktree add --detach $MergePreflightWorktree $BaseRef
+            if ($LASTEXITCODE -ne 0) {
+                throw "failed to create merge preflight worktree at '$MergePreflightWorktree'"
+            }
+            $WorktreeCreated = $true
+
+            Push-Location $MergePreflightWorktree
+            try {
+                git merge --no-commit --no-ff $HeadSha
+                if ($LASTEXITCODE -ne 0) {
+                    throw "merge preflight failed: merging current HEAD into '$BaseRef' produced conflicts"
+                }
+
+                cargo test --all-targets --quiet
+                if ($LASTEXITCODE -ne 0) {
+                    throw "merge preflight failed: cargo test --all-targets --quiet"
+                }
+
+                cargo check --no-default-features --quiet
+                if ($LASTEXITCODE -ne 0) {
+                    throw "merge preflight failed: cargo check --no-default-features --quiet"
+                }
+            } finally {
+                Pop-Location
+            }
+        } finally {
+            Set-Location $RepoRoot
+            if ($WorktreeCreated) {
+                git worktree remove --force $MergePreflightWorktree
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "failed to remove merge preflight worktree '$MergePreflightWorktree'; remove it manually"
+                    if (Test-Path $MergePreflightWorktree) {
+                        Remove-Item -Recurse -Force $MergePreflightWorktree -ErrorAction SilentlyContinue
+                    }
+                }
+            } elseif (Test-Path $MergePreflightWorktree) {
+                Remove-Item -Recurse -Force $MergePreflightWorktree -ErrorAction SilentlyContinue
+            }
+        }
     }
 }
 
@@ -145,6 +237,10 @@ Invoke-LocalCiStep "cargo test --test public_api_contracts --quiet" {
 
 Invoke-LocalCiStep "git diff --check" {
     git diff --check
+}
+
+if ($MergePreflight) {
+    Invoke-LocalCiMergePreflight -BaseRef $BaseRef
 }
 
 Write-Host ""
