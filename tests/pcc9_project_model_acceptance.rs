@@ -2,6 +2,14 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "support/cli_artifact_support.rs"]
+mod cli_artifact_support;
+
+use cli_artifact_support::{
+    check_source, compile_project_root_to_artifact, compile_source_to_artifact, run_smc_artifact,
+    run_source, source_fixture, temp_semcode_artifact, verify_artifact, SemCodeArtifactPath,
+};
+
 use smc_cli::{
     admit_package_entry_module, parse_package_manifest_baseline, resolve_package_import_path,
     validate_package_manifest_baseline, PackageDependencySource, PACKAGE_MANIFEST_FILE_NAME,
@@ -235,50 +243,20 @@ fn cli_hash_smc_file_output(path: &std::path::Path, context: &str) -> String {
     cli_command_file_output("hash-smc", path, context)
 }
 
-fn cli_disasm_artifact_output(path: &std::path::Path, context: &str) -> String {
-    cli_stdout(vec!["disasm".to_string(), normalize_path(path)], context)
+fn cli_disasm_artifact_output(artifact: &SemCodeArtifactPath, context: &str) -> String {
+    cli_stdout(vec!["disasm".to_string(), artifact.cli_arg()], context)
 }
 
-fn cli_compile_project_root_ok(dir: &std::path::Path, out_name: &str, context: &str) -> PathBuf {
-    let input = normalize_path(dir);
-    let out = dir.join(out_name);
-    let out_arg = normalize_path(&out);
-    cli_ok(
-        vec![
-            "compile".to_string(),
-            input,
-            "-o".to_string(),
-            out_arg.clone(),
-        ],
-        context,
-    );
-    assert!(out.is_file(), "{context} did not write requested output");
-    cli_ok(
-        vec!["verify".to_string(), out_arg.clone()],
-        &format!("{context} produced unverifiable SemCode"),
-    );
-    cli_ok(
-        vec!["run-smc".to_string(), out_arg],
-        &format!("{context} run-smc failed"),
-    );
-    out
-}
-
-fn cli_compile_project_root_to(
-    input_dir: &std::path::Path,
-    output_dir: &std::path::Path,
+fn cli_compile_project_root_ok(
+    dir: &std::path::Path,
     out_name: &str,
     context: &str,
-) -> PathBuf {
-    let input = normalize_path(input_dir);
-    let out = output_dir.join(out_name);
-    let out_arg = normalize_path(&out);
-    cli_ok(
-        vec!["compile".to_string(), input, "-o".to_string(), out_arg],
-        context,
-    );
-    assert!(out.is_file(), "{context} did not write requested output");
-    out
+) -> SemCodeArtifactPath {
+    let artifact = temp_semcode_artifact("pcc9-project-root", out_name);
+    compile_project_root_to_artifact(dir, &artifact, context);
+    verify_artifact(&artifact);
+    run_smc_artifact(&artifact);
+    artifact
 }
 
 fn collect_semcode_artifacts(dir: &std::path::Path, artifacts: &mut Vec<PathBuf>) {
@@ -355,15 +333,15 @@ fn cli_compile_project_root_err_no_overwrite(
     out_name: &str,
     context: &str,
 ) -> String {
+    let artifact = temp_semcode_artifact("pcc9-project-root", out_name);
     let input = normalize_path(dir);
-    let out = dir.join(out_name);
-    let out_arg = normalize_path(&out);
-    std::fs::write(&out, "sentinel").expect("write sentinel");
+    let out_arg = artifact.cli_arg();
+    std::fs::write(artifact.path(), "sentinel").expect("write sentinel");
     let err = cli_err(
         vec!["compile".to_string(), input, "-o".to_string(), out_arg],
         context,
     );
-    let content = std::fs::read_to_string(&out).expect("read out file");
+    let content = std::fs::read_to_string(artifact.path()).expect("read out file");
     assert_eq!(
         content, "sentinel",
         "{context} overwrote existing file on compilation failure"
@@ -380,15 +358,15 @@ fn assert_stale_artifact_protected<F>(
     F: FnOnce(&std::path::Path),
 {
     let out = cli_compile_project_root_ok(dir, out_name, &format!("{context} (initial compile)"));
-    let original_bytes = std::fs::read(&out).unwrap_or_else(|err| {
+    let original_bytes = std::fs::read(out.path()).unwrap_or_else(|err| {
         panic!(
             "{context}: failed to read original bytes of {}: {err}",
-            out.display()
+            out.path().display()
         )
     });
     mutate(dir);
     let input = normalize_path(dir);
-    let out_arg = normalize_path(&out);
+    let out_arg = out.cli_arg();
     let _err = cli_err(
         vec![
             "compile".to_string(),
@@ -398,25 +376,19 @@ fn assert_stale_artifact_protected<F>(
         ],
         &format!("{context} (failing compile expected)"),
     );
-    assert!(out.is_file(), "{context}: out.smc was deleted");
-    let current_bytes = std::fs::read(&out).unwrap_or_else(|err| {
+    assert!(out.path().is_file(), "{context}: out.smc was deleted");
+    let current_bytes = std::fs::read(out.path()).unwrap_or_else(|err| {
         panic!(
             "{context}: failed to read current bytes of {}: {err}",
-            out.display()
+            out.path().display()
         )
     });
     assert_eq!(
         original_bytes, current_bytes,
         "{context}: out.smc was overwritten or modified on compilation failure"
     );
-    cli_ok(
-        vec!["verify".to_string(), out_arg.clone()],
-        &format!("{context}: verification failed for original artifact after failed compile"),
-    );
-    cli_ok(
-        vec!["run-smc".to_string(), out_arg],
-        &format!("{context}: run-smc failed for original artifact after failed compile"),
-    );
+    verify_artifact(&out);
+    run_smc_artifact(&out);
 }
 
 fn cli_check_dot_ok(dir: &std::path::Path, context: &str) {
@@ -451,12 +423,13 @@ fn cli_run_dot_ok(dir: &std::path::Path, context: &str) {
     );
 }
 
-fn cli_compile_dot_ok(dir: &std::path::Path, out_name: &str, context: &str) -> PathBuf {
+fn cli_compile_dot_ok(dir: &std::path::Path, out_name: &str, context: &str) -> SemCodeArtifactPath {
+    let artifact = temp_semcode_artifact("pcc9-project-root", out_name);
     let output = Command::new(env!("CARGO_BIN_EXE_smc"))
         .arg("compile")
         .arg(".")
         .arg("-o")
-        .arg(out_name)
+        .arg(artifact.cli_arg())
         .current_dir(dir)
         .output()
         .unwrap_or_else(|err| panic!("{context} failed to spawn smc: {err}"));
@@ -467,15 +440,14 @@ fn cli_compile_dot_ok(dir: &std::path::Path, out_name: &str, context: &str) -> P
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
-    let out = dir.join(out_name);
-    assert!(out.is_file(), "{context} did not write requested output");
-    cli_ok(
-        vec!["verify".to_string(), normalize_path(&out)],
-        &format!("{context} produced unverifiable SemCode"),
+    assert!(
+        artifact.path().is_file(),
+        "{context} did not write requested output"
     );
+    verify_artifact(&artifact);
     let output2 = Command::new(env!("CARGO_BIN_EXE_smc"))
         .arg("run-smc")
-        .arg(out_name)
+        .arg(artifact.cli_arg())
         .current_dir(dir)
         .output()
         .unwrap_or_else(|err| panic!("{context} failed to spawn smc run-smc: {err}"));
@@ -486,7 +458,7 @@ fn cli_compile_dot_ok(dir: &std::path::Path, out_name: &str, context: &str) -> P
         String::from_utf8_lossy(&output2.stdout),
         String::from_utf8_lossy(&output2.stderr)
     );
-    out
+    artifact
 }
 
 fn cli_err(args: Vec<String>, context: &str) -> String {
@@ -515,33 +487,14 @@ fn normalize_path(path: &std::path::Path) -> String {
 }
 
 fn full_cli_path(file_rel: &str) {
-    let input = repo_path(file_rel);
-    cli_ok(
-        vec!["check".to_string(), input.clone()],
-        &format!("smc check for {input}"),
-    );
-    cli_ok(
-        vec!["run".to_string(), input.clone()],
-        &format!("smc run for {input}"),
-    );
+    let source = source_fixture(file_rel);
+    check_source(&source);
+    run_source(&source);
 
-    let dir = mk_temp_dir("pcc9_project_model_acceptance");
-    let out = dir.join("out.smc");
-    let out_arg = out.to_string_lossy().replace('\\', "/");
-    cli_ok(
-        vec![
-            "compile".to_string(),
-            input.clone(),
-            "-o".to_string(),
-            out_arg.clone(),
-        ],
-        &format!("smc compile for {input}"),
-    );
-    cli_ok(
-        vec!["verify".to_string(), out_arg],
-        &format!("smc verify for {input}"),
-    );
-    let _ = std::fs::remove_dir_all(&dir);
+    let artifact = temp_semcode_artifact("pcc9-project-model", "single_file_baseline");
+    compile_source_to_artifact(&source, &artifact);
+    verify_artifact(&artifact);
+    run_smc_artifact(&artifact);
 }
 
 fn full_project_root_check_path() {
@@ -2882,20 +2835,15 @@ fn pcc9_project_root_smoke_fixture_accepts_admitted_surface() {
         "hash-smc must be deterministic across repeated runs"
     );
 
-    let artifacts_dir = mk_temp_dir("pcc9_project_root_smoke_fixture_artifacts");
-    let out = cli_compile_project_root_to(
+    let out = cli_compile_project_root_ok(
         &root,
-        &artifacts_dir,
         "out.smc",
         "smc compile canonical project-root fixture to temp output",
     );
-    cli_ok(
-        vec!["verify".to_string(), normalize_path(&out)],
-        "smc verify for canonical project-root artifact",
-    );
-    cli_ok(
-        vec!["run-smc".to_string(), normalize_path(&out)],
-        "smc run-smc for canonical project-root artifact",
+    assert_eq!(
+        out.path().parent(),
+        Some(out.root_dir()),
+        "compile output should be written directly into the temp artifact dir"
     );
     let disasm = cli_disasm_artifact_output(&out, "smc disasm for canonical project-root artifact");
     assert!(
@@ -2911,8 +2859,6 @@ fn pcc9_project_root_smoke_fixture_accepts_admitted_surface() {
         "smc disasm for canonical project-root artifact must be deterministic"
     );
     assert_no_semcode_artifacts(&root, "canonical project-root smoke fixture after checks");
-
-    let _ = std::fs::remove_dir_all(&artifacts_dir);
 }
 
 #[test]
@@ -2920,27 +2866,23 @@ fn pcc9_project_root_smoke_fixture_remains_source_only_after_compile() {
     let root = canonical_project_root_fixture();
     assert_canonical_project_root_fixture_clean("canonical project-root fixture before compile");
 
-    let artifacts_dir = mk_temp_dir("pcc9_project_root_smoke_fixture_cleanliness");
-    let out = cli_compile_project_root_to(
+    let out = cli_compile_project_root_ok(
         &root,
-        &artifacts_dir,
         "out.smc",
         "smc compile canonical project-root fixture to temp output",
     );
     assert!(
-        out.starts_with(&artifacts_dir),
+        out.path().starts_with(out.root_dir()),
         "compile output should stay under temp artifact dir: {}",
-        out.display()
+        out.path().display()
     );
     assert_eq!(
-        out.parent(),
-        Some(artifacts_dir.as_path()),
+        out.path().parent(),
+        Some(out.root_dir()),
         "compile output should be written directly into the temp artifact dir"
     );
 
     assert_canonical_project_root_fixture_clean("canonical project-root fixture after compile");
-
-    let _ = std::fs::remove_dir_all(&artifacts_dir);
 }
 
 #[test]
@@ -3036,30 +2978,20 @@ fn pcc9_project_root_package_baseline_fixture_accepts_admitted_surface() {
         "hash-smc must be deterministic across repeated runs"
     );
 
-    let artifacts_dir = mk_temp_dir("pcc9_project_root_package_baseline_fixture_artifacts");
-    let out = cli_compile_project_root_to(
+    let out = cli_compile_project_root_ok(
         &root,
-        &artifacts_dir,
         "out.smc",
         "smc compile package baseline project-root fixture to temp output",
     );
     assert!(
-        out.starts_with(&artifacts_dir),
+        out.path().starts_with(out.root_dir()),
         "compile output should stay under temp artifact dir: {}",
-        out.display()
+        out.path().display()
     );
     assert_eq!(
-        out.parent(),
-        Some(artifacts_dir.as_path()),
+        out.path().parent(),
+        Some(out.root_dir()),
         "compile output should be written directly into the temp artifact dir"
-    );
-    cli_ok(
-        vec!["verify".to_string(), normalize_path(&out)],
-        "smc verify for package baseline project-root artifact",
-    );
-    cli_ok(
-        vec!["run-smc".to_string(), normalize_path(&out)],
-        "smc run-smc for package baseline project-root artifact",
     );
     let disasm = cli_disasm_artifact_output(
         &out,
@@ -3081,8 +3013,6 @@ fn pcc9_project_root_package_baseline_fixture_accepts_admitted_surface() {
         "package baseline project-root fixture after checks",
     );
     assert_no_semcode_artifacts(&root, "package baseline project-root fixture after checks");
-
-    let _ = std::fs::remove_dir_all(&artifacts_dir);
 }
 
 #[test]

@@ -31,6 +31,14 @@ impl SemCodeArtifactPath {
     pub(crate) fn cli_arg(&self) -> String {
         normalize_path(&self.path)
     }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) fn root_dir(&self) -> &Path {
+        &self.root
+    }
 }
 
 impl Drop for SemCodeArtifactPath {
@@ -97,6 +105,29 @@ pub(crate) fn compile_source_to_artifact(
             artifact.cli_arg(),
         ],
         "smc compile for source fixture",
+    );
+}
+
+pub(crate) fn compile_project_root_to_artifact(
+    root: &Path,
+    artifact: &SemCodeArtifactPath,
+    context: &str,
+) {
+    std::fs::create_dir_all(
+        artifact
+            .path()
+            .parent()
+            .expect("SemCode artifact should always have a parent"),
+    )
+    .expect("mkdir artifact parent");
+    cli_ok(
+        vec![
+            "compile".to_string(),
+            normalize_path(root),
+            "-o".to_string(),
+            artifact.cli_arg(),
+        ],
+        context,
     );
 }
 
