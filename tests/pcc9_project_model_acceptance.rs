@@ -3111,3 +3111,228 @@ fn pcc9_project_root_surface_inventory_guard() {
         );
     }
 }
+
+#[test]
+fn pcc9_hash_ast_semantic_toml_explicit_entry() {
+    let dir = mk_temp_dir("pcc9_hash_ast_explicit");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let hash = cli_hash_ast_project_root_output(&dir, "hash-ast with semantic.toml explicit entry")
+        .trim()
+        .to_string();
+    assert_eq!(
+        hash.len(),
+        16,
+        "hash should be a 16-char hex string: {hash}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_semantic_toml_default_entry() {
+    let dir = mk_temp_dir("pcc9_hash_ast_default");
+    write_semantic_toml(&dir, None);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let hash = cli_hash_ast_project_root_output(&dir, "hash-ast with semantic.toml default entry")
+        .trim()
+        .to_string();
+    assert_eq!(
+        hash.len(),
+        16,
+        "hash should be a 16-char hex string: {hash}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_semantic_toml_nested_entry() {
+    let dir = mk_temp_dir("pcc9_hash_ast_nested");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    let entry_file = dir.join("examples").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let hash = cli_hash_ast_project_root_output(&dir, "hash-ast with semantic.toml nested entry")
+        .trim()
+        .to_string();
+    assert_eq!(
+        hash.len(),
+        16,
+        "hash should be a 16-char hex string: {hash}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_prefers_semantic_toml_over_package_manifest() {
+    let dir = mk_temp_dir("pcc9_hash_ast_preferred");
+    write_semantic_toml(&dir, Some("examples/main.sm"));
+    write_package_manifest_baseline(&dir);
+    let toml_entry = dir.join("examples").join("main.sm");
+    std::fs::create_dir_all(toml_entry.parent().unwrap()).expect("mkdir");
+    std::fs::write(&toml_entry, "fn main() { return; }\n").expect("write file");
+
+    let pkg_entry = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(pkg_entry.parent().unwrap()).expect("mkdir");
+    std::fs::write(&pkg_entry, "fn main() { return; }\n").expect("write file");
+
+    let hash = cli_hash_ast_project_root_output(
+        &dir,
+        "hash-ast prefers semantic.toml over Semantic.package",
+    )
+    .trim()
+    .to_string();
+    assert_eq!(
+        hash.len(),
+        16,
+        "hash should be a 16-char hex string: {hash}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_package_baseline_fallback() {
+    let dir = mk_temp_dir("pcc9_hash_ast_package_baseline");
+    write_package_manifest_baseline(&dir);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let hash = cli_hash_ast_project_root_output(&dir, "hash-ast fallback to Semantic.package")
+        .trim()
+        .to_string();
+    assert_eq!(
+        hash.len(),
+        16,
+        "hash should be a 16-char hex string: {hash}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_dot_works_from_root() {
+    let dir = mk_temp_dir("pcc9_hash_ast_dot");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let hash = cli_hash_ast_project_root_output_dot(&dir, "hash-ast . from project root")
+        .trim()
+        .to_string();
+    assert_eq!(
+        hash.len(),
+        16,
+        "hash should be a 16-char hex string: {hash}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_invalid_semantic_toml_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_hash_ast_invalid_toml");
+    std::fs::write(
+        dir.join("semantic.toml"),
+        r#"
+[package
+name = "app"
+"#,
+    )
+    .expect("write malformed toml");
+    write_package_manifest_baseline(&dir);
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let err = cli_err(
+        vec!["hash-ast".to_string(), normalize_path(&dir)],
+        "hash-ast with invalid semantic.toml",
+    );
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_missing_entry_file_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_hash_ast_missing_file");
+    write_semantic_toml(&dir, Some("src/missing.sm"));
+
+    let err = cli_err(
+        vec!["hash-ast".to_string(), normalize_path(&dir)],
+        "hash-ast with missing entry file",
+    );
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_path_escape_fails_without_fallback() {
+    let dir = mk_temp_dir("pcc9_hash_ast_path_escape");
+    write_semantic_toml(&dir, Some("../escape.sm"));
+
+    let err = cli_err(
+        vec!["hash-ast".to_string(), normalize_path(&dir)],
+        "hash-ast with path escape entry",
+    );
+    assert!(!err.is_empty(), "expected error output");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_determinism_consecutive_runs() {
+    let dir = mk_temp_dir("pcc9_hash_ast_det_consec");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let hash1 = cli_hash_ast_project_root_output(&dir, "hash-ast consecutive run 1")
+        .trim()
+        .to_string();
+    let hash2 = cli_hash_ast_project_root_output(&dir, "hash-ast consecutive run 2")
+        .trim()
+        .to_string();
+    assert_eq!(
+        hash1, hash2,
+        "hash-ast must be identical across consecutive runs"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pcc9_hash_ast_determinism_matches_resolved_file() {
+    let dir = mk_temp_dir("pcc9_hash_ast_det_match");
+    write_semantic_toml(&dir, Some("src/main.sm"));
+    let entry_file = dir.join("src").join("main.sm");
+    std::fs::create_dir_all(entry_file.parent().unwrap()).expect("mkdir");
+    std::fs::write(&entry_file, "fn main() { return; }\n").expect("write file");
+
+    let hash_root = cli_hash_ast_project_root_output(&dir, "hash-ast on root")
+        .trim()
+        .to_string();
+    let hash_file = cli_hash_ast_file_output(&entry_file, "hash-ast on resolved file")
+        .trim()
+        .to_string();
+    assert_eq!(
+        hash_root, hash_file,
+        "hash-ast on root must match hash-ast on resolved file"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
