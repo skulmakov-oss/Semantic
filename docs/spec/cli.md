@@ -45,9 +45,9 @@ Current accepted usage forms are:
 - `smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc watch <input.sm> [--metrics] [--color auto|always|never]`
 - `smc fmt [--check] <path>`
-- `smc dump-ast <input.sm>`
-- `smc dump-ir <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]`
-- `smc dump-bytecode <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]`
+- `smc dump-ast <input.sm|project-root>`
+- `smc dump-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]`
+- `smc dump-bytecode <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]`
 - `smc hash-ast <input.sm|project-root>`
 - `smc hash-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]`
 - `smc hash-smc <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--trace-cache]`
@@ -132,6 +132,7 @@ Current rule:
 - `smc check` also accepts a bounded admitted project-root entrypoint through `Semantic.package` + `src/main.sm`
 - project-root `smc check` also resolves a minimal `semantic.toml` manifest when present
 - project-root `smc run` uses the same bounded project entry resolution, then follows the existing verifier-first source execution route
+- project-root `smc dump-ast`, `smc dump-ir`, and `smc dump-bytecode` use the same bounded project entry resolution, then emit the existing dump output for the resolved source
 - project-root `smc hash-ast` uses the same bounded project entry resolution and emits the existing AST hash for the resolved source file
 - project-root `smc hash-ir` uses the same bounded project entry resolution and emits the existing IR hash for the resolved source file
 - project-root `smc hash-smc` uses the same bounded project entry resolution and emits the existing SemCode hash for the resolved source or artifact path
