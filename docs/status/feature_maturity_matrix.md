@@ -50,7 +50,7 @@ landed on main != published stable
 | Feature | Maturity level | Confidence | Evidence type | Status | Notes |
 |---|---:|---|---|---|---|
 | Native quad logic | D6 | High | Docs claim, VM/spec evidence | Stable release surface | `N / F / T / S` is a native semantic value domain. |
-| i32 relational operators | D7 | High | Test evidence | Qualified limited release | Covers relational/equality-style operators (`==`, `!=`, `<`, `<=`, `>`, `=>`). |
+| i32 relational operators | D7 | High | Test evidence | Qualified limited release | Covers relational/equality-style operators (`==`, `!=`, `<`, `<=`, `>`, `>=`). |
 | same-family i32 arithmetic | D7 | High | Test evidence | Qualified application-completeness contour | Covers `+`, `-`, `*`, `/`, `%` and unary `-`. Not published stable. |
 | Mutable locals & reassignment | D7 | High | Test evidence | Qualified application-completeness contour | Supports `let mut` declarations and plain reassignments. Not published stable. |
 | Loops and control exits | D7 | High | Test evidence | Qualified application-completeness contour | Supports `while` loops, statement `loop`, and exits `break`/`continue`. Not published stable. |

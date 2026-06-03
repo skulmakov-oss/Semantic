@@ -173,7 +173,8 @@ The controlled observation envelope and narrow print(text) path have landed:
 
 ```text
 verified SemCode
-  -> VM controlled observation event (print / to_text)
+  -> pure semantic construction (to_text)
+  -> VM controlled observation event (print)
   -> ControlledObservationSink capability gate (CAP_STDOUT)
   -> audit decision
   -> CLI rendering envelope

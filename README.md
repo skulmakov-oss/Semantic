@@ -127,7 +127,7 @@ The stable public contract lives in `docs/spec/*` and the release/status languag
 
 ### Current active focus
 
-The current active hardening focus is **project-root CLI/status reconciliation and application-completeness evidence alignment**.
+The current active hardening focus is **project-root CLI hardening and status reconciliation**.
 
 ```text
 source (file / project-root)
