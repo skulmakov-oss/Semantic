@@ -439,20 +439,64 @@ pub fn admit_package_entry_module(
     }))
 }
 
-pub(crate) fn resolve_project_root_check_entry(root: &Path) -> Result<PathBuf, String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProjectRootResolutionCode {
+    SemanticTomlReadFailed,
+    SemanticTomlManifest(SemanticTomlManifestErrorCode),
+    SemanticTomlEntryMissing,
+    MissingProjectManifest,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProjectRootResolutionError {
+    code: ProjectRootResolutionCode,
+    message: String,
+}
+
+impl fmt::Display for ProjectRootResolutionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+fn project_root_resolution_error(
+    code: ProjectRootResolutionCode,
+    message: impl Into<String>,
+) -> ProjectRootResolutionError {
+    ProjectRootResolutionError {
+        code,
+        message: message.into(),
+    }
+}
+
+fn resolve_project_root_check_entry_structured(
+    root: &Path,
+) -> Result<PathBuf, ProjectRootResolutionError> {
     let semantic_toml = root.join(SEMANTIC_TOML_FILE_NAME);
     if semantic_toml.is_file() {
-        let source = std::fs::read_to_string(&semantic_toml)
-            .map_err(|e| format!("failed to read '{}': {}", semantic_toml.display(), e))?;
-        let project_manifest = parse_semantic_toml_manifest(&semantic_toml, &source)
-            .map_err(|e| format!("failed to parse '{}': {}", semantic_toml.display(), e))?;
+        let source = std::fs::read_to_string(&semantic_toml).map_err(|e| {
+            project_root_resolution_error(
+                ProjectRootResolutionCode::SemanticTomlReadFailed,
+                format!("failed to read '{}': {}", semantic_toml.display(), e),
+            )
+        })?;
+        let project_manifest =
+            parse_semantic_toml_manifest(&semantic_toml, &source).map_err(|e| {
+                project_root_resolution_error(
+                    ProjectRootResolutionCode::SemanticTomlManifest(e.code),
+                    format!("failed to parse '{}': {}", semantic_toml.display(), e),
+                )
+            })?;
         let entry_path = root.join(&project_manifest.entry);
         if !entry_path.is_file() {
-            return Err(format!(
-                "semantic.toml manifest '{}' entry '{}' resolves to missing file '{}'",
-                semantic_toml.display(),
-                project_manifest.entry,
-                entry_path.display()
+            return Err(project_root_resolution_error(
+                ProjectRootResolutionCode::SemanticTomlEntryMissing,
+                format!(
+                    "semantic.toml manifest '{}' entry '{}' resolves to missing file '{}'",
+                    semantic_toml.display(),
+                    project_manifest.entry,
+                    entry_path.display()
+                ),
             ));
         }
         return Ok(entry_path);
@@ -463,12 +507,19 @@ pub(crate) fn resolve_project_root_check_entry(root: &Path) -> Result<PathBuf, S
         return Ok(root.join("src/main.sm"));
     }
 
-    Err(format!(
-        "project root '{}' must contain '{}' or '{}'",
-        root.display(),
-        SEMANTIC_TOML_FILE_NAME,
-        PACKAGE_MANIFEST_FILE_NAME
+    Err(project_root_resolution_error(
+        ProjectRootResolutionCode::MissingProjectManifest,
+        format!(
+            "project root '{}' must contain '{}' or '{}'",
+            root.display(),
+            SEMANTIC_TOML_FILE_NAME,
+            PACKAGE_MANIFEST_FILE_NAME
+        ),
     ))
+}
+
+pub(crate) fn resolve_project_root_check_entry(root: &Path) -> Result<PathBuf, String> {
+    resolve_project_root_check_entry_structured(root).map_err(|e| e.to_string())
 }
 pub fn resolve_package_import_path(
     importer_module: &Path,
@@ -1478,6 +1529,101 @@ name "app"
                 err.message
             );
         }
+    }
+
+    #[test]
+    fn resolve_project_root_check_entry_preserves_structured_diagnostic_codes() {
+        let semantic_toml_root = mk_temp_dir("project_root_semantic_toml_codes");
+        let semantic_toml = semantic_toml_root.join(SEMANTIC_TOML_FILE_NAME);
+
+        std::fs::write(
+            &semantic_toml,
+            r#"
+[package
+name = "app"
+"#,
+        )
+        .expect("write malformed semantic.toml");
+        let err = resolve_project_root_check_entry_structured(&semantic_toml_root)
+            .expect_err("must reject malformed semantic.toml");
+        assert_eq!(
+            err.code,
+            ProjectRootResolutionCode::SemanticTomlManifest(
+                SemanticTomlManifestErrorCode::MalformedSectionHeader
+            )
+        );
+        assert!(err.message.contains("failed to parse"));
+
+        std::fs::write(
+            &semantic_toml,
+            r#"
+[package]
+name = ""
+"#,
+        )
+        .expect("write empty package semantic.toml");
+        let err = resolve_project_root_check_entry_structured(&semantic_toml_root)
+            .expect_err("must reject empty package name");
+        assert_eq!(
+            err.code,
+            ProjectRootResolutionCode::SemanticTomlManifest(
+                SemanticTomlManifestErrorCode::EmptyPackageName
+            )
+        );
+        assert!(err.message.contains("empty [package].name"));
+
+        std::fs::write(
+            &semantic_toml,
+            r#"
+[package]
+name = "app"
+
+[project]
+entry = "../escape.sm"
+"#,
+        )
+        .expect("write escaping semantic.toml");
+        let err = resolve_project_root_check_entry_structured(&semantic_toml_root)
+            .expect_err("must reject entry escape");
+        assert_eq!(
+            err.code,
+            ProjectRootResolutionCode::SemanticTomlManifest(
+                SemanticTomlManifestErrorCode::ProjectEntryMustNotEscapeRoot
+            )
+        );
+        assert!(err.message.contains("must not escape the project root"));
+        let _ = std::fs::remove_dir_all(&semantic_toml_root);
+    }
+
+    #[test]
+    fn resolve_project_root_check_entry_reports_missing_entry_and_manifest_codes() {
+        let semantic_toml_root = mk_temp_dir("project_root_missing_entry");
+        std::fs::write(
+            semantic_toml_root.join(SEMANTIC_TOML_FILE_NAME),
+            r#"
+[package]
+name = "app"
+
+[project]
+entry = "src/main.sm"
+"#,
+        )
+        .expect("write semantic.toml");
+        let err = resolve_project_root_check_entry_structured(&semantic_toml_root)
+            .expect_err("must reject missing entry file");
+        assert_eq!(
+            err.code,
+            ProjectRootResolutionCode::SemanticTomlEntryMissing
+        );
+        assert!(err.message.contains("resolves to missing file"));
+        let _ = std::fs::remove_dir_all(&semantic_toml_root);
+
+        let missing_root = mk_temp_dir("project_root_missing_manifest");
+        let err = resolve_project_root_check_entry_structured(&missing_root)
+            .expect_err("must reject missing manifests");
+        assert_eq!(err.code, ProjectRootResolutionCode::MissingProjectManifest);
+        assert!(err.message.contains("must contain"));
+        let _ = std::fs::remove_dir_all(&missing_root);
     }
 
     #[test]
