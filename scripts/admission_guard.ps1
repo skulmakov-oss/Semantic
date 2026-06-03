@@ -12,6 +12,7 @@
 
 param(
     [switch] $MergePreflight,
+    [switch] $FullPreflight,
 
     [string] $BaseRef = "origin/main"
 )
@@ -131,6 +132,34 @@ $TempRoot = if ($env:TEMP) {
     $env:TMP
 } else {
     [System.IO.Path]::GetTempPath()
+}
+
+if ($FullPreflight) {
+    Invoke-LocalCiStep "cargo fmt --all --check" {
+        cargo fmt --all --check
+    }
+    Invoke-LocalCiStep "cargo test -q --test public_api_contracts" {
+        cargo test -q --test public_api_contracts
+    }
+    Invoke-LocalCiStep "cargo test -q --test pcc9_project_model_acceptance" {
+        cargo test -q --test pcc9_project_model_acceptance
+    }
+    Invoke-LocalCiStep "cargo test --all-targets --quiet" {
+        cargo test --all-targets --quiet
+    }
+    Invoke-LocalCiStep "cargo check --no-default-features --quiet" {
+        cargo check --no-default-features --quiet
+    }
+
+    Invoke-LocalCiMergePreflight -BaseRef $BaseRef
+
+    Invoke-LocalCiStep "git diff --check" {
+        git diff --check
+    }
+
+    Write-Host ""
+    Write-Host "ADMISSION GUARD FULL PREFLIGHT PASS"
+    exit 0
 }
 
 $ManifestPath = Join-Path $TempRoot "semantic_v1_release_bundle_manifest.json"
