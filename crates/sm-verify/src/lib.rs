@@ -29,6 +29,7 @@ pub enum VerificationCode {
     UnsupportedVersion,
     TruncatedFunction,
     InvalidFunctionName,
+    DuplicateFunction,
     InvalidStringTable,
     InvalidDebugSection,
     InvalidOwnershipSection,
@@ -129,6 +130,7 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
     let mut cursor = 8usize;
     let mut functions = Vec::new();
     let mut pending_functions = Vec::new();
+    let mut seen_names = HashSet::new();
     while cursor < bytes.len() {
         let function_start = cursor;
         let name_len = match read_u16_le(bytes, &mut cursor) {
@@ -164,6 +166,17 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
                 break;
             }
         };
+
+        if !seen_names.insert(name.clone()) {
+            diagnostics.push(diag(
+                VerificationCode::DuplicateFunction,
+                Some(name.clone()),
+                Some(function_start),
+                format!("duplicate function '{}'", name),
+            ));
+            break;
+        }
+
         let code_len = match read_u32_le(bytes, &mut cursor) {
             Ok(v) => v as usize,
             Err(_) => {
