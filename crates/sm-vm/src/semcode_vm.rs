@@ -213,6 +213,10 @@ impl core::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
+/// Raw / compatibility helper.
+///
+/// Executes raw SemCode bytes without a verifier admission gate.
+/// Not part of the canonical execution path.
 pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     run_semcode_with_config(
         bytes,
@@ -220,6 +224,10 @@ pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     )
 }
 
+/// Compatibility verified shim.
+///
+/// Internally routes through `verify_semcode_token` and `require_entry`,
+/// preserving the legacy public API signature.
 pub fn run_verified_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry("main").map_err(|err| match err {
@@ -231,6 +239,7 @@ pub fn run_verified_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     )
 }
 
+/// Raw / compatibility helper.
 pub fn run_semcode_collecting_hello_observations(
     bytes: &[u8],
 ) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
@@ -245,6 +254,7 @@ pub fn run_semcode_collecting_hello_observations(
     Ok(collected)
 }
 
+/// Raw / compatibility helper.
 pub fn run_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), RuntimeError> {
     run_semcode_with_entry_and_config(
         bytes,
@@ -253,10 +263,12 @@ pub fn run_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), RuntimeEr
     )
 }
 
+/// Raw / compatibility helper.
 pub fn run_semcode_with_config(bytes: &[u8], config: ExecutionConfig) -> Result<(), RuntimeError> {
     run_semcode_with_entry_and_config(bytes, "main", config)
 }
 
+/// Compatibility verified shim.
 pub fn run_verified_semcode_with_config(
     bytes: &[u8],
     config: ExecutionConfig,
@@ -268,6 +280,7 @@ pub fn run_verified_semcode_with_config(
     run_verified_entry_semcode_with_config(&entry_token, config)
 }
 
+/// Compatibility verified shim.
 pub fn run_verified_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), RuntimeError> {
     let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry(entry).map_err(|err| match err {
@@ -279,6 +292,7 @@ pub fn run_verified_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), 
     )
 }
 
+/// Compatibility verified shim.
 pub fn run_verified_semcode_with_entry_and_config(
     bytes: &[u8],
     entry: &str,
@@ -291,6 +305,7 @@ pub fn run_verified_semcode_with_entry_and_config(
     run_verified_entry_semcode_with_config(&entry_token, config)
 }
 
+/// Compatibility verified shim.
 pub fn run_verified_semcode_with_host_and_capabilities<
     H: PrometheusHostAbi,
     C: CapabilityChecker,
@@ -311,6 +326,7 @@ pub fn run_verified_semcode_with_host_and_capabilities<
     )
 }
 
+/// Compatibility verified shim.
 pub fn run_verified_semcode_with_host_and_capabilities_and_config<
     H: PrometheusHostAbi,
     C: CapabilityChecker,
@@ -333,6 +349,11 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config<
     )
 }
 
+/// Canonical verified execution.
+///
+/// This is the canonical entry point for verified execution with host bindings.
+/// It requires a `VerifiedEntrySemCode` token, ensuring that admission
+/// and entry resolution have already occurred.
 pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     H: PrometheusHostAbi,
     C: CapabilityChecker,
@@ -357,6 +378,8 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     exec_loop(&mut vm, &mut bridge, &mut observation)
 }
 
+/// Compatibility verified shim.
+///
 /// Run verified SemCode with both a standard capability checker and a UI
 /// capability checker.
 ///
@@ -385,6 +408,7 @@ pub fn run_verified_semcode_with_ui_capabilities<
     )
 }
 
+/// Canonical verified execution.
 pub fn run_verified_entry_semcode_with_ui_capabilities<
     H: PrometheusHostAbi,
     C: CapabilityChecker,
@@ -414,6 +438,7 @@ pub fn run_verified_entry_semcode_with_ui_capabilities<
     exec_loop(&mut vm, &mut bridge, &mut observation)
 }
 
+/// Canonical verified execution.
 pub fn run_verified_entry_semcode(
     token: &VerifiedEntrySemCode<'_, '_>,
 ) -> Result<(), RuntimeError> {
@@ -423,6 +448,7 @@ pub fn run_verified_entry_semcode(
     )
 }
 
+/// Canonical verified execution.
 pub fn run_verified_entry_semcode_with_config(
     token: &VerifiedEntrySemCode<'_, '_>,
     config: ExecutionConfig,
@@ -430,6 +456,7 @@ pub fn run_verified_entry_semcode_with_config(
     run_semcode_with_entry_and_config(token.bytes(), token.entry(), config)
 }
 
+/// Raw / compatibility helper.
 pub fn run_semcode_with_entry_and_config(
     bytes: &[u8],
     entry: &str,
@@ -468,6 +495,10 @@ fn run_semcode_with_entry_and_config_with_observation_runtime<'a>(
     }
 }
 
+/// Raw diagnostic path.
+///
+/// Parses SemCode for diagnostic output without verifier enforcement.
+/// Not part of the execution path.
 pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {
     let (spec, _, functions) = parse_semcode(bytes)?;
     let mut out = String::new();

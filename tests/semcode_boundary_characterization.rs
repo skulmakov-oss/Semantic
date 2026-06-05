@@ -1,6 +1,6 @@
 use sm_emit::compile_program_to_semcode;
-use sm_verify::{verify_semcode, VerificationCode};
-use sm_vm::{run_verified_semcode, run_verified_semcode_with_entry};
+use sm_verify::{verify_semcode, verify_semcode_token, VerificationCode};
+use sm_vm::{run_verified_entry_semcode, run_verified_semcode, run_verified_semcode_with_entry};
 
 #[test]
 fn raw_helper_current_behavior_short_and_unsupported_headers_are_rejected_consistently() {
@@ -78,4 +78,17 @@ fn missing_main_entrypoint_current_behavior_is_verifier_ok_and_explicit_entry_ok
 
     // Explicit entry lookup succeeds
     run_verified_semcode_with_entry(&bytes, "help").expect("should run explicitly");
+}
+
+#[test]
+fn shim_and_token_path_produce_equivalent_success() {
+    let bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+
+    // 1. Compatibility verified shim
+    run_verified_semcode(&bytes).expect("shim should succeed");
+
+    // 2. Canonical token path
+    let token = verify_semcode_token(&bytes).expect("verify");
+    let entry_token = token.require_entry("main").expect("require entry");
+    run_verified_entry_semcode(&entry_token).expect("token path should succeed");
 }
