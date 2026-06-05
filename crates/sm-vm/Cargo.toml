@@ -17,3 +17,4 @@ sm-verify = { path = "../sm-verify", default-features = false, features = ["std"
 prom-abi = { path = "../prom-abi", default-features = false, features = ["std"] }
 prom-cap = { path = "../prom-cap", default-features = false, features = ["std"] }
 prom-ui = { path = "../prom-ui", default-features = false, features = ["std"] }
+sm-ir = { path = "../sm-ir", default-features = false, features = ["std"] }
