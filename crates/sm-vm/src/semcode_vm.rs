@@ -1,6 +1,6 @@
 use crate::semcode_format::{
-    read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8, Opcode,
-    SemcodeFormatError, SemcodeHeaderSpec,
+    read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
+    SemcodeHeaderSpec,
 };
 use crate::QuadVal;
 use prom_abi::{AbiError, AbiValue, HostCallId, PrometheusHostAbi};
@@ -1022,6 +1022,7 @@ trait VmHostBridge {
     ///
     /// Default implementations return not-admitted. Overridden in
     /// `PrometheusVmHost` when a `UiCapabilityChecker` is provided.
+    #[allow(dead_code)] // intentionally retained as UI host bridge surface
     fn ui_window_create(&mut self) -> Result<(), RuntimeError> {
         Err(RuntimeError::BadFormat(
             "UI operations are not admitted in the current execution context; \
@@ -1029,6 +1030,7 @@ trait VmHostBridge {
                 .to_string(),
         ))
     }
+    #[allow(dead_code)] // intentionally retained as UI host bridge surface
     fn ui_window_run(&mut self) -> Result<(), RuntimeError> {
         Err(RuntimeError::BadFormat(
             "UI operations are not admitted in the current execution context; \
@@ -1036,6 +1038,7 @@ trait VmHostBridge {
                 .to_string(),
         ))
     }
+    #[allow(dead_code)] // intentionally retained as UI host bridge surface
     fn ui_event_poll(&mut self) -> Result<(), RuntimeError> {
         Err(RuntimeError::BadFormat(
             "UI operations are not admitted in the current execution context; \
@@ -1043,6 +1046,7 @@ trait VmHostBridge {
                 .to_string(),
         ))
     }
+    #[allow(dead_code)] // intentionally retained as UI host bridge surface
     fn ui_frame_submit(&mut self) -> Result<(), RuntimeError> {
         Err(RuntimeError::BadFormat(
             "UI operations are not admitted in the current execution context; \
@@ -1166,6 +1170,7 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
 struct PrometheusUiVmHost<'a, H: PrometheusHostAbi, C: CapabilityChecker, U: UiCapabilityChecker> {
     host: &'a mut H,
     capabilities: &'a C,
+    #[allow(dead_code)] // intentionally retained as UI host bridge surface
     ui_capabilities: &'a U,
 }
 
@@ -3018,6 +3023,7 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::semcode_format::read_utf8;
     use sm_emit::{
         compile_program_to_semcode, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
         OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,

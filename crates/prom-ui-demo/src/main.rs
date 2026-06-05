@@ -160,7 +160,7 @@ fn main() {
         })
         .expect("event loop must succeed");
 
-    session.close();
+    let _ = session.close();
 
     println!();
     println!("Session state after close: {:?}", session.state());
@@ -201,7 +201,7 @@ mod tests {
             })
             .expect("run must succeed");
 
-        session.close();
+        let _ = session.close();
         assert_eq!(session.state(), SessionState::Closed);
         assert_eq!(frame_count, 3);
     }
