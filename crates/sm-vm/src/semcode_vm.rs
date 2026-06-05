@@ -13,8 +13,8 @@ use sm_runtime_core::{
     AccessPath, AdtCarrier, ExecutionConfig, ExecutionContext, QuotaExceeded, QuotaKind,
     RecordCarrier, RuntimeQuotas, RuntimeSymbolTable, RuntimeTrap, SymbolId,
 };
-use sm_verify::verify_semcode;
 use sm_verify::RejectReport;
+use sm_verify::{verify_semcode_token, EntryResolutionError, VerifiedEntrySemCode};
 use std::collections::{HashMap, HashSet};
 
 /// Scalar key type for Map values.
@@ -221,8 +221,12 @@ pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
 }
 
 pub fn run_verified_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
-    run_verified_semcode_with_config(
-        bytes,
+    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let entry_token = token.require_entry("main").map_err(|err| match err {
+        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
+    })?;
+    run_verified_entry_semcode_with_config(
+        &entry_token,
         ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
     )
 }
@@ -257,13 +261,20 @@ pub fn run_verified_semcode_with_config(
     bytes: &[u8],
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    run_verified_semcode_with_entry_and_config(bytes, "main", config)
+    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let entry_token = token.require_entry("main").map_err(|err| match err {
+        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
+    })?;
+    run_verified_entry_semcode_with_config(&entry_token, config)
 }
 
 pub fn run_verified_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), RuntimeError> {
-    run_verified_semcode_with_entry_and_config(
-        bytes,
-        entry,
+    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let entry_token = token.require_entry(entry).map_err(|err| match err {
+        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
+    })?;
+    run_verified_entry_semcode_with_config(
+        &entry_token,
         ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
     )
 }
@@ -273,8 +284,11 @@ pub fn run_verified_semcode_with_entry_and_config(
     entry: &str,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    verify_semcode(bytes).map_err(RuntimeError::VerifierRejected)?;
-    run_semcode_with_entry_and_config(bytes, entry, config)
+    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let entry_token = token.require_entry(entry).map_err(|err| match err {
+        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
+    })?;
+    run_verified_entry_semcode_with_config(&entry_token, config)
 }
 
 pub fn run_verified_semcode_with_host_and_capabilities<
@@ -285,9 +299,12 @@ pub fn run_verified_semcode_with_host_and_capabilities<
     host: &mut H,
     capabilities: &C,
 ) -> Result<(), RuntimeError> {
-    run_verified_semcode_with_host_and_capabilities_and_config(
-        bytes,
-        "main",
+    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let entry_token = token.require_entry("main").map_err(|err| match err {
+        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
+    })?;
+    run_verified_entry_semcode_with_host_and_capabilities_and_config(
+        &entry_token,
         host,
         capabilities,
         ExecutionConfig::for_context(ExecutionContext::KernelBound),
@@ -304,8 +321,28 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config<
     capabilities: &C,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    verify_semcode(bytes).map_err(RuntimeError::VerifierRejected)?;
-    let (_, symbols, functions) = parse_semcode(bytes)?;
+    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let entry_token = token.require_entry(entry).map_err(|err| match err {
+        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
+    })?;
+    run_verified_entry_semcode_with_host_and_capabilities_and_config(
+        &entry_token,
+        host,
+        capabilities,
+        config,
+    )
+}
+
+pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
+    H: PrometheusHostAbi,
+    C: CapabilityChecker,
+>(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    host: &mut H,
+    capabilities: &C,
+    config: ExecutionConfig,
+) -> Result<(), RuntimeError> {
+    let (_, symbols, functions) = parse_semcode(token.bytes())?;
     let mut vm = VM {
         functions,
         callstack: Vec::new(),
@@ -314,7 +351,7 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config<
         symbols,
         prng_state: 0,
     };
-    push_frame(&mut vm, entry, Vec::new(), None)?;
+    push_frame(&mut vm, token.entry(), Vec::new(), None)?;
     let mut bridge = PrometheusVmHost { host, capabilities };
     let mut observation = HelloObservationRuntime::discard();
     exec_loop(&mut vm, &mut bridge, &mut observation)
@@ -336,8 +373,29 @@ pub fn run_verified_semcode_with_ui_capabilities<
     capabilities: &C,
     ui_capabilities: &U,
 ) -> Result<(), RuntimeError> {
-    verify_semcode(bytes).map_err(RuntimeError::VerifierRejected)?;
-    let (_, symbols, functions) = parse_semcode(bytes)?;
+    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let entry_token = token.require_entry("main").map_err(|err| match err {
+        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
+    })?;
+    run_verified_entry_semcode_with_ui_capabilities(
+        &entry_token,
+        host,
+        capabilities,
+        ui_capabilities,
+    )
+}
+
+pub fn run_verified_entry_semcode_with_ui_capabilities<
+    H: PrometheusHostAbi,
+    C: CapabilityChecker,
+    U: UiCapabilityChecker,
+>(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    host: &mut H,
+    capabilities: &C,
+    ui_capabilities: &U,
+) -> Result<(), RuntimeError> {
+    let (_, symbols, functions) = parse_semcode(token.bytes())?;
     let mut vm = VM {
         functions,
         callstack: Vec::new(),
@@ -346,7 +404,7 @@ pub fn run_verified_semcode_with_ui_capabilities<
         symbols,
         prng_state: 0,
     };
-    push_frame(&mut vm, "main", Vec::new(), None)?;
+    push_frame(&mut vm, token.entry(), Vec::new(), None)?;
     let mut bridge = PrometheusUiVmHost {
         host,
         capabilities,
@@ -354,6 +412,22 @@ pub fn run_verified_semcode_with_ui_capabilities<
     };
     let mut observation = HelloObservationRuntime::discard();
     exec_loop(&mut vm, &mut bridge, &mut observation)
+}
+
+pub fn run_verified_entry_semcode(
+    token: &VerifiedEntrySemCode<'_, '_>,
+) -> Result<(), RuntimeError> {
+    run_verified_entry_semcode_with_config(
+        token,
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+    )
+}
+
+pub fn run_verified_entry_semcode_with_config(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    config: ExecutionConfig,
+) -> Result<(), RuntimeError> {
+    run_semcode_with_entry_and_config(token.bytes(), token.entry(), config)
 }
 
 pub fn run_semcode_with_entry_and_config(
@@ -2861,7 +2935,6 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::*;
     use sm_emit::{
         compile_program_to_semcode, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
         OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
@@ -2876,6 +2949,46 @@ mod tests {
         let src = "fn main() { return; }";
         let bytes = compile_program_to_semcode(src).expect("compile");
         run_semcode(&bytes).expect("run");
+    }
+
+    #[test]
+    fn run_verified_entry_semcode_executes_main_token() {
+        let src = "fn main() { return; }";
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let token = sm_verify::verify_semcode_token(&bytes).expect("verify");
+        let entry_token = token.require_entry("main").expect("require entry");
+        run_verified_entry_semcode(&entry_token).expect("token execution");
+    }
+
+    #[test]
+    fn run_verified_entry_semcode_executes_helper_token() {
+        let src = r#"
+            fn helper() { return; }
+            fn main() { return; }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let token = sm_verify::verify_semcode_token(&bytes).expect("verify");
+        let entry_token = token.require_entry("helper").expect("require entry");
+        run_verified_entry_semcode(&entry_token).expect("token execution");
+    }
+
+    #[test]
+    fn run_verified_entry_semcode_with_config_matches_old_verified_path() {
+        let src = "fn main() { return; }";
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let token = sm_verify::verify_semcode_token(&bytes).expect("verify");
+        let entry_token = token.require_entry("main").expect("require entry");
+        let mut config = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
+        config.quotas.max_stack_depth = 1;
+        run_verified_entry_semcode_with_config(&entry_token, config).expect("run");
+    }
+
+    #[test]
+    fn run_verified_semcode_missing_main_keeps_old_error() {
+        let src = "fn helper() { return; }";
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let err = run_verified_semcode(&bytes).expect_err("must fail missing main");
+        assert!(matches!(err, RuntimeError::UnknownFunction(func) if func == "main"));
     }
 
     #[test]
