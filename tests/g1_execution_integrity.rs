@@ -10,7 +10,6 @@ use semantic_language::{
     semcode_verify::{verify_semcode, VerificationCode},
     semcode_vm::{disasm_semcode, run_semcode},
 };
-use sm_vm::run_verified_semcode;
 
 fn repo_path(rel: &str) -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -59,9 +58,11 @@ fn execution_summary(rel: &str) -> String {
     let sema = check_source(&src).expect("semantic check");
     let ir = compile_program_to_ir(&src).expect("compile ir");
     let bytes = compile_program_to_semcode(&src).expect("compile semcode");
-    let verified = verify_semcode(&bytes).expect("verify");
+    let token = sm_verify::verify_semcode_token(&bytes).expect("verify");
+    let verified = token.program().clone();
     let disasm = disasm_semcode(&bytes).expect("disasm");
-    run_verified_semcode(&bytes).expect("verified run");
+    let entry_token = token.require_entry("main").expect("require main");
+    sm_vm::run_verified_entry_semcode(&entry_token).expect("verified run");
 
     let mut magic = [0u8; 8];
     magic.copy_from_slice(&bytes[..8]);
@@ -189,9 +190,11 @@ fn g1_execution_integrity_repeated_compiles_are_byte_stable() {
         let disasm_second = disasm_semcode(&second).expect("second disasm");
         assert_eq!(disasm_first, disasm_second, "disasm drifted for {rel}");
 
-        verify_semcode(&first).expect("verify");
+        let token = sm_verify::verify_semcode_token(&first).expect("verify");
+        let entry_token = token.require_entry("main").expect("require main");
         for _ in 0..3 {
-            run_verified_semcode(&first).expect("verified run must stay successful");
+            sm_vm::run_verified_entry_semcode(&entry_token)
+                .expect("verified run must stay successful");
         }
     }
 }
