@@ -94,6 +94,11 @@ impl core::fmt::Display for RejectReport {
 #[cfg(feature = "std")]
 impl std::error::Error for RejectReport {}
 
+/// Canonical admission token for a verified SemCode artifact.
+///
+/// Instances of this type represent SemCode bytes that have successfully
+/// passed the `verify_semcode_token` admission gate. This forms the first
+/// boundary in the canonical verified execution path.
 #[cfg(feature = "std")]
 #[derive(Debug)]
 pub struct VerifiedSemCode<'a> {
@@ -102,6 +107,11 @@ pub struct VerifiedSemCode<'a> {
     decoded: Vec<sm_ir::semcode_decode::DecodedFunctionEnvelope<'a>>,
 }
 
+/// Error type for canonical entry resolution.
+///
+/// This error indicates that a `VerifiedSemCode` artifact does not contain
+/// the required entry function, preventing it from proceeding to the
+/// `VerifiedEntrySemCode` boundary.
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryResolutionError {
@@ -122,6 +132,12 @@ impl core::fmt::Display for EntryResolutionError {
 #[cfg(feature = "std")]
 impl std::error::Error for EntryResolutionError {}
 
+/// Canonical entry-resolved token for a verified SemCode artifact.
+///
+/// Instances of this type represent a verified artifact that has also
+/// been confirmed to contain a specific entry point function. This forms
+/// the second boundary in the canonical verified execution path, directly
+/// preceding execution in the `sm-vm` layer.
 #[cfg(feature = "std")]
 #[derive(Debug, Clone)]
 pub struct VerifiedEntrySemCode<'token, 'bytes> {
@@ -166,6 +182,10 @@ impl<'a> VerifiedSemCode<'a> {
         self.decoded.iter().any(|env| env.name == entry)
     }
 
+    /// Canonical entry resolution gate.
+    ///
+    /// Upgrades this admission token to a `VerifiedEntrySemCode` token
+    /// if the specified entry function is present in the verified artifact.
     pub fn require_entry<'token>(
         &'token self,
         entry: &str,
@@ -183,6 +203,11 @@ impl<'a> VerifiedSemCode<'a> {
     }
 }
 
+/// Canonical admission gate for SemCode bytes.
+///
+/// This is the primary entry point for the canonical verified execution path.
+/// It validates raw SemCode bytes against admission policies and returns a
+/// `VerifiedSemCode` token if successful.
 #[cfg(feature = "std")]
 pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectReport> {
     let mut diagnostics = Vec::new();
@@ -346,6 +371,10 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
     }
 }
 
+/// Legacy admission gate (returns verified program model directly).
+///
+/// Prefer `verify_semcode_token` for canonical execution flows that require
+/// the token-based boundary pattern.
 #[cfg(feature = "std")]
 pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
     verify_semcode_token(bytes).map(|token| token.program.clone())
