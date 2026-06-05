@@ -1,4 +1,4 @@
-use sm_vm::{disasm_semcode, run_verified_semcode};
+use sm_vm::disasm_semcode;
 use std::env;
 use std::fs;
 use std::process::ExitCode;
@@ -32,7 +32,13 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     }
     let input = &args[0];
     let bytes = fs::read(input).map_err(|e| format!("failed to read '{}': {}", input, e))?;
-    run_verified_semcode(&bytes).map_err(|e| e.to_string())
+    let token = sm_verify::verify_semcode_token(&bytes).map_err(|e| e.to_string())?;
+    let entry_token = token.require_entry("main").map_err(|e| match e {
+        sm_verify::EntryResolutionError::MissingEntry { entry } => {
+            sm_vm::RuntimeError::UnknownFunction(entry).to_string()
+        }
+    })?;
+    sm_vm::run_verified_entry_semcode(&entry_token).map_err(|e| e.to_string())
 }
 
 fn cmd_disasm(args: &[String]) -> Result<(), String> {
