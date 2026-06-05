@@ -16,15 +16,20 @@ fn cli_err(args: Vec<String>, context: &str) -> String {
     smc_cli::run(args).expect_err(&format!("{context} unexpectedly passed"))
 }
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 fn mk_temp_dir(prefix: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "{}_{}_{}",
+        "{}_{}_{}_{}",
         prefix,
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
-            .as_nanos()
+            .as_nanos(),
+        DIR_COUNTER.fetch_add(1, Ordering::SeqCst)
     ));
     std::fs::create_dir_all(&dir).expect("mkdir");
     dir

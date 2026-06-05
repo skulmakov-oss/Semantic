@@ -22,18 +22,23 @@ fn fixture_text(rel: &str) -> String {
         .unwrap_or_else(|err| panic!("read fixture {rel}: {err}"))
 }
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 fn mk_temp_dir(prefix: &str) -> PathBuf {
-    let base = std::env::temp_dir().join(format!(
-        "{}_{}_{}",
+    let dir = std::env::temp_dir().join(format!(
+        "{}_{}_{}_{}",
         prefix,
         std::process::id(),
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
-            .as_nanos()
+            .as_nanos(),
+        DIR_COUNTER.fetch_add(1, Ordering::SeqCst)
     ));
-    std::fs::create_dir_all(&base).expect("mkdir");
-    base
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    dir
 }
 
 fn assert_manifest_parse_error(rel: &str, code: PackageManifestParseCode, needle: &str) {
