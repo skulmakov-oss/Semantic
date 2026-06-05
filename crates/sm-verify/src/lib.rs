@@ -201,6 +201,20 @@ impl<'a> VerifiedSemCode<'a> {
             })
         }
     }
+
+    /// Workspace-internal accessor for VM preparation.
+    /// Exposes the decoded internal state safely without creating a stable public API.
+    #[cfg(feature = "std")]
+    #[doc(hidden)]
+    pub fn with_decoded_envelopes<R, F>(&self, f: F) -> R
+    where
+        F: for<'scope> FnOnce(
+            &'scope sm_emit::SemcodeHeaderSpec,
+            &'scope [sm_ir::semcode_decode::DecodedFunctionEnvelope<'a>],
+        ) -> R,
+    {
+        f(&self.program.header, &self.decoded)
+    }
 }
 
 /// Canonical admission gate for SemCode bytes.

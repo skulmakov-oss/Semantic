@@ -596,19 +596,22 @@ fn decode_and_map_errors(
 
 fn parse_semcode(bytes: &[u8]) -> Result<VmProgramView, RuntimeError> {
     let (header, decoded_functions) = decode_and_map_errors(bytes)?;
-    build_vm_program_view_from_decoded(header, decoded_functions)
+    build_vm_program_view_from_decoded(header, &decoded_functions)
 }
 
 fn prepare_verified_execution(
     token: &VerifiedEntrySemCode<'_, '_>,
 ) -> Result<VmProgramView, RuntimeError> {
-    let (header, decoded_functions) = decode_and_map_errors(token.bytes())?;
-    build_vm_program_view_from_decoded(header, decoded_functions)
+    token
+        .artifact()
+        .with_decoded_envelopes(|header, decoded_functions| {
+            build_vm_program_view_from_decoded(header.clone(), decoded_functions)
+        })
 }
 
 fn build_vm_program_view_from_decoded(
     header: SemcodeHeaderSpec,
-    decoded_functions: Vec<sm_ir::semcode_decode::DecodedFunctionEnvelope>,
+    decoded_functions: &[sm_ir::semcode_decode::DecodedFunctionEnvelope<'_>],
 ) -> Result<VmProgramView, RuntimeError> {
     let mut out = HashMap::new();
     let mut runtime_symbols = RuntimeSymbolTable::new();
@@ -619,7 +622,7 @@ fn build_vm_program_view_from_decoded(
 
         let debug_symbols = env
             .debug_symbols
-            .into_iter()
+            .iter()
             .map(|s| DebugSymbol {
                 pc: s.pc,
                 line: s.line,
@@ -632,9 +635,9 @@ fn build_vm_program_view_from_decoded(
             .map(|name| runtime_symbols.intern(name))
             .collect::<Vec<_>>();
 
-        let remap_paths = |paths: Vec<sm_ir::semcode_decode::DecodedAccessPath>| {
+        let remap_paths = |paths: &[sm_ir::semcode_decode::DecodedAccessPath]| {
             paths
-                .into_iter()
+                .iter()
                 .map(|path| {
                     let local_root = path.root_symbol_id as usize;
                     let root = symbol_ids
@@ -642,13 +645,13 @@ fn build_vm_program_view_from_decoded(
                         .copied()
                         .unwrap_or(SymbolId(path.root_symbol_id));
                     let mut p = AccessPath::new(root);
-                    for c in path.components {
+                    for c in &path.components {
                         match c {
                             sm_ir::semcode_decode::DecodedAccessPathComponent::TupleIndex(i) => {
-                                p = p.tuple_index(i);
+                                p = p.tuple_index(*i);
                             }
                             sm_ir::semcode_decode::DecodedAccessPathComponent::FieldSymbol(s) => {
-                                p = p.field(SymbolId(s));
+                                p = p.field(SymbolId(*s));
                             }
                         }
                     }
@@ -657,8 +660,8 @@ fn build_vm_program_view_from_decoded(
                 .collect::<Result<Vec<_>, RuntimeError>>()
         };
 
-        let borrowed_paths = remap_paths(env.borrowed_paths)?;
-        let write_paths = remap_paths(env.write_paths)?;
+        let borrowed_paths = remap_paths(&env.borrowed_paths)?;
+        let write_paths = remap_paths(&env.write_paths)?;
 
         let f = FunctionBytecode {
             name: name.clone(),
