@@ -3016,8 +3016,14 @@ mod tests {
 
     #[test]
     fn run_verified_semcode_missing_main_keeps_old_error() {
-        let src = "fn helper() { return; }";
-        let bytes = compile_program_to_semcode(src).expect("compile");
+        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        let target = b"main";
+        for i in 0..bytes.len() - target.len() {
+            if &bytes[i..i + target.len()] == target {
+                bytes[i..i + target.len()].copy_from_slice(b"help");
+                break;
+            }
+        }
         let err = run_verified_semcode(&bytes).expect_err("must fail missing main");
         assert!(matches!(err, RuntimeError::UnknownFunction(func) if func == "main"));
     }
