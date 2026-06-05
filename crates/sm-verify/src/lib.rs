@@ -5,14 +5,11 @@ extern crate std;
 
 #[cfg(feature = "std")]
 use sm_emit::{
-    header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8,
-    Opcode, SemcodeFormatError, SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_CLOSURE_VALUES,
-    CAP_DEBUG_SYMBOLS, CAP_EVENT_POST, CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE,
-    CAP_MAP_VALUES, CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_PRNG,
-    CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_STDOUT,
-    CAP_TEXT_VALUES, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG,
+    read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
+    SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS, CAP_EVENT_POST,
+    CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_MAP_VALUES,
+    CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_PRNG, CAP_SEQUENCE_ITERATION,
+    CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_STDOUT, CAP_TEXT_VALUES,
 };
 use sm_runtime_core::RuntimeQuotas;
 use std::collections::HashSet;
@@ -102,70 +99,70 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
     let mut diagnostics = Vec::new();
     let quotas = RuntimeQuotas::verified_local();
 
-    if bytes.len() < 8 {
-        diagnostics.push(diag(
-            VerificationCode::BadHeader,
-            None,
-            None,
-            "SemCode file is shorter than the 8-byte header",
-        ));
-        return Err(RejectReport { diagnostics });
-    }
-
-    let mut magic = [0u8; 8];
-    magic.copy_from_slice(&bytes[..8]);
-    let Some(header) = header_spec_from_magic(&magic) else {
-        diagnostics.push(diag(
-            VerificationCode::UnsupportedVersion,
-            None,
-            Some(0),
-            format!(
-                "unsupported SemCode header '{}'",
-                String::from_utf8_lossy(&magic)
-            ),
-        ));
-        return Err(RejectReport { diagnostics });
+    let (header, decoded_functions) = match sm_ir::semcode_decode::decode_semcode_envelope(bytes) {
+        Ok(v) => v,
+        Err(err) => {
+            let diag = match err {
+                sm_ir::semcode_decode::DecodeError::BadHeader => diag(
+                    VerificationCode::BadHeader,
+                    None,
+                    None,
+                    "SemCode file is shorter than the 8-byte header",
+                ),
+                sm_ir::semcode_decode::DecodeError::UnsupportedVersion { found, .. } => diag(
+                    VerificationCode::UnsupportedVersion,
+                    None,
+                    Some(0),
+                    format!("unsupported SemCode header '{}'", found),
+                ),
+                sm_ir::semcode_decode::DecodeError::TruncatedFunction { offset, msg } => {
+                    diag(VerificationCode::TruncatedFunction, None, Some(offset), msg)
+                }
+                sm_ir::semcode_decode::DecodeError::InvalidFunctionName { offset, msg } => diag(
+                    VerificationCode::InvalidFunctionName,
+                    None,
+                    Some(offset),
+                    msg,
+                ),
+                sm_ir::semcode_decode::DecodeError::InvalidStringTable { offset, msg } => diag(
+                    VerificationCode::InvalidStringTable,
+                    None,
+                    Some(offset),
+                    msg,
+                ),
+                sm_ir::semcode_decode::DecodeError::InvalidDebugSection { offset, msg } => diag(
+                    VerificationCode::InvalidDebugSection,
+                    None,
+                    Some(offset),
+                    msg,
+                ),
+                sm_ir::semcode_decode::DecodeError::InvalidOwnershipSection { offset, msg } => {
+                    diag(
+                        VerificationCode::InvalidOwnershipSection,
+                        None,
+                        Some(offset),
+                        msg,
+                    )
+                }
+                sm_ir::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
+                    VerificationCode::ResourceLimitExceeded,
+                    None,
+                    Some(offset),
+                    msg,
+                ),
+            };
+            diagnostics.push(diag);
+            return Err(RejectReport { diagnostics });
+        }
     };
 
-    let mut cursor = 8usize;
     let mut functions = Vec::new();
     let mut pending_functions = Vec::new();
     let mut seen_names = HashSet::new();
-    while cursor < bytes.len() {
-        let function_start = cursor;
-        let name_len = match read_u16_le(bytes, &mut cursor) {
-            Ok(v) => v as usize,
-            Err(_) => {
-                diagnostics.push(diag(
-                    VerificationCode::TruncatedFunction,
-                    None,
-                    Some(function_start),
-                    "truncated function header while reading name length",
-                ));
-                break;
-            }
-        };
-        if name_len == 0 {
-            diagnostics.push(diag(
-                VerificationCode::InvalidFunctionName,
-                None,
-                Some(function_start),
-                "function name must not be empty",
-            ));
-            break;
-        }
-        let name = match read_utf8(bytes, &mut cursor, name_len) {
-            Ok(v) => v,
-            Err(_) => {
-                diagnostics.push(diag(
-                    VerificationCode::InvalidFunctionName,
-                    None,
-                    Some(function_start),
-                    "function name is truncated or invalid utf-8",
-                ));
-                break;
-            }
-        };
+
+    for env in decoded_functions {
+        let function_start = env.name_offset;
+        let name = env.name.clone();
 
         if !seen_names.insert(name.clone()) {
             diagnostics.push(diag(
@@ -177,31 +174,7 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
             break;
         }
 
-        let code_len = match read_u32_le(bytes, &mut cursor) {
-            Ok(v) => v as usize,
-            Err(_) => {
-                diagnostics.push(diag(
-                    VerificationCode::TruncatedFunction,
-                    Some(name.clone()),
-                    Some(function_start),
-                    "truncated function header while reading code length",
-                ));
-                break;
-            }
-        };
-        if cursor + code_len > bytes.len() {
-            diagnostics.push(diag(
-                VerificationCode::TruncatedFunction,
-                Some(name.clone()),
-                Some(cursor),
-                "function code extends past end of file",
-            ));
-            break;
-        }
-        let code = &bytes[cursor..cursor + code_len];
-        cursor += code_len;
-
-        match verify_function_code(&name, code, &header, &quotas) {
+        match verify_function_code(&env, &header, &quotas) {
             Ok(function) => {
                 functions.push(function.verified.clone());
                 pending_functions.push(function);
@@ -282,20 +255,12 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
 
 #[cfg(feature = "std")]
 fn verify_function_code(
-    name: &str,
-    code: &[u8],
+    env: &sm_ir::semcode_decode::DecodedFunctionEnvelope,
     header: &SemcodeHeaderSpec,
     quotas: &RuntimeQuotas,
 ) -> Result<PendingVerifiedFunction, RejectReport> {
-    let mut cursor = 0usize;
-    let string_count = read_u16_le(code, &mut cursor).map_err(|_| {
-        reject_one(
-            name,
-            VerificationCode::InvalidStringTable,
-            0,
-            "missing string table header",
-        )
-    })? as usize;
+    let name = env.name.as_str();
+    let string_count = env.strings.len();
     if string_count > quotas.max_symbol_table {
         return Err(reject_one(
             name,
@@ -308,87 +273,35 @@ fn verify_function_code(
         ));
     }
 
-    let mut strings = Vec::with_capacity(string_count);
-    for _ in 0..string_count {
-        let len = read_u16_le(code, &mut cursor).map_err(|_| {
-            reject_one(
-                name,
-                VerificationCode::InvalidStringTable,
-                cursor,
-                "truncated string length",
-            )
-        })? as usize;
-        let string = read_utf8(code, &mut cursor, len).map_err(|_| {
-            reject_one(
-                name,
-                VerificationCode::InvalidStringTable,
-                cursor,
-                "invalid function string entry",
-            )
-        })?;
-        strings.push(string);
+    let debug_symbol_count = env.debug_symbols.len();
+    if debug_symbol_count > quotas.max_trace_entries {
+        return Err(reject_one(
+            name,
+            VerificationCode::ResourceLimitExceeded,
+            0,
+            format!(
+                "debug section uses {} entries, exceeding the verified-local trace budget of {}",
+                debug_symbol_count, quotas.max_trace_entries
+            ),
+        ));
     }
 
-    let mut debug_symbol_count = 0usize;
-    let mut debug_pcs = Vec::new();
-    if cursor + 4 <= code.len() && &code[cursor..cursor + 4] == b"DBG0" {
-        cursor += 4;
-        debug_symbol_count = read_u16_le(code, &mut cursor).map_err(|_| {
-            reject_one(
-                name,
-                VerificationCode::InvalidDebugSection,
-                cursor,
-                "truncated debug section header",
-            )
-        })? as usize;
-        if debug_symbol_count > quotas.max_trace_entries {
-            return Err(reject_one(
-                name,
-                VerificationCode::ResourceLimitExceeded,
-                cursor,
-                format!(
-                    "debug section uses {} entries, exceeding the verified-local trace budget of {}",
-                    debug_symbol_count, quotas.max_trace_entries
-                ),
-            ));
-        }
-        for _ in 0..debug_symbol_count {
-            let pc = read_u32_le(code, &mut cursor).map_err(|_| {
-                reject_one(
-                    name,
-                    VerificationCode::InvalidDebugSection,
-                    cursor,
-                    "truncated debug pc",
-                )
-            })?;
-            read_u32_le(code, &mut cursor).map_err(|_| {
-                reject_one(
-                    name,
-                    VerificationCode::InvalidDebugSection,
-                    cursor,
-                    "truncated debug line",
-                )
-            })?;
-            read_u16_le(code, &mut cursor).map_err(|_| {
-                reject_one(
-                    name,
-                    VerificationCode::InvalidDebugSection,
-                    cursor,
-                    "truncated debug column",
-                )
-            })?;
-            debug_pcs.push(pc as usize);
-        }
-    }
+    let has_ownership_section = env.has_ownership_section;
+    let has_record_field_ownership =
+        env.borrowed_paths
+            .iter()
+            .chain(env.write_paths.iter())
+            .any(|p| {
+                p.components.iter().any(|c| {
+                    matches!(
+                        c,
+                        sm_ir::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_)
+                    )
+                })
+            });
 
-    let has_ownership_section =
-        cursor + 4 <= code.len() && &code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG;
-    let ownership_usage = if has_ownership_section {
-        verify_ownership_section(name, code, &mut cursor, quotas)?
-    } else {
-        OwnershipSectionUsage::default()
-    };
-
+    let code = env.code_slice;
+    let mut cursor = env.instr_start_offset;
     let instr_start = cursor;
     let instr_len = code.len().saturating_sub(instr_start);
     let mut instr_starts = Vec::new();
@@ -432,12 +345,12 @@ fn verify_function_code(
         };
     }
 
-    for pc in debug_pcs {
-        if pc >= instr_len {
+    for sym in &env.debug_symbols {
+        if sym.pc >= instr_len {
             return Err(reject_one(
                 name,
                 VerificationCode::InvalidDebugSection,
-                pc,
+                sym.pc,
                 "debug symbol pc points past the instruction stream",
             ));
         }
@@ -449,7 +362,7 @@ fn verify_function_code(
     if has_ownership_section {
         used_caps |= CAP_OWNERSHIP_PATHS;
     }
-    if ownership_usage.has_record_field_ownership {
+    if has_record_field_ownership {
         used_caps |= CAP_OWNERSHIP_FIELD_PATHS;
     }
 
@@ -497,7 +410,7 @@ fn verify_function_code(
             ));
         }
         if usage == "call target" {
-            call_targets.push((offset, strings[sid].clone()));
+            call_targets.push((offset, env.strings[sid].clone()));
         }
     }
 
@@ -1081,145 +994,6 @@ fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
         "print" => Some(CAP_STDOUT),
         _ => None,
     }
-}
-
-#[cfg(feature = "std")]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct OwnershipSectionUsage {
-    has_record_field_ownership: bool,
-}
-
-#[cfg(feature = "std")]
-fn verify_ownership_section(
-    function: &str,
-    code: &[u8],
-    cursor: &mut usize,
-    quotas: &RuntimeQuotas,
-) -> Result<OwnershipSectionUsage, RejectReport> {
-    let section_start = *cursor;
-    *cursor += OWNERSHIP_SECTION_TAG.len();
-    let mut usage = OwnershipSectionUsage::default();
-
-    let event_count = read_u16_le(code, cursor).map_err(|_| {
-        reject_one(
-            function,
-            VerificationCode::InvalidOwnershipSection,
-            section_start,
-            "truncated OWN0 section header",
-        )
-    })? as usize;
-
-    if event_count > quotas.max_symbol_table {
-        return Err(reject_one(
-            function,
-            VerificationCode::ResourceLimitExceeded,
-            section_start,
-            format!(
-                "OWN0 section uses {} events, exceeding the verified-local symbol budget of {}",
-                event_count, quotas.max_symbol_table
-            ),
-        ));
-    }
-
-    for event_idx in 0..event_count {
-        let event_offset = *cursor;
-        let kind = read_u8(code, cursor).map_err(|_| {
-            reject_one(
-                function,
-                VerificationCode::InvalidOwnershipSection,
-                event_offset,
-                "truncated ownership event kind",
-            )
-        })?;
-        if !matches!(
-            kind,
-            OWNERSHIP_EVENT_KIND_BORROW | OWNERSHIP_EVENT_KIND_WRITE
-        ) {
-            return Err(reject_one(
-                function,
-                VerificationCode::InvalidOwnershipSection,
-                *cursor - 1,
-                format!("unsupported ownership event kind 0x{kind:02x}"),
-            ));
-        }
-
-        read_u32_le(code, cursor).map_err(|_| {
-            reject_one(
-                function,
-                VerificationCode::InvalidOwnershipSection,
-                *cursor,
-                "truncated ownership path root",
-            )
-        })?;
-        let component_count = read_u16_le(code, cursor).map_err(|_| {
-            reject_one(
-                function,
-                VerificationCode::InvalidOwnershipSection,
-                *cursor,
-                "truncated ownership path component count",
-            )
-        })? as usize;
-
-        if component_count > quotas.max_symbol_table {
-            return Err(reject_one(
-                function,
-                VerificationCode::ResourceLimitExceeded,
-                event_offset,
-                format!(
-                    "ownership path {} uses {} components, exceeding the verified-local symbol budget of {}",
-                    event_idx, component_count, quotas.max_symbol_table
-                ),
-            ));
-        }
-
-        let mut event_has_field_component = false;
-        for _ in 0..component_count {
-            let component_offset = *cursor;
-            let component_kind = read_u8(code, cursor).map_err(|_| {
-                reject_one(
-                    function,
-                    VerificationCode::InvalidOwnershipSection,
-                    component_offset,
-                    "truncated ownership path component kind",
-                )
-            })?;
-            match component_kind {
-                OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX => {
-                    read_u16_le(code, cursor).map_err(|_| {
-                        reject_one(
-                            function,
-                            VerificationCode::InvalidOwnershipSection,
-                            *cursor,
-                            "truncated tuple-index ownership path component",
-                        )
-                    })?;
-                }
-                OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => {
-                    event_has_field_component = true;
-                    read_u32_le(code, cursor).map_err(|_| {
-                        reject_one(
-                            function,
-                            VerificationCode::InvalidOwnershipSection,
-                            *cursor,
-                            "truncated field-symbol ownership path component",
-                        )
-                    })?;
-                }
-                _ => {
-                    return Err(reject_one(
-                        function,
-                        VerificationCode::InvalidOwnershipSection,
-                        *cursor - 1,
-                        format!("unsupported ownership path component kind 0x{component_kind:02x}"),
-                    ));
-                }
-            }
-        }
-
-        usage.has_record_field_ownership |= event_has_field_component;
-    }
-
-    Ok(usage)
 }
 
 #[cfg(feature = "std")]

@@ -1,8 +1,6 @@
 use crate::semcode_format::{
-    header_spec_from_magic, read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8,
-    supported_headers, Opcode, SemcodeFormatError, SemcodeHeaderSpec, OWNERSHIP_EVENT_KIND_BORROW,
-    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
-    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
+    read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8, Opcode,
+    SemcodeFormatError, SemcodeHeaderSpec,
 };
 use crate::QuadVal;
 use prom_abi::{AbiError, AbiValue, HostCallId, PrometheusHostAbi};
@@ -18,11 +16,6 @@ use sm_runtime_core::{
 use sm_verify::verify_semcode;
 use sm_verify::RejectReport;
 use std::collections::{HashMap, HashSet};
-
-const MAX_FUNCTIONS: usize = 4096;
-const MAX_STRINGS_PER_FUNCTION: usize = 4096;
-const MAX_STRING_LEN: usize = 8192;
-const MAX_DEBUG_SYMBOLS_PER_FUNCTION: usize = 8192;
 
 /// Scalar key type for Map values.
 ///
@@ -442,75 +435,81 @@ fn parse_semcode(
     ),
     RuntimeError,
 > {
-    if bytes.len() < 8 {
-        return Err(RuntimeError::BadHeader);
-    }
-    let mut magic = [0u8; 8];
-    magic.copy_from_slice(&bytes[0..8]);
-    let Some(header) = header_spec_from_magic(&magic) else {
-        if &magic[0..7] == b"SEMCODE" {
-            return Err(RuntimeError::UnsupportedBytecodeVersion {
-                found: String::from_utf8_lossy(&magic).to_string(),
-                supported: supported_headers()
-                    .iter()
-                    .map(|h| String::from_utf8_lossy(&h.magic).to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            });
-        }
-        return Err(RuntimeError::BadHeader);
-    };
-    let mut i = 8usize;
+    let (header, decoded_functions) = sm_ir::semcode_decode::decode_semcode_envelope(bytes)
+        .map_err(|e| match e {
+            sm_ir::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
+            sm_ir::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
+                RuntimeError::UnsupportedBytecodeVersion { found, supported }
+            }
+            sm_ir::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_ir::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_ir::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_ir::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_ir::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
+                RuntimeError::BadFormat(msg.to_string())
+            }
+            sm_ir::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
+                RuntimeError::BadFormat(msg)
+            }
+        })?;
     let mut out = HashMap::new();
     let mut runtime_symbols = RuntimeSymbolTable::new();
-    while i < bytes.len() {
-        if out.len() >= MAX_FUNCTIONS {
-            return Err(RuntimeError::BadFormat(format!(
-                "too many functions (>{})",
-                MAX_FUNCTIONS
-            )));
-        }
-        let name_len = read_u16_le(bytes, &mut i).map_err(map_format_err)? as usize;
-        if name_len == 0 {
-            return Err(RuntimeError::BadFormat("empty function name".to_string()));
-        }
-        if name_len > MAX_STRING_LEN {
-            return Err(RuntimeError::BadFormat(format!(
-                "function name too long: {}",
-                name_len
-            )));
-        }
-        let name = read_utf8(bytes, &mut i, name_len).map_err(map_format_err)?;
-        let code_len = read_u32_le(bytes, &mut i).map_err(map_format_err)? as usize;
-        if i + code_len > bytes.len() {
-            return Err(RuntimeError::BadFormat(
-                "function code out of bounds".to_string(),
-            ));
-        }
-        let code = bytes[i..i + code_len].to_vec();
-        i += code_len;
 
-        let (strings, debug_symbols, borrowed_paths, write_paths, instr_start) =
-            parse_string_table_debug_and_ownership(&code)?;
+    for env in decoded_functions {
+        let name = env.name.clone();
+        let strings = env.strings.clone();
+
+        let debug_symbols = env
+            .debug_symbols
+            .into_iter()
+            .map(|s| DebugSymbol {
+                pc: s.pc,
+                line: s.line,
+                col: s.col,
+            })
+            .collect();
+
         let symbol_ids = strings
             .iter()
             .map(|name| runtime_symbols.intern(name))
             .collect::<Vec<_>>();
-        let remap_paths = |paths: Vec<AccessPath>| {
+
+        let remap_paths = |paths: Vec<sm_ir::semcode_decode::DecodedAccessPath>| {
             paths
                 .into_iter()
                 .map(|path| {
-                    let local_root = path.root.raw() as usize;
-                    let root = symbol_ids.get(local_root).copied().unwrap_or(path.root);
-                    Ok(AccessPath {
-                        root,
-                        components: path.components,
-                    })
+                    let local_root = path.root_symbol_id as usize;
+                    let root = symbol_ids
+                        .get(local_root)
+                        .copied()
+                        .unwrap_or(SymbolId(path.root_symbol_id));
+                    let mut p = AccessPath::new(root);
+                    for c in path.components {
+                        match c {
+                            sm_ir::semcode_decode::DecodedAccessPathComponent::TupleIndex(i) => {
+                                p = p.tuple_index(i);
+                            }
+                            sm_ir::semcode_decode::DecodedAccessPathComponent::FieldSymbol(s) => {
+                                p = p.field(SymbolId(s));
+                            }
+                        }
+                    }
+                    Ok(p)
                 })
                 .collect::<Result<Vec<_>, RuntimeError>>()
         };
-        let borrowed_paths = remap_paths(borrowed_paths)?;
-        let write_paths = remap_paths(write_paths)?;
+
+        let borrowed_paths = remap_paths(env.borrowed_paths)?;
+        let write_paths = remap_paths(env.write_paths)?;
+
         let f = FunctionBytecode {
             name: name.clone(),
             strings,
@@ -518,8 +517,8 @@ fn parse_semcode(
             debug_symbols,
             borrowed_paths,
             write_paths,
-            code,
-            instr_start,
+            code: env.code_slice.to_vec(),
+            instr_start: env.instr_start_offset,
         };
         validate_function_bytecode(&f)?;
         if out.insert(name.clone(), f).is_some() {
@@ -530,99 +529,6 @@ fn parse_semcode(
         }
     }
     Ok((header, runtime_symbols, out))
-}
-
-fn parse_string_table_debug_and_ownership(
-    code: &[u8],
-) -> Result<
-    (
-        Vec<String>,
-        Vec<DebugSymbol>,
-        Vec<AccessPath>,
-        Vec<AccessPath>,
-        usize,
-    ),
-    RuntimeError,
-> {
-    let mut i = 0usize;
-    let count = read_u16_le(code, &mut i).map_err(map_format_err)? as usize;
-    if count > MAX_STRINGS_PER_FUNCTION {
-        return Err(RuntimeError::BadFormat(format!(
-            "too many strings in function: {} (max {})",
-            count, MAX_STRINGS_PER_FUNCTION
-        )));
-    }
-    let mut strings = Vec::with_capacity(count);
-    for _ in 0..count {
-        let len = read_u16_le(code, &mut i).map_err(map_format_err)? as usize;
-        if len > MAX_STRING_LEN {
-            return Err(RuntimeError::BadFormat(format!(
-                "string too long in function string table: {}",
-                len
-            )));
-        }
-        strings.push(read_utf8(code, &mut i, len).map_err(map_format_err)?);
-    }
-    let mut debug_symbols = Vec::new();
-    if i + 4 <= code.len() && &code[i..i + 4] == b"DBG0" {
-        i += 4;
-        let count = read_u16_le(code, &mut i).map_err(map_format_err)? as usize;
-        if count > MAX_DEBUG_SYMBOLS_PER_FUNCTION {
-            return Err(RuntimeError::BadFormat(format!(
-                "too many debug symbols in function: {} (max {})",
-                count, MAX_DEBUG_SYMBOLS_PER_FUNCTION
-            )));
-        }
-        debug_symbols.reserve(count);
-        for _ in 0..count {
-            let pc = read_u32_le(code, &mut i).map_err(map_format_err)? as usize;
-            let line = read_u32_le(code, &mut i).map_err(map_format_err)?;
-            let col = read_u16_le(code, &mut i).map_err(map_format_err)?;
-            debug_symbols.push(DebugSymbol { pc, line, col });
-        }
-    }
-    let mut borrowed_paths = Vec::new();
-    let mut write_paths = Vec::new();
-    if i + 4 <= code.len() && &code[i..i + 4] == OWNERSHIP_SECTION_TAG {
-        i += OWNERSHIP_SECTION_TAG.len();
-        let count = read_u16_le(code, &mut i).map_err(map_format_err)? as usize;
-        borrowed_paths.reserve(count);
-        write_paths.reserve(count);
-        for _ in 0..count {
-            let kind = read_u8(code, &mut i).map_err(map_format_err)?;
-            let root = SymbolId(read_u32_le(code, &mut i).map_err(map_format_err)?);
-            let component_count = read_u16_le(code, &mut i).map_err(map_format_err)? as usize;
-            let mut path = AccessPath::new(root);
-            for _ in 0..component_count {
-                let component_kind = read_u8(code, &mut i).map_err(map_format_err)?;
-                match component_kind {
-                    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX => {
-                        let index = read_u16_le(code, &mut i).map_err(map_format_err)?;
-                        path = path.tuple_index(index);
-                    }
-                    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => {
-                        let field = SymbolId(read_u32_le(code, &mut i).map_err(map_format_err)?);
-                        path = path.field(field);
-                    }
-                    _ => {
-                        return Err(RuntimeError::BadFormat(format!(
-                            "unsupported ownership path component kind 0x{component_kind:02x}"
-                        )));
-                    }
-                }
-            }
-            match kind {
-                OWNERSHIP_EVENT_KIND_BORROW => borrowed_paths.push(path),
-                OWNERSHIP_EVENT_KIND_WRITE => write_paths.push(path),
-                _ => {
-                    return Err(RuntimeError::BadFormat(format!(
-                        "unsupported ownership event kind 0x{kind:02x}"
-                    )))
-                }
-            }
-        }
-    }
-    Ok((strings, debug_symbols, borrowed_paths, write_paths, i))
 }
 
 fn map_format_err(err: SemcodeFormatError) -> RuntimeError {
@@ -2955,7 +2861,12 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sm_emit::compile_program_to_semcode;
+    use super::*;
+    use sm_emit::{
+        compile_program_to_semcode, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+        OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
+        OWNERSHIP_SECTION_TAG,
+    };
     use sm_runtime_core::{
         ExecutionConfig, ExecutionContext, PathComponent, QuotaExceeded, QuotaKind, RuntimeTrap,
     };
@@ -4279,8 +4190,11 @@ mod tests {
         let code_start = cursor;
         let code_end = code_start + code_len;
         let code = &bytes[code_start..code_end];
-        let (strings, _, _, _, instr_start) =
-            parse_string_table_debug_and_ownership(code).expect("parse");
+        let (_, mut decoded_functions) =
+            sm_ir::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let env = decoded_functions.remove(0);
+        let strings = env.strings;
+        let instr_start = env.instr_start_offset;
         let ctx_root = strings
             .iter()
             .position(|s| s == "ctx")
@@ -4385,8 +4299,11 @@ mod tests {
         let code_start = cursor;
         let code_end = code_start + code_len;
         let code = &bytes[code_start..code_end];
-        let (strings, _, _, _, instr_start) =
-            parse_string_table_debug_and_ownership(code).expect("parse");
+        let (_, mut decoded_functions) =
+            sm_ir::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let env = decoded_functions.remove(0);
+        let strings = env.strings;
+        let instr_start = env.instr_start_offset;
         let total_root = strings
             .iter()
             .position(|s| s == "total")

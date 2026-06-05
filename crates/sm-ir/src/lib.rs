@@ -24,6 +24,9 @@ mod local_format;
 pub mod hello_ir;
 #[cfg(feature = "std")]
 pub mod hello_semcode;
+#[cfg(feature = "std")]
+#[doc(hidden)]
+pub mod semcode_decode;
 
 #[cfg(feature = "std")]
 pub mod semcode_format {
