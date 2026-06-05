@@ -103,6 +103,52 @@ pub struct VerifiedSemCode<'a> {
 }
 
 #[cfg(feature = "std")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryResolutionError {
+    MissingEntry { entry: String },
+}
+
+#[cfg(feature = "std")]
+impl core::fmt::Display for EntryResolutionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            EntryResolutionError::MissingEntry { entry } => {
+                write!(f, "entry function '{}' not found in SemCode", entry)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for EntryResolutionError {}
+
+#[cfg(feature = "std")]
+#[derive(Debug, Clone)]
+pub struct VerifiedEntrySemCode<'token, 'bytes> {
+    artifact: &'token VerifiedSemCode<'bytes>,
+    entry: String,
+}
+
+#[cfg(feature = "std")]
+impl<'token, 'bytes> VerifiedEntrySemCode<'token, 'bytes> {
+    pub fn artifact(&self) -> &'token VerifiedSemCode<'bytes> {
+        self.artifact
+    }
+
+    pub fn entry(&self) -> &str {
+        &self.entry
+    }
+
+    pub fn bytes(&self) -> &'bytes [u8] {
+        self.artifact.bytes()
+    }
+
+    pub fn program(&self) -> &VerifiedProgram {
+        self.artifact.program()
+    }
+}
+
+#[cfg(feature = "std")]
 impl<'a> VerifiedSemCode<'a> {
     pub fn bytes(&self) -> &'a [u8] {
         self.bytes
@@ -118,6 +164,22 @@ impl<'a> VerifiedSemCode<'a> {
 
     pub fn has_entry(&self, entry: &str) -> bool {
         self.decoded.iter().any(|env| env.name == entry)
+    }
+
+    pub fn require_entry<'token>(
+        &'token self,
+        entry: &str,
+    ) -> Result<VerifiedEntrySemCode<'token, 'a>, EntryResolutionError> {
+        if self.has_entry(entry) {
+            Ok(VerifiedEntrySemCode {
+                artifact: self,
+                entry: entry.to_string(),
+            })
+        } else {
+            Err(EntryResolutionError::MissingEntry {
+                entry: entry.to_string(),
+            })
+        }
     }
 }
 
@@ -2033,5 +2095,78 @@ mod tests {
             report.diagnostics[0].code,
             VerificationCode::DuplicateFunction
         );
+    }
+
+    #[test]
+    fn require_entry_main_ok_for_executable_semcode() {
+        let src = "fn main() { return; }";
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let token = verify_semcode_token(&bytes).expect("token admission");
+        let entry_token = token.require_entry("main").expect("require_entry");
+        assert_eq!(entry_token.entry(), "main");
+    }
+
+    #[test]
+    fn require_entry_main_fails_for_helper_only_semcode() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "helper".to_string(),
+                instrs: vec![IrInstr::Ret { src: None }],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+        let token = verify_semcode_token(&bytes).expect("token admission");
+        let err = token.require_entry("main").expect_err("should fail");
+        assert_eq!(
+            err,
+            EntryResolutionError::MissingEntry {
+                entry: "main".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn require_entry_helper_ok_for_helper_only_semcode() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "helper".to_string(),
+                instrs: vec![IrInstr::Ret { src: None }],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+        let token = verify_semcode_token(&bytes).expect("token admission");
+        let entry_token = token.require_entry("helper").expect("require_entry");
+        assert_eq!(entry_token.entry(), "helper");
+    }
+
+    #[test]
+    fn missing_entry_error_is_not_reject_report() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "helper".to_string(),
+                instrs: vec![IrInstr::Ret { src: None }],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+        let token = verify_semcode_token(&bytes).expect("token admission");
+        let err = token.require_entry("main").expect_err("should fail");
+        let error_msg = err.to_string();
+        assert!(error_msg.contains("entry function 'main' not found"));
+    }
+
+    #[test]
+    fn verified_entry_token_reuses_original_artifact() {
+        let src = "fn main() { return; }";
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let token = verify_semcode_token(&bytes).expect("token admission");
+        let entry_token = token.require_entry("main").expect("require_entry");
+        assert_eq!(entry_token.bytes(), token.bytes());
+        assert_eq!(entry_token.program(), token.program());
     }
 }
