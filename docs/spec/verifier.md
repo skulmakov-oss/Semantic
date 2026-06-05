@@ -19,6 +19,9 @@ Current verifier surface is centered on:
 - `VerifiedProgram`
 - `VerifiedFunction`
 - `RejectReport`
+- `VerifiedSemCode`
+- `VerifiedEntrySemCode`
+- `EntryResolutionError`
 
 ## Verification Scope
 
@@ -48,12 +51,13 @@ Current ownership-specific structural checks for ownership transport include:
 
 Standard execution uses the chain:
 
-`emit SemCode -> verify_semcode -> execute`
+`emit SemCode -> verify_semcode -> (optional) require_entry -> execute`
 
 Important rule:
 
 - VM execution does not replace SemCode admission
 - a valid producer path does not waive verifier admission
+- entry resolution failure (`EntryResolutionError`) is distinct from verifier rejection (`RejectReport`); missing an entrypoint does not make the artifact itself invalid.
 
 ## Separation Rule
 
