@@ -4,8 +4,8 @@ use std::process::ExitCode;
 
 use sm_emit::{compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
 use sm_front::FrontendError;
-use sm_verify::{verify_semcode, RejectReport, VerifiedProgram};
-use sm_vm::{run_verified_semcode, RuntimeError as VmRuntimeError};
+use sm_verify::{RejectReport, VerifiedProgram};
+use sm_vm::RuntimeError as VmRuntimeError;
 use smc_cli::{CliPipeline, ControlledObservationQualificationEnvelope};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -211,46 +211,67 @@ fn execute_7hell_single_file(
 ) -> SevenHellRenderOutput {
     let target_display = display_path_for_report(target);
     let report = match fs::read_to_string(Path::new(target)) {
-        Ok(source) => match smc_cli::CliPipeline::semantic_check_source(&source) {
-            Ok(_) => match compile_program_to_semcode_with_options_debug(
-                &source,
-                CompileProfile::Auto,
-                OptLevel::O0,
-                false,
-            ) {
-                Ok(bytes) => match verify_semcode(&bytes) {
-                    Ok(verified) => match run_verified_semcode(&bytes) {
-                        Ok(()) => match CliPipeline::qualify_controlled_observation_bytes(&bytes) {
-                            Ok(practical) => build_practical_passed_7hell_report(
-                                target_display,
-                                verified,
-                                practical,
-                            ),
-                            Err(error) => build_practical_failed_7hell_report(
+        Ok(source) => {
+            match smc_cli::CliPipeline::semantic_check_source(&source) {
+                Ok(_) => {
+                    match compile_program_to_semcode_with_options_debug(
+                        &source,
+                        CompileProfile::Auto,
+                        OptLevel::O0,
+                        false,
+                    ) {
+                        Ok(bytes) => {
+                            match sm_verify::verify_semcode_token(&bytes) {
+                                Ok(token) => {
+                                    let verified = token.program().clone();
+                                    let entry_result =
+                                        token.require_entry("main").map_err(|e| match e {
+                                            sm_verify::EntryResolutionError::MissingEntry {
+                                                entry,
+                                            } => VmRuntimeError::UnknownFunction(entry),
+                                        });
+                                    match entry_result {
+                            Ok(entry_token) => match sm_vm::run_verified_entry_semcode(&entry_token) {
+                                Ok(()) => match CliPipeline::qualify_controlled_observation_bytes(&bytes) {
+                                    Ok(practical) => build_practical_passed_7hell_report(
+                                        target_display,
+                                        verified,
+                                        practical,
+                                    ),
+                                    Err(error) => build_practical_failed_7hell_report(
+                                        target_display.clone(),
+                                        diagnostic_from_practical_error(&error, &target_display),
+                                    ),
+                                },
+                                Err(error) => build_vm_failed_7hell_report(
+                                    target_display.clone(),
+                                    diagnostic_from_vm_error(&error, &target_display),
+                                ),
+                            },
+                            Err(error) => build_vm_failed_7hell_report(
                                 target_display.clone(),
-                                diagnostic_from_practical_error(&error, &target_display),
+                                diagnostic_from_vm_error(&error, &target_display),
                             ),
-                        },
-                        Err(error) => build_vm_failed_7hell_report(
+                        }
+                                }
+                                Err(report) => build_verifier_failed_7hell_report(
+                                    target_display.clone(),
+                                    diagnostic_from_verifier_error(&report, &target_display),
+                                ),
+                            }
+                        }
+                        Err(error) => build_lowering_failed_7hell_report(
                             target_display.clone(),
-                            diagnostic_from_vm_error(&error, &target_display),
+                            diagnostic_from_compile_error(&error, &target_display),
                         ),
-                    },
-                    Err(report) => build_verifier_failed_7hell_report(
-                        target_display.clone(),
-                        diagnostic_from_verifier_error(&report, &target_display),
-                    ),
-                },
-                Err(error) => build_lowering_failed_7hell_report(
-                    target_display.clone(),
-                    diagnostic_from_compile_error(&error, &target_display),
-                ),
-            },
-            Err(error_text) => {
-                let diagnostic = diagnostic_from_check_error(&error_text, &target_display);
-                build_check_failed_7hell_report(target_display, diagnostic)
+                    }
+                }
+                Err(error_text) => {
+                    let diagnostic = diagnostic_from_check_error(&error_text, &target_display);
+                    build_check_failed_7hell_report(target_display, diagnostic)
+                }
             }
-        },
+        }
         Err(_) => build_check_failed_7hell_report(
             target_display.clone(),
             boundary_denial_diagnostic(&target_display),

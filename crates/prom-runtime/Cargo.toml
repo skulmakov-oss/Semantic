@@ -16,6 +16,7 @@ std = [
     "prom-rules/std",
     "prom-state/std",
     "sm-runtime-core/std",
+    "sm-verify/std",
     "sm-vm/std",
 ]
 
@@ -27,4 +28,5 @@ prom-gates = { path = "../prom-gates", default-features = false }
 prom-rules = { path = "../prom-rules", default-features = false }
 prom-state = { path = "../prom-state", default-features = false }
 sm-runtime-core = { path = "../sm-runtime-core", default-features = false }
+sm-verify = { path = "../sm-verify", default-features = false }
 sm-vm = { path = "../sm-vm", default-features = false }
