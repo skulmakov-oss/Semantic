@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use sm_front::types::{
     AstArena, ExecutableImport, Expr, ExprId, Function, Stmt, StmtId, SymbolId, TokenKind, Type,
 };

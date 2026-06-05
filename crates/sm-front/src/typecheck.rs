@@ -10713,6 +10713,7 @@ pub(crate) fn validate_binding_plan_conflicts(plan: &BindingPlan) -> Result<(), 
 }
 
 /// Determine whether the scrutinee is consumed (moved) by the plan.
+#[allow(dead_code)]
 pub(crate) fn scrutinee_use_from_plan(plan: &BindingPlan) -> ScrutineeUse {
     if plan.items.iter().any(|it| it.capture == CaptureMode::Move) {
         ScrutineeUse::Consumed
