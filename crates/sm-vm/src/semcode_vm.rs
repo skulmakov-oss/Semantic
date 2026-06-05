@@ -564,6 +564,13 @@ fn parse_semcode(bytes: &[u8]) -> Result<VmProgramView, RuntimeError> {
                 RuntimeError::BadFormat(msg)
             }
         })?;
+    build_vm_program_view_from_decoded(header, decoded_functions)
+}
+
+fn build_vm_program_view_from_decoded(
+    header: SemcodeHeaderSpec,
+    decoded_functions: Vec<sm_ir::semcode_decode::DecodedFunctionEnvelope>,
+) -> Result<VmProgramView, RuntimeError> {
     let mut out = HashMap::new();
     let mut runtime_symbols = RuntimeSymbolTable::new();
 
