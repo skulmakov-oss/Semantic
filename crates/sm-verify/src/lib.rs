@@ -95,7 +95,34 @@ impl core::fmt::Display for RejectReport {
 impl std::error::Error for RejectReport {}
 
 #[cfg(feature = "std")]
-pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
+#[derive(Debug)]
+pub struct VerifiedSemCode<'a> {
+    bytes: &'a [u8],
+    program: VerifiedProgram,
+    decoded: Vec<sm_ir::semcode_decode::DecodedFunctionEnvelope<'a>>,
+}
+
+#[cfg(feature = "std")]
+impl<'a> VerifiedSemCode<'a> {
+    pub fn bytes(&self) -> &'a [u8] {
+        self.bytes
+    }
+
+    pub fn program(&self) -> &VerifiedProgram {
+        &self.program
+    }
+
+    pub fn function_names(&self) -> impl Iterator<Item = &str> {
+        self.decoded.iter().map(|env| env.name.as_str())
+    }
+
+    pub fn has_entry(&self, entry: &str) -> bool {
+        self.decoded.iter().any(|env| env.name == entry)
+    }
+}
+
+#[cfg(feature = "std")]
+pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectReport> {
     let mut diagnostics = Vec::new();
     let quotas = RuntimeQuotas::verified_local();
 
@@ -160,7 +187,7 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
     let mut pending_functions = Vec::new();
     let mut seen_names = HashSet::new();
 
-    for env in decoded_functions {
+    for env in &decoded_functions {
         let function_start = env.name_offset;
         let name = env.name.clone();
 
@@ -174,7 +201,7 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
             break;
         }
 
-        match verify_function_code(&env, &header, &quotas) {
+        match verify_function_code(env, &header, &quotas) {
             Ok(function) => {
                 functions.push(function.verified.clone());
                 pending_functions.push(function);
@@ -247,10 +274,19 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
     }
 
     if diagnostics.is_empty() {
-        Ok(VerifiedProgram { header, functions })
+        Ok(VerifiedSemCode {
+            bytes,
+            program: VerifiedProgram { header, functions },
+            decoded: decoded_functions,
+        })
     } else {
         Err(RejectReport { diagnostics })
     }
+}
+
+#[cfg(feature = "std")]
+pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
+    verify_semcode_token(bytes).map(|token| token.program.clone())
 }
 
 #[cfg(feature = "std")]
@@ -1945,5 +1981,57 @@ mod tests {
 
     fn find_opcode(bytes: &[u8], opcode: u8) -> Option<usize> {
         bytes.iter().position(|byte| *byte == opcode)
+    }
+
+    #[test]
+    fn verify_semcode_token_accepts_no_main_helper_semcode() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "helper".to_string(),
+                instrs: vec![IrInstr::Ret { src: None }],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+        let token = verify_semcode_token(&bytes).expect("token admission");
+        assert!(token.has_entry("helper"));
+        assert!(!token.has_entry("main"));
+        assert_eq!(token.function_names().collect::<Vec<_>>(), vec!["helper"]);
+    }
+
+    #[test]
+    fn verify_semcode_token_metadata_matches_verify_semcode() {
+        let src = "fn main() { return; }";
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let metadata = verify_semcode(&bytes).expect("verify_semcode");
+        let token = verify_semcode_token(&bytes).expect("token admission");
+        assert_eq!(token.program(), &metadata);
+    }
+
+    #[test]
+    fn verify_semcode_token_rejects_malformed_header() {
+        let report = verify_semcode_token(b"SEMC").expect_err("must reject");
+        assert_eq!(report.diagnostics[0].code, VerificationCode::BadHeader);
+    }
+
+    #[test]
+    fn verified_semcode_token_keeps_original_bytes() {
+        let src = "fn main() { return; }";
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let token = verify_semcode_token(&bytes).expect("token admission");
+        assert_eq!(token.bytes(), bytes.as_slice());
+    }
+
+    #[test]
+    fn verify_semcode_token_rejects_duplicate_function_names() {
+        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        let function_block = bytes[8..].to_vec();
+        bytes.extend_from_slice(&function_block);
+        let report = verify_semcode_token(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::DuplicateFunction
+        );
     }
 }

@@ -30,4 +30,13 @@ pub struct VerifiedProgram {
 pub header: SemcodeHeaderSpec,
 pub functions: Vec<VerifiedFunction>,
 #[cfg(feature = "std")]
+#[derive(Debug)]
+pub struct VerifiedSemCode<'a> {
+pub fn bytes(&self) -> &'a [u8] {
+pub fn program(&self) -> &VerifiedProgram {
+pub fn function_names(&self) -> impl Iterator<Item = &str> {
+pub fn has_entry(&self, entry: &str) -> bool {
+#[cfg(feature = "std")]
+pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectReport> {
+#[cfg(feature = "std")]
 pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
