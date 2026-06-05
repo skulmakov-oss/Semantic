@@ -137,20 +137,16 @@ $TempRoot = if ($env:TEMP) {
     [System.IO.Path]::GetTempPath()
 }
 
-if ($Quick) {
-    Write-Host "`n=== GATE MODE: Quick ==="
+function Invoke-QuickGate {
     Invoke-LocalCiStep "cargo check --workspace --all-targets" {
         cargo check --workspace --all-targets
     }
     Invoke-LocalCiStep "cargo fmt --all --check" {
         cargo fmt --all --check
     }
-    Write-Host "`nADMISSION GUARD QUICK PASS"
-    exit 0
 }
 
-if ($PRReady) {
-    Write-Host "`n=== GATE MODE: PRReady ==="
+function Invoke-PRReadyGate {
     Invoke-LocalCiStep "cargo check --workspace --all-targets" {
         cargo check --workspace --all-targets
     }
@@ -166,30 +162,9 @@ if ($PRReady) {
     Invoke-LocalCiStep "cargo test -q --test public_api_contracts" {
         cargo test -q --test public_api_contracts
     }
-    Write-Host "`nADMISSION GUARD PR-READY PASS"
-    exit 0
 }
 
-if ($MergePreflight) {
-    Write-Host "`n=== GATE MODE: MergePreflight ==="
-    Invoke-LocalCiStep "cargo test --workspace --quiet" {
-        cargo test --workspace --quiet
-    }
-    Invoke-LocalCiStep "cargo test -q --test public_api_contracts" {
-        cargo test -q --test public_api_contracts
-    }
-    
-    Invoke-LocalCiMergePreflight -BaseRef $BaseRef
-    
-    Invoke-LocalCiStep "git diff --check" {
-        git diff --check
-    }
-    Write-Host "`nADMISSION GUARD MERGE PREFLIGHT PASS"
-    exit 0
-}
-
-if ($Readiness) {
-    Write-Host "`n=== GATE MODE: Readiness ==="
+function Invoke-ReadinessGate {
     $ManifestPath = Join-Path $TempRoot "semantic_v1_release_bundle_manifest.json"
     $ProjectRootSmokeFixture = Join-Path $RepoRoot "examples/qualification/pcc9_project_root_minimal"
     $ProjectRootSmokeTempDir = Join-Path $TempRoot "semantic_project_root_local_ci_smoke"
@@ -246,144 +221,78 @@ if ($Readiness) {
     Invoke-LocalCiStep "smc 7hell json smoke" {
         & $SmcBinary 7hell tests/fixtures/7hell_e1/valid_minimal.sm --json
     }
+}
 
+function Invoke-LegacyAdditionalChecks {
+    Invoke-LocalCiStep "cargo check --no-default-features --quiet" {
+        cargo check --no-default-features --quiet
+    }
+    Invoke-LocalCiStep "cargo test --test legacy_guards --quiet" {
+        cargo test --test legacy_guards --quiet
+    }
+    Invoke-LocalCiStep "cargo test --test frontend_boundaries --quiet" {
+        cargo test --test frontend_boundaries --quiet
+    }
+    Invoke-LocalCiStep "cargo test --test ir_opt_boundaries --quiet" {
+        cargo test --test ir_opt_boundaries --quiet
+    }
+    Invoke-LocalCiStep "cargo test --test dependency_boundaries --quiet" {
+        cargo test --test dependency_boundaries --quiet
+    }
+}
+
+if ($Quick) {
+    Write-Host "`n=== GATE MODE: Quick ==="
+    Invoke-QuickGate
+    Write-Host "`nADMISSION GUARD QUICK PASS"
+    exit 0
+}
+
+if ($PRReady) {
+    Write-Host "`n=== GATE MODE: PRReady ==="
+    Invoke-PRReadyGate
+    Write-Host "`nADMISSION GUARD PR-READY PASS"
+    exit 0
+}
+
+if ($Readiness) {
+    Write-Host "`n=== GATE MODE: Readiness ==="
+    Invoke-ReadinessGate
     Write-Host "`nADMISSION GUARD READINESS PASS"
+    exit 0
+}
+
+if ($MergePreflight) {
+    Write-Host "`n=== GATE MODE: MergePreflight ==="
+    Invoke-PRReadyGate
+    Invoke-ReadinessGate
+    Invoke-LegacyAdditionalChecks
+    Invoke-LocalCiMergePreflight -BaseRef $BaseRef
+    Invoke-LocalCiStep "git diff --check" {
+        git diff --check
+    }
+    Write-Host "`nADMISSION GUARD MERGE PREFLIGHT PASS"
     exit 0
 }
 
 if ($FullPreflight) {
     Write-Host "`n=== GATE MODE: FullPreflight ==="
-    Invoke-LocalCiStep "cargo fmt --all --check" {
-        cargo fmt --all --check
-    }
-    Invoke-LocalCiStep "cargo test -q --test public_api_contracts" {
-        cargo test -q --test public_api_contracts
-    }
-    Invoke-LocalCiStep "cargo test -q --test pcc9_project_model_acceptance" {
-        cargo test -q --test pcc9_project_model_acceptance
-    }
-    Invoke-LocalCiStep "cargo test --all-targets --quiet" {
-        cargo test --all-targets --quiet
-    }
-    Invoke-LocalCiStep "cargo check --no-default-features --quiet" {
-        cargo check --no-default-features --quiet
-    }
-
+    Invoke-PRReadyGate
+    Invoke-ReadinessGate
+    Invoke-LegacyAdditionalChecks
     Invoke-LocalCiMergePreflight -BaseRef $BaseRef
-
     Invoke-LocalCiStep "git diff --check" {
         git diff --check
     }
-
     Write-Host "`nADMISSION GUARD FULL PREFLIGHT PASS"
     exit 0
 }
 
 Write-Host "`n=== GATE MODE: Legacy Default ==="
-$ManifestPath = Join-Path $TempRoot "semantic_v1_release_bundle_manifest.json"
-$ProjectRootSmokeFixture = Join-Path $RepoRoot "examples/qualification/pcc9_project_root_minimal"
-$ProjectRootSmokeTempDir = Join-Path $TempRoot "semantic_project_root_local_ci_smoke"
-$PackageBaselineSmokeFixture = Join-Path $RepoRoot "examples/qualification/pcc9_project_root_package_baseline"
-$PackageBaselineSmokeTempDir = Join-Path $TempRoot "semantic_project_root_package_baseline_local_ci_smoke"
-$ExeSuffix = if ($IsWindows) { ".exe" } else { "" }
-$SmcBinary = Join-Path $RepoRoot "target/debug/smc$ExeSuffix"
-
-Invoke-LocalCiStep "cargo test --bin smc --quiet" {
-    cargo test --bin smc --quiet
-}
-
-Invoke-LocalCiStep "cargo test --test 7hell_e1_report_snapshots --quiet" {
-    cargo test --test 7hell_e1_report_snapshots --quiet
-}
-
-Invoke-LocalCiStep "cargo test --all-targets --quiet" {
-    cargo test --all-targets --quiet
-}
-
-Invoke-LocalCiStep "cargo check --no-default-features --quiet" {
-    cargo check --no-default-features --quiet
-}
-
-Invoke-LocalCiStep "cargo fmt --all --check" {
-    cargo fmt --all --check
-}
-
-Invoke-LocalCiStep "verify release bundle process" {
-    pwsh -File scripts/verify_release_bundle.ps1 -ManifestPath $ManifestPath
-}
-
-Invoke-LocalCiStep "cargo build --bin smc --bin svm" {
-    cargo build --bin smc --bin svm
-}
-
-Invoke-LocalCiStep "canonical project-root fixture smoke" {
-    if (Test-Path $ProjectRootSmokeTempDir) {
-        Remove-Item -Recurse -Force $ProjectRootSmokeTempDir
-    }
-    New-Item -ItemType Directory -Force -Path $ProjectRootSmokeTempDir | Out-Null
-
-    $ProjectRootSmokeOut = Join-Path $ProjectRootSmokeTempDir "out.smc"
-
-    & $SmcBinary check $ProjectRootSmokeFixture
-    & $SmcBinary run $ProjectRootSmokeFixture
-    & $SmcBinary compile $ProjectRootSmokeFixture -o $ProjectRootSmokeOut
-    & $SmcBinary verify $ProjectRootSmokeOut
-    & $SmcBinary run-smc $ProjectRootSmokeOut
-
-    if (Test-Path $ProjectRootSmokeTempDir) {
-        Remove-Item -Recurse -Force $ProjectRootSmokeTempDir
-    }
-}
-
-Invoke-LocalCiStep "package-baseline project-root fixture smoke" {
-    if (Test-Path $PackageBaselineSmokeTempDir) {
-        Remove-Item -Recurse -Force $PackageBaselineSmokeTempDir
-    }
-    New-Item -ItemType Directory -Force -Path $PackageBaselineSmokeTempDir | Out-Null
-
-    $PackageBaselineSmokeOut = Join-Path $PackageBaselineSmokeTempDir "out-package-baseline.smc"
-
-    & $SmcBinary check $PackageBaselineSmokeFixture
-    & $SmcBinary run $PackageBaselineSmokeFixture
-    & $SmcBinary compile $PackageBaselineSmokeFixture -o $PackageBaselineSmokeOut
-    & $SmcBinary verify $PackageBaselineSmokeOut
-    & $SmcBinary run-smc $PackageBaselineSmokeOut
-
-    if (Test-Path $PackageBaselineSmokeTempDir) {
-        Remove-Item -Recurse -Force $PackageBaselineSmokeTempDir
-    }
-}
-
-Invoke-LocalCiStep "smc 7hell human smoke" {
-    & $SmcBinary 7hell tests/fixtures/7hell_e1/valid_minimal.sm
-}
-
-Invoke-LocalCiStep "smc 7hell json smoke" {
-    & $SmcBinary 7hell tests/fixtures/7hell_e1/valid_minimal.sm --json
-}
-
-Invoke-LocalCiStep "cargo test --test legacy_guards --quiet" {
-    cargo test --test legacy_guards --quiet
-}
-
-Invoke-LocalCiStep "cargo test --test frontend_boundaries --quiet" {
-    cargo test --test frontend_boundaries --quiet
-}
-
-Invoke-LocalCiStep "cargo test --test ir_opt_boundaries --quiet" {
-    cargo test --test ir_opt_boundaries --quiet
-}
-
-Invoke-LocalCiStep "cargo test --test dependency_boundaries --quiet" {
-    cargo test --test dependency_boundaries --quiet
-}
-
-Invoke-LocalCiStep "cargo test --test public_api_contracts --quiet" {
-    cargo test --test public_api_contracts --quiet
-}
-
+Invoke-PRReadyGate
+Invoke-ReadinessGate
+Invoke-LegacyAdditionalChecks
 Invoke-LocalCiStep "git diff --check" {
     git diff --check
 }
-
 Write-Host "`nlocal_ci passed"
