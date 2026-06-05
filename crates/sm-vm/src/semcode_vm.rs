@@ -363,7 +363,7 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     capabilities: &C,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    let program = parse_semcode(token.bytes())?;
+    let program = prepare_verified_execution(token)?;
     let mut vm = VM {
         functions: program.functions,
         callstack: Vec::new(),
@@ -419,7 +419,7 @@ pub fn run_verified_entry_semcode_with_ui_capabilities<
     capabilities: &C,
     ui_capabilities: &U,
 ) -> Result<(), RuntimeError> {
-    let program = parse_semcode(token.bytes())?;
+    let program = prepare_verified_execution(token)?;
     let mut vm = VM {
         functions: program.functions,
         callstack: Vec::new(),
@@ -453,7 +453,14 @@ pub fn run_verified_entry_semcode_with_config(
     token: &VerifiedEntrySemCode<'_, '_>,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    run_semcode_with_entry_and_config(token.bytes(), token.entry(), config)
+    let program = prepare_verified_execution(token)?;
+    run_vm_program_view_with_entry_and_config_with_observation_runtime(
+        program,
+        token.entry(),
+        config,
+        HelloObservationRuntime::discard(),
+    )
+    .map(|_| ())
 }
 
 /// Raw / compatibility helper.
@@ -475,9 +482,23 @@ fn run_semcode_with_entry_and_config_with_observation_runtime<'a>(
     bytes: &[u8],
     entry: &str,
     config: ExecutionConfig,
-    mut observation: HelloObservationRuntime<'a>,
+    observation: HelloObservationRuntime<'a>,
 ) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
     let program = parse_semcode(bytes)?;
+    run_vm_program_view_with_entry_and_config_with_observation_runtime(
+        program,
+        entry,
+        config,
+        observation,
+    )
+}
+
+fn run_vm_program_view_with_entry_and_config_with_observation_runtime<'a>(
+    program: VmProgramView,
+    entry: &str,
+    config: ExecutionConfig,
+    mut observation: HelloObservationRuntime<'a>,
+) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
     let mut vm = VM {
         functions: program.functions,
         callstack: Vec::new(),
@@ -538,32 +559,50 @@ struct VmProgramView {
     functions: HashMap<String, FunctionBytecode>,
 }
 
+fn decode_and_map_errors(
+    bytes: &[u8],
+) -> Result<
+    (
+        SemcodeHeaderSpec,
+        Vec<sm_ir::semcode_decode::DecodedFunctionEnvelope<'_>>,
+    ),
+    RuntimeError,
+> {
+    sm_ir::semcode_decode::decode_semcode_envelope(bytes).map_err(|e| match e {
+        sm_ir::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
+        sm_ir::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
+            RuntimeError::UnsupportedBytecodeVersion { found, supported }
+        }
+        sm_ir::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
+            RuntimeError::BadFormat(msg.to_string())
+        }
+        sm_ir::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
+            RuntimeError::BadFormat(msg.to_string())
+        }
+        sm_ir::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
+            RuntimeError::BadFormat(msg.to_string())
+        }
+        sm_ir::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
+            RuntimeError::BadFormat(msg.to_string())
+        }
+        sm_ir::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
+            RuntimeError::BadFormat(msg.to_string())
+        }
+        sm_ir::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
+            RuntimeError::BadFormat(msg)
+        }
+    })
+}
+
 fn parse_semcode(bytes: &[u8]) -> Result<VmProgramView, RuntimeError> {
-    let (header, decoded_functions) = sm_ir::semcode_decode::decode_semcode_envelope(bytes)
-        .map_err(|e| match e {
-            sm_ir::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
-            sm_ir::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
-                RuntimeError::UnsupportedBytecodeVersion { found, supported }
-            }
-            sm_ir::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
-                RuntimeError::BadFormat(msg.to_string())
-            }
-            sm_ir::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
-                RuntimeError::BadFormat(msg.to_string())
-            }
-            sm_ir::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
-                RuntimeError::BadFormat(msg.to_string())
-            }
-            sm_ir::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
-                RuntimeError::BadFormat(msg.to_string())
-            }
-            sm_ir::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
-                RuntimeError::BadFormat(msg.to_string())
-            }
-            sm_ir::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
-                RuntimeError::BadFormat(msg)
-            }
-        })?;
+    let (header, decoded_functions) = decode_and_map_errors(bytes)?;
+    build_vm_program_view_from_decoded(header, decoded_functions)
+}
+
+fn prepare_verified_execution(
+    token: &VerifiedEntrySemCode<'_, '_>,
+) -> Result<VmProgramView, RuntimeError> {
+    let (header, decoded_functions) = decode_and_map_errors(token.bytes())?;
     build_vm_program_view_from_decoded(header, decoded_functions)
 }
 
