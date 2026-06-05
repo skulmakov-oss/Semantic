@@ -92,3 +92,74 @@ fn shim_and_token_path_produce_equivalent_success() {
     let entry_token = token.require_entry("main").expect("require entry");
     run_verified_entry_semcode(&entry_token).expect("token path should succeed");
 }
+
+#[test]
+fn token_retains_metadata_presence_in_program_metadata() {
+    let bytes =
+        compile_program_to_semcode("fn main() { let x = \"hello\"; return; }").expect("compile");
+    let token = verify_semcode_token(&bytes).expect("verify");
+    let main_fn = &token.program().functions[0];
+
+    assert!(main_fn.string_count > 0, "token must retain string count");
+}
+
+#[test]
+fn raw_helper_behavior_unchanged_for_valid_bytes() {
+    let bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+    sm_vm::run_semcode(&bytes).expect("raw run should succeed");
+    sm_vm::run_semcode_with_entry(&bytes, "main").expect("raw run with entry should succeed");
+}
+
+#[test]
+fn disasm_behavior_unchanged() {
+    let bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+    let disasm = sm_vm::disasm_semcode(&bytes).expect("disasm should succeed");
+    assert!(disasm.contains("fn main"));
+}
+
+#[test]
+fn host_and_capability_path_parity() {
+    use prom_abi::RecordingHostAbi;
+    use prom_cap::CapabilityManifest;
+    use sm_runtime_core::{ExecutionConfig, ExecutionContext};
+    use sm_vm::run_verified_entry_semcode_with_host_and_capabilities_and_config;
+
+    let bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+    let token = verify_semcode_token(&bytes).expect("verify");
+    let entry_token = token.require_entry("main").expect("require entry");
+
+    let mut host = RecordingHostAbi::default();
+    let capabilities = CapabilityManifest::new();
+    let config = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
+
+    run_verified_entry_semcode_with_host_and_capabilities_and_config(
+        &entry_token,
+        &mut host,
+        &capabilities,
+        config,
+    )
+    .expect("host and capability path should succeed");
+}
+
+#[test]
+fn ui_capability_path_parity() {
+    use prom_abi::RecordingHostAbi;
+    use prom_cap::CapabilityManifest;
+    use sm_vm::run_verified_entry_semcode_with_ui_capabilities;
+
+    let bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+    let token = verify_semcode_token(&bytes).expect("verify");
+    let entry_token = token.require_entry("main").expect("require entry");
+
+    let mut host = RecordingHostAbi::default();
+    let capabilities = CapabilityManifest::new();
+    let ui_capabilities = CapabilityManifest::new();
+
+    run_verified_entry_semcode_with_ui_capabilities(
+        &entry_token,
+        &mut host,
+        &capabilities,
+        &ui_capabilities,
+    )
+    .expect("UI capability path should succeed");
+}
