@@ -1,3 +1,4 @@
+#![allow(clippy::new_without_default, clippy::explicit_auto_deref)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(any(feature = "alloc", feature = "std"))]

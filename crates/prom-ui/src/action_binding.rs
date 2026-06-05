@@ -4,6 +4,8 @@
 //! and future action names. It does not dispatch actions, perform admission,
 //! request effects, call the VM, call Host ABI, or mutate runtime state.
 
+#![allow(clippy::too_many_arguments)]
+
 use crate::interaction::InteractionIntentKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

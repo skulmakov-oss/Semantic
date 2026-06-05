@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use sm_front::{
     build_adt_table, build_record_table, canonicalize_declared_type, parse_program,
     resolve_symbol_name, AstArena, FrontendError, SchemaDecl, SchemaShape, SchemaVersion, Type,

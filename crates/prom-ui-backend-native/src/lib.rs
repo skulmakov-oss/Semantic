@@ -8,6 +8,7 @@
 //! - Native/window dependencies belong here, not in `prom-ui-runtime`.
 //! - The only current seam is `UiBackendAdapter`.
 
+#![allow(clippy::mem_replace_with_default)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;

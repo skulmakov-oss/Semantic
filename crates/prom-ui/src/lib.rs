@@ -15,6 +15,7 @@
 //! - multi-window, browser, or mobile UI support
 //! - a forked graphics stack or shader-language ownership
 //! - that UI support is already part of the published `v1.1.1` line
+#![allow(clippy::manual_is_multiple_of)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;

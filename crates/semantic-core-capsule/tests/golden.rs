@@ -64,7 +64,7 @@ fn all_golden_programs_pass() {
 
     for (name, status, value) in expectations {
         let file = load_program_file(golden_path(name));
-        let capsule = CoreCapsule::new(file.config.unwrap_or_else(CoreConfig::default));
+        let capsule = CoreCapsule::new(file.config.unwrap_or_default());
         let result = capsule.run(&file.program).expect("golden executes");
         assert_eq!(result.status, status, "unexpected status for {name}");
         assert_eq!(result.return_value, value, "unexpected value for {name}");

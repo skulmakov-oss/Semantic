@@ -1,3 +1,4 @@
+#![allow(clippy::clone_on_copy)]
 use std::path::PathBuf;
 use std::vec::Vec;
 

@@ -1,3 +1,4 @@
+#![allow(clippy::clone_on_copy, clippy::needless_lifetimes)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "std")]

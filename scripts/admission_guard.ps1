@@ -154,6 +154,9 @@ if ($PRReady) {
     Invoke-LocalCiStep "cargo check --workspace --all-targets" {
         cargo check --workspace --all-targets
     }
+    Invoke-LocalCiStep "cargo clippy --workspace --all-targets" {
+        cargo clippy --workspace --all-targets -- -D warnings
+    }
     Invoke-LocalCiStep "cargo fmt --all --check" {
         cargo fmt --all --check
     }

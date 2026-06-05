@@ -1,3 +1,4 @@
+#![allow(clippy::filter_map_bool_then)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;

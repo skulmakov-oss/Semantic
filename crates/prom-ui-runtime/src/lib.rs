@@ -25,6 +25,13 @@
 //! - multi-window, browser, or mobile support
 //! - a widget/layout framework
 //! - that UI runtime support is already part of the published `v1.1.1` line
+#![allow(
+    clippy::new_without_default,
+    clippy::let_and_return,
+    clippy::mem_replace_with_default,
+    clippy::should_implement_trait,
+    clippy::cloned_ref_to_slice_refs
+)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;

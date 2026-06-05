@@ -4,6 +4,7 @@
 //! This crate keeps the historical `ton618-core` name only as part of the
 //! retained compatibility perimeter and must not become a second public owner.
 
+#![allow(clippy::len_without_is_empty)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "alloc")]

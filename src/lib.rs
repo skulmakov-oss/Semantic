@@ -347,12 +347,17 @@ impl QuadroReg {
         Ok(())
     }
 
+    /// # Safety
+    /// `index` must be strictly less than 32 to avoid shifting out of bounds.
     #[inline(always)]
     pub unsafe fn get_unchecked(self, index: usize) -> u8 {
         let shift = index * 2;
         ((self.0 >> shift) & 0b11) as u8
     }
 
+    /// # Safety
+    /// `index` must be strictly less than 32 to avoid shifting out of bounds.
+    /// `state` must be a valid quadit state (<= 0b11) to avoid invalidating the packed representation.
     #[inline(always)]
     pub unsafe fn set_unchecked(&mut self, index: usize, state: u8) {
         debug_assert!(index < 32);
@@ -589,6 +594,13 @@ pub struct DeltaSoA<const N: usize> {
     pub left_super: [u64; N],
 }
 
+impl<const N: usize> Default for DeltaSoA<N> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const N: usize> DeltaSoA<N> {
     #[inline]
     pub fn new() -> Self {
@@ -613,8 +625,8 @@ impl<const N: usize> DeltaSoA<N> {
             left_super: 0,
         }; N];
 
-        for i in 0..N {
-            out[i] = StateDelta {
+        for (i, item) in out.iter_mut().enumerate().take(N) {
+            *item = StateDelta {
                 entered_true: self.entered_true[i],
                 left_true: self.left_true[i],
                 entered_false: self.entered_false[i],
@@ -1059,6 +1071,13 @@ pub struct QuadroBank<const NREG: usize> {
     pub regs: [QuadroReg; NREG],
 }
 
+impl<const NREG: usize> Default for QuadroBank<NREG> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<const NREG: usize> QuadroBank<NREG> {
     #[inline]
     pub fn new() -> Self {
@@ -1222,6 +1241,8 @@ pub mod bench {
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::erasing_op, clippy::identity_op)] // Expressions like 0 * 2 intentionally document bit-plane arithmetic
+
     use super::*;
 
     #[test]

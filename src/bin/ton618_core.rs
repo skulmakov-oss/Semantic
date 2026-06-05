@@ -1,3 +1,4 @@
+#![allow(clippy::single_match, clippy::erasing_op, clippy::identity_op)]
 //! Retained non-owning TON618 compatibility CLI shim.
 //!
 //! Canonical public CLI ownership lives in `smc-cli`.
