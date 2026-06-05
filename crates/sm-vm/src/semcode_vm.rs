@@ -363,13 +363,13 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     capabilities: &C,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    let (_, symbols, functions) = parse_semcode(token.bytes())?;
+    let program = parse_semcode(token.bytes())?;
     let mut vm = VM {
-        functions,
+        functions: program.functions,
         callstack: Vec::new(),
         config,
         effect_calls: 0,
-        symbols,
+        symbols: program.runtime_symbols,
         prng_state: 0,
     };
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
@@ -419,13 +419,13 @@ pub fn run_verified_entry_semcode_with_ui_capabilities<
     capabilities: &C,
     ui_capabilities: &U,
 ) -> Result<(), RuntimeError> {
-    let (_, symbols, functions) = parse_semcode(token.bytes())?;
+    let program = parse_semcode(token.bytes())?;
     let mut vm = VM {
-        functions,
+        functions: program.functions,
         callstack: Vec::new(),
         config: ExecutionConfig::for_context(ExecutionContext::KernelBound),
         effect_calls: 0,
-        symbols,
+        symbols: program.runtime_symbols,
         prng_state: 0,
     };
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
@@ -477,13 +477,13 @@ fn run_semcode_with_entry_and_config_with_observation_runtime<'a>(
     config: ExecutionConfig,
     mut observation: HelloObservationRuntime<'a>,
 ) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
-    let (_, symbols, functions) = parse_semcode(bytes)?;
+    let program = parse_semcode(bytes)?;
     let mut vm = VM {
-        functions,
+        functions: program.functions,
         callstack: Vec::new(),
         config,
         effect_calls: 0,
-        symbols,
+        symbols: program.runtime_symbols,
         prng_state: 0,
     };
     push_frame(&mut vm, entry, Vec::new(), None)?;
@@ -500,7 +500,9 @@ fn run_semcode_with_entry_and_config_with_observation_runtime<'a>(
 /// Parses SemCode for diagnostic output without verifier enforcement.
 /// Not part of the execution path.
 pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {
-    let (spec, _, functions) = parse_semcode(bytes)?;
+    let program = parse_semcode(bytes)?;
+    let spec = program.header;
+    let functions = program.functions;
     let mut out = String::new();
     let header = if bytes.len() >= 8 { &bytes[0..8] } else { &[] };
     out.push_str(&format!(
@@ -530,16 +532,13 @@ pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {
     Ok(out)
 }
 
-fn parse_semcode(
-    bytes: &[u8],
-) -> Result<
-    (
-        SemcodeHeaderSpec,
-        RuntimeSymbolTable,
-        HashMap<String, FunctionBytecode>,
-    ),
-    RuntimeError,
-> {
+struct VmProgramView {
+    header: SemcodeHeaderSpec,
+    runtime_symbols: RuntimeSymbolTable,
+    functions: HashMap<String, FunctionBytecode>,
+}
+
+fn parse_semcode(bytes: &[u8]) -> Result<VmProgramView, RuntimeError> {
     let (header, decoded_functions) = sm_ir::semcode_decode::decode_semcode_envelope(bytes)
         .map_err(|e| match e {
             sm_ir::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
@@ -633,7 +632,11 @@ fn parse_semcode(
             )));
         }
     }
-    Ok((header, runtime_symbols, out))
+    Ok(VmProgramView {
+        header,
+        runtime_symbols,
+        functions: out,
+    })
 }
 
 fn map_format_err(err: SemcodeFormatError) -> RuntimeError {
@@ -3413,13 +3416,13 @@ mod tests {
     #[test]
     fn vm_tracks_borrowed_paths_on_frame_push() {
         let bytes = ownership_tracking_bytes();
-        let (_, symbols, functions) = parse_semcode(&bytes).expect("parse");
+        let program = parse_semcode(&bytes).expect("parse");
         let mut vm = VM {
-            functions,
+            functions: program.functions,
             callstack: Vec::new(),
             config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
             effect_calls: 0,
-            symbols,
+            symbols: program.runtime_symbols,
             prng_state: 0,
         };
 
@@ -3441,13 +3444,13 @@ mod tests {
     #[test]
     fn vm_clears_borrowed_paths_on_frame_exit() {
         let bytes = helper_borrow_bytes();
-        let (_, symbols, functions) = parse_semcode(&bytes).expect("parse");
+        let program = parse_semcode(&bytes).expect("parse");
         let mut vm = VM {
-            functions,
+            functions: program.functions,
             callstack: Vec::new(),
             config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
             effect_calls: 0,
-            symbols,
+            symbols: program.runtime_symbols,
             prng_state: 0,
         };
 
@@ -3472,13 +3475,13 @@ mod tests {
     #[test]
     fn vm_tracks_record_field_borrowed_paths_on_frame_push() {
         let bytes = record_field_borrow_tracking_bytes();
-        let (_, symbols, functions) = parse_semcode(&bytes).expect("parse");
+        let program = parse_semcode(&bytes).expect("parse");
         let mut vm = VM {
-            functions,
+            functions: program.functions,
             callstack: Vec::new(),
             config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
             effect_calls: 0,
-            symbols,
+            symbols: program.runtime_symbols,
             prng_state: 0,
         };
 
@@ -3496,13 +3499,13 @@ mod tests {
     #[test]
     fn vm_clears_record_field_borrowed_paths_on_frame_exit() {
         let bytes = helper_record_field_borrow_bytes();
-        let (_, symbols, functions) = parse_semcode(&bytes).expect("parse");
+        let program = parse_semcode(&bytes).expect("parse");
         let mut vm = VM {
-            functions,
+            functions: program.functions,
             callstack: Vec::new(),
             config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
             effect_calls: 0,
-            symbols,
+            symbols: program.runtime_symbols,
             prng_state: 0,
         };
 
