@@ -6,8 +6,13 @@ use sm_ir::semcode_format::{
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
 use sm_runtime_core::RuntimeTrap;
-use sm_verify::verify_semcode;
-use sm_vm::{run_verified_semcode, RuntimeError};
+use sm_vm::RuntimeError;
+
+fn run_token_first_main(semcode: &[u8]) -> Result<(), RuntimeError> {
+    let token = sm_verify::verify_semcode_token(semcode).expect("token admission");
+    let entry_token = token.require_entry("main").expect("entry resolution");
+    sm_vm::run_verified_entry_semcode(&entry_token)
+}
 
 #[derive(Clone, Copy)]
 enum OwnershipPathComponentSpec {
@@ -52,8 +57,7 @@ fn runtime_ownership_sibling_write_passes_on_verified_path() {
         ],
     );
 
-    verify_semcode(&rewritten).expect("verify");
-    run_verified_semcode(&rewritten).expect("sibling tuple write should pass");
+    run_token_first_main(&rewritten).expect("sibling tuple write should pass");
 }
 
 #[test]
@@ -142,8 +146,7 @@ fn runtime_ownership_inner_frame_borrow_does_not_leak_after_exit() {
         }],
     );
 
-    verify_semcode(&rewritten).expect("verify");
-    run_verified_semcode(&rewritten).expect("inner-frame borrow must not leak after return");
+    run_token_first_main(&rewritten).expect("inner-frame borrow must not leak after return");
 }
 
 #[test]
@@ -170,8 +173,7 @@ fn runtime_ownership_record_sibling_field_write_passes_on_verified_path() {
         ],
     );
 
-    verify_semcode(&rewritten).expect("verify");
-    run_verified_semcode(&rewritten).expect("sibling record field write should pass");
+    run_token_first_main(&rewritten).expect("sibling record field write should pass");
 }
 
 #[test]
@@ -370,8 +372,7 @@ fn runtime_ownership_record_inner_frame_borrow_does_not_leak_after_exit() {
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
-    verify_semcode(&bytes).expect("verify");
-    run_verified_semcode(&bytes).expect("inner-frame record borrow must not leak after return");
+    run_token_first_main(&bytes).expect("inner-frame record borrow must not leak after return");
 }
 
 #[test]
@@ -381,8 +382,7 @@ fn runtime_ownership_unsupported_paths_do_not_silently_claim_support() {
         assert_ne!(&bytes[..8], &MAGIC11);
         assert_ne!(&bytes[..8], &MAGIC12);
         assert!(!any_function_has_ownership_section(&bytes));
-        verify_semcode(&bytes).expect("verify");
-        run_verified_semcode(&bytes).expect("run");
+        run_token_first_main(&bytes).expect("run");
     }
 
     let _ = compile_program_to_semcode(indirect_record_projection_source())
@@ -740,16 +740,13 @@ fn assert_write_overlap_rejects_deterministically(bytes: &[u8], symbol_name: &st
 }
 
 fn assert_repeated_verified_success(bytes: &[u8], runs: usize) {
-    verify_semcode(bytes).expect("verify");
     for _ in 0..runs {
-        run_verified_semcode(bytes).expect("verified run must stay successful");
+        run_token_first_main(bytes).expect("verified run must stay successful");
     }
 }
 
 fn observe_borrow_write_conflict_surface(bytes: &[u8]) -> String {
-    verify_semcode(bytes).expect("verify");
-
-    let err = run_verified_semcode(bytes).expect_err("runtime overlap must reject");
+    let err = run_token_first_main(bytes).expect_err("runtime overlap must reject");
     let rendered = format!("{err}");
     assert!(matches!(
         err,
@@ -760,11 +757,9 @@ fn observe_borrow_write_conflict_surface(bytes: &[u8]) -> String {
 }
 
 fn assert_repeated_write_overlap_rejects(bytes: &[u8], _symbol_name: &str, runs: usize) {
-    verify_semcode(bytes).expect("verify");
-
     let mut observed = Vec::with_capacity(runs);
     for _ in 0..runs {
-        let err = run_verified_semcode(bytes).expect_err("runtime overlap must reject");
+        let err = run_token_first_main(bytes).expect_err("runtime overlap must reject");
         let rendered = format!("{err}");
         assert!(matches!(
             err,
