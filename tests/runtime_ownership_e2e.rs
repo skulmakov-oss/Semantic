@@ -1,3 +1,4 @@
+#![allow(clippy::op_ref, clippy::needless_lifetimes)]
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
     read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC11, MAGIC12, OWNERSHIP_EVENT_KIND_BORROW,

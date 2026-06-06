@@ -1,3 +1,4 @@
+#![allow(clippy::derivable_impls)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -254,10 +255,7 @@ mod tests {
             descriptor_for_call(HostCallId::StateQuery).stability,
             HostCallStability::PlannedPostStable
         );
-        assert_eq!(
-            descriptor_for_call(HostCallId::ClockRead).returns_value,
-            true
-        );
+        assert!(descriptor_for_call(HostCallId::ClockRead).returns_value);
     }
 
     #[test]

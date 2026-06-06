@@ -1,3 +1,12 @@
+#![allow(
+    clippy::type_complexity,
+    clippy::let_and_return,
+    clippy::only_used_in_recursion,
+    clippy::doc_overindented_list_items,
+    clippy::collapsible_if,
+    clippy::needless_lifetimes,
+    clippy::empty_line_after_doc_comments
+)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(any(feature = "alloc", feature = "std"))]

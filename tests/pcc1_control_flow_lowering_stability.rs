@@ -1,3 +1,4 @@
+#![allow(clippy::ptr_arg, clippy::single_match)]
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 

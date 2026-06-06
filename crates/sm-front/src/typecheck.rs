@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)] // Internal typechecker helpers carry explicit semantic context
+
 use crate::types::{
     AdtCtorExpr, AdtMatchPattern, AdtPatternItem, BindingPlan, BindingPlanItem, CaptureMode,
     MatchPattern, NumericLiteral, PathAvailability, PatternPath, RecordPatternTarget, ScrutineeUse,
@@ -10980,10 +10982,10 @@ pub(crate) fn build_match_pattern_plan(
 ///
 /// NOTE (M9.5): PatternPath overlap (e.g., root vs root.0) is NOT checked yet.
 /// Only exact-path conflicts are validated.
-pub(crate) fn build_and_apply_match_plan<'e>(
+pub(crate) fn build_and_apply_match_plan(
     pattern: &MatchPattern,
     scrutinee_ty: &Type,
-    env: &'e ScopeEnv,
+    env: &ScopeEnv,
     arena: &AstArena,
     adt_table: &AdtTable,
 ) -> Result<(BindingPlan, ScopeEnv), FrontendError> {
@@ -11036,7 +11038,7 @@ pub(crate) fn validate_plan_against_scrutinee_state(
 ///   * `Expr::Var(x)`                          → `(x, root)`
 ///   * `Expr::RecordField { base, field }`      → recurse + `RecordField(field)`
 ///   * `Expr::SequenceIndex { base, index }`    → recurse + `TupleIndex(n)` for
-///                                                 literal `i32` index only
+///                                   literal `i32` index only
 ///
 /// Returns `None` for calls, computed indices, closures, and anything not
 /// expressible as a single static path from a local variable.

@@ -631,10 +631,8 @@ fn collect_local_calls_from_function(
     functions_by_name: &BTreeMap<String, &Function>,
     out: &mut BTreeSet<String>,
 ) {
-    for default in &func.param_defaults {
-        if let Some(expr) = default {
-            collect_local_calls_from_expr(arena, *expr, functions_by_name, out);
-        }
+    for expr in func.param_defaults.iter().flatten() {
+        collect_local_calls_from_expr(arena, *expr, functions_by_name, out);
     }
     for expr in &func.requires {
         collect_local_calls_from_expr(arena, *expr, functions_by_name, out);

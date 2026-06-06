@@ -1,3 +1,8 @@
+#![allow(
+    clippy::collapsible_if,
+    clippy::useless_format,
+    clippy::manual_is_ascii_check
+)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "std")]

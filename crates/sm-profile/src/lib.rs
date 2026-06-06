@@ -1,3 +1,5 @@
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::field_reassign_with_default)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(any(feature = "alloc", feature = "std"))]

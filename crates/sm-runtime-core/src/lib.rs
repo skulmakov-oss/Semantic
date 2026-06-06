@@ -1,3 +1,4 @@
+#![allow(clippy::len_without_is_empty)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(any(feature = "alloc", feature = "std"))]

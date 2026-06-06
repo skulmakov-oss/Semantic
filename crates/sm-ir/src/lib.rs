@@ -1,3 +1,11 @@
+#![allow(
+    clippy::too_many_arguments,
+    clippy::redundant_closure,
+    clippy::default_constructed_unit_structs,
+    clippy::type_complexity,
+    clippy::op_ref,
+    clippy::useless_conversion
+)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 #[cfg(feature = "std")]

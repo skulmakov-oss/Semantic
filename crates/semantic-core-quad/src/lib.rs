@@ -1,3 +1,4 @@
+#![allow(clippy::new_without_default, clippy::zero_repeat_side_effects)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use core::fmt;
@@ -758,7 +759,9 @@ impl<const N: usize> QuadTileBank<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::vec::Vec;
+    extern crate alloc;
+    use alloc::format;
+    use alloc::vec::Vec;
 
     fn reg_filled(state: QuadState) -> QuadroReg32 {
         let mut reg = QuadroReg32::new();

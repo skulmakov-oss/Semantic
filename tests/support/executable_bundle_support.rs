@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::manual_flatten)]
 use sm_front::types::{
     AstArena, ExecutableImport, Expr, ExprId, Function, Stmt, StmtId, SymbolId, TokenKind, Type,
 };
