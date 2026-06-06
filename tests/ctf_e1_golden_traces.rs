@@ -6,7 +6,8 @@ use semantic_language::{
     semantics::check_source,
     semcode_verify::verify_semcode,
 };
-use sm_vm::run_verified_semcode;
+use sm_verify::verify_semcode_token;
+use sm_vm::run_verified_entry_semcode;
 
 const UPDATE_ENV: &str = "SM_UPDATE_CTF_E1_TRACES";
 
@@ -201,7 +202,9 @@ fn render_trace_artifact(case: &TraceCase) -> String {
     let ir = compile_program_to_ir(&src).expect("compile ir");
     let semcode = compile_program_to_semcode(&src).expect("compile semcode");
     verify_semcode(&semcode).expect("verify semcode");
-    run_verified_semcode(&semcode).expect("run verified semcode");
+    let token = verify_semcode_token(&semcode).expect("token admission");
+    let entry_token = token.require_entry("main").expect("entry resolution");
+    run_verified_entry_semcode(&entry_token).expect("run verified semcode");
 
     let source_hash = hash_hex(&src);
     let mut ir_signatures = Vec::with_capacity(ir.len());
