@@ -213,10 +213,11 @@ impl core::fmt::Display for RuntimeError {
 
 impl std::error::Error for RuntimeError {}
 
-/// Raw / compatibility helper.
+/// Raw execution path.
 ///
-/// Executes raw SemCode bytes without a verifier admission gate.
-/// Not part of the canonical execution path.
+/// Bypasses `sm-verify` admission and executes raw SemCode bytes.
+/// Intentionally retained for tests, diagnostics, and malformed-byte behavior.
+/// Must not be confused with verified execution.
 pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     run_semcode_with_config(
         bytes,
@@ -224,10 +225,11 @@ pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     )
 }
 
-/// Compatibility verified shim.
+/// Compatibility verified-bytes shim.
 ///
-/// Internally routes through `verify_semcode_token` and `require_entry`,
-/// preserving the legacy public API signature.
+/// Preserves older byte-based call sites. Internally performs admission through
+/// `verify_semcode_token`, resolves the entry via `require_entry`, and delegates
+/// to canonical token execution. It should not be preferred for new internal callers.
 pub fn run_verified_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry("main").map_err(|err| match err {
@@ -239,7 +241,11 @@ pub fn run_verified_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
     )
 }
 
-/// Raw / compatibility helper.
+/// Raw execution path.
+///
+/// Bypasses `sm-verify` admission and executes raw SemCode bytes.
+/// Intentionally retained for tests, diagnostics, and malformed-byte behavior.
+/// Must not be confused with verified execution.
 pub fn run_semcode_collecting_hello_observations(
     bytes: &[u8],
 ) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
@@ -254,7 +260,11 @@ pub fn run_semcode_collecting_hello_observations(
     Ok(collected)
 }
 
-/// Raw / compatibility helper.
+/// Raw execution path.
+///
+/// Bypasses `sm-verify` admission and executes raw SemCode bytes.
+/// Intentionally retained for tests, diagnostics, and malformed-byte behavior.
+/// Must not be confused with verified execution.
 pub fn run_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), RuntimeError> {
     run_semcode_with_entry_and_config(
         bytes,
@@ -263,12 +273,20 @@ pub fn run_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), RuntimeEr
     )
 }
 
-/// Raw / compatibility helper.
+/// Raw execution path.
+///
+/// Bypasses `sm-verify` admission and executes raw SemCode bytes.
+/// Intentionally retained for tests, diagnostics, and malformed-byte behavior.
+/// Must not be confused with verified execution.
 pub fn run_semcode_with_config(bytes: &[u8], config: ExecutionConfig) -> Result<(), RuntimeError> {
     run_semcode_with_entry_and_config(bytes, "main", config)
 }
 
-/// Compatibility verified shim.
+/// Compatibility verified-bytes shim.
+///
+/// Preserves older byte-based call sites. Internally performs admission through
+/// `verify_semcode_token`, resolves the entry via `require_entry`, and delegates
+/// to canonical token execution. It should not be preferred for new internal callers.
 pub fn run_verified_semcode_with_config(
     bytes: &[u8],
     config: ExecutionConfig,
@@ -280,7 +298,11 @@ pub fn run_verified_semcode_with_config(
     run_verified_entry_semcode_with_config(&entry_token, config)
 }
 
-/// Compatibility verified shim.
+/// Compatibility verified-bytes shim.
+///
+/// Preserves older byte-based call sites. Internally performs admission through
+/// `verify_semcode_token`, resolves the entry via `require_entry`, and delegates
+/// to canonical token execution. It should not be preferred for new internal callers.
 pub fn run_verified_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), RuntimeError> {
     let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry(entry).map_err(|err| match err {
@@ -292,7 +314,11 @@ pub fn run_verified_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), 
     )
 }
 
-/// Compatibility verified shim.
+/// Compatibility verified-bytes shim.
+///
+/// Preserves older byte-based call sites. Internally performs admission through
+/// `verify_semcode_token`, resolves the entry via `require_entry`, and delegates
+/// to canonical token execution. It should not be preferred for new internal callers.
 pub fn run_verified_semcode_with_entry_and_config(
     bytes: &[u8],
     entry: &str,
@@ -305,7 +331,11 @@ pub fn run_verified_semcode_with_entry_and_config(
     run_verified_entry_semcode_with_config(&entry_token, config)
 }
 
-/// Compatibility verified shim.
+/// Compatibility verified-bytes shim.
+///
+/// Preserves older byte-based call sites. Internally performs admission through
+/// `verify_semcode_token`, resolves the entry via `require_entry`, and delegates
+/// to canonical token execution. It should not be preferred for new internal callers.
 pub fn run_verified_semcode_with_host_and_capabilities<
     H: PrometheusHostAbi,
     C: CapabilityChecker,
@@ -326,7 +356,11 @@ pub fn run_verified_semcode_with_host_and_capabilities<
     )
 }
 
-/// Compatibility verified shim.
+/// Compatibility verified-bytes shim.
+///
+/// Preserves older byte-based call sites. Internally performs admission through
+/// `verify_semcode_token`, resolves the entry via `require_entry`, and delegates
+/// to canonical token execution. It should not be preferred for new internal callers.
 pub fn run_verified_semcode_with_host_and_capabilities_and_config<
     H: PrometheusHostAbi,
     C: CapabilityChecker,
@@ -349,11 +383,11 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config<
     )
 }
 
-/// Canonical verified execution.
+/// Canonical verified token execution path.
 ///
-/// This is the canonical entry point for verified execution with host bindings.
+/// This is the canonical and preferred path for internal verified execution.
 /// It requires a `VerifiedEntrySemCode` token, ensuring that admission
-/// and entry resolution have already occurred.
+/// and entry resolution have already occurred, and does not accept raw bytes.
 pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     H: PrometheusHostAbi,
     C: CapabilityChecker,
@@ -378,7 +412,11 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     exec_loop(&mut vm, &mut bridge, &mut observation)
 }
 
-/// Compatibility verified shim.
+/// Compatibility verified-bytes shim.
+///
+/// Preserves older byte-based call sites. Internally performs admission through
+/// `verify_semcode_token`, resolves the entry via `require_entry`, and delegates
+/// to canonical token execution. It should not be preferred for new internal callers.
 ///
 /// Run verified SemCode with both a standard capability checker and a UI
 /// capability checker.
@@ -408,7 +446,11 @@ pub fn run_verified_semcode_with_ui_capabilities<
     )
 }
 
-/// Canonical verified execution.
+/// Canonical verified token execution path.
+///
+/// This is the canonical and preferred path for internal verified execution.
+/// It requires a `VerifiedEntrySemCode` token, ensuring that admission
+/// and entry resolution have already occurred, and does not accept raw bytes.
 pub fn run_verified_entry_semcode_with_ui_capabilities<
     H: PrometheusHostAbi,
     C: CapabilityChecker,
@@ -438,7 +480,11 @@ pub fn run_verified_entry_semcode_with_ui_capabilities<
     exec_loop(&mut vm, &mut bridge, &mut observation)
 }
 
-/// Canonical verified execution.
+/// Canonical verified token execution path.
+///
+/// This is the canonical and preferred path for internal verified execution.
+/// It requires a `VerifiedEntrySemCode` token, ensuring that admission
+/// and entry resolution have already occurred, and does not accept raw bytes.
 pub fn run_verified_entry_semcode(
     token: &VerifiedEntrySemCode<'_, '_>,
 ) -> Result<(), RuntimeError> {
@@ -448,7 +494,11 @@ pub fn run_verified_entry_semcode(
     )
 }
 
-/// Canonical verified execution.
+/// Canonical verified token execution path.
+///
+/// This is the canonical and preferred path for internal verified execution.
+/// It requires a `VerifiedEntrySemCode` token, ensuring that admission
+/// and entry resolution have already occurred, and does not accept raw bytes.
 pub fn run_verified_entry_semcode_with_config(
     token: &VerifiedEntrySemCode<'_, '_>,
     config: ExecutionConfig,
@@ -463,7 +513,11 @@ pub fn run_verified_entry_semcode_with_config(
     .map(|_| ())
 }
 
-/// Raw / compatibility helper.
+/// Raw execution path.
+///
+/// Bypasses `sm-verify` admission and executes raw SemCode bytes.
+/// Intentionally retained for tests, diagnostics, and malformed-byte behavior.
+/// Must not be confused with verified execution.
 pub fn run_semcode_with_entry_and_config(
     bytes: &[u8],
     entry: &str,
@@ -516,10 +570,10 @@ fn run_vm_program_view_with_entry_and_config_with_observation_runtime<'a>(
     }
 }
 
-/// Raw diagnostic path.
+/// Diagnostic raw-byte path.
 ///
-/// Parses SemCode for diagnostic output without verifier enforcement.
-/// Not part of the execution path.
+/// Intentionally parses raw SemCode for diagnostic output without verifier enforcement.
+/// Not a verified execution API.
 pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {
     let program = parse_semcode(bytes)?;
     let spec = program.header;
