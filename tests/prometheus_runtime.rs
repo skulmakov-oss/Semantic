@@ -116,6 +116,7 @@ fn gate_execution_session_runs_verified_program_with_bound_registry() {
     assert!(session.descriptor().gate_registry_bound);
     assert_eq!(session.descriptor().capability_manifest, metadata);
 
+    // Intentional byte-shim compatibility coverage: this test protects the public run_verified_semcode* API surface.
     session
         .run_verified_semcode(&bytes)
         .expect("run verified via runtime session");
