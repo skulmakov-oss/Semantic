@@ -37,6 +37,7 @@ fn compat_v0_header_and_run() {
     assert_eq!(spec.rev, 1);
     assert_eq!(spec.capabilities & CAP_F64_MATH, 0);
     assert_ne!(spec.capabilities & CAP_GATE_SURFACE, 0);
+    // Intentional byte-shim compatibility coverage: this test protects legacy bytecode execution.
     run_verified_semcode(&bytes).expect("verified run");
 }
 

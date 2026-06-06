@@ -69,6 +69,7 @@ fn missing_main_entrypoint_current_behavior_is_verifier_ok_and_explicit_entry_ok
     verify_semcode(&bytes).expect("verifier should accept missing main");
 
     // Default VM run fails at lookup
+    // Intentional byte-shim compatibility coverage: characterizes boundary behavior of the shim itself.
     let err = run_verified_semcode(&bytes).expect_err("should fail to find main");
     assert!(
         err.to_string().contains("unknown function 'main'"),

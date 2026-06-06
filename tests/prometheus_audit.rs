@@ -54,6 +54,7 @@ fn audit_trail_reuses_runtime_session_descriptor_without_owning_runtime_logic() 
         entry: "main".to_string(),
     });
 
+    // Intentional byte-shim compatibility coverage: this test protects the public run_verified_semcode* API surface.
     session.run_verified_semcode(&bytes).expect("run");
     drop(session);
 

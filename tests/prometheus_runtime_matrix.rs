@@ -92,6 +92,7 @@ fn runtime_validation_matrix_core_flow_is_deterministic_and_owner_clean() {
     session.record_rule_activation(&mut audit, &activation);
     session.record_session_finished(&mut audit);
 
+    // Intentional byte-shim compatibility coverage: this test protects the public run_verified_semcode* API surface.
     session
         .run_verified_semcode(&bytes)
         .expect("run verified runtime flow");
