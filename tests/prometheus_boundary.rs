@@ -2,9 +2,24 @@ use semantic_language::frontend::{emit_ir_to_semcode, IrFunction, IrInstr};
 use semantic_language::prom_abi::HostCallId;
 use semantic_language::prom_abi::{AbiValue, RecordingHostAbi};
 use semantic_language::prom_cap::{CapabilityKind, CapabilityManifest};
-use semantic_language::semcode_vm::{
-    run_verified_semcode_with_host_and_capabilities, RuntimeError,
-};
+use semantic_language::semcode_vm::RuntimeError;
+
+fn run_token_first_with_host(
+    semcode: &[u8],
+    host: &mut RecordingHostAbi,
+    manifest: &CapabilityManifest,
+) -> Result<(), RuntimeError> {
+    let token = sm_verify::verify_semcode_token(semcode).expect("token admission");
+    let entry_token = token.require_entry("main").expect("entry resolution");
+    sm_vm::run_verified_entry_semcode_with_host_and_capabilities_and_config(
+        &entry_token,
+        host,
+        manifest,
+        semantic_language::runtime_core::ExecutionConfig::for_context(
+            semantic_language::runtime_core::ExecutionContext::KernelBound,
+        ),
+    )
+}
 
 fn boundary_program() -> Vec<IrFunction> {
     vec![IrFunction {
@@ -35,8 +50,7 @@ fn host_effects_route_through_prometheus_boundary() {
     let mut host = RecordingHostAbi::with_read_value(AbiValue::I32(42));
     let manifest = CapabilityManifest::gate_surface();
 
-    run_verified_semcode_with_host_and_capabilities(&bytes, &mut host, &manifest)
-        .expect("run through prom boundary");
+    run_token_first_with_host(&bytes, &mut host, &manifest).expect("run through prom boundary");
 
     assert_eq!(host.reads, vec![(7, 3)]);
     assert_eq!(host.writes, vec![(7, 4, AbiValue::I32(42))]);
@@ -51,7 +65,7 @@ fn missing_capability_blocks_host_effect_before_dispatch() {
     manifest.allow(CapabilityKind::GateRead);
     manifest.allow(CapabilityKind::GateWrite);
 
-    let err = run_verified_semcode_with_host_and_capabilities(&bytes, &mut host, &manifest)
+    let err = run_token_first_with_host(&bytes, &mut host, &manifest)
         .expect_err("pulse capability should block dispatch");
 
     match err {
