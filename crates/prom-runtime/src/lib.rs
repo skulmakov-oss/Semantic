@@ -352,10 +352,18 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> ExecutionSession<'a, H, C> 
         apply_rule_audit_note_effects(trail, rule)
     }
 
+    /// Public compatibility API accepting bytes.
+    ///
+    /// Internally routes through verified token admission and VM token execution.
+    /// Retained for public compatibility and is not evidence that `sm-vm` canonical execution is byte-first.
     pub fn run_verified_semcode(&mut self, bytes: &[u8]) -> Result<(), RuntimeError> {
         self.run_verified_semcode_entry(bytes, "main")
     }
 
+    /// Public compatibility API accepting bytes.
+    ///
+    /// Internally routes through verified token admission and VM token execution.
+    /// Retained for public compatibility and is not evidence that `sm-vm` canonical execution is byte-first.
     pub fn run_verified_semcode_entry(
         &mut self,
         bytes: &[u8],
@@ -510,10 +518,18 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
         apply_rule_audit_note_effects(trail, rule)
     }
 
+    /// Public compatibility API accepting bytes.
+    ///
+    /// Internally routes through verified token admission and VM token execution.
+    /// Retained for public compatibility and is not evidence that `sm-vm` canonical execution is byte-first.
     pub fn run_verified_semcode(&mut self, bytes: &[u8]) -> Result<(), RuntimeError> {
         self.run_verified_semcode_entry(bytes, "main")
     }
 
+    /// Public compatibility API accepting bytes.
+    ///
+    /// Internally routes through verified token admission and VM token execution.
+    /// Retained for public compatibility and is not evidence that `sm-vm` canonical execution is byte-first.
     pub fn run_verified_semcode_entry(
         &mut self,
         bytes: &[u8],
