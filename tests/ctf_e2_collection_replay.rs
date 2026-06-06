@@ -4,9 +4,13 @@ use std::path::PathBuf;
 use semantic_language::{
     frontend::{compile_program_to_ir, compile_program_to_semcode},
     semantics::check_source,
-    semcode_verify::verify_semcode,
 };
-use sm_vm::run_verified_semcode;
+
+fn run_token_first_main(semcode: &[u8]) -> Result<(), sm_vm::RuntimeError> {
+    let token = sm_verify::verify_semcode_token(semcode).expect("token admission");
+    let entry_token = token.require_entry("main").expect("entry resolution");
+    sm_vm::run_verified_entry_semcode(&entry_token)
+}
 
 const REPLAY_COUNT: usize = 5;
 const UPDATE_ENV: &str = "SM_UPDATE_CTF_E2_REPLAYS";
@@ -212,8 +216,7 @@ fn run_case_once(case: &ReplayCase) -> ReplayRun {
     let _sema = check_source(&src).expect("semantic check");
     let ir = compile_program_to_ir(&src).expect("compile ir");
     let semcode = compile_program_to_semcode(&src).expect("compile semcode");
-    verify_semcode(&semcode).expect("verify semcode");
-    run_verified_semcode(&semcode).expect("run verified semcode");
+    run_token_first_main(&semcode).expect("run verified semcode");
 
     let source_hash = hash_hex(&src);
     let mut ir_signatures = Vec::with_capacity(ir.len());
