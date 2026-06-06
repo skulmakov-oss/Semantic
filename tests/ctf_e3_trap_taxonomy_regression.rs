@@ -6,7 +6,8 @@ use semantic_language::{
     semantics::check_source,
     semcode_verify::verify_semcode,
 };
-use sm_vm::run_verified_semcode;
+use sm_verify::verify_semcode_token;
+use sm_vm::run_verified_entry_semcode;
 use smc_cli::parse_package_manifest_baseline;
 
 const REPLAY_COUNT: usize = 5;
@@ -225,7 +226,9 @@ fn run_vm_trap_case(case: &TaxonomyCase) -> Vec<RunSummary> {
         let ir = compile_program_to_ir(&src).expect("compile ir");
         let semcode = compile_program_to_semcode(&src).expect("compile semcode");
         verify_semcode(&semcode).expect("verify semcode");
-        let err = run_verified_semcode(&semcode).expect_err("must trap");
+        let token = verify_semcode_token(&semcode).expect("token admission");
+        let entry_token = token.require_entry("main").expect("entry resolution");
+        let err = run_verified_entry_semcode(&entry_token).expect_err("must trap");
         let rendered = err.to_string();
         assert!(
             rendered.contains(case.stable_message_needle),

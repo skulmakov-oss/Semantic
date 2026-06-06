@@ -11,7 +11,8 @@ use semantic_language::{
     semantics::check_source_with_profile,
     semcode_verify::verify_semcode,
 };
-use sm_vm::run_verified_semcode;
+use sm_verify::verify_semcode_token;
+use sm_vm::run_verified_entry_semcode;
 
 const WARMUP_RUNS: usize = 1;
 const MEASURED_RUNS: usize = 7;
@@ -86,7 +87,9 @@ fn measure_once(src: &str, profile: &ParserProfile) -> (PipelineSnapshot, StageD
     let t5 = Instant::now();
     verify_semcode(&semcode).expect("verify");
     let t6 = Instant::now();
-    run_verified_semcode(&semcode).expect("verified run");
+    let token = verify_semcode_token(&semcode).expect("token admission");
+    let entry_token = token.require_entry("main").expect("entry resolution");
+    run_verified_entry_semcode(&entry_token).expect("verified run");
     let t7 = Instant::now();
 
     let snapshot = PipelineSnapshot {
