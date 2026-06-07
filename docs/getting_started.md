@@ -79,6 +79,8 @@ If you want to run from source instead of the verified artifact route, `smc run 
 5. run the verified artifact
 6. disassemble if needed
 
+The admitted Practical Core path uses explicit source/project-root entry resolution through the current bounded admission model.
+
 The current baseline also exposes `smc 7hell program.sm [--json]` as a diagnostic/readiness path. Use it for report-quality checks and qualification review, not as the normal first-run route.
 
 ## Canonical Example Loop
@@ -138,4 +140,4 @@ The canonical examples pack includes one honest boundary example:
 
 - `examples/canonical/boundary_alias_import/`
 
-It exists to show a real current limit, not a supported workflow.
+It exists to show a real current limit, not a supported workflow, and future support for that alias-import form would require an explicit language/source-admission change.

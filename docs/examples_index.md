@@ -78,8 +78,9 @@ cargo run --bin smc -- check examples/canonical/positive_selected_import/src/mai
 ### `boundary_alias_import`
 
 - path: `examples/canonical/boundary_alias_import/`
-- purpose: honest boundary example showing that executable-path alias import is still rejected
+- purpose: intentional boundary example showing that executable-path alias import is still rejected
 - current reading: `out of scope`
+- note: this is not a supported workflow; it documents a current executable-module / alias-import limit in the current baseline
 - first command:
 
 ```powershell
@@ -89,6 +90,8 @@ cargo run --bin smc -- check examples/canonical/boundary_alias_import/src/main.s
 Expected result:
 
 - this example should fail with the current executable import boundary diagnostic
+- it should not be treated as a failing canonical success example
+- future support requires an explicit language/source-admission change
 
 ## Validation
 
