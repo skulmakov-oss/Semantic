@@ -326,9 +326,9 @@ The repository intentionally retains a narrow compatibility perimeter. It is not
 
 New architecture must land in the appropriate owner crate, not in compatibility paths.
 
-## Quickstart
+## CLI Quickstart
 
-This quickstart is a **zero-effect verifier smoke path**. It proves the core pipeline:
+This quickstart is the recommended first pass for a new user. It is a **zero-effect verifier smoke path** that proves the core pipeline:
 
 ```text
 source -> check -> compile -> verify -> run -> disasm
@@ -413,6 +413,10 @@ The smoke path should:
 - produce disassembly containing the compiled `main` function.
 
 For controlled text observation / Hello World work, follow the active M-Hello documents under `docs/language/semantic_hello_*`.
+
+For the full CLI contract and command semantics, see `docs/spec/cli.md`.
+
+The current `smc 7hell <file.sm> [--json]` path exists as a diagnostic/readiness route. It is useful for qualification and report review, but it is not the normal beginner onboarding flow.
 
 For a fuller onboarding path, see:
 

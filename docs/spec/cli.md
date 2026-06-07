@@ -37,6 +37,7 @@ The admitted `smc` command surface is currently:
 - `run`
 - `run-smc`
 - `disasm`
+- `7hell`
 
 Current accepted usage forms are:
 
@@ -59,6 +60,7 @@ Current accepted usage forms are:
 - `smc run <input.sm|project-root>`
 - `smc run-smc <input.smc>`
 - `smc disasm <input.smc>`
+- `smc 7hell <input.sm> [--json]`
 
 This draft does not claim that every command is permanently frozen, but it defines the current public CLI surface that tooling may rely on.
 
@@ -92,6 +94,19 @@ The following inspection commands are public workflow surface, but their plain-t
 - `smc hash-ir`
 - `smc hash-smc`
 - `smc disasm`
+
+## Diagnostic / Readiness Path
+
+`smc 7hell` is the current single-file diagnostic/readiness route. It is a
+compatibility and qualification path, not the normal beginner onboarding flow.
+
+Current command surface:
+
+- `smc 7hell <input.sm> [--json]`
+
+Current output rule:
+
+- `smc 7hell` emits either human-readable text or JSON via `--json`
 
 ## Output Modes
 
