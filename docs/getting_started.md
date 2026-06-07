@@ -9,7 +9,8 @@ This guide gives an external engineer the shortest honest path from clone to:
 - building the public CLI entrypoints
 - checking and running a minimal program
 - compiling and verifying a `.smc` artifact
-- running one canonical example from the current readiness contour
+- running the verified artifact and inspecting it when needed
+- optionally reviewing the current diagnostic/readiness path
 
 This is an onboarding guide, not a release-promotion document. Current `main`
 includes landed work beyond the published stable line, so release reading still
@@ -45,12 +46,6 @@ Check the source:
 cargo run --bin smc -- check program.sm
 ```
 
-Run the source directly:
-
-```powershell
-cargo run --bin smc -- run program.sm
-```
-
 Compile to SemCode:
 
 ```powershell
@@ -74,6 +69,17 @@ Disassemble the compiled artifact:
 ```powershell
 cargo run --bin svm -- disasm program.smc
 ```
+
+If you want to run from source instead of the verified artifact route, `smc run program.sm` remains the source-execution workflow command. The practical onboarding order is still:
+
+1. write or use a small `.sm` example
+2. check source
+3. compile to SemCode
+4. verify the compiled artifact
+5. run the verified artifact
+6. disassemble if needed
+
+The current baseline also exposes `smc 7hell program.sm [--json]` as a diagnostic/readiness path. Use it for report-quality checks and qualification review, not as the normal first-run route.
 
 ## Canonical Example Loop
 
