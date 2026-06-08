@@ -237,3 +237,12 @@ fn pcc7_sequence_pop_empty_traps_deterministically() {
 fn pcc7_sequence_index_requires_i32_index_rejects() {
     assert_sequence_index_type_error("true", "sequence indexing currently requires i32 index");
 }
+
+#[test]
+fn pcc7_sequence_index_type_mismatch_fixture_rejects_and_does_not_verify() {
+    assert_invalid_collection_source_does_not_verify(
+        "negative_sequence_index_type_mismatch.sm",
+        "E0201",
+        "sequence indexing currently requires i32 index",
+    );
+}
