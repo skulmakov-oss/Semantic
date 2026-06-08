@@ -289,3 +289,12 @@ fn pcc8_to_text_sequence_rejects_and_does_not_verify() {
 fn pcc8_to_text_map_rejects_and_does_not_verify() {
     assert_to_text_map_rejects();
 }
+
+#[test]
+fn pcc8_print_wrong_arity_rejects_and_does_not_verify() {
+    assert_invalid_stdlib_source_does_not_verify(
+        "negative_print_wrong_arity.sm",
+        "E0201",
+        "builtin 'print' takes exactly one positional argument",
+    );
+}
