@@ -89,6 +89,11 @@ fn canonical_data_audit_record_iterable_is_the_second_application_completeness_a
 }
 
 #[test]
+fn canonical_cli_batch_core_is_the_third_application_completeness_anchor() {
+    check_run_compile_verify("examples/canonical/cli_batch_core/src/main.sm");
+}
+
+#[test]
 fn canonical_boundary_example_reports_current_alias_limit() {
     let input = repo_path("examples/canonical/boundary_alias_import/src/main.sm");
     let err = cli_err(
