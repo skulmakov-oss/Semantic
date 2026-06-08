@@ -81,8 +81,9 @@ Current honest baseline:
   in the same source path
 - current `main` admits same-family equality on `text`
 - current `main` now admits a canonical runtime text carrier for admitted
-  literal/equality programs
-- current `main` still does not admit text concatenation
+  literal/equality/concatenation/to_text programs
+- current `main` now admits `text + text` concatenation and explicit `to_text`
+  for the admitted scalar families represented by existing fixtures
 - current `main` does not widen the PROMETHEUS host ABI with text values
 
 Current text-surface limits:

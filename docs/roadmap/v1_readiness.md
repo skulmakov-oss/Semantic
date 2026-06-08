@@ -86,6 +86,7 @@ The benchmark-qualified contour includes:
 
 - same-family `i32` relational operators and arithmetic (`+`, `-`, `*`, `/`, `%`)
 - mutable locals (`let mut` + reassignments) and loop control exits (`while`, `loop`, `break`, `continue`)
+- bounded text usability (`text` literals, same-family equality, `text + text`, explicit `to_text` for admitted scalar families)
 - built-in `Sequence(T)` persistent utilities (`len`, `push`, `pop`, `prepend`, `contains`)
 - persistent functional `Map(K, V)` lookup tables
 - deterministic seeded PRNG (xorshift64)
