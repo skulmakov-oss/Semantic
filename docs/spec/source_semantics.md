@@ -822,11 +822,14 @@ Current honest limit:
 - current `main` now also admits plain same-family `i32` relational operators
   through the existing verified compare opcodes
 - current `main` now also admits plain same-family `i32` unary `-` and binary
-  `+`, `-`, `*` through explicit lowering, verified opcodes, and VM execution
+  `+`, `-`, `*`, `/`, `%` through explicit lowering, verified opcodes, and VM
+  execution
+- division and modulo by zero currently surface as deterministic runtime
+  failures in the benchmark-negative fixtures
 - broader numeric relational surfaces for `u32`, `f64`, `fx`, and measured
   values remain outside the current application-completeness wave
-- broader integer arithmetic for `u32`, mixed numeric families, and `i32`
-  division remains outside the current first arithmetic wave
+- broader integer arithmetic for `u32` and mixed numeric families remains
+  outside the current first arithmetic wave
 - iteration, `len`, `is_empty`, maps, sets, and collection protocol machinery
   remain outside the current `M8.3` first-wave contract
 - current `main` now also admits one first-wave closure family through the
