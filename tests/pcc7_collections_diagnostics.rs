@@ -136,6 +136,42 @@ fn assert_collection_runtime_trap(rel: &str, needle: &str) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn assert_sequence_index_type_error(index_expr: &str, needle: &str) {
+    let dir = mk_temp_dir("pcc7_sequence_index_type_error");
+    let source_path = dir.join("probe.sm");
+    std::fs::write(
+        &source_path,
+        format!(
+            r#"
+fn main() {{
+    let values: Sequence(i32) = [1, 2, 3];
+    let x = values[{index_expr}];
+    return;
+}}
+"#
+        ),
+    )
+    .expect("write probe source");
+
+    let err = cli_err(
+        vec![
+            "check".to_string(),
+            source_path.to_string_lossy().replace('\\', "/"),
+        ],
+        "smc check for sequence index type error",
+    );
+    assert!(
+        err.contains("Error [E0201]"),
+        "expected sequence index type error code E0201, got: {err}"
+    );
+    assert!(
+        err.contains(needle),
+        "expected sequence index type error containing '{needle}', got: {err}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn pcc7_map_empty_requires_context_rejects_and_does_not_verify() {
     assert_invalid_collection_source_does_not_verify(
@@ -195,4 +231,9 @@ fn pcc7_sequence_pop_empty_traps_deterministically() {
         "negative_sequence_pop_empty.sm",
         "SEQUENCE_POP source must be non-empty",
     );
+}
+
+#[test]
+fn pcc7_sequence_index_requires_i32_index_rejects() {
+    assert_sequence_index_type_error("true", "sequence indexing currently requires i32 index");
 }
