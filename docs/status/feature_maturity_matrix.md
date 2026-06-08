@@ -81,7 +81,8 @@ status vocabulary in `docs/roadmap/public_status_model.md`.
 | `record` | qualified limited | spec, examples, tests, roadmap | limited | nominal record values are admitted and benchmarked, but not published stable |
 | `Option` / `Result` | qualified limited | spec, tests, Gate 1 report | limited | explicit variants are in the narrow qualified contour |
 | `Sequence` | qualified limited | spec, tests, Gate 1 + benchmark reports | limited | iteration/indexing are qualified; broader collection API remains limited |
-| `import` / `export` surface | landed on main / current-main only | spec, tests, roadmap | limited | narrow direct local-path helper imports are qualified; broader module/export surface remains current-main only |
+| direct local-path helper imports | qualified limited release | spec, tests, roadmap | limited | bare and selected local-path helper imports are admitted in the qualified contour |
+| broader import / export surface | landed on main / current-main only | spec, tests, roadmap | limited | alias, wildcard, public re-export, package-qualified executable import, and namespace-qualified access remain current-main only |
 | mutable locals / assignment | landed on main / current-main only | spec, tests, matrix | limited | benchmark-qualified on main; not promoted to published stable |
 | `while` / `loop` / `break` / `continue` | landed on main / current-main only | spec, tests, roadmap | limited | benchmark-qualified on main; not promoted to published stable |
 | `schema` | landed on main / current-main only | spec, tests, roadmap | limited | compile-time-only family; current-main support remains bounded |
