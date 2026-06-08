@@ -134,6 +134,44 @@ fn assert_stdlib_runtime_trap(rel: &str, needle: &str) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn assert_to_text_sequence_rejects() {
+    let dir = mk_temp_dir("pcc8_stdlib_diagnostics_to_text_sequence");
+    let source_path = dir.join("probe.sm");
+    std::fs::write(
+        &source_path,
+        r#"
+fn main() {
+    let xs = [1, 2, 3];
+    to_text(xs);
+    return;
+}
+"#,
+    )
+    .expect("write probe source");
+
+    let err = cli_err(
+        vec![
+            "check".to_string(),
+            source_path.to_string_lossy().replace('\\', "/"),
+        ],
+        "smc check for to_text(sequence) diagnostic",
+    );
+    assert!(
+        err.contains("Error [E0201]"),
+        "expected to_text(sequence) diagnostic code E0201, got: {err}"
+    );
+    assert!(
+        err.contains("builtin 'to_text' currently supports"),
+        "expected to_text(sequence) diagnostic to mention supported inputs, got: {err}"
+    );
+    assert!(
+        err.contains("got Sequence"),
+        "expected to_text(sequence) diagnostic to mention Sequence input, got: {err}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn pcc8_assert_false_traps_deterministically() {
     assert_stdlib_runtime_trap("negative_assert_false_trap.sm", "assertion failed");
@@ -182,4 +220,9 @@ fn pcc8_to_text_wrong_arity_rejects_and_does_not_verify() {
         "E0201",
         "builtin 'to_text' takes exactly one positional argument",
     );
+}
+
+#[test]
+fn pcc8_to_text_sequence_rejects_and_does_not_verify() {
+    assert_to_text_sequence_rejects();
 }
