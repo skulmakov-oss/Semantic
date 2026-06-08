@@ -814,7 +814,9 @@ Current honest limit:
 - the published stable `v1.1.1` line still does not expose executable `text`
 - current `main` now admits `text` through the source type/equality layer and
   through the canonical runtime carrier for those admitted programs
-- text concatenation remains a later `M8.1` wave
+- current `main` now also admits bounded `text + text` concatenation and
+  explicit `to_text` for the admitted scalar families represented by the
+  existing fixtures
 - host-facing text ABI widening is still out of scope
 - current `main` now also admits one ordered sequence family with bracketed
   literals, same-family equality, and `expr[index]` through the canonical
