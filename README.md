@@ -145,6 +145,25 @@ Recent work has moved the CLI pipeline to support a bounded project-root baselin
 - Deterministic compiler artifact chains and stale artifact protections.
 - Integrated local CI validation gates.
 
+#### Project-root readiness path
+
+The existing Project Model v0 readiness path is:
+
+```text
+cd <semantic-project-root>
+smc check .
+smc run .
+```
+
+The acceptance coverage already exercises both supported project-root shapes:
+
+- `semantic.toml` project roots;
+- `Semantic.package` package-baseline roots.
+
+That coverage also includes the explicit project-root argument form (`smc check <project-root>` / `smc run <project-root>`), alongside the `.` form from inside the root.
+
+This is readiness documentation only. GitHub CI is not the admission gate; local Admission Guard remains authoritative.
+
 ### Current guarantees / design posture
 
 Semantic currently prioritizes:
