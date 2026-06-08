@@ -176,3 +176,12 @@ fn pcc6_result_match_arm_result_type_mismatch_rejects_and_does_not_verify() {
         "match expression branch type mismatch",
     );
 }
+
+#[test]
+fn pcc6_option_none_payload_rejects_and_does_not_verify() {
+    assert_invalid_option_result_source_does_not_verify(
+        "negative_option_none_payload.sm",
+        "E0201",
+        "Option::None does not accept payload items",
+    );
+}
