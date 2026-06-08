@@ -98,6 +98,39 @@ fn assert_entry_admission_error(
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn assert_project_root_missing_entry_error(entry_rel: &str, needle: &str) {
+    let dir = mk_temp_dir("pcc9_project_root_missing_entry_error");
+    std::fs::create_dir_all(dir.join("src")).expect("mkdir src");
+    std::fs::write(
+        dir.join("semantic.toml"),
+        format!(
+            r#"
+[package]
+name = "missing_entry_probe"
+
+[project]
+entry = "{entry_rel}"
+"#
+        ),
+    )
+    .expect("write manifest");
+
+    let err = smc_cli::run(vec!["check".to_string(), dir.to_string_lossy().to_string()])
+        .expect_err("must reject");
+    assert!(
+        err.contains("semantic.toml"),
+        "expected project-root error to mention semantic.toml, got: {}",
+        err
+    );
+    assert!(
+        err.contains(needle),
+        "expected project-root error containing '{needle}', got: {}",
+        err
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 fn assert_import_resolution_error(
     rel: &str,
     import: &str,
@@ -209,6 +242,11 @@ fn pcc9_entry_admission_rejects_path_escape() {
         PackageModuleAdmissionCode::EntryOutsideModuleRoot,
         "outside admitted package module_root",
     );
+}
+
+#[test]
+fn pcc9_project_root_check_rejects_missing_entry_target() {
+    assert_project_root_missing_entry_error("src/missing.sm", "missing file");
 }
 
 #[test]
