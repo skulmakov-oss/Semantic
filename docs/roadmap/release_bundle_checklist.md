@@ -5,6 +5,23 @@ Status: active stable release baseline
 Use this checklist before assembling or publishing a release-facing stable or
 prerelease `v1` bundle.
 
+## Local-first Release Readiness Policy
+
+GitHub CI is not the authoritative release gate for the current stage.
+
+Release/readiness admission is validated locally through:
+
+- `pwsh scripts\admission_guard.ps1 -PRReady`
+- `pwsh scripts\admission_guard.ps1 -Readiness`
+- `pwsh scripts\admission_guard.ps1 -FullPreflight` when required or practical
+- `pwsh scripts\verify_release_bundle.ps1 ...`
+- `pwsh scripts\verify_release_assets.ps1 ...`
+
+GitHub CI may remain a supplementary signal when available, but it must not be
+described as required for the current local release-readiness baseline.
+
+A human release decision is still required before tagging or publishing.
+
 ## Required Documentation Bundle
 
 Verify the bundle includes:
@@ -36,11 +53,13 @@ Verify the release documents the current state of:
 
 ## Required Test Gates
 
-Verify these are green before the bundle is considered releasable:
+Verify these are green locally before the bundle is considered releasable:
 
-- CI must run these as explicit release-facing jobs, not only via broad workspace test aggregation
-- `.github/workflows/ci.yml` should include `boundary-enforcement`, `public-api-guard`, `runtime-release-gates`, and `release-bundle-process`
-- `boundary-enforcement` must keep `cargo test --test legacy_guards --quiet` as an explicit root cleanliness gate, not only as part of a broad test bundle
+- `pwsh scripts\admission_guard.ps1 -PRReady`
+- `pwsh scripts\admission_guard.ps1 -Readiness`
+- `pwsh scripts\admission_guard.ps1 -FullPreflight` when required or practical
+- `pwsh scripts\verify_release_bundle.ps1 -ManifestPath <path>`
+- `pwsh scripts\verify_release_assets.ps1 -Tag <tag> -AssetsDirectory <downloaded-assets-dir>`
 - `cargo test --workspace`
 - `cargo test --test public_api_contracts`
 - `cargo test --test golden_semcode`
@@ -48,6 +67,11 @@ Verify these are green before the bundle is considered releasable:
 - `cargo test --test prometheus_runtime_goldens`
 - `cargo test --test prometheus_runtime_negative_goldens`
 - `cargo test --test prometheus_runtime_compat_matrix`
+
+The older CI-job names (`boundary-enforcement`, `public-api-guard`,
+`runtime-release-gates`, `release-bundle-process`) are historical references or
+supplementary signals only; they are not the authoritative gate for the current
+local release-readiness baseline.
 
 ## Required Artifact Notes
 
