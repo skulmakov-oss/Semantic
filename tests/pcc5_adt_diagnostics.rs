@@ -157,3 +157,12 @@ fn pcc5_match_unknown_variant_and_result_diagnostics_are_stable() {
         assert_invalid_adt_source_does_not_verify(rel, code, needle);
     }
 }
+
+#[test]
+fn pcc5_match_pattern_family_mismatch_rejects_and_does_not_verify() {
+    assert_invalid_adt_source_does_not_verify(
+        "negative_match_pattern_type_mismatch.sm",
+        "E0201",
+        "match arm pattern type 'Signal' does not match scrutinee enum 'Direction'",
+    );
+}
