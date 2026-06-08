@@ -74,9 +74,9 @@ status vocabulary in `docs/roadmap/public_status_model.md`.
 
 | Feature / syntax family | Current status | Evidence | Public claim allowed | Notes / limitation |
 |---|---|---|---|---|
-| `fn` / `let` / `if` / `else` / `return` | published stable | spec, README, tests | yes | core executable control surface |
-| `quad` / `bool` / `unit` | published stable | spec, README, tests | yes | native value and condition families |
-| `i32` / `u32` primitive types | published stable | spec, tests | yes | primitive types only; arithmetic and relational behavior are tracked separately |
+| `fn` / `let` / `if` / `else` / `return` | qualified limited release | spec, README, tests | limited | core executable control surface; published-stable status requires stable-line contract evidence |
+| `quad` / `bool` / `unit` | qualified limited release | spec, README, tests | limited | native value and condition families; stable promotion remains governed by public status model |
+| `i32` / `u32` primitive types | qualified limited release | spec, tests | limited | primitive types only; arithmetic and relational behavior are tracked separately |
 | `match` | qualified limited | spec, tests, roadmap | limited | quad and narrow enum / standard-form match behavior is documented; full pattern ergonomics remain bounded |
 | `record` | qualified limited | spec, examples, tests, roadmap | limited | nominal record values are admitted and benchmarked, but not published stable |
 | `Option` / `Result` | qualified limited | spec, tests, Gate 1 report | limited | explicit variants are in the narrow qualified contour |
