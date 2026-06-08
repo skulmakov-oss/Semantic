@@ -1,0 +1,22 @@
+enum Direction {
+    North,
+    South,
+}
+
+enum Signal {
+    Red,
+    Green,
+}
+
+fn main() {
+    let d: Direction = Direction::North;
+
+    let x: i32 = match d {
+        Signal::Red => { 1 }
+        Direction::North => { 2 }
+        Direction::South => { 3 }
+    };
+
+    let _ = x;
+    return;
+}
