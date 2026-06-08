@@ -79,6 +79,11 @@ fn canonical_positive_examples_check_run_compile_and_verify() {
 }
 
 #[test]
+fn canonical_rule_state_decision_is_the_first_application_completeness_anchor() {
+    check_run_compile_verify("examples/canonical/rule_state_decision/src/main.sm");
+}
+
+#[test]
 fn canonical_boundary_example_reports_current_alias_limit() {
     let input = repo_path("examples/canonical/boundary_alias_import/src/main.sm");
     let err = cli_err(
