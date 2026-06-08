@@ -172,6 +172,64 @@ fn main() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn assert_to_text_map_rejects() {
+    let input = fixture_path("negative_to_text_map.sm");
+    let err = cli_err(
+        vec!["check".to_string(), input.clone()],
+        &format!("smc check for {input}"),
+    );
+    assert!(
+        err.contains("Error [E0201]"),
+        "expected to_text(map) diagnostic code E0201, got: {err}"
+    );
+    assert!(
+        err.contains("builtin 'to_text' currently supports"),
+        "expected to_text(map) diagnostic to mention supported inputs, got: {err}"
+    );
+    assert!(
+        err.contains("got Map"),
+        "expected to_text(map) diagnostic to mention Map input, got: {err}"
+    );
+
+    let dir = mk_temp_dir("pcc8_stdlib_diagnostics_to_text_map");
+    let out = dir.join("out.smc");
+    let out_arg = out.to_string_lossy().replace('\\', "/");
+    let compile_res = smc_cli::run(vec![
+        "compile".to_string(),
+        input.clone(),
+        "-o".to_string(),
+        out_arg.clone(),
+    ]);
+
+    match compile_res {
+        Ok(()) => {
+            let bytes = std::fs::read(&out).unwrap_or_else(|err| {
+                panic!("compile succeeded but emitted artifact for {input} was not readable: {err}")
+            });
+            assert!(
+                !bytes.is_empty(),
+                "compile succeeded but emitted artifact for {input} was empty"
+            );
+            let verify_err = cli_err(
+                vec!["verify".to_string(), out_arg.clone()],
+                &format!("smc verify for {out_arg}"),
+            );
+            assert!(
+                verify_err.contains("Error ["),
+                "expected verify to reject invalid stdlib artifact for {input}, got: {verify_err}"
+            );
+        }
+        Err(err) => {
+            assert!(
+                err.contains("Error [E0201]") || err.contains("builtin 'to_text' currently supports"),
+                "expected compile failure to mention E0201 or to_text support boundary for {input}, got: {err}"
+            );
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn pcc8_assert_false_traps_deterministically() {
     assert_stdlib_runtime_trap("negative_assert_false_trap.sm", "assertion failed");
@@ -225,4 +283,9 @@ fn pcc8_to_text_wrong_arity_rejects_and_does_not_verify() {
 #[test]
 fn pcc8_to_text_sequence_rejects_and_does_not_verify() {
     assert_to_text_sequence_rejects();
+}
+
+#[test]
+fn pcc8_to_text_map_rejects_and_does_not_verify() {
+    assert_to_text_map_rejects();
 }
