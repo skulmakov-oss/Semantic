@@ -67,6 +67,30 @@ landed on main != published stable
 | Units-of-measure surface | D2 | High | Docs claim, crate/status evidence | Experimental | Type/semantic surface only. |
 | ADT payload paths for ownership | N/A | High | Runtime ownership docs | Out of scope | Explicitly excluded from the current OWN0 slice. |
 
+## FR-1 Source Surface Classification
+
+This section classifies the public source contour for FR-1 using the canonical
+status vocabulary in `docs/roadmap/public_status_model.md`.
+
+| Feature / syntax family | Current status | Evidence | Public claim allowed | Notes / limitation |
+|---|---|---|---|---|
+| `fn` / `let` / `if` / `else` / `return` | qualified limited release | spec, README, tests | limited | core executable control surface; published-stable status requires stable-line contract evidence |
+| `quad` / `bool` / `unit` | qualified limited release | spec, README, tests | limited | native value and condition families; stable promotion remains governed by public status model |
+| `i32` / `u32` primitive types | qualified limited release | spec, tests | limited | primitive types only; arithmetic and relational behavior are tracked separately |
+| `match` | qualified limited | spec, tests, roadmap | limited | quad and narrow enum / standard-form match behavior is documented; full pattern ergonomics remain bounded |
+| `record` | qualified limited | spec, examples, tests, roadmap | limited | nominal record values are admitted and benchmarked, but not published stable |
+| `Option` / `Result` | qualified limited | spec, tests, Gate 1 report | limited | explicit variants are in the narrow qualified contour |
+| `Sequence` | qualified limited | spec, tests, Gate 1 + benchmark reports | limited | iteration/indexing are qualified; broader collection API remains limited |
+| direct local-path helper imports | qualified limited release | spec, tests, roadmap | limited | bare and selected local-path helper imports are admitted in the qualified contour |
+| broader import / export surface | landed on main / current-main only | spec, tests, roadmap | limited | alias, wildcard, public re-export, package-qualified executable import, and namespace-qualified access remain current-main only |
+| mutable locals / assignment | landed on main / current-main only | spec, tests, matrix | limited | benchmark-qualified on main; not promoted to published stable |
+| `while` / `loop` / `break` / `continue` | landed on main / current-main only | spec, tests, roadmap | limited | benchmark-qualified on main; not promoted to published stable |
+| `schema` | landed on main / current-main only | spec, tests, roadmap | limited | compile-time-only family; current-main support remains bounded |
+| ADT / enum surface | landed on main / current-main only | spec, tests | limited | enum forms are documented and tested; public promotion not yet made |
+| function contracts | landed on main / current-main only | spec, tests | limited | `requires` / `ensures` / `invariant` exist, but release-facing qualification is still pending |
+| `f64` / `fx` / `text` | landed on main / current-main only | spec, tests, roadmap | limited | admitted on current main in bounded slices; not a published stable promise |
+| unsupported / diagnostic-only syntax families | out of scope | diagnostics, spec | no | general package registry, broad I/O, generic traits, and other non-FR-1 families remain excluded |
+
 ## Important distinctions
 
 ### same-family i32 arithmetic is qualified
