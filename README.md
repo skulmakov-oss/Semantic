@@ -164,6 +164,19 @@ That coverage also includes the explicit project-root argument form (`smc check 
 
 This is readiness documentation only. GitHub CI is not the admission gate; local Admission Guard remains authoritative.
 
+#### Package-baseline identity
+
+`Semantic.package` is the current package-baseline identity surface.
+
+In the current readiness model, that identity is bounded by the package manifest file and the fields already represented in the existing fixtures and tests:
+
+- package name, when present in the manifest;
+- `manifest_dir`;
+- `module_root`;
+- resolved entrypoint behavior used by `smc check` and `smc run`.
+
+This is package-baseline readiness, not a broader package registry or version-resolution system. The current behavior is already represented by the existing acceptance and diagnostic coverage for `Semantic.package`.
+
 ### Current guarantees / design posture
 
 Semantic currently prioritizes:
