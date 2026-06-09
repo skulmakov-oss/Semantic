@@ -257,7 +257,7 @@ Current SemCode admission validates:
 
 - header magic and supported version
 - section and function-layout integrity
-- opcode validity
+- opcode validity against the public opcode admission matrix in `verifier.md`
 - operand shape validity
 - jump-target validity
 - call-target validity
