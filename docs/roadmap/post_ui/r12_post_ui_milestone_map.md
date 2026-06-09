@@ -76,7 +76,7 @@ Semantic UI owns:
 
 | Track | Milestone role | Owner layer | Current status | Allowed work | Forbidden work | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Semantic UI DNA / Doctrine | doctrine anchor for POST-UI boundary | Semantic UI architecture | present and authoritative | docs-only doctrine alignment | implementation claims | [`docs/dna/SEMANTIC_UI_DNA.md`](../dna/SEMANTIC_UI_DNA.md) |
+| Semantic UI DNA / Doctrine | doctrine anchor for POST-UI boundary | Semantic UI architecture | present and authoritative | docs-only doctrine alignment | implementation claims | [`docs/dna/SEMANTIC_UI_DNA.md`](../../dna/SEMANTIC_UI_DNA.md) |
 | UI Ownership / Boundary Maps | owner split and must-not-own boundaries | POST-UI boundary map | present and authoritative | docs-only boundary mapping | authority widening | [`docs/architecture/ui_ownership_map.md`](../../architecture/ui_ownership_map.md) |
 | UI Specs / Admission Contracts | admitted UI surface and verifier-admission planning | spec layer | present as docs/spec anchors | docs/spec mapping and consistency checks | verifier/runtime behavior changes | [`docs/spec/ui/*`](../../spec/ui/) and [`docs/spec/ui_abi_capability_admission.md`](../../spec/ui_abi_capability_admission.md) |
 | prom-ui Contract Layer | future inert model planning | UI boundary types | scaffold present | future inert model planning only | renderer/event loop/widget framework | [`crates/prom-ui`](../../../crates/prom-ui) |
@@ -84,7 +84,7 @@ Semantic UI owns:
 | prom-ui-backend-native Adapter Layer | adapter planning | native backend adapter boundary | scaffold present | optional adapter planning | Semantic UI model ownership | [`crates/prom-ui-backend-native`](../../../crates/prom-ui-backend-native) |
 | Workbench Separation | governance while `#675` is active | Workbench tooling/presentation | paused / guarded | audit/docs only while `#675` active | Workbench implementation widening | [`apps/workbench`](../../../apps/workbench) and `#675` |
 | Semantic Studio Future Anchor | future control-environment planning | Semantic Studio planning | future anchor only | planning docs only | Studio implementation | `#595` |
-| Legal / Dependency Posture | dependency and influence inventory | legal/control docs | dependency register updated; license verification pending | inventory / license verification planning | dependency admission by implication | [`docs/legal/third_party_dependencies.md`](../legal/third_party_dependencies.md) and [`docs/legal/third_party_influence.md`](../legal/third_party_influence.md) |
+| Legal / Dependency Posture | dependency and influence inventory | legal/control docs | dependency register updated; license verification pending | inventory / license verification planning | dependency admission by implication | [`docs/legal/third_party_dependencies.md`](../../legal/third_party_dependencies.md) and [`docs/legal/third_party_influence.md`](../../legal/third_party_influence.md) |
 
 ## 6. Milestone Work Buckets
 
