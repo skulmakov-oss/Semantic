@@ -55,7 +55,7 @@ type ScreenSpec = {
   eyebrow: string
   title: string
   summary: string
-  stable: string[]
+  current: string[]
   next: string[]
 }
 
@@ -266,15 +266,15 @@ const routeSpecs: ScreenSpec[] = [
   {
     path: '/',
     label: 'Overview',
-    eyebrow: 'WB-0.1 Cockpit',
-    title: 'Repository reality without terminal drift.',
+    eyebrow: 'proposed v1 / cockpit',
+    title: 'Repository evidence without UI-owned truth.',
     summary:
-      'Overview is the command-and-readiness cockpit. It exists to surface branch, baseline tag, recent validation signals, and known limits from real repository sources.',
-    stable: [
+      'Overview is the cockpit route for branch, baseline, command evidence, readiness visibility, and known limits from repository sources.',
+    current: [
       'Branch, commit, and baseline tag cards',
       'Source-of-truth callouts for specs, roadmap, and release artifacts',
-      'Deterministic command adapter contract for smc, svm, cargo, and release verification',
-      'Real workflow actions and job history routed through the backend process adapter',
+      'Presentation-only status summaries over captured repository evidence',
+      'Command and job links routed through public smc, svm, cargo, and release-script surfaces',
     ],
     next: [
       'Split jobs and diagnostics into richer structured views',
@@ -284,30 +284,48 @@ const routeSpecs: ScreenSpec[] = [
   {
     path: '/project',
     label: 'Project',
-    eyebrow: 'WB-0.2 Authoring',
-    title: 'Project explorer and editor shell without hidden semantics.',
+    eyebrow: 'proposed v1 / workspace',
+    title: 'Workspace view without package-model authority.',
     summary:
-      'Project owns workspace selection, file-tree navigation, tabs, and text editing. It does not create an alternate package, parser, or repository model.',
-    stable: [
+      'Project owns workspace selection, repository-relative file navigation, and local project context. It does not create alternate package or repository truth.',
+    current: [
       'Workspace resolver over canonical repository paths',
       'Recent projects list and default workspace persistence',
       'Canonical project bootstrap for Semantic.toml, src/main.sm, and examples/smoke.sm',
       'Read-only package metadata preview derived from Semantic.toml',
-      'Workspace file tree, read/write text editor tabs, current-file compile/check, and formatter actions through smc fmt',
+      'Workspace file tree and local UI state kept separate from repository authority',
     ],
     next: [
-      'Route current-file command results into richer diagnostics views',
-      'Keep editor shell intentionally lighter than a full IDE until later slices arrive',
+      'Keep editor actions routed through public smc commands',
+      'Preserve local cache staleness instead of hiding changed repository state',
+    ],
+  },
+  {
+    path: '/editor',
+    label: 'Editor',
+    eyebrow: 'proposed v1 / editor shell',
+    title: 'Authoring shell without compiler ownership.',
+    summary:
+      'Editor provides file tabs, dirty markers, save/reload, and current-file actions through public commands. Syntax highlighting remains presentation only.',
+    current: [
+      'Text editor tabs and dirty markers as local UI state',
+      'Current-file check and compile actions through public smc commands',
+      'Formatter actions routed through the documented public formatter surface when available',
+      'Command output shown through execution/feedback rules instead of editor-owned diagnostics truth',
+    ],
+    next: [
+      'Keep parser, typechecker, compiler diagnostics, and formatting semantics outside Workbench',
+      'Make unsupported syntax visible through emitted command output, not optimistic UI labels',
     ],
   },
   {
     path: '/spec',
     label: 'Spec',
-    eyebrow: 'WB-0.1 Cockpit',
+    eyebrow: 'read-only / docs navigator',
     title: 'Read-only entry into the contract bundle.',
     summary:
       'Spec navigation is a presentation layer over docs/spec and docs/roadmap. Workbench points at the documents; it does not fork them.',
-    stable: [
+    current: [
       'Docs entry cards for language, execution, and release anchors',
       'Canonical tree over docs/spec, docs/roadmap, and synced language overview documents',
       'Title/path search and section navigator driven by repository markdown',
@@ -321,11 +339,11 @@ const routeSpecs: ScreenSpec[] = [
   {
     path: '/diagnostics',
     label: 'Diagnostics',
-    eyebrow: 'WB-0.2 Authoring',
-    title: 'One structured panel, not stdout archaeology.',
+    eyebrow: 'proposed v1 / emitted diagnostics',
+    title: 'Emitted diagnostics, not UI-owned semantics.',
     summary:
-      'Diagnostics will group parse, type, module, verify, and runtime outputs. The shell here reserves the contract without duplicating parser or verifier semantics.',
-    stable: [
+      'Diagnostics groups parse, type, module, verify, and runtime outputs emitted by public commands. It does not duplicate parser or verifier semantics.',
+    current: [
       'Dedicated diagnostics route and panel shell',
       'Family buckets for parse, type, module, verify, and runtime',
       'Space reserved for spec-linked error drilldowns',
@@ -338,11 +356,11 @@ const routeSpecs: ScreenSpec[] = [
   {
     path: '/inspect',
     label: 'Inspect',
-    eyebrow: 'WB-0.3 Inspect',
-    title: 'Disasm and verify before richer debugging.',
+    eyebrow: 'read-only / output views',
+    title: 'Disasm, verify, and trace output views.',
     summary:
       'Inspect is where Workbench will render SemCode, verifier output, and runtime summaries. It stays downstream from existing execution contracts.',
-    stable: [
+    current: [
       'Dedicated trace, verify, disasm, and verified-run inspectors over real CLI jobs',
       'Dedicated inspector over smc verify, svm disasm, and verified-run jobs',
       'Raw command output is preserved as the only bytecode, verifier, and runtime source of truth',
@@ -356,11 +374,11 @@ const routeSpecs: ScreenSpec[] = [
   {
     path: '/release',
     label: 'Release',
-    eyebrow: 'WB-0.4 Operate',
-    title: 'Stable hardening lives on one screen.',
+    eyebrow: 'visibility-only / release console',
+    title: 'Release visibility without release authority.',
     summary:
-      'Release is the eventual command center for gates, bundle verification, asset smoke, docs alignment, and known limits. Every signal must remain explainable.',
-    stable: [
+      'Release shows gate, bundle, asset-smoke, docs-alignment, and known-limit visibility. Final release decisions remain outside Workbench.',
+    current: [
       'Release route anchored around canonical release docs and baseline artifacts',
       'Known-limits panel separated from pass/fail gates',
       'Freshness hints and source paths shown for release-facing documents',
@@ -373,11 +391,11 @@ const routeSpecs: ScreenSpec[] = [
   {
     path: '/settings',
     label: 'Settings',
-    eyebrow: 'WB-0 Bootstrap',
+    eyebrow: 'local UI state',
     title: 'Local preferences, not hidden feature flags.',
     summary:
       'Settings is for shell-level behavior only: display, formatter preferences, shell defaults, and workspace affordances. It must not widen Semantic scope.',
-    stable: [
+    current: [
       'Settings route with persisted local preferences',
       'Scope guard against hidden runtime or language toggles',
       'Formatter and shell preference toggles wired only to canonical public surfaces',
@@ -989,6 +1007,7 @@ function App() {
             <li>`docs/spec/*` and `docs/roadmap/*` remain canonical.</li>
             <li>`smc`, `svm`, `cargo`, and release scripts stay the first integration path.</li>
             <li>Workbench owns only UI state, orchestration, and presentation caches.</li>
+            <li>Local Admission Guard remains authoritative; GitHub CI is not a Workbench gate.</li>
           </ul>
         </section>
 
@@ -1008,35 +1027,35 @@ function App() {
       <main className="main-panel">
         <header className="topbar">
           <div>
-            <p className="eyebrow">WB-0.1 Cockpit</p>
-            <h2>Operations cockpit from repository truth, not UI guesswork</h2>
+            <p className="eyebrow">Workbench foundation</p>
+            <h2>Route map aligned to repository truth</h2>
           </div>
           <div className="status-cluster">
-            <span className="status-pill stable">Stable now: shell, adapter contract, workspace context</span>
-            <span className="status-pill draft">Draft target: richer diagnostics, formatter, and inspectors</span>
+            <span className="status-pill stable">Presentation/orchestration only</span>
+            <span className="status-pill draft">Current beta evidence, not production-ready</span>
           </div>
         </header>
 
         <section className="hero-grid">
           <article className="hero-card">
             <p className="card-kicker">Current slice</p>
-            <h3>Repository truth and runnable workflows now sit together</h3>
+            <h3>Foundation route families now match the readiness docs</h3>
             <p>
-              The overview now surfaces branch, commit, baseline tag, release documents, known limits, and a command runner over approved public workflows.
+              The shell exposes Overview, Project, Editor, Diagnostics, Spec, Inspect, Release, and Settings as bounded Workbench v1 route families.
             </p>
           </article>
           <article className="hero-card">
             <p className="card-kicker">Do not cross</p>
             <h3>No alternate readiness model inside the UI</h3>
             <p>
-              Workbench stores only local UI state. Readiness, compatibility, and release validity still come from repository docs and real command output.
+              Workbench presents repository evidence. Commands, docs, scripts, captured outputs, and local Admission Guard remain authoritative.
             </p>
           </article>
           <article className="hero-card">
             <p className="card-kicker">Immediate next</p>
-            <h3>Spec navigation and authoring shell</h3>
+            <h3>Implement one route family at a time</h3>
             <p>
-              `WB-07` and `WB-09` should extend this cockpit into spec browsing and the first editor-facing loop without inventing parser, verifier, or runtime semantics.
+              Future slices can fill routes without moving parser, typechecker, verifier, VM, runtime, or release authority into Workbench.
             </p>
           </article>
         </section>
@@ -1205,7 +1224,7 @@ function WorkbenchScreen({
         <article className="screen-card">
           <p className="card-kicker">In this slice</p>
           <ul className="bullet-list">
-            {route.stable.map((item) => (
+            {route.current.map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
@@ -1259,7 +1278,7 @@ function WorkbenchScreen({
         />
       ) : null}
 
-      {route.path === '/project' ? (
+      {route.path === '/project' || route.path === '/editor' ? (
         <ProjectPanel
           adapterContract={adapterContract}
           selectedWorkspace={selectedWorkspace}
