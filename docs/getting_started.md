@@ -16,6 +16,36 @@ This is an onboarding guide, not a release-promotion document. Current `main`
 includes landed work beyond the published stable line, so release reading still
 follows the status model in `docs/roadmap/public_status_model.md`.
 
+## External Onboarding Map
+
+Use this path if you are reading the repository for the first time and want a
+single honest route from clone to the current documented surface:
+
+1. Understand status and non-claims
+   - `README.md`
+   - `docs/roadmap/public_status_model.md`
+   - `docs/roadmap/v1_readiness.md`
+   - `docs/status/feature_maturity_matrix.md`
+
+2. Follow the shortest practical path
+   - this guide
+
+3. Move to the curated proof surface
+   - `docs/examples_index.md`
+   - `examples/canonical/README.md`
+
+4. Read the public command and diagnostic contracts
+   - `docs/spec/cli.md`
+   - `docs/spec/diagnostics.md`
+
+5. Review release posture and non-claims
+   - `docs/roadmap/stable_release_policy.md`
+   - `docs/roadmap/public_maturity_snapshot.md`
+
+The canonical examples pack is the practical proof surface for the current
+readiness contour. It is the right place to see the admitted `check`, `run`,
+`compile`, and `verify` path in action before reading release-facing status.
+
 ## Prerequisites
 
 - Rust toolchain installed
