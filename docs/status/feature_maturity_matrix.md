@@ -141,6 +141,26 @@ It explicitly does not support:
 - inter-frame borrow persistence;
 - indirect projections.
 
+## FR-6 Runtime Closure Classification
+
+This matrix classifies the deterministic runtime surfaces that FR-6 keeps in
+scope. It does not add runtime behavior or promote any surface to stable
+release by itself.
+
+| FR-6 surface | Current classification | Evidence owner | Boundary | Notes |
+|---|---|---|---|---|
+| Runtime value set | core runtime contract | `sm-vm` / `sm-runtime-core` | runtime value / execution model | Current value families are documented in `docs/spec/vm.md`; this is a bounded runtime carrier set, not a general-purpose value guarantee. |
+| Symbol identity model | core runtime contract | `sm-runtime-core` | deterministic identity / hot-path model | `SymbolId` is used in the VM hot path and canonical access-path transport; the model is deterministic, but not a public stable naming ABI. |
+| Quota / fuel taxonomy | core runtime contract | `sm-runtime-core` / `sm-vm` | bounded execution | Quota kinds, baseline profiles, and enforcement ownership are already frozen in `docs/spec/quotas.md`. |
+| Quota exhaustion behavior | core runtime contract | `sm-vm` | deterministic failure | Exhaustion is reported deterministically via `QuotaExceeded` or the surfaced `StackOverflow` compatibility path. |
+| Trap taxonomy | core runtime contract | `sm-vm` | runtime failure model | Runtime traps remain distinct from verifier rejection, CLI diagnostics, and capability denial. |
+| Verifier rejection vs runtime trap split | core runtime contract | `sm-verify` / `sm-vm` | verifier-before-execution boundary | Standard SemCode admission rejects malformed or unsupported artifacts before execution; runtime traps only describe admitted execution failure. |
+| Trace / audit event shape | PROMETHEUS boundary policy | `prom-runtime` / `prom-audit` | orchestration / audit policy | Trace and audit shape are release-facing evidence, but the shape is owned by PROMETHEUS-facing orchestration and audit layers rather than core VM semantics. |
+| Deterministic rerun invariant | downstream proof surface | `sm-vm` / tests | replay / golden evidence | Same SemCode, same config, same capability context, and same input stream must yield the same result / trap / trace class. |
+| Seeded pseudo-random behavior | current-main evidence | `sm-vm` / tests | deterministic helper surface | Deterministic seeded PRNG (`random_seed` / `random_next_i32`) is qualified evidence, not a broad randomness contract. |
+| Capability / observation boundary | PROMETHEUS boundary policy | `prom-cap` / `prom-runtime` | host-effect admission | Narrow `print(text)` / `CAP_STDOUT` remains bounded and capability-aware; this matrix does not widen host effects. |
+| PROMETHEUS runtime policy | PROMETHEUS boundary policy | `prom-runtime` / `prom-audit` | orchestration / release-facing policy | PROMETHEUS runtime policy stays separate from core runtime determinism and does not imply release qualification. |
+
 ## Documentation rule
 
 README, examples, and public docs should avoid presenting roadmap or
