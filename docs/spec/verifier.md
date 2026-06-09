@@ -38,6 +38,23 @@ Current SemCode verification checks include:
 - call-target validity
 - capability consistency with actual opcode usage
 
+## Opcode Admission Matrix
+
+The verifier treats opcode admission as part of SemCode admission.
+
+This matrix documents the current public admission boundary. It uses operation
+families rather than binary opcode numbers so that internal encodings can change
+without turning this document into a stable bytecode ISA promise.
+
+| Operation family | Admission status | Capability / boundary | Notes |
+| --- | --- | --- | --- |
+| Ordinary source-derived families: control flow, data movement, literal loading, arithmetic, comparison, calls, and returns | Admitted when produced by supported SemCode and consistent with the emitted contract | No extra capability beyond the artifact contract | Baseline verifier-admitted surface; this document intentionally does not stabilize binary opcode numbers. |
+| `SEQUENCE_LEN` | Admitted only when the emitted contract carries `CAP_SEQUENCE_ITERATION` and the header family supports the sequence-iteration contract | Capability-gated | Built-in sequence lowering opcode for the admitted `Sequence(T)` iteration slice. |
+| Effect-oriented host-boundary families such as `GateRead`, `GateWrite`, and `PulseEmit` | Admitted only when the emitted contract matches the required capability envelope | Capability-gated / host-boundary | These opcodes do not define capability policy semantics by themselves. |
+| Ownership transport payloads admitted through `OWN0` | Admitted structurally only when the ownership transport slice is present and well formed | Header and capability consistency required | This covers the currently documented tuple-only and direct record-field ownership transport slices. |
+| Unknown, unsupported, or malformed opcode encodings | Rejected | N/A | Rejection must happen before a successful VM execution path. |
+| Opcode streams that fail operand, jump-target, call-target, register-budget, string-reference, or section-integrity checks | Rejected | N/A | These are verifier admission failures, not successful runtime executions. |
+
 Current ownership-specific structural checks for ownership transport include:
 
 - `OWN0` section presence and layout validity when ownership transport is used
