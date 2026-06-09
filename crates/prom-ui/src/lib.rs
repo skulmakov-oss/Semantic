@@ -44,6 +44,7 @@ pub mod host_runtime_effect_denial_trace;
 pub mod host_runtime_effect_result;
 pub mod intent_stream;
 pub mod interaction;
+pub mod model;
 pub mod prepared_effect;
 pub mod prepared_effect_result;
 pub mod raw_event;
@@ -182,6 +183,10 @@ pub use intent_stream::{
 pub use interaction::{
     ElementId, InteractionIntentDescriptor, InteractionIntentId, InteractionIntentKind,
     InteractionModifiers, InteractionSource, InteractionTarget, RegionId, SurfaceId, WindowId,
+};
+pub use model::{
+    UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIr, UiIrNode, UiIrNodeId, UiIrNodeKind, UiNode,
+    UiNodeId, UiNodeKind, UiTree, UiTreeId,
 };
 pub use prepared_effect::{
     describe_interaction_prepared_effect, InteractionPreparedEffectCommitRequirement,
