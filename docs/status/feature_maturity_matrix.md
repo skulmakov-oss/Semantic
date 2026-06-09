@@ -184,6 +184,35 @@ does not itself create release artifacts or claims.
 | Package ecosystem / `smc new` claims | explicit non-claim | roadmap/status docs | out of scope | Package-registry semantics and `smc new` support remain separate from release qualification planning. |
 | Production-ready claim | explicit non-claim | roadmap/status docs | out of scope | FR-9 planning does not imply production-ready status. |
 
+## Workbench Readiness Classification
+
+This matrix classifies the Workbench readiness surfaces after the non-UI
+readiness first pass. It does not add UI behavior, promote Workbench to stable
+release, or move Semantic core ownership into the desktop shell.
+
+| Workbench surface | Current classification | Source of truth | Boundary | Notes |
+|---|---|---|---|---|
+| Workbench foundation | foundation policy | `docs/workbench/architecture.md`, `docs/workbench/scope.md` | UI / orchestration | Workbench is a desktop orchestration and presentation layer over existing repository contracts, not a second Semantic core. |
+| Source-of-truth policy | foundation policy | repository docs, command outputs, release artifacts | truth ownership | Workbench presents repository truth derived from docs, public tools, scripts, artifacts, and recorded outputs; it must not create Semantic truth. |
+| Public surface rule | foundation policy | `smc`, `svm`, `cargo`, public release scripts, public docs | integration boundary | First integration is process-based over public surfaces; private crate internals remain off-limits unless a later public facade is explicitly supported. |
+| Process adapter / command runner | proposed v1 / current beta evidence | `apps/workbench`, Workbench beta docs | orchestration-only | May request `smc`, `svm`, `cargo`, and release-script commands and display outputs; command dispatch must not rewrite semantics or bypass verifier admission. |
+| Overview cockpit | proposed v1 / current beta evidence | Workbench scope, beta notes, view models | presentation-only | May summarize branch, commit, validation, readiness, bundle, asset-smoke, and known-limit signals; it must not invent readiness percentages or alternate scores. |
+| Jobs history | proposed v1 / current beta evidence | `JobViewModel`, Workbench app scaffold | presentation-only | Stores requested command metadata, stdout/stderr, exit codes, duration, and related files; it must not hide or reinterpret command failure. |
+| Spec navigator | proposed v1 / current beta evidence | `docs/spec/*`, `docs/roadmap/*`, `SpecDocumentViewModel` | read-only projection | May index canonical docs, paths, headings, and declared stability labels; it must not silently edit or mirror docs as a new contract. |
+| Editor shell | proposed v1 / current beta evidence | Workbench scope, beta notes | authoring shell | May provide tabs, save/reload, dirty markers, and current-file actions; it must not become a parser, typechecker, or full IDE protocol owner. |
+| Diagnostics hub | proposed v1 / current beta evidence | public diagnostics, command outputs, `DiagnosticsViewModel` | diagnostic presentation | May group diagnostics, preserve codes/locations/messages, and link specs; it must not define diagnostic categories independently. |
+| Inspector views | proposed v1 / current beta evidence | `svm disasm`, verify outputs, trace/quota/capability summaries | output projection | May display disassembly, verify, trace, quota, and capability summaries when present in outputs; it must not implement a second VM interpretation layer. |
+| Release console | proposed v1 / current beta evidence | release docs, release scripts, `ReleaseViewModel` | gate visibility / not release authority | May show real gate, bundle, asset-smoke, and docs-alignment signals; it must not publish, qualify, or compute release truth independent from repository gates. |
+| View models | proposed v1 | `docs/workbench/view_models.md` | derived presentation cache | View models are derived, explainable, and refreshable from public inputs; they are never canonical source of truth. |
+| Beta packaging / beta notes | current beta evidence | `docs/workbench/beta_packaging.md`, `docs/workbench/beta_release_notes.md`, beta smoke artifacts | beta evidence / not stable release | Existing beta package and smoke evidence are current-main Workbench evidence, not production-ready or published-stable claims. |
+| `smlsp` bridge | experimental / deferred | Workbench beta notes, scope deferred path | editor protocol boundary | Optional and experimental; not required for the primary Workbench loop and not a stable editor-semantics promise. |
+| Private crate internals | explicitly forbidden | Workbench architecture | out of scope | Workbench must not couple to private crate internals or absorb core ownership through convenience integrations. |
+| Parser / typechecker ownership | explicitly forbidden | Workbench scope and architecture | no second compiler frontend | Workbench may request public checks, but it must not own parsing or typechecking semantics. |
+| Verifier / VM / runtime ownership | explicitly forbidden | Workbench scope and architecture | no second execution core | Workbench may display verifier, VM, trace, quota, and runtime outputs, but verifier admission, VM execution, and runtime contracts remain outside Workbench. |
+| Alternate release scoring | explicitly forbidden | Workbench scope, release policy | not release authority | Workbench must not create release scoring independent from local gates, release scripts, release docs, and final human release decisions. |
+| PROMETHEUS private state editing | explicitly forbidden | Workbench scope and architecture | host-boundary protection | Workbench must not edit private PROMETHEUS state or grant capabilities outside admitted boundary policy. |
+| Workbench stability claim | explicit non-claim | Workbench beta docs, status docs | public-status guard | Workbench readiness classification does not claim stable Workbench, production-ready status, release readiness, or UI-driven widening of Semantic language/runtime behavior. |
+
 ## Documentation rule
 
 README, examples, and public docs should avoid presenting roadmap or
