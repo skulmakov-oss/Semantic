@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 /// Stable local identifier for a UI node.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiNodeId(pub u64);
+pub struct UiNodeId(u64);
 
 impl UiNodeId {
     /// Creates a new node identifier from a raw value.
@@ -27,7 +27,7 @@ impl UiNodeId {
 /// Stable local identifier for a UI tree instance.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiTreeId(pub u64);
+pub struct UiTreeId(u64);
 
 impl UiTreeId {
     /// Creates a new tree identifier from a raw value.
@@ -44,7 +44,7 @@ impl UiTreeId {
 /// Stable local identifier for a UI AST node.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiAstNodeId(pub u64);
+pub struct UiAstNodeId(u64);
 
 impl UiAstNodeId {
     /// Creates a new AST-node identifier from a raw value.
@@ -61,7 +61,7 @@ impl UiAstNodeId {
 /// Stable local identifier for a UI IR node.
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct UiIrNodeId(pub u64);
+pub struct UiIrNodeId(u64);
 
 impl UiIrNodeId {
     /// Creates a new IR-node identifier from a raw value.
@@ -88,10 +88,10 @@ pub enum UiNodeKind {
 /// Inert UI Tree node with local parent/child handles.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiNode {
-    pub id: UiNodeId,
-    pub kind: UiNodeKind,
-    pub parent: Option<UiNodeId>,
-    pub children: Vec<UiNodeId>,
+    id: UiNodeId,
+    kind: UiNodeKind,
+    parent: Option<UiNodeId>,
+    children: Vec<UiNodeId>,
 }
 
 impl UiNode {
@@ -120,6 +120,16 @@ impl UiNode {
         self.parent
     }
 
+    /// Returns the node id.
+    pub const fn id(&self) -> UiNodeId {
+        self.id
+    }
+
+    /// Returns the node kind.
+    pub const fn kind(&self) -> UiNodeKind {
+        self.kind
+    }
+
     /// Returns the child handles.
     pub fn children(&self) -> &[UiNodeId] {
         &self.children
@@ -139,8 +149,8 @@ impl UiNode {
 /// Inert UI Tree container.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiTree {
-    pub id: UiTreeId,
-    pub nodes: Vec<UiNode>,
+    id: UiTreeId,
+    nodes: Vec<UiNode>,
 }
 
 impl UiTree {
@@ -193,10 +203,10 @@ pub enum UiAstNodeKind {
 /// Inert UI AST node with local parent/child handles.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiAstNode {
-    pub id: UiAstNodeId,
-    pub kind: UiAstNodeKind,
-    pub parent: Option<UiAstNodeId>,
-    pub children: Vec<UiAstNodeId>,
+    id: UiAstNodeId,
+    kind: UiAstNodeKind,
+    parent: Option<UiAstNodeId>,
+    children: Vec<UiAstNodeId>,
 }
 
 impl UiAstNode {
@@ -225,6 +235,16 @@ impl UiAstNode {
         self.parent
     }
 
+    /// Returns the AST node id.
+    pub const fn id(&self) -> UiAstNodeId {
+        self.id
+    }
+
+    /// Returns the AST node kind.
+    pub const fn kind(&self) -> UiAstNodeKind {
+        self.kind
+    }
+
     /// Returns the child handles.
     pub fn children(&self) -> &[UiAstNodeId] {
         &self.children
@@ -244,7 +264,7 @@ impl UiAstNode {
 /// Inert UI AST container.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct UiAst {
-    pub nodes: Vec<UiAstNode>,
+    nodes: Vec<UiAstNode>,
 }
 
 impl UiAst {
@@ -289,10 +309,10 @@ pub enum UiIrNodeKind {
 /// Inert UI IR node with local parent/child handles.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiIrNode {
-    pub id: UiIrNodeId,
-    pub kind: UiIrNodeKind,
-    pub parent: Option<UiIrNodeId>,
-    pub children: Vec<UiIrNodeId>,
+    id: UiIrNodeId,
+    kind: UiIrNodeKind,
+    parent: Option<UiIrNodeId>,
+    children: Vec<UiIrNodeId>,
 }
 
 impl UiIrNode {
@@ -321,6 +341,16 @@ impl UiIrNode {
         self.parent
     }
 
+    /// Returns the IR node id.
+    pub const fn id(&self) -> UiIrNodeId {
+        self.id
+    }
+
+    /// Returns the IR node kind.
+    pub const fn kind(&self) -> UiIrNodeKind {
+        self.kind
+    }
+
     /// Returns the child handles.
     pub fn children(&self) -> &[UiIrNodeId] {
         &self.children
@@ -340,7 +370,7 @@ impl UiIrNode {
 /// Inert UI IR container.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct UiIr {
-    pub nodes: Vec<UiIrNode>,
+    nodes: Vec<UiIrNode>,
 }
 
 impl UiIr {
@@ -391,6 +421,22 @@ mod tests {
     }
 
     #[test]
+    fn ast_node_id_round_trip() {
+        let id = UiAstNodeId::new(12);
+
+        assert_eq!(id.raw(), 12);
+        assert_eq!(UiAstNodeId(12), id);
+    }
+
+    #[test]
+    fn ir_node_id_round_trip() {
+        let id = UiIrNodeId::new(13);
+
+        assert_eq!(id.raw(), 13);
+        assert_eq!(UiIrNodeId(13), id);
+    }
+
+    #[test]
     fn empty_tree_has_id_and_no_nodes() {
         let tree = UiTree::new(UiTreeId::new(1));
 
@@ -411,6 +457,16 @@ mod tests {
 
         assert_eq!(tree.len(), 1);
         assert_eq!(tree.nodes()[0], node);
+    }
+
+    #[test]
+    fn node_accessors_expose_identity_and_kind_without_field_mutation() {
+        let node = UiNode::new(UiNodeId::new(23), UiNodeKind::Text);
+
+        assert_eq!(node.id(), UiNodeId::new(23));
+        assert_eq!(node.kind(), UiNodeKind::Text);
+        assert_eq!(node.parent(), None);
+        assert!(node.children().is_empty());
     }
 
     #[test]
@@ -436,6 +492,16 @@ mod tests {
     }
 
     #[test]
+    fn ast_node_accessors_expose_identity_and_kind_without_field_mutation() {
+        let node = UiAstNode::new(UiAstNodeId::new(33), UiAstNodeKind::Binding);
+
+        assert_eq!(node.id(), UiAstNodeId::new(33));
+        assert_eq!(node.kind(), UiAstNodeKind::Binding);
+        assert_eq!(node.parent(), None);
+        assert!(node.children().is_empty());
+    }
+
+    #[test]
     fn ir_starts_empty() {
         let ir = UiIr::new();
 
@@ -458,6 +524,16 @@ mod tests {
     }
 
     #[test]
+    fn ir_node_accessors_expose_identity_and_kind_without_field_mutation() {
+        let node = UiIrNode::new(UiIrNodeId::new(43), UiIrNodeKind::Root);
+
+        assert_eq!(node.id(), UiIrNodeId::new(43));
+        assert_eq!(node.kind(), UiIrNodeKind::Root);
+        assert_eq!(node.parent(), None);
+        assert!(node.children().is_empty());
+    }
+
+    #[test]
     fn node_parent_and_children_are_handles_only() {
         let mut node =
             UiNode::with_parent(UiNodeId::new(50), UiNodeKind::Fragment, UiNodeId::new(49));
@@ -466,6 +542,59 @@ mod tests {
 
         assert_eq!(node.parent(), Some(UiNodeId::new(49)));
         assert_eq!(node.children(), &[UiNodeId::new(51), UiNodeId::new(52)]);
+    }
+
+    #[test]
+    fn ast_node_parent_and_children_are_handles_only() {
+        let mut node = UiAstNode::with_parent(
+            UiAstNodeId::new(51),
+            UiAstNodeKind::Fragment,
+            UiAstNodeId::new(50),
+        );
+        node.push_child(UiAstNodeId::new(52));
+        node.push_child(UiAstNodeId::new(53));
+
+        assert_eq!(node.parent(), Some(UiAstNodeId::new(50)));
+        assert_eq!(
+            node.children(),
+            &[UiAstNodeId::new(52), UiAstNodeId::new(53)]
+        );
+    }
+
+    #[test]
+    fn ir_node_parent_and_children_are_handles_only() {
+        let mut node = UiIrNode::with_parent(
+            UiIrNodeId::new(61),
+            UiIrNodeKind::Fragment,
+            UiIrNodeId::new(60),
+        );
+        node.push_child(UiIrNodeId::new(62));
+        node.push_child(UiIrNodeId::new(63));
+
+        assert_eq!(node.parent(), Some(UiIrNodeId::new(60)));
+        assert_eq!(node.children(), &[UiIrNodeId::new(62), UiIrNodeId::new(63)]);
+    }
+
+    #[test]
+    fn tree_ast_and_ir_containers_are_separate() {
+        let mut tree = UiTree::new(UiTreeId::new(70));
+        tree.push_node(UiNode::new(UiNodeId::new(71), UiNodeKind::Root));
+
+        let mut ast = UiAst::new();
+        ast.push_node(UiAstNode::new(UiAstNodeId::new(72), UiAstNodeKind::Root));
+
+        let mut ir = UiIr::new();
+        ir.push_node(UiIrNode::new(UiIrNodeId::new(73), UiIrNodeKind::Root));
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ir.len(), 1);
+        assert_eq!(tree.nodes()[0].kind(), UiNodeKind::Root);
+        assert_eq!(ast.nodes()[0].kind(), UiAstNodeKind::Root);
+        assert_eq!(ir.nodes()[0].kind(), UiIrNodeKind::Root);
+        assert_eq!(tree.nodes()[0].id(), UiNodeId::new(71));
+        assert_eq!(ast.nodes()[0].id(), UiAstNodeId::new(72));
+        assert_eq!(ir.nodes()[0].id(), UiIrNodeId::new(73));
     }
 
     #[test]
@@ -480,8 +609,8 @@ mod tests {
         ));
 
         assert_eq!(ast.len(), 1);
-        assert_eq!(ast.nodes()[0].kind, UiAstNodeKind::Action);
+        assert_eq!(ast.nodes()[0].kind(), UiAstNodeKind::Action);
         assert_eq!(ir.len(), 1);
-        assert_eq!(ir.nodes()[0].kind, UiIrNodeKind::EffectBoundary);
+        assert_eq!(ir.nodes()[0].kind(), UiIrNodeKind::EffectBoundary);
     }
 }
