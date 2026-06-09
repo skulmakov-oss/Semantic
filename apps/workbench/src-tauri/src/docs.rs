@@ -273,6 +273,13 @@ const DOC_ENTRIES: &[DocEntryDef] = &[
     title: "WBS",
     relative_path: "docs/roadmap/wbs.md",
   },
+  DocEntryDef {
+    key: "workbench_spec_index_reader",
+    section_key: "workbench",
+    section_title: "Workbench",
+    title: "Workbench Spec Index Reader v0",
+    relative_path: "docs/roadmap/workbench_spec_index_reader_v0.md",
+  },
 ];
 
 #[derive(Clone, Debug, Serialize)]
