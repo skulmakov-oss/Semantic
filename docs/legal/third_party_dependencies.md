@@ -1,54 +1,143 @@
 # Third-Party Dependency Register
 
-Status: dependency register placeholder
-Scope: actual admitted third-party dependencies only
+Status: Draft
+Track: R12 / POST-UI / Workbench dependency posture
+Scope: documentation only
 
-## Purpose
+## 1. Purpose
 
-This file records actual third-party dependencies used by Semantic UI or related UI adapters.
+This register records actual third-party dependencies admitted by repository manifests.
 
-Do not add a project here merely because it inspired the architecture.
+It is distinct from third-party influence or architectural inspiration.
 
-A project belongs here only if it is actually used as:
+It does not authorize new dependencies.
 
-- a Rust crate;
-- an npm package;
-- a vendored library;
-- a linked runtime dependency;
-- copied source code;
-- modified fork.
+It does not authorize Workbench, Semantic Studio, renderer, browser/WebView, or widget framework ownership.
 
-## Current Semantic UI dependency status
+It does not claim final legal clearance.
 
-As of this document:
+License fields marked `pending verification` require later source verification.
 
-```text
-No Semantic UI third-party runtime dependency is admitted by this document.
-```
+## 2. Classification Rules
 
-## Future Entry Format
+- Inspiration: architectural reference only; no code dependency.
+- Dependency: crate or npm package used by repository manifests.
+- Derivative / fork: copied or modified third-party code; requires explicit license and copyright handling.
 
-| Dependency | Version/source | Purpose | License | Notes |
-| --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD |
+Current audit found no derivative / fork evidence.
 
-## Rule
+Dependency entries below are based on local manifests only.
 
-Before adding a dependency:
+## 3. Relationship To Influence Register
 
-- check license;
-- check transitive dependencies;
-- check whether it affects the Semantic language/runtime boundary;
-- document whether it is runtime, build-time, dev-only, or adapter-only.
+See:
 
-## Non-Dependency Note
+- [`docs/legal/third_party_influence.md`](./third_party_influence.md)
+- [`docs/dna/SEMANTIC_UI_DNA.md`](../dna/SEMANTIC_UI_DNA.md)
 
-The following projects may be listed in `third_party_influence.md` as architectural influences, but are not dependencies unless explicitly added here:
+The following names remain influence-only unless they also appear in manifests:
 
 - Slint
 - Lapce / Floem
 - Makepad
 - Zed / GPUI
-- Tauri
 - Monaco / CodeMirror
 - React Flow / Cytoscape / ELK
+
+Tauri appears both as an architectural influence and as an actual dependency surface in the Workbench Tauri backend.
+
+## 4. Dependency Groups
+
+### 4.1 Workspace / shared Rust dependencies
+
+| Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `serde` | `Cargo.toml` | serialization | shared infrastructure | yes | pending verification | Workspace-level shared Rust dependency. |
+| `serde_json` | `Cargo.toml` | serialization | shared infrastructure | yes | pending verification | Workspace-level shared Rust dependency. |
+
+### 4.2 Workbench Tauri backend dependencies
+
+| Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `tauri-build` | `apps/workbench/src-tauri/Cargo.toml` | build-time | Workbench backend | no | pending verification | Build dependency for the Tauri backend crate. |
+| `serde` | `apps/workbench/src-tauri/Cargo.toml` | serialization | Workbench backend | no | pending verification | Backend serialization dependency. |
+| `serde_json` | `apps/workbench/src-tauri/Cargo.toml` | serialization | Workbench backend | no | pending verification | Backend JSON serialization dependency. |
+| `log` | `apps/workbench/src-tauri/Cargo.toml` | logging | Workbench backend | no | pending verification | Logging dependency for backend diagnostics. |
+| `tauri` | `apps/workbench/src-tauri/Cargo.toml` | runtime | Workbench backend | no | pending verification | Actual Tauri runtime dependency for the Workbench shell. |
+| `tauri-plugin-log` | `apps/workbench/src-tauri/Cargo.toml` | runtime / logging | Workbench backend | no | pending verification | Tauri log plugin used by the backend shell. |
+
+### 4.3 Workbench frontend runtime dependencies
+
+| Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `@tauri-apps/api` | `apps/workbench/package.json` | runtime | Workbench frontend | no | pending verification | Frontend Tauri API bridge. |
+| `react` | `apps/workbench/package.json` | runtime | Workbench frontend | no | pending verification | UI runtime framework for the Workbench shell. |
+| `react-dom` | `apps/workbench/package.json` | runtime | Workbench frontend | no | pending verification | React DOM renderer for the Workbench shell. |
+| `react-router-dom` | `apps/workbench/package.json` | runtime | Workbench frontend | no | pending verification | Routing/runtime support for Workbench UI navigation. |
+
+### 4.4 Workbench frontend tooling / dev dependencies
+
+| Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `@tauri-apps/cli` | `apps/workbench/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | CLI tooling for Tauri app development. |
+| `@vitejs/plugin-react` | `apps/workbench/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | Vite React plugin. |
+| `@eslint/js` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | ESLint JS config package. |
+| `@types/node` | `apps/workbench/package.json` | type definitions | Workbench frontend | no | pending verification | TypeScript type support. |
+| `@types/react` | `apps/workbench/package.json` | type definitions | Workbench frontend | no | pending verification | React type definitions. |
+| `@types/react-dom` | `apps/workbench/package.json` | type definitions | Workbench frontend | no | pending verification | React DOM type definitions. |
+| `eslint` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | Linting tool. |
+| `eslint-plugin-react-hooks` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | React hooks lint rules. |
+| `eslint-plugin-react-refresh` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | React refresh lint rules. |
+| `globals` | `apps/workbench/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | Shared global identifier definitions. |
+| `typescript` | `apps/workbench/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | TypeScript compiler and language tooling. |
+| `typescript-eslint` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | TypeScript-aware ESLint tooling. |
+| `vite` | `apps/workbench/package.json` | bundling | Workbench frontend | no | pending verification | Frontend bundler and dev server. |
+
+### 4.5 Optional native backend dependencies
+
+| Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `winit` | `crates/prom-ui-backend-native/Cargo.toml` | runtime / adapter | native backend adapter | yes | pending verification | Optional feature-gated native backend dependency. This does not make renderer ownership part of Semantic UI. |
+
+### 4.6 Internal workspace crates not third-party dependencies
+
+The following are workspace-owned crates and are not third-party dependency entries:
+
+- `prom-ui`
+- `prom-ui-runtime`
+- `prom-ui-backend-native`
+- `prom-ui-demo`
+- `prom-abi`
+
+## 5. Non-Adoption / Non-Ownership Notes
+
+- React and Tauri are Workbench implementation dependencies, not Semantic UI model owners.
+- `winit` is an optional backend-adapter surface, not a Semantic UI model owner.
+- No dependency listed here owns UI Tree, UI AST, UI IR, Semantic state/update/event model, capability/effect discipline, diagnostics/fault model, or renderer adapter contract.
+- No dependency listed here authorizes browser/WebView ownership of Semantic state.
+- No dependency listed here authorizes widget framework scope.
+- No dependency listed here widens release scope.
+
+## 6. License Verification Status
+
+License values are pending verification unless directly present in local manifest evidence.
+
+A later legal pass must verify licenses against package or crate source metadata before release claims.
+
+This register is an inventory and control document, not final legal approval.
+
+## 7. Current Risk Summary
+
+- Unregistered dependency gap before this patch: yes
+- Derivative / fork evidence: none found
+- Final legal clearance: not yet
+- Release widening: no
+- Implementation authorization: no
+
+## 8. Follow-Up Items
+
+- Verify licenses for all direct third-party dependencies.
+- Decide whether to add version columns from lockfiles in a later pass.
+- Keep influence, dependency, and derivative categories separate.
+- Update this register when manifests change.
+- Keep the `#675` pause active for Workbench and Semantic Studio implementation.
