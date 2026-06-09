@@ -60,7 +60,7 @@ landed on main != published stable
 | Map surface | D7 | High | Test evidence | Qualified application-completeness contour | Supports `Map(K, V)` functional get, set, contains. Not published stable. |
 | Deterministic seeded PRNG | D7 | High | Test evidence | Qualified application-completeness contour | Deterministic seeded PRNG (xorshift64) via `random_seed` / `random_next_i32`. Not published stable. |
 | Controlled observation (stdout) | D7 | High | Test evidence | Qualified application-completeness contour | Narrow `print(text)` via `CAP_STDOUT` capability. Not published stable. |
-| Bounded project-root CLI baseline | D7 | High | Test evidence | Qualified application-completeness contour | Supports resolving and running routes from project root. Excludes registry, multi-package resolution, package manager semantics. Not published stable. |
+| Bounded project-root CLI baseline | D7 | High | Test evidence | Qualified application-completeness contour | Supports resolving and running routes from documented manual project-root layouts (`semantic.toml` / `Semantic.package`). Excludes registry, multi-package resolution, package manager semantics, and `smc new` scaffolding. Not published stable. |
 | Runtime ownership OWN0 | D6 | High | Docs claim, VM/spec evidence | Stable release surface, frozen | Tuple and direct record-field access paths only. |
 | Function contracts: `requires` / `ensures` | D5 | Medium | Docs claim, verifier spec | Implemented but unqualified | Requires syntax, typecheck, lowering, verifier and runtime qualification. |
 | PROMETHEUS ABI / host boundary | D6 | Medium | Docs claim, CLI evidence | Implemented but unqualified | Needs qualification of ABI, capability policy, audit, and host bridge. |

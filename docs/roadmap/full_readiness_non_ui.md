@@ -144,13 +144,18 @@ Tasks:
 - define package identity;
 - define project entrypoint behavior;
 - define examples/tests discovery;
-- add CLI support for project check/run where needed.
+- add CLI support for project check/run where needed;
+- keep project creation for this pass grounded in manual project-root layouts.
 
 Acceptance:
 
-- a new project can be created, checked, and run by the documented path;
+- a new project can be created manually from the documented project-root layout, then checked and run by the documented path;
 - imports resolve relative to explicit project/package rules;
 - the project model does not conflict with the module system.
+
+Non-goal for this pass:
+
+- `smc new` / project scaffolding is out of scope for the current FR-4 readiness pass.
 
 ## Phase FR-5 — Verified Execution Closure
 
