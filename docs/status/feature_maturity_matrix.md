@@ -161,6 +161,29 @@ release by itself.
 | Capability / observation boundary | PROMETHEUS boundary policy | `prom-cap` / `prom-runtime` | host-effect admission | Narrow `print(text)` / `CAP_STDOUT` remains bounded and capability-aware; this matrix does not widen host effects. |
 | PROMETHEUS runtime policy | PROMETHEUS boundary policy | `prom-runtime` / `prom-audit` | orchestration / release-facing policy | PROMETHEUS runtime policy stays separate from core runtime determinism and does not imply release qualification. |
 
+## FR-9 Release Qualification Classification
+
+This matrix classifies the release-qualification surfaces that FR-9 keeps in
+scope. It distinguishes local admission gates from release-facing policy and
+does not itself create release artifacts or claims.
+
+| FR-9 surface | Current classification | Evidence owner | Gate role | Notes |
+|---|---|---|---|---|
+| Public status vocabulary | public-status guard | roadmap/status docs | release-facing policy | Distinguishes `published stable`, `qualified limited release`, `landed on main`, `current-main only`, `experimental`, and `out of scope` without promoting any of them. |
+| Qualified limited release posture | release policy / required | roadmap policy docs | release-candidate posture | Describes the bounded qualified contour; it is not a public stable declaration. |
+| Published stable posture | explicit non-claim until later decision | roadmap policy docs | release publication target | Remains distinct from landed-on-main behavior and is not implied by FR-9 planning. |
+| `PRReady` | local admission gate | `scripts/admission_guard.ps1` | local admission | Useful for PR admission, but not sufficient alone for release qualification. |
+| `Readiness` | local readiness gate | `scripts/admission_guard.ps1` | local readiness | Stronger than `PRReady`, but still not equivalent to publishing a release. |
+| `FullPreflight` | heavy local gate candidate | `scripts/admission_guard.ps1` | local full-preflight gate | A broad local gate used for deeper validation; it is not itself a public release claim. |
+| Release bundle verification | bundle verification surface | `scripts/verify_release_bundle.ps1` | release-candidate gate | Verifies bundle contents and required release documentation without producing a release artifact in this PR. |
+| Release asset smoke verification | asset smoke surface | `scripts/verify_release_assets.ps1` | release-candidate gate | Checks release assets and smoke behavior separately from ordinary PR readiness. |
+| Release-facing docs alignment | release policy / required | roadmap/status docs | release publication support | Keeps release notes and status wording honest before any publication decision. |
+| Release notes / release candidate wording | public-status guard | roadmap/status docs | release-facing policy | Must preserve non-claims and avoid implying stable or production-ready status. |
+| GitHub CI role | not authoritative | process policy docs | non-gate | GitHub CI may report evidence, but it is not the authoritative admission gate for this repository. |
+| Stable runtime / binary ABI claims | explicit non-claim | roadmap/status docs | out of scope | FR-9 planning does not imply a stable runtime ABI or stable binary ISA. |
+| Package ecosystem / `smc new` claims | explicit non-claim | roadmap/status docs | out of scope | Package-registry semantics and `smc new` support remain separate from release qualification planning. |
+| Production-ready claim | explicit non-claim | roadmap/status docs | out of scope | FR-9 planning does not imply production-ready status. |
+
 ## Documentation rule
 
 README, examples, and public docs should avoid presenting roadmap or
