@@ -17,7 +17,9 @@
 
 use alloc::vec::Vec;
 
-use crate::model::{UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind};
+use crate::model::{
+    UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIr, UiIrNode, UiIrNodeId, UiIrNodeKind,
+};
 
 /// Inert configuration placeholder for the minimal AST validation seed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -274,6 +276,274 @@ fn push_inconsistent_pair(
 }
 
 fn find_node(nodes: &[UiAstNode], id: UiAstNodeId) -> Option<&UiAstNode> {
+    nodes.iter().find(|node| node.id() == id)
+}
+
+/// Inert configuration placeholder for the minimal IR validation seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct UiIrValidationConfig;
+
+/// Structured diagnostic kind for the minimal IR validation seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiIrValidationDiagnosticKind {
+    /// A node identifier appears more than once in the IR.
+    DuplicateNodeId(UiIrNodeId),
+    /// A node references a missing parent node.
+    MissingParentTarget {
+        node_id: UiIrNodeId,
+        parent_id: UiIrNodeId,
+    },
+    /// A node references a missing child node.
+    MissingChildTarget {
+        node_id: UiIrNodeId,
+        child_id: UiIrNodeId,
+    },
+    /// The parent/child relationship is inconsistent in the IR.
+    InconsistentParentChild {
+        parent_id: UiIrNodeId,
+        child_id: UiIrNodeId,
+    },
+    /// A node names itself as its own parent.
+    SelfParent(UiIrNodeId),
+    /// A node names itself as one of its children.
+    SelfChild(UiIrNodeId),
+    /// More than one root node exists in the IR.
+    MultipleRoots,
+}
+
+/// Structured diagnostic for an IR validation failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiIrValidationDiagnostic {
+    node_id: Option<UiIrNodeId>,
+    kind: UiIrValidationDiagnosticKind,
+}
+
+impl UiIrValidationDiagnostic {
+    /// Creates a validation diagnostic for a specific IR node.
+    pub const fn new(node_id: Option<UiIrNodeId>, kind: UiIrValidationDiagnosticKind) -> Self {
+        Self { node_id, kind }
+    }
+
+    /// Returns the IR node id associated with the diagnostic, if any.
+    pub const fn node_id(&self) -> Option<UiIrNodeId> {
+        self.node_id
+    }
+
+    /// Returns the diagnostic kind.
+    pub const fn kind(&self) -> UiIrValidationDiagnosticKind {
+        self.kind
+    }
+}
+
+/// Collection of structured IR validation diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+pub struct UiIrValidationDiagnostics {
+    diagnostics: Vec<UiIrValidationDiagnostic>,
+}
+
+impl UiIrValidationDiagnostics {
+    /// Creates a diagnostics collection from a vector.
+    pub fn new(diagnostics: Vec<UiIrValidationDiagnostic>) -> Self {
+        Self { diagnostics }
+    }
+
+    /// Returns whether there are no diagnostics.
+    pub fn is_empty(&self) -> bool {
+        self.diagnostics.is_empty()
+    }
+
+    /// Returns the number of diagnostics.
+    pub fn len(&self) -> usize {
+        self.diagnostics.len()
+    }
+
+    /// Returns the diagnostics as a slice.
+    pub fn diagnostics(&self) -> &[UiIrValidationDiagnostic] {
+        &self.diagnostics
+    }
+
+    /// Returns an iterator over the diagnostics.
+    pub fn iter(&self) -> core::slice::Iter<'_, UiIrValidationDiagnostic> {
+        self.diagnostics.iter()
+    }
+
+    /// Returns the first diagnostic, if any.
+    pub fn first(&self) -> Option<&UiIrValidationDiagnostic> {
+        self.diagnostics.first()
+    }
+
+    /// Converts the collection into a vector.
+    pub fn into_vec(self) -> Vec<UiIrValidationDiagnostic> {
+        self.diagnostics
+    }
+}
+
+/// Result of the minimal IR validation seed.
+pub type UiIrValidationResult = Result<(), UiIrValidationDiagnostics>;
+
+/// Validates a minimal inert Semantic UI IR.
+///
+/// The first seed validates local structural properties only.
+pub fn validate_ir(ir: &UiIr, config: &UiIrValidationConfig) -> UiIrValidationResult {
+    let _ = config;
+
+    if ir.is_empty() {
+        return Ok(());
+    }
+
+    let nodes = ir.nodes();
+    let mut diagnostics = Vec::new();
+    let mut seen_inconsistent_pairs: Vec<(UiIrNodeId, UiIrNodeId)> = Vec::new();
+    let mut seen_root = false;
+
+    for (index, node) in nodes.iter().enumerate() {
+        if nodes[..index]
+            .iter()
+            .any(|previous| previous.id() == node.id())
+        {
+            diagnostics.push(UiIrValidationDiagnostic::new(
+                Some(node.id()),
+                UiIrValidationDiagnosticKind::DuplicateNodeId(node.id()),
+            ));
+        }
+
+        if node.kind() == UiIrNodeKind::Root {
+            if seen_root {
+                diagnostics.push(UiIrValidationDiagnostic::new(
+                    Some(node.id()),
+                    UiIrValidationDiagnosticKind::MultipleRoots,
+                ));
+            } else {
+                seen_root = true;
+            }
+        }
+
+        validate_ir_parent_relationship(
+            nodes,
+            node,
+            &mut diagnostics,
+            &mut seen_inconsistent_pairs,
+        );
+        validate_ir_child_relationships(
+            nodes,
+            node,
+            &mut diagnostics,
+            &mut seen_inconsistent_pairs,
+        );
+    }
+
+    if diagnostics.is_empty() {
+        Ok(())
+    } else {
+        Err(UiIrValidationDiagnostics::new(diagnostics))
+    }
+}
+
+fn validate_ir_parent_relationship(
+    nodes: &[UiIrNode],
+    node: &UiIrNode,
+    diagnostics: &mut Vec<UiIrValidationDiagnostic>,
+    seen_inconsistent_pairs: &mut Vec<(UiIrNodeId, UiIrNodeId)>,
+) {
+    let Some(parent_id) = node.parent() else {
+        return;
+    };
+
+    if parent_id == node.id() {
+        diagnostics.push(UiIrValidationDiagnostic::new(
+            Some(node.id()),
+            UiIrValidationDiagnosticKind::SelfParent(node.id()),
+        ));
+        return;
+    }
+
+    let Some(parent_node) = find_ir_node(nodes, parent_id) else {
+        diagnostics.push(UiIrValidationDiagnostic::new(
+            Some(node.id()),
+            UiIrValidationDiagnosticKind::MissingParentTarget {
+                node_id: node.id(),
+                parent_id,
+            },
+        ));
+        return;
+    };
+
+    if !parent_node.children().contains(&node.id()) {
+        push_ir_inconsistent_pair(
+            diagnostics,
+            seen_inconsistent_pairs,
+            parent_id,
+            node.id(),
+            Some(node.id()),
+        );
+    }
+}
+
+fn validate_ir_child_relationships(
+    nodes: &[UiIrNode],
+    node: &UiIrNode,
+    diagnostics: &mut Vec<UiIrValidationDiagnostic>,
+    seen_inconsistent_pairs: &mut Vec<(UiIrNodeId, UiIrNodeId)>,
+) {
+    for &child_id in node.children() {
+        if child_id == node.id() {
+            diagnostics.push(UiIrValidationDiagnostic::new(
+                Some(node.id()),
+                UiIrValidationDiagnosticKind::SelfChild(node.id()),
+            ));
+            continue;
+        }
+
+        let Some(child_node) = find_ir_node(nodes, child_id) else {
+            diagnostics.push(UiIrValidationDiagnostic::new(
+                Some(node.id()),
+                UiIrValidationDiagnosticKind::MissingChildTarget {
+                    node_id: node.id(),
+                    child_id,
+                },
+            ));
+            continue;
+        };
+
+        if child_node.parent() != Some(node.id()) {
+            push_ir_inconsistent_pair(
+                diagnostics,
+                seen_inconsistent_pairs,
+                node.id(),
+                child_id,
+                Some(node.id()),
+            );
+        }
+    }
+}
+
+fn push_ir_inconsistent_pair(
+    diagnostics: &mut Vec<UiIrValidationDiagnostic>,
+    seen_inconsistent_pairs: &mut Vec<(UiIrNodeId, UiIrNodeId)>,
+    parent_id: UiIrNodeId,
+    child_id: UiIrNodeId,
+    node_id: Option<UiIrNodeId>,
+) {
+    if seen_inconsistent_pairs
+        .iter()
+        .any(|&(seen_parent_id, seen_child_id)| {
+            seen_parent_id == parent_id && seen_child_id == child_id
+        })
+    {
+        return;
+    }
+
+    seen_inconsistent_pairs.push((parent_id, child_id));
+    diagnostics.push(UiIrValidationDiagnostic::new(
+        node_id,
+        UiIrValidationDiagnosticKind::InconsistentParentChild {
+            parent_id,
+            child_id,
+        },
+    ));
+}
+
+fn find_ir_node(nodes: &[UiIrNode], id: UiIrNodeId) -> Option<&UiIrNode> {
     nodes.iter().find(|node| node.id() == id)
 }
 
@@ -641,5 +911,250 @@ mod tests {
 
         assert!(err.iter().any(|d| matches!(d.kind(), UiAstValidationDiagnosticKind::DuplicateNodeId(id) if id == UiAstNodeId::new(1))));
         assert!(!err.is_empty());
+    }
+
+    fn ir_with_nodes(nodes: impl IntoIterator<Item = UiIrNode>) -> UiIr {
+        let mut ir = UiIr::new();
+        for node in nodes {
+            ir.push_node(node);
+        }
+        ir
+    }
+
+    #[test]
+    fn empty_ir_is_valid() {
+        let ir = UiIr::new();
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn single_ir_root_is_valid() {
+        let ir = ir_with_nodes([UiIrNode::new(UiIrNodeId::new(1), UiIrNodeKind::Root)]);
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn zero_root_non_empty_ir_is_valid_in_first_seed() {
+        let ir = ir_with_nodes([UiIrNode::new(UiIrNodeId::new(2), UiIrNodeKind::Element)]);
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn multiple_ir_roots_returns_diagnostic() {
+        let ir = ir_with_nodes([
+            UiIrNode::new(UiIrNodeId::new(1), UiIrNodeKind::Root),
+            UiIrNode::new(UiIrNodeId::new(2), UiIrNodeKind::Root),
+        ]);
+        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("multiple roots");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::MultipleRoots
+        )));
+    }
+
+    #[test]
+    fn duplicate_ir_node_id_returns_diagnostic() {
+        let ir = ir_with_nodes([
+            UiIrNode::new(UiIrNodeId::new(3), UiIrNodeKind::Root),
+            UiIrNode::new(UiIrNodeId::new(3), UiIrNodeKind::Element),
+        ]);
+        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("duplicate id");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::DuplicateNodeId(id) if id == UiIrNodeId::new(3)
+        )));
+    }
+
+    #[test]
+    fn missing_ir_parent_target_returns_diagnostic() {
+        let ir = ir_with_nodes([UiIrNode::with_parent(
+            UiIrNodeId::new(4),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(99),
+        )]);
+        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("missing parent");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::MissingParentTarget { node_id, parent_id } if node_id == UiIrNodeId::new(4) && parent_id == UiIrNodeId::new(99)
+        )));
+    }
+
+    #[test]
+    fn missing_ir_child_target_returns_diagnostic() {
+        let mut node = UiIrNode::new(UiIrNodeId::new(5), UiIrNodeKind::Root);
+        node.push_child(UiIrNodeId::new(100));
+        let ir = ir_with_nodes([node]);
+        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("missing child");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::MissingChildTarget { node_id, child_id } if node_id == UiIrNodeId::new(5) && child_id == UiIrNodeId::new(100)
+        )));
+    }
+
+    #[test]
+    fn consistent_ir_parent_child_relationship_is_valid() {
+        let mut parent = UiIrNode::new(UiIrNodeId::new(6), UiIrNodeKind::Root);
+        parent.push_child(UiIrNodeId::new(7));
+        let child = UiIrNode::with_parent(
+            UiIrNodeId::new(7),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(6),
+        );
+        let ir = ir_with_nodes([parent, child]);
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn ir_parent_without_matching_child_returns_diagnostic() {
+        let parent = UiIrNode::new(UiIrNodeId::new(8), UiIrNodeKind::Root);
+        let child = UiIrNode::with_parent(
+            UiIrNodeId::new(9),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(8),
+        );
+        let ir = ir_with_nodes([parent, child]);
+        let err = validate_ir(&ir, &UiIrValidationConfig::default())
+            .expect_err("inconsistent relationship");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::InconsistentParentChild { parent_id, child_id } if parent_id == UiIrNodeId::new(8) && child_id == UiIrNodeId::new(9)
+        )));
+    }
+
+    #[test]
+    fn ir_child_without_matching_parent_returns_diagnostic() {
+        let mut parent = UiIrNode::new(UiIrNodeId::new(10), UiIrNodeKind::Root);
+        parent.push_child(UiIrNodeId::new(11));
+        let child = UiIrNode::new(UiIrNodeId::new(11), UiIrNodeKind::Element);
+        let ir = ir_with_nodes([parent, child]);
+        let err = validate_ir(&ir, &UiIrValidationConfig::default())
+            .expect_err("inconsistent relationship");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::InconsistentParentChild { parent_id, child_id } if parent_id == UiIrNodeId::new(10) && child_id == UiIrNodeId::new(11)
+        )));
+    }
+
+    #[test]
+    fn ir_self_parent_returns_diagnostic() {
+        let ir = ir_with_nodes([UiIrNode::with_parent(
+            UiIrNodeId::new(12),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(12),
+        )]);
+        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("self parent");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::SelfParent(id) if id == UiIrNodeId::new(12)
+        )));
+    }
+
+    #[test]
+    fn ir_self_child_returns_diagnostic() {
+        let mut node = UiIrNode::new(UiIrNodeId::new(13), UiIrNodeKind::Root);
+        node.push_child(UiIrNodeId::new(13));
+        let ir = ir_with_nodes([node]);
+        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("self child");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::SelfChild(id) if id == UiIrNodeId::new(13)
+        )));
+    }
+
+    #[test]
+    fn ir_diagnostics_collect_multiple_failures() {
+        let mut first = UiIrNode::new(UiIrNodeId::new(14), UiIrNodeKind::Root);
+        first.push_child(UiIrNodeId::new(15));
+        let second = UiIrNode::new(UiIrNodeId::new(14), UiIrNodeKind::Element);
+        let ir = ir_with_nodes([first, second]);
+        let err =
+            validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("multiple failures");
+        assert!(err.len() >= 2);
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::DuplicateNodeId(id) if id == UiIrNodeId::new(14)
+        )));
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::MissingChildTarget { node_id, child_id } if node_id == UiIrNodeId::new(14) && child_id == UiIrNodeId::new(15)
+        )));
+    }
+
+    #[test]
+    fn ir_validation_does_not_call_lowering() {
+        let ir = UiIr::new();
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn ir_validation_config_is_inert() {
+        let config = UiIrValidationConfig;
+        assert_eq!(config, UiIrValidationConfig::default());
+    }
+
+    #[test]
+    fn ir_diagnostics_are_structural_and_do_not_panic() {
+        let ir = ir_with_nodes([UiIrNode::with_parent(
+            UiIrNodeId::new(16),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(17),
+        )]);
+        let err =
+            validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("structural diagnostic");
+        assert!(err.diagnostics().iter().any(|diagnostic| matches!(
+            diagnostic.kind(),
+            UiIrValidationDiagnosticKind::MissingParentTarget { node_id, parent_id } if node_id == UiIrNodeId::new(16) && parent_id == UiIrNodeId::new(17)
+        )));
+    }
+
+    #[test]
+    fn ir_effect_boundary_is_structural_not_admission() {
+        let node = UiIrNode::new(UiIrNodeId::new(100), UiIrNodeKind::EffectBoundary);
+        let ir = ir_with_nodes([node]);
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn ir_action_is_structural_not_execution() {
+        let node = UiIrNode::new(UiIrNodeId::new(101), UiIrNodeKind::Action);
+        let ir = ir_with_nodes([node]);
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn ir_property_is_structural_not_rendering() {
+        let node = UiIrNode::new(UiIrNodeId::new(102), UiIrNodeKind::Property);
+        let ir = ir_with_nodes([node]);
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn ir_cycle_shape_is_not_rejected_in_first_seed() {
+        let mut a = UiIrNode::with_parent(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(2),
+        );
+        a.push_child(UiIrNodeId::new(2));
+
+        let mut b = UiIrNode::with_parent(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(1),
+        );
+        b.push_child(UiIrNodeId::new(1));
+
+        let ir = ir_with_nodes([a, b]);
+
+        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        assert_eq!(result, Ok(()));
     }
 }
