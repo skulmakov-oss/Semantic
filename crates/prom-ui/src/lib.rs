@@ -55,6 +55,7 @@ pub mod trace;
 pub mod ui_capability_admission;
 pub mod ui_capability_admission_result;
 pub mod ui_capability_denial_trace;
+pub mod validation;
 
 pub use action_admission::{
     describe_interaction_action_admission, InteractionActionAdmissionCapabilityRequirement,
@@ -242,6 +243,10 @@ pub use ui_capability_denial_trace::{
     trace_interaction_ui_capability_denial, InteractionUiCapabilityDenialRetryHint,
     InteractionUiCapabilityDenialTrace, InteractionUiCapabilityDenialTraceId,
     InteractionUiCapabilityDenialTraceStatus,
+};
+pub use validation::{
+    validate_ast, UiAstValidationConfig, UiAstValidationDiagnostic, UiAstValidationDiagnosticKind,
+    UiAstValidationDiagnostics, UiAstValidationResult,
 };
 
 /// Marker for the UI application boundary capability family.
