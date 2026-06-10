@@ -576,6 +576,86 @@ mod tests {
     }
 
     #[test]
+    fn ast_and_ir_node_ids_are_distinct_handle_domains() {
+        let ast_id = UiAstNodeId::new(1);
+        let ir_id = UiIrNodeId::new(1);
+
+        // Equal raw values do not imply the same handle domain.
+        assert_eq!(ast_id.raw(), 1);
+        assert_eq!(ir_id.raw(), 1);
+        assert_eq!(ast_id.raw(), ir_id.raw());
+    }
+
+    #[test]
+    fn ast_and_ir_node_kinds_are_distinct_vocabularies() {
+        let ast_attribute = UiAstNodeKind::Attribute;
+        let ast_binding = UiAstNodeKind::Binding;
+        let ir_property = UiIrNodeKind::Property;
+        let ir_effect_boundary = UiIrNodeKind::EffectBoundary;
+
+        // Similar words do not imply a lowering relationship.
+        assert_eq!(format!("{ast_attribute:?}"), "Attribute");
+        assert_eq!(format!("{ast_binding:?}"), "Binding");
+        assert_eq!(format!("{ir_property:?}"), "Property");
+        assert_eq!(format!("{ir_effect_boundary:?}"), "EffectBoundary");
+    }
+
+    #[test]
+    fn ast_and_ir_containers_do_not_share_nodes() {
+        let mut ast = UiAst::new();
+        let ast_node = UiAstNode::new(UiAstNodeId::new(80), UiAstNodeKind::Element);
+        ast.push_node(ast_node.clone());
+
+        let mut ir = UiIr::new();
+        let ir_node = UiIrNode::new(UiIrNodeId::new(90), UiIrNodeKind::Element);
+        ir.push_node(ir_node.clone());
+
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ir.len(), 1);
+        assert_eq!(ast.nodes()[0], ast_node);
+        assert_eq!(ir.nodes()[0], ir_node);
+        assert_eq!(ast.nodes()[0].id(), UiAstNodeId::new(80));
+        assert_eq!(ir.nodes()[0].id(), UiIrNodeId::new(90));
+        assert_eq!(ast.nodes()[0].kind(), UiAstNodeKind::Element);
+        assert_eq!(ir.nodes()[0].kind(), UiIrNodeKind::Element);
+    }
+
+    #[test]
+    fn ast_action_and_ir_action_are_not_implicit_conversion() {
+        let ast_action = UiAstNode::new(UiAstNodeId::new(81), UiAstNodeKind::Action);
+        let ir_action = UiIrNode::new(UiIrNodeId::new(91), UiIrNodeKind::Action);
+
+        assert_eq!(ast_action.kind(), UiAstNodeKind::Action);
+        assert_eq!(ir_action.kind(), UiIrNodeKind::Action);
+        assert_ne!(ast_action.id().raw(), ir_action.id().raw());
+    }
+
+    #[test]
+    fn effect_boundary_is_not_admission_logic() {
+        let ir_node = UiIrNode::new(UiIrNodeId::new(92), UiIrNodeKind::EffectBoundary);
+
+        assert_eq!(ir_node.kind(), UiIrNodeKind::EffectBoundary);
+        assert_eq!(ir_node.parent(), None);
+        assert!(ir_node.children().is_empty());
+    }
+
+    #[test]
+    fn no_lowering_surface_exists_in_model_tests() {
+        let mut ast = UiAst::new();
+        ast.push_node(UiAstNode::new(UiAstNodeId::new(101), UiAstNodeKind::Root));
+
+        let mut ir = UiIr::new();
+        ir.push_node(UiIrNode::new(UiIrNodeId::new(201), UiIrNodeKind::Root));
+
+        assert_eq!(ast.len(), 1);
+        assert_eq!(ir.len(), 1);
+        assert_eq!(ast.nodes()[0].id(), UiAstNodeId::new(101));
+        assert_eq!(ir.nodes()[0].id(), UiIrNodeId::new(201));
+        assert_eq!(ast.nodes()[0].kind(), UiAstNodeKind::Root);
+        assert_eq!(ir.nodes()[0].kind(), UiIrNodeKind::Root);
+    }
+
+    #[test]
     fn tree_ast_and_ir_containers_are_separate() {
         let mut tree = UiTree::new(UiTreeId::new(70));
         tree.push_node(UiNode::new(UiNodeId::new(71), UiNodeKind::Root));
