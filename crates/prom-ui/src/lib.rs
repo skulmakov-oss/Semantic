@@ -245,8 +245,10 @@ pub use ui_capability_denial_trace::{
     InteractionUiCapabilityDenialTraceStatus,
 };
 pub use validation::{
-    validate_ast, UiAstValidationConfig, UiAstValidationDiagnostic, UiAstValidationDiagnosticKind,
-    UiAstValidationDiagnostics, UiAstValidationResult,
+    validate_ast, validate_ir, UiAstValidationConfig, UiAstValidationDiagnostic,
+    UiAstValidationDiagnosticKind, UiAstValidationDiagnostics, UiAstValidationResult,
+    UiIrValidationConfig, UiIrValidationDiagnostic, UiIrValidationDiagnosticKind,
+    UiIrValidationDiagnostics, UiIrValidationResult,
 };
 
 /// Marker for the UI application boundary capability family.
