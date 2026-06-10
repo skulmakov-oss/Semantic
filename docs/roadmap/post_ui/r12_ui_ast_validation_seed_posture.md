@@ -3,13 +3,12 @@
 Status: Draft
 Track: R12 / POST-UI / Semantic UI Model
 Scope type: factual posture note
-Implementation status: no new implementation authorized by this document
+Implementation status: no new pipeline implementation authorized by this document
 
 ## 1. Purpose
 
 * This document records the factual posture after the minimal Semantic UI AST validation seed.
 * It prevents interpreting validation seed as complete UI admission, parser, verifier, runtime, renderer, or application pipeline.
-* It does not authorize new code.
 * It does not authorize parser integration.
 * It does not authorize verifier/VM/runtime integration.
 * It does not authorize renderer/backend integration.
@@ -198,13 +197,13 @@ UI state is projection/cache, not semantic state.
 
 ## 15. Next Recommended Step
 
-Recommended next step after this posture note:
+Recommended next step after this posture note and local hardening:
 
-R12-UI-AST-VALIDATION-SEED-POSTURE-AUDIT
+R12-UI-AST-VALIDATION-POSTURE-AND-HARDENING-REVIEW
 
 Then choose one bounded path:
 
-* R12-UI-AST-VALIDATION-DIAGNOSTICS-HARDENING
+* R12-UI-AST-VALIDATION-DIAGNOSTICS-HARDENING-2
 * or R12-UI-AST-INDEXING-POSTURE
 
 * no parser/runtime/renderer work is authorized by this document.

@@ -101,6 +101,21 @@ impl UiAstValidationDiagnostics {
     pub fn diagnostics(&self) -> &[UiAstValidationDiagnostic] {
         &self.diagnostics
     }
+
+    /// Returns an iterator over the diagnostics.
+    pub fn iter(&self) -> core::slice::Iter<'_, UiAstValidationDiagnostic> {
+        self.diagnostics.iter()
+    }
+
+    /// Returns the first diagnostic, if any.
+    pub fn first(&self) -> Option<&UiAstValidationDiagnostic> {
+        self.diagnostics.first()
+    }
+
+    /// Converts the collection into a vector.
+    pub fn into_vec(self) -> Vec<UiAstValidationDiagnostic> {
+        self.diagnostics
+    }
 }
 
 /// Result of the minimal AST validation seed.
@@ -496,5 +511,135 @@ mod tests {
             .diagnostics()
             .iter()
             .any(|diagnostic| matches!(diagnostic.kind(), UiAstValidationDiagnosticKind::MissingParentTarget { node_id, parent_id } if node_id == UiAstNodeId::new(16) && parent_id == UiAstNodeId::new(17))));
+    }
+
+    #[test]
+    fn diagnostics_iter_matches_slice_order() {
+        let diagnostics = UiAstValidationDiagnostics::new(vec![
+            UiAstValidationDiagnostic::new(None, UiAstValidationDiagnosticKind::MultipleRoots),
+            UiAstValidationDiagnostic::new(
+                None,
+                UiAstValidationDiagnosticKind::SelfParent(UiAstNodeId::new(1)),
+            ),
+        ]);
+
+        let mut iter = diagnostics.iter();
+        assert!(matches!(
+            iter.next().unwrap().kind(),
+            UiAstValidationDiagnosticKind::MultipleRoots
+        ));
+        assert!(matches!(
+            iter.next().unwrap().kind(),
+            UiAstValidationDiagnosticKind::SelfParent(_)
+        ));
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn diagnostics_first_returns_first_diagnostic() {
+        let diagnostics = UiAstValidationDiagnostics::new(vec![
+            UiAstValidationDiagnostic::new(None, UiAstValidationDiagnosticKind::MultipleRoots),
+            UiAstValidationDiagnostic::new(
+                None,
+                UiAstValidationDiagnosticKind::SelfParent(UiAstNodeId::new(1)),
+            ),
+        ]);
+
+        assert!(matches!(
+            diagnostics.first().unwrap().kind(),
+            UiAstValidationDiagnosticKind::MultipleRoots
+        ));
+    }
+
+    #[test]
+    fn diagnostics_into_vec_preserves_order() {
+        let diagnostics = UiAstValidationDiagnostics::new(vec![
+            UiAstValidationDiagnostic::new(None, UiAstValidationDiagnosticKind::MultipleRoots),
+            UiAstValidationDiagnostic::new(
+                None,
+                UiAstValidationDiagnosticKind::SelfParent(UiAstNodeId::new(1)),
+            ),
+        ]);
+
+        let vec = diagnostics.into_vec();
+        assert!(matches!(
+            vec[0].kind(),
+            UiAstValidationDiagnosticKind::MultipleRoots
+        ));
+        assert!(matches!(
+            vec[1].kind(),
+            UiAstValidationDiagnosticKind::SelfParent(_)
+        ));
+    }
+
+    #[test]
+    fn validation_accepts_ast_kinds_without_lowering_subset_filter() {
+        let mut root = UiAstNode::new(UiAstNodeId::new(1), UiAstNodeKind::Root);
+        root.push_child(UiAstNodeId::new(2));
+        root.push_child(UiAstNodeId::new(3));
+        root.push_child(UiAstNodeId::new(4));
+
+        let attr = UiAstNode::with_parent(
+            UiAstNodeId::new(2),
+            UiAstNodeKind::Attribute,
+            UiAstNodeId::new(1),
+        );
+        let bind = UiAstNode::with_parent(
+            UiAstNodeId::new(3),
+            UiAstNodeKind::Binding,
+            UiAstNodeId::new(1),
+        );
+        let act = UiAstNode::with_parent(
+            UiAstNodeId::new(4),
+            UiAstNodeKind::Action,
+            UiAstNodeId::new(1),
+        );
+
+        let ast = ast_with_nodes([root, attr, bind, act]);
+
+        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn validation_result_does_not_produce_ir() {
+        let ast = UiAst::new();
+        let result: UiAstValidationResult = validate_ast(&ast, &UiAstValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn cycle_shape_is_not_rejected_in_first_seed() {
+        let mut a = UiAstNode::with_parent(
+            UiAstNodeId::new(1),
+            UiAstNodeKind::Element,
+            UiAstNodeId::new(2),
+        );
+        a.push_child(UiAstNodeId::new(2));
+
+        let mut b = UiAstNode::with_parent(
+            UiAstNodeId::new(2),
+            UiAstNodeKind::Element,
+            UiAstNodeId::new(1),
+        );
+        b.push_child(UiAstNodeId::new(1));
+
+        let ast = ast_with_nodes([a, b]);
+
+        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn duplicate_ids_may_accumulate_structural_diagnostics() {
+        let root = UiAstNode::new(UiAstNodeId::new(1), UiAstNodeKind::Root);
+        let dup = UiAstNode::new(UiAstNodeId::new(1), UiAstNodeKind::Element);
+
+        let ast = ast_with_nodes([root, dup]);
+
+        let err = validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("duplicate id");
+
+        assert!(err.iter().any(|d| matches!(d.kind(), UiAstValidationDiagnosticKind::DuplicateNodeId(id) if id == UiAstNodeId::new(1))));
+        assert!(!err.is_empty());
     }
 }
