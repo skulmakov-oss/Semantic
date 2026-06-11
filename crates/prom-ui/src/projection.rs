@@ -418,12 +418,19 @@ pub fn validate_ui_ir_for_projection_with_config<'ir>(
 pub fn project_validated_ir_to_projection(
     validated: &ValidatedUiIr<'_>,
 ) -> Result<UiProjectionArtifact, UiProjectionError> {
-    project_ir_to_projection(validated.as_ir())
+    build_projection_from_validated_ir(validated.as_ir())
 }
 
 pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiProjectionError> {
     validate_ir(ir, &UiIrValidationConfig::default()).map_err(UiProjectionError::InvalidIr)?;
+    build_projection_from_validated_ir(ir)
+}
 
+// Internal projection construction for UiIr that already passed projection-layer validation.
+// This is not a public unchecked API and must not be exported.
+fn build_projection_from_validated_ir(
+    ir: &UiIr,
+) -> Result<UiProjectionArtifact, UiProjectionError> {
     let mut artifact = UiProjectionArtifact::new(projection_artifact_id_for_ir(ir));
 
     let root_node = ir.nodes().iter().find(|n| n.kind() == UiIrNodeKind::Root);
@@ -1246,5 +1253,106 @@ mod tests {
 
         // The wrapper exposes only as_ir. No handles for verifier, runtime, capability, renderer.
         let _ir_ref: &UiIr = validated.as_ir();
+    }
+
+    #[test]
+    fn test_helper_raw_projection_still_validates_invalid_ir() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Root,
+        ));
+
+        let err = project_ir_to_projection(&ir).unwrap_err();
+        assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
+        assert!(err.validation_diagnostics().is_some());
+    }
+
+    #[test]
+    fn test_helper_validated_projection_matches_raw_projection() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let raw = project_ir_to_projection(&ir).expect("projects");
+        let validated = ValidatedUiIr::new(&ir).expect("validates");
+        let via_validated = project_validated_ir_to_projection(&validated).expect("projects");
+
+        assert_eq!(raw.id(), via_validated.id());
+        assert_eq!(raw.source_ir_root(), via_validated.source_ir_root());
+        assert_eq!(raw.len(), via_validated.len());
+        assert_eq!(raw.nodes()[0].id(), via_validated.nodes()[0].id());
+    }
+
+    #[test]
+    fn test_helper_config_validated_projection_matches_raw_projection() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let raw = project_ir_to_projection(&ir).expect("projects");
+        let validated = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default())
+            .expect("validates");
+        let via_validated = project_validated_ir_to_projection(&validated).expect("projects");
+
+        assert_eq!(raw.id(), via_validated.id());
+        assert_eq!(raw.source_ir_root(), via_validated.source_ir_root());
+        assert_eq!(raw.len(), via_validated.len());
+    }
+
+    #[test]
+    fn test_helper_split_does_not_change_artifact_id_policy() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(42),
+            UiIrNodeKind::Root,
+        ));
+
+        let raw = project_ir_to_projection(&ir).expect("projects");
+        let validated = ValidatedUiIr::new(&ir).expect("validates");
+        let via_validated = project_validated_ir_to_projection(&validated).expect("projects");
+
+        assert_eq!(raw.id().raw(), 42);
+        assert_eq!(via_validated.id().raw(), 42);
+        assert_eq!(raw.id(), via_validated.id());
+    }
+
+    #[test]
+    fn test_helper_split_does_not_change_projected_node_id_policy() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(42),
+            UiIrNodeKind::Root,
+        ));
+
+        let raw = project_ir_to_projection(&ir).expect("projects");
+        let validated = ValidatedUiIr::new(&ir).expect("validates");
+        let via_validated = project_validated_ir_to_projection(&validated).expect("projects");
+
+        assert_eq!(raw.nodes()[0].id().raw(), 42);
+        assert_eq!(via_validated.nodes()[0].id().raw(), 42);
+    }
+
+    #[test]
+    fn test_helper_boundary_test_non_authority() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let validated = ValidatedUiIr::new(&ir).expect("validates");
+        let via_validated = project_validated_ir_to_projection(&validated).expect("projects");
+
+        let _id = via_validated.id();
+        // Exposes no renderer handle, runtime admission, or capability admission.
     }
 }
