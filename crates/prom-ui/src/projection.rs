@@ -91,6 +91,27 @@ pub enum UiProjectedNodeKind {
     EffectBoundaryMarker,
 }
 
+impl UiProjectedNodeKind {
+    pub const fn is_property_carrier(self) -> bool {
+        matches!(self, Self::PropertyCarrier)
+    }
+
+    pub const fn is_action_carrier(self) -> bool {
+        matches!(self, Self::ActionCarrier)
+    }
+
+    pub const fn is_effect_boundary_marker(self) -> bool {
+        matches!(self, Self::EffectBoundaryMarker)
+    }
+
+    pub const fn is_inert_carrier(self) -> bool {
+        matches!(
+            self,
+            Self::PropertyCarrier | Self::ActionCarrier | Self::EffectBoundaryMarker
+        )
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiProjectedNode {
     id: UiProjectedNodeId,
@@ -143,6 +164,22 @@ impl UiProjectedNode {
 
     pub fn kind(&self) -> UiProjectedNodeKind {
         self.kind
+    }
+
+    pub fn is_property_carrier(&self) -> bool {
+        self.kind().is_property_carrier()
+    }
+
+    pub fn is_action_carrier(&self) -> bool {
+        self.kind().is_action_carrier()
+    }
+
+    pub fn is_effect_boundary_marker(&self) -> bool {
+        self.kind().is_effect_boundary_marker()
+    }
+
+    pub fn is_inert_carrier(&self) -> bool {
+        self.kind().is_inert_carrier()
     }
 
     pub const fn source_ir_node_id(&self) -> Option<UiIrNodeId> {
@@ -383,6 +420,134 @@ pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiPro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_node_kind_classifies_inert_carriers() {
+        assert!(UiProjectedNodeKind::PropertyCarrier.is_property_carrier());
+        assert!(UiProjectedNodeKind::ActionCarrier.is_action_carrier());
+        assert!(UiProjectedNodeKind::EffectBoundaryMarker.is_effect_boundary_marker());
+
+        assert!(UiProjectedNodeKind::PropertyCarrier.is_inert_carrier());
+        assert!(UiProjectedNodeKind::ActionCarrier.is_inert_carrier());
+        assert!(UiProjectedNodeKind::EffectBoundaryMarker.is_inert_carrier());
+
+        assert!(!UiProjectedNodeKind::Element.is_property_carrier());
+        assert!(!UiProjectedNodeKind::Root.is_action_carrier());
+        assert!(!UiProjectedNodeKind::Text.is_effect_boundary_marker());
+        assert!(!UiProjectedNodeKind::Fragment.is_inert_carrier());
+    }
+
+    #[test]
+    fn test_property_projects_to_inert_carrier() {
+        let mut ir = UiIr::new();
+        let root_id = UiIrNodeId::new(1);
+        let prop_id = UiIrNodeId::new(2);
+        let mut root = crate::model::UiIrNode::new(root_id, UiIrNodeKind::Root);
+        root.push_child(prop_id);
+        ir.push_node(root);
+        ir.push_node(crate::model::UiIrNode::with_parent(
+            prop_id,
+            UiIrNodeKind::Property,
+            root_id,
+        ));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.nodes().len(), 2);
+
+        let prop_node = artifact
+            .nodes()
+            .iter()
+            .find(|n| n.source_ir_node_id() == Some(prop_id))
+            .unwrap();
+        assert!(prop_node.is_property_carrier());
+        assert!(prop_node.is_inert_carrier());
+    }
+
+    #[test]
+    fn test_action_projects_to_inert_carrier() {
+        let mut ir = UiIr::new();
+        let root_id = UiIrNodeId::new(1);
+        let action_id = UiIrNodeId::new(2);
+        let mut root = crate::model::UiIrNode::new(root_id, UiIrNodeKind::Root);
+        root.push_child(action_id);
+        ir.push_node(root);
+        ir.push_node(crate::model::UiIrNode::with_parent(
+            action_id,
+            UiIrNodeKind::Action,
+            root_id,
+        ));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.nodes().len(), 2);
+
+        let action_node = artifact
+            .nodes()
+            .iter()
+            .find(|n| n.source_ir_node_id() == Some(action_id))
+            .unwrap();
+        assert!(action_node.is_action_carrier());
+        assert!(action_node.is_inert_carrier());
+    }
+
+    #[test]
+    fn test_effect_boundary_projects_to_inert_marker() {
+        let mut ir = UiIr::new();
+        let root_id = UiIrNodeId::new(1);
+        let boundary_id = UiIrNodeId::new(2);
+        ir.push_node(crate::model::UiIrNode::new(root_id, UiIrNodeKind::Root));
+        ir.push_node(crate::model::UiIrNode::new(
+            boundary_id,
+            UiIrNodeKind::EffectBoundary,
+        ));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.nodes().len(), 2);
+
+        let boundary_node = artifact
+            .nodes()
+            .iter()
+            .find(|n| n.source_ir_node_id() == Some(boundary_id))
+            .unwrap();
+        assert!(boundary_node.is_effect_boundary_marker());
+        assert!(boundary_node.is_inert_carrier());
+    }
+
+    #[test]
+    fn test_classification_does_not_affect_identity_or_traceability() {
+        let mut ir = UiIr::new();
+        let root_id = UiIrNodeId::new(1);
+        let prop_id = UiIrNodeId::new(2);
+        let mut root = crate::model::UiIrNode::new(root_id, UiIrNodeKind::Root);
+        root.push_child(prop_id);
+        ir.push_node(root);
+        ir.push_node(crate::model::UiIrNode::with_parent(
+            prop_id,
+            UiIrNodeKind::Property,
+            root_id,
+        ));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.id(), UiProjectionArtifactId::new(1));
+
+        let prop_node = artifact
+            .nodes()
+            .iter()
+            .find(|n| n.source_ir_node_id() == Some(prop_id))
+            .unwrap();
+        assert_eq!(prop_node.id(), UiProjectedNodeId::new(2));
+    }
+
+    #[test]
+    fn test_classification_does_not_affect_diagnostics() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Property,
+        ));
+
+        let err = project_ir_to_projection(&ir).unwrap_err();
+        assert_eq!(err.code(), UiProjectionErrorCode::MissingRoot);
+    }
 
     #[test]
     fn test_traceability_projected_node_exposes_source_ir_node_id() {
