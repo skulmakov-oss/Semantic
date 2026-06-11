@@ -48,6 +48,7 @@ pub mod lowering;
 pub mod model;
 pub mod prepared_effect;
 pub mod prepared_effect_result;
+pub mod projection;
 pub mod raw_event;
 pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
@@ -204,6 +205,11 @@ pub use prepared_effect_result::{
     InteractionPreparedEffectDecisionStatus, InteractionPreparedEffectDenialReason,
     InteractionPreparedEffectMissingRequirement, InteractionPreparedEffectResult,
     InteractionPreparedEffectResultId,
+};
+pub use projection::{
+    UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionActionRef,
+    UiProjectionArtifact, UiProjectionArtifactId, UiProjectionEffectBoundaryRef,
+    UiProjectionPropertyRef, UiProjectionTraceRef,
 };
 pub use raw_event::{
     map_raw_event_to_interaction_intent, RawKeyCode, RawPointerButton, RawTextInput, RawUiEvent,
