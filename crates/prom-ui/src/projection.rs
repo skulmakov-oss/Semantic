@@ -1,4 +1,5 @@
-use crate::model::UiIrNodeId;
+use crate::model::{UiIr, UiIrNodeId, UiIrNodeKind};
+use crate::validation::{validate_ir, UiIrValidationConfig, UiIrValidationDiagnostics};
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -252,6 +253,58 @@ impl UiProjectionArtifact {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UiProjectionError {
+    InvalidIr(UiIrValidationDiagnostics),
+    MissingRoot,
+    MissingNode,
+    UnsupportedNodeKind,
+    InconsistentHandle,
+}
+
+pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiProjectionError> {
+    validate_ir(ir, &UiIrValidationConfig::default()).map_err(UiProjectionError::InvalidIr)?;
+
+    let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
+
+    let root_node = ir.nodes().iter().find(|n| n.kind() == UiIrNodeKind::Root);
+    if let Some(root) = root_node {
+        artifact.set_source_ir_root(root.id());
+    } else if !ir.is_empty() {
+        return Err(UiProjectionError::MissingRoot);
+    }
+
+    for ir_node in ir.nodes() {
+        let projected_kind = match ir_node.kind() {
+            UiIrNodeKind::Root => UiProjectedNodeKind::Root,
+            UiIrNodeKind::Element => UiProjectedNodeKind::Element,
+            UiIrNodeKind::Text => UiProjectedNodeKind::Text,
+            UiIrNodeKind::Fragment => UiProjectedNodeKind::Fragment,
+            UiIrNodeKind::Property => UiProjectedNodeKind::PropertyCarrier,
+            UiIrNodeKind::Action => UiProjectedNodeKind::ActionCarrier,
+            UiIrNodeKind::EffectBoundary => UiProjectedNodeKind::EffectBoundaryMarker,
+        };
+
+        let mut projected_node = UiProjectedNode::with_source_ir_node(
+            UiProjectedNodeId::new(ir_node.id().raw()),
+            projected_kind,
+            ir_node.id(),
+        );
+
+        if let Some(parent_id) = ir_node.parent() {
+            projected_node.set_parent(UiProjectedNodeId::new(parent_id.raw()));
+        }
+
+        for child_id in ir_node.children() {
+            projected_node.push_child(UiProjectedNodeId::new(child_id.raw()));
+        }
+
+        artifact.push_node(projected_node);
+    }
+
+    Ok(artifact)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -397,5 +450,117 @@ mod tests {
         // Structural test only. No layout or draw methods exist here.
         let artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
         assert!(artifact.traces().is_empty());
+    }
+
+    #[test]
+    fn test_minimal_ir_projects() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.len(), 1);
+        assert_eq!(artifact.source_ir_root(), Some(UiIrNodeId::new(1)));
+    }
+
+    #[test]
+    fn test_parent_child_structure_preserved() {
+        let mut ir = UiIr::new();
+        let mut root = crate::model::UiIrNode::new(UiIrNodeId::new(1), UiIrNodeKind::Root);
+        root.push_child(UiIrNodeId::new(2));
+        let child = crate::model::UiIrNode::with_parent(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(1),
+        );
+        ir.push_node(root);
+        ir.push_node(child);
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.len(), 2);
+        assert_eq!(artifact.nodes()[0].children(), &[UiProjectedNodeId::new(2)]);
+        assert_eq!(
+            artifact.nodes()[1].parent(),
+            Some(UiProjectedNodeId::new(1))
+        );
+    }
+
+    #[test]
+    fn test_deterministic_projection() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        let a = project_ir_to_projection(&ir).expect("projects");
+        let b = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_invalid_ir_rejected() {
+        let mut ir = UiIr::new();
+        // Missing child reference causes InvalidIr via validation
+        let root = crate::model::UiIrNode::new(UiIrNodeId::new(1), UiIrNodeKind::Root);
+        ir.push_node(root);
+        ir.push_node(crate::model::UiIrNode::with_parent(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(1),
+        ));
+
+        let err = project_ir_to_projection(&ir).expect_err("should reject invalid ir");
+        assert!(matches!(err, UiProjectionError::InvalidIr(_)));
+    }
+
+    #[test]
+    fn test_no_renderer_layout_draw_event_artifacts() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert!(artifact.traces().is_empty());
+    }
+
+    #[test]
+    fn test_property_action_effect_remain_inert() {
+        let mut ir = UiIr::new();
+        let mut root = crate::model::UiIrNode::new(UiIrNodeId::new(1), UiIrNodeKind::Root);
+        root.push_child(UiIrNodeId::new(2));
+        root.push_child(UiIrNodeId::new(3));
+        root.push_child(UiIrNodeId::new(4));
+        ir.push_node(root);
+        ir.push_node(crate::model::UiIrNode::with_parent(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Property,
+            UiIrNodeId::new(1),
+        ));
+        ir.push_node(crate::model::UiIrNode::with_parent(
+            UiIrNodeId::new(3),
+            UiIrNodeKind::Action,
+            UiIrNodeId::new(1),
+        ));
+        ir.push_node(crate::model::UiIrNode::with_parent(
+            UiIrNodeId::new(4),
+            UiIrNodeKind::EffectBoundary,
+            UiIrNodeId::new(1),
+        ));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.len(), 4);
+        assert_eq!(
+            artifact.nodes()[1].kind(),
+            UiProjectedNodeKind::PropertyCarrier
+        );
+        assert_eq!(
+            artifact.nodes()[2].kind(),
+            UiProjectedNodeKind::ActionCarrier
+        );
+        assert_eq!(
+            artifact.nodes()[3].kind(),
+            UiProjectedNodeKind::EffectBoundaryMarker
+        );
     }
 }
