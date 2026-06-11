@@ -1,10 +1,8 @@
-#![allow(dead_code)]
-
 use crate::model::UiIrNodeId;
 use alloc::vec::Vec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct UiProjectionArtifactId(pub u64);
+pub struct UiProjectionArtifactId(u64);
 
 impl UiProjectionArtifactId {
     pub const fn new(raw: u64) -> Self {
@@ -17,7 +15,7 @@ impl UiProjectionArtifactId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct UiProjectedNodeId(pub u64);
+pub struct UiProjectedNodeId(u64);
 
 impl UiProjectedNodeId {
     pub const fn new(raw: u64) -> Self {
@@ -30,7 +28,7 @@ impl UiProjectedNodeId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct UiProjectionPropertyRef(pub u64);
+pub struct UiProjectionPropertyRef(u64);
 
 impl UiProjectionPropertyRef {
     pub const fn new(raw: u64) -> Self {
@@ -43,7 +41,7 @@ impl UiProjectionPropertyRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct UiProjectionActionRef(pub u64);
+pub struct UiProjectionActionRef(u64);
 
 impl UiProjectionActionRef {
     pub const fn new(raw: u64) -> Self {
@@ -56,7 +54,7 @@ impl UiProjectionActionRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct UiProjectionEffectBoundaryRef(pub u64);
+pub struct UiProjectionEffectBoundaryRef(u64);
 
 impl UiProjectionEffectBoundaryRef {
     pub const fn new(raw: u64) -> Self {
@@ -69,7 +67,7 @@ impl UiProjectionEffectBoundaryRef {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct UiProjectionTraceRef(pub u64);
+pub struct UiProjectionTraceRef(u64);
 
 impl UiProjectionTraceRef {
     pub const fn new(raw: u64) -> Self {
