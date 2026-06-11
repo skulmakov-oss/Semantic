@@ -253,6 +253,27 @@ impl UiProjectionArtifact {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiProjectionErrorCode {
+    InvalidIr,
+    MissingRoot,
+    MissingNode,
+    UnsupportedNodeKind,
+    InconsistentHandle,
+}
+
+impl UiProjectionErrorCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidIr => "invalid_ir",
+            Self::MissingRoot => "missing_root",
+            Self::MissingNode => "missing_node",
+            Self::UnsupportedNodeKind => "unsupported_node_kind",
+            Self::InconsistentHandle => "inconsistent_handle",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiProjectionError {
     InvalidIr(UiIrValidationDiagnostics),
@@ -260,6 +281,33 @@ pub enum UiProjectionError {
     MissingNode,
     UnsupportedNodeKind,
     InconsistentHandle,
+}
+
+impl UiProjectionError {
+    pub fn code(&self) -> UiProjectionErrorCode {
+        match self {
+            Self::InvalidIr(_) => UiProjectionErrorCode::InvalidIr,
+            Self::MissingRoot => UiProjectionErrorCode::MissingRoot,
+            Self::MissingNode => UiProjectionErrorCode::MissingNode,
+            Self::UnsupportedNodeKind => UiProjectionErrorCode::UnsupportedNodeKind,
+            Self::InconsistentHandle => UiProjectionErrorCode::InconsistentHandle,
+        }
+    }
+
+    pub fn validation_diagnostics(&self) -> Option<&UiIrValidationDiagnostics> {
+        match self {
+            Self::InvalidIr(diagnostics) => Some(diagnostics),
+            _ => None,
+        }
+    }
+
+    pub fn is_validation_error(&self) -> bool {
+        matches!(self, Self::InvalidIr(_))
+    }
+
+    pub fn is_projection_structural_error(&self) -> bool {
+        !self.is_validation_error()
+    }
 }
 
 // Deterministic projection-layer artifact identity.
@@ -320,6 +368,67 @@ pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiPro
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_diagnostics_error_code_strings() {
+        assert_eq!(UiProjectionErrorCode::InvalidIr.as_str(), "invalid_ir");
+        assert_eq!(UiProjectionErrorCode::MissingRoot.as_str(), "missing_root");
+        assert_eq!(UiProjectionErrorCode::MissingNode.as_str(), "missing_node");
+        assert_eq!(
+            UiProjectionErrorCode::UnsupportedNodeKind.as_str(),
+            "unsupported_node_kind"
+        );
+        assert_eq!(
+            UiProjectionErrorCode::InconsistentHandle.as_str(),
+            "inconsistent_handle"
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_error_code_mapping() {
+        assert_eq!(
+            UiProjectionError::MissingRoot.code(),
+            UiProjectionErrorCode::MissingRoot
+        );
+        assert_eq!(
+            UiProjectionError::MissingNode.code(),
+            UiProjectionErrorCode::MissingNode
+        );
+        assert_eq!(
+            UiProjectionError::UnsupportedNodeKind.code(),
+            UiProjectionErrorCode::UnsupportedNodeKind
+        );
+        assert_eq!(
+            UiProjectionError::InconsistentHandle.code(),
+            UiProjectionErrorCode::InconsistentHandle
+        );
+    }
+
+    #[test]
+    fn test_diagnostics_structural_error_isolation() {
+        let err = UiProjectionError::MissingRoot;
+        assert!(err.validation_diagnostics().is_none());
+        assert!(err.is_projection_structural_error());
+        assert!(!err.is_validation_error());
+    }
+
+    #[test]
+    fn test_diagnostics_invalid_ir_exposes_validation() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Root,
+        )); // Multiple roots -> invalid
+
+        let err = project_ir_to_projection(&ir).expect_err("should reject invalid ir");
+        assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
+        assert!(err.validation_diagnostics().is_some());
+        assert!(err.is_validation_error());
+        assert!(!err.is_projection_structural_error());
+    }
     #[test]
     fn projection_artifact_id_round_trips_raw() {
         let id = UiProjectionArtifactId::new(42);
