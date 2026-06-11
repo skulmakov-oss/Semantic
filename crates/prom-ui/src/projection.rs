@@ -145,8 +145,12 @@ impl UiProjectedNode {
         self.kind
     }
 
-    pub fn source_ir_node_id(&self) -> Option<UiIrNodeId> {
+    pub const fn source_ir_node_id(&self) -> Option<UiIrNodeId> {
         self.source_ir_node_id
+    }
+
+    pub const fn has_source_ir_node(&self) -> bool {
+        self.source_ir_node_id.is_some()
     }
 
     pub fn parent(&self) -> Option<UiProjectedNodeId> {
@@ -189,8 +193,12 @@ impl UiProjectedNode {
         self.effect_boundaries.push(effect_boundary);
     }
 
-    pub fn trace(&self) -> Option<UiProjectionTraceRef> {
+    pub const fn trace(&self) -> Option<UiProjectionTraceRef> {
         self.trace
+    }
+
+    pub const fn has_trace(&self) -> bool {
+        self.trace.is_some()
     }
 
     pub fn set_trace(&mut self, trace: UiProjectionTraceRef) {
@@ -220,8 +228,12 @@ impl UiProjectionArtifact {
         self.id
     }
 
-    pub fn source_ir_root(&self) -> Option<UiIrNodeId> {
+    pub const fn source_ir_root(&self) -> Option<UiIrNodeId> {
         self.source_ir_root
+    }
+
+    pub const fn has_source_ir_root(&self) -> bool {
+        self.source_ir_root.is_some()
     }
 
     pub fn set_source_ir_root(&mut self, root: UiIrNodeId) {
@@ -246,6 +258,10 @@ impl UiProjectionArtifact {
 
     pub fn traces(&self) -> &[UiProjectionTraceRef] {
         &self.traces
+    }
+
+    pub fn has_traces(&self) -> bool {
+        !self.traces.is_empty()
     }
 
     pub fn push_trace(&mut self, trace: UiProjectionTraceRef) {
@@ -368,6 +384,82 @@ pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiPro
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_traceability_projected_node_exposes_source_ir_node_id() {
+        let mut ir = UiIr::new();
+        let root_id = UiIrNodeId::new(10);
+        ir.push_node(crate::model::UiIrNode::new(root_id, UiIrNodeKind::Root));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.len(), 1);
+        let node = &artifact.nodes()[0];
+
+        assert!(node.has_source_ir_node());
+        assert_eq!(node.source_ir_node_id(), Some(root_id));
+    }
+
+    #[test]
+    fn test_traceability_artifact_exposes_source_ir_root() {
+        let mut ir = UiIr::new();
+        let root_id = UiIrNodeId::new(20);
+        ir.push_node(crate::model::UiIrNode::new(root_id, UiIrNodeKind::Root));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert!(artifact.has_source_ir_root());
+        assert_eq!(artifact.source_ir_root(), Some(root_id));
+    }
+
+    #[test]
+    fn test_traceability_source_trace_preservation_does_not_alter_node_identity() {
+        let mut ir = UiIr::new();
+        let root_id = UiIrNodeId::new(30);
+        ir.push_node(crate::model::UiIrNode::new(root_id, UiIrNodeKind::Root));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        let node = &artifact.nodes()[0];
+
+        // Identity and traceability remain distinct
+        assert_eq!(node.id(), UiProjectedNodeId::new(30));
+        assert_eq!(node.source_ir_node_id(), Some(UiIrNodeId::new(30)));
+    }
+
+    #[test]
+    fn test_traceability_trace_handle_is_inert() {
+        let mut node =
+            UiProjectedNode::new(UiProjectedNodeId::new(1), UiProjectedNodeKind::Element);
+        assert!(!node.has_trace());
+        assert_eq!(node.trace(), None);
+
+        let handle = UiProjectionTraceRef::new(42);
+        node.set_trace(handle);
+        assert!(node.has_trace());
+        assert_eq!(node.trace(), Some(handle));
+    }
+
+    #[test]
+    fn test_traceability_artifact_traces_collection_remains_inert() {
+        let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
+        assert!(!artifact.has_traces());
+        assert!(artifact.traces().is_empty());
+
+        artifact.push_trace(UiProjectionTraceRef::new(100));
+        assert!(artifact.has_traces());
+        assert_eq!(artifact.traces().len(), 1);
+        assert_eq!(artifact.traces()[0], UiProjectionTraceRef::new(100));
+    }
+
+    #[test]
+    fn test_traceability_success_path_unchanged() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.id(), UiProjectionArtifactId::new(1));
+        assert_eq!(artifact.len(), 1);
+    }
     #[test]
     fn test_diagnostics_error_code_strings() {
         assert_eq!(UiProjectionErrorCode::InvalidIr.as_str(), "invalid_ir");
