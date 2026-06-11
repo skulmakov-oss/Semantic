@@ -374,6 +374,35 @@ pub fn projection_artifact_id_for_ir(ir: &UiIr) -> UiProjectionArtifactId {
     }
 }
 
+// Projection-layer validation evidence only.
+// This is not Semantic truth, verifier admission, runtime admission,
+// capability admission, renderer readiness, or Workbench/Studio readiness.
+#[derive(Debug, Clone, Copy)]
+pub struct ValidatedUiIr<'ir> {
+    ir: &'ir UiIr,
+}
+
+impl<'ir> ValidatedUiIr<'ir> {
+    pub fn new(ir: &'ir UiIr) -> Result<Self, UiProjectionError> {
+        validate_ir(ir, &UiIrValidationConfig::default()).map_err(UiProjectionError::InvalidIr)?;
+        Ok(Self { ir })
+    }
+
+    pub fn as_ir(&self) -> &'ir UiIr {
+        self.ir
+    }
+}
+
+pub fn validate_ui_ir_for_projection(ir: &UiIr) -> Result<ValidatedUiIr<'_>, UiProjectionError> {
+    ValidatedUiIr::new(ir)
+}
+
+pub fn project_validated_ir_to_projection(
+    validated: &ValidatedUiIr<'_>,
+) -> Result<UiProjectionArtifact, UiProjectionError> {
+    project_ir_to_projection(validated.as_ir())
+}
+
 pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiProjectionError> {
     validate_ir(ir, &UiIrValidationConfig::default()).map_err(UiProjectionError::InvalidIr)?;
 
@@ -977,5 +1006,113 @@ mod tests {
             artifact.nodes()[3].kind(),
             UiProjectedNodeKind::EffectBoundaryMarker
         );
+    }
+
+    #[test]
+    fn test_valid_ir_creates_wrapper() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let validated = ValidatedUiIr::new(&ir).expect("creates wrapper");
+        assert!(std::ptr::eq(validated.as_ir(), &ir));
+
+        let validated_conv = validate_ui_ir_for_projection(&ir).expect("creates wrapper");
+        assert!(std::ptr::eq(validated_conv.as_ir(), &ir));
+    }
+
+    #[test]
+    fn test_invalid_ir_cannot_create_wrapper() {
+        let mut ir = UiIr::new();
+        let root = crate::model::UiIrNode::new(UiIrNodeId::new(1), UiIrNodeKind::Root);
+        ir.push_node(root);
+        ir.push_node(crate::model::UiIrNode::with_parent(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Element,
+            UiIrNodeId::new(1),
+        ));
+
+        let err = ValidatedUiIr::new(&ir).expect_err("should reject invalid ir");
+        assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
+        assert!(err.validation_diagnostics().is_some());
+    }
+
+    #[test]
+    fn test_validated_projection_matches_raw_projection() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let raw = project_ir_to_projection(&ir).expect("projects");
+        let validated = ValidatedUiIr::new(&ir).expect("creates wrapper");
+        let via_wrapper = project_validated_ir_to_projection(&validated).expect("projects");
+
+        assert_eq!(raw.id(), via_wrapper.id());
+        assert_eq!(raw.source_ir_root(), via_wrapper.source_ir_root());
+        assert_eq!(raw.len(), via_wrapper.len());
+    }
+
+    #[test]
+    fn test_wrapper_does_not_change_artifact_id_policy() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(42),
+            UiIrNodeKind::Root,
+        ));
+
+        let validated = ValidatedUiIr::new(&ir).expect("creates wrapper");
+        let via_wrapper = project_validated_ir_to_projection(&validated).expect("projects");
+
+        assert_eq!(via_wrapper.id(), UiProjectionArtifactId::new(42));
+    }
+
+    #[test]
+    fn test_wrapper_does_not_change_projected_node_id_policy() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(100),
+            UiIrNodeKind::Root,
+        ));
+
+        let validated = ValidatedUiIr::new(&ir).expect("creates wrapper");
+        let via_wrapper = project_validated_ir_to_projection(&validated).expect("projects");
+
+        let node = &via_wrapper.nodes()[0];
+        assert_eq!(node.id(), UiProjectedNodeId::new(100));
+        assert_eq!(node.source_ir_node_id(), Some(UiIrNodeId::new(100)));
+    }
+
+    #[test]
+    fn test_wrapper_preserves_diagnostics_behavior() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Root,
+        ));
+
+        let err = ValidatedUiIr::new(&ir).expect_err("should reject invalid ir");
+        assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
+        assert!(err.validation_diagnostics().is_some());
+    }
+
+    #[test]
+    fn test_wrapper_is_not_admission_authority() {
+        let mut valid_ir = UiIr::new();
+        valid_ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        let validated = ValidatedUiIr::new(&valid_ir).expect("creates wrapper");
+
+        // The wrapper exposes only as_ir. There are no methods for verifier, runtime, capability, renderer, etc.
+        let _ir_ref: &UiIr = validated.as_ir();
     }
 }
