@@ -384,7 +384,18 @@ pub struct ValidatedUiIr<'ir> {
 
 impl<'ir> ValidatedUiIr<'ir> {
     pub fn new(ir: &'ir UiIr) -> Result<Self, UiProjectionError> {
-        validate_ir(ir, &UiIrValidationConfig::default()).map_err(UiProjectionError::InvalidIr)?;
+        Self::new_with_config(ir, &UiIrValidationConfig::default())
+    }
+
+    // Config-aware projection validation only.
+    // UiIrValidationConfig is not Semantic truth policy, verifier policy,
+    // runtime admission policy, capability policy, renderer readiness policy,
+    // or Workbench/Studio readiness policy.
+    pub fn new_with_config(
+        ir: &'ir UiIr,
+        config: &UiIrValidationConfig,
+    ) -> Result<Self, UiProjectionError> {
+        validate_ir(ir, config).map_err(UiProjectionError::InvalidIr)?;
         Ok(Self { ir })
     }
 
@@ -395,6 +406,13 @@ impl<'ir> ValidatedUiIr<'ir> {
 
 pub fn validate_ui_ir_for_projection(ir: &UiIr) -> Result<ValidatedUiIr<'_>, UiProjectionError> {
     ValidatedUiIr::new(ir)
+}
+
+pub fn validate_ui_ir_for_projection_with_config<'ir>(
+    ir: &'ir UiIr,
+    config: &UiIrValidationConfig,
+) -> Result<ValidatedUiIr<'ir>, UiProjectionError> {
+    ValidatedUiIr::new_with_config(ir, config)
 }
 
 pub fn project_validated_ir_to_projection(
@@ -1113,6 +1131,120 @@ mod tests {
         let validated = ValidatedUiIr::new(&valid_ir).expect("creates wrapper");
 
         // The wrapper exposes only as_ir. There are no methods for verifier, runtime, capability, renderer, etc.
+        let _ir_ref: &UiIr = validated.as_ir();
+    }
+
+    #[test]
+    fn test_default_constructor_delegates_to_config_path() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let v1 = ValidatedUiIr::new(&ir).expect("ok");
+        let v2 = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default()).expect("ok");
+
+        assert!(std::ptr::eq(v1.as_ir(), v2.as_ir()));
+    }
+
+    #[test]
+    fn test_config_aware_constructor_rejects_invalid_ir() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Root,
+        ));
+
+        let err =
+            ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default()).unwrap_err();
+        assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
+        assert!(err.validation_diagnostics().is_some());
+    }
+
+    #[test]
+    fn test_free_helper_with_config_works() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let v = validate_ui_ir_for_projection_with_config(&ir, &UiIrValidationConfig::default())
+            .expect("ok");
+        assert!(std::ptr::eq(v.as_ir(), &ir));
+    }
+
+    #[test]
+    fn test_free_helper_with_config_rejects_invalid_ir() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Root,
+        ));
+
+        let err = validate_ui_ir_for_projection_with_config(&ir, &UiIrValidationConfig::default())
+            .unwrap_err();
+        assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
+    }
+
+    #[test]
+    fn test_config_seed_does_not_change_projection_output() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+
+        let raw = project_ir_to_projection(&ir).expect("projects");
+        let validated = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default())
+            .expect("creates wrapper");
+        let via_wrapper = project_validated_ir_to_projection(&validated).expect("projects");
+
+        assert_eq!(raw.id(), via_wrapper.id());
+        assert_eq!(raw.source_ir_root(), via_wrapper.source_ir_root());
+        assert_eq!(raw.len(), via_wrapper.len());
+        if !raw.is_empty() {
+            assert_eq!(raw.nodes()[0].id(), via_wrapper.nodes()[0].id());
+        }
+    }
+
+    #[test]
+    fn test_config_seed_does_not_store_config_identity() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        let validated = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default())
+            .expect("creates wrapper");
+
+        // Exposes only as_ir. Size should just be the reference.
+        assert_eq!(
+            std::mem::size_of_val(&validated),
+            std::mem::size_of::<&UiIr>()
+        );
+    }
+
+    #[test]
+    fn test_config_is_not_authority() {
+        let mut valid_ir = UiIr::new();
+        valid_ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        let validated = ValidatedUiIr::new_with_config(&valid_ir, &UiIrValidationConfig::default())
+            .expect("creates wrapper");
+
+        // The wrapper exposes only as_ir. No handles for verifier, runtime, capability, renderer.
         let _ir_ref: &UiIr = validated.as_ir();
     }
 }
