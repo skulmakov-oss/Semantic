@@ -262,10 +262,21 @@ pub enum UiProjectionError {
     InconsistentHandle,
 }
 
+// Deterministic projection-layer artifact identity.
+// This is not renderer identity, runtime identity, Semantic truth,
+// verifier admission, or capability admission.
+pub fn projection_artifact_id_for_ir(ir: &UiIr) -> UiProjectionArtifactId {
+    if let Some(root) = ir.nodes().iter().find(|n| n.kind() == UiIrNodeKind::Root) {
+        UiProjectionArtifactId::new(root.id().raw())
+    } else {
+        UiProjectionArtifactId::new(0)
+    }
+}
+
 pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiProjectionError> {
     validate_ir(ir, &UiIrValidationConfig::default()).map_err(UiProjectionError::InvalidIr)?;
 
-    let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
+    let mut artifact = UiProjectionArtifact::new(projection_artifact_id_for_ir(ir));
 
     let root_node = ir.nodes().iter().find(|n| n.kind() == UiIrNodeKind::Root);
     if let Some(root) = root_node {
@@ -462,6 +473,44 @@ mod tests {
         let artifact = project_ir_to_projection(&ir).expect("projects");
         assert_eq!(artifact.len(), 1);
         assert_eq!(artifact.source_ir_root(), Some(UiIrNodeId::new(1)));
+    }
+
+    #[test]
+    fn artifact_id_follows_root_id() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(42),
+            UiIrNodeKind::Root,
+        ));
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.id(), UiProjectionArtifactId::new(42));
+    }
+
+    #[test]
+    fn empty_valid_ir_uses_empty_policy() {
+        let ir = UiIr::new();
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.id(), UiProjectionArtifactId::new(0));
+    }
+
+    #[test]
+    fn projected_node_ids_remain_structural() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(42),
+            UiIrNodeKind::Root,
+        ));
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.nodes()[0].id(), UiProjectedNodeId::new(42));
+    }
+
+    #[test]
+    fn no_renderer_runtime_identity_introduced() {
+        // artifact id is projection-layer only
+        // no renderer/runtime handles exist in artifact
+        let ir = UiIr::new();
+        let artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(artifact.id(), UiProjectionArtifactId::new(0));
     }
 
     #[test]
