@@ -1,0 +1,183 @@
+module MissionControl
+
+// Mission Control v2 sketch.
+// This file intentionally describes the intended Semantic-native direction.
+// Syntax may evolve together with the Semantic language.
+
+observe AdmissionRun as run
+
+concept GraphNode {
+    id: Text
+    kind: NodeKind
+    label: Text
+    status: NodeStatus
+    severity: Severity
+    source: SourceLocation?
+}
+
+concept GraphEdge {
+    id: Text
+    source: GraphNode
+    target: GraphNode
+    relation: EdgeKind
+    status: EdgeStatus
+    weight: Number
+}
+
+concept SourceLocation {
+    file: Text
+    line_start: Number
+    line_end: Number
+    symbol: Text?
+}
+
+enum NodeKind {
+    Module
+    Namespace
+    Type
+    Function
+    Contract
+    Invariant
+    Rule
+    Effect
+    Guard
+    Proof
+    Conflict
+    Verdict
+    Artifact
+}
+
+enum EdgeKind {
+    Imports
+    Calls
+    Reads
+    Writes
+    DependsOn
+    Proves
+    Violates
+    ConflictsWith
+    Guards
+    Emits
+    ResolvesTo
+    Contains
+}
+
+enum NodeStatus {
+    Pending
+    Scanning
+    Checking
+    Verified
+    Warning
+    Conflict
+    Unknown
+    Admitted
+    Rejected
+    NeedsReview
+}
+
+enum EdgeStatus {
+    Pending
+    Active
+    Verified
+    Warning
+    Conflict
+}
+
+enum Severity {
+    None
+    Low
+    Medium
+    High
+    Critical
+}
+
+graph DependencyGraph {
+    node GraphNode
+    edge GraphEdge
+}
+
+rule OnNodeAdded(event) when event.kind == "node.added" {
+    DependencyGraph.add_node(
+        id: event.node.id,
+        kind: event.node.kind,
+        label: event.node.label,
+        status: event.node.status,
+        severity: event.node.severity,
+        source: event.node.source
+    )
+}
+
+rule OnEdgeAdded(event) when event.kind == "edge.added" {
+    DependencyGraph.add_edge(
+        id: event.edge.id,
+        source: event.edge.source,
+        target: event.edge.target,
+        relation: event.edge.type,
+        status: event.edge.status,
+        weight: event.edge.weight
+    )
+}
+
+rule OnConflictDetected(event) when event.kind == "conflict.detected" {
+    let conflict = DependencyGraph.ensure_node(
+        id: event.conflict.id,
+        kind: Conflict,
+        label: event.conflict.id,
+        status: Conflict,
+        severity: event.conflict.severity
+    )
+
+    DependencyGraph.mark(conflict, state: S)
+
+    visual.emit(
+        kind: "conflict_pulse",
+        target: conflict.id,
+        severity: event.conflict.severity
+    )
+}
+
+rule OnVerdictEmitted(event) when event.kind == "verdict.emitted" {
+    let verdict = DependencyGraph.ensure_node(
+        id: "verdict:" + event.run_id,
+        kind: Verdict,
+        label: event.verdict.status,
+        status: event.verdict.status,
+        severity: if event.verdict.status == "admitted" then None else High
+    )
+
+    visual.emit(
+        kind: "admission_verdict",
+        target: verdict.id,
+        status: event.verdict.status
+    )
+}
+
+projection MissionControl3D {
+    layer Verdict        at z = 300
+    layer Invariant      at z = 200
+    layer Contract       at z = 200
+    layer Function       at z = 100
+    layer Rule           at z = 100
+    layer Module         at z = 0
+    layer Type           at z = 0
+    layer Effect         at z = -100
+    layer Conflict       at z = -200
+
+    style Pending        => dim
+    style Scanning       => pulse_soft
+    style Checking       => pulse_active
+    style Verified       => stable_glow
+    style Warning        => yellow_halo
+    style Conflict       => red_core_vibration
+    style Unknown        => translucent
+    style Admitted       => green_final_arc
+    style Rejected       => broken_red_path
+    style NeedsReview    => amber_review_arc
+
+    edge Calls           => particles_forward
+    edge Proves          => particles_upward
+    edge Violates        => red_impulse
+    edge DependsOn       => stable_line
+    edge Writes          => thick_directed_line
+    edge Reads           => thin_directed_line
+}
