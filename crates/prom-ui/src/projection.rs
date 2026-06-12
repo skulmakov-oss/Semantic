@@ -1355,4 +1355,85 @@ mod tests {
         let _id = via_validated.id();
         // Exposes no renderer handle, runtime admission, or capability admission.
     }
+
+    #[test]
+    fn projection_public_api_lock_compile_signatures() {
+        fn check_ir_to_proj(_: fn(&UiIr) -> Result<UiProjectionArtifact, UiProjectionError>) {}
+        check_ir_to_proj(project_ir_to_projection);
+
+        fn check_validate<'ir>(_: fn(&'ir UiIr) -> Result<ValidatedUiIr<'ir>, UiProjectionError>) {}
+        check_validate(ValidatedUiIr::new);
+        check_validate(validate_ui_ir_for_projection);
+
+        fn check_validate_config<'ir, 'c>(
+            _: fn(
+                &'ir UiIr,
+                &'c crate::validation::UiIrValidationConfig,
+            ) -> Result<ValidatedUiIr<'ir>, UiProjectionError>,
+        ) {
+        }
+        check_validate_config(ValidatedUiIr::new_with_config);
+        check_validate_config(validate_ui_ir_for_projection_with_config);
+
+        fn check_proj_val<'ir>(
+            _: fn(&ValidatedUiIr<'ir>) -> Result<UiProjectionArtifact, UiProjectionError>,
+        ) {
+        }
+        check_proj_val(project_validated_ir_to_projection);
+
+        fn check_as_ir<'ir>(_: for<'a> fn(&'a ValidatedUiIr<'ir>) -> &'ir UiIr) {}
+        check_as_ir(ValidatedUiIr::as_ir);
+
+        let _ = UiProjectionError::code as fn(&UiProjectionError) -> UiProjectionErrorCode;
+        let _ = UiProjectionError::validation_diagnostics
+            as fn(&UiProjectionError) -> Option<&crate::validation::UiIrValidationDiagnostics>;
+
+        let _ =
+            UiProjectionArtifact::traces as fn(&UiProjectionArtifact) -> &[UiProjectionTraceRef];
+        let _ =
+            UiProjectionArtifact::source_ir_root as fn(&UiProjectionArtifact) -> Option<UiIrNodeId>;
+        let _ = UiProjectedNode::source_ir_node_id as fn(&UiProjectedNode) -> Option<UiIrNodeId>;
+
+        let _ = UiProjectedNodeKind::is_inert_carrier as fn(UiProjectedNodeKind) -> bool;
+        let _ = UiProjectedNode::is_inert_carrier as fn(&UiProjectedNode) -> bool;
+    }
+
+    #[test]
+    fn projection_public_api_lock_smoke_tests() {
+        let mut ir = UiIr::new();
+        ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(42),
+            UiIrNodeKind::Root,
+        ));
+
+        let raw_artifact = project_ir_to_projection(&ir).expect("projects");
+        assert_eq!(raw_artifact.id().raw(), 42);
+
+        let wrapper = ValidatedUiIr::new(&ir).expect("validates");
+        assert_eq!(wrapper.as_ir().nodes().len(), 1);
+
+        let config_wrapper = ValidatedUiIr::new_with_config(
+            &ir,
+            &crate::validation::UiIrValidationConfig::default(),
+        )
+        .expect("validates");
+        assert_eq!(config_wrapper.as_ir().nodes().len(), 1);
+
+        let val_artifact = project_validated_ir_to_projection(&wrapper).expect("projects");
+        assert_eq!(val_artifact.id().raw(), 42);
+
+        let mut invalid_ir = UiIr::new();
+        invalid_ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(1),
+            UiIrNodeKind::Root,
+        ));
+        invalid_ir.push_node(crate::model::UiIrNode::new(
+            UiIrNodeId::new(2),
+            UiIrNodeKind::Root,
+        ));
+
+        let err = project_ir_to_projection(&invalid_ir).unwrap_err();
+        assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
+        assert!(err.validation_diagnostics().is_some());
+    }
 }
