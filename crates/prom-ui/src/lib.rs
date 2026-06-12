@@ -217,8 +217,16 @@ pub use raw_event::{
     RawUiEventId, RawUiEventKind, RawUiEventPayload, RawUiEventTarget,
 };
 pub use renderer::{
-    render_projection_to_model, UiRenderError, UiRenderMarker, UiRenderModel, UiRenderModelId,
-    UiRenderNode, UiRenderNodeId, UiRenderNodeKind,
+    present_render_diagnostics, present_render_inspection, present_render_markers,
+    present_render_trace, render_projection_to_model, UiRenderDiagnosticsPresentation,
+    UiRenderDiagnosticsPresentationId, UiRenderError, UiRenderInspectionItem,
+    UiRenderInspectionItemId, UiRenderInspectionItemKind, UiRenderInspectionPresentation,
+    UiRenderInspectionPresentationId, UiRenderInspectionSection, UiRenderInspectionSectionId,
+    UiRenderInspectionSectionKind, UiRenderMarker, UiRenderMarkerEmphasis, UiRenderMarkerItem,
+    UiRenderMarkerItemId, UiRenderMarkerPresentation, UiRenderMarkerPresentationId,
+    UiRenderMarkerVisualRole, UiRenderModel, UiRenderModelId, UiRenderNode, UiRenderNodeId,
+    UiRenderNodeKind, UiRenderTraceLink, UiRenderTraceLinkId, UiRenderTraceLinkKind,
+    UiRenderTracePresentation, UiRenderTracePresentationId,
 };
 pub use runtime_capability_mapping::{
     describe_interaction_runtime_capability_mapping, InteractionRuntimeCapabilityMappingDescriptor,

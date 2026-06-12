@@ -630,3 +630,317 @@ pub fn present_render_markers(model: &UiRenderModel) -> UiRenderMarkerPresentati
         items,
     }
 }
+
+// Inspection presentation is inert renderer-local metadata.
+// It composes diagnostics, trace, and marker presentation data for future UI inspection.
+// It must not act as debugger state, proof, runtime introspection, event dispatch,
+// action execution, effect authorization, or capability admission.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderInspectionPresentation {
+    id: UiRenderInspectionPresentationId,
+    source_render_model: UiRenderModelId,
+    source_projection: UiProjectionArtifactId,
+    sections: Vec<UiRenderInspectionSection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderInspectionPresentationId(u64);
+
+impl UiRenderInspectionPresentationId {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderInspectionSection {
+    id: UiRenderInspectionSectionId,
+    kind: UiRenderInspectionSectionKind,
+    items: Vec<UiRenderInspectionItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderInspectionSectionId(u64);
+
+impl UiRenderInspectionSectionId {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderInspectionItem {
+    id: UiRenderInspectionItemId,
+    kind: UiRenderInspectionItemKind,
+    source_render_node: Option<UiRenderNodeId>,
+    source_projection_node: Option<UiProjectedNodeId>,
+    source_ir_node: Option<UiIrNodeId>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderInspectionItemId(u64);
+
+impl UiRenderInspectionItemId {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiRenderInspectionSectionKind {
+    Overview,
+    Diagnostics,
+    Trace,
+    Markers,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiRenderInspectionItemKind {
+    OverviewSummary,
+    DiagnosticItem,
+    TraceLink,
+    MarkerItem,
+}
+
+impl UiRenderInspectionPresentation {
+    pub fn id(&self) -> UiRenderInspectionPresentationId {
+        self.id
+    }
+
+    pub fn source_render_model(&self) -> UiRenderModelId {
+        self.source_render_model
+    }
+
+    pub fn source_projection(&self) -> UiProjectionArtifactId {
+        self.source_projection
+    }
+
+    pub fn sections(&self) -> &[UiRenderInspectionSection] {
+        &self.sections
+    }
+}
+
+impl UiRenderInspectionSection {
+    pub fn id(&self) -> UiRenderInspectionSectionId {
+        self.id
+    }
+
+    pub fn kind(&self) -> UiRenderInspectionSectionKind {
+        self.kind
+    }
+
+    pub fn items(&self) -> &[UiRenderInspectionItem] {
+        &self.items
+    }
+}
+
+impl UiRenderInspectionItem {
+    pub fn id(&self) -> UiRenderInspectionItemId {
+        self.id
+    }
+
+    pub fn kind(&self) -> UiRenderInspectionItemKind {
+        self.kind
+    }
+
+    pub fn source_render_node(&self) -> Option<UiRenderNodeId> {
+        self.source_render_node
+    }
+
+    pub fn source_projection_node(&self) -> Option<UiProjectedNodeId> {
+        self.source_projection_node
+    }
+
+    pub fn source_ir_node(&self) -> Option<UiIrNodeId> {
+        self.source_ir_node
+    }
+}
+
+const fn inspection_section_kind_ordinal(kind: UiRenderInspectionSectionKind) -> u64 {
+    match kind {
+        UiRenderInspectionSectionKind::Overview => 0,
+        UiRenderInspectionSectionKind::Diagnostics => 1,
+        UiRenderInspectionSectionKind::Trace => 2,
+        UiRenderInspectionSectionKind::Markers => 3,
+    }
+}
+
+const fn inspection_item_kind_ordinal(kind: UiRenderInspectionItemKind) -> u64 {
+    match kind {
+        UiRenderInspectionItemKind::OverviewSummary => 0,
+        UiRenderInspectionItemKind::DiagnosticItem => 1,
+        UiRenderInspectionItemKind::TraceLink => 2,
+        UiRenderInspectionItemKind::MarkerItem => 3,
+    }
+}
+
+fn inspection_section_id(
+    presentation_id: UiRenderInspectionPresentationId,
+    kind: UiRenderInspectionSectionKind,
+) -> UiRenderInspectionSectionId {
+    UiRenderInspectionSectionId::new(
+        presentation_id
+            .raw()
+            .wrapping_mul(37)
+            .wrapping_add(inspection_section_kind_ordinal(kind)),
+    )
+}
+
+fn inspection_item_id(
+    section_id: UiRenderInspectionSectionId,
+    kind: UiRenderInspectionItemKind,
+    ordinal: u64,
+) -> UiRenderInspectionItemId {
+    UiRenderInspectionItemId::new(
+        section_id
+            .raw()
+            .wrapping_mul(17)
+            .wrapping_add(inspection_item_kind_ordinal(kind))
+            .wrapping_add(ordinal),
+    )
+}
+
+fn build_overview_section(
+    presentation_id: UiRenderInspectionPresentationId,
+    model: &UiRenderModel,
+) -> UiRenderInspectionSection {
+    let kind = UiRenderInspectionSectionKind::Overview;
+    let section_id = inspection_section_id(presentation_id, kind);
+    let mut items = Vec::new();
+
+    items.push(UiRenderInspectionItem {
+        id: inspection_item_id(section_id, UiRenderInspectionItemKind::OverviewSummary, 0),
+        kind: UiRenderInspectionItemKind::OverviewSummary,
+        source_render_node: None,
+        source_projection_node: None,
+        source_ir_node: model.source_ir_root(),
+    });
+
+    UiRenderInspectionSection {
+        id: section_id,
+        kind,
+        items,
+    }
+}
+
+fn build_diagnostics_section(
+    presentation_id: UiRenderInspectionPresentationId,
+    diagnostics: &UiRenderDiagnosticsPresentation,
+) -> UiRenderInspectionSection {
+    let kind = UiRenderInspectionSectionKind::Diagnostics;
+    let section_id = inspection_section_id(presentation_id, kind);
+    let mut items = Vec::new();
+
+    for (ordinal, item) in diagnostics.items().iter().enumerate() {
+        items.push(UiRenderInspectionItem {
+            id: inspection_item_id(
+                section_id,
+                UiRenderInspectionItemKind::DiagnosticItem,
+                ordinal as u64,
+            ),
+            kind: UiRenderInspectionItemKind::DiagnosticItem,
+            source_render_node: item.source_render_node(),
+            source_projection_node: item.source_projection_node(),
+            source_ir_node: item.source_ir_node(),
+        });
+    }
+
+    UiRenderInspectionSection {
+        id: section_id,
+        kind,
+        items,
+    }
+}
+
+fn build_trace_section(
+    presentation_id: UiRenderInspectionPresentationId,
+    trace: &UiRenderTracePresentation,
+) -> UiRenderInspectionSection {
+    let kind = UiRenderInspectionSectionKind::Trace;
+    let section_id = inspection_section_id(presentation_id, kind);
+    let mut items = Vec::new();
+
+    for (ordinal, link) in trace.links().iter().enumerate() {
+        items.push(UiRenderInspectionItem {
+            id: inspection_item_id(
+                section_id,
+                UiRenderInspectionItemKind::TraceLink,
+                ordinal as u64,
+            ),
+            kind: UiRenderInspectionItemKind::TraceLink,
+            source_render_node: link.source_render_node(),
+            source_projection_node: link.source_projection_node(),
+            source_ir_node: link.source_ir_node(),
+        });
+    }
+
+    UiRenderInspectionSection {
+        id: section_id,
+        kind,
+        items,
+    }
+}
+
+fn build_markers_section(
+    presentation_id: UiRenderInspectionPresentationId,
+    markers: &UiRenderMarkerPresentation,
+) -> UiRenderInspectionSection {
+    let kind = UiRenderInspectionSectionKind::Markers;
+    let section_id = inspection_section_id(presentation_id, kind);
+    let mut items = Vec::new();
+
+    for (ordinal, item) in markers.items().iter().enumerate() {
+        items.push(UiRenderInspectionItem {
+            id: inspection_item_id(
+                section_id,
+                UiRenderInspectionItemKind::MarkerItem,
+                ordinal as u64,
+            ),
+            kind: UiRenderInspectionItemKind::MarkerItem,
+            source_render_node: Some(item.source_render_node()),
+            source_projection_node: None,
+            source_ir_node: None,
+        });
+    }
+
+    UiRenderInspectionSection {
+        id: section_id,
+        kind,
+        items,
+    }
+}
+
+pub fn present_render_inspection(
+    model: &UiRenderModel,
+    diagnostics: &UiRenderDiagnosticsPresentation,
+    trace: &UiRenderTracePresentation,
+    markers: &UiRenderMarkerPresentation,
+) -> UiRenderInspectionPresentation {
+    let id = UiRenderInspectionPresentationId::new(model.id().raw());
+    let sections = vec![
+        build_overview_section(id, model),
+        build_diagnostics_section(id, diagnostics),
+        build_trace_section(id, trace),
+        build_markers_section(id, markers),
+    ];
+
+    UiRenderInspectionPresentation {
+        id,
+        source_render_model: model.id(),
+        source_projection: model.source_projection(),
+        sections,
+    }
+}
