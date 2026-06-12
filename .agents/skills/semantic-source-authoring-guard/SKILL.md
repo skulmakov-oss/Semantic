@@ -33,6 +33,25 @@ Hard rules:
 
 The two skills are complementary and non-overlapping.
 
+## Boundary With Repository Architecture Work
+
+This skill is only for Semantic `.sm` source authoring, fixtures, examples, and diagnostic probes.
+
+Use the main `semantic` skill instead for:
+- Rust source changes;
+- repository architecture;
+- UI / renderer work;
+- roadmap / closeout / ledger PRs;
+- Project #2 metadata;
+- capability / runtime / verifier / VM ownership;
+- Workbench / Studio boundaries;
+- agent skill governance.
+
+If a task combines `.sm` fixtures with architecture, renderer, roadmap, verifier, runtime, capability, or Project #2 workflow:
+1. Use the main `semantic` skill for repository and architectural boundaries.
+2. Use this source authoring guard only for the `.sm` fixture/source portion.
+3. Do not let `.sm` fixture convenience widen compiler, parser, verifier, runtime, or UI behavior.
+
 ## Required Source Authorities
 
 Read these canonical docs first:
@@ -56,6 +75,21 @@ Treat these live paths as stronger evidence than intuition and stronger than fut
 - `examples/**/*.sm`
 
 If docs and fixtures disagree, prefer the fixture/test evidence for current authoring and stop if the conflict cannot be resolved safely.
+
+## DNA-Aware Source Authoring
+
+For `.sm` authoring that touches public examples, doctrine, roadmap-facing examples, UI examples, capability examples, verifier examples, runtime examples, or language identity examples, inspect `docs/dna` before authoring.
+
+DNA-sensitive `.sm` work must report:
+- docs/dna inspected: YES/NO
+- DNA files inspected:
+- DNA alignment:
+- DNA conflicts detected:
+- DNA-driven constraints applied:
+
+If docs/dna conflicts with the proposed `.sm` example or fixture framing, stop and report the contradiction.
+
+If docs/dna is not relevant to a tiny local negative fixture, say so explicitly.
 
 ## Mandatory Authoring Workflow
 
@@ -219,7 +253,9 @@ Stop and report if:
 - `smc check` fails because the syntax is unsupported;
 - the requested fixture requires language widening;
 - the task would require compiler/runtime/parser/verifier changes but was scoped as test-only;
-- you are about to invent syntax to satisfy the task.
+- you are about to invent syntax to satisfy the task;
+- the `.sm` source would conflict with docs/dna project identity;
+- the task is actually repository architecture / renderer / roadmap work and should use the main `semantic` skill first.
 
 ## Acceptance Criteria
 
