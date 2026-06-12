@@ -81,7 +81,7 @@ fn test_source_trace_preservation() {
     let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
     artifact.set_source_ir_root(UiIrNodeId::new(50));
 
-    let mut node = UiProjectedNode::with_source_ir_node(
+    let node = UiProjectedNode::with_source_ir_node(
         UiProjectedNodeId::new(1),
         UiProjectedNodeKind::Element,
         UiIrNodeId::new(51),

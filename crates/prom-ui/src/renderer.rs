@@ -175,3 +175,161 @@ pub fn render_projection_to_model(
         nodes,
     })
 }
+
+// Diagnostics presentation is inert renderer-local metadata.
+// It must not rewrite verifier diagnostics, execute actions, authorize effects,
+// or mutate semantic/runtime state.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderDiagnosticsPresentation {
+    id: UiRenderDiagnosticsPresentationId,
+    source_render_model: UiRenderModelId,
+    source_projection: UiProjectionArtifactId,
+    items: Vec<UiRenderDiagnosticItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderDiagnosticsPresentationId(u64);
+
+impl UiRenderDiagnosticsPresentationId {
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderDiagnosticItem {
+    id: UiRenderDiagnosticItemId,
+    source_render_node: Option<UiRenderNodeId>,
+    source_projection_node: Option<UiProjectedNodeId>,
+    source_ir_node: Option<UiIrNodeId>,
+    kind: UiRenderDiagnosticKind,
+    severity: UiRenderDiagnosticSeverity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderDiagnosticItemId(u64);
+
+impl UiRenderDiagnosticItemId {
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiRenderDiagnosticKind {
+    DiagnosticMarker,
+    TraceMarker,
+    PropertyMarker,
+    ActionMarker,
+    EffectBoundaryMarker,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiRenderDiagnosticSeverity {
+    Info,
+    Warning,
+}
+
+impl UiRenderDiagnosticsPresentation {
+    pub fn id(&self) -> UiRenderDiagnosticsPresentationId {
+        self.id
+    }
+
+    pub fn source_render_model(&self) -> UiRenderModelId {
+        self.source_render_model
+    }
+
+    pub fn source_projection(&self) -> UiProjectionArtifactId {
+        self.source_projection
+    }
+
+    pub fn items(&self) -> &[UiRenderDiagnosticItem] {
+        &self.items
+    }
+}
+
+impl UiRenderDiagnosticItem {
+    pub fn id(&self) -> UiRenderDiagnosticItemId {
+        self.id
+    }
+
+    pub fn source_render_node(&self) -> Option<UiRenderNodeId> {
+        self.source_render_node
+    }
+
+    pub fn source_projection_node(&self) -> Option<UiProjectedNodeId> {
+        self.source_projection_node
+    }
+
+    pub fn source_ir_node(&self) -> Option<UiIrNodeId> {
+        self.source_ir_node
+    }
+
+    pub fn kind(&self) -> UiRenderDiagnosticKind {
+        self.kind
+    }
+
+    pub fn severity(&self) -> UiRenderDiagnosticSeverity {
+        self.severity
+    }
+}
+
+pub fn present_render_diagnostics(model: &UiRenderModel) -> UiRenderDiagnosticsPresentation {
+    let id = UiRenderDiagnosticsPresentationId(model.id().raw());
+    let mut items = Vec::new();
+
+    let mut item_counter = 0;
+    for node in model.nodes() {
+        for marker in node.markers() {
+            let (kind, severity) = match marker {
+                UiRenderMarker::Property => (
+                    UiRenderDiagnosticKind::PropertyMarker,
+                    UiRenderDiagnosticSeverity::Info,
+                ),
+                UiRenderMarker::Action => (
+                    UiRenderDiagnosticKind::ActionMarker,
+                    UiRenderDiagnosticSeverity::Warning,
+                ),
+                UiRenderMarker::EffectBoundary => (
+                    UiRenderDiagnosticKind::EffectBoundaryMarker,
+                    UiRenderDiagnosticSeverity::Warning,
+                ),
+                UiRenderMarker::Trace => (
+                    UiRenderDiagnosticKind::TraceMarker,
+                    UiRenderDiagnosticSeverity::Info,
+                ),
+            };
+
+            // Derive deterministic item ID from node ID and a local ordinal counter for markers
+            let mut hasher_val = node.id().raw().wrapping_mul(31);
+            hasher_val = hasher_val.wrapping_add(item_counter);
+            let item_id = UiRenderDiagnosticItemId(hasher_val);
+            item_counter += 1;
+
+            items.push(UiRenderDiagnosticItem {
+                id: item_id,
+                source_render_node: Some(node.id()),
+                source_projection_node: Some(node.source_projection_node()),
+                source_ir_node: node.source_ir_node(),
+                kind,
+                severity,
+            });
+        }
+    }
+
+    UiRenderDiagnosticsPresentation {
+        id,
+        source_render_model: model.id(),
+        source_projection: model.source_projection(),
+        items,
+    }
+}
