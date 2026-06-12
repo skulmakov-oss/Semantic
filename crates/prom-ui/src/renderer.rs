@@ -333,3 +333,154 @@ pub fn present_render_diagnostics(model: &UiRenderModel) -> UiRenderDiagnosticsP
         items,
     }
 }
+
+// Trace presentation is inert renderer-local metadata.
+// It must not act as proof, debugger state, verifier output,
+// runtime introspection, event dispatch, or semantic authority.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderTracePresentation {
+    id: UiRenderTracePresentationId,
+    source_render_model: UiRenderModelId,
+    source_projection: UiProjectionArtifactId,
+    links: Vec<UiRenderTraceLink>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderTracePresentationId(u64);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderTraceLink {
+    id: UiRenderTraceLinkId,
+    source_render_node: Option<UiRenderNodeId>,
+    source_projection_node: Option<UiProjectedNodeId>,
+    source_ir_node: Option<UiIrNodeId>,
+    kind: UiRenderTraceLinkKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderTraceLinkId(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiRenderTraceLinkKind {
+    RenderModelToProjection,
+    RenderNodeToProjectionNode,
+    RenderNodeToIrNode,
+}
+
+impl UiRenderTracePresentationId {
+    pub fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl UiRenderTraceLinkId {
+    pub fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl UiRenderTracePresentation {
+    pub fn id(&self) -> UiRenderTracePresentationId {
+        self.id
+    }
+
+    pub fn source_render_model(&self) -> UiRenderModelId {
+        self.source_render_model
+    }
+
+    pub fn source_projection(&self) -> UiProjectionArtifactId {
+        self.source_projection
+    }
+
+    pub fn links(&self) -> &[UiRenderTraceLink] {
+        &self.links
+    }
+}
+
+impl UiRenderTraceLink {
+    pub fn id(&self) -> UiRenderTraceLinkId {
+        self.id
+    }
+
+    pub fn source_render_node(&self) -> Option<UiRenderNodeId> {
+        self.source_render_node
+    }
+
+    pub fn source_projection_node(&self) -> Option<UiProjectedNodeId> {
+        self.source_projection_node
+    }
+
+    pub fn source_ir_node(&self) -> Option<UiIrNodeId> {
+        self.source_ir_node
+    }
+
+    pub fn kind(&self) -> UiRenderTraceLinkKind {
+        self.kind
+    }
+}
+
+pub fn present_render_trace(model: &UiRenderModel) -> UiRenderTracePresentation {
+    // Domain marker for trace presentation
+    let id_val = model.id().raw().wrapping_mul(31).wrapping_add(2);
+    let id = UiRenderTracePresentationId::new(id_val);
+
+    let mut links = Vec::new();
+    let mut link_counter = 0_u64;
+
+    // Model level link
+    let link_id_val = id.raw().wrapping_mul(17).wrapping_add(link_counter);
+    let link_id = UiRenderTraceLinkId::new(link_id_val);
+    link_counter += 1;
+
+    links.push(UiRenderTraceLink {
+        id: link_id,
+        source_render_node: None,
+        source_projection_node: None,
+        source_ir_node: model.source_ir_root(),
+        kind: UiRenderTraceLinkKind::RenderModelToProjection,
+    });
+
+    for node in model.nodes() {
+        let link_id_val = id.raw().wrapping_mul(17).wrapping_add(link_counter);
+        let link_id = UiRenderTraceLinkId::new(link_id_val);
+        link_counter += 1;
+
+        links.push(UiRenderTraceLink {
+            id: link_id,
+            source_render_node: Some(node.id()),
+            source_projection_node: Some(node.source_projection_node()),
+            source_ir_node: node.source_ir_node(),
+            kind: UiRenderTraceLinkKind::RenderNodeToProjectionNode,
+        });
+
+        if node.source_ir_node().is_some() {
+            let link_id_val = id.raw().wrapping_mul(17).wrapping_add(link_counter);
+            let link_id = UiRenderTraceLinkId::new(link_id_val);
+            link_counter += 1;
+
+            links.push(UiRenderTraceLink {
+                id: link_id,
+                source_render_node: Some(node.id()),
+                source_projection_node: Some(node.source_projection_node()),
+                source_ir_node: node.source_ir_node(),
+                kind: UiRenderTraceLinkKind::RenderNodeToIrNode,
+            });
+        }
+    }
+
+    UiRenderTracePresentation {
+        id,
+        source_render_model: model.id(),
+        source_projection: model.source_projection(),
+        links,
+    }
+}
