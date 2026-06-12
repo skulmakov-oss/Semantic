@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semantic.local/schemas/mission-control/semantic-graph-event.schema.json",
+  "title": "Semantic Graph Event",
+  "description": "Event protocol for Mission Control live graph construction.",
+  "type": "object",
+  "required": ["event", "run_id", "timestamp"],
+  "properties": {
+    "event": {
+      "type": "string",
+      "enum": [
+        "run.started",
+        "run.completed",
+        "node.added",
+        "node.updated",
+        "edge.added",
+        "edge.updated",
+        "check.started",
+        "check.completed",
+        "conflict.detected",
+        "verdict.emitted",
+        "snapshot.emitted"
+      ]
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "node": {
+      "$ref": "#/$defs/node"
+    },
+    "edge": {
+      "$ref": "#/$defs/edge"
+    },
+    "node_id": {
+      "type": "string"
+    },
+    "edge_id": {
+      "type": "string"
+    },
+    "patch": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "conflict": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "verdict": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["admitted", "rejected", "needs_review"]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "kind", "label", "status"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "module",
+            "namespace",
+            "type",
+            "function",
+            "contract",
+            "invariant",
+            "rule",
+            "effect",
+            "guard",
+            "proof",
+            "conflict",
+            "verdict",
+            "artifact"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "scanning",
+            "checking",
+            "verified",
+            "warning",
+            "conflict",
+            "unknown",
+            "admitted",
+            "rejected",
+            "needs_review"
+          ]
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["none", "low", "medium", "high", "critical"]
+        },
+        "file": {
+          "type": "string"
+        },
+        "line_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "line_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "symbol": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "edge": {
+      "type": "object",
+      "required": ["id", "source", "target", "type"],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "imports",
+            "calls",
+            "reads",
+            "writes",
+            "depends_on",
+            "proves",
+            "violates",
+            "conflicts_with",
+            "guards",
+            "emits",
+            "resolves_to",
+            "contains"
+          ]
+        },
+        "weight": {
+          "type": "number"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "active", "verified", "warning", "conflict"]
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["forward", "backward", "bidirectional"]
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}
