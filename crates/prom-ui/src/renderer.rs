@@ -484,3 +484,149 @@ pub fn present_render_trace(model: &UiRenderModel) -> UiRenderTracePresentation 
         links,
     }
 }
+
+// Marker presentation is inert renderer-local metadata.
+// It must not execute action markers, authorize effect markers,
+// or mutate semantic/runtime state.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderMarkerPresentation {
+    id: UiRenderMarkerPresentationId,
+    source_render_model: UiRenderModelId,
+    source_projection: UiProjectionArtifactId,
+    items: Vec<UiRenderMarkerItem>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderMarkerPresentationId(u64);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UiRenderMarkerItem {
+    id: UiRenderMarkerItemId,
+    source_render_node: UiRenderNodeId,
+    role: UiRenderMarkerVisualRole,
+    emphasis: UiRenderMarkerEmphasis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiRenderMarkerItemId(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiRenderMarkerVisualRole {
+    PropertyIndicator,
+    ActionIndicator,
+    EffectBoundaryIndicator,
+    TraceIndicator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiRenderMarkerEmphasis {
+    Subtle,
+    Prominent,
+}
+
+impl UiRenderMarkerPresentationId {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl UiRenderMarkerItemId {
+    pub const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
+impl UiRenderMarkerPresentation {
+    pub fn id(&self) -> UiRenderMarkerPresentationId {
+        self.id
+    }
+
+    pub fn source_render_model(&self) -> UiRenderModelId {
+        self.source_render_model
+    }
+
+    pub fn source_projection(&self) -> UiProjectionArtifactId {
+        self.source_projection
+    }
+
+    pub fn items(&self) -> &[UiRenderMarkerItem] {
+        &self.items
+    }
+}
+
+impl UiRenderMarkerItem {
+    pub fn id(&self) -> UiRenderMarkerItemId {
+        self.id
+    }
+
+    pub fn source_render_node(&self) -> UiRenderNodeId {
+        self.source_render_node
+    }
+
+    pub fn role(&self) -> UiRenderMarkerVisualRole {
+        self.role
+    }
+
+    pub fn emphasis(&self) -> UiRenderMarkerEmphasis {
+        self.emphasis
+    }
+}
+
+pub fn present_render_markers(model: &UiRenderModel) -> UiRenderMarkerPresentation {
+    // Domain marker for marker presentation
+    let id_val = model.id().raw().wrapping_mul(31).wrapping_add(3);
+    let id = UiRenderMarkerPresentationId::new(id_val);
+
+    let mut items = Vec::new();
+    let mut item_counter = 0_u64;
+
+    for node in model.nodes() {
+        for marker in node.markers() {
+            let (role, emphasis) = match marker {
+                UiRenderMarker::Property => (
+                    UiRenderMarkerVisualRole::PropertyIndicator,
+                    UiRenderMarkerEmphasis::Subtle,
+                ),
+                UiRenderMarker::Action => (
+                    UiRenderMarkerVisualRole::ActionIndicator,
+                    UiRenderMarkerEmphasis::Prominent,
+                ),
+                UiRenderMarker::EffectBoundary => (
+                    UiRenderMarkerVisualRole::EffectBoundaryIndicator,
+                    UiRenderMarkerEmphasis::Prominent,
+                ),
+                UiRenderMarker::Trace => (
+                    UiRenderMarkerVisualRole::TraceIndicator,
+                    UiRenderMarkerEmphasis::Subtle,
+                ),
+            };
+
+            let item_id_val = id.raw().wrapping_mul(17).wrapping_add(item_counter);
+            let item_id = UiRenderMarkerItemId::new(item_id_val);
+            item_counter += 1;
+
+            items.push(UiRenderMarkerItem {
+                id: item_id,
+                source_render_node: node.id(),
+                role,
+                emphasis,
+            });
+        }
+    }
+
+    UiRenderMarkerPresentation {
+        id,
+        source_render_model: model.id(),
+        source_projection: model.source_projection(),
+        items,
+    }
+}
