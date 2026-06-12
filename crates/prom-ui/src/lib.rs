@@ -50,6 +50,7 @@ pub mod prepared_effect;
 pub mod prepared_effect_result;
 pub mod projection;
 pub mod raw_event;
+pub mod renderer;
 pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
 pub mod trace;
@@ -214,6 +215,10 @@ pub use projection::{
 pub use raw_event::{
     map_raw_event_to_interaction_intent, RawKeyCode, RawPointerButton, RawTextInput, RawUiEvent,
     RawUiEventId, RawUiEventKind, RawUiEventPayload, RawUiEventTarget,
+};
+pub use renderer::{
+    render_projection_to_model, UiRenderError, UiRenderMarker, UiRenderModel, UiRenderModelId,
+    UiRenderNode, UiRenderNodeId, UiRenderNodeKind,
 };
 pub use runtime_capability_mapping::{
     describe_interaction_runtime_capability_mapping, InteractionRuntimeCapabilityMappingDescriptor,
