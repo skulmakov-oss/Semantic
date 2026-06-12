@@ -408,6 +408,54 @@ Preserve order:
     -> renderer
     -> native backend
 
+R12_RENDERER_PRESENTATION_RULES:
+- Renderer presentation layers are inert renderer-local metadata.
+- Renderer presentation may consume UiRenderModel, UiProjectionArtifact, projected node IDs, source IR IDs, trace references, diagnostics markers, and render markers through existing public APIs.
+- Renderer presentation may build deterministic presentation models.
+- Renderer presentation may classify display roles, emphasis, trace links, diagnostics items, and marker hints.
+- Renderer presentation must not execute actions.
+- Renderer presentation must not authorize effects.
+- Renderer presentation must not dispatch events.
+- Renderer presentation must not become capability admission.
+- Renderer presentation must not call runtime, verifier, VM, Workbench, or Studio.
+- Renderer presentation must not rewrite verifier diagnostics.
+- Renderer presentation must not prove semantic truth.
+- Renderer presentation must not treat visual state as source-of-truth state.
+- Renderer presentation must not treat trace as proof.
+- Renderer presentation must not treat diagnostics presentation as verifier output.
+- Renderer presentation must not treat ActionAffordance as an event handler.
+- Renderer presentation must not treat EffectBoundaryWarning as capability approval.
+- Renderer presentation must not treat PropertyHint as semantic truth.
+
+Allowed renderer presentation layers:
+- diagnostics presentation;
+- trace presentation;
+- marker presentation;
+- future inspection/presentation models if explicitly admitted.
+
+Forbidden without separate admitted boundary:
+- backend rendering;
+- WGPU/winit/Tauri integration;
+- layout engine;
+- draw engine;
+- event loop;
+- event dispatch;
+- runtime/verifier/VM bridge;
+- capability gate implementation;
+- Workbench/Studio integration;
+- host file/network/process handles.
+
+Required renderer presentation tests:
+- deterministic model identity;
+- deterministic item/link identity;
+- read-only input preservation;
+- source projection/reference preservation where exposed;
+- explicit absence of action execution;
+- explicit absence of effect authorization;
+- explicit absence of event dispatch;
+- explicit absence of runtime/verifier/VM/capability authority;
+- public API signature locks when adding public presentation APIs.
+
 UI_INTERACTION_RULES:
 - Native event is not semantic intent.
 - Intent is not action.
@@ -472,6 +520,37 @@ Still out of scope unless explicitly admitted:
 - browser target;
 - mobile target;
 - Workbench integration as core behavior.
+
+DNA_RULES:
+- docs/dna is the project identity layer.
+- For Semantic architecture, UI, renderer, roadmap, ownership, status, capability, audit, runtime, verifier, VM, Workbench, Studio, or agent-skill work, inspect docs/dna before editing.
+- If docs/dna is stricter than the local task, docs/dna wins.
+- If docs/dna conflicts with the requested task, stop and report the contradiction.
+- If docs/dna is missing or unreadable in a DNA-sensitive task, stop and report.
+
+Required DNA preflight for DNA-sensitive work:
+  find docs/dna -maxdepth 2 -type f | sort
+
+PowerShell equivalent:
+  Get-ChildItem docs/dna -Recurse -File | Sort-Object FullName
+
+For each relevant DNA file:
+- read it before editing;
+- extract applicable constraints;
+- report DNA alignment in the final output.
+
+Final output must include:
+- docs/dna inspected: YES/NO
+- DNA files inspected:
+- DNA alignment:
+- DNA conflicts detected:
+- DNA-driven constraints applied:
+
+Stop conditions:
+- STOP — DOCS/DNA NOT FOUND
+- STOP — DOCS/DNA INSPECTION FAILED
+- STOP — TASK CONFLICTS WITH PROJECT DNA
+- STOP — DNA AUTHORITY BOUNDARY VIOLATION
 
 RUNTIME_OWNERSHIP_RULES:
 - Current frozen slice:
@@ -556,6 +635,45 @@ TEST_POLICY:
   ensure Workbench does not redefine core Semantic behavior.
 - no_std-sensitive change =>
   cargo check --no-default-features where relevant.
+
+ROADMAP_LEDGER_DISCIPLINE:
+- Roadmap/closeout/audit documents must be honest evidence records, not aspirations.
+- Do not claim future work as implemented.
+- Do not claim "clean" unless post-merge validation was actually run.
+- Closeout documents for POST-UI roadmap work belong under:
+  docs/roadmap/post_ui/
+- Do not place R12 POST-UI closeouts directly under docs/.
+- PR body files are temporary and must not be committed.
+- Never commit pr_body_*.md files.
+- Never commit temporary Project update scripts.
+- Temporary scripts must be removed before final status.
+- If temporary files accidentally reach main, create an explicit cleanup PR.
+- Project #2 metadata must be verified by actual field values, not described conceptually.
+- "Conceptually updated" is not acceptable as evidence.
+- Final ledger reports must include changed files, merge commits, Project #2 metadata, duplicate item count, validation commands, and repository cleanliness.
+
+Required post-merge audit for roadmap/source package work:
+  git fetch origin main
+  git switch --detach origin/main
+  git status --short --branch
+  git log --oneline -10
+  git rev-parse HEAD
+  git show --name-only --format="" HEAD
+  cargo fmt --check
+  cargo test -p prom-ui --lib
+  cargo test -p prom-ui
+  git diff --check
+  git ls-files | grep "pr_body" || true
+
+PowerShell equivalent for pr_body scan:
+  git ls-files | Select-String "pr_body"
+
+Stop conditions:
+- STOP — TRACKED PR BODY ARTIFACT DETECTED
+- STOP — ROADMAP CLOSEOUT IN WRONG DIRECTORY
+- STOP — PROJECT METADATA ONLY CONCEPTUALLY UPDATED
+- STOP — POST-MERGE VALIDATION NOT RUN
+- STOP — LEDGER CLAIM EXCEEDS EVIDENCE
 
 PREFERRED_COMMANDS:
 - cargo fmt --check
