@@ -2,28 +2,37 @@ use prom_ui::layout::{
     layout_render_model, present_layout_inspection, UiLayoutInspectionItemKind,
     UiLayoutInspectionSectionKind,
 };
-use prom_ui::model::{UiIr, UiIrNodeId};
-use prom_ui::projection::project_ir_to_projection;
-use prom_ui::renderer::render_projection_to_model;
+use prom_ui::model::UiIrNodeId;
+use prom_ui::projection::{
+    UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionArtifact,
+    UiProjectionArtifactId,
+};
+use prom_ui::renderer::{render_projection_to_model, UiRenderModel};
 
-fn get_test_ir() -> UiIr {
-    let mut ir = UiIr::new();
-    let parent = UiIrNodeId::new(100);
-    let child1 = UiIrNodeId::new(101);
-    let child2 = UiIrNodeId::new(102);
+fn create_test_render_model() -> UiRenderModel {
+    let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(100));
+    artifact.set_source_ir_root(UiIrNodeId::new(10));
 
-    ir.add_node(parent, None, "test_parent".to_string());
-    ir.add_node(child1, Some(parent), "test_child1".to_string());
-    ir.add_node(child2, Some(parent), "test_child2".to_string());
-    ir.set_roots(vec![parent]);
-    ir
+    let root = UiProjectedNode::with_source_ir_node(
+        UiProjectedNodeId::new(1),
+        UiProjectedNodeKind::Root,
+        UiIrNodeId::new(11),
+    );
+    artifact.push_node(root);
+
+    let element = UiProjectedNode::with_source_ir_node(
+        UiProjectedNodeId::new(2),
+        UiProjectedNodeKind::Element,
+        UiIrNodeId::new(12),
+    );
+    artifact.push_node(element);
+
+    render_projection_to_model(&artifact).unwrap()
 }
 
 #[test]
 fn layout_inspection_presentation_preserves_layout_model_identity() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -36,9 +45,7 @@ fn layout_inspection_presentation_preserves_layout_model_identity() {
 
 #[test]
 fn layout_inspection_presentation_preserves_source_render_model() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -50,9 +57,7 @@ fn layout_inspection_presentation_preserves_source_render_model() {
 
 #[test]
 fn layout_inspection_presentation_preserves_source_projection() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -64,9 +69,7 @@ fn layout_inspection_presentation_preserves_source_projection() {
 
 #[test]
 fn layout_inspection_presentation_preserves_source_ir_root() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -75,9 +78,7 @@ fn layout_inspection_presentation_preserves_source_ir_root() {
 
 #[test]
 fn layout_inspection_sections_are_deterministic() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -95,9 +96,7 @@ fn layout_inspection_sections_are_deterministic() {
 
 #[test]
 fn layout_inspection_slot_items_preserve_slot_identity() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -116,9 +115,7 @@ fn layout_inspection_slot_items_preserve_slot_identity() {
 
 #[test]
 fn layout_inspection_node_items_preserve_layout_node_identity() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -137,9 +134,7 @@ fn layout_inspection_node_items_preserve_layout_node_identity() {
 
 #[test]
 fn layout_inspection_node_items_preserve_render_node_identity() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -157,9 +152,7 @@ fn layout_inspection_node_items_preserve_render_node_identity() {
 
 #[test]
 fn layout_inspection_node_items_preserve_projection_node_identity() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -177,9 +170,7 @@ fn layout_inspection_node_items_preserve_projection_node_identity() {
 
 #[test]
 fn layout_inspection_node_items_preserve_source_ir_node_identity() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -197,9 +188,7 @@ fn layout_inspection_node_items_preserve_source_ir_node_identity() {
 
 #[test]
 fn layout_inspection_item_order_is_deterministic() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
@@ -215,9 +204,7 @@ fn layout_inspection_item_order_is_deterministic() {
 
 #[test]
 fn repeated_layout_inspection_is_deterministic() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let p1 = present_layout_inspection(&layout_model);
@@ -234,9 +221,7 @@ fn repeated_layout_inspection_is_deterministic() {
 
 #[test]
 fn layout_inspection_public_api_signature_lock() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation: prom_ui::layout::UiLayoutInspectionPresentation =
@@ -249,21 +234,15 @@ fn layout_inspection_public_api_signature_lock() {
 
 #[test]
 fn layout_inspection_is_read_only_observability() {
-    let ir = get_test_ir();
-    let projection = project_ir_to_projection(&ir).unwrap();
-    let render_model = render_projection_to_model(&projection).unwrap();
+    let render_model = create_test_render_model();
     let layout_model = layout_render_model(&render_model);
 
     let presentation = present_layout_inspection(&layout_model);
 
-    // We only read from it.
     assert!(presentation.items().len() > 0);
 }
 
 #[test]
 fn layout_inspection_has_no_geometry_draw_event_backend_authority() {
-    // This test ensures we only access the vocabulary and ID preserving methods.
-    // If geometry, draw, event, or backend methods were added to the API,
-    // they are not verified or used here, aligning with the inert rule.
     assert!(true);
 }
