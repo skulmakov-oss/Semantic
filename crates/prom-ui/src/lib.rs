@@ -44,6 +44,7 @@ pub mod host_runtime_effect_denial_trace;
 pub mod host_runtime_effect_result;
 pub mod intent_stream;
 pub mod interaction;
+pub mod layout;
 pub mod lowering;
 pub mod model;
 pub mod prepared_effect;
