@@ -10,7 +10,7 @@ fn create_test_render_model() -> UiRenderModel {
     let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(100));
     artifact.set_source_ir_root(UiIrNodeId::new(10));
 
-    let mut root = UiProjectedNode::with_source_ir_node(
+    let root = UiProjectedNode::with_source_ir_node(
         UiProjectedNodeId::new(1),
         UiProjectedNodeKind::Root,
         UiIrNodeId::new(11),
