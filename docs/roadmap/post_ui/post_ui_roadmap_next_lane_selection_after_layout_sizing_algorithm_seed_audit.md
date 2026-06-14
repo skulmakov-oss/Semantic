@@ -15,10 +15,13 @@ DNA-driven constraints applied:
 - constraints seed remains inert renderer-local metadata declarations;
 - sizing seed remains inert renderer-local metadata/result declarations;
 - sizing algorithm seed remains deterministic renderer-local metadata derivation substrate;
-- measuring boundary must remain docs-only;
-- measuring boundary must not implement text/glyph/image/widget measurement;
-- measuring boundary must not introduce backend/font/GPU measurement authority;
+- measuring boundary remains docs-only;
+- measuring boundary must not introduce measuring source;
+- measuring boundary must not introduce text/glyph/image/widget measurement;
+- measuring boundary must not introduce font/backend/GPU measurement authority;
+- measuring boundary must not introduce WGPU/winit/Tauri authority;
 - measuring boundary must not introduce size-to-fit authority;
+- measuring boundary must not introduce intrinsic/content size calculation as executable behavior;
 - measuring boundary must not introduce constraint solver authority;
 - measuring boundary must not introduce constraint satisfaction authority;
 - measuring boundary must not introduce layout solving;
@@ -33,6 +36,7 @@ DNA-driven constraints applied:
 - #1014 — layout sizing algorithm seed source
 - #1015 — layout sizing algorithm seed closeout
 - #1016 — layout sizing algorithm seed ledger audit
+- #1017 — roadmap selected measuring boundary
 
 ## 4. Sizing Algorithm Seed State
 Sizing algorithm seed is closed as a minimal deterministic renderer-local sizing metadata derivation substrate. It implements deterministic sizing algorithm metadata only and does not implement measuring algorithm behavior, size-to-fit behavior, intrinsic/content size calculation, glyph/text/image/widget measurement, constraint solver behavior, constraint satisfaction, layout solving, layout engine rewrite, draw/event/backend systems, runtime/verifier/VM integration, capability admission, proof/debugger authority, or Workbench/Studio integration.
@@ -44,6 +48,7 @@ Project #2 item states are clean for the corrected sizing seed line:
 - #1014: Done | POST-UI | R12 | Code | High | Renderer | PRReady | PR | #1013
 - #1015: Done | POST-UI | R12 | Closeout | Medium | Renderer | Release Artifact | Roadmap doc | #1014
 - #1016: Done | POST-UI | R12 | Audit | Medium | Renderer | FullPreflight | Roadmap doc | #1015
+- #1017: Done | POST-UI | R12 | Roadmap | Medium | Renderer | Planning-only | Roadmap doc | #1016
 
 ## 6. Candidate Lanes
 | Candidate | Classification | Reason | Risk | Decision |
@@ -64,15 +69,16 @@ Project #2 item states are clean for the corrected sizing seed line:
 4. Must not implement measuring source in the roadmap selection PR.
 5. Must not introduce text/glyph/image/widget measurement.
 6. Must not introduce font/backend/GPU measurement.
-7. Must not introduce size-to-fit behavior.
-8. Must not introduce intrinsic/content size calculation as executable behavior.
-9. Must not introduce constraint solver behavior.
-10. Must not introduce constraint satisfaction behavior.
-11. Must not introduce layout solving.
-12. Must not introduce draw/event/backend.
-13. Must not introduce runtime/verifier/VM/capability authority.
-14. Must build naturally on closed sizing algorithm seed and audit.
-15. Must be boundary-gated before any measuring source exists.
+7. Must not introduce WGPU/winit/Tauri authority.
+8. Must not introduce size-to-fit behavior.
+9. Must not introduce intrinsic/content size calculation as executable behavior.
+10. Must not introduce constraint solver behavior.
+11. Must not introduce constraint satisfaction behavior.
+12. Must not introduce layout solving.
+13. Must not introduce draw/event/backend.
+14. Must not introduce runtime/verifier/VM/capability authority.
+15. Must build naturally on closed sizing algorithm seed and audit.
+16. Must be boundary-gated before any measuring source exists.
 
 ## 8. Selected Next Lane
 Selected next lane:
@@ -82,6 +88,7 @@ This selection is planning-only.
 This selection does not implement measuring source.
 This selection does not implement text/glyph/image/widget measurement.
 This selection does not implement font/backend/GPU measurement.
+This selection does not implement WGPU/winit/Tauri measurement authority.
 This selection does not implement size-to-fit behavior.
 This selection does not implement intrinsic/content size calculation as executable behavior.
 This selection does not implement constraint solver behavior.
@@ -122,6 +129,7 @@ Sizing algorithm seed remains deterministic renderer-local metadata derivation s
 - no measuring source
 - no text/glyph/image/widget measurement
 - no font/backend/GPU measurement
+- no WGPU/winit/Tauri measurement authority
 - no size-to-fit behavior
 - no intrinsic/content size calculation as executable behavior
 - no constraint solver
@@ -139,6 +147,6 @@ PASS WITH WARNINGS — POST-UI next lane selected after layout sizing algorithm 
 
 The next selected lane is R12-UI-RENDERER-LAYOUT-MEASURING-BOUNDARY-LINE-FULL-PACKAGE.
 
-This selection is planning-only and does not implement measuring source, text/glyph/image/widget measurement, font/backend/GPU measurement, size-to-fit behavior, intrinsic/content size calculation as executable behavior, constraint solver behavior, constraint satisfaction, layout solving, draw/event/backend systems, runtime/verifier/VM integration, capability admission, proof/debugger authority, or Workbench/Studio integration.
+This selection is planning-only and does not implement measuring source, text/glyph/image/widget measurement, font/backend/GPU measurement, WGPU/winit/Tauri measurement authority, size-to-fit behavior, intrinsic/content size calculation as executable behavior, constraint solver behavior, constraint satisfaction, layout solving, draw/event/backend systems, runtime/verifier/VM integration, capability admission, proof/debugger authority, or Workbench/Studio integration.
 
 Tracked repository state remains clean for this roadmap selection. Pre-existing untracked local workspace artifacts are not staged, not committed, and not merged.
