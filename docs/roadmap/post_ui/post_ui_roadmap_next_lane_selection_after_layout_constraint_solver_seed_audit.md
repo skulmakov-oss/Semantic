@@ -7,9 +7,13 @@ This document selects the next POST-UI roadmap lane after the completed and audi
 ## 2. DNA Alignment
 
 DNA inspected: YES
-DNA source path: docs/dna/SEMANTIC_UI_DNA.md
+DNA source paths inspected:
+- docs/dna/SEMANTIC_UI_DNA.md
+- docs/DNA.md
+
 docs/dna directory present: YES
-docs/DNA.md present: NO
+docs/dna/SEMANTIC_UI_DNA.md present: YES
+docs/DNA.md present: YES
 DNA conflicts detected: NONE
 DNA-driven constraints applied:
 - renderer/UI remains downstream;
@@ -76,8 +80,9 @@ Before introducing layout solving authority, real constraint solving, final rect
 
 ## 5. Project #2 State
 
-Project #2 items verified.
-Project #2 requires manual review to confirm duplicate items and counts.
+Project #2 state observed.
+Project #2 metadata for the roadmap PR was recorded.
+Project #2 duplicate/count verification remains manual-review pending where API evidence was incomplete.
 
 ## 6. Candidate Lanes
 
