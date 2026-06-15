@@ -4,10 +4,15 @@
 
 The `R12-UI-RENDERER-LAYOUT-SOLVING-SEED-LINE-FULL-PACKAGE` lane is complete.
 
-The source PR has been successfully merged:
+Lineage:
+*   **#1053** — roadmap selected layout solving seed
+*   **#1054** — renderer layout solving seed source
+*   **#1055** — renderer layout solving seed closeout (this boundary)
 
-*   **PR**: #1054
-*   **Target**: `main`
+Path:
+```text
+docs/roadmap/post_ui/r12_ui_renderer_layout_solving_seed_closeout.md
+```
 
 ## Verification
 
@@ -19,5 +24,7 @@ The Layout Solving Seed meets all requirements:
 
 ## Next Steps
 
-1.  Acknowledge this closeout.
-2.  Perform a Ledger Audit for the Layout Solving Seed.
+Recommended Next Gate:
+```text
+R12-UI-RENDERER-LAYOUT-SOLVING-SEED-LEDGER-AUDIT-PR
+```
