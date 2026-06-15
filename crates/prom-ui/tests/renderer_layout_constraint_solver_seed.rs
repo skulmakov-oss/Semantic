@@ -2,7 +2,7 @@ use prom_ui::layout::{
     build_layout_constraint_solver, build_layout_constraints, build_layout_geometry,
     build_layout_measuring, build_layout_size_to_fit, build_layout_sizing,
     build_layout_sizing_algorithm, layout_render_model, UiLayoutConstraintSolverKind,
-    UiLayoutConstraintSolverModel, UiLayoutConstraintSolverState,
+    UiLayoutConstraintSolverState,
 };
 use prom_ui::model::UiIrNodeId;
 use prom_ui::projection::{
