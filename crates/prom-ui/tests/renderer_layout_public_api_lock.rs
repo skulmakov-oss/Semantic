@@ -193,7 +193,7 @@ fn repeated_layout_render_model_is_deterministic() {
 
 #[test]
 fn layout_api_exposes_no_geometry_contract() {
-    let code = include_str!("../src/layout.rs");
+    let code = include_str!("../src/layout/base.rs");
     assert!(!code.contains("pub width"));
     assert!(!code.contains("pub height"));
     assert!(!code.contains("pub x:"));
@@ -202,7 +202,7 @@ fn layout_api_exposes_no_geometry_contract() {
 
 #[test]
 fn layout_api_exposes_no_draw_event_backend_contract() {
-    let code = include_str!("../src/layout.rs");
+    let code = include_str!("../src/layout/base.rs");
     assert!(!code.contains("draw"));
     assert!(!code.contains("event"));
     assert!(!code.contains("wgpu"));
