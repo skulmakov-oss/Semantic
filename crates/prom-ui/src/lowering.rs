@@ -137,7 +137,7 @@ const fn map_supported_kind(kind: UiAstNodeKind) -> UiIrNodeKind {
         UiAstNodeKind::Fragment => UiIrNodeKind::Fragment,
         UiAstNodeKind::Attribute => UiIrNodeKind::Property,
         UiAstNodeKind::Action => UiIrNodeKind::Action,
-        UiAstNodeKind::Binding => UiIrNodeKind::Root, // Fallback for unsupported
+        UiAstNodeKind::Binding => UiIrNodeKind::Root, // unreachable after unsupported diagnostics
     }
 }
 
