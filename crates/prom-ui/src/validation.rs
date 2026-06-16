@@ -18,8 +18,278 @@
 use alloc::vec::Vec;
 
 use crate::model::{
-    UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIr, UiIrNode, UiIrNodeId, UiIrNodeKind,
+    UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIr, UiIrNode, UiIrNodeId, UiIrNodeKind, UiNode,
+    UiNodeId, UiNodeKind, UiTree,
 };
+
+/// Inert configuration placeholder for the minimal UI tree validation seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct UiTreeValidationConfig;
+
+/// Structured diagnostic kind for the minimal UI tree validation seed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UiTreeValidationDiagnosticKind {
+    /// A node identifier appears more than once in the tree.
+    DuplicateNodeId(UiNodeId),
+    /// A node references a missing parent node.
+    MissingParentTarget {
+        node_id: UiNodeId,
+        parent_id: UiNodeId,
+    },
+    /// A node references a missing child node.
+    MissingChildTarget {
+        node_id: UiNodeId,
+        child_id: UiNodeId,
+    },
+    /// The parent/child relationship is inconsistent in the tree.
+    InconsistentParentChild {
+        parent_id: UiNodeId,
+        child_id: UiNodeId,
+    },
+    /// A node names itself as its own parent.
+    SelfParent(UiNodeId),
+    /// A node names itself as one of its children.
+    SelfChild(UiNodeId),
+    /// More than one root node exists in the tree.
+    MultipleRoots,
+}
+
+/// Structured diagnostic for a tree validation failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UiTreeValidationDiagnostic {
+    node_id: Option<UiNodeId>,
+    kind: UiTreeValidationDiagnosticKind,
+}
+
+impl UiTreeValidationDiagnostic {
+    /// Creates a validation diagnostic for a specific tree node.
+    pub const fn new(node_id: Option<UiNodeId>, kind: UiTreeValidationDiagnosticKind) -> Self {
+        Self { node_id, kind }
+    }
+
+    /// Returns the tree node id associated with the diagnostic, if any.
+    pub const fn node_id(&self) -> Option<UiNodeId> {
+        self.node_id
+    }
+
+    /// Returns the diagnostic kind.
+    pub const fn kind(&self) -> UiTreeValidationDiagnosticKind {
+        self.kind
+    }
+}
+
+/// Collection of structured tree validation diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
+pub struct UiTreeValidationDiagnostics {
+    diagnostics: Vec<UiTreeValidationDiagnostic>,
+}
+
+impl UiTreeValidationDiagnostics {
+    /// Creates a diagnostics collection from a vector.
+    pub fn new(diagnostics: Vec<UiTreeValidationDiagnostic>) -> Self {
+        Self { diagnostics }
+    }
+
+    /// Returns whether there are no diagnostics.
+    pub fn is_empty(&self) -> bool {
+        self.diagnostics.is_empty()
+    }
+
+    /// Returns the number of diagnostics.
+    pub fn len(&self) -> usize {
+        self.diagnostics.len()
+    }
+
+    /// Returns the diagnostics as a slice.
+    pub fn diagnostics(&self) -> &[UiTreeValidationDiagnostic] {
+        &self.diagnostics
+    }
+
+    /// Returns an iterator over the diagnostics.
+    pub fn iter(&self) -> core::slice::Iter<'_, UiTreeValidationDiagnostic> {
+        self.diagnostics.iter()
+    }
+
+    /// Returns the first diagnostic, if any.
+    pub fn first(&self) -> Option<&UiTreeValidationDiagnostic> {
+        self.diagnostics.first()
+    }
+
+    /// Converts the collection into a vector.
+    pub fn into_vec(self) -> Vec<UiTreeValidationDiagnostic> {
+        self.diagnostics
+    }
+}
+
+/// Result of the minimal tree validation seed.
+pub type UiTreeValidationResult = Result<(), UiTreeValidationDiagnostics>;
+
+/// Validates a minimal inert Semantic UI tree.
+///
+/// The first seed validates local structural properties only.
+/// Resolution metadata (Known/Unknown/Conflict) is preserved but does not affect structural validity.
+pub fn validate_tree(tree: &UiTree, config: &UiTreeValidationConfig) -> UiTreeValidationResult {
+    let _ = config;
+
+    if tree.is_empty() {
+        return Ok(());
+    }
+
+    let nodes = tree.nodes();
+    let mut diagnostics = Vec::new();
+    let mut seen_inconsistent_pairs: Vec<(UiNodeId, UiNodeId)> = Vec::new();
+    let mut seen_root = false;
+
+    for (index, node) in nodes.iter().enumerate() {
+        if nodes[..index]
+            .iter()
+            .any(|previous| previous.id() == node.id())
+        {
+            diagnostics.push(UiTreeValidationDiagnostic::new(
+                Some(node.id()),
+                UiTreeValidationDiagnosticKind::DuplicateNodeId(node.id()),
+            ));
+        }
+
+        if node.kind() == UiNodeKind::Root {
+            if seen_root {
+                diagnostics.push(UiTreeValidationDiagnostic::new(
+                    Some(node.id()),
+                    UiTreeValidationDiagnosticKind::MultipleRoots,
+                ));
+            } else {
+                seen_root = true;
+            }
+        }
+
+        validate_tree_parent_relationship(
+            nodes,
+            node,
+            &mut diagnostics,
+            &mut seen_inconsistent_pairs,
+        );
+        validate_tree_child_relationships(
+            nodes,
+            node,
+            &mut diagnostics,
+            &mut seen_inconsistent_pairs,
+        );
+    }
+
+    if diagnostics.is_empty() {
+        Ok(())
+    } else {
+        Err(UiTreeValidationDiagnostics::new(diagnostics))
+    }
+}
+
+fn validate_tree_parent_relationship(
+    nodes: &[UiNode],
+    node: &UiNode,
+    diagnostics: &mut Vec<UiTreeValidationDiagnostic>,
+    seen_inconsistent_pairs: &mut Vec<(UiNodeId, UiNodeId)>,
+) {
+    let Some(parent_id) = node.parent() else {
+        return;
+    };
+
+    if parent_id == node.id() {
+        diagnostics.push(UiTreeValidationDiagnostic::new(
+            Some(node.id()),
+            UiTreeValidationDiagnosticKind::SelfParent(node.id()),
+        ));
+        return;
+    }
+
+    let Some(parent_node) = find_tree_node(nodes, parent_id) else {
+        diagnostics.push(UiTreeValidationDiagnostic::new(
+            Some(node.id()),
+            UiTreeValidationDiagnosticKind::MissingParentTarget {
+                node_id: node.id(),
+                parent_id,
+            },
+        ));
+        return;
+    };
+
+    if !parent_node.children().contains(&node.id()) {
+        push_tree_inconsistent_pair(
+            diagnostics,
+            seen_inconsistent_pairs,
+            parent_id,
+            node.id(),
+            Some(node.id()),
+        );
+    }
+}
+
+fn validate_tree_child_relationships(
+    nodes: &[UiNode],
+    node: &UiNode,
+    diagnostics: &mut Vec<UiTreeValidationDiagnostic>,
+    seen_inconsistent_pairs: &mut Vec<(UiNodeId, UiNodeId)>,
+) {
+    for &child_id in node.children() {
+        if child_id == node.id() {
+            diagnostics.push(UiTreeValidationDiagnostic::new(
+                Some(node.id()),
+                UiTreeValidationDiagnosticKind::SelfChild(node.id()),
+            ));
+            continue;
+        }
+
+        let Some(child_node) = find_tree_node(nodes, child_id) else {
+            diagnostics.push(UiTreeValidationDiagnostic::new(
+                Some(node.id()),
+                UiTreeValidationDiagnosticKind::MissingChildTarget {
+                    node_id: node.id(),
+                    child_id,
+                },
+            ));
+            continue;
+        };
+
+        if child_node.parent() != Some(node.id()) {
+            push_tree_inconsistent_pair(
+                diagnostics,
+                seen_inconsistent_pairs,
+                node.id(),
+                child_id,
+                Some(node.id()),
+            );
+        }
+    }
+}
+
+fn push_tree_inconsistent_pair(
+    diagnostics: &mut Vec<UiTreeValidationDiagnostic>,
+    seen_inconsistent_pairs: &mut Vec<(UiNodeId, UiNodeId)>,
+    parent_id: UiNodeId,
+    child_id: UiNodeId,
+    node_id: Option<UiNodeId>,
+) {
+    if seen_inconsistent_pairs
+        .iter()
+        .any(|&(seen_parent_id, seen_child_id)| {
+            seen_parent_id == parent_id && seen_child_id == child_id
+        })
+    {
+        return;
+    }
+
+    seen_inconsistent_pairs.push((parent_id, child_id));
+    diagnostics.push(UiTreeValidationDiagnostic::new(
+        node_id,
+        UiTreeValidationDiagnosticKind::InconsistentParentChild {
+            parent_id,
+            child_id,
+        },
+    ));
+}
+
+fn find_tree_node(nodes: &[UiNode], id: UiNodeId) -> Option<&UiNode> {
+    nodes.iter().find(|node| node.id() == id)
+}
 
 /// Inert configuration placeholder for the minimal AST validation seed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
