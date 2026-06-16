@@ -99,7 +99,10 @@ fn layout_solving_result_model_can_be_built_from_existing_fixture() {
         result_model.source_projection(),
         solving_model.source_projection()
     );
-    assert_eq!(result_model.source_ir_root(), solving_model.source_ir_root());
+    assert_eq!(
+        result_model.source_ir_root(),
+        solving_model.source_ir_root()
+    );
 }
 
 #[test]
@@ -193,7 +196,10 @@ fn layout_solving_result_entries_preserve_source_references() {
             result_entry.source_projection_node(),
             solving_entry.source_projection_node()
         );
-        assert_eq!(result_entry.source_ir_node(), solving_entry.source_ir_node());
+        assert_eq!(
+            result_entry.source_ir_node(),
+            solving_entry.source_ir_node()
+        );
     }
 }
 
