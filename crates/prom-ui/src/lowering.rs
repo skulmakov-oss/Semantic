@@ -88,11 +88,11 @@ pub type UiLoweringResult = Result<UiIr, UiLoweringDiagnostics>;
 /// - Element
 /// - Text
 /// - Fragment
+/// - Attribute
+/// - Action
 ///
 /// Unsupported AST kinds return diagnostics:
-/// - Attribute
 /// - Binding
-/// - Action
 pub fn lower_ast_to_ir(ast: &UiAst, config: &UiLoweringConfig) -> UiLoweringResult {
     let _ = config;
 
@@ -135,9 +135,9 @@ const fn map_supported_kind(kind: UiAstNodeKind) -> UiIrNodeKind {
         UiAstNodeKind::Element => UiIrNodeKind::Element,
         UiAstNodeKind::Text => UiIrNodeKind::Text,
         UiAstNodeKind::Fragment => UiIrNodeKind::Fragment,
-        UiAstNodeKind::Attribute | UiAstNodeKind::Binding | UiAstNodeKind::Action => {
-            UiIrNodeKind::Root
-        }
+        UiAstNodeKind::Attribute => UiIrNodeKind::Property,
+        UiAstNodeKind::Action => UiIrNodeKind::Action,
+        UiAstNodeKind::Binding => UiIrNodeKind::Root, // unreachable after unsupported diagnostics
     }
 }
 
@@ -146,16 +146,16 @@ const fn unsupported_node_diagnostic(
     kind: UiAstNodeKind,
 ) -> Option<UiLoweringDiagnostic> {
     match kind {
-        UiAstNodeKind::Attribute | UiAstNodeKind::Binding | UiAstNodeKind::Action => {
-            Some(UiLoweringDiagnostic::new(
-                ast_node_id,
-                UiLoweringDiagnosticKind::UnsupportedAstNodeKind(kind),
-            ))
-        }
+        UiAstNodeKind::Binding => Some(UiLoweringDiagnostic::new(
+            ast_node_id,
+            UiLoweringDiagnosticKind::UnsupportedAstNodeKind(kind),
+        )),
         UiAstNodeKind::Root
         | UiAstNodeKind::Element
         | UiAstNodeKind::Text
-        | UiAstNodeKind::Fragment => None,
+        | UiAstNodeKind::Fragment
+        | UiAstNodeKind::Attribute
+        | UiAstNodeKind::Action => None,
     }
 }
 
@@ -244,21 +244,18 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_attribute_returns_diagnostic() {
+    fn attribute_lowers_to_ir_property() {
         let mut ast = UiAst::new();
         ast.push_node(crate::model::UiAstNode::new(
             UiAstNodeId::new(30),
             UiAstNodeKind::Attribute,
         ));
 
-        let err = lower_ast_to_ir(&ast, &UiLoweringConfig).expect_err("unsupported kind");
+        let lowered = lower_ast_to_ir(&ast, &UiLoweringConfig).expect("supported kind");
 
-        assert_eq!(err.len(), 1);
-        assert_eq!(err.diagnostics()[0].ast_node_id(), UiAstNodeId::new(30));
-        assert_eq!(
-            err.diagnostics()[0].kind(),
-            UiLoweringDiagnosticKind::UnsupportedAstNodeKind(UiAstNodeKind::Attribute)
-        );
+        assert_eq!(lowered.len(), 1);
+        assert_eq!(lowered.nodes()[0].id(), UiIrNodeId::new(30));
+        assert_eq!(lowered.nodes()[0].kind(), UiIrNodeKind::Property);
     }
 
     #[test]
@@ -280,45 +277,32 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_action_returns_diagnostic() {
+    fn action_lowers_to_ir_action() {
         let mut ast = UiAst::new();
         ast.push_node(crate::model::UiAstNode::new(
             UiAstNodeId::new(32),
             UiAstNodeKind::Action,
         ));
 
-        let err = lower_ast_to_ir(&ast, &UiLoweringConfig).expect_err("unsupported kind");
+        let lowered = lower_ast_to_ir(&ast, &UiLoweringConfig).expect("supported kind");
 
-        assert_eq!(err.len(), 1);
-        assert_eq!(err.diagnostics()[0].ast_node_id(), UiAstNodeId::new(32));
-        assert_eq!(
-            err.diagnostics()[0].kind(),
-            UiLoweringDiagnosticKind::UnsupportedAstNodeKind(UiAstNodeKind::Action)
-        );
+        assert_eq!(lowered.len(), 1);
+        assert_eq!(lowered.nodes()[0].id(), UiIrNodeId::new(32));
+        assert_eq!(lowered.nodes()[0].kind(), UiIrNodeKind::Action);
     }
 
     #[test]
     fn unsupported_nodes_collect_all_diagnostics() {
         let mut ast = UiAst::new();
         ast.push_node(crate::model::UiAstNode::new(
-            UiAstNodeId::new(40),
-            UiAstNodeKind::Attribute,
-        ));
-        ast.push_node(crate::model::UiAstNode::new(
             UiAstNodeId::new(41),
             UiAstNodeKind::Binding,
-        ));
-        ast.push_node(crate::model::UiAstNode::new(
-            UiAstNodeId::new(42),
-            UiAstNodeKind::Action,
         ));
 
         let err = lower_ast_to_ir(&ast, &UiLoweringConfig).expect_err("unsupported kinds");
 
-        assert_eq!(err.len(), 3);
-        assert_eq!(err.diagnostics()[0].ast_node_id(), UiAstNodeId::new(40));
-        assert_eq!(err.diagnostics()[1].ast_node_id(), UiAstNodeId::new(41));
-        assert_eq!(err.diagnostics()[2].ast_node_id(), UiAstNodeId::new(42));
+        assert_eq!(err.len(), 1);
+        assert_eq!(err.diagnostics()[0].ast_node_id(), UiAstNodeId::new(41));
     }
 
     #[test]
@@ -326,7 +310,7 @@ mod tests {
         let mut ast = supported_ast();
         ast.push_node(crate::model::UiAstNode::new(
             UiAstNodeId::new(43),
-            UiAstNodeKind::Action,
+            UiAstNodeKind::Binding,
         ));
 
         assert!(lower_ast_to_ir(&ast, &UiLoweringConfig).is_err());
@@ -344,18 +328,26 @@ mod tests {
     }
 
     #[test]
-    fn property_and_ir_action_are_not_generated_by_minimal_lowering() {
-        let ast = supported_ast();
+    fn property_and_ir_action_are_generated_by_carrier_lowering() {
+        let mut ast = supported_ast();
+        ast.push_node(crate::model::UiAstNode::new(
+            UiAstNodeId::new(44),
+            UiAstNodeKind::Attribute,
+        ));
+        ast.push_node(crate::model::UiAstNode::new(
+            UiAstNodeId::new(45),
+            UiAstNodeKind::Action,
+        ));
         let lowered = lower_ast_to_ir(&ast, &UiLoweringConfig).expect("supported subset");
 
         assert!(lowered
             .nodes()
             .iter()
-            .all(|node| node.kind() != UiIrNodeKind::Property));
+            .any(|node| node.kind() == UiIrNodeKind::Property));
         assert!(lowered
             .nodes()
             .iter()
-            .all(|node| node.kind() != UiIrNodeKind::Action));
+            .any(|node| node.kind() == UiIrNodeKind::Action));
     }
 
     #[test]
