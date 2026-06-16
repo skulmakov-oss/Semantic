@@ -85,11 +85,20 @@ pub enum UiNodeKind {
     Slot,
 }
 
+/// Resolution metadata representing knowledge state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum UiNodeResolution {
+    Known,
+    Unknown,
+    Conflict,
+}
+
 /// Inert UI Tree node with local parent/child handles.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiNode {
     id: UiNodeId,
     kind: UiNodeKind,
+    resolution: UiNodeResolution,
     parent: Option<UiNodeId>,
     children: Vec<UiNodeId>,
 }
@@ -100,6 +109,18 @@ impl UiNode {
         Self {
             id,
             kind,
+            resolution: UiNodeResolution::Known,
+            parent: None,
+            children: Vec::new(),
+        }
+    }
+
+    /// Creates an inert UI Tree node with explicit resolution metadata.
+    pub fn with_resolution(id: UiNodeId, kind: UiNodeKind, resolution: UiNodeResolution) -> Self {
+        Self {
+            id,
+            kind,
+            resolution,
             parent: None,
             children: Vec::new(),
         }
@@ -110,6 +131,7 @@ impl UiNode {
         Self {
             id,
             kind,
+            resolution: UiNodeResolution::Known,
             parent: Some(parent),
             children: Vec::new(),
         }
@@ -128,6 +150,11 @@ impl UiNode {
     /// Returns the node kind.
     pub const fn kind(&self) -> UiNodeKind {
         self.kind
+    }
+
+    /// Returns the node resolution metadata.
+    pub const fn resolution(&self) -> UiNodeResolution {
+        self.resolution
     }
 
     /// Returns the child handles.

@@ -195,7 +195,7 @@ pub use lowering::{
 };
 pub use model::{
     UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIr, UiIrNode, UiIrNodeId, UiIrNodeKind, UiNode,
-    UiNodeId, UiNodeKind, UiTree, UiTreeId,
+    UiNodeId, UiNodeKind, UiNodeResolution, UiTree, UiTreeId,
 };
 pub use prepared_effect::{
     describe_interaction_prepared_effect, InteractionPreparedEffectCommitRequirement,
