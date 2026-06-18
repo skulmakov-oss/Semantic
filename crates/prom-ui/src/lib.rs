@@ -55,6 +55,7 @@ pub mod renderer;
 pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
 pub mod trace;
+pub mod tree_bridge;
 pub mod ui_capability_admission;
 pub mod ui_capability_admission_result;
 pub mod ui_capability_denial_trace;
@@ -245,6 +246,10 @@ pub use runtime_capability_mapping_result::{
 pub use trace::{
     trace_raw_event_to_interaction_intent, InteractionIntentMappingRule,
     InteractionIntentTraceReason, InteractionIntentTraceReport, InteractionIntentTraceStatus,
+};
+pub use tree_bridge::{
+    tree_to_ast, UiTreeToAstDiagnostic, UiTreeToAstDiagnosticKind, UiTreeToAstDiagnostics,
+    UiTreeToAstResult,
 };
 pub use ui_capability_admission::{
     describe_interaction_ui_capability_admission, InteractionUiCapabilityAdmissionDescriptor,
