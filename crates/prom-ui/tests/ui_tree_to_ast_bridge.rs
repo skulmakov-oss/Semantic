@@ -133,31 +133,87 @@ fn conflict_resolution_does_not_block_mapping() {
 }
 
 #[test]
-fn slot_node_remains_unsupported() {
+fn slot_node_maps_to_ast_fragment() {
     let tree = tree_with_nodes([UiNode::new(UiNodeId::new(1), UiNodeKind::Slot)]);
-    let err = tree_to_ast(&tree).expect_err("slot unsupported");
+    let ast = tree_to_ast(&tree).expect("valid tree");
 
-    assert!(err.diagnostics().iter().any(|d| matches!(
-        d.kind(),
-        UiTreeToAstDiagnosticKind::UnsupportedTreeNodeKind {
-            kind: UiNodeKind::Slot,
-            ..
-        }
-    )));
+    assert_eq!(ast.len(), 1);
+    assert_eq!(ast.nodes()[0].kind(), UiAstNodeKind::Fragment);
 }
 
 #[test]
-fn slot_diagnostic_preserves_node_id_and_kind() {
+fn slot_node_preserves_raw_id() {
     let tree = tree_with_nodes([UiNode::new(UiNodeId::new(99), UiNodeKind::Slot)]);
-    let err = tree_to_ast(&tree).expect_err("slot unsupported");
+    let ast = tree_to_ast(&tree).expect("valid tree");
 
-    assert!(err.diagnostics().iter().any(|d| matches!(
-        d.kind(),
-        UiTreeToAstDiagnosticKind::UnsupportedTreeNodeKind {
-            node_id,
-            kind: UiNodeKind::Slot
-        } if node_id == UiNodeId::new(99)
-    )));
+    assert_eq!(ast.len(), 1);
+    assert_eq!(ast.nodes()[0].id(), UiAstNodeId::new(99));
+}
+
+#[test]
+fn slot_node_preserves_parent_handle() {
+    let mut root = UiNode::new(UiNodeId::new(1), UiNodeKind::Root);
+    root.push_child(UiNodeId::new(2));
+    let tree = tree_with_nodes([
+        root,
+        UiNode::with_parent(UiNodeId::new(2), UiNodeKind::Slot, UiNodeId::new(1)),
+    ]);
+    let ast = tree_to_ast(&tree).expect("valid tree");
+
+    assert_eq!(ast.len(), 2);
+    assert_eq!(ast.nodes()[1].parent(), Some(UiAstNodeId::new(1)));
+}
+
+#[test]
+fn slot_node_preserves_child_handles() {
+    let mut parent = UiNode::new(UiNodeId::new(1), UiNodeKind::Slot);
+    parent.push_child(UiNodeId::new(2));
+    let tree = tree_with_nodes([
+        parent,
+        UiNode::with_parent(UiNodeId::new(2), UiNodeKind::Element, UiNodeId::new(1)),
+    ]);
+    let ast = tree_to_ast(&tree).expect("valid tree");
+
+    assert_eq!(ast.len(), 2);
+    assert_eq!(ast.nodes()[0].children(), &[UiAstNodeId::new(2)]);
+}
+
+#[test]
+fn unknown_slot_resolution_does_not_block_mapping() {
+    let tree = tree_with_nodes([UiNode::with_resolution(
+        UiNodeId::new(1),
+        UiNodeKind::Slot,
+        UiNodeResolution::Unknown,
+    )]);
+    let ast = tree_to_ast(&tree).expect("valid tree");
+
+    assert_eq!(ast.len(), 1);
+    assert_eq!(ast.nodes()[0].kind(), UiAstNodeKind::Fragment);
+}
+
+#[test]
+fn conflict_slot_resolution_does_not_block_mapping() {
+    let tree = tree_with_nodes([UiNode::with_resolution(
+        UiNodeId::new(1),
+        UiNodeKind::Slot,
+        UiNodeResolution::Conflict,
+    )]);
+    let ast = tree_to_ast(&tree).expect("valid tree");
+
+    assert_eq!(ast.len(), 1);
+    assert_eq!(ast.nodes()[0].kind(), UiAstNodeKind::Fragment);
+}
+
+#[test]
+fn slot_mapping_does_not_create_attribute_binding_or_action() {
+    let tree = tree_with_nodes([UiNode::new(UiNodeId::new(1), UiNodeKind::Slot)]);
+    let ast = tree_to_ast(&tree).expect("valid tree");
+
+    assert_eq!(ast.len(), 1);
+    let kind = ast.nodes()[0].kind();
+    assert_ne!(kind, UiAstNodeKind::Attribute);
+    assert_ne!(kind, UiAstNodeKind::Binding);
+    assert_ne!(kind, UiAstNodeKind::Action);
 }
 
 #[test]
@@ -184,16 +240,6 @@ fn invalid_tree_does_not_return_partial_ast() {
     // The bridge returns a Result, so if it's invalid, it returns Err (diagnostics)
     // and inherently does not return a partial AST in the success path.
     let _err = tree_to_ast(&tree).expect_err("invalid tree");
-}
-
-#[test]
-fn unsupported_slot_does_not_return_partial_ast() {
-    let tree = tree_with_nodes([
-        UiNode::new(UiNodeId::new(1), UiNodeKind::Element),
-        UiNode::new(UiNodeId::new(2), UiNodeKind::Slot),
-    ]);
-
-    let _err = tree_to_ast(&tree).expect_err("unsupported slot blocks full ast");
 }
 
 #[test]

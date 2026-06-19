@@ -92,7 +92,7 @@ pub fn tree_to_ast(tree: &UiTree) -> UiTreeToAstResult {
         ]));
     }
 
-    let mut diagnostics = Vec::new();
+    let diagnostics = Vec::new();
     let mut ast_nodes = Vec::with_capacity(tree.len());
 
     for node in tree.nodes() {
@@ -101,15 +101,7 @@ pub fn tree_to_ast(tree: &UiTree) -> UiTreeToAstResult {
             UiNodeKind::Element => crate::model::UiAstNodeKind::Element,
             UiNodeKind::Text => crate::model::UiAstNodeKind::Text,
             UiNodeKind::Fragment => crate::model::UiAstNodeKind::Fragment,
-            UiNodeKind::Slot => {
-                diagnostics.push(UiTreeToAstDiagnostic::new(
-                    UiTreeToAstDiagnosticKind::UnsupportedTreeNodeKind {
-                        node_id: node.id(),
-                        kind: UiNodeKind::Slot,
-                    },
-                ));
-                continue;
-            }
+            UiNodeKind::Slot => crate::model::UiAstNodeKind::Fragment,
         };
 
         let ast_id = UiAstNodeId::new(node.id().raw());
