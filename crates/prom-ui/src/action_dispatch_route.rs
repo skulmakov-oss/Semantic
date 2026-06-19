@@ -276,3 +276,12 @@ mod tests {
         assert_eq!(first, second);
     }
 }
+
+
+use crate::action_admission::AdmittedAction;
+
+/// The boundary interface for handing over an admitted action to the runtime execution environment.
+pub trait ActionRuntimeDispatcher {
+    fn dispatch_action(&self, action: AdmittedAction);
+}
+

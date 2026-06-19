@@ -397,3 +397,29 @@ mod tests {
         assert_eq!(first, second);
     }
 }
+
+
+use crate::action_request::ActionRequestDescriptor;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AdmittedAction {
+    pub request_id: crate::action_request::ActionRequestId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ActionDenialTrace {
+    pub request_id: crate::action_request::ActionRequestId,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ActionAdmissionResult {
+    Admitted(AdmittedAction),
+    Denied(ActionDenialTrace),
+}
+
+/// The boundary interface for validating if an ActionRequest is allowed to execute.
+pub trait ActionAdmissionGuard {
+    fn admit_request(&self, request: ActionRequestDescriptor) -> ActionAdmissionResult;
+}
+

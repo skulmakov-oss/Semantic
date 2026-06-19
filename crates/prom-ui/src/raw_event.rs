@@ -64,10 +64,11 @@ pub struct RawTextInput {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum RawUiEventPayload {
     None,
     Pointer { button: RawPointerButton },
+    CursorMove { x: f64, y: f64 },
     Key { key: RawKeyCode },
     Text(RawTextInput),
     Wheel { delta_x: i32, delta_y: i32 },
@@ -83,13 +84,17 @@ pub enum RawUiEventTarget {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct RawUiEvent {
     pub id: RawUiEventId,
     pub kind: RawUiEventKind,
     pub target: RawUiEventTarget,
     pub modifiers: InteractionModifiers,
     pub payload: RawUiEventPayload,
+}
+
+pub trait UiInputSink {
+    fn submit_raw_event(&mut self, event: RawUiEvent);
 }
 
 impl RawUiEvent {
@@ -147,6 +152,13 @@ fn map_kind(kind: RawUiEventKind, payload: &RawUiEventPayload) -> InteractionInt
         RawUiEventKind::PointerDown => InteractionIntentKind::Activate,
         RawUiEventKind::PointerEnter => InteractionIntentKind::Focus,
         RawUiEventKind::PointerLeave => InteractionIntentKind::Blur,
+        RawUiEventKind::PointerMove => {
+            if let RawUiEventPayload::CursorMove { .. } = payload {
+                InteractionIntentKind::Hover
+            } else {
+                InteractionIntentKind::Unknown
+            }
+        }
         RawUiEventKind::KeyDown => match payload {
             RawUiEventPayload::Key {
                 key: RawKeyCode::Enter,
@@ -174,7 +186,6 @@ fn map_kind(kind: RawUiEventKind, payload: &RawUiEventPayload) -> InteractionInt
         RawUiEventKind::FocusGained => InteractionIntentKind::Focus,
         RawUiEventKind::FocusLost => InteractionIntentKind::Blur,
         RawUiEventKind::PointerUp
-        | RawUiEventKind::PointerMove
         | RawUiEventKind::KeyUp
         | RawUiEventKind::Unknown => InteractionIntentKind::Unknown,
     }
@@ -310,5 +321,22 @@ mod tests {
         let intent = map_raw_event_to_interaction_intent(&event);
 
         assert_eq!(intent.modifiers, modifiers);
+    }
+
+    #[test]
+    fn cursor_move_maps_to_hover() {
+        let event = RawUiEvent::new(
+            RawUiEventId(16),
+            RawUiEventKind::PointerMove,
+            RawUiEventTarget::Window(WindowId(1)),
+            InteractionModifiers::default(),
+            RawUiEventPayload::CursorMove { x: 100.0, y: 200.0 },
+        );
+
+        let intent = map_raw_event_to_interaction_intent(&event);
+
+        assert_eq!(intent.source, InteractionSource::Pointer);
+        assert_eq!(intent.kind, InteractionIntentKind::Hover);
+        assert!(intent.is_classified());
     }
 }

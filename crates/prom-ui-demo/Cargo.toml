@@ -15,3 +15,5 @@ std = ["prom-ui-runtime/std", "prom-ui/std"]
 [dependencies]
 prom-ui-runtime = { path = "../prom-ui-runtime", default-features = false }
 prom-ui = { path = "../prom-ui", default-features = false }
+prom-ui-backend-native = { path = "../prom-ui-backend-native", features = ["winit-backend"] }
+winit = { version = "0.30.13", default-features = false, features = ["rwh_06"] }

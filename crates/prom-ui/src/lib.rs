@@ -31,6 +31,7 @@ pub mod action_dispatch_record;
 pub mod action_dispatch_route;
 pub mod action_dispatch_summary;
 pub mod action_dispatch_trace;
+pub mod action_request;
 pub mod admitted_action;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
@@ -47,6 +48,7 @@ pub mod interaction;
 pub mod layout;
 pub mod lowering;
 pub mod model;
+pub mod paint;
 pub mod prepared_effect;
 pub mod prepared_effect_result;
 pub mod projection;
@@ -61,6 +63,9 @@ pub mod ui_capability_admission;
 pub mod ui_capability_admission_result;
 pub mod ui_capability_denial_trace;
 pub mod validation;
+pub mod window;
+
+pub use window::{UiWindowContract, UiWindowEvent};
 
 pub use action_admission::{
     describe_interaction_action_admission, InteractionActionAdmissionCapabilityRequirement,
@@ -109,7 +114,7 @@ pub use action_dispatch_route::{
     describe_interaction_semantic_action_dispatch_route,
     InteractionSemanticActionDispatchEffectEligibility,
     InteractionSemanticActionDispatchRouteDescriptor, InteractionSemanticActionDispatchRouteId,
-    InteractionSemanticActionDispatchRouteKind,
+    InteractionSemanticActionDispatchRouteKind, ActionRuntimeDispatcher,
 };
 pub use action_dispatch_summary::{
     summarize_interaction_semantic_action_dispatches, InteractionSemanticActionDispatchRouteCount,
@@ -119,6 +124,8 @@ pub use action_dispatch_trace::{
     trace_interaction_semantic_action_dispatch, InteractionSemanticActionDispatchTraceReason,
     InteractionSemanticActionDispatchTraceReport, InteractionSemanticActionDispatchTraceStatus,
 };
+pub use action_request::{ActionKind, ActionRequestDescriptor, ActionRequestId};
+pub use action_admission::{ActionAdmissionGuard, ActionAdmissionResult, AdmittedAction, ActionDenialTrace};
 pub use admitted_action::{
     build_interaction_admitted_semantic_action, InteractionAdmittedSemanticAction,
     InteractionAdmittedSemanticActionDispatchReadiness,
@@ -152,7 +159,7 @@ pub use effect_request::{
     InteractionEffectRequestKind, InteractionEffectRequestLifecyclePrecondition,
     InteractionEffectRequestPrepareCommitRelationship, InteractionEffectRequestRuntimeCapability,
     InteractionEffectRequestScope, InteractionEffectRequestTargetPolicy,
-    InteractionEffectRequestUiCapability,
+    InteractionEffectRequestUiCapability, EffectRuntimeDispatcher,
 };
 pub use effect_request_summary::{
     summarize_interaction_effect_requests, InteractionEffectRequestKindCount,
@@ -211,13 +218,13 @@ pub use prepared_effect_result::{
     InteractionPreparedEffectResultId,
 };
 pub use projection::{
-    UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionActionRef,
-    UiProjectionArtifact, UiProjectionArtifactId, UiProjectionEffectBoundaryRef,
-    UiProjectionPropertyRef, UiProjectionTraceRef,
+    project_ir_to_projection, UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind,
+    UiProjectionActionRef, UiProjectionArtifact, UiProjectionArtifactId,
+    UiProjectionEffectBoundaryRef, UiProjectionPropertyRef, UiProjectionTraceRef,
 };
 pub use raw_event::{
     map_raw_event_to_interaction_intent, RawKeyCode, RawPointerButton, RawTextInput, RawUiEvent,
-    RawUiEventId, RawUiEventKind, RawUiEventPayload, RawUiEventTarget,
+    RawUiEventId, RawUiEventKind, RawUiEventPayload, RawUiEventTarget, UiInputSink,
 };
 pub use renderer::{
     present_render_diagnostics, present_render_inspection, present_render_markers,

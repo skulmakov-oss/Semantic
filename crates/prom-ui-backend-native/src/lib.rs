@@ -13,6 +13,11 @@
 
 extern crate alloc;
 
+pub mod app;
+pub mod draw_backend;
+pub mod sink;
+pub mod wgpu_backend;
+
 use prom_ui_runtime::{
     DrawFrame, InputEvent, InputEventKind, LoopControl, UiBackendAdapter, UiRuntimeError,
     WindowConfig,

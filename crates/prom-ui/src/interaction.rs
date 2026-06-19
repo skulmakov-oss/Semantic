@@ -16,6 +16,7 @@ pub enum InteractionIntentKind {
     Deselect,
     Focus,
     Blur,
+    Hover,
     Navigate,
     Edit,
     Drag,

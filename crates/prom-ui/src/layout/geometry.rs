@@ -35,37 +35,61 @@ impl UiLayoutGeometryNodeId {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct UiLayoutGeometryRect {
-    x: i32,
-    y: i32,
-    width: u32,
-    height: u32,
+pub struct UiPoint {
+    pub x: i32,
+    pub y: i32,
 }
 
-impl UiLayoutGeometryRect {
-    pub fn new(x: i32, y: i32, width: u32, height: u32) -> Self {
+impl UiPoint {
+    pub const fn new(x: i32, y: i32) -> Self {
+        Self { x, y }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct UiSize {
+    pub width: u32,
+    pub height: u32,
+}
+
+impl UiSize {
+    pub const fn new(width: u32, height: u32) -> Self {
+        Self { width, height }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct UiRect {
+    pub origin: UiPoint,
+    pub size: UiSize,
+}
+
+impl UiRect {
+    pub const fn new(origin: UiPoint, size: UiSize) -> Self {
+        Self { origin, size }
+    }
+
+    pub const fn from_xywh(x: i32, y: i32, width: u32, height: u32) -> Self {
         Self {
-            x,
-            y,
-            width,
-            height,
+            origin: UiPoint::new(x, y),
+            size: UiSize::new(width, height),
         }
     }
 
-    pub fn x(&self) -> i32 {
-        self.x
+    pub const fn x(&self) -> i32 {
+        self.origin.x
     }
 
-    pub fn y(&self) -> i32 {
-        self.y
+    pub const fn y(&self) -> i32 {
+        self.origin.y
     }
 
-    pub fn width(&self) -> u32 {
-        self.width
+    pub const fn width(&self) -> u32 {
+        self.size.width
     }
 
-    pub fn height(&self) -> u32 {
-        self.height
+    pub const fn height(&self) -> u32 {
+        self.size.height
     }
 }
 
@@ -77,7 +101,7 @@ pub struct UiLayoutGeometryNode {
     source_render_node: UiRenderNodeId,
     source_projection_node: Option<UiProjectedNodeId>,
     source_ir_node: Option<UiIrNodeId>,
-    rect: UiLayoutGeometryRect,
+    rect: UiRect,
     order: usize,
 }
 
@@ -106,12 +130,17 @@ impl UiLayoutGeometryNode {
         self.source_ir_node
     }
 
-    pub fn rect(&self) -> UiLayoutGeometryRect {
+    pub fn rect(&self) -> UiRect {
         self.rect
     }
 
     pub fn order(&self) -> usize {
         self.order
+    }
+
+    pub fn with_rect(mut self, rect: UiRect) -> Self {
+        self.rect = rect;
+        self
     }
 }
 
@@ -157,6 +186,11 @@ impl UiLayoutGeometryModel {
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
+
+    pub fn with_nodes(mut self, nodes: Vec<UiLayoutGeometryNode>) -> Self {
+        self.nodes = nodes;
+        self
+    }
 }
 
 pub fn build_layout_geometry(model: &UiLayoutModel) -> UiLayoutGeometryModel {
@@ -170,7 +204,7 @@ pub fn build_layout_geometry(model: &UiLayoutModel) -> UiLayoutGeometryModel {
             source_render_node: layout_node.source_render_node(),
             source_projection_node: layout_node.source_projection_node(),
             source_ir_node: layout_node.source_ir_node(),
-            rect: UiLayoutGeometryRect::default(),
+            rect: UiRect::default(),
             order: layout_node.order(),
         });
     }

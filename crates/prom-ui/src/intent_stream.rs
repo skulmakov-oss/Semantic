@@ -12,7 +12,7 @@ use crate::trace::{
     InteractionIntentTraceStatus,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InteractionIntentStreamModel {
     pub events: Vec<RawUiEvent>,
 }

@@ -549,3 +549,10 @@ mod tests {
         assert_eq!(first, second);
     }
 }
+
+
+/// The boundary interface for handing over an admitted effect request to the runtime environment.
+pub trait EffectRuntimeDispatcher {
+    fn dispatch_effect(&self, request: InteractionEffectRequestDescriptor);
+}
+

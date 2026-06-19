@@ -98,6 +98,15 @@ Allowed future backend families may include:
 
 None of these becomes the Semantic language boundary by default.
 
+## Foundation Layer Strict Boundaries
+
+The UI Foundation layer (`prom-ui` core) is structurally isolated to guarantee purity:
+
+- **Pure Projection**: It is strictly a one-way projection mechanism.
+- **Inert Data**: The resulting `UiRenderModel` and intermediate AST/IR nodes are entirely inert. They execute no actions, authorize no capabilities, and mutate no semantic state.
+- **No Layout Solvers**: External layout engines (e.g., Taffy) must not infect the foundation layer. Layout is a downstream concern operating on foundation outputs or across explicit boundary contracts.
+- **No Graphics Backends**: Graphics rendering pipelines and windowing systems (e.g., wgpu, winit) are absolutely forbidden inside the foundation.
+
 ## Non-Goals
 
 Semantic UI does not claim:

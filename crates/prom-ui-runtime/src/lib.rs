@@ -42,6 +42,8 @@ pub mod boundary_registry;
 pub mod component_metadata;
 pub mod layout_primitives;
 pub mod visual_tokens;
+pub mod action_admission;
+pub mod dispatcher;
 
 pub use adapter_boundary::{
     AdapterRequestId, DrawBatchId, FrameId, RecordingAdapter, UiAdapterFailure,

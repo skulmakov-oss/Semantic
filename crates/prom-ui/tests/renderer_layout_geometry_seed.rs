@@ -1,4 +1,4 @@
-use prom_ui::layout::{build_layout_geometry, layout_render_model, UiLayoutGeometryRect};
+use prom_ui::layout::{build_layout_geometry, layout_render_model};
 use prom_ui::model::UiIrNodeId;
 use prom_ui::projection::{
     UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionArtifact,
@@ -105,11 +105,11 @@ fn geometry_rect_metadata_is_inert_default_unresolved() {
 
     for node in geometry_model.nodes() {
         let rect = node.rect();
-        assert_eq!(rect, UiLayoutGeometryRect::default());
-        assert_eq!(rect.x(), 0);
-        assert_eq!(rect.y(), 0);
-        assert_eq!(rect.width(), 0);
-        assert_eq!(rect.height(), 0);
+        assert_eq!(rect, prom_ui::layout::UiRect::default());
+        assert_eq!(rect.origin.x, 0);
+        assert_eq!(rect.origin.y, 0);
+        assert_eq!(rect.size.width, 0);
+        assert_eq!(rect.size.height, 0);
     }
 }
 
@@ -163,7 +163,7 @@ fn geometry_seed_does_not_expose_draw_event_backend_runtime_capability_proof_deb
     assert!(!geometry_model.is_empty());
     assert_eq!(
         geometry_model.nodes()[0].rect(),
-        UiLayoutGeometryRect::default()
+        prom_ui::layout::UiRect::default()
     );
 }
 
