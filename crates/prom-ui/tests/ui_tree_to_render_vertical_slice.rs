@@ -1,6 +1,6 @@
 use prom_ui::lowering::{lower_ast_to_ir, UiLoweringConfig};
-use prom_ui::model::{UiNode, UiNodeId, UiNodeKind, UiTree, UiTreeId};
-use prom_ui::projection::project_ir_to_projection;
+use prom_ui::model::{UiAstNodeKind, UiIrNodeKind, UiNode, UiNodeId, UiNodeKind, UiTree, UiTreeId};
+use prom_ui::projection::{project_ir_to_projection, UiProjectedNodeKind};
 use prom_ui::renderer::{render_projection_to_model, UiRenderMarker, UiRenderNodeKind};
 use prom_ui::tree_bridge::tree_to_ast;
 use prom_ui::validation::{validate_tree, UiTreeValidationConfig};
@@ -87,11 +87,11 @@ fn vertical_slice_from_tree_to_render_model_builds_successfully() {
 }
 
 #[test]
-fn vertical_slice_rejects_unsupported_slot_nodes() {
+fn vertical_slice_accepts_inert_slot_as_fragment() {
     let mut tree = UiTree::new(UiTreeId::new(200));
 
     let root_id = UiNodeId::new(201);
-    let slot_id = UiNodeId::new(202); // Slot cannot be bridged
+    let slot_id = UiNodeId::new(202);
 
     let mut root_node = UiNode::new(root_id, UiNodeKind::Root);
     root_node.push_child(slot_id);
@@ -101,16 +101,96 @@ fn vertical_slice_rejects_unsupported_slot_nodes() {
     tree.push_node(root_node);
     tree.push_node(slot_node);
 
-    // Validation might pass structurally
     let validation_result = validate_tree(&tree, &UiTreeValidationConfig::default());
     assert!(validation_result.is_ok());
 
-    // Bridge Tree to AST must fail due to unsupported Slot
-    let tree_to_ast_result = tree_to_ast(&tree);
-    assert!(
-        tree_to_ast_result.is_err(),
-        "Tree to AST bridge must reject unsupported Slot node"
-    );
+    let ast = tree_to_ast(&tree).expect("bridge to succeed");
+
+    let ast_slot = ast
+        .nodes()
+        .iter()
+        .find(|n| n.id().raw() == slot_id.raw())
+        .expect("AST node missing");
+    assert_eq!(ast_slot.kind(), UiAstNodeKind::Fragment);
+
+    let ir = lower_ast_to_ir(&ast, &UiLoweringConfig).expect("lowering to succeed");
+
+    let ir_slot = ir
+        .nodes()
+        .iter()
+        .find(|n| n.id().raw() == slot_id.raw())
+        .expect("IR node missing");
+    assert_eq!(ir_slot.kind(), UiIrNodeKind::Fragment);
+
+    let projection = project_ir_to_projection(&ir).expect("projection to succeed");
+
+    let proj_slot = projection
+        .nodes()
+        .iter()
+        .find(|n| n.source_ir_node_id() == Some(ir_slot.id()))
+        .expect("Projection node missing");
+    assert_eq!(proj_slot.kind(), UiProjectedNodeKind::Fragment);
+
+    let render_model = render_projection_to_model(&projection).expect("render to succeed");
+
+    let render_slot = render_model
+        .nodes()
+        .iter()
+        .find(|n| n.source_ir_node() == Some(ir_slot.id()))
+        .expect("Render node missing");
+    assert_eq!(render_slot.kind(), UiRenderNodeKind::Fragment);
+}
+
+#[test]
+fn slot_vertical_slice_does_not_produce_property_or_action_markers() {
+    let mut tree = UiTree::new(UiTreeId::new(300));
+    let root_id = UiNodeId::new(301);
+    let slot_id = UiNodeId::new(302);
+    let mut root_node = UiNode::new(root_id, UiNodeKind::Root);
+    root_node.push_child(slot_id);
+    let slot_node = UiNode::with_parent(slot_id, UiNodeKind::Slot, root_id);
+    tree.push_node(root_node);
+    tree.push_node(slot_node);
+
+    let ast = tree_to_ast(&tree).expect("bridge");
+    let ir = lower_ast_to_ir(&ast, &UiLoweringConfig).expect("lowering");
+    let projection = project_ir_to_projection(&ir).expect("projection");
+    let render_model = render_projection_to_model(&projection).expect("render");
+
+    for node in render_model.nodes() {
+        for marker in node.markers() {
+            assert!(
+                !matches!(marker, UiRenderMarker::Property | UiRenderMarker::Action),
+                "Slot should not produce property or action markers"
+            );
+        }
+    }
+}
+
+#[test]
+fn slot_vertical_slice_does_not_produce_effect_boundary_marker() {
+    let mut tree = UiTree::new(UiTreeId::new(400));
+    let root_id = UiNodeId::new(401);
+    let slot_id = UiNodeId::new(402);
+    let mut root_node = UiNode::new(root_id, UiNodeKind::Root);
+    root_node.push_child(slot_id);
+    let slot_node = UiNode::with_parent(slot_id, UiNodeKind::Slot, root_id);
+    tree.push_node(root_node);
+    tree.push_node(slot_node);
+
+    let ast = tree_to_ast(&tree).expect("bridge");
+    let ir = lower_ast_to_ir(&ast, &UiLoweringConfig).expect("lowering");
+    let projection = project_ir_to_projection(&ir).expect("projection");
+    let render_model = render_projection_to_model(&projection).expect("render");
+
+    for node in render_model.nodes() {
+        for marker in node.markers() {
+            assert!(
+                !matches!(marker, UiRenderMarker::EffectBoundary),
+                "Slot should not produce effect boundary marker"
+            );
+        }
+    }
 }
 
 #[test]
