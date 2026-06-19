@@ -353,3 +353,11 @@ pub use tree_slot_ast_intent::{
     UiTreeSlotAstIntentKind, UiTreeSlotAstIntentModel, UiTreeSlotAstIntentModelId,
     UiTreeSlotAstIntentResult, UiTreeSlotAstIntentState,
 };
+
+pub mod ast_slot_ir_intent;
+pub use ast_slot_ir_intent::{
+    build_ast_slot_ir_intents, UiAstSlotIrIntentDiagnostic, UiAstSlotIrIntentDiagnosticKind,
+    UiAstSlotIrIntentDiagnostics, UiAstSlotIrIntentEntry, UiAstSlotIrIntentEntryId,
+    UiAstSlotIrIntentKind, UiAstSlotIrIntentModel, UiAstSlotIrIntentModelId,
+    UiAstSlotIrIntentResult, UiAstSlotIrIntentState,
+};
