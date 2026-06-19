@@ -361,3 +361,12 @@ pub use ast_slot_ir_intent::{
     UiAstSlotIrIntentKind, UiAstSlotIrIntentModel, UiAstSlotIrIntentModelId,
     UiAstSlotIrIntentResult, UiAstSlotIrIntentState,
 };
+
+pub mod ir_slot_projection_intent;
+pub use ir_slot_projection_intent::{
+    build_ir_slot_projection_intents, UiIrSlotProjectionIntentDiagnostic,
+    UiIrSlotProjectionIntentDiagnosticKind, UiIrSlotProjectionIntentDiagnostics,
+    UiIrSlotProjectionIntentEntry, UiIrSlotProjectionIntentEntryId, UiIrSlotProjectionIntentKind,
+    UiIrSlotProjectionIntentModel, UiIrSlotProjectionIntentModelId, UiIrSlotProjectionIntentResult,
+    UiIrSlotProjectionIntentState,
+};
