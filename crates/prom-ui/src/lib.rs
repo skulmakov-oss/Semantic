@@ -56,6 +56,7 @@ pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
 pub mod trace;
 pub mod tree_bridge;
+pub mod tree_slot_intent;
 pub mod ui_capability_admission;
 pub mod ui_capability_admission_result;
 pub mod ui_capability_denial_trace;
@@ -337,3 +338,11 @@ pub const fn required_ui_capability(op: UiOperationId) -> UiCapabilityKind {
         UiOperationId::FrameSubmit => UiCapabilityKind::FrameEmit,
     }
 }
+
+pub use tree_slot_intent::{
+    build_tree_slot_carrier_intents, UiTreeSlotCarrierIntentDiagnostic,
+    UiTreeSlotCarrierIntentDiagnosticKind, UiTreeSlotCarrierIntentDiagnostics,
+    UiTreeSlotCarrierIntentEntry, UiTreeSlotCarrierIntentEntryId, UiTreeSlotCarrierIntentKind,
+    UiTreeSlotCarrierIntentModel, UiTreeSlotCarrierIntentModelId, UiTreeSlotCarrierIntentResult,
+    UiTreeSlotCarrierIntentState,
+};
