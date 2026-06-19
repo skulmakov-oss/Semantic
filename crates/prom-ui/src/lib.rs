@@ -346,3 +346,10 @@ pub use tree_slot_intent::{
     UiTreeSlotCarrierIntentModel, UiTreeSlotCarrierIntentModelId, UiTreeSlotCarrierIntentResult,
     UiTreeSlotCarrierIntentState,
 };
+pub mod tree_slot_ast_intent;
+pub use tree_slot_ast_intent::{
+    build_tree_slot_ast_intents, UiTreeSlotAstIntentDiagnostic, UiTreeSlotAstIntentDiagnosticKind,
+    UiTreeSlotAstIntentDiagnostics, UiTreeSlotAstIntentEntry, UiTreeSlotAstIntentEntryId,
+    UiTreeSlotAstIntentKind, UiTreeSlotAstIntentModel, UiTreeSlotAstIntentModelId,
+    UiTreeSlotAstIntentResult, UiTreeSlotAstIntentState,
+};
