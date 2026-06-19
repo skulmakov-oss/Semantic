@@ -370,3 +370,13 @@ pub use ir_slot_projection_intent::{
     UiIrSlotProjectionIntentModel, UiIrSlotProjectionIntentModelId, UiIrSlotProjectionIntentResult,
     UiIrSlotProjectionIntentState,
 };
+
+pub mod projection_slot_render_intent;
+pub use projection_slot_render_intent::{
+    build_projection_slot_render_intents, UiProjectionSlotRenderIntentDiagnostic,
+    UiProjectionSlotRenderIntentDiagnosticKind, UiProjectionSlotRenderIntentDiagnostics,
+    UiProjectionSlotRenderIntentEntry, UiProjectionSlotRenderIntentEntryId,
+    UiProjectionSlotRenderIntentKind, UiProjectionSlotRenderIntentModel,
+    UiProjectionSlotRenderIntentModelId, UiProjectionSlotRenderIntentResult,
+    UiProjectionSlotRenderIntentState,
+};
