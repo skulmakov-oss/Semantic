@@ -45,6 +45,7 @@ pub mod host_runtime_effect_result;
 pub mod intent_stream;
 pub mod interaction;
 pub mod layout;
+pub mod layout_rect;
 pub mod lowering;
 pub mod model;
 pub mod prepared_effect;
@@ -191,6 +192,7 @@ pub use interaction::{
     ElementId, InteractionIntentDescriptor, InteractionIntentId, InteractionIntentKind,
     InteractionModifiers, InteractionSource, InteractionTarget, RegionId, SurfaceId, WindowId,
 };
+pub use layout_rect::{UiLayoutRect, UiLayoutRectEntry, UiLayoutRectModel};
 pub use lowering::{
     lower_ast_to_ir, UiLoweringConfig, UiLoweringDiagnostic, UiLoweringDiagnosticKind,
     UiLoweringDiagnostics, UiLoweringResult,
