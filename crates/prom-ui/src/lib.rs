@@ -47,6 +47,7 @@ pub mod interaction;
 pub mod layout;
 pub mod layout_rect;
 pub mod lowering;
+pub mod minimal_block_layout;
 pub mod model;
 pub mod prepared_effect;
 pub mod prepared_effect_result;
@@ -197,6 +198,7 @@ pub use lowering::{
     lower_ast_to_ir, UiLoweringConfig, UiLoweringDiagnostic, UiLoweringDiagnosticKind,
     UiLoweringDiagnostics, UiLoweringResult,
 };
+pub use minimal_block_layout::{solve_minimal_block_layout, UiMinimalBlockLayoutConfig};
 pub use model::{
     UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIr, UiIrNode, UiIrNodeId, UiIrNodeKind, UiNode,
     UiNodeId, UiNodeKind, UiNodeResolution, UiTree, UiTreeId,
