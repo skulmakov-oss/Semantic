@@ -127,7 +127,7 @@ This closeout does not reopen or modify those systems.
 ## 10. Project Board / Control Plane Status
 Project board reliability: GOOD
 
-Project board item update: NOT APPLIED — item not found / unavailable
+Project board item update: APPLIED — PR #1112 added to Project #2 and set to `Todo` for the draft phase
 
 The control plane evidence remains the merged Project #2 state established by #1106.
 
