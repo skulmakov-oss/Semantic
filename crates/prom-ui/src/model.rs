@@ -338,6 +338,7 @@ pub enum UiIrNodeKind {
 pub struct UiIrNode {
     id: UiIrNodeId,
     kind: UiIrNodeKind,
+    source_ast_node_id: Option<UiAstNodeId>,
     parent: Option<UiIrNodeId>,
     children: Vec<UiIrNodeId>,
 }
@@ -348,6 +349,7 @@ impl UiIrNode {
         Self {
             id,
             kind,
+            source_ast_node_id: None,
             parent: None,
             children: Vec::new(),
         }
@@ -358,6 +360,7 @@ impl UiIrNode {
         Self {
             id,
             kind,
+            source_ast_node_id: None,
             parent: Some(parent),
             children: Vec::new(),
         }
@@ -376,6 +379,16 @@ impl UiIrNode {
     /// Returns the IR node kind.
     pub const fn kind(&self) -> UiIrNodeKind {
         self.kind
+    }
+
+    /// Returns the source AST node handle when the IR node was lowered from AST.
+    pub const fn source_ast_node_id(&self) -> Option<UiAstNodeId> {
+        self.source_ast_node_id
+    }
+
+    /// Updates the source AST node handle without adding semantics.
+    pub(crate) fn set_source_ast_node_id(&mut self, source_ast_node_id: Option<UiAstNodeId>) {
+        self.source_ast_node_id = source_ast_node_id;
     }
 
     /// Returns the child handles.
