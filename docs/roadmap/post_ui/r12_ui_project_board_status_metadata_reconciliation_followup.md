@@ -29,6 +29,18 @@ Verified basis facts:
 - Evidence gaps before mutation: `54`
 - Duplicate count before mutation: `0`
 
+## PR Range Count Reconciliation
+- Total numbered slots scanned in `#913..#1105`: `193`
+- Actual PRs resolved by `gh pr view`: `192`
+- Broad candidate pool before UI filtering: `191` merged PRs
+- Filters applied:
+  - removed `#914` because it is an issue, not a PR
+  - removed `#938` because it is closed/non-merged
+  - applied the explicit UI surface/title classifier
+  - retained merged UI PRs only for reconciliation
+- Final reconciled UI PR count: `158`
+- Why `158` is correct: the reconciliation target is the merged UI subset. The earlier `~191` figure was the broad merged-PR pool in the scanned range, not the narrower UI subset. The remaining `33` merged PRs in the range are adjacent non-UI/governance items and are not board reconciliation targets.
+
 ## 4. Field Schema Discovery
 Field schema source:
 - `gh api graphql` against `user(login: "skulmakov-oss") { projectV2(number: 2) { ... } }`
@@ -64,6 +76,9 @@ Discovered fields and ids:
 - No Project items were deleted.
 - No new fields or options were created.
 - No source files, test files, Cargo files, DNA files, or admission guard files were changed.
+- Status = Done updates applied: YES
+- Metadata updates applied: YES
+- Project board reliability after: GOOD
 
 ## 7. Project Board After
 - Project item count after mutation: `234`
@@ -77,6 +92,7 @@ Discovered fields and ids:
 - Gate gaps after mutation: `0`
 - Evidence gaps after mutation: `0`
 - Duplicate count after mutation: `0`
+- Project board reliability after: GOOD
 
 ## 8. Unresolved Items
 FIELD OPTION MISSING - NOT MUTATED: none
@@ -101,6 +117,11 @@ Admission Guard command:
 
 Admission Guard result:
 - `FAIL - ENVIRONMENT PATHING`
+
+cargo fmt --check:
+- `FAIL - PRE-EXISTING FORMATTING DRIFT`
+- affected file: `crates/prom-ui/tests/ui_ast_ir_lowering_carriers.rs`
+- this PR did not modify source/test files
 
 ## 11. Final Decision
 PASS WITH WARNINGS - R12 UI Project Board status/metadata reconciliation completed.
