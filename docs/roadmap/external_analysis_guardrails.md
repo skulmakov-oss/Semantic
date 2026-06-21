@@ -6,16 +6,13 @@ Related authority: `docs/roadmap/public_status_model.md`
 
 ## Purpose
 
-This document exists to prevent external summaries, AI-generated reviews, and
-public-facing writeups from converting historical names, roadmap shorthand, or
-future-fit positioning into unsupported current claims.
+This document prevents external summaries, AI-generated reviews, and public-facing writeups from converting historical names, roadmap shorthand, or future-fit positioning into unsupported current claims.
 
 It does not widen the release contour.
 It does not change implementation behavior.
 It does not promote current-`main` behavior into the published stable line.
 
-It only records how the repository should be read when describing Semantic from
-outside the project.
+It only records how the repository should be read when describing Semantic from outside the project.
 
 ## Canonical Reading Order
 
@@ -38,24 +35,17 @@ External analysis should read repository claims in this order:
 8. `docs/roadmap/language_maturity/7hell_report_contract.md`
    - 7hell qualification-report contract
 
-Roadmap notes, issue discussions, visual diagrams, and historical names are not
-allowed to override those sources.
+Roadmap notes, issue discussions, visual diagrams, and historical names are not allowed to override those sources.
 
 ## Preferred One-Sentence Description
 
 Use this when a compact external description is needed:
 
 ```text
-Semantic is a deterministic verified execution platform for Semantic Language
-programs, built around source checking, IR lowering, SemCode emission,
-verifier-first admission, deterministic VM execution, native quad logic, and a
-controlled PROMETHEUS boundary.
+Semantic is a deterministic verified execution platform for Semantic Language programs, built around source checking, IR lowering, SemCode emission, verifier-first admission, deterministic VM execution, native quad logic, and a controlled PROMETHEUS boundary.
 ```
 
-This description is intentionally technical and bounded. It should not be
-expanded into compliance, certification, cryptographic, financial, medical, or
-zero-trust production claims unless a later release document explicitly supports
-those claims.
+This description is intentionally technical and bounded. It should not be expanded into compliance, certification, cryptographic, financial, medical, or zero-trust production claims unless a later release document explicitly supports those claims.
 
 ## Correct Current Architecture Reading
 
@@ -85,11 +75,7 @@ Use the canonical phrase:
 retained non-owning TON618 compatibility perimeter
 ```
 
-This currently covers:
-
-- `src/bin/ton618_core.rs`
-- `crates/ton618-core`
-- `ton618_legacy/`
+The exact retained path inventory lives in `docs/legacy-map.md` and the perimeter governance document. This guardrail intentionally refers readers there instead of duplicating that inventory.
 
 Do not describe TON618 as:
 
@@ -104,8 +90,7 @@ Allowed wording:
 
 ```text
 TON618 names are retained for compatibility and low-level primitive history.
-Canonical ownership for the current toolchain and execution contracts lives in
-sm-* and prom-* crates.
+Canonical ownership for the current toolchain and execution contracts lives in sm-* and prom-* crates.
 ```
 
 ## SemCode / VM Wording Rule
@@ -113,8 +98,7 @@ sm-* and prom-* crates.
 Correct wording:
 
 ```text
-SemCode is the executable artifact boundary. Public `.smc` execution is
-verifier-first: SemCode must be admitted before deterministic VM execution.
+SemCode is the executable artifact boundary. Public `.smc` execution is verifier-first: SemCode must be admitted before deterministic VM execution.
 ```
 
 Avoid wording that implies:
@@ -131,8 +115,7 @@ Correct wording:
 
 ```text
 Semantic has native quad logic with `N / F / T / S` semantic states.
-Quad values carry unknown/conflict information, while branch control remains
-explicit and boolean-facing.
+Quad values carry unknown/conflict information, while branch control remains explicit and boolean-facing.
 ```
 
 Do not imply that current public docs promise:
@@ -143,8 +126,7 @@ Do not imply that current public docs promise:
 - automatic conflict resolution through meta-rules;
 - that `if quad_expr` is valid branch syntax.
 
-If discussing future packed or accelerated representations, mark them as future
-backend work or implementation strategy, not as a current public guarantee.
+If discussing future packed or accelerated representations, mark them as future backend work or implementation strategy, not as a current public guarantee.
 
 ## CTF Wording Rule
 
@@ -154,10 +136,7 @@ backend work or implementation strategy, not as a current public guarantee.
 Core Trust Freeze
 ```
 
-It is the parallel trust lane for Practical Core Completion. It exists to keep
-runtime values, traps, verifier expectations, determinism, SymbolId assumptions,
-capability behavior, and golden traces from drifting silently while language
-surface expands.
+It is the parallel trust lane for Practical Core Completion. It exists to keep runtime values, traps, verifier expectations, determinism, SymbolId assumptions, capability behavior, and golden traces from drifting silently while language surface expands.
 
 Do not expand CTF as:
 
@@ -217,11 +196,6 @@ Important rule:
 
 ```text
 landed on main != published stable
-```
-
-and:
-
-```text
 landed on main != qualified limited release
 ```
 
@@ -229,8 +203,7 @@ unless the relevant release/readiness document explicitly says so.
 
 ## Future-Fit Domains
 
-External summaries may mention these as possible fit areas only when clearly
-marked as future-fit or potential applications:
+External summaries may mention these as possible fit areas only when clearly marked as future-fit or potential applications:
 
 - compliance-oriented execution
 - regulated workflows
@@ -240,10 +213,7 @@ marked as future-fit or potential applications:
 - zero-knowledge or cryptographic proof systems
 - agentic AI control planes
 
-Do not claim that Semantic currently provides certification, regulatory
-compliance, formal proof of business correctness, cryptographic proof systems,
-or production-grade sandbox guarantees unless a later stable release document
-explicitly supports that claim.
+Do not claim that Semantic currently provides certification, regulatory compliance, formal proof of business correctness, cryptographic proof systems, or production-grade sandbox guarantees unless a later stable release document explicitly supports that claim.
 
 ## Numbers And Benchmarks
 
@@ -257,8 +227,7 @@ Do not publish numeric claims such as:
 - safety coverage percentages;
 - security assurance levels;
 
-unless the claim points to a benchmark, report, test artifact, or release note
-that actually measures it.
+unless the claim points to a benchmark, report, test artifact, or release note that actually measures it.
 
 ## External Analysis Checklist
 
@@ -281,15 +250,11 @@ Before publishing an external analysis, check:
 When an external writeup overstates the project, correct it with this shape:
 
 ```text
-The high-level direction is right, but the current repository uses a narrower
-canonical reading:
+The high-level direction is right, but the current repository uses a narrower canonical reading:
 
-- Semantic is a deterministic verified execution platform, not a general
-  production compliance platform.
-- TON618 is retained as a non-owning compatibility perimeter, not the current
-  platform owner.
+- Semantic is a deterministic verified execution platform, not a general production compliance platform.
+- TON618 is retained as a non-owning compatibility perimeter, not the current platform owner.
 - CTF means Core Trust Freeze.
 - 7hell is a staged qualification/report contract.
-- Current `main` may contain landed work that is not yet part of the published
-  stable or qualified limited release promise.
+- Current `main` may contain landed work that is not yet part of the published stable or qualified limited release promise.
 ```
