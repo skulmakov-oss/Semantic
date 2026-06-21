@@ -48,17 +48,15 @@ or historical compatibility paths.
 
 External-facing descriptions should keep these readings explicit:
 
-- Semantic is a deterministic verified execution platform, not a general
-  production compliance platform.
-- TON618 names are retained compatibility perimeter, not current platform
-  ownership.
+- Semantic is deterministic verified execution, not general production
+  compliance.
+- TON618 names are compatibility perimeter, not current platform ownership.
 - `CTF` means Core Trust Freeze.
-- `7hell` is a staged qualification/report contract.
-- Current `main` is not automatically a stable or qualified release claim.
-- Future-fit domains are not current compliance, certification, security, or
-  cryptographic guarantees.
-- Numeric claims such as compression ratios, speedups, or coverage percentages
-  require benchmark, report, test, or release-note evidence.
+- `7hell` is staged qualification and report shape.
+- Current `main` is not automatically stable or qualified release claim.
+- Future-fit domains are not current certification, security, or cryptographic
+  guarantees.
+- Numeric claims require benchmark, report, test, or release-note evidence.
 
 This guardrail does not create a fifth status family. It applies the four
 canonical status families below to external-facing interpretation.
