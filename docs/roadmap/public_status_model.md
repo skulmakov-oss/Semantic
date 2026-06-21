@@ -24,6 +24,7 @@ This document governs the wording and placement of status claims in:
 - `docs/roadmap/v1_readiness.md`
 - `docs/roadmap/compatibility_statement.md`
 - `docs/roadmap/stable_release_policy.md`
+- `docs/roadmap/external_analysis_guardrails.md`
 - `reports/g1_*.md`
 - stale or completed scope docs that still influence the public reading of the
   repository
@@ -39,6 +40,26 @@ This document does not:
 - convert current-`main` behavior into release-promised behavior
 - rewrite the published stable line
 - open a new feature or blocker-removal track
+
+## External Analysis Guardrail
+
+External summaries, AI-generated reviews, public writeups, and third-party
+analyses must not infer release status from naming, diagrams, roadmap shorthand,
+or historical compatibility paths.
+
+Use `docs/roadmap/external_analysis_guardrails.md` when a document needs to
+clarify:
+
+- that TON618 names are retained compatibility perimeter, not current platform
+  ownership;
+- that `CTF` means Core Trust Freeze;
+- that `7hell` is a staged qualification/report contract;
+- that current `main` is not automatically a stable or qualified release claim;
+- that future-fit domains are not current compliance, certification, security, or
+  cryptographic guarantees.
+
+This guardrail does not create a fifth status family. It applies the four
+canonical status families below to external-facing interpretation.
 
 ## Canonical Status Vocabulary
 
@@ -212,6 +233,16 @@ If behavior is landed on `main` but unpromoted, do not erase it by calling it
 - describe how stable publication moves forward
 - not silently inherit widened current-`main` behavior as part of the stable
   line
+
+### `docs/roadmap/external_analysis_guardrails.md`
+
+`external_analysis_guardrails.md` should:
+
+- prevent external summaries from turning historical names into current owners
+- prevent roadmap shorthand from becoming unsupported implementation claims
+- correct common misreadings around TON618, CTF, 7hell, quad, SemCode, VM,
+  release status, and future-fit domains
+- not add new features, new release claims, new benchmarks, or new guarantees
 
 ### `reports/g1_*.md`
 
