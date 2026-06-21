@@ -48,12 +48,13 @@ or historical compatibility paths.
 
 External-facing descriptions should keep these readings explicit:
 
-- Semantic is deterministic verified execution, not general production
-  compliance.
-- TON618 names are compatibility perimeter, not current platform ownership.
-- `CTF` means Core Trust Freeze.
-- `7hell` is staged qualification and report shape.
-- Current `main` is not automatically stable or qualified release claim.
+- Semantic is deterministic verified execution, not a general production
+  compliance claim.
+- Historical compatibility names are not current platform ownership claims.
+- Trust-lane abbreviations must use their canonical project expansion.
+- Qualification labels are report/readiness structure, not implementation
+  mechanisms.
+- Current `main` is not automatically a stable or qualified release claim.
 - Future-fit domains are not current certification, security, or cryptographic
   guarantees.
 - Numeric claims require benchmark, report, test, or release-note evidence.
