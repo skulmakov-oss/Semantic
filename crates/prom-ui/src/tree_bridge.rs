@@ -85,7 +85,7 @@ pub type UiTreeToAstResult = Result<UiAst, UiTreeToAstDiagnostics>;
 /// Resolution metadata (`Known`, `Unknown`, `Conflict`) is ignored during
 /// bridging and does not block structural mapping.
 pub fn tree_to_ast(tree: &UiTree) -> UiTreeToAstResult {
-    let validation_result = validate_tree(tree, &UiTreeValidationConfig::default());
+    let validation_result = validate_tree(tree, &UiTreeValidationConfig);
     if validation_result.is_err() {
         return Err(UiTreeToAstDiagnostics::new(alloc::vec![
             UiTreeToAstDiagnostic::new(UiTreeToAstDiagnosticKind::InvalidTree)

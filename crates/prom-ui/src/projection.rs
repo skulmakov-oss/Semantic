@@ -384,7 +384,7 @@ pub struct ValidatedUiIr<'ir> {
 
 impl<'ir> ValidatedUiIr<'ir> {
     pub fn new(ir: &'ir UiIr) -> Result<Self, UiProjectionError> {
-        Self::new_with_config(ir, &UiIrValidationConfig::default())
+        Self::new_with_config(ir, &UiIrValidationConfig)
     }
 
     // Config-aware projection validation only.
@@ -422,7 +422,7 @@ pub fn project_validated_ir_to_projection(
 }
 
 pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiProjectionError> {
-    validate_ir(ir, &UiIrValidationConfig::default()).map_err(UiProjectionError::InvalidIr)?;
+    validate_ir(ir, &UiIrValidationConfig).map_err(UiProjectionError::InvalidIr)?;
     build_projection_from_validated_ir(ir)
 }
 
