@@ -1,18 +1,31 @@
+use crate::intent_capability::{InertCapabilityEvaluator, UiCapabilityEvaluator};
 use prom_ui::{IntentDispatchError, SemanticIntent, UiIntentDispatcher};
 
 /// The default runtime dispatcher that securely maps intents to capability gates.
 #[derive(Debug, Clone, Default)]
-pub struct RuntimeIntentDispatcher;
+pub struct RuntimeIntentDispatcher {
+    evaluator: InertCapabilityEvaluator,
+}
 
 impl RuntimeIntentDispatcher {
     pub fn new() -> Self {
-        Self
+        Self {
+            evaluator: InertCapabilityEvaluator::new(),
+        }
     }
 }
 
 impl UiIntentDispatcher for RuntimeIntentDispatcher {
-    fn dispatch_intent(&self, _intent: SemanticIntent) -> Result<(), IntentDispatchError> {
-        // Wave 0: Inert scaffold. Always denies execution to ensure fail-safe capability.
-        Err(IntentDispatchError::CapabilityDenied)
+    fn dispatch_intent(&self, intent: SemanticIntent) -> Result<(), IntentDispatchError> {
+        match self.evaluator.evaluate_intent(&intent) {
+            Ok(_admitted) => {
+                // Wave 0: Inert scaffold. If by some chance it was admitted, we still do nothing.
+                Ok(())
+            }
+            Err(_) => {
+                // Wave 0: Always denies execution to ensure fail-safe capability.
+                Err(IntentDispatchError::CapabilityDenied)
+            }
+        }
     }
 }
