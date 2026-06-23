@@ -7,5 +7,9 @@ Set-StrictMode -Version Latest
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $GuardScript = Join-Path $ScriptDir "admission_guard.ps1"
 
-& pwsh -File $GuardScript @args
+if ($args.Count -eq 0) {
+    & pwsh -File $GuardScript -CIParity
+} else {
+    & pwsh -File $GuardScript @args
+}
 exit $LASTEXITCODE
