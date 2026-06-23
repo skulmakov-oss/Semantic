@@ -44,6 +44,7 @@ pub mod hit_test;
 pub mod host_runtime_effect;
 pub mod host_runtime_effect_denial_trace;
 pub mod host_runtime_effect_result;
+pub mod intent_dispatch;
 pub mod intent_stream;
 pub mod interaction;
 pub mod layout;
@@ -189,6 +190,7 @@ pub use host_runtime_effect_result::{
     InteractionHostRuntimeEffectBoundaryMissingRequirement,
     InteractionHostRuntimeEffectBoundaryResult, InteractionHostRuntimeEffectBoundaryResultId,
 };
+pub use intent_dispatch::{IntentDispatchError, UiIntentDispatcher};
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel, InteractionIntentStreamReport,
     InteractionIntentStreamStats,
