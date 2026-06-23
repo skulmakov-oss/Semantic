@@ -40,7 +40,11 @@ pub mod adapter_boundary;
 pub mod admission_facade;
 pub mod boundary_registry;
 pub mod component_metadata;
+pub mod intent_audit;
+pub mod intent_capability;
+pub mod intent_dispatch;
 pub mod layout_primitives;
+pub mod state_update;
 pub mod visual_tokens;
 
 pub use adapter_boundary::{
@@ -48,6 +52,7 @@ pub use adapter_boundary::{
     UiAdapterFailureKind, UiAdapterReject, UiAdapterRejectKind, UiAdapterRequest, UiAdapterResult,
     UiAdapterTarget, UiAdapterValue, UiRuntimeAdapter, UiRuntimeEffect, WindowId,
 };
+pub use intent_dispatch::RuntimeIntentDispatcher;
 
 use prom_ui::{UiCapabilityKind, UiOperationId};
 
