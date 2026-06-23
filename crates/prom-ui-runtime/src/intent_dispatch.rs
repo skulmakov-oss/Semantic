@@ -1,5 +1,6 @@
 use crate::intent_audit::{InertAuditLogger, UiAuditLogger};
 use crate::intent_capability::{InertCapabilityEvaluator, UiCapabilityEvaluator};
+use crate::state_update::{InertStateUpdater, RuntimeStateUpdater};
 use prom_ui::{IntentDispatchError, SemanticIntent, UiIntentDispatcher};
 
 /// The default runtime dispatcher that securely maps intents to capability gates.
@@ -7,6 +8,7 @@ use prom_ui::{IntentDispatchError, SemanticIntent, UiIntentDispatcher};
 pub struct RuntimeIntentDispatcher {
     evaluator: InertCapabilityEvaluator,
     audit_logger: InertAuditLogger,
+    state_updater: InertStateUpdater,
 }
 
 impl RuntimeIntentDispatcher {
@@ -14,6 +16,7 @@ impl RuntimeIntentDispatcher {
         Self {
             evaluator: InertCapabilityEvaluator::new(),
             audit_logger: InertAuditLogger::new(),
+            state_updater: InertStateUpdater::new(),
         }
     }
 }
@@ -28,10 +31,10 @@ impl UiIntentDispatcher for RuntimeIntentDispatcher {
             .record_intent_evaluation(&intent, &evaluation);
 
         match evaluation {
-            Ok(_admitted) => {
-                // Wave 0: Inert scaffold. If by some chance it was admitted, we still do nothing.
-                Ok(())
-            }
+            Ok(admitted) => self
+                .state_updater
+                .execute_admitted_action(admitted)
+                .map_err(|_| IntentDispatchError::StateUpdateFailed),
             Err(_) => {
                 // Wave 0: Always denies execution to ensure fail-safe capability.
                 Err(IntentDispatchError::CapabilityDenied)

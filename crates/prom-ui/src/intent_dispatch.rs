@@ -9,6 +9,8 @@ pub enum IntentDispatchError {
     UnknownAction,
     /// The target node could not be resolved in the current semantic state.
     TargetNotFound,
+    /// The runtime failed to apply the state update or execute the side effect.
+    StateUpdateFailed,
 }
 
 /// Dispatches a mapped `SemanticIntent` into the runtime execution environment.

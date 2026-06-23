@@ -44,6 +44,7 @@ pub mod intent_audit;
 pub mod intent_capability;
 pub mod intent_dispatch;
 pub mod layout_primitives;
+pub mod state_update;
 pub mod visual_tokens;
 
 pub use adapter_boundary::{
