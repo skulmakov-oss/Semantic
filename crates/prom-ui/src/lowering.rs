@@ -364,7 +364,7 @@ mod tests {
     fn lowering_config_is_inert() {
         let config = UiLoweringConfig;
 
-        assert_eq!(config, UiLoweringConfig::default());
+        assert_eq!(config, UiLoweringConfig);
     }
 
     #[test]

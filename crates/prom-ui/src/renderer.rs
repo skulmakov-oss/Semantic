@@ -819,15 +819,13 @@ fn build_overview_section(
 ) -> UiRenderInspectionSection {
     let kind = UiRenderInspectionSectionKind::Overview;
     let section_id = inspection_section_id(presentation_id, kind);
-    let mut items = Vec::new();
-
-    items.push(UiRenderInspectionItem {
+    let items = vec![UiRenderInspectionItem {
         id: inspection_item_id(section_id, UiRenderInspectionItemKind::OverviewSummary, 0),
         kind: UiRenderInspectionItemKind::OverviewSummary,
         source_render_node: None,
         source_projection_node: None,
         source_ir_node: model.source_ir_root(),
-    });
+    }];
 
     UiRenderInspectionSection {
         id: section_id,

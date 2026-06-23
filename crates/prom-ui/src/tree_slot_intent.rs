@@ -129,7 +129,7 @@ pub type UiTreeSlotCarrierIntentResult =
 
 pub fn build_tree_slot_carrier_intents(tree: &UiTree) -> UiTreeSlotCarrierIntentResult {
     // 1. Validate tree
-    if let Err(errs) = validate_tree(tree, &UiTreeValidationConfig::default()) {
+    if let Err(errs) = validate_tree(tree, &UiTreeValidationConfig) {
         let diag = UiTreeSlotCarrierIntentDiagnostic {
             kind: UiTreeSlotCarrierIntentDiagnosticKind::TreeValidationFailed,
             message: format!(

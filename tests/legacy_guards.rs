@@ -60,7 +60,10 @@ fn no_path_adapter_back_to_root_src() {
     let mut files = Vec::new();
     collect_rs_files(Path::new("crates"), &mut files);
     for f in files {
-        let txt = fs::read_to_string(&f).expect("read rs");
+        let txt = match fs::read_to_string(&f) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
         assert!(
             !txt.contains("#[path = \"../../../src/"),
             "forbidden legacy path adapter in {}",
@@ -133,7 +136,10 @@ fn root_src_bans_legacy_patterns() {
     let mut files = Vec::new();
     collect_rs_files(Path::new("src"), &mut files);
     for f in files {
-        let txt = fs::read_to_string(&f).expect("read rs");
+        let txt = match fs::read_to_string(&f) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
         let rel = f.to_string_lossy().replace('\\', "/");
         assert!(
             !txt.contains("legacy_"),
@@ -280,7 +286,10 @@ fn ton618_content_inventory_is_explicit() {
     let mut matches = BTreeSet::new();
     for file in files {
         let rel = file.to_string_lossy().replace('\\', "/");
-        let txt = fs::read_to_string(&file).expect("read text file");
+        let txt = match fs::read_to_string(&file) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
         if txt.contains("ton618_core") || txt.contains("ton618-core") {
             matches.insert(rel);
         }

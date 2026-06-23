@@ -13,9 +13,9 @@ fn sample_entry() -> UiBackendFrameEntry {
     )
 }
 
-fn entry_signature(
-    entry: &UiBackendFrameEntry,
-) -> (u64, u64, Option<u64>, i32, i32, u32, u32, UiRenderNodeKind) {
+type FrameSignatureTuple = (u64, u64, Option<u64>, i32, i32, u32, u32, UiRenderNodeKind);
+
+fn entry_signature(entry: &UiBackendFrameEntry) -> FrameSignatureTuple {
     let rect = entry.rect();
     (
         entry.render_node_id().raw(),
@@ -29,9 +29,7 @@ fn entry_signature(
     )
 }
 
-fn frame_signature(
-    frame: &UiBackendFrame,
-) -> Vec<(u64, u64, Option<u64>, i32, i32, u32, u32, UiRenderNodeKind)> {
+fn frame_signature(frame: &UiBackendFrame) -> Vec<FrameSignatureTuple> {
     frame.entries().iter().map(entry_signature).collect()
 }
 

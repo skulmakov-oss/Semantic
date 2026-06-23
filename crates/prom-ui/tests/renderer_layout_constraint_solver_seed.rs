@@ -209,5 +209,4 @@ fn constraint_solver_seed_is_inert_and_does_not_mutate() {
     // Does not implement constraint satisfaction or equation solving
     // Does not produce final rectangles
     let _model = constraint_solver_model;
-    assert!(true, "Seed is inert");
 }
