@@ -1,0 +1,11 @@
+{
+  "run_id": "1782226190595-31868",
+  "repo_path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui",
+  "created_unix_ms": 1782226190595,
+  "command_ids": [
+    "git-diff-check"
+  ],
+  "run_path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui\\.ccl\\runs\\1782226190595-31868",
+  "run_json_path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui\\.ccl\\runs\\1782226190595-31868\\run.json",
+  "evidence_manifest_path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui\\.ccl\\runs\\1782226190595-31868\\evidence-manifest.json"
+}
