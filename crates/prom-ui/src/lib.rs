@@ -31,6 +31,7 @@ pub mod action_dispatch_record;
 pub mod action_dispatch_route;
 pub mod action_dispatch_summary;
 pub mod action_dispatch_trace;
+pub mod action_mapping;
 pub mod admitted_action;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
@@ -122,6 +123,7 @@ pub use action_dispatch_trace::{
     trace_interaction_semantic_action_dispatch, InteractionSemanticActionDispatchTraceReason,
     InteractionSemanticActionDispatchTraceReport, InteractionSemanticActionDispatchTraceStatus,
 };
+pub use action_mapping::{DefaultActionMapper, SemanticIntent, UiActionMapper};
 pub use admitted_action::{
     build_interaction_admitted_semantic_action, InteractionAdmittedSemanticAction,
     InteractionAdmittedSemanticActionDispatchReadiness,

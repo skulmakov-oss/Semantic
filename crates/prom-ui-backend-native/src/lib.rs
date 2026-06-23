@@ -18,9 +18,11 @@ use prom_ui_runtime::{
     WindowConfig,
 };
 
+pub mod action_translation;
 pub mod frame_sink;
 pub mod interaction;
 
+pub use action_translation::{DefaultNativeActionTranslator, NativeActionTranslator};
 pub use frame_sink::{UiBackendFrame, UiBackendFrameEntry, UiFrameSink};
 pub use interaction::RoutedInteraction;
 
