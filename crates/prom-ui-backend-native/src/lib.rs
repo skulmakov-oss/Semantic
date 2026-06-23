@@ -18,6 +18,10 @@ use prom_ui_runtime::{
     WindowConfig,
 };
 
+pub mod frame_sink;
+
+pub use frame_sink::{UiBackendFrame, UiBackendFrameEntry, UiFrameSink};
+
 #[cfg(feature = "winit-backend")]
 #[derive(Debug)]
 pub enum NativeBackendWinitSmokeError {

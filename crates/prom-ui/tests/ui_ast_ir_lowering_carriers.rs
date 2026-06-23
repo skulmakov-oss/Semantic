@@ -1,5 +1,5 @@
 use prom_ui::lowering::{lower_ast_to_ir, UiLoweringConfig, UiLoweringDiagnosticKind};
-use prom_ui::model::{UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIrNodeKind};
+use prom_ui::model::{UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIrNodeId, UiIrNodeKind};
 use prom_ui::projection::{project_ir_to_projection, UiProjectedNodeKind};
 use prom_ui::renderer::{render_projection_to_model, UiRenderMarker};
 

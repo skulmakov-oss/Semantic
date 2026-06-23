@@ -118,6 +118,7 @@ pub fn lower_ast_to_ir(ast: &UiAst, config: &UiLoweringConfig) -> UiLoweringResu
             ),
             None => UiIrNode::new(UiIrNodeId::new(node.id().raw()), ir_kind),
         };
+        ir_node.set_source_ast_node_id(Some(node.id()));
 
         for child in node.children() {
             ir_node.push_child(UiIrNodeId::new(child.raw()));
