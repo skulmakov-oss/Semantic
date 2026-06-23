@@ -39,6 +39,7 @@ pub mod committed_effect_record;
 pub mod effect_request;
 pub mod effect_request_summary;
 pub mod effect_request_trace;
+pub mod hit_test;
 pub mod host_runtime_effect;
 pub mod host_runtime_effect_denial_trace;
 pub mod host_runtime_effect_result;
@@ -165,6 +166,7 @@ pub use effect_request_trace::{
     trace_interaction_effect_request, InteractionEffectRequestTraceReason,
     InteractionEffectRequestTraceReport, InteractionEffectRequestTraceStatus,
 };
+pub use hit_test::{DefaultHitTester, UiHitTester};
 pub use host_runtime_effect::{
     describe_interaction_host_runtime_effect_boundary, InteractionHostRuntimeAuditWriteRequirement,
     InteractionHostRuntimeEffectBoundaryDecisionShape,

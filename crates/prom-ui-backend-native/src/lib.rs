@@ -19,8 +19,10 @@ use prom_ui_runtime::{
 };
 
 pub mod frame_sink;
+pub mod interaction;
 
 pub use frame_sink::{UiBackendFrame, UiBackendFrameEntry, UiFrameSink};
+pub use interaction::RoutedInteraction;
 
 /// Raw button state representing physical input evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
