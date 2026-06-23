@@ -38,7 +38,26 @@ impl From<winit::error::EventLoopError> for NativeBackendWinitSmokeError {
 
 /// Returns whether this crate was compiled with the `winit-backend` feature.
 pub const fn winit_backend_feature_enabled() -> bool {
-    cfg!(feature = "winit-backend")
+    #[cfg(feature = "winit-backend")]
+    {
+        true
+    }
+    #[cfg(not(feature = "winit-backend"))]
+    {
+        false
+    }
+}
+
+/// Returns whether the `wgpu-backend` Cargo feature is enabled at compile time.
+pub const fn wgpu_backend_feature_enabled() -> bool {
+    #[cfg(feature = "wgpu-backend")]
+    {
+        true
+    }
+    #[cfg(not(feature = "wgpu-backend"))]
+    {
+        false
+    }
 }
 
 #[cfg(feature = "winit-backend")]
@@ -1487,4 +1506,9 @@ impl UiBackendAdapter for NativeBackend {
         self.submitted_frames = self.submitted_frames.saturating_add(1);
         Ok(())
     }
+}
+
+#[cfg(feature = "wgpu-backend")]
+pub fn selected_draw_backend_name() -> &'static str {
+    "wgpu"
 }
