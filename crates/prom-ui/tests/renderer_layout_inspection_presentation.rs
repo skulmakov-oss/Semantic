@@ -243,5 +243,4 @@ fn layout_inspection_is_read_only_observability() {
 }
 
 #[test]
-fn layout_inspection_has_no_geometry_draw_event_backend_authority() {
-}
+fn layout_inspection_has_no_geometry_draw_event_backend_authority() {}
