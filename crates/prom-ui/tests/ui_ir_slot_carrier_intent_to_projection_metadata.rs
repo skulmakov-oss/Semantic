@@ -491,7 +491,7 @@ fn conflict_resolution_is_preserved() {
 
 #[test]
 fn missing_projected_node_returns_diagnostic() {
-    let (ir_intents, mut projection, _, _) = build_baseline_artifact();
+    let (ir_intents, projection, _, _) = build_baseline_artifact();
 
     // Create a new projection with only the root, missing the fragment
     let mut new_projection = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
@@ -516,7 +516,7 @@ fn missing_projected_node_returns_diagnostic() {
 
 #[test]
 fn non_fragment_projected_node_returns_diagnostic() {
-    let (ir_intents, mut projection, _, _) = build_baseline_artifact();
+    let (ir_intents, projection, _, _) = build_baseline_artifact();
 
     let mut new_projection = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
     for node in projection.nodes() {
