@@ -22,6 +22,51 @@ pub mod frame_sink;
 
 pub use frame_sink::{UiBackendFrame, UiBackendFrameEntry, UiFrameSink};
 
+/// Raw button state representing physical input evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RawButtonState {
+    Pressed,
+    Released,
+}
+
+/// Raw keyboard key code representing physical input evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RawKeyCode {
+    KeyA,
+    KeyB,
+    KeyC,
+    KeyD,
+    KeyW,
+    KeyS,
+    Digit0,
+    Digit1,
+    Digit2,
+    Enter,
+    Escape,
+    Space,
+    Unknown(u32),
+}
+
+/// Inert physical event evidence captured from the host.
+///
+/// This does not infer semantic intent.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RawBackendEvent {
+    WindowResized {
+        width: u32,
+        height: u32,
+    },
+    KeyboardInput {
+        key: RawKeyCode,
+        state: RawButtonState,
+    },
+    PointerMoved {
+        x: f64,
+        y: f64,
+    },
+    CloseRequested,
+}
+
 #[cfg(feature = "winit-backend")]
 #[derive(Debug)]
 pub enum NativeBackendWinitSmokeError {
@@ -213,6 +258,64 @@ pub mod winit_placeholder {
             WindowEvent::CloseRequested => Some(translate_winit_close_requested()),
             WindowEvent::KeyboardInput { event, .. } => {
                 translate_winit_physical_key(event.state, event.physical_key)
+            }
+            _ => None,
+        }
+    }
+
+    /// Translate a selected winit physical key into `RawKeyCode`.
+    pub const fn translate_winit_to_raw_key_code(key_code: KeyCode) -> super::RawKeyCode {
+        match key_code {
+            KeyCode::KeyA => super::RawKeyCode::KeyA,
+            KeyCode::KeyB => super::RawKeyCode::KeyB,
+            KeyCode::KeyC => super::RawKeyCode::KeyC,
+            KeyCode::KeyD => super::RawKeyCode::KeyD,
+            KeyCode::KeyW => super::RawKeyCode::KeyW,
+            KeyCode::KeyS => super::RawKeyCode::KeyS,
+            KeyCode::Digit0 => super::RawKeyCode::Digit0,
+            KeyCode::Digit1 => super::RawKeyCode::Digit1,
+            KeyCode::Digit2 => super::RawKeyCode::Digit2,
+            KeyCode::Enter => super::RawKeyCode::Enter,
+            KeyCode::Escape => super::RawKeyCode::Escape,
+            KeyCode::Space => super::RawKeyCode::Space,
+            _ => super::RawKeyCode::Unknown(key_code as u32),
+        }
+    }
+
+    /// Translate a winit `ElementState` to `RawButtonState`.
+    pub const fn translate_winit_to_raw_button_state(state: ElementState) -> super::RawButtonState {
+        match state {
+            ElementState::Pressed => super::RawButtonState::Pressed,
+            ElementState::Released => super::RawButtonState::Released,
+        }
+    }
+
+    /// Translate a winit `WindowEvent` into inert `RawBackendEvent` evidence.
+    pub fn translate_winit_to_raw_backend_event(
+        event: &WindowEvent,
+    ) -> Option<super::RawBackendEvent> {
+        match event {
+            WindowEvent::CloseRequested => Some(super::RawBackendEvent::CloseRequested),
+            WindowEvent::Resized(physical_size) => Some(super::RawBackendEvent::WindowResized {
+                width: physical_size.width,
+                height: physical_size.height,
+            }),
+            WindowEvent::KeyboardInput { event, .. } => {
+                let key_code = match event.physical_key {
+                    PhysicalKey::Code(code) => translate_winit_to_raw_key_code(code),
+                    PhysicalKey::Unidentified(_) => return None,
+                };
+                let state = translate_winit_to_raw_button_state(event.state);
+                Some(super::RawBackendEvent::KeyboardInput {
+                    key: key_code,
+                    state,
+                })
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                Some(super::RawBackendEvent::PointerMoved {
+                    x: position.x,
+                    y: position.y,
+                })
             }
             _ => None,
         }
