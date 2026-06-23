@@ -26,7 +26,7 @@ fn vertical_slice_from_tree_to_render_model_builds_successfully() {
     tree.push_node(text_node);
 
     // Step 1: Validate Tree
-    let validation_result = validate_tree(&tree, &UiTreeValidationConfig::default());
+    let validation_result = validate_tree(&tree, &UiTreeValidationConfig);
     assert!(validation_result.is_ok(), "UiTree must pass validation");
 
     // Step 2: Bridge Tree to AST
@@ -101,7 +101,7 @@ fn vertical_slice_accepts_inert_slot_as_fragment() {
     tree.push_node(root_node);
     tree.push_node(slot_node);
 
-    let validation_result = validate_tree(&tree, &UiTreeValidationConfig::default());
+    let validation_result = validate_tree(&tree, &UiTreeValidationConfig);
     assert!(validation_result.is_ok());
 
     let ast = tree_to_ast(&tree).expect("bridge to succeed");

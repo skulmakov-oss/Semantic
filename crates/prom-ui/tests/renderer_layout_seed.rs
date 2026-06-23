@@ -118,7 +118,7 @@ fn repeated_layout_is_deterministic() {
 #[test]
 fn layout_seed_is_structural_only() {
     // Asserting the vocabulary contains only structural/metadata items, no geometries
-    let slots = vec![
+    let slots = [
         UiLayoutSlotKind::Root,
         UiLayoutSlotKind::Node,
         UiLayoutSlotKind::Metadata,

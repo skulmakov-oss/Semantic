@@ -31,7 +31,7 @@ fn slot_carrier_intent_golden_vertical_slice_reaches_render_metadata_without_aut
     let ast = tree_to_ast(&tree).unwrap();
     let ast_nodes_count = ast.nodes().len();
 
-    let ir = lower_ast_to_ir(&ast, &UiLoweringConfig::default()).unwrap();
+    let ir = lower_ast_to_ir(&ast, &UiLoweringConfig).unwrap();
     let ir_nodes_count = ir.nodes().len();
 
     let projection = project_ir_to_projection(&ir).unwrap();
@@ -174,7 +174,7 @@ fn slot_carrier_intent_golden_vertical_slice_preserves_conflict_resolution() {
     tree.push_node(slot);
 
     let ast = tree_to_ast(&tree).unwrap();
-    let ir = lower_ast_to_ir(&ast, &UiLoweringConfig::default()).unwrap();
+    let ir = lower_ast_to_ir(&ast, &UiLoweringConfig).unwrap();
     let projection = project_ir_to_projection(&ir).unwrap();
     let render_model = render_projection_to_model(&projection).unwrap();
 
