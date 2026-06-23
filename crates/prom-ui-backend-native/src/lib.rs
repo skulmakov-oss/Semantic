@@ -1512,3 +1512,111 @@ impl UiBackendAdapter for NativeBackend {
 pub fn selected_draw_backend_name() -> &'static str {
     "wgpu"
 }
+
+#[cfg(feature = "wgpu-backend")]
+pub mod wgpu_integration {
+    //! Feature-gated minimal wgpu integration.
+    //!
+    //! This proves wgpu initialization without wiring it into the live run loop
+    //! and without surface presentation logic.
+
+    use wgpu::{Adapter, Device, Instance, Queue};
+
+    /// Encapsulates the core wgpu primitives.
+    #[derive(Debug)]
+    pub struct NativeBackendWgpuContext {
+        pub instance: Instance,
+        pub adapter: Adapter,
+        pub device: Device,
+        pub queue: Queue,
+    }
+
+    impl NativeBackendWgpuContext {
+        /// Initializes the wgpu context asynchronously and blocks using `pollster`.
+        ///
+        /// This creates the instance, requests the default adapter, and requests the device.
+        pub fn new() -> Option<Self> {
+            let instance = Instance::default();
+
+            // Block on adapter request
+            let adapter =
+                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::default(),
+                    force_fallback_adapter: false,
+                    compatible_surface: None, // No surface yet
+                }))?;
+
+            // Block on device request
+            let (device, queue) = pollster::block_on(adapter.request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("NativeBackend Minimal Device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::downlevel_defaults(),
+                },
+                None,
+            ))
+            .ok()?;
+
+            Some(Self {
+                instance,
+                adapter,
+                device,
+                queue,
+            })
+        }
+
+        /// Proves minimal draw execution by clearing a dummy texture offscreen.
+        ///
+        /// This records a minimal `RenderPass` without swapchain presentation.
+        pub fn execute_minimal_draw_pass(&self) {
+            let texture_size = wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            };
+
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Minimal Draw Dummy Texture"),
+                size: texture_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Minimal Draw Encoder"),
+                });
+
+            {
+                let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Minimal Draw Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &texture_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.3,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+
+            self.queue.submit(core::iter::once(encoder.finish()));
+        }
+    }
+}
