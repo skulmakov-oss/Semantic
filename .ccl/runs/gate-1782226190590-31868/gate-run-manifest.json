@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "gate_run_id": "gate-1782226190590-31868",
+  "contract_path": "C:\\Users\\said3\\AppData\\Local\\Temp\\semantic-branch-condition-code-doc-ccl-dogfood.json",
+  "contract_sha256": "4168d4a8057b7bdffb35628dd65a02665bf6f2106c72631dd9ba19f8b4ae8d2f",
+  "repo_path": ".",
+  "status": "FAIL",
+  "started_unix_ms": 1782226190592,
+  "finished_unix_ms": 1782226268969,
+  "github_ci_used_as_evidence": false,
+  "steps": [
+    {
+      "name": "validation",
+      "status": "PASS",
+      "manifest_path": ".ccl/runs/validation-1782226190592-31868/validation-run-manifest.json"
+    },
+    {
+      "name": "scope",
+      "status": "FAIL",
+      "manifest_path": ".ccl/runs/scope-1782226267288-31868/scope-check-manifest.json"
+    },
+    {
+      "name": "admission",
+      "status": "FAIL",
+      "manifest_path": ".ccl/runs/admission-1782226268961-31868/admission-verdict.json"
+    }
+  ],
+  "warnings": [],
+  "violations": [
+    {
+      "kind": "scope_status_fail",
+      "reason": "scope status FAIL"
+    },
+    {
+      "kind": "scope_violations_present",
+      "reason": "2 scope violation(s) recorded"
+    }
+  ]
+}

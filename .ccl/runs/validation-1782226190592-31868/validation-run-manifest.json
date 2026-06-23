@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "validation_run_id": "validation-1782226190592-31868",
+  "contract_path": "C:\\Users\\said3\\AppData\\Local\\Temp\\semantic-branch-condition-code-doc-ccl-dogfood.json",
+  "contract_sha256": "4168d4a8057b7bdffb35628dd65a02665bf6f2106c72631dd9ba19f8b4ae8d2f",
+  "repo_path": ".",
+  "status": "PASS",
+  "started_unix_ms": 1782226190593,
+  "finished_unix_ms": 1782226267285,
+  "commands": [
+    {
+      "id": "git-diff-check",
+      "required": true,
+      "status": "PASS",
+      "capture_run_id": "1782226190595-31868",
+      "result_path": ".ccl/runs/1782226190595-31868/commands/001-git-diff-check/result.json",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 0,
+      "timed_out": false,
+      "output_limit_exceeded": false
+    },
+    {
+      "id": "cargo-fmt-check",
+      "required": true,
+      "status": "PASS",
+      "capture_run_id": "1782226190896-31868",
+      "result_path": ".ccl/runs/1782226190896-31868/commands/001-cargo-fmt-check/result.json",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 0,
+      "timed_out": false,
+      "output_limit_exceeded": false
+    },
+    {
+      "id": "focused-branch-condition-tests",
+      "required": true,
+      "status": "PASS",
+      "capture_run_id": "1782226197359-31868",
+      "result_path": ".ccl/runs/1782226197359-31868/commands/001-focused-branch-condition-tests/result.json",
+      "stdout_sha256": "534ff0909192eae6ad9889cddc6df5d7279150e78d0fe39908684b6181b15214",
+      "stderr_sha256": "dbf65850531123d6aba50aa5ae4059b38fd013faf190fddbc4791581779fc1d7",
+      "exit_code": 0,
+      "timed_out": false,
+      "output_limit_exceeded": false
+    },
+    {
+      "id": "cargo-test",
+      "required": false,
+      "status": "PASS",
+      "capture_run_id": "1782226203523-31868",
+      "result_path": ".ccl/runs/1782226203523-31868/commands/001-cargo-test/result.json",
+      "stdout_sha256": "2248d8f876c22ebc70f688eb2528df8d735517c92a4b20bb69b39de8dbe8f8f1",
+      "stderr_sha256": "c51a6f8a668afa86fdbb2e427e3fde052c6e4fa8eae19eaa29b22ebcff5cbad0",
+      "exit_code": 0,
+      "timed_out": false,
+      "output_limit_exceeded": false
+    },
+    {
+      "id": "cargo-clippy",
+      "required": false,
+      "status": "PASS",
+      "capture_run_id": "1782226227020-31868",
+      "result_path": ".ccl/runs/1782226227020-31868/commands/001-cargo-clippy/result.json",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "cc84e8bae4462273de5758fdebace21ec6f3410b13571838af3ce15abda33628",
+      "exit_code": 0,
+      "timed_out": false,
+      "output_limit_exceeded": false
+    }
+  ],
+  "github_ci_used_as_evidence": false,
+  "environment_policy": {
+    "mode": "record_only",
+    "status": "pass",
+    "checked": true,
+    "command_results": [
+      {
+        "command_id": "git-diff-check",
+        "status": "pass",
+        "warnings_count": 0,
+        "violations_count": 0,
+        "redacted_variables_count": 0
+      },
+      {
+        "command_id": "cargo-fmt-check",
+        "status": "pass",
+        "warnings_count": 0,
+        "violations_count": 0,
+        "redacted_variables_count": 0
+      },
+      {
+        "command_id": "focused-branch-condition-tests",
+        "status": "pass",
+        "warnings_count": 0,
+        "violations_count": 0,
+        "redacted_variables_count": 0
+      },
+      {
+        "command_id": "cargo-test",
+        "status": "pass",
+        "warnings_count": 0,
+        "violations_count": 0,
+        "redacted_variables_count": 0
+      },
+      {
+        "command_id": "cargo-clippy",
+        "status": "pass",
+        "warnings_count": 0,
+        "violations_count": 0,
+        "redacted_variables_count": 0
+      }
+    ],
+    "warnings_count": 0,
+    "violations_count": 0,
+    "redacted_variables_count": 0
+  }
+}

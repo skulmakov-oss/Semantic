@@ -1619,4 +1619,108 @@ pub mod wgpu_integration {
             self.queue.submit(core::iter::once(encoder.finish()));
         }
     }
+
+    /// Feature-gated surface presentation logic.
+    ///
+    /// Requires both `wgpu-backend` and `winit-backend` to link physical pixels to a native window.
+    #[cfg(feature = "winit-backend")]
+    #[derive(Debug)]
+    pub struct NativeBackendPresentationSurface {
+        pub surface: wgpu::Surface<'static>,
+        pub config: wgpu::SurfaceConfiguration,
+    }
+
+    #[cfg(feature = "winit-backend")]
+    impl NativeBackendPresentationSurface {
+        /// Creates a new surface from an `Arc<winit::window::Window>`.
+        pub fn new(
+            context: &NativeBackendWgpuContext,
+            window: alloc::sync::Arc<winit::window::Window>,
+            width: u32,
+            height: u32,
+        ) -> Result<Self, wgpu::CreateSurfaceError> {
+            let surface = context.instance.create_surface(window)?;
+
+            let config = surface
+                .get_default_config(&context.adapter, width.max(1), height.max(1))
+                .unwrap_or_else(|| wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    width: width.max(1),
+                    height: height.max(1),
+                    present_mode: wgpu::PresentMode::AutoVsync,
+                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    view_formats: alloc::vec![],
+                    desired_maximum_frame_latency: 2,
+                });
+
+            // Configure immediately
+            surface.configure(&context.device, &config);
+
+            Ok(Self { surface, config })
+        }
+
+        /// Reconfigures the swapchain upon window resize.
+        pub fn resize(&mut self, context: &NativeBackendWgpuContext, width: u32, height: u32) {
+            let w = width.max(1);
+            let h = height.max(1);
+            if self.config.width != w || self.config.height != h {
+                self.config.width = w;
+                self.config.height = h;
+                self.surface.configure(&context.device, &self.config);
+            }
+        }
+
+        /// Presents a minimal clear color to the surface to prove connectivity.
+        ///
+        /// Returns `false` if the surface was lost or outdated, requiring reconfiguration.
+        pub fn present_minimal_clear(&self, context: &NativeBackendWgpuContext) -> bool {
+            let frame = match self.surface.get_current_texture() {
+                Ok(frame) => frame,
+                Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => return false,
+                Err(_e) => {
+                    // Timeout or OutOfMemory. Treat as physical evidence failure, do not panic.
+                    // OutOfMemory might require larger handling, but we log and drop frame.
+                    return false;
+                }
+            };
+
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            let mut encoder =
+                context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Presentation Clear Encoder"),
+                    });
+
+            {
+                let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Presentation Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.15,
+                                g: 0.15,
+                                b: 0.2,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+
+            context.queue.submit(core::iter::once(encoder.finish()));
+            frame.present();
+            true
+        }
+    }
 }

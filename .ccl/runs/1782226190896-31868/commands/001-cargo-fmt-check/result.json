@@ -1,0 +1,717 @@
+{
+  "id": "cargo-fmt-check",
+  "program": "cargo",
+  "args": [
+    "fmt",
+    "--check"
+  ],
+  "cwd": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui",
+  "status": "PASS",
+  "failure_class": null,
+  "exit_code": 0,
+  "timed_out": false,
+  "output_limit_exceeded": false,
+  "runtime_ms": 6444,
+  "wall_timeout_seconds": 180,
+  "stdout": {
+    "path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui\\.ccl\\runs\\1782226190896-31868\\commands\\001-cargo-fmt-check\\stdout.txt",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0,
+    "complete": true,
+    "truncated": false,
+    "hash_scope": "saved_bytes_only"
+  },
+  "stderr": {
+    "path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui\\.ccl\\runs\\1782226190896-31868\\commands\\001-cargo-fmt-check\\stderr.txt",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "bytes": 0,
+    "complete": true,
+    "truncated": false,
+    "hash_scope": "saved_bytes_only"
+  },
+  "combined_output_bytes": 0,
+  "max_stdout_bytes": 10485760,
+  "max_stderr_bytes": 10485760,
+  "max_combined_output_bytes": 20971520,
+  "env_path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui\\.ccl\\runs\\1782226190896-31868\\commands\\001-cargo-fmt-check\\env.json",
+  "env_sha256": "f95f9039d5e6c212aa0b2ce9032aebc9f92f445db0d61d87a538cbdbd8b48a3f",
+  "environment_policy": {
+    "mode": "record_only",
+    "status": "pass",
+    "checked": true,
+    "variables": [
+      {
+        "name": "AGY_BROWSER_ACTIVE_PORT_FILE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "AGY_BROWSER_WS_URL",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ALLUSERSPROFILE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ANTIGRAVITY_AGENT",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ANTIGRAVITY_CSRF_TOKEN",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ANTIGRAVITY_LS_ADDRESS",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ANTIGRAVITY_PROJECT_ID",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ANTIGRAVITY_SOURCE_METADATA",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ANTIGRAVITY_TRAJECTORY_ID",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "APPDATA",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_HOME",
+        "class": "toolchain_path",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_MANIFEST_DIR",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_MANIFEST_PATH",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_AUTHORS",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_DESCRIPTION",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_HOMEPAGE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_LICENSE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_LICENSE_FILE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_NAME",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_README",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_REPOSITORY",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_RUST_VERSION",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_VERSION",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_VERSION_MAJOR",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_VERSION_MINOR",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_VERSION_PATCH",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CARGO_PKG_VERSION_PRE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CHROME_DEVTOOLS_MCP_JS",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "COMPUTERNAME",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CUDA_PATH",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CUDA_PATH_V12_4",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ComSpec",
+        "class": "required_runtime",
+        "match_rule": "baseline_allowlist",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "allowed_by_baseline"
+      },
+      {
+        "name": "CommonProgramFiles",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CommonProgramFiles(x86)",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "CommonProgramW6432",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "DriverData",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "EFC_17536_1262719628",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "EFC_17536_1592913036",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "EFC_17536_2283032206",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "EFC_17536_2775293581",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "EFC_17536_2946480783",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "EFC_17536_3789132940",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "EFC_17536_4126798990",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "FPS_BROWSER_APP_PROFILE_STRING",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "FPS_BROWSER_USER_PROFILE_STRING",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "HOMEDRIVE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "HOMEPATH",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "LD_LIBRARY_PATH",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "LOCALAPPDATA",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "LOGONSERVER",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "NUMBER_OF_PROCESSORS",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "OPENSSL_ia32cap",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "OS",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "OneDrive",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "PATH",
+        "class": "required_runtime",
+        "match_rule": "baseline_allowlist",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "allowed_by_baseline"
+      },
+      {
+        "name": "PATHEXT",
+        "class": "required_runtime",
+        "match_rule": "baseline_allowlist",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "allowed_by_baseline"
+      },
+      {
+        "name": "PROCESSOR_ARCHITECTURE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "PROCESSOR_IDENTIFIER",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "PROCESSOR_LEVEL",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "PROCESSOR_REVISION",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "PROGF81DEF27053",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "PSModulePath",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "PUBLIC",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ProgramData",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ProgramFiles",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ProgramFiles(x86)",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "ProgramW6432",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "RUSTUP_HOME",
+        "class": "toolchain_path",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "RUSTUP_TOOLCHAIN",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "RUST_RECURSION_COUNT",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "SESSIONNAME",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "SystemDrive",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "SystemRoot",
+        "class": "required_runtime",
+        "match_rule": "baseline_allowlist",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "allowed_by_baseline"
+      },
+      {
+        "name": "TEMP",
+        "class": "required_runtime",
+        "match_rule": "baseline_allowlist",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "allowed_by_baseline"
+      },
+      {
+        "name": "TMP",
+        "class": "required_runtime",
+        "match_rule": "baseline_allowlist",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "allowed_by_baseline"
+      },
+      {
+        "name": "USERDOMAIN",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "USERDOMAIN_ROAMINGPROFILE",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "USERNAME",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "USERPROFILE",
+        "class": "required_runtime",
+        "match_rule": "baseline_allowlist",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "allowed_by_baseline"
+      },
+      {
+        "name": "VS140COMNTOOLS",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "__PSLockDownPolicy",
+        "class": "unknown",
+        "match_rule": "unknown",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "unknown_by_policy"
+      },
+      {
+        "name": "windir",
+        "class": "required_runtime",
+        "match_rule": "baseline_allowlist",
+        "decision": "pass",
+        "redacted": false,
+        "reason": "allowed_by_baseline"
+      }
+    ],
+    "warnings": [],
+    "violations": [],
+    "redacted_variables": [],
+    "allowed_variables_count": 8,
+    "denied_variables_count": 0,
+    "unknown_variables_count": 75
+  },
+  "result_path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui\\.ccl\\runs\\1782226190896-31868\\commands\\001-cargo-fmt-check\\result.json",
+  "command_path": "\\\\?\\C:\\Users\\said3\\Desktop\\EXOcode\\Semantic_phase1_prom_ui\\.ccl\\runs\\1782226190896-31868\\commands\\001-cargo-fmt-check\\command.json"
+}

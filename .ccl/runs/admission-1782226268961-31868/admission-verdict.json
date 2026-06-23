@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "admission_run_id": "admission-1782226268961-31868",
+  "contract_path": "C:\\Users\\said3\\AppData\\Local\\Temp\\semantic-branch-condition-code-doc-ccl-dogfood.json",
+  "contract_sha256": "4168d4a8057b7bdffb35628dd65a02665bf6f2106c72631dd9ba19f8b4ae8d2f",
+  "repo_path": ".",
+  "validation_manifest_path": ".ccl/runs/validation-1782226190592-31868/validation-run-manifest.json",
+  "scope_manifest_path": ".ccl/runs/scope-1782226267288-31868/scope-check-manifest.json",
+  "ledger_path": ".\\ledger/project-ledger.md",
+  "status": "FAIL",
+  "started_unix_ms": 1782226268962,
+  "finished_unix_ms": 1782226268967,
+  "github_ci_used_as_evidence": false,
+  "evidence": {
+    "validation_status": "PASS",
+    "scope_status": "FAIL",
+    "validation_github_ci_used_as_evidence": false,
+    "scope_github_ci_used_as_evidence": false,
+    "scope_violations_count": 2,
+    "validation_commands_count": 5,
+    "required_validation_failures_count": 0,
+    "missing_command_result_artifacts_count": 0,
+    "ledger_exists": false,
+    "ledger_update_required": false,
+    "contract_sha256_matches_validation": true,
+    "contract_sha256_matches_scope": true
+  },
+  "violations": [
+    {
+      "kind": "scope_status_fail",
+      "reason": "scope status FAIL"
+    },
+    {
+      "kind": "scope_violations_present",
+      "reason": "2 scope violation(s) recorded"
+    }
+  ],
+  "warnings": [],
+  "decision_rule": "validation PASS + scope PASS + no hard violations",
+  "reason": "scope_status_fail"
+}
