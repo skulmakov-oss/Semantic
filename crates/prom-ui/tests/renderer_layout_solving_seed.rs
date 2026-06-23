@@ -214,5 +214,4 @@ fn layout_solving_seed_is_inert_and_does_not_mutate() {
     // Does not execute fit/fill/shrink/grow behavior
     // Does not calculate intrinsic/content size
     let _model = solving_model;
-    assert!(true, "Seed is inert");
 }

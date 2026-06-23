@@ -228,7 +228,7 @@ fn layout_inspection_public_api_signature_lock() {
         present_layout_inspection(&layout_model);
 
     assert!(!presentation.is_empty());
-    assert!(presentation.len() > 0);
+    assert!(!presentation.is_empty());
     assert_eq!(presentation.len(), presentation.items().len());
 }
 
@@ -239,10 +239,8 @@ fn layout_inspection_is_read_only_observability() {
 
     let presentation = present_layout_inspection(&layout_model);
 
-    assert!(presentation.items().len() > 0);
+    assert!(!presentation.items().is_empty());
 }
 
 #[test]
-fn layout_inspection_has_no_geometry_draw_event_backend_authority() {
-    assert!(true);
-}
+fn layout_inspection_has_no_geometry_draw_event_backend_authority() {}

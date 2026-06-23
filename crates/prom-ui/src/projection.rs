@@ -384,7 +384,7 @@ pub struct ValidatedUiIr<'ir> {
 
 impl<'ir> ValidatedUiIr<'ir> {
     pub fn new(ir: &'ir UiIr) -> Result<Self, UiProjectionError> {
-        Self::new_with_config(ir, &UiIrValidationConfig::default())
+        Self::new_with_config(ir, &UiIrValidationConfig)
     }
 
     // Config-aware projection validation only.
@@ -422,7 +422,7 @@ pub fn project_validated_ir_to_projection(
 }
 
 pub fn project_ir_to_projection(ir: &UiIr) -> Result<UiProjectionArtifact, UiProjectionError> {
-    validate_ir(ir, &UiIrValidationConfig::default()).map_err(UiProjectionError::InvalidIr)?;
+    validate_ir(ir, &UiIrValidationConfig).map_err(UiProjectionError::InvalidIr)?;
     build_projection_from_validated_ir(ir)
 }
 
@@ -1150,7 +1150,7 @@ mod tests {
         ));
 
         let v1 = ValidatedUiIr::new(&ir).expect("ok");
-        let v2 = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default()).expect("ok");
+        let v2 = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig).expect("ok");
 
         assert!(std::ptr::eq(v1.as_ir(), v2.as_ir()));
     }
@@ -1167,8 +1167,7 @@ mod tests {
             UiIrNodeKind::Root,
         ));
 
-        let err =
-            ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default()).unwrap_err();
+        let err = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig).unwrap_err();
         assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
         assert!(err.validation_diagnostics().is_some());
     }
@@ -1181,8 +1180,7 @@ mod tests {
             UiIrNodeKind::Root,
         ));
 
-        let v = validate_ui_ir_for_projection_with_config(&ir, &UiIrValidationConfig::default())
-            .expect("ok");
+        let v = validate_ui_ir_for_projection_with_config(&ir, &UiIrValidationConfig).expect("ok");
         assert!(std::ptr::eq(v.as_ir(), &ir));
     }
 
@@ -1198,8 +1196,8 @@ mod tests {
             UiIrNodeKind::Root,
         ));
 
-        let err = validate_ui_ir_for_projection_with_config(&ir, &UiIrValidationConfig::default())
-            .unwrap_err();
+        let err =
+            validate_ui_ir_for_projection_with_config(&ir, &UiIrValidationConfig).unwrap_err();
         assert_eq!(err.code(), UiProjectionErrorCode::InvalidIr);
     }
 
@@ -1212,8 +1210,8 @@ mod tests {
         ));
 
         let raw = project_ir_to_projection(&ir).expect("projects");
-        let validated = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default())
-            .expect("creates wrapper");
+        let validated =
+            ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig).expect("creates wrapper");
         let via_wrapper = project_validated_ir_to_projection(&validated).expect("projects");
 
         assert_eq!(raw.id(), via_wrapper.id());
@@ -1231,8 +1229,8 @@ mod tests {
             UiIrNodeId::new(1),
             UiIrNodeKind::Root,
         ));
-        let validated = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default())
-            .expect("creates wrapper");
+        let validated =
+            ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig).expect("creates wrapper");
 
         // Exposes only as_ir. Size should just be the reference.
         assert_eq!(
@@ -1248,7 +1246,7 @@ mod tests {
             UiIrNodeId::new(1),
             UiIrNodeKind::Root,
         ));
-        let validated = ValidatedUiIr::new_with_config(&valid_ir, &UiIrValidationConfig::default())
+        let validated = ValidatedUiIr::new_with_config(&valid_ir, &UiIrValidationConfig)
             .expect("creates wrapper");
 
         // The wrapper exposes only as_ir. No handles for verifier, runtime, capability, renderer.
@@ -1299,8 +1297,8 @@ mod tests {
         ));
 
         let raw = project_ir_to_projection(&ir).expect("projects");
-        let validated = ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig::default())
-            .expect("validates");
+        let validated =
+            ValidatedUiIr::new_with_config(&ir, &UiIrValidationConfig).expect("validates");
         let via_validated = project_validated_ir_to_projection(&validated).expect("projects");
 
         assert_eq!(raw.id(), via_validated.id());
@@ -1412,11 +1410,9 @@ mod tests {
         let wrapper = ValidatedUiIr::new(&ir).expect("validates");
         assert_eq!(wrapper.as_ir().nodes().len(), 1);
 
-        let config_wrapper = ValidatedUiIr::new_with_config(
-            &ir,
-            &crate::validation::UiIrValidationConfig::default(),
-        )
-        .expect("validates");
+        let config_wrapper =
+            ValidatedUiIr::new_with_config(&ir, &crate::validation::UiIrValidationConfig)
+                .expect("validates");
         assert_eq!(config_wrapper.as_ir().nodes().len(), 1);
 
         let val_artifact = project_validated_ir_to_projection(&wrapper).expect("projects");

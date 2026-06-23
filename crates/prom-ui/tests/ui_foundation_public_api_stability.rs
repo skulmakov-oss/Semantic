@@ -33,9 +33,9 @@ fn foundation_tree() -> UiTree {
     tree
 }
 
-fn render_signature(
-    model: &UiRenderModel,
-) -> Vec<(u64, UiRenderNodeKind, u64, Option<u64>, Vec<UiRenderMarker>)> {
+type RenderSignatureTuple = (u64, UiRenderNodeKind, u64, Option<u64>, Vec<UiRenderMarker>);
+
+fn render_signature(model: &UiRenderModel) -> Vec<RenderSignatureTuple> {
     model
         .nodes()
         .iter()
