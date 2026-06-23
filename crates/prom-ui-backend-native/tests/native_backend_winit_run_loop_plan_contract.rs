@@ -17,12 +17,12 @@ fn native_backend_winit_run_loop_plan_is_available() {
 }
 
 #[test]
-fn current_plan_is_manual_app_state_run() {
+fn current_plan_is_facade_transcript_integration() {
     let plan = current_native_backend_winit_run_loop_plan();
 
     assert_eq!(
         plan.stage,
-        NativeBackendWinitRunLoopStage::ManualAppStateRun
+        NativeBackendWinitRunLoopStage::FacadeTranscriptIntegration
     );
     assert_eq!(
         plan.ownership,

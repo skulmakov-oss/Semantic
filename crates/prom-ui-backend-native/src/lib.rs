@@ -517,6 +517,9 @@ pub mod winit_placeholder {
         /// Existing NativeBackendWinitAppState manual run_app path.
         ManualAppStateRun,
 
+        /// Formal facade integration path returning a transcript.
+        FacadeTranscriptIntegration,
+
         /// Future step: adapter integration has not been admitted yet.
         AdapterIntegrationDeferred,
     }
@@ -569,9 +572,9 @@ pub mod winit_placeholder {
         /// only through manual/ignored smoke helpers.
         ///
         /// It does not admit normal runtime integration yet.
-        pub const fn current_manual_app_state_plan() -> Self {
+        pub const fn current_facade_transcript_plan() -> Self {
             Self {
-                stage: NativeBackendWinitRunLoopStage::ManualAppStateRun,
+                stage: NativeBackendWinitRunLoopStage::FacadeTranscriptIntegration,
                 ownership: NativeBackendWinitRunLoopOwnership::ConsumesBackendReturnsSummary,
 
                 requires_staged_window_config: true,
@@ -612,7 +615,7 @@ pub mod winit_placeholder {
     /// Return the current controlled integration plan.
     pub const fn current_native_backend_winit_run_loop_plan(
     ) -> NativeBackendWinitRunLoopIntegrationPlan {
-        NativeBackendWinitRunLoopIntegrationPlan::current_manual_app_state_plan()
+        NativeBackendWinitRunLoopIntegrationPlan::current_facade_transcript_plan()
     }
 
     /// Preflight the staged NativeBackend state for the current manual app-state run path.
@@ -1446,6 +1449,21 @@ impl NativeBackend {
         let result = winit_placeholder::run_winit_window_creation_smoke(config)?;
 
         Ok(result)
+    }
+
+    /// Run the native backend as a winit app facade until the window closes.
+    ///
+    /// This consumes the backend, creates an event loop, runs the application
+    /// state, and returns a detailed `NativeBackendWinitAppFacadeTranscript`.
+    /// This does not modify `UiBackendAdapter::run_event_loop` or ordinary tests.
+    pub fn run_winit_run_loop_from_staged_config_transcript(
+        self,
+    ) -> Result<
+        winit_placeholder::NativeBackendWinitAppFacadeTranscript,
+        winit_placeholder::NativeBackendWinitAppError,
+    > {
+        let app = winit_placeholder::NativeBackendWinitApp::new(self)?;
+        app.run_until_close_facade_transcript()
     }
 }
 
