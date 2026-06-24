@@ -14,7 +14,7 @@ pub trait EventCoordinates {
 
 /// A facade that processes a batch of raw physical events through the complete
 /// semantic interaction pipeline:
-/// 
+///
 /// `capture/normalize -> route -> map -> admit -> dispatch`
 ///
 /// It acts purely as a coordinator, invoking the independent boundary abstractions
@@ -49,11 +49,7 @@ where
     D: UiActionDispatcher,
 {
     /// Process a batch of raw physical events.
-    pub fn process_batch<E>(
-        &self,
-        events: &[E],
-        layout: &UiLayoutGeometryModel,
-    )
+    pub fn process_batch<E>(&self, events: &[E], layout: &UiLayoutGeometryModel)
     where
         E: EventCoordinates + Clone,
         M: UiActionMapper<E>,
@@ -64,7 +60,6 @@ where
             // If the event does not have coordinates (e.g., keyboard input),
             // it is skipped by this hit-testing router in Wave 0.
             if let Some((x, y)) = event.hit_test_coords() {
-                
                 // 2. Route
                 // Perform geometric hit-testing against the rendered UI layout.
                 if let Some(target) = self.hit_tester.find_target_at(layout, x, y) {
@@ -76,12 +71,10 @@ where
                     // 3. Map
                     // Map the physical event on a semantic node to a SemanticIntent.
                     if let Some(intent) = self.action_mapper.map_interaction(routed) {
-                        
                         // 4. Admit
-                        // Verify the semantic intent against component capabilities 
+                        // Verify the semantic intent against component capabilities
                         // and lifecycle gates.
                         if let Ok(admitted) = self.admission.admit_intent(intent) {
-                            
                             // 5. Dispatch
                             // Issue the fully authorized interaction to the state manager.
                             let _ = self.dispatcher.dispatch_action(admitted);
