@@ -1728,7 +1728,7 @@ impl UiBackendAdapter for NativeBackend {
 
     fn run_event_loop<F: FnMut(prom_ui_runtime::LoopControl)>(
         &mut self,
-        on_event: F,
+        mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
         self.run_loop_calls = self.run_loop_calls.saturating_add(1);
 
