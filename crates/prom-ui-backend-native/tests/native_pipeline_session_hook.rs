@@ -1,7 +1,14 @@
 use prom_ui::{
-    action_binding::InteractionActionBindingId, layout::geometry::UiLayoutGeometryModel,
-    model::UiIrNodeId, projection::UiProjectedNodeId, InteractionAdmittedSemanticAction,
-    SemanticIntent, UiActionDispatcher,
+    action_binding::InteractionActionBindingId,
+    layout::geometry::UiLayoutGeometryModel,
+    layout::{build_layout_geometry, layout_render_model},
+    model::UiIrNodeId,
+    projection::{
+        UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionArtifact,
+        UiProjectionArtifactId,
+    },
+    renderer::render_projection_to_model,
+    InteractionAdmittedSemanticAction, SemanticIntent, UiActionDispatcher,
 };
 use prom_ui_backend_native::session_hook::tick_native_interaction_pipeline;
 use prom_ui_backend_native::{RawBackendEvent, RawButtonState, RawKeyCode};
@@ -60,6 +67,18 @@ impl UiActionDispatcher for MockDispatcher {
     }
 }
 
+fn test_layout_geometry() -> UiLayoutGeometryModel {
+    let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
+    artifact.push_node(UiProjectedNode::new(
+        UiProjectedNodeId::new(42),
+        UiProjectedNodeKind::Root,
+    ));
+
+    let render_model = render_projection_to_model(&artifact).expect("render model");
+    let layout_model = layout_render_model(&render_model);
+    build_layout_geometry(&layout_model)
+}
+
 #[test]
 fn native_pipeline_session_hook_contract() {
     let hit_tester = MockHitTester;
@@ -70,9 +89,7 @@ fn native_pipeline_session_hook_contract() {
     let pipeline =
         InteractionPipeline::new(hit_tester, action_mapper, admission, dispatcher.clone());
 
-    // Create a dummy layout model since MockHitTester ignores it.
-    let dummy_layout = std::mem::MaybeUninit::<UiLayoutGeometryModel>::uninit();
-    let layout = unsafe { &*dummy_layout.as_ptr() };
+    let layout = test_layout_geometry();
 
     // Mixed events batch
     let events = vec![
@@ -84,7 +101,7 @@ fn native_pipeline_session_hook_contract() {
         RawBackendEvent::CloseRequested,                      // No coordinates mapped, skipped
     ];
 
-    let report = tick_native_interaction_pipeline(&events, layout, &pipeline);
+    let report = tick_native_interaction_pipeline(&events, &layout, &pipeline);
 
     // Verify correct processing counts
     assert_eq!(report.received, 3);
