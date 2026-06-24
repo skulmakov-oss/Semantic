@@ -1343,13 +1343,17 @@ pub mod winit_placeholder {
 
                         #[cfg(feature = "wgpu-backend")]
                         {
-                            if let Some(context) = super::wgpu_integration::NativeBackendWgpuContext::new() {
-                                if let Ok(surface) = super::wgpu_integration::NativeBackendPresentationSurface::new(
-                                    &context,
-                                    window_arc,
-                                    config.width,
-                                    config.height,
-                                ) {
+                            if let Some(context) =
+                                super::wgpu_integration::NativeBackendWgpuContext::new()
+                            {
+                                if let Ok(surface) =
+                                    super::wgpu_integration::NativeBackendPresentationSurface::new(
+                                        &context,
+                                        window_arc,
+                                        config.width,
+                                        config.height,
+                                    )
+                                {
                                     self.presentation_surface = Some(surface);
                                 }
                                 self.wgpu_context = Some(context);
@@ -1379,13 +1383,20 @@ pub mod winit_placeholder {
             {
                 match &event {
                     WindowEvent::Resized(physical_size) => {
-                        if let (Some(context), Some(surface)) = (&self.wgpu_context, &mut self.presentation_surface) {
+                        if let (Some(context), Some(surface)) =
+                            (&self.wgpu_context, &mut self.presentation_surface)
+                        {
                             surface.resize(context, physical_size.width, physical_size.height);
                         }
                     }
                     WindowEvent::RedrawRequested => {
-                        if let (Some(context), Some(surface)) = (&self.wgpu_context, &mut self.presentation_surface) {
-                            let _ = surface.present_semantic_commands(context, &self.backend.last_frame_commands);
+                        if let (Some(context), Some(surface)) =
+                            (&self.wgpu_context, &mut self.presentation_surface)
+                        {
+                            let _ = surface.present_semantic_commands(
+                                context,
+                                &self.backend.last_frame_commands,
+                            );
                         }
                     }
                     _ => {}

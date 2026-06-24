@@ -10,7 +10,7 @@ pub struct DefaultHitTester;
 impl UiHitTester for DefaultHitTester {
     fn find_target_at(&self, layout: &UiLayoutGeometryModel, x: f64, y: f64) -> Option<UiIrNodeId> {
         let mut best_match: Option<(UiIrNodeId, usize)> = None;
-        
+
         // Simple conversion to physical coordinates
         let px = x.round() as i32;
         let py = y.round() as i32;

@@ -1,6 +1,6 @@
+use crate::interaction::RoutedInteraction;
 use prom_ui::action_binding::InteractionActionName;
 use prom_ui::model::UiIrNodeId;
-use crate::interaction::RoutedInteraction;
 
 /// Represents an abstract user intention targeting a specific semantic node.
 pub struct SemanticIntent {
