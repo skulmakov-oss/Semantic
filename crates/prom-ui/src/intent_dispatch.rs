@@ -1,10 +1,8 @@
-use crate::action_mapping::SemanticIntent;
+use crate::admitted_action::InteractionAdmittedSemanticAction;
 
-/// Errors that can occur during the dispatch of a semantic intent.
+/// Errors that can occur during the dispatch of an admitted semantic action.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IntentDispatchError {
-    /// The intent was denied by the runtime capability rules.
-    CapabilityDenied,
     /// The requested action is unknown to the dispatcher.
     UnknownAction,
     /// The target node could not be resolved in the current semantic state.
@@ -13,10 +11,13 @@ pub enum IntentDispatchError {
     StateUpdateFailed,
 }
 
-/// Dispatches a mapped `SemanticIntent` into the runtime execution environment.
+/// Dispatches an admitted semantic action into the runtime execution environment.
 ///
-/// This trait acts as the secure switchboard, leaving capability checks to the implementor.
-pub trait UiIntentDispatcher {
-    /// Attempts to securely dispatch a semantic intent.
-    fn dispatch_intent(&self, intent: SemanticIntent) -> Result<(), IntentDispatchError>;
+/// This trait assumes the action has already passed capability and lifecycle admission gates.
+pub trait UiActionDispatcher {
+    /// Dispatches an execution-authorized semantic action.
+    fn dispatch_action(
+        &self,
+        action: InteractionAdmittedSemanticAction,
+    ) -> Result<(), IntentDispatchError>;
 }
