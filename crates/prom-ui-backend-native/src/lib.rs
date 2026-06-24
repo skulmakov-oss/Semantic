@@ -110,6 +110,10 @@ pub const fn wgpu_backend_feature_enabled() -> bool {
     }
 }
 
+pub const fn native_run_loop_safety_lock_available() -> bool {
+    true
+}
+
 #[cfg(feature = "winit-backend")]
 pub mod winit_placeholder {
     //! Feature-gated placeholder for future winit integration.
@@ -1564,10 +1568,10 @@ pub mod winit_placeholder {
     }
 }
 
-/// Skeleton native backend.
+/// Native backend transport boundary.
 ///
-/// This type is intentionally not wired to a platform windowing library yet.
-/// It exists to lock the crate boundary before real native integration.
+/// Handles event staging and loop lifecycle without owning
+/// semantic admission or dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeBackend {
     platform_wired: bool,
@@ -1781,10 +1785,11 @@ pub fn selected_draw_backend_name() -> &'static str {
 
 #[cfg(feature = "wgpu-backend")]
 pub mod wgpu_integration {
-    //! Feature-gated minimal wgpu integration.
+    //! Feature-gated wgpu integration.
     //!
-    //! This proves wgpu initialization without wiring it into the live run loop
-    //! and without surface presentation logic.
+    //! Provides `NativeBackendWgpuContext` and `NativeBackendPresentationSurface`
+    //! which are wired into the `winit` run loop when both `wgpu-backend` and
+    //! `winit-backend` features are enabled.
 
     use wgpu::{Adapter, Device, Instance, Queue};
 
