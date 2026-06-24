@@ -22,6 +22,7 @@ use prom_ui_runtime::{
 pub mod action_translation;
 pub mod frame_sink;
 pub mod interaction;
+pub mod session_hook;
 
 pub use action_translation::{DefaultNativeActionTranslator, NativeActionTranslator};
 pub use frame_sink::{UiBackendFrame, UiBackendFrameEntry, UiFrameSink};
@@ -761,7 +762,7 @@ pub mod winit_placeholder {
     /// Return the current controlled integration plan.
     pub const fn current_native_backend_winit_run_loop_plan(
     ) -> NativeBackendWinitRunLoopIntegrationPlan {
-        NativeBackendWinitRunLoopIntegrationPlan::current_integrated_plan()
+        NativeBackendWinitRunLoopIntegrationPlan::current_manual_app_state_plan()
     }
 
     /// Preflight the staged NativeBackend state for the current manual app-state run path.
