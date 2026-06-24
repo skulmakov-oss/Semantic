@@ -190,7 +190,7 @@ pub use host_runtime_effect_result::{
     InteractionHostRuntimeEffectBoundaryMissingRequirement,
     InteractionHostRuntimeEffectBoundaryResult, InteractionHostRuntimeEffectBoundaryResultId,
 };
-pub use intent_dispatch::{IntentDispatchError, UiIntentDispatcher};
+pub use intent_dispatch::{IntentDispatchError, UiActionDispatcher};
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel, InteractionIntentStreamReport,
     InteractionIntentStreamStats,
