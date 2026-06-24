@@ -1,7 +1,14 @@
 use prom_ui::{
-    action_binding::InteractionActionBindingId, layout::geometry::UiLayoutGeometryModel,
-    model::UiIrNodeId, projection::UiProjectedNodeId, InteractionAdmittedSemanticAction,
-    SemanticIntent, UiActionDispatcher,
+    action_binding::InteractionActionBindingId,
+    layout::geometry::UiLayoutGeometryModel,
+    layout::{build_layout_geometry, layout_render_model},
+    model::UiIrNodeId,
+    projection::UiProjectedNodeId,
+    projection::{
+        UiProjectedNode, UiProjectedNodeKind, UiProjectionArtifact, UiProjectionArtifactId,
+    },
+    renderer::render_projection_to_model,
+    InteractionAdmittedSemanticAction, SemanticIntent, UiActionDispatcher,
 };
 use prom_ui_runtime::action_mapping::UiActionMapper;
 use prom_ui_runtime::intent_admission::RuntimeIntentAdmission;
@@ -72,6 +79,18 @@ impl UiActionDispatcher for TestDispatcher {
     }
 }
 
+fn test_layout_geometry() -> UiLayoutGeometryModel {
+    let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
+    artifact.push_node(UiProjectedNode::new(
+        UiProjectedNodeId::new(1),
+        UiProjectedNodeKind::Root,
+    ));
+
+    let render_model = render_projection_to_model(&artifact).expect("render model");
+    let layout_model = layout_render_model(&render_model);
+    build_layout_geometry(&layout_model)
+}
+
 #[test]
 fn interaction_pipeline_tick_frame_smoke() {
     let backend = InMemoryBackend::new();
@@ -85,10 +104,7 @@ fn interaction_pipeline_tick_frame_smoke() {
         TestDispatcher,
     );
 
-    // Create a dummy layout model since TestHitTester ignores it.
-    let dummy_layout =
-        std::mem::MaybeUninit::<prom_ui::layout::geometry::UiLayoutGeometryModel>::uninit();
-    let layout = unsafe { &*dummy_layout.as_ptr() };
+    let layout = test_layout_geometry();
 
     // Start the session loop to transition to Running state
     session.run(|_| LoopControl::ExitRequested).unwrap();
@@ -151,7 +167,7 @@ fn interaction_pipeline_tick_frame_smoke() {
                 })
                 .collect();
 
-            let report = pipeline.process_batch_report(&test_events, layout);
+            let report = pipeline.process_batch_report(&test_events, &layout);
             final_report = report;
 
             LoopControl::ExitRequested
