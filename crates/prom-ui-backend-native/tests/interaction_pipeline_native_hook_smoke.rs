@@ -1,5 +1,12 @@
 use prom_ui::{
-    action_binding::InteractionActionBindingId, model::UiIrNodeId, projection::UiProjectedNodeId,
+    action_binding::InteractionActionBindingId,
+    layout::{build_layout_geometry, layout_render_model},
+    model::UiIrNodeId,
+    projection::{
+        UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionArtifact,
+        UiProjectionArtifactId,
+    },
+    renderer::render_projection_to_model,
     InteractionAdmittedSemanticAction, SemanticIntent, UiActionDispatcher,
 };
 use prom_ui_backend_native::{RawBackendEvent, RawButtonState, RawKeyCode};
@@ -54,6 +61,18 @@ impl UiActionDispatcher for TestDispatcher {
     }
 }
 
+fn test_layout_geometry() -> prom_ui::layout::geometry::UiLayoutGeometryModel {
+    let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(1));
+    artifact.push_node(UiProjectedNode::new(
+        UiProjectedNodeId::new(1),
+        UiProjectedNodeKind::Root,
+    ));
+
+    let render_model = render_projection_to_model(&artifact).expect("render model");
+    let layout_model = layout_render_model(&render_model);
+    build_layout_geometry(&layout_model)
+}
+
 #[test]
 fn native_event_pipeline_hook_smoke() {
     let pipeline = InteractionPipeline::new(
@@ -63,9 +82,7 @@ fn native_event_pipeline_hook_smoke() {
         TestDispatcher,
     );
 
-    let dummy_layout =
-        std::mem::MaybeUninit::<prom_ui::layout::geometry::UiLayoutGeometryModel>::uninit();
-    let layout = unsafe { &*dummy_layout.as_ptr() };
+    let layout = test_layout_geometry();
 
     let events = vec![
         RawBackendEvent::KeyboardInput {
@@ -76,7 +93,7 @@ fn native_event_pipeline_hook_smoke() {
         RawBackendEvent::PointerMoved { x: 10.0, y: 10.0 },
     ];
 
-    let report = pipeline.process_batch_report(&events, layout);
+    let report = pipeline.process_batch_report(&events, &layout);
 
     assert_eq!(report.received, 3);
     assert_eq!(report.skipped_no_coordinates, 1); // KeyboardInput has no coordinates
