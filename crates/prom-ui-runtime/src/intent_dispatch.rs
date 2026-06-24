@@ -1,5 +1,5 @@
 use crate::state_update::{InertStateUpdater, RuntimeStateUpdater};
-use prom_ui::{InteractionAdmittedSemanticAction, IntentDispatchError, UiActionDispatcher};
+use prom_ui::{IntentDispatchError, InteractionAdmittedSemanticAction, UiActionDispatcher};
 
 /// The default runtime dispatcher that securely dispatches execution-authorized actions.
 ///

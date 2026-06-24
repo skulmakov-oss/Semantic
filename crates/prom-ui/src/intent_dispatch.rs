@@ -16,5 +16,8 @@ pub enum IntentDispatchError {
 /// This trait assumes the action has already passed capability and lifecycle admission gates.
 pub trait UiActionDispatcher {
     /// Dispatches an execution-authorized semantic action.
-    fn dispatch_action(&self, action: InteractionAdmittedSemanticAction) -> Result<(), IntentDispatchError>;
+    fn dispatch_action(
+        &self,
+        action: InteractionAdmittedSemanticAction,
+    ) -> Result<(), IntentDispatchError>;
 }

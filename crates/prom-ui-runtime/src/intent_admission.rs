@@ -1,5 +1,7 @@
 use crate::intent_audit::{InertAuditLogger, UiAuditLogger};
-use crate::intent_capability::{InertCapabilityEvaluator, IntentCapabilityError, UiCapabilityEvaluator};
+use crate::intent_capability::{
+    InertCapabilityEvaluator, IntentCapabilityError, UiCapabilityEvaluator,
+};
 use prom_ui::{InteractionAdmittedSemanticAction, SemanticIntent};
 
 /// Evaluates and audits a semantic intent, returning an admitted action if authorized.

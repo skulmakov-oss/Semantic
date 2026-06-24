@@ -1,9 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-use prom_ui::{
-    action_binding::InteractionActionBindingId, SemanticIntent,
-    UiProjectedNodeId,
-};
+use prom_ui::{action_binding::InteractionActionBindingId, SemanticIntent, UiProjectedNodeId};
 use prom_ui_runtime::intent_capability::IntentCapabilityError;
 use prom_ui_runtime::RuntimeIntentAdmission;
 
