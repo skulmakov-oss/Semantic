@@ -13,6 +13,7 @@
 
 extern crate alloc;
 
+#[allow(unused_imports)]
 use prom_ui_runtime::{
     DrawFrame, InputEvent, InputEventKind, LoopControl, UiBackendAdapter, UiRuntimeError,
     WindowConfig,
@@ -1728,7 +1729,7 @@ impl UiBackendAdapter for NativeBackend {
 
     fn run_event_loop<F: FnMut(prom_ui_runtime::LoopControl)>(
         &mut self,
-        mut on_event: F,
+        #[allow(unused_mut)] mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
         self.run_loop_calls = self.run_loop_calls.saturating_add(1);
 
@@ -1741,7 +1742,7 @@ impl UiBackendAdapter for NativeBackend {
 
             let mut host = winit_placeholder::WinitRunLoopHost::new(self, on_event);
 
-            if let Err(_) = event_loop.run_app(&mut host) {
+            if event_loop.run_app(&mut host).is_err() {
                 return Err(UiRuntimeError::EventLoopFailed);
             }
         }

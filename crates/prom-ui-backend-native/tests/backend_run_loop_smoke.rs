@@ -16,6 +16,7 @@ fn native_backend_winit_run_event_loop_can_be_invoked() {
     // Since winit's `run_app` blocks until the window is closed by the user,
     // we cannot execute the loop directly in a headless automated test without it hanging.
     // We simply assert that `NativeBackend` implements the trait method as expected.
+    #[allow(clippy::type_complexity)]
     let _run_fn: fn(&mut NativeBackend, fn(LoopControl)) -> Result<(), UiRuntimeError> =
         NativeBackend::run_event_loop;
 }

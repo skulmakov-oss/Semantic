@@ -1,9 +1,9 @@
 #![cfg(all(feature = "winit-backend", feature = "wgpu-backend"))]
 
-use alloc::sync::Arc;
 use prom_ui_backend_native::wgpu_integration::{
     NativeBackendPresentationSurface, NativeBackendWgpuContext,
 };
+use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent, WindowEvent},
