@@ -643,8 +643,8 @@ pub mod winit_placeholder {
         /// Existing NativeBackendWinitAppState manual run_app path.
         ManualAppStateRun,
 
-        /// Future step: adapter integration has not been admitted yet.
-        AdapterIntegrationDeferred,
+        /// Adapter is integrated with `NativeBackend::run_event_loop`.
+        AdapterIntegrated,
     }
 
     /// Ownership model for the planned NativeBackend/winit run-loop path.
@@ -653,8 +653,8 @@ pub mod winit_placeholder {
         /// Manual helper consumes NativeBackend and returns summary only.
         ConsumesBackendReturnsSummary,
 
-        /// Future persistent ownership model is intentionally unresolved.
-        PersistentBackendOwnershipDeferred,
+        /// NativeBackend temporarily hosts the winit EventLoop in run_event_loop.
+        HostedInsideBackendRunEventLoop,
     }
 
     /// Preflight readiness for running the NativeBackend-backed winit app state.
@@ -714,10 +714,28 @@ pub mod winit_placeholder {
             }
         }
 
+        /// Current integrated plan.
+        pub const fn current_integrated_plan() -> Self {
+            Self {
+                stage: NativeBackendWinitRunLoopStage::AdapterIntegrated,
+                ownership: NativeBackendWinitRunLoopOwnership::HostedInsideBackendRunEventLoop,
+
+                requires_staged_window_config: true,
+                uses_native_backend_app_state: true,
+                creates_event_loop: true,
+                may_create_native_window: true,
+                may_call_run_app: true,
+
+                integrates_with_backend_run_event_loop: true,
+                mutates_prom_ui_runtime: false,
+                changes_ui_backend_adapter: false,
+                includes_renderer: false,
+                presents_frames: false,
+            }
+        }
+
         pub const fn keeps_runtime_boundary_clean(&self) -> bool {
-            !self.integrates_with_backend_run_event_loop
-                && !self.mutates_prom_ui_runtime
-                && !self.changes_ui_backend_adapter
+            !self.mutates_prom_ui_runtime && !self.changes_ui_backend_adapter
         }
 
         pub const fn keeps_rendering_out_of_scope(&self) -> bool {
@@ -738,7 +756,7 @@ pub mod winit_placeholder {
     /// Return the current controlled integration plan.
     pub const fn current_native_backend_winit_run_loop_plan(
     ) -> NativeBackendWinitRunLoopIntegrationPlan {
-        NativeBackendWinitRunLoopIntegrationPlan::current_manual_app_state_plan()
+        NativeBackendWinitRunLoopIntegrationPlan::current_integrated_plan()
     }
 
     /// Preflight the staged NativeBackend state for the current manual app-state run path.
@@ -1279,6 +1297,115 @@ pub mod winit_placeholder {
         pub staged_event_count: usize,
     }
 
+    /// Winit run loop host that implements `ApplicationHandler`.
+    ///
+    /// This acts as a bridge between the winit `EventLoop` and `NativeBackend::run_event_loop`.
+    /// It hosts the backend temporarily while the event loop runs.
+    pub struct WinitRunLoopHost<'a, F: FnMut(prom_ui_runtime::LoopControl)> {
+        pub backend: &'a mut NativeBackend,
+        pub on_event: F,
+        pub window: Option<alloc::sync::Arc<Window>>,
+        pub window_id: Option<WindowId>,
+
+        #[cfg(feature = "wgpu-backend")]
+        pub wgpu_context: Option<super::wgpu_integration::NativeBackendWgpuContext>,
+        #[cfg(feature = "wgpu-backend")]
+        pub presentation_surface: Option<super::wgpu_integration::NativeBackendPresentationSurface>,
+    }
+
+    impl<'a, F: FnMut(prom_ui_runtime::LoopControl)> WinitRunLoopHost<'a, F> {
+        pub fn new(backend: &'a mut NativeBackend, on_event: F) -> Self {
+            Self {
+                backend,
+                on_event,
+                window: None,
+                window_id: None,
+                #[cfg(feature = "wgpu-backend")]
+                wgpu_context: None,
+                #[cfg(feature = "wgpu-backend")]
+                presentation_surface: None,
+            }
+        }
+    }
+
+    impl<'a, F: FnMut(prom_ui_runtime::LoopControl)> ApplicationHandler for WinitRunLoopHost<'a, F> {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            if self.window.is_some() {
+                return;
+            }
+
+            if let Some(config) = self.backend.window_config() {
+                match create_winit_window_from_config(event_loop, config) {
+                    Ok(window) => {
+                        self.window_id = Some(window.id());
+                        let window_arc = alloc::sync::Arc::new(window);
+                        self.window = Some(window_arc.clone());
+
+                        #[cfg(feature = "wgpu-backend")]
+                        {
+                            if let Some(context) = super::wgpu_integration::NativeBackendWgpuContext::new() {
+                                if let Ok(surface) = super::wgpu_integration::NativeBackendPresentationSurface::new(
+                                    &context,
+                                    window_arc,
+                                    config.width,
+                                    config.height,
+                                ) {
+                                    self.presentation_surface = Some(surface);
+                                }
+                                self.wgpu_context = Some(context);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        event_loop.exit();
+                    }
+                }
+            } else {
+                event_loop.exit();
+            }
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            window_id: WindowId,
+            event: WindowEvent,
+        ) {
+            if Some(window_id) != self.window_id {
+                return;
+            }
+
+            #[cfg(feature = "wgpu-backend")]
+            {
+                match &event {
+                    WindowEvent::Resized(physical_size) => {
+                        if let (Some(context), Some(surface)) = (&self.wgpu_context, &mut self.presentation_surface) {
+                            surface.resize(context, physical_size.width, physical_size.height);
+                        }
+                    }
+                    WindowEvent::RedrawRequested => {
+                        if let (Some(context), Some(surface)) = (&self.wgpu_context, &mut self.presentation_surface) {
+                            let _ = surface.present_semantic_commands(context, &self.backend.last_frame_commands);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(backend_event) = translate_winit_to_raw_backend_event(&event) {
+                if matches!(backend_event, super::RawBackendEvent::CloseRequested) {
+                    (self.on_event)(prom_ui_runtime::LoopControl::ExitRequested);
+                    event_loop.exit();
+                } else {
+                    if let Some(input_event) = translate_winit_window_event(&event) {
+                        self.backend.pending_events.push(input_event);
+                    }
+                    (self.on_event)(prom_ui_runtime::LoopControl::Continue);
+                }
+            }
+        }
+    }
+
     /// Winit ApplicationHandler scaffold backed by `NativeBackend`.
     ///
     /// This is a state scaffold for future native runtime integration.
@@ -1434,6 +1561,7 @@ pub struct NativeBackend {
     platform_wired: bool,
     window_config: Option<WindowConfig>,
     pending_events: alloc::vec::Vec<InputEvent>,
+    last_frame_commands: alloc::vec::Vec<prom_ui_runtime::DrawCommand>,
     submitted_frames: usize,
     closed: bool,
     run_loop_calls: usize,
@@ -1447,6 +1575,7 @@ impl NativeBackend {
             platform_wired: false,
             window_config: None,
             pending_events: alloc::vec::Vec::new(),
+            last_frame_commands: alloc::vec::Vec::new(),
             submitted_frames: 0,
             closed: false,
             run_loop_calls: 0,
@@ -1586,30 +1715,48 @@ impl UiBackendAdapter for NativeBackend {
         self.closed = true;
     }
 
-    fn run_event_loop<F: FnMut(LoopControl)>(
+    fn run_event_loop<F: FnMut(prom_ui_runtime::LoopControl)>(
         &mut self,
-        mut on_event: F,
+        on_event: F,
     ) -> Result<(), UiRuntimeError> {
         self.run_loop_calls = self.run_loop_calls.saturating_add(1);
 
-        let events = self.drain_pending_events();
+        #[cfg(feature = "winit-backend")]
+        {
+            let event_loop = match winit_placeholder::create_winit_event_loop() {
+                Ok(el) => el,
+                Err(_) => return Err(UiRuntimeError::EventLoopFailed),
+            };
 
-        for event in events {
-            self.run_loop_ticks = self.run_loop_ticks.saturating_add(1);
+            let mut host = winit_placeholder::WinitRunLoopHost::new(self, on_event);
 
-            match event.kind {
-                InputEventKind::CloseRequested => {
-                    on_event(LoopControl::ExitRequested);
-                    break;
+            if let Err(_) = event_loop.run_app(&mut host) {
+                return Err(UiRuntimeError::EventLoopFailed);
+            }
+        }
+
+        #[cfg(not(feature = "winit-backend"))]
+        {
+            let events = self.drain_pending_events();
+
+            for event in events {
+                self.run_loop_ticks = self.run_loop_ticks.saturating_add(1);
+
+                match event.kind {
+                    InputEventKind::CloseRequested => {
+                        on_event(LoopControl::ExitRequested);
+                        break;
+                    }
+                    _ => on_event(LoopControl::Continue),
                 }
-                _ => on_event(LoopControl::Continue),
             }
         }
 
         Ok(())
     }
 
-    fn draw_frame(&mut self, _frame: &DrawFrame) -> Result<(), UiRuntimeError> {
+    fn draw_frame(&mut self, frame: &DrawFrame) -> Result<(), UiRuntimeError> {
+        self.last_frame_commands = frame.commands().to_vec();
         self.submitted_frames = self.submitted_frames.saturating_add(1);
         Ok(())
     }
@@ -1782,14 +1929,19 @@ pub mod wgpu_integration {
         ///
         /// Returns `false` if the surface was lost or outdated, requiring reconfiguration.
         pub fn present_minimal_clear(&self, context: &NativeBackendWgpuContext) -> bool {
+            self.present_semantic_commands(context, &[])
+        }
+
+        /// Presents a semantic frame to the surface by mapping `DrawCommand`s to physical wgpu instructions.
+        pub fn present_semantic_commands(
+            &self,
+            context: &NativeBackendWgpuContext,
+            commands: &[prom_ui_runtime::DrawCommand],
+        ) -> bool {
             let frame = match self.surface.get_current_texture() {
                 Ok(frame) => frame,
                 Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => return false,
-                Err(_e) => {
-                    // Timeout or OutOfMemory. Treat as physical evidence failure, do not panic.
-                    // OutOfMemory might require larger handling, but we log and drop frame.
-                    return false;
-                }
+                Err(_e) => return false,
             };
 
             let view = frame
@@ -1800,22 +1952,36 @@ pub mod wgpu_integration {
                 context
                     .device
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("Presentation Clear Encoder"),
+                        label: Some("Semantic Presentation Encoder"),
                     });
+
+            // Extract the background color from a semantic Clear command, defaulting to static color if not found.
+            let mut bg_color = wgpu::Color {
+                r: 0.15,
+                g: 0.15,
+                b: 0.2,
+                a: 1.0,
+            };
+
+            for cmd in commands {
+                if let prom_ui_runtime::DrawCommand::Clear { color } = cmd {
+                    bg_color = wgpu::Color {
+                        r: color.r as f64 / 255.0,
+                        g: color.g as f64 / 255.0,
+                        b: color.b as f64 / 255.0,
+                        a: color.a as f64 / 255.0,
+                    };
+                }
+            }
 
             {
                 let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("Presentation Render Pass"),
+                    label: Some("Semantic Render Pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.15,
-                                g: 0.15,
-                                b: 0.2,
-                                a: 1.0,
-                            }),
+                            load: wgpu::LoadOp::Clear(bg_color),
                             store: wgpu::StoreOp::Store,
                         },
                     })],
@@ -1825,7 +1991,7 @@ pub mod wgpu_integration {
                 });
             }
 
-            context.queue.submit(core::iter::once(encoder.finish()));
+            context.queue.submit(Some(encoder.finish()));
             frame.present();
             true
         }
