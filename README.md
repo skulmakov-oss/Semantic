@@ -222,6 +222,31 @@ PROMETHEUS boundary     = capability, host effects, runtime/audit integration
 
 `Semantic Studio` is tracked as a future unified control environment. It must use canonical pipeline APIs and must not bypass verifier admission.
 
+### Native UI demo milestone
+
+`prom-ui-demo` now has a first visible native WGPU demo slice on the active development line.
+
+The current demo path opens a native window, presents a WGPU-backed frame, renders deterministic physical-placement output, and keeps the UI path in the operator/application layer:
+
+```text
+prom-ui-demo
+  -> winit native window
+  -> WGPU presentation
+  -> physical placement
+  -> draw frame
+  -> interactive demo loop
+```
+
+Run the demo with:
+
+```bash
+cargo run -p prom-ui-demo
+```
+
+This is a development milestone, not a stable public UI contract. The UI layer remains a display/operator surface and must not become the owner of compiler, verifier, VM, SemCode, capability, audit, or runtime semantics.
+
+![Semantic UI Demo - WGPU Native](assets/readme/semantic-ui-demo-wgpu-native.png)
+
 ### Current non-goals
 
 The current status does not claim:
