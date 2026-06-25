@@ -1,0 +1,28 @@
+record Pair {
+    left: i32,
+    right: i32,
+}
+
+enum Mode {
+    Idle,
+    Run,
+}
+
+fn pair_sum(pair: Pair) -> i32 {
+    return pair.left + pair.right;
+}
+
+fn mode_label(mode: Mode) -> text {
+    let label: text = match mode {
+        Mode::Idle => { "idle" }
+        Mode::Run => { "run" }
+    };
+    return label;
+}
+
+fn main() {
+    let pair: Pair = Pair { left: 2, right: 5 };
+    assert(pair_sum(pair) == 7);
+    assert(mode_label(Mode::Run) == "run");
+    return;
+}

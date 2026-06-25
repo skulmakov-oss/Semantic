@@ -1,0 +1,13 @@
+// Practical surface check:
+// comments and blank lines should be ignored by the frontend.
+
+fn main() {
+    let mut count: i32 = 0;
+
+    while count < 3 {
+        count = count + 1;
+    }
+
+    assert(count == 3);
+    return;
+}

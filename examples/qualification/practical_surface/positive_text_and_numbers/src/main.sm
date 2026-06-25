@@ -1,0 +1,13 @@
+fn main() {
+    let title: text = "practical surface";
+    let left: i32 = 2;
+    let count: u32 = 3u32;
+    let weight: fx = 2.5fx;
+    let total: fx = weight + 1.5fx;
+
+    assert(title == "practical surface");
+    assert(left + 1 == 3);
+    assert(count == 3u32);
+    assert(total == 4.0fx);
+    return;
+}

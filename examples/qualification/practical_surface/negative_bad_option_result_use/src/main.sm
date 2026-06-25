@@ -1,0 +1,4 @@
+fn main() {
+    let value = Result::Ok(7);
+    return;
+}
