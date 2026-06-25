@@ -45,12 +45,15 @@ impl UiBackendAdapter for SmokeBackend {
         self.calls.borrow_mut().push(BackendCall::CloseWindow);
     }
 
-    fn run_event_loop<F: FnMut(LoopControl)>(
+    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
         mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
         self.calls.borrow_mut().push(BackendCall::RunEventLoop);
-        on_event(LoopControl::ExitRequested);
+        {
+            let mut f = prom_ui_runtime::DrawFrame::new();
+            on_event(LoopControl::ExitRequested, &mut f);
+        };
         Ok(())
     }
 
@@ -70,7 +73,7 @@ fn backend_adapter_receives_lifecycle_calls_in_order() {
     let cfg = WindowConfig::new("Smoke", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut frame = DrawFrame::new();
     frame.clear(Color::BLACK);
@@ -165,9 +168,9 @@ fn backend_adapter_run_is_not_called_when_run_is_rejected() {
     let cfg = WindowConfig::new("Smoke", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
-    let err = session.run(|_| LoopControl::ExitRequested).unwrap_err();
+    let err = session.run(|_, _| LoopControl::ExitRequested).unwrap_err();
 
     assert!(matches!(
         err,

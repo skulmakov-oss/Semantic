@@ -35,7 +35,7 @@ impl UiBackendAdapter for FailingCountingBackend {
         self.counters.borrow_mut().close_window += 1;
     }
 
-    fn run_event_loop<F: FnMut(LoopControl)>(
+    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
         _on_event: F,
     ) -> Result<(), UiRuntimeError> {
@@ -60,7 +60,7 @@ fn run_after_close_returns_lifecycle_error_before_backend_run_error() {
     session.close().unwrap();
 
     let err = session
-        .run(|_| LoopControl::Continue)
+        .run(|_, _| LoopControl::Continue)
         .expect_err("run after close must fail at lifecycle gate");
 
     assert!(matches!(

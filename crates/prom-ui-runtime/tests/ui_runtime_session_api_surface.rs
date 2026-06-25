@@ -12,11 +12,14 @@ impl UiBackendAdapter for NoopBackend {
 
     fn close_window(&mut self) {}
 
-    fn run_event_loop<F: FnMut(LoopControl)>(
+    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
         mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
-        on_event(LoopControl::ExitRequested);
+        {
+            let mut f = prom_ui_runtime::DrawFrame::new();
+            on_event(LoopControl::ExitRequested, &mut f);
+        };
         Ok(())
     }
 
@@ -33,7 +36,7 @@ fn desktop_session_lifecycle_gated_api_surface_roundtrips() {
 
     let _: SessionState = session.state();
 
-    let run_result: Result<(), UiRuntimeError> = session.run(|_| LoopControl::ExitRequested);
+    let run_result: Result<(), UiRuntimeError> = session.run(|_, _| LoopControl::ExitRequested);
     run_result.unwrap();
     assert_eq!(session.state(), SessionState::Running);
 

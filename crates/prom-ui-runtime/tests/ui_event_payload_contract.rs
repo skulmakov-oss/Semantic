@@ -12,11 +12,14 @@ impl UiBackendAdapter for NoopBackend {
 
     fn close_window(&mut self) {}
 
-    fn run_event_loop<F: FnMut(LoopControl)>(
+    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
         mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
-        on_event(LoopControl::ExitRequested);
+        {
+            let mut f = prom_ui_runtime::DrawFrame::new();
+            on_event(LoopControl::ExitRequested, &mut f);
+        };
         Ok(())
     }
 
@@ -31,7 +34,7 @@ fn poll_events_preserves_event_order_and_payload() {
     let cfg = WindowConfig::new("EventPayload", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut buffer = EventBuffer::new();
     buffer.push(InputEvent::new(InputEventKind::KeyDown { key_code: 65 }));
@@ -53,7 +56,7 @@ fn tick_frame_passes_event_payload_to_callback() {
     let cfg = WindowConfig::new("TickEventPayload", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut buffer = EventBuffer::new();
     buffer.push(InputEvent::new(InputEventKind::KeyDown { key_code: 13 }));
@@ -80,7 +83,7 @@ fn empty_event_buffer_polls_as_empty_event_list() {
     let cfg = WindowConfig::new("EmptyEvents", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut buffer = EventBuffer::new();
 
@@ -96,7 +99,7 @@ fn multiple_event_drains_are_independent() {
     let cfg = WindowConfig::new("MultiDrain", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut buffer = EventBuffer::new();
 

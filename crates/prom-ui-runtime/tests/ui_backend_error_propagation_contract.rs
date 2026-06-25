@@ -30,7 +30,7 @@ impl UiBackendAdapter for FailingBackend {
 
     fn close_window(&mut self) {}
 
-    fn run_event_loop<F: FnMut(LoopControl)>(
+    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
         _on_event: F,
     ) -> Result<(), UiRuntimeError> {
@@ -67,7 +67,7 @@ fn run_event_loop_error_is_propagated_from_session_run() {
     let cfg = WindowConfig::new("FailRun", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    let err = session.run(|_| LoopControl::Continue).unwrap_err();
+    let err = session.run(|_, _| LoopControl::Continue).unwrap_err();
 
     assert_eq!(err, UiRuntimeError::EventLoopFailed);
     assert_eq!(session.state(), SessionState::Running);
@@ -79,7 +79,7 @@ fn draw_frame_error_is_propagated_from_submit_frame() {
     let cfg = WindowConfig::new("FailDraw", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut frame = DrawFrame::new();
     frame.clear(Color::BLACK);
@@ -97,7 +97,7 @@ fn draw_frame_error_is_propagated_from_tick_frame() {
     let cfg = WindowConfig::new("FailTickDraw", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut buffer = EventBuffer::new();
 

@@ -946,7 +946,7 @@ mod tests {
 
         let mut frame_count = 0u32;
         session
-            .run(|_buf| {
+            .run(|_buf, _| {
                 frame_count += 1;
                 LoopControl::Continue
             })
@@ -984,7 +984,7 @@ mod tests {
         session.close().unwrap();
 
         let err = session
-            .run(|_| LoopControl::Continue)
+            .run(|_, _| LoopControl::Continue)
             .expect_err("run after close must fail");
         assert_eq!(
             err,
@@ -1018,11 +1018,11 @@ mod tests {
         let mut session = DesktopSession::create(backend, cfg).unwrap();
 
         session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect("first run must succeed");
 
         let err = session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect_err("second run must fail");
         assert_eq!(
             err,
@@ -1097,7 +1097,7 @@ mod tests {
         let mut session = DesktopSession::create(backend, cfg).unwrap();
 
         session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect("run must succeed");
 
         let mut frame = DrawFrame::new();
@@ -1117,7 +1117,7 @@ mod tests {
         let mut session = DesktopSession::create(backend, cfg).unwrap();
 
         session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect("run must succeed");
         session.close().expect("close must succeed");
 
@@ -1143,7 +1143,7 @@ mod tests {
         let mut session = DesktopSession::create(backend, cfg).unwrap();
 
         session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect("run must succeed");
 
         let frame = DrawFrame::new();
@@ -1184,7 +1184,7 @@ mod tests {
         let mut session = DesktopSession::create(backend, cfg).unwrap();
 
         session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect("run must succeed");
 
         let mut buffer = EventBuffer::new();
@@ -1207,7 +1207,7 @@ mod tests {
         let mut session = DesktopSession::create(backend, cfg).unwrap();
 
         session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect("run must succeed");
         session.close().expect("close must succeed");
 
@@ -1234,7 +1234,7 @@ mod tests {
         let mut session = DesktopSession::create(backend, cfg).unwrap();
 
         session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect("run must succeed");
 
         let mut buffer = EventBuffer::new();
@@ -1282,7 +1282,7 @@ mod tests {
         let mut session = DesktopSession::create(backend, cfg).unwrap();
 
         session
-            .run(|_| LoopControl::ExitRequested)
+            .run(|_, _| LoopControl::ExitRequested)
             .expect("run must succeed");
 
         let mut buffer = EventBuffer::new();
