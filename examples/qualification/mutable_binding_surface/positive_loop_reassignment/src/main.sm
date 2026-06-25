@@ -1,0 +1,7 @@
+fn main() {
+    let mut count: i32 = 0;
+    while count < 4 {
+        count = count + 1;
+    }
+    assert(count == 4);
+}
