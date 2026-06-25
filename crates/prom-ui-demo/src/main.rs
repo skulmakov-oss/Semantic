@@ -1,21 +1,19 @@
-use prom_ui_runtime::{
-    DesktopSession, DrawFrame, EventBuffer, FrameToken, FrameTokenIssuer,
-    InputEventKind, LoopControl, SessionState, WindowConfig,
+use prom_ui::layout::{
+    constraint_solver::build_layout_constraint_solver,
+    constraints::build_layout_constraints,
+    geometry::build_layout_geometry,
+    measuring::build_layout_measuring,
+    physical_placement::build_layout_physical_placement,
+    size_to_fit::build_layout_size_to_fit,
+    sizing::build_layout_sizing,
+    sizing_algorithm::build_layout_sizing_algorithm,
+    solving::{build_layout_solving, build_layout_solving_result},
 };
-use prom_ui_backend_native::NativeBackend;
 use prom_ui_backend_native::draw_generation::generate_draw_frame;
-use prom_ui::{
-    layout::{
-        constraint_solver::build_layout_constraint_solver,
-        constraints::build_layout_constraints,
-        geometry::build_layout_geometry,
-        measuring::build_layout_measuring,
-        physical_placement::build_layout_physical_placement,
-        size_to_fit::build_layout_size_to_fit,
-        sizing::build_layout_sizing,
-        sizing_algorithm::build_layout_sizing_algorithm,
-        solving::{build_layout_solving, build_layout_solving_result},
-    },
+use prom_ui_backend_native::NativeBackend;
+use prom_ui_runtime::{
+    DesktopSession, DrawFrame, EventBuffer, FrameToken, FrameTokenIssuer, InputEventKind,
+    LoopControl, SessionState, WindowConfig,
 };
 
 fn main() {
@@ -49,9 +47,12 @@ fn main() {
             let token = issuer.next();
             frame_tokens.push(token);
 
-            use prom_ui::projection::{UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionArtifact, UiProjectionArtifactId};
             use prom_ui::model::UiIrNodeId;
-            
+            use prom_ui::projection::{
+                UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionArtifact,
+                UiProjectionArtifactId,
+            };
+
             let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(100));
             artifact.set_source_ir_root(UiIrNodeId::new(10));
             artifact.push_node(UiProjectedNode::with_source_ir_node(

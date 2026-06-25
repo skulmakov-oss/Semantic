@@ -1308,7 +1308,10 @@ pub mod winit_placeholder {
     ///
     /// This acts as a bridge between the winit `EventLoop` and `NativeBackend::run_event_loop`.
     /// It hosts the backend temporarily while the event loop runs.
-    pub struct WinitRunLoopHost<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)> {
+    pub struct WinitRunLoopHost<
+        'a,
+        F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame),
+    > {
         pub backend: &'a mut NativeBackend,
         pub on_event: F,
         pub window: Option<alloc::sync::Arc<Window>>,
@@ -1320,7 +1323,9 @@ pub mod winit_placeholder {
         pub presentation_surface: Option<super::wgpu_integration::NativeBackendPresentationSurface>,
     }
 
-    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)> WinitRunLoopHost<'a, F> {
+    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>
+        WinitRunLoopHost<'a, F>
+    {
         pub fn new(backend: &'a mut NativeBackend, on_event: F) -> Self {
             Self {
                 backend,
@@ -1335,8 +1340,8 @@ pub mod winit_placeholder {
         }
     }
 
-    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)> ApplicationHandler
-        for WinitRunLoopHost<'a, F>
+    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>
+        ApplicationHandler for WinitRunLoopHost<'a, F>
     {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
             if self.window.is_some() {
@@ -1779,10 +1784,16 @@ impl UiBackendAdapter for NativeBackend {
 
                 match event.kind {
                     InputEventKind::CloseRequested => {
-                        { let mut f = prom_ui_runtime::DrawFrame::new(); on_event(LoopControl::ExitRequested, &mut f); };
+                        {
+                            let mut f = prom_ui_runtime::DrawFrame::new();
+                            on_event(LoopControl::ExitRequested, &mut f);
+                        };
                         break;
                     }
-                    _ => { let mut f = prom_ui_runtime::DrawFrame::new(); on_event(LoopControl::Continue, &mut f); },
+                    _ => {
+                        let mut f = prom_ui_runtime::DrawFrame::new();
+                        on_event(LoopControl::Continue, &mut f);
+                    }
                 }
             }
         }
@@ -1878,7 +1889,8 @@ pub mod wgpu_integration {
 
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Rect Shader"),
-                source: wgpu::ShaderSource::Wgsl(alloc::borrow::Cow::Borrowed("
+                source: wgpu::ShaderSource::Wgsl(alloc::borrow::Cow::Borrowed(
+                    "
                     struct VertexInput {
                         @location(0) position: vec2<f32>,
                         @location(1) color: vec4<f32>,
@@ -1901,14 +1913,16 @@ pub mod wgpu_integration {
                     fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
                         return in.color;
                     }
-                ")),
+                ",
+                )),
             });
 
-            let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[],
-                push_constant_ranges: &[],
-            });
+            let render_pipeline_layout =
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Render Pipeline Layout"),
+                    bind_group_layouts: &[],
+                    push_constant_ranges: &[],
+                });
 
             let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Render Pipeline"),
@@ -2130,16 +2144,35 @@ pub mod wgpu_integration {
                         let x0 = (rect.x as f32 / surface_width) * 2.0 - 1.0;
                         let y0 = 1.0 - (rect.y as f32 / surface_height) * 2.0;
                         let x1 = ((rect.x + rect.width as i32) as f32 / surface_width) * 2.0 - 1.0;
-                        let y1 = 1.0 - ((rect.y + rect.height as i32) as f32 / surface_height) * 2.0;
+                        let y1 =
+                            1.0 - ((rect.y + rect.height as i32) as f32 / surface_height) * 2.0;
 
                         // Triangle 1
-                        vertices.push(Vertex { position: [x0, y0], color: c });
-                        vertices.push(Vertex { position: [x0, y1], color: c });
-                        vertices.push(Vertex { position: [x1, y0], color: c });
+                        vertices.push(Vertex {
+                            position: [x0, y0],
+                            color: c,
+                        });
+                        vertices.push(Vertex {
+                            position: [x0, y1],
+                            color: c,
+                        });
+                        vertices.push(Vertex {
+                            position: [x1, y0],
+                            color: c,
+                        });
                         // Triangle 2
-                        vertices.push(Vertex { position: [x1, y0], color: c });
-                        vertices.push(Vertex { position: [x0, y1], color: c });
-                        vertices.push(Vertex { position: [x1, y1], color: c });
+                        vertices.push(Vertex {
+                            position: [x1, y0],
+                            color: c,
+                        });
+                        vertices.push(Vertex {
+                            position: [x0, y1],
+                            color: c,
+                        });
+                        vertices.push(Vertex {
+                            position: [x1, y1],
+                            color: c,
+                        });
                     }
                     _ => {}
                 }
@@ -2147,11 +2180,15 @@ pub mod wgpu_integration {
 
             let vertex_buffer = if !vertices.is_empty() {
                 use wgpu::util::DeviceExt;
-                Some(context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Rect Vertex Buffer"),
-                    contents: bytemuck::cast_slice(&vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                }))
+                Some(
+                    context
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Rect Vertex Buffer"),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        }),
+                )
             } else {
                 None
             };
