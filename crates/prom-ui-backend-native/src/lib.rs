@@ -54,6 +54,16 @@ pub enum RawKeyCode {
     Unknown(u32),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RawMouseButton {
+    Left,
+    Right,
+    Middle,
+    Back,
+    Forward,
+    Other(u32),
+}
+
 /// Inert physical event evidence captured from the host.
 ///
 /// This does not infer semantic intent.
@@ -70,6 +80,10 @@ pub enum RawBackendEvent {
     PointerMoved {
         x: f64,
         y: f64,
+    },
+    MouseInput {
+        button: RawMouseButton,
+        state: RawButtonState,
     },
     CloseRequested,
 }
@@ -130,7 +144,7 @@ pub mod winit_placeholder {
     use winit::{
         application::ApplicationHandler,
         dpi::LogicalSize,
-        event::{ElementState, WindowEvent},
+        event::{ElementState, MouseButton, WindowEvent},
         event_loop::{ActiveEventLoop, EventLoop},
         keyboard::{KeyCode, PhysicalKey},
         window::{Window, WindowAttributes, WindowId},
@@ -270,6 +284,31 @@ pub mod winit_placeholder {
             WindowEvent::KeyboardInput { event, .. } => {
                 translate_winit_physical_key(event.state, event.physical_key)
             }
+            WindowEvent::CursorMoved { position, .. } => Some(prom_ui_runtime::InputEvent::new(
+                prom_ui_runtime::InputEventKind::PointerMoved {
+                    x: position.x,
+                    y: position.y,
+                },
+            )),
+            WindowEvent::MouseInput { state, button, .. } => {
+                let btn_num = match button {
+                    MouseButton::Left => 0,
+                    MouseButton::Right => 1,
+                    MouseButton::Middle => 2,
+                    MouseButton::Back => 3,
+                    MouseButton::Forward => 4,
+                    MouseButton::Other(n) => *n as u32,
+                };
+                let kind = match state {
+                    ElementState::Pressed => {
+                        prom_ui_runtime::InputEventKind::PointerDown { button: btn_num }
+                    }
+                    ElementState::Released => {
+                        prom_ui_runtime::InputEventKind::PointerUp { button: btn_num }
+                    }
+                };
+                Some(prom_ui_runtime::InputEvent::new(kind))
+            }
             _ => None,
         }
     }
@@ -327,6 +366,18 @@ pub mod winit_placeholder {
                     x: position.x,
                     y: position.y,
                 })
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let button = match button {
+                    winit::event::MouseButton::Left => super::RawMouseButton::Left,
+                    winit::event::MouseButton::Right => super::RawMouseButton::Right,
+                    winit::event::MouseButton::Middle => super::RawMouseButton::Middle,
+                    winit::event::MouseButton::Back => super::RawMouseButton::Back,
+                    winit::event::MouseButton::Forward => super::RawMouseButton::Forward,
+                    winit::event::MouseButton::Other(n) => super::RawMouseButton::Other(*n as u32),
+                };
+                let state = translate_winit_to_raw_button_state(*state);
+                Some(super::RawBackendEvent::MouseInput { button, state })
             }
             _ => None,
         }
@@ -1596,7 +1647,7 @@ pub mod winit_placeholder {
 ///
 /// Handles event staging and loop lifecycle without owning
 /// semantic admission or dispatch.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct NativeBackend {
     platform_wired: bool,
     window_config: Option<WindowConfig>,

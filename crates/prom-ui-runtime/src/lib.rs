@@ -358,17 +358,20 @@ impl DesktopSession<InMemoryBackend> {
 /// Taxonomy of first-wave input events admitted for polling.
 ///
 /// Mouse, touch, and gamepad events are deferred to a future wave.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InputEventKind {
     KeyDown { key_code: u32 },
     KeyUp { key_code: u32 },
+    PointerMoved { x: f64, y: f64 },
+    PointerDown { button: u32 },
+    PointerUp { button: u32 },
     CloseRequested,
 }
 
 /// A single input event polled from the desktop session.
 ///
 /// Replaces the Wave 0 inert marker.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InputEvent {
     pub kind: InputEventKind,
 }
@@ -594,7 +597,7 @@ impl DrawFrame {
 ///
 /// This backend does not create native windows and does not render pixels.
 /// It records lifecycle calls and submitted draw frames for tests/reference use.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InMemoryBackend {
     config: Option<WindowConfig>,
     run_event_loop_calls: usize,

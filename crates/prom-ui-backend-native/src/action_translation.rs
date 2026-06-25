@@ -20,6 +20,7 @@ impl NativeActionTranslator for DefaultNativeActionTranslator {
     fn translate(&self, interaction: &RoutedInteraction) -> InteractionIntentKind {
         match interaction.event {
             crate::RawBackendEvent::PointerMoved { .. } => InteractionIntentKind::Unknown,
+            crate::RawBackendEvent::MouseInput { .. } => InteractionIntentKind::Unknown,
             crate::RawBackendEvent::KeyboardInput {
                 state: crate::RawButtonState::Pressed,
                 ..
