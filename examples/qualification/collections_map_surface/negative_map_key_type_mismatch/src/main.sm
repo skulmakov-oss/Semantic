@@ -1,0 +1,5 @@
+fn main() {
+    let m: Map(i32, bool) = map_empty();
+    let next: Map(i32, bool) = map_set(m, true, false);
+    return;
+}

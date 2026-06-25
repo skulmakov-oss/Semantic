@@ -1,0 +1,4 @@
+fn main() {
+    let values: Sequence(i32) = [1, true];
+    return;
+}

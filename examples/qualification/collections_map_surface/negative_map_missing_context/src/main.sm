@@ -1,0 +1,4 @@
+fn main() {
+    let m = map_empty();
+    return;
+}
