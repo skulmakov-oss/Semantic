@@ -1,0 +1,23 @@
+fn unwrap(opt: Option(bool)) -> bool {
+    let out: bool = match opt {
+        Option::Some(value) => { value }
+        Option::None => { false }
+    };
+    return out;
+}
+
+fn settle(res: Result(bool, quad)) -> bool {
+    let out: bool = match res {
+        Result::Ok(value) => { value }
+        Result::Err(code) => { false }
+    };
+    return out;
+}
+
+fn main() {
+    let left: bool = unwrap(Option::Some(true));
+    let right: bool = settle(Result::Err(S));
+    assert(left == true);
+    assert(right == false);
+    return;
+}

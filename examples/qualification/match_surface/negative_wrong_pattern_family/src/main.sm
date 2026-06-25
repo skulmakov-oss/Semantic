@@ -1,0 +1,12 @@
+fn settle(res: Result(bool, quad)) -> bool {
+    let out: bool = match res {
+        Option::Some(value) => { value }
+        _ => { false }
+    };
+    return out;
+}
+
+fn main() {
+    let out: bool = settle(Result::Err(S));
+    return;
+}
