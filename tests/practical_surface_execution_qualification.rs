@@ -108,11 +108,7 @@ fn practical_surface_positive_fixtures_are_depth_classified_by_current_pipeline_
     // All current positive practical fixtures are executable on main.
     // Keep the check-only bucket explicit so future partially-supported fixtures can be added
     // without changing the structure of this test.
-    let check_only_fixtures: [(&str, Depth); 0] = [];
-    assert!(
-        check_only_fixtures.is_empty(),
-        "no current practical positive fixture should remain check-only"
-    );
+    let _check_only_fixtures: &[(&str, Depth)] = &[];
     let depth_ladder = [
         Depth::CheckOnly,
         Depth::CompileOk,
