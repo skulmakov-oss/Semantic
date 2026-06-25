@@ -22,6 +22,8 @@ struct DemoState {
     is_pointer_down: bool,
     key_press_count: u32,
     last_key: Option<u32>,
+    hovered_node: Option<prom_ui::renderer::UiRenderNodeId>,
+    selected_node: Option<prom_ui::renderer::UiRenderNodeId>,
 }
 
 fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
@@ -89,6 +91,8 @@ fn main() {
         is_pointer_down: false,
         key_press_count: 0,
         last_key: None,
+        hovered_node: None,
+        selected_node: None,
     };
 
     session
@@ -104,9 +108,14 @@ fn main() {
                     InputEventKind::PointerMoved { x, y } => {
                         demo_state.pointer_x = x as i32;
                         demo_state.pointer_y = y as i32;
+                        demo_state.hovered_node =
+                            prom_ui::layout::physical_placement::hit_test_placement(
+                                x, y, &placement,
+                            );
                     }
                     InputEventKind::PointerDown { .. } => {
                         demo_state.is_pointer_down = true;
+                        demo_state.selected_node = demo_state.hovered_node;
                     }
                     InputEventKind::PointerUp { .. } => {
                         demo_state.is_pointer_down = false;
@@ -129,10 +138,51 @@ fn main() {
                 Color::GREEN
             };
 
-            out_frame.fill_rect(
-                Rect::new(demo_state.pointer_x - 5, demo_state.pointer_y - 5, 10, 10),
-                pointer_color,
-            );
+            // Draw highlights for nodes
+            for entry in placement.entries() {
+                let node_id = entry.source_render_node();
+                let rect = entry.final_rect();
+
+                let is_selected = Some(node_id) == demo_state.selected_node;
+                let is_hovered = Some(node_id) == demo_state.hovered_node;
+
+                if is_selected || is_hovered {
+                    let color = if is_selected {
+                        Color::BLUE // bright blue for selected
+                    } else {
+                        Color::GREEN // green for hovered
+                    };
+
+                    let x = rect.x();
+                    let y = rect.y();
+                    let w = rect.width();
+                    let h = rect.height();
+                    let thickness = 2;
+
+                    // Top border
+                    out_frame.fill_rect(Rect::new(x, y, w, thickness), color);
+                    // Bottom border
+                    out_frame.fill_rect(
+                        Rect::new(x, y + (h as i32) - (thickness as i32), w, thickness),
+                        color,
+                    );
+                    // Left border
+                    out_frame.fill_rect(Rect::new(x, y, thickness, h), color);
+                    // Right border
+                    out_frame.fill_rect(
+                        Rect::new(x + (w as i32) - (thickness as i32), y, thickness, h),
+                        color,
+                    );
+                }
+            }
+
+            // Draw global pointer if it doesn't hit any node
+            if demo_state.hovered_node.is_none() {
+                out_frame.fill_rect(
+                    Rect::new(demo_state.pointer_x - 5, demo_state.pointer_y - 5, 10, 10),
+                    pointer_color,
+                );
+            }
 
             let key_feedback_text = match demo_state.last_key {
                 Some(k) => format!("Keys pressed: {} (Last: {})", demo_state.key_press_count, k),
@@ -167,6 +217,8 @@ mod tests {
             is_pointer_down: true,
             key_press_count: 5,
             last_key: Some(65),
+            hovered_node: None,
+            selected_node: None,
         };
 
         let mut out_frame = generate_draw_frame(&placement);
