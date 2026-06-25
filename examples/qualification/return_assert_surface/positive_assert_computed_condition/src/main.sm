@@ -1,0 +1,7 @@
+fn main() {
+    let left: i32 = 2;
+    let right: i32 = 1 + 1;
+    let ok: bool = left == right;
+    assert(ok);
+    return;
+}
