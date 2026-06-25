@@ -1,0 +1,8 @@
+fn main() {
+    let a: fx = 2.5;
+    let b: fx = 1.5;
+    let total: fx = a + b;
+    let expected: fx = 4.0;
+    assert(total == expected);
+    return;
+}
