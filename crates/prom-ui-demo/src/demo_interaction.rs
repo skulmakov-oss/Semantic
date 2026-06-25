@@ -219,7 +219,18 @@ fn draw_selected_feedback(out_frame: &mut DrawFrame, rect: prom_ui::layout::UiLa
 }
 
 fn draw_focused_feedback(out_frame: &mut DrawFrame, rect: prom_ui::layout::UiLayoutGeometryRect) {
-    draw_outline(out_frame, rect, Color::WHITE, 2);
+    let x = rect.x() - 4;
+    let y = rect.y() - 4;
+    let w = rect.width() + 8;
+    let h = rect.height() + 8;
+    let thickness = 2;
+
+    draw_outline(
+        out_frame,
+        prom_ui::layout::UiLayoutGeometryRect::new(x, y, w, h),
+        Color::WHITE,
+        thickness,
+    );
 }
 
 fn draw_dispatch_feedback(
@@ -422,7 +433,11 @@ mod tests {
         )));
         assert!(commands.iter().any(|cmd| matches!(
             cmd,
-            prom_ui_runtime::DrawCommand::FillRect { color, .. } if *color == Color::WHITE
+            prom_ui_runtime::DrawCommand::FillRect { rect, color } if *color == Color::WHITE
+                && rect.x == 6
+                && rect.y == 16
+                && rect.width == 113
+                && rect.height == 2
         )));
     }
 }
