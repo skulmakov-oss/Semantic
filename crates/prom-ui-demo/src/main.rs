@@ -16,6 +16,50 @@ use prom_ui_runtime::{
     WindowConfig,
 };
 
+use prom_ui::action_binding::InteractionActionBindingId;
+use prom_ui::projection::UiProjectedNodeId;
+use prom_ui::SemanticIntent;
+use prom_ui_runtime::RuntimeIntentAdmission;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchFeedback {
+    None,
+    IntentBuilt,
+    Denied,
+}
+
+struct DemoActionBindings {
+    bindings:
+        HashMap<prom_ui::renderer::UiRenderNodeId, (UiProjectedNodeId, InteractionActionBindingId)>,
+}
+
+impl DemoActionBindings {
+    fn new() -> Self {
+        let mut bindings = HashMap::new();
+        // Root
+        bindings.insert(
+            prom_ui::renderer::UiRenderNodeId::new(10),
+            (UiProjectedNodeId::new(1), InteractionActionBindingId(100)),
+        );
+        // Element
+        bindings.insert(
+            prom_ui::renderer::UiRenderNodeId::new(20),
+            (UiProjectedNodeId::new(2), InteractionActionBindingId(200)),
+        );
+        Self { bindings }
+    }
+
+    fn build_intent(
+        &self,
+        render_node: prom_ui::renderer::UiRenderNodeId,
+    ) -> Option<SemanticIntent> {
+        self.bindings
+            .get(&render_node)
+            .map(|(proj_id, action_id)| SemanticIntent::new(*proj_id, *action_id))
+    }
+}
+
 struct DemoState {
     pointer_x: i32,
     pointer_y: i32,
@@ -24,6 +68,8 @@ struct DemoState {
     last_key: Option<u32>,
     hovered_node: Option<prom_ui::renderer::UiRenderNodeId>,
     selected_node: Option<prom_ui::renderer::UiRenderNodeId>,
+    dispatch_feedback: DispatchFeedback,
+    denied_count: u32,
 }
 
 fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
@@ -93,7 +139,12 @@ fn main() {
         last_key: None,
         hovered_node: None,
         selected_node: None,
+        dispatch_feedback: DispatchFeedback::None,
+        denied_count: 0,
     };
+
+    let bindings = DemoActionBindings::new();
+    let admission_gate = RuntimeIntentAdmission::new();
 
     session
         .run(move |buf: &mut EventBuffer, out_frame: &mut DrawFrame| {
@@ -116,6 +167,22 @@ fn main() {
                     InputEventKind::PointerDown { .. } => {
                         demo_state.is_pointer_down = true;
                         demo_state.selected_node = demo_state.hovered_node;
+
+                        // Trigger intent if selected
+                        if let Some(selected) = demo_state.selected_node {
+                            if let Some(intent) = bindings.build_intent(selected) {
+                                demo_state.dispatch_feedback = DispatchFeedback::IntentBuilt;
+                                match admission_gate.admit_intent(intent) {
+                                    Ok(_) => {} // Normally dispatched, but we expect Denial
+                                    Err(_) => {
+                                        demo_state.dispatch_feedback = DispatchFeedback::Denied;
+                                        demo_state.denied_count += 1;
+                                    }
+                                }
+                            } else {
+                                demo_state.dispatch_feedback = DispatchFeedback::None;
+                            }
+                        }
                     }
                     InputEventKind::PointerUp { .. } => {
                         demo_state.is_pointer_down = false;
@@ -123,6 +190,22 @@ fn main() {
                     InputEventKind::KeyDown { key_code } => {
                         demo_state.key_press_count += 1;
                         demo_state.last_key = Some(key_code);
+
+                        // Enter/Space on selected node
+                        if let Some(selected) = demo_state.selected_node {
+                            if let Some(intent) = bindings.build_intent(selected) {
+                                demo_state.dispatch_feedback = DispatchFeedback::IntentBuilt;
+                                match admission_gate.admit_intent(intent) {
+                                    Ok(_) => {}
+                                    Err(_) => {
+                                        demo_state.dispatch_feedback = DispatchFeedback::Denied;
+                                        demo_state.denied_count += 1;
+                                    }
+                                }
+                            } else {
+                                demo_state.dispatch_feedback = DispatchFeedback::None;
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -148,9 +231,9 @@ fn main() {
 
                 if is_selected || is_hovered {
                     let color = if is_selected {
-                        Color::BLUE // bright blue for selected
+                        Color::rgb(255, 255, 0) // yellow for selected
                     } else {
-                        Color::GREEN // green for hovered
+                        Color::WHITE // white for hovered
                     };
 
                     let x = rect.x();
@@ -159,22 +242,44 @@ fn main() {
                     let h = rect.height();
                     let thickness = 2;
 
-                    // Top border
                     out_frame.fill_rect(Rect::new(x, y, w, thickness), color);
-                    // Bottom border
                     out_frame.fill_rect(
                         Rect::new(x, y + (h as i32) - (thickness as i32), w, thickness),
                         color,
                     );
-                    // Left border
                     out_frame.fill_rect(Rect::new(x, y, thickness, h), color);
-                    // Right border
                     out_frame.fill_rect(
                         Rect::new(x + (w as i32) - (thickness as i32), y, thickness, h),
                         color,
                     );
+
+                    // If it's selected, draw the dispatch feedback marker
+                    if is_selected {
+                        let feedback_color = match demo_state.dispatch_feedback {
+                            DispatchFeedback::IntentBuilt => Color::BLUE,
+                            DispatchFeedback::Denied => Color::RED,
+                            DispatchFeedback::None => Color::rgb(128, 128, 128), // Gray
+                        };
+
+                        // Draw a short thick bar at the top-left of the selected node
+                        out_frame.fill_rect(Rect::new(x + 5, y - 10, 20, 8), feedback_color);
+                    }
                 }
             }
+
+            // Also draw some general text for denied counts
+            out_frame.draw_text(
+                format!(
+                    "Pointer: ({}, {}), Keys: {}, Denied: {}",
+                    demo_state.pointer_x,
+                    demo_state.pointer_y,
+                    demo_state.key_press_count,
+                    demo_state.denied_count
+                ),
+                10,
+                30,
+                pointer_color,
+            );
 
             // Draw global pointer if it doesn't hit any node
             if demo_state.hovered_node.is_none() {
@@ -219,6 +324,8 @@ mod tests {
             last_key: Some(65),
             hovered_node: None,
             selected_node: None,
+            dispatch_feedback: DispatchFeedback::None,
+            denied_count: 0,
         };
 
         let mut out_frame = generate_draw_frame(&placement);
