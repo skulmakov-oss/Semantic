@@ -20,6 +20,7 @@ use prom_ui_runtime::{
 };
 
 pub mod action_translation;
+pub mod draw_generation;
 pub mod frame_sink;
 pub mod interaction;
 pub mod session_hook;
@@ -1307,7 +1308,7 @@ pub mod winit_placeholder {
     ///
     /// This acts as a bridge between the winit `EventLoop` and `NativeBackend::run_event_loop`.
     /// It hosts the backend temporarily while the event loop runs.
-    pub struct WinitRunLoopHost<'a, F: FnMut(prom_ui_runtime::LoopControl)> {
+    pub struct WinitRunLoopHost<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)> {
         pub backend: &'a mut NativeBackend,
         pub on_event: F,
         pub window: Option<alloc::sync::Arc<Window>>,
@@ -1319,7 +1320,7 @@ pub mod winit_placeholder {
         pub presentation_surface: Option<super::wgpu_integration::NativeBackendPresentationSurface>,
     }
 
-    impl<'a, F: FnMut(prom_ui_runtime::LoopControl)> WinitRunLoopHost<'a, F> {
+    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)> WinitRunLoopHost<'a, F> {
         pub fn new(backend: &'a mut NativeBackend, on_event: F) -> Self {
             Self {
                 backend,
@@ -1334,44 +1335,43 @@ pub mod winit_placeholder {
         }
     }
 
-    impl<'a, F: FnMut(prom_ui_runtime::LoopControl)> ApplicationHandler for WinitRunLoopHost<'a, F> {
+    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)> ApplicationHandler
+        for WinitRunLoopHost<'a, F>
+    {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
             if self.window.is_some() {
                 return;
             }
 
-            if let Some(config) = self.backend.window_config() {
-                match create_winit_window_from_config(event_loop, config) {
-                    Ok(window) => {
-                        self.window_id = Some(window.id());
-                        let window_arc = alloc::sync::Arc::new(window);
-                        self.window = Some(window_arc.clone());
+            if let Some(config) = &self.backend.window_config {
+                let window_attributes = Window::default_attributes()
+                    .with_title(&config.title)
+                    .with_inner_size(winit::dpi::LogicalSize::new(config.width, config.height));
 
-                        #[cfg(feature = "wgpu-backend")]
+                if let Ok(window) = event_loop.create_window(window_attributes) {
+                    self.window_id = Some(window.id());
+                    let window_arc = alloc::sync::Arc::new(window);
+                    self.window = Some(window_arc.clone());
+
+                    #[cfg(feature = "wgpu-backend")]
+                    {
+                        if let Some(context) =
+                            super::wgpu_integration::NativeBackendWgpuContext::new()
                         {
-                            if let Some(context) =
-                                super::wgpu_integration::NativeBackendWgpuContext::new()
+                            if let Ok(surface) =
+                                super::wgpu_integration::NativeBackendPresentationSurface::new(
+                                    &context,
+                                    window_arc,
+                                    config.width,
+                                    config.height,
+                                )
                             {
-                                if let Ok(surface) =
-                                    super::wgpu_integration::NativeBackendPresentationSurface::new(
-                                        &context,
-                                        window_arc,
-                                        config.width,
-                                        config.height,
-                                    )
-                                {
-                                    self.presentation_surface = Some(surface);
-                                }
-                                self.wgpu_context = Some(context);
+                                self.presentation_surface = Some(surface);
                             }
+                            self.wgpu_context = Some(context);
                         }
                     }
-                    Err(_) => {
-                        event_loop.exit();
-                    }
                 }
-            } else {
-                event_loop.exit();
             }
         }
 
@@ -1411,14 +1411,32 @@ pub mod winit_placeholder {
 
             if let Some(backend_event) = translate_winit_to_raw_backend_event(&event) {
                 if matches!(backend_event, super::RawBackendEvent::CloseRequested) {
-                    (self.on_event)(prom_ui_runtime::LoopControl::ExitRequested);
+                    let mut frame = prom_ui_runtime::DrawFrame::new();
+                    (self.on_event)(prom_ui_runtime::LoopControl::ExitRequested, &mut frame);
+                    use prom_ui_runtime::UiBackendAdapter;
+                    let _ = self.backend.draw_frame(&frame);
                     event_loop.exit();
                 } else {
                     if let Some(input_event) = translate_winit_window_event(&event) {
                         self.backend.pending_events.push(input_event);
                     }
-                    (self.on_event)(prom_ui_runtime::LoopControl::Continue);
+                    let mut frame = prom_ui_runtime::DrawFrame::new();
+                    (self.on_event)(prom_ui_runtime::LoopControl::Continue, &mut frame);
+                    use prom_ui_runtime::UiBackendAdapter;
+                    let _ = self.backend.draw_frame(&frame);
                 }
+            }
+        }
+
+        fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+            // Unconditionally advance the app loop on every iteration
+            let mut frame = prom_ui_runtime::DrawFrame::new();
+            (self.on_event)(prom_ui_runtime::LoopControl::Continue, &mut frame);
+            use prom_ui_runtime::UiBackendAdapter;
+            let _ = self.backend.draw_frame(&frame);
+            // Redraw continuously
+            if let Some(window) = &self.window {
+                window.request_redraw();
             }
         }
     }
@@ -1732,7 +1750,7 @@ impl UiBackendAdapter for NativeBackend {
         self.closed = true;
     }
 
-    fn run_event_loop<F: FnMut(prom_ui_runtime::LoopControl)>(
+    fn run_event_loop<F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
         #[allow(unused_mut)] mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
@@ -1801,6 +1819,35 @@ pub mod wgpu_integration {
         pub adapter: Adapter,
         pub device: Device,
         pub queue: Queue,
+        pub pipeline: wgpu::RenderPipeline,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+    struct Vertex {
+        position: [f32; 2],
+        color: [f32; 4],
+    }
+
+    impl Vertex {
+        fn desc() -> wgpu::VertexBufferLayout<'static> {
+            wgpu::VertexBufferLayout {
+                array_stride: core::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: core::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                        shader_location: 1,
+                        format: wgpu::VertexFormat::Float32x4,
+                    },
+                ],
+            }
+        }
     }
 
     impl NativeBackendWgpuContext {
@@ -1829,11 +1876,83 @@ pub mod wgpu_integration {
             ))
             .ok()?;
 
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Rect Shader"),
+                source: wgpu::ShaderSource::Wgsl(alloc::borrow::Cow::Borrowed("
+                    struct VertexInput {
+                        @location(0) position: vec2<f32>,
+                        @location(1) color: vec4<f32>,
+                    };
+
+                    struct VertexOutput {
+                        @builtin(position) clip_position: vec4<f32>,
+                        @location(0) color: vec4<f32>,
+                    };
+
+                    @vertex
+                    fn vs_main(model: VertexInput) -> VertexOutput {
+                        var out: VertexOutput;
+                        out.clip_position = vec4<f32>(model.position, 0.0, 1.0);
+                        out.color = model.color;
+                        return out;
+                    }
+
+                    @fragment
+                    fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+                        return in.color;
+                    }
+                ")),
+            });
+
+            let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Render Pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[Vertex::desc()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+            });
+
             Some(Self {
                 instance,
                 adapter,
                 device,
                 queue,
+                pipeline,
             })
         }
 
@@ -1913,20 +2032,25 @@ pub mod wgpu_integration {
         ) -> Result<Self, wgpu::CreateSurfaceError> {
             let surface = context.instance.create_surface(window)?;
 
-            let config = surface
-                .get_default_config(&context.adapter, width.max(1), height.max(1))
+            let max_dim = context.device.limits().max_texture_dimension_2d;
+            let w = width.clamp(1, max_dim);
+            let h = height.clamp(1, max_dim);
+
+            let mut config = surface
+                .get_default_config(&context.adapter, w, h)
                 .unwrap_or_else(|| wgpu::SurfaceConfiguration {
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    width: width.max(1),
-                    height: height.max(1),
+                    width: w,
+                    height: h,
                     present_mode: wgpu::PresentMode::AutoVsync,
                     alpha_mode: wgpu::CompositeAlphaMode::Auto,
                     view_formats: alloc::vec![],
                     desired_maximum_frame_latency: 2,
                 });
-
-            // Configure immediately
+            config.width = w;
+            config.height = h;
+            config.format = wgpu::TextureFormat::Rgba8UnormSrgb;
             surface.configure(&context.device, &config);
 
             Ok(Self { surface, config })
@@ -1934,8 +2058,9 @@ pub mod wgpu_integration {
 
         /// Reconfigures the swapchain upon window resize.
         pub fn resize(&mut self, context: &NativeBackendWgpuContext, width: u32, height: u32) {
-            let w = width.max(1);
-            let h = height.max(1);
+            let max_dim = context.device.limits().max_texture_dimension_2d;
+            let w = width.clamp(1, max_dim);
+            let h = height.clamp(1, max_dim);
             if self.config.width != w || self.config.height != h {
                 self.config.width = w;
                 self.config.height = h;
@@ -1981,19 +2106,58 @@ pub mod wgpu_integration {
                 a: 1.0,
             };
 
+            let mut vertices = alloc::vec::Vec::new();
+            let surface_width = self.config.width as f32;
+            let surface_height = self.config.height as f32;
+
             for cmd in commands {
-                if let prom_ui_runtime::DrawCommand::Clear { color } = cmd {
-                    bg_color = wgpu::Color {
-                        r: color.r as f64 / 255.0,
-                        g: color.g as f64 / 255.0,
-                        b: color.b as f64 / 255.0,
-                        a: color.a as f64 / 255.0,
-                    };
+                match cmd {
+                    prom_ui_runtime::DrawCommand::Clear { color } => {
+                        bg_color = wgpu::Color {
+                            r: color.r as f64 / 255.0,
+                            g: color.g as f64 / 255.0,
+                            b: color.b as f64 / 255.0,
+                            a: color.a as f64 / 255.0,
+                        };
+                    }
+                    prom_ui_runtime::DrawCommand::FillRect { rect, color } => {
+                        let r = color.r as f32 / 255.0;
+                        let g = color.g as f32 / 255.0;
+                        let b = color.b as f32 / 255.0;
+                        let a = color.a as f32 / 255.0;
+                        let c = [r, g, b, a];
+
+                        let x0 = (rect.x as f32 / surface_width) * 2.0 - 1.0;
+                        let y0 = 1.0 - (rect.y as f32 / surface_height) * 2.0;
+                        let x1 = ((rect.x + rect.width as i32) as f32 / surface_width) * 2.0 - 1.0;
+                        let y1 = 1.0 - ((rect.y + rect.height as i32) as f32 / surface_height) * 2.0;
+
+                        // Triangle 1
+                        vertices.push(Vertex { position: [x0, y0], color: c });
+                        vertices.push(Vertex { position: [x0, y1], color: c });
+                        vertices.push(Vertex { position: [x1, y0], color: c });
+                        // Triangle 2
+                        vertices.push(Vertex { position: [x1, y0], color: c });
+                        vertices.push(Vertex { position: [x0, y1], color: c });
+                        vertices.push(Vertex { position: [x1, y1], color: c });
+                    }
+                    _ => {}
                 }
             }
 
+            let vertex_buffer = if !vertices.is_empty() {
+                use wgpu::util::DeviceExt;
+                Some(context.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Rect Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                }))
+            } else {
+                None
+            };
+
             {
-                let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Some("Semantic Render Pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &view,
@@ -2007,6 +2171,12 @@ pub mod wgpu_integration {
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });
+
+                if let Some(vb) = &vertex_buffer {
+                    render_pass.set_pipeline(&context.pipeline);
+                    render_pass.set_vertex_buffer(0, vb.slice(..));
+                    render_pass.draw(0..vertices.len() as u32, 0..1);
+                }
             }
 
             context.queue.submit(Some(encoder.finish()));

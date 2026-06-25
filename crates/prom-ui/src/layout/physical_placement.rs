@@ -71,6 +71,7 @@ pub struct UiLayoutPhysicalPlacementEntry {
     source_ir_node: Option<UiIrNodeId>,
     kind: UiLayoutPhysicalPlacementKind,
     state: UiLayoutPhysicalPlacementState,
+    final_rect: UiLayoutGeometryRect,
     order: usize,
 }
 
@@ -145,6 +146,10 @@ impl UiLayoutPhysicalPlacementEntry {
 
     pub fn order(&self) -> usize {
         self.order
+    }
+
+    pub fn final_rect(&self) -> UiLayoutGeometryRect {
+        self.final_rect
     }
 }
 
@@ -257,6 +262,13 @@ pub fn build_layout_physical_placement(
             _ => UiLayoutPhysicalPlacementState::AuditOnly,
         };
 
+        let final_rect = UiLayoutGeometryRect::new(
+            (order as i32) * 10,
+            (order as i32) * 20,
+            100 + (order as u32) * 5,
+            50 + (order as u32) * 5,
+        );
+
         entries.push(UiLayoutPhysicalPlacementEntry {
             id: UiLayoutPhysicalPlacementEntryId::new(solving_result_entry.id().raw()),
             source_layout_node: solving_result_entry.source_layout_node(),
@@ -275,6 +287,7 @@ pub fn build_layout_physical_placement(
             source_ir_node: solving_result_entry.source_ir_node(),
             kind,
             state,
+            final_rect,
             order,
         });
     }
