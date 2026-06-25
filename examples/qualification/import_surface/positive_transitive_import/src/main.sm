@@ -1,0 +1,7 @@
+Import "domain.sm" { domain_value }
+
+fn main() {
+    let value: i32 = domain_value();
+    assert(value == 3);
+    return;
+}
