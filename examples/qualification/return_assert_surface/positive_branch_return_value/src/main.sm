@@ -1,0 +1,7 @@
+fn choose(flag: bool) -> i32 = if flag { 1 } else { 2 };
+
+fn main() {
+    let value: i32 = choose(true);
+    assert(value == 1);
+    return;
+}
