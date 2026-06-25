@@ -1,0 +1,6 @@
+Import "left.sm"
+Import "right.sm"
+
+fn main() {
+    return;
+}

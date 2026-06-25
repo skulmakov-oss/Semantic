@@ -1,0 +1,5 @@
+Import "core.sm" { seed }
+
+fn domain_value() -> i32 {
+    return seed() + 1;
+}

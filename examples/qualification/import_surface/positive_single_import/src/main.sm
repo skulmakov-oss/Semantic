@@ -1,0 +1,7 @@
+Import "math.sm" { add_one }
+
+fn main() {
+    let value: i32 = add_one(1);
+    assert(value == 2);
+    return;
+}
