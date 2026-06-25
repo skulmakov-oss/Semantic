@@ -1,0 +1,6 @@
+fn main() {
+    let add: Closure(f64 -> f64) = (x => x + 1.0);
+    let total: f64 = add(2.0);
+    assert(total == 3.0);
+    return;
+}
