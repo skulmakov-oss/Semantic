@@ -1350,7 +1350,7 @@ pub mod winit_placeholder {
 
             if let Some(config) = &self.backend.window_config {
                 let window_attributes = Window::default_attributes()
-                    .with_title(&config.title)
+                    .with_title(config.title.clone())
                     .with_inner_size(winit::dpi::LogicalSize::new(config.width, config.height));
 
                 if let Ok(window) = event_loop.create_window(window_attributes) {
@@ -1784,15 +1784,13 @@ impl UiBackendAdapter for NativeBackend {
 
                 match event.kind {
                     InputEventKind::CloseRequested => {
-                        {
-                            let mut f = prom_ui_runtime::DrawFrame::new();
-                            on_event(LoopControl::ExitRequested, &mut f);
-                        };
+                        let mut frame = prom_ui_runtime::DrawFrame::new();
+                        on_event(LoopControl::ExitRequested, &mut frame);
                         break;
                     }
                     _ => {
-                        let mut f = prom_ui_runtime::DrawFrame::new();
-                        on_event(LoopControl::Continue, &mut f);
+                        let mut frame = prom_ui_runtime::DrawFrame::new();
+                        on_event(LoopControl::Continue, &mut frame);
                     }
                 }
             }

@@ -35,12 +35,9 @@ fn main() {
             // Drain any pending events
             let events = buf.drain();
             for evt in &events {
-                match &evt.kind {
-                    InputEventKind::CloseRequested => {
-                        println!("  Event: CloseRequested -> Exiting loop");
-                        return LoopControl::ExitRequested;
-                    }
-                    _ => {}
+                if evt.kind == InputEventKind::CloseRequested {
+                    println!("  Event: CloseRequested -> Exiting loop");
+                    return LoopControl::ExitRequested;
                 }
             }
 
