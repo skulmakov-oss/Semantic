@@ -1,0 +1,4 @@
+fn main() {
+    let cmp: bool = 1.0 < 2.0fx;
+    return;
+}
