@@ -1,0 +1,5 @@
+fn main() {
+    let value: f64 = 2.0 |> (x => x + 1.0);
+    assert(value == 3.0);
+    return;
+}

@@ -1,0 +1,4 @@
+fn main() {
+    let value: f64 = (x, y => x + y)(1.0, 2.0);
+    return;
+}
