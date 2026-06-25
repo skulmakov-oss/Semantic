@@ -1,0 +1,5 @@
+fn main() {
+    let mut values: Sequence(i32) = [1, 2];
+    values = push(values, 3);
+    assert(len(values) == 3);
+}
