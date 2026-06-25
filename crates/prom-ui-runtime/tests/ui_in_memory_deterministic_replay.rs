@@ -72,7 +72,7 @@ fn run_replay(script: Vec<Vec<InputEvent>>) -> ReplayResult {
     let cfg = WindowConfig::new("Replay", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut app = ReplayApp::default();
     let mut controls = Vec::new();

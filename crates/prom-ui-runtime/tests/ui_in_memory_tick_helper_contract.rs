@@ -39,7 +39,7 @@ fn tick_in_memory_frame_delivers_queued_events_to_callback() {
     let cfg = WindowConfig::new("TickQueuedEvents", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     session.backend_mut().extend_events([
         InputEvent::new(InputEventKind::KeyDown { key_code: 11 }),
@@ -70,7 +70,7 @@ fn tick_in_memory_frame_captures_callback_draw_payload() {
     let cfg = WindowConfig::new("TickDrawPayload", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let control = session
         .tick_in_memory_frame(|_events, frame| {
@@ -107,7 +107,7 @@ fn tick_in_memory_frame_empty_queue_passes_empty_events() {
     let cfg = WindowConfig::new("TickEmptyQueue", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let control = session
         .tick_in_memory_frame(|events, frame| {
@@ -128,7 +128,7 @@ fn tick_in_memory_frame_after_close_preserves_queue() {
     let cfg = WindowConfig::new("TickAfterClose", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
     session.close().unwrap();
 
     session
@@ -162,7 +162,7 @@ fn multiple_in_memory_ticks_are_independent() {
     let cfg = WindowConfig::new("MultiTick", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     session
         .backend_mut()

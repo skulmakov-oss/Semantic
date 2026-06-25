@@ -49,7 +49,7 @@ fn in_memory_e2e_app_loop_updates_state_and_captures_frame() {
     let cfg = WindowConfig::new("E2E", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
     assert_eq!(session.state(), SessionState::Running);
 
     session
@@ -96,7 +96,7 @@ fn in_memory_e2e_app_loop_accumulates_state_across_ticks() {
     let cfg = WindowConfig::new("E2EMultiTick", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut app = CounterApp::default();
 
@@ -170,7 +170,7 @@ fn in_memory_e2e_close_event_returns_exit_requested_and_can_close_session() {
     let cfg = WindowConfig::new("E2EClose", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut app = CounterApp::default();
 
@@ -218,7 +218,7 @@ fn in_memory_e2e_tick_after_close_is_rejected_and_preserves_events() {
     let cfg = WindowConfig::new("E2EAfterClose", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
     session.close().unwrap();
 
     session

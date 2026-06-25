@@ -107,7 +107,7 @@ fn interaction_pipeline_tick_frame_smoke() {
     let layout = test_layout_geometry();
 
     // Start the session loop to transition to Running state
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     // Queue events in the backend to be polled by the frame tick
     session

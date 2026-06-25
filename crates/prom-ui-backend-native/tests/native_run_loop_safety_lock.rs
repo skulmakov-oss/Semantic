@@ -41,7 +41,7 @@ fn native_run_loop_safety_lock_contract() {
     // It has NO access to `InteractionPipeline`, NO capability authority,
     // and NO ability to dispatch `SemanticIntent`.
     backend
-        .run_event_loop(|control| {
+        .run_event_loop(|control, _frame| {
             loop_controls.push(control);
         })
         .expect("Deterministic run_event_loop should succeed");

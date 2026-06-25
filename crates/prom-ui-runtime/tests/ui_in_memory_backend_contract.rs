@@ -23,7 +23,7 @@ fn in_memory_backend_counts_run_event_loop_calls() {
     let cfg = WindowConfig::new("RunCounter", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     assert_eq!(session.backend().run_event_loop_calls(), 1);
     assert_eq!(session.state(), SessionState::Running);
@@ -35,7 +35,7 @@ fn in_memory_backend_captures_submitted_frame_payload() {
     let cfg = WindowConfig::new("FrameCapture", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut frame = DrawFrame::new();
     frame.clear(Color::BLACK);
@@ -73,7 +73,7 @@ fn in_memory_backend_captures_tick_frame_payload() {
     let cfg = WindowConfig::new("TickCapture", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut buffer = EventBuffer::new();
     buffer.push(InputEvent::new(InputEventKind::KeyDown { key_code: 65 }));

@@ -23,11 +23,14 @@ impl UiBackendAdapter for CapturingBackend {
 
     fn close_window(&mut self) {}
 
-    fn run_event_loop<F: FnMut(LoopControl)>(
+    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
         mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
-        on_event(LoopControl::ExitRequested);
+        {
+            let mut f = prom_ui_runtime::DrawFrame::new();
+            on_event(LoopControl::ExitRequested, &mut f);
+        };
         Ok(())
     }
 
@@ -47,7 +50,7 @@ fn submit_frame_preserves_draw_command_order_and_payload() {
     let cfg = WindowConfig::new("Payload", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut frame = DrawFrame::new();
     frame.clear(Color::rgba(1, 2, 3, 4));
@@ -87,7 +90,7 @@ fn tick_frame_preserves_callback_built_draw_payload() {
     let cfg = WindowConfig::new("TickPayload", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut buffer = prom_ui_runtime::EventBuffer::new();
 
@@ -133,7 +136,7 @@ fn empty_frame_payload_reaches_backend_as_empty_command_list() {
     let cfg = WindowConfig::new("EmptyFrame", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let frame = DrawFrame::new();
     session.submit_frame(&frame).unwrap();
@@ -151,7 +154,7 @@ fn multiple_frame_payloads_are_captured_independently() {
     let cfg = WindowConfig::new("MultiFrame", 640, 480);
     let mut session = DesktopSession::create(backend, cfg).unwrap();
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut frame_a = DrawFrame::new();
     frame_a.clear(Color::RED);
