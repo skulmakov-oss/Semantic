@@ -1,0 +1,37 @@
+fn choose_value(flag: bool) -> Option(i32) {
+    if flag {
+        return Option::Some(9);
+    }
+    return Option::None;
+}
+
+fn parse_flag(flag: bool) -> Result(i32, text) {
+    if flag {
+        return Result::Ok(11);
+    }
+    return Result::Err("disabled");
+}
+
+fn unwrap_option(opt: Option(i32)) -> i32 {
+    let value: i32 = match opt {
+        Option::Some(v) => { v }
+        Option::None => { 0 }
+    };
+    return value;
+}
+
+fn unwrap_result(res: Result(i32, text)) -> i32 {
+    let value: i32 = match res {
+        Result::Ok(v) => { v }
+        Result::Err(e) => { 0 }
+    };
+    return value;
+}
+
+fn main() {
+    assert(unwrap_option(choose_value(true)) == 9);
+    assert(unwrap_option(choose_value(false)) == 0);
+    assert(unwrap_result(parse_flag(true)) == 11);
+    assert(unwrap_result(parse_flag(false)) == 0);
+    return;
+}
