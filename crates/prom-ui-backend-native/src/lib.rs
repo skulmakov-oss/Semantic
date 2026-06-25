@@ -1779,10 +1779,10 @@ impl UiBackendAdapter for NativeBackend {
 
                 match event.kind {
                     InputEventKind::CloseRequested => {
-                        on_event(LoopControl::ExitRequested);
+                        { let mut f = prom_ui_runtime::DrawFrame::new(); on_event(LoopControl::ExitRequested, &mut f); };
                         break;
                     }
-                    _ => on_event(LoopControl::Continue),
+                    _ => { let mut f = prom_ui_runtime::DrawFrame::new(); on_event(LoopControl::Continue, &mut f); },
                 }
             }
         }

@@ -42,7 +42,7 @@ mod tests {
     use prom_ui::layout::sizing::build_layout_sizing;
     use prom_ui::layout::sizing_algorithm::build_layout_sizing_algorithm;
     use prom_ui::layout::solving::{build_layout_solving, build_layout_solving_result};
-    use prom_ui::layout::UiLayoutModel;
+    
 
     #[test]
     fn test_generate_draw_frame_from_placement() {
