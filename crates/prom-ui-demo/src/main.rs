@@ -1,3 +1,6 @@
+mod demo_interaction;
+
+use demo_interaction::{render_demo_frame, DemoInteraction};
 use prom_ui::layout::{
     constraint_solver::build_layout_constraint_solver,
     constraints::build_layout_constraints,
@@ -9,77 +12,16 @@ use prom_ui::layout::{
     sizing_algorithm::build_layout_sizing_algorithm,
     solving::{build_layout_solving, build_layout_solving_result},
 };
-use prom_ui_backend_native::draw_generation::generate_draw_frame;
-use prom_ui_backend_native::NativeBackend;
-use prom_ui_runtime::{
-    Color, DesktopSession, DrawFrame, EventBuffer, InputEventKind, LoopControl, Rect, SessionState,
-    WindowConfig,
+use prom_ui::model::UiIrNodeId;
+use prom_ui::projection::{
+    UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionArtifact,
+    UiProjectionArtifactId,
 };
-
-use prom_ui::action_binding::InteractionActionBindingId;
-use prom_ui::projection::UiProjectedNodeId;
-use prom_ui::SemanticIntent;
-use prom_ui_runtime::RuntimeIntentAdmission;
-use std::collections::HashMap;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DispatchFeedback {
-    None,
-    IntentBuilt,
-    Denied,
-}
-
-struct DemoActionBindings {
-    bindings:
-        HashMap<prom_ui::renderer::UiRenderNodeId, (UiProjectedNodeId, InteractionActionBindingId)>,
-}
-
-impl DemoActionBindings {
-    fn new() -> Self {
-        let mut bindings = HashMap::new();
-        // Root
-        bindings.insert(
-            prom_ui::renderer::UiRenderNodeId::new(10),
-            (UiProjectedNodeId::new(1), InteractionActionBindingId(100)),
-        );
-        // Element
-        bindings.insert(
-            prom_ui::renderer::UiRenderNodeId::new(20),
-            (UiProjectedNodeId::new(2), InteractionActionBindingId(200)),
-        );
-        Self { bindings }
-    }
-
-    fn build_intent(
-        &self,
-        render_node: prom_ui::renderer::UiRenderNodeId,
-    ) -> Option<SemanticIntent> {
-        self.bindings
-            .get(&render_node)
-            .map(|(proj_id, action_id)| SemanticIntent::new(*proj_id, *action_id))
-    }
-}
-
-struct DemoState {
-    pointer_x: i32,
-    pointer_y: i32,
-    is_pointer_down: bool,
-    key_press_count: u32,
-    last_key: Option<u32>,
-    hovered_node: Option<prom_ui::renderer::UiRenderNodeId>,
-    selected_node: Option<prom_ui::renderer::UiRenderNodeId>,
-    focused_node: Option<prom_ui::renderer::UiRenderNodeId>,
-    dispatch_feedback: DispatchFeedback,
-    denied_count: u32,
-}
+use prom_ui::render_projection_to_model;
+use prom_ui_backend_native::NativeBackend;
+use prom_ui_runtime::{DesktopSession, EventBuffer, LoopControl, SessionState, WindowConfig};
 
 fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
-    use prom_ui::model::UiIrNodeId;
-    use prom_ui::projection::{
-        UiProjectedNode, UiProjectedNodeId, UiProjectedNodeKind, UiProjectionArtifact,
-        UiProjectionArtifactId,
-    };
-
     let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(100));
     artifact.set_source_ir_root(UiIrNodeId::new(10));
     artifact.push_node(UiProjectedNode::with_source_ir_node(
@@ -92,7 +34,8 @@ fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
         UiProjectedNodeKind::Element,
         UiIrNodeId::new(12),
     ));
-    let render_model = prom_ui::render_projection_to_model(&artifact).unwrap();
+
+    let render_model = render_projection_to_model(&artifact).unwrap();
     let layout_model = prom_ui::layout::layout_render_model(&render_model);
 
     let _geometry = build_layout_geometry(&layout_model);
@@ -108,7 +51,7 @@ fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
 }
 
 fn main() {
-    println!("=== Semantic UI Application Boundary — Native Render Demo ===");
+    println!("=== Semantic UI Application Boundary - Native Render Demo ===");
 
     let config = WindowConfig::new("Semantic UI Demo - WGPU Native", 800, 600);
     let backend = NativeBackend::new();
@@ -120,7 +63,6 @@ fn main() {
 
     let placement = build_static_placement();
 
-    // Print physical placement to console initially
     for entry in placement.entries() {
         println!(
             "Placed {:?}: x={}, y={}, w={}, h={}",
@@ -132,259 +74,21 @@ fn main() {
         );
     }
 
-    let mut demo_state = DemoState {
-        pointer_x: 0,
-        pointer_y: 0,
-        is_pointer_down: false,
-        key_press_count: 0,
-        last_key: None,
-        hovered_node: None,
-        selected_node: None,
-        focused_node: None,
-        dispatch_feedback: DispatchFeedback::None,
-        denied_count: 0,
-    };
-
-    let bindings = DemoActionBindings::new();
-    let admission_gate = RuntimeIntentAdmission::new();
+    let mut interaction = DemoInteraction::new();
 
     session
-        .run(move |buf: &mut EventBuffer, out_frame: &mut DrawFrame| {
-            // Drain any pending events
+        .run(move |buf: &mut EventBuffer, out_frame| {
             let events = buf.drain();
-            for evt in &events {
-                match evt.kind {
-                    InputEventKind::CloseRequested => {
-                        println!("  Event: CloseRequested -> Exiting loop");
-                        return LoopControl::ExitRequested;
-                    }
-                    InputEventKind::PointerMoved { x, y } => {
-                        demo_state.pointer_x = x as i32;
-                        demo_state.pointer_y = y as i32;
-                        demo_state.hovered_node =
-                            prom_ui::layout::physical_placement::hit_test_placement(
-                                x, y, &placement,
-                            );
-                    }
-                    InputEventKind::PointerDown { .. } => {
-                        demo_state.is_pointer_down = true;
-                        demo_state.selected_node = demo_state.hovered_node;
-                        demo_state.focused_node = demo_state.hovered_node;
-
-                        // Trigger intent if selected
-                        if let Some(selected) = demo_state.selected_node {
-                            if let Some(intent) = bindings.build_intent(selected) {
-                                demo_state.dispatch_feedback = DispatchFeedback::IntentBuilt;
-                                match admission_gate.admit_intent(intent) {
-                                    Ok(_) => {} // Normally dispatched, but we expect Denial
-                                    Err(_) => {
-                                        demo_state.dispatch_feedback = DispatchFeedback::Denied;
-                                        demo_state.denied_count += 1;
-                                    }
-                                }
-                            } else {
-                                demo_state.dispatch_feedback = DispatchFeedback::None;
-                            }
-                        }
-                    }
-                    InputEventKind::PointerUp { .. } => {
-                        demo_state.is_pointer_down = false;
-                    }
-                    InputEventKind::KeyDown { key_code } => {
-                        demo_state.key_press_count += 1;
-                        demo_state.last_key = Some(key_code);
-
-                        // Enter(13) / Space(32) on focused node
-                        if key_code == 13 || key_code == 32 {
-                            if let Some(focused) = demo_state.focused_node {
-                                if let Some(intent) = bindings.build_intent(focused) {
-                                    demo_state.dispatch_feedback = DispatchFeedback::IntentBuilt;
-                                    match admission_gate.admit_intent(intent) {
-                                        Ok(_) => {}
-                                        Err(_) => {
-                                            demo_state.dispatch_feedback = DispatchFeedback::Denied;
-                                            demo_state.denied_count += 1;
-                                        }
-                                    }
-                                } else {
-                                    demo_state.dispatch_feedback = DispatchFeedback::None;
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+            let control = interaction.apply_events(&events, &placement);
+            if control == LoopControl::ExitRequested {
+                return control;
             }
 
-            // Generate frame commands from the static placement
-            *out_frame = generate_draw_frame(&placement);
-
-            // Add input feedback overlays
-            let pointer_color = if demo_state.is_pointer_down {
-                Color::RED
-            } else {
-                Color::GREEN
-            };
-
-            // Draw highlights for nodes
-            for entry in placement.entries() {
-                let node_id = entry.source_render_node();
-                let rect = entry.final_rect();
-
-                let is_selected = Some(node_id) == demo_state.selected_node;
-                let is_hovered = Some(node_id) == demo_state.hovered_node;
-                let is_focused = Some(node_id) == demo_state.focused_node;
-
-                if is_selected || is_hovered {
-                    let color = if is_selected {
-                        Color::rgb(255, 255, 0) // yellow for selected
-                    } else {
-                        Color::WHITE // white for hovered
-                    };
-
-                    let x = rect.x();
-                    let y = rect.y();
-                    let w = rect.width();
-                    let h = rect.height();
-                    let thickness = 2;
-
-                    out_frame.fill_rect(Rect::new(x, y, w, thickness), color);
-                    out_frame.fill_rect(
-                        Rect::new(x, y + (h as i32) - (thickness as i32), w, thickness),
-                        color,
-                    );
-                    out_frame.fill_rect(Rect::new(x, y, thickness, h), color);
-                    out_frame.fill_rect(
-                        Rect::new(x + (w as i32) - (thickness as i32), y, thickness, h),
-                        color,
-                    );
-
-                    // If it's selected, draw the dispatch feedback marker
-                    if is_selected {
-                        let feedback_color = match demo_state.dispatch_feedback {
-                            DispatchFeedback::IntentBuilt => Color::BLUE,
-                            DispatchFeedback::Denied => Color::RED,
-                            DispatchFeedback::None => Color::rgb(128, 128, 128), // Gray
-                        };
-
-                        // Draw a short thick bar at the top-left of the selected node
-                        out_frame.fill_rect(Rect::new(x + 5, y - 10, 20, 8), feedback_color);
-                    }
-                }
-
-                // Draw focus ring (slightly outside)
-                if is_focused {
-                    let x = rect.x() - 4;
-                    let y = rect.y() - 4;
-                    let w = rect.width() + 8;
-                    let h = rect.height() + 8;
-                    let thickness = 2;
-                    let color = Color::WHITE;
-
-                    out_frame.fill_rect(Rect::new(x, y, w, thickness), color);
-                    out_frame.fill_rect(
-                        Rect::new(x, y + (h as i32) - (thickness as i32), w, thickness),
-                        color,
-                    );
-                    out_frame.fill_rect(Rect::new(x, y, thickness, h), color);
-                    out_frame.fill_rect(
-                        Rect::new(x + (w as i32) - (thickness as i32), y, thickness, h),
-                        color,
-                    );
-                }
-            }
-
-            // Also draw some general text for denied counts
-            out_frame.draw_text(
-                format!(
-                    "Pointer: ({}, {}), Keys: {}, Denied: {}",
-                    demo_state.pointer_x,
-                    demo_state.pointer_y,
-                    demo_state.key_press_count,
-                    demo_state.denied_count
-                ),
-                10,
-                30,
-                pointer_color,
-            );
-
-            // Draw global pointer if it doesn't hit any node
-            if demo_state.hovered_node.is_none() {
-                out_frame.fill_rect(
-                    Rect::new(demo_state.pointer_x - 5, demo_state.pointer_y - 5, 10, 10),
-                    pointer_color,
-                );
-            }
-
-            let key_feedback_text = match demo_state.last_key {
-                Some(k) => format!("Keys pressed: {} (Last: {})", demo_state.key_press_count, k),
-                None => format!("Keys pressed: {}", demo_state.key_press_count),
-            };
-
-            let key_width = 20 + (demo_state.key_press_count.min(20) * 8);
-
-            out_frame.fill_rect(Rect::new(10, 100, key_width, 12), Color::BLUE);
-
-            out_frame.draw_text(key_feedback_text, 10, 100, Color::WHITE);
-
-            LoopControl::Continue
+            *out_frame = render_demo_frame(&placement, &interaction);
+            control
         })
         .expect("event loop must succeed");
 
     let _ = session.close();
     println!("Session state after close: {:?}", session.state());
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_deterministic_scene_frame_generation_with_feedback() {
-        let placement = build_static_placement();
-
-        let demo_state = DemoState {
-            pointer_x: 50,
-            pointer_y: 50,
-            is_pointer_down: true,
-            key_press_count: 5,
-            last_key: Some(65),
-            hovered_node: None,
-            selected_node: None,
-            focused_node: None,
-            dispatch_feedback: DispatchFeedback::None,
-            denied_count: 0,
-        };
-
-        let mut out_frame = generate_draw_frame(&placement);
-
-        let pointer_color = if demo_state.is_pointer_down {
-            Color::RED
-        } else {
-            Color::GREEN
-        };
-
-        out_frame.fill_rect(
-            Rect::new(demo_state.pointer_x - 5, demo_state.pointer_y - 5, 10, 10),
-            pointer_color,
-        );
-
-        // Verify the original placement was drawn
-        // Typically it has a background rect and then the items
-        assert!(!out_frame.is_empty());
-
-        use prom_ui_runtime::DrawCommand;
-        // Verify that the feedback rectangle is exactly what we pushed
-        let commands = out_frame.commands();
-        let last_cmd = commands.last().unwrap();
-        if let DrawCommand::FillRect { rect, color } = last_cmd {
-            assert_eq!(rect.x, 45);
-            assert_eq!(rect.y, 45);
-            assert_eq!(rect.width, 10);
-            assert_eq!(rect.height, 10);
-            assert_eq!(*color, Color::RED);
-        } else {
-            panic!("Expected FillRect at the end for pointer feedback");
-        }
-    }
 }
