@@ -1,0 +1,4 @@
+fn main() {
+    let value: f64 = sqrt(x = 4.0);
+    return;
+}
