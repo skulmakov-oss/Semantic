@@ -1,0 +1,16 @@
+enum Direction {
+    Up,
+    Right,
+    Down,
+    Left,
+}
+
+fn main() {
+    let out: text = match Direction::Up {
+        Direction::Up => { "up" }
+        Direction::Right => { true }
+        Direction::Down => { "down" }
+        Direction::Left => { "left" }
+    };
+    return;
+}

@@ -1,0 +1,19 @@
+enum Direction {
+    Up,
+    Right,
+    Down,
+    Left,
+}
+
+fn label(dir: Direction) -> text {
+    let out: text = match dir {
+        Direction::Up => { "Up" }
+        Direction::Right => { "Right" }
+        Direction::Down => { "Down" }
+    };
+    return out;
+}
+
+fn main() {
+    return;
+}
