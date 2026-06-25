@@ -68,6 +68,7 @@ struct DemoState {
     last_key: Option<u32>,
     hovered_node: Option<prom_ui::renderer::UiRenderNodeId>,
     selected_node: Option<prom_ui::renderer::UiRenderNodeId>,
+    focused_node: Option<prom_ui::renderer::UiRenderNodeId>,
     dispatch_feedback: DispatchFeedback,
     denied_count: u32,
 }
@@ -139,6 +140,7 @@ fn main() {
         last_key: None,
         hovered_node: None,
         selected_node: None,
+        focused_node: None,
         dispatch_feedback: DispatchFeedback::None,
         denied_count: 0,
     };
@@ -167,6 +169,7 @@ fn main() {
                     InputEventKind::PointerDown { .. } => {
                         demo_state.is_pointer_down = true;
                         demo_state.selected_node = demo_state.hovered_node;
+                        demo_state.focused_node = demo_state.hovered_node;
 
                         // Trigger intent if selected
                         if let Some(selected) = demo_state.selected_node {
@@ -191,19 +194,21 @@ fn main() {
                         demo_state.key_press_count += 1;
                         demo_state.last_key = Some(key_code);
 
-                        // Enter/Space on selected node
-                        if let Some(selected) = demo_state.selected_node {
-                            if let Some(intent) = bindings.build_intent(selected) {
-                                demo_state.dispatch_feedback = DispatchFeedback::IntentBuilt;
-                                match admission_gate.admit_intent(intent) {
-                                    Ok(_) => {}
-                                    Err(_) => {
-                                        demo_state.dispatch_feedback = DispatchFeedback::Denied;
-                                        demo_state.denied_count += 1;
+                        // Enter(13) / Space(32) on focused node
+                        if key_code == 13 || key_code == 32 {
+                            if let Some(focused) = demo_state.focused_node {
+                                if let Some(intent) = bindings.build_intent(focused) {
+                                    demo_state.dispatch_feedback = DispatchFeedback::IntentBuilt;
+                                    match admission_gate.admit_intent(intent) {
+                                        Ok(_) => {}
+                                        Err(_) => {
+                                            demo_state.dispatch_feedback = DispatchFeedback::Denied;
+                                            demo_state.denied_count += 1;
+                                        }
                                     }
+                                } else {
+                                    demo_state.dispatch_feedback = DispatchFeedback::None;
                                 }
-                            } else {
-                                demo_state.dispatch_feedback = DispatchFeedback::None;
                             }
                         }
                     }
@@ -228,6 +233,7 @@ fn main() {
 
                 let is_selected = Some(node_id) == demo_state.selected_node;
                 let is_hovered = Some(node_id) == demo_state.hovered_node;
+                let is_focused = Some(node_id) == demo_state.focused_node;
 
                 if is_selected || is_hovered {
                     let color = if is_selected {
@@ -264,6 +270,27 @@ fn main() {
                         // Draw a short thick bar at the top-left of the selected node
                         out_frame.fill_rect(Rect::new(x + 5, y - 10, 20, 8), feedback_color);
                     }
+                }
+
+                // Draw focus ring (slightly outside)
+                if is_focused {
+                    let x = rect.x() - 4;
+                    let y = rect.y() - 4;
+                    let w = rect.width() + 8;
+                    let h = rect.height() + 8;
+                    let thickness = 2;
+                    let color = Color::WHITE;
+
+                    out_frame.fill_rect(Rect::new(x, y, w, thickness), color);
+                    out_frame.fill_rect(
+                        Rect::new(x, y + (h as i32) - (thickness as i32), w, thickness),
+                        color,
+                    );
+                    out_frame.fill_rect(Rect::new(x, y, thickness, h), color);
+                    out_frame.fill_rect(
+                        Rect::new(x + (w as i32) - (thickness as i32), y, thickness, h),
+                        color,
+                    );
                 }
             }
 
@@ -324,6 +351,7 @@ mod tests {
             last_key: Some(65),
             hovered_node: None,
             selected_node: None,
+            focused_node: None,
             dispatch_feedback: DispatchFeedback::None,
             denied_count: 0,
         };
