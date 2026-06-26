@@ -1,0 +1,5 @@
+fn main() {
+    let value: i32 = 1;
+    let patched = value with { left: 2 };
+    return;
+}

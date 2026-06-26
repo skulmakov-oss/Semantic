@@ -1,0 +1,10 @@
+record Pair {
+    left: i32,
+    right: i32,
+}
+
+fn main() {
+    let base: Pair = Pair { left: 1, right: 2 };
+    let patched = base with { middle: 3 };
+    return;
+}
