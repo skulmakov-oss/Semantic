@@ -1,0 +1,18 @@
+record Pair {
+    left: i32,
+    right: i32,
+    tag: i32,
+}
+
+fn main() {
+    let base: Pair = Pair {
+        left: 1,
+        right: 2,
+        tag: 3,
+    };
+    let next: Pair = base with { left: 4, right: 5 };
+    assert(next.left == 4);
+    assert(next.right == 5);
+    assert(next.tag == 3);
+    return;
+}

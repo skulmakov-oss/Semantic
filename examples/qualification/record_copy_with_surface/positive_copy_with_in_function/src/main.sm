@@ -1,0 +1,19 @@
+record DecisionContext {
+    camera: quad,
+    quality: f64,
+}
+
+fn retune(ctx: DecisionContext) -> DecisionContext {
+    return ctx with { quality: 0.25 };
+}
+
+fn main() {
+    let ctx: DecisionContext = DecisionContext {
+        camera: T,
+        quality: 0.75,
+    };
+    let patched: DecisionContext = retune(ctx);
+    assert(patched.camera == T);
+    assert(patched.quality == 0.25);
+    return;
+}
