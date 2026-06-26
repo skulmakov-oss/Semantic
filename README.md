@@ -71,6 +71,30 @@ The repository `main` may contain work that is newer than the currently publishe
 
 The public contract is centered in `docs/spec/*`. Historical roadmap notes and legacy compatibility shims remain in the repository, but they are not the primary source of truth for the current toolchain surface.
 
+## Semantic Language canonical samples
+
+Semantic is the programming language in this repository. In the public surface:
+
+- `.sm` is Semantic source;
+- `.smc` is the compiled SemCode artifact;
+- `smc` is the command-line toolchain owner.
+
+These samples are intended as the stable public sample surface for Semantic Language. They are backed by [`tests/canonical_examples.rs`](tests/canonical_examples.rs) and kept distinct from qualification fixtures, benchmark programs, readiness drafts, and internal or experimental examples.
+
+| Sample | Path | Demonstrates | Toolchain depth |
+|---|---|---|---|
+| Rule State Decision | [`examples/canonical/rule_state_decision/src/main.sm`](examples/canonical/rule_state_decision/src/main.sm) | quad-state branching and deterministic rule-like decisions | check / run / compile / verify |
+| Data Audit Record Iterable | [`examples/canonical/data_audit_record_iterable/src/main.sm`](examples/canonical/data_audit_record_iterable/src/main.sm) | records, traits, iteration, and copy-with over an admitted summary flow | check / run / compile / verify |
+| CLI Batch Core | [`examples/canonical/cli_batch_core/src/main.sm`](examples/canonical/cli_batch_core/src/main.sm) | control-flow over sequences, assertions, and CLI-like batch classification | check / run / compile / verify |
+| Positive Selected Import | [`examples/canonical/positive_selected_import/src/main.sm`](examples/canonical/positive_selected_import/src/main.sm) | selected local import and helper-call composition | check / run / compile / verify |
+| Wave2 Local Helper Import | [`examples/canonical/wave2_local_helper_import/src/main.sm`](examples/canonical/wave2_local_helper_import/src/main.sm) | bare local helper import and direct callable surface | check / run / compile / verify |
+
+For contract details, see:
+
+- [`docs/spec/index.md`](docs/spec/index.md)
+- [`docs/spec/syntax.md`](docs/spec/syntax.md)
+- [`docs/spec/cli.md`](docs/spec/cli.md)
+
 ## Design Invariants
 
 Semantic is governed by invariants that are stronger than individual features. A feature can be experimental, limited, or out of scope; these rules define the shape of the platform.
