@@ -1,0 +1,5 @@
+format 1
+package project_manifest_surface_duplicate
+package other
+manifest_dir .
+module_root src

@@ -1,0 +1,5 @@
+[package]
+name = "project_manifest_surface_entry_missing"
+
+[project]
+entry = "src/missing.sm"
