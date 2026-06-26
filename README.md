@@ -79,7 +79,7 @@ Semantic is the programming language in this repository. In the public surface:
 - `.smc` is the compiled SemCode artifact;
 - `smc` is the command-line toolchain owner.
 
-These samples are intended as the stable public sample surface for Semantic Language. They are backed by [`tests/canonical_examples.rs`](tests/canonical_examples.rs) and kept distinct from qualification fixtures, benchmark programs, readiness drafts, and internal or experimental examples.
+These samples are intended as the canonical public sample surface for Semantic Language. They are backed by [`tests/canonical_examples.rs`](tests/canonical_examples.rs) and kept distinct from qualification fixtures, benchmark programs, readiness drafts, and internal or experimental examples.
 
 | Sample | Path | Demonstrates | Toolchain depth |
 |---|---|---|---|
