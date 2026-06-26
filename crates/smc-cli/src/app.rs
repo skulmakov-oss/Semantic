@@ -65,6 +65,14 @@ fn cli_profile() -> ParserProfile {
     ParserProfile::foundation_default()
 }
 
+fn reject_leading_unknown_flag(input: &str) -> Result<(), String> {
+    if input.starts_with('-') {
+        Err(format!("unknown flag '{}'", input))
+    } else {
+        Ok(())
+    }
+}
+
 pub fn main_entry() -> ExitCode {
     match run(env::args().skip(1).collect()) {
         Ok(()) => ExitCode::SUCCESS,
@@ -105,13 +113,20 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
 }
 
 fn cmd_compile(args: &[String]) -> Result<(), String> {
-    if args.len() < 3 {
+    if args.is_empty() {
         return Err(
             "usage: smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]"
                 .to_string(),
         );
     }
     let input = args[0].as_str();
+    reject_leading_unknown_flag(input)?;
+    if args.len() < 3 {
+        return Err(
+            "usage: smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]"
+                .to_string(),
+        );
+    }
     let mut out: Option<&str> = None;
     let mut metrics = false;
     let mut profile = CompileProfile::Auto;
@@ -273,6 +288,7 @@ fn cmd_check(args: &[String]) -> Result<(), String> {
         );
     }
     let input = args[0].as_str();
+    reject_leading_unknown_flag(input)?;
     let input_path = Path::new(input);
     let root = if input_path.is_dir() {
         resolve_project_root_check_entry(input_path)?
@@ -2422,6 +2438,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         return Err("usage: smc run <input.sm|project-root>".to_string());
     }
     let input = args[0].as_str();
+    reject_leading_unknown_flag(input)?;
     let input_path = Path::new(input);
     let root = if input_path.is_dir() {
         resolve_project_root_check_entry(input_path)?
@@ -2442,6 +2459,7 @@ fn cmd_verify(args: &[String]) -> Result<(), String> {
         return Err("usage: smc verify <input.smc>".to_string());
     }
     let input = args[0].as_str();
+    reject_leading_unknown_flag(input)?;
     let bytes = std::fs::read(input).map_err(|e| format!("failed to read '{}': {}", input, e))?;
     let verified = verify_semcode(&bytes).map_err(|report| report.to_string())?;
     println!(
@@ -2460,6 +2478,7 @@ fn cmd_run_smc(args: &[String]) -> Result<(), String> {
         return Err("usage: smc run-smc <input.smc>".to_string());
     }
     let input = args[0].as_str();
+    reject_leading_unknown_flag(input)?;
     let bytes = std::fs::read(input).map_err(|e| format!("failed to read '{}': {}", input, e))?;
     let envelope = render_controlled_observation_envelope(&bytes)?;
     for line in envelope.rendered_lines {
