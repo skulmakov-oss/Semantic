@@ -1,3 +1,4 @@
+use crate::calculator_shell::CalculatorShell;
 use prom_ui::action_binding::InteractionActionBindingId;
 use prom_ui::layout::physical_placement::{hit_test_placement, UiLayoutPhysicalPlacementModel};
 use prom_ui::projection::UiProjectedNodeId;
@@ -61,6 +62,7 @@ pub struct DemoInteraction {
     state: DemoState,
     bindings: DemoActionBindings,
     admission_gate: RuntimeIntentAdmission,
+    calculator: CalculatorShell,
 }
 
 impl DemoInteraction {
@@ -69,11 +71,16 @@ impl DemoInteraction {
             state: DemoState::default(),
             bindings: DemoActionBindings::new(),
             admission_gate: RuntimeIntentAdmission::new(),
+            calculator: CalculatorShell::new(),
         }
     }
 
     pub fn state(&self) -> &DemoState {
         &self.state
+    }
+
+    pub fn calculator(&self) -> &CalculatorShell {
+        &self.calculator
     }
 
     pub fn apply_events(
@@ -104,10 +111,18 @@ impl DemoInteraction {
             }
             InputEventKind::PointerDown { .. } => {
                 self.handle_pointer_down();
+                if let Some(bounds) = placement_bounds(placement) {
+                    self.calculator.handle_pointer_down(
+                        self.state.pointer_x as f64,
+                        self.state.pointer_y as f64,
+                        bounds,
+                    );
+                }
                 LoopControl::Continue
             }
             InputEventKind::PointerUp { .. } => {
                 self.handle_pointer_up();
+                self.calculator.handle_pointer_up();
                 LoopControl::Continue
             }
             InputEventKind::KeyDown { key_code } => {
@@ -122,6 +137,9 @@ impl DemoInteraction {
         self.state.pointer_x = x as i32;
         self.state.pointer_y = y as i32;
         self.state.hovered_node = hit_test_placement(x, y, placement);
+        if let Some(bounds) = placement_bounds(placement) {
+            self.calculator.handle_pointer_moved(x, y, bounds);
+        }
     }
 
     fn handle_pointer_down(&mut self) {
@@ -176,7 +194,12 @@ pub fn render_demo_frame(
     interaction: &DemoInteraction,
 ) -> DrawFrame {
     let mut out_frame = generate_draw_frame(placement);
-    render_feedback_overlays(&mut out_frame, placement, interaction.state());
+    render_feedback_overlays(
+        &mut out_frame,
+        placement,
+        interaction.state(),
+        interaction.calculator(),
+    );
     out_frame
 }
 
@@ -184,12 +207,14 @@ fn render_feedback_overlays(
     out_frame: &mut DrawFrame,
     placement: &UiLayoutPhysicalPlacementModel,
     state: &DemoState,
+    calculator: &CalculatorShell,
 ) {
     if let Some(bounds) = placement_bounds(placement) {
         draw_scene_backdrop(out_frame, bounds);
         draw_scene_header(out_frame, bounds);
         draw_scene_cards(out_frame, placement, state);
         draw_status_area(out_frame, bounds, state);
+        calculator.render(out_frame, bounds);
     }
 
     draw_pointer_marker(out_frame, state);
@@ -718,6 +743,16 @@ mod tests {
             cmd,
             prom_ui_runtime::DrawCommand::DrawText { text, .. }
                 if text.contains("Demo status")
+        )));
+        assert!(commands.iter().any(|cmd| matches!(
+            cmd,
+            prom_ui_runtime::DrawCommand::DrawText { text, .. }
+                if text.contains("Calculator")
+        )));
+        assert!(commands.iter().any(|cmd| matches!(
+            cmd,
+            prom_ui_runtime::DrawCommand::DrawText { text, .. }
+                if text.contains("Semantic bridge: not connected")
         )));
         assert!(commands.iter().any(|cmd| matches!(
             cmd,
