@@ -42,6 +42,14 @@ fn temp_missing_parent_output_path() -> PathBuf {
     root.join("missing").join("out.smc")
 }
 
+fn artifact_bytes(path: &std::path::Path) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_else(|err| panic!("read artifact {}: {err}", path.display()))
+}
+
+fn write_malformed_artifact(path: &std::path::Path) {
+    std::fs::write(path, b"not a semcode artifact").expect("write malformed artifact");
+}
+
 #[test]
 fn smc_compile_creates_and_verifies_explicit_output_artifact() {
     let source = source_fixture(
@@ -171,5 +179,119 @@ fn smc_compile_rejects_missing_output_parent_path() {
             .parent()
             .and_then(|p| p.parent())
             .expect("cleanup root"),
+    );
+}
+
+#[test]
+fn smc_verify_leaves_valid_artifact_bytes_unchanged() {
+    let source = source_fixture(
+        "examples/qualification/practical_surface/positive_comments_and_blocks/src/main.sm",
+    );
+    let artifact = temp_semcode_artifact("cli-artifact-lifecycle", "verify-unchanged.smc");
+
+    compile_source_to_artifact(
+        &source.cli_arg(),
+        artifact.path(),
+        "smc compile verify non-mutation fixture",
+    );
+    let before = artifact_bytes(artifact.path());
+    verify_artifact(&artifact);
+    let after = artifact_bytes(artifact.path());
+
+    assert_eq!(
+        before, after,
+        "smc verify must not mutate valid artifact bytes"
+    );
+}
+
+#[test]
+fn smc_run_smc_leaves_valid_artifact_bytes_unchanged() {
+    let source = source_fixture(
+        "examples/qualification/practical_surface/positive_comments_and_blocks/src/main.sm",
+    );
+    let artifact = temp_semcode_artifact("cli-artifact-lifecycle", "run-smc-unchanged.smc");
+
+    compile_source_to_artifact(
+        &source.cli_arg(),
+        artifact.path(),
+        "smc compile run-smc non-mutation fixture",
+    );
+    let before = artifact_bytes(artifact.path());
+    cli_ok(
+        vec!["run-smc".to_string(), artifact.cli_arg()],
+        "smc run-smc valid artifact",
+    );
+    let after = artifact_bytes(artifact.path());
+
+    assert_eq!(
+        before, after,
+        "smc run-smc must not mutate valid artifact bytes"
+    );
+}
+
+#[test]
+fn smc_verify_leaves_malformed_artifact_bytes_unchanged_on_failure() {
+    let artifact = temp_semcode_artifact("cli-artifact-lifecycle", "verify-malformed.smc");
+    write_malformed_artifact(artifact.path());
+    let before = artifact_bytes(artifact.path());
+
+    let first_err = cli_err(
+        vec!["verify".to_string(), artifact.cli_arg()],
+        "smc verify malformed artifact",
+    );
+    let after_first = artifact_bytes(artifact.path());
+    let second_err = cli_err(
+        vec!["verify".to_string(), artifact.cli_arg()],
+        "smc verify malformed artifact second run",
+    );
+    let after_second = artifact_bytes(artifact.path());
+
+    assert_eq!(before, after_first, "smc verify mutated malformed artifact");
+    assert_eq!(
+        after_first, after_second,
+        "smc verify mutated malformed artifact on repeated failure"
+    );
+    assert_eq!(
+        first_err, second_err,
+        "smc verify failure should be deterministic for malformed artifact"
+    );
+    assert!(
+        !first_err.is_empty(),
+        "smc verify malformed artifact should emit a deterministic error"
+    );
+}
+
+#[test]
+fn smc_run_smc_leaves_malformed_artifact_bytes_unchanged_on_failure() {
+    let artifact = temp_semcode_artifact("cli-artifact-lifecycle", "run-smc-malformed.smc");
+    write_malformed_artifact(artifact.path());
+    let before = artifact_bytes(artifact.path());
+
+    let first_err = cli_err(
+        vec!["run-smc".to_string(), artifact.cli_arg()],
+        "smc run-smc malformed artifact",
+    );
+    let after_first = artifact_bytes(artifact.path());
+    let second_err = cli_err(
+        vec!["run-smc".to_string(), artifact.cli_arg()],
+        "smc run-smc malformed artifact second run",
+    );
+    let after_second = artifact_bytes(artifact.path());
+
+    assert_eq!(
+        before, after_first,
+        "smc run-smc mutated malformed artifact"
+    );
+    assert_eq!(
+        after_first, after_second,
+        "smc run-smc mutated malformed artifact on repeated failure"
+    );
+    assert_eq!(
+        first_err, second_err,
+        "smc run-smc failure should be deterministic for malformed artifact"
+    );
+    assert!(
+        !first_err.is_empty(),
+        "smc run-smc malformed artifact should emit a deterministic error"
     );
 }
