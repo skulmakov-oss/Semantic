@@ -47,6 +47,37 @@ fn smc_explain_known_code_returns_help() {
 }
 
 #[test]
+fn smc_explain_known_catalog_entries_return_help() {
+    let cases = [
+        ("E0101", "Bad indentation level (INDENT/DEDENT mismatch)."),
+        ("E0238", "Cyclic import detected."),
+        ("E0239", "Import resolution/read/parse failure."),
+        (
+            "W0240",
+            "Dead law branch detected: When condition is always false.",
+        ),
+    ];
+
+    for (code, fragment) in cases {
+        let output = smc_output(&["explain", code]);
+        let text = output_text(&output);
+
+        assert!(
+            output.status.success(),
+            "smc explain {code} failed:\n{text}"
+        );
+        assert!(
+            text.contains(&format!("{code}:")),
+            "expected code prefix in explain output for {code}, got:\n{text}"
+        );
+        assert!(
+            text.contains(fragment),
+            "expected stable help fragment '{fragment}' in explain output for {code}, got:\n{text}"
+        );
+    }
+}
+
+#[test]
 fn smc_explain_unknown_code_is_deterministic() {
     let first = smc_output(&["explain", "E9999"]);
     let second = smc_output(&["explain", "E9999"]);
