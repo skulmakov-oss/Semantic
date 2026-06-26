@@ -1,3 +1,4 @@
+mod calculator_shell;
 mod demo_interaction;
 
 use demo_interaction::{render_demo_frame, DemoInteraction};
