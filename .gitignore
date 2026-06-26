@@ -12,3 +12,4 @@ Cargo.lock
 /.claude/
 /scratch/
 /patch.txt
+/examples/baseline/
