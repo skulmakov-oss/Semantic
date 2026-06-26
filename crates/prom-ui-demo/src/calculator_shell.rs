@@ -77,10 +77,6 @@ impl CalculatorShell {
         }
     }
 
-    pub fn state(&self) -> &CalculatorShellState {
-        &self.state
-    }
-
     pub fn handle_pointer_moved(&mut self, x: f64, y: f64, scene_bounds: UiLayoutGeometryRect) {
         self.state.hovered_button = hit_test_button(scene_bounds, x, y);
     }
@@ -305,22 +301,16 @@ mod tests {
         let scene_bounds = UiLayoutGeometryRect::new(0, 0, 760, 420);
 
         shell.handle_pointer_moved(40.0, 490.0, scene_bounds);
-        assert_eq!(
-            shell.state().hovered_button,
-            Some(CalculatorButton::Digit(7))
-        );
+        assert_eq!(shell.state.hovered_button, Some(CalculatorButton::Digit(7)));
 
         shell.handle_pointer_down(40.0, 490.0, scene_bounds);
         assert_eq!(
-            shell.state().selected_button,
+            shell.state.selected_button,
             Some(CalculatorButton::Digit(7))
         );
-        assert_eq!(
-            shell.state().focused_button,
-            Some(CalculatorButton::Digit(7))
-        );
-        assert_eq!(shell.state().last_button, Some(CalculatorButton::Digit(7)));
-        assert_eq!(shell.state().press_count, 1);
+        assert_eq!(shell.state.focused_button, Some(CalculatorButton::Digit(7)));
+        assert_eq!(shell.state.last_button, Some(CalculatorButton::Digit(7)));
+        assert_eq!(shell.state.press_count, 1);
     }
 
     #[test]
