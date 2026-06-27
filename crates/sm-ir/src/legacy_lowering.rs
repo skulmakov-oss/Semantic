@@ -11323,6 +11323,89 @@ mod opt_tests {
     }
 
     #[test]
+    fn lower_record_borrow_capture_records_distinct_field_paths() {
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let DecisionContext { camera: ref seen_camera, quality: ref seen_quality } = ctx;
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let camera_field = program.records[0].fields[0].name;
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*ctx_name).field(camera_field),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*ctx_name).field(quality_field),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_record_copy_with_emits_distinct_field_write_events() {
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let patched: DecisionContext = ctx with { quality: 1.0, camera: T };
+                assert(patched.camera == T);
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let camera_field = program.records[0].fields[0].name;
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Write,
+                    path: AccessPath::new(*ctx_name).field(quality_field),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Write,
+                    path: AccessPath::new(*ctx_name).field(camera_field),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn lower_record_let_else_to_record_get_and_early_return_ir() {
         let src = r#"
             record DecisionContext {
