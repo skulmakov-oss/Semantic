@@ -3,8 +3,8 @@ use crate::semcode_format::{
     write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC10,
     MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6,
     MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG,
+    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
 use sm_front::types::{
     AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
@@ -364,6 +364,15 @@ impl AccessPath {
         }
     }
 
+    pub fn sequence_index_static(&self, index: u32) -> Self {
+        let mut components = self.components.clone();
+        components.push(PathComponent::SequenceIndexStatic(index));
+        Self {
+            root: self.root,
+            components,
+        }
+    }
+
     pub fn field(&self, name: SymbolId) -> Self {
         let mut components = self.components.clone();
         components.push(PathComponent::Field(name));
@@ -386,6 +395,7 @@ impl AccessPath {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathComponent {
     TupleIndex(u16),
+    SequenceIndexStatic(u32),
     Field(SymbolId),
     AdtPayload { variant: SymbolId, index: u16 },
 }
@@ -1927,6 +1937,10 @@ fn emit_ownership_events(
                 PathComponent::TupleIndex(index) => {
                     out.push(OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX);
                     write_u16_le(out, *index);
+                }
+                PathComponent::SequenceIndexStatic(index) => {
+                    out.push(OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX);
+                    write_u32_le(out, *index);
                 }
                 PathComponent::Field(name) => {
                     out.push(OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL);
@@ -5440,7 +5454,7 @@ fn lower_stmt(
         }
         Stmt::LetTuple { items, ty, value } => {
             append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
-            let tuple_path = tuple_access_path_from_expr(*value, arena);
+            let sequence_path = sequence_access_path_from_expr(*value, arena);
             let (tuple_reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -5464,7 +5478,7 @@ fn lower_stmt(
                 items,
                 tuple_reg,
                 &final_ty,
-                tuple_path.as_ref(),
+                sequence_path.as_ref(),
                 arena,
                 &mut ctx.next_reg,
                 &mut ctx.instrs,
@@ -5561,7 +5575,7 @@ fn lower_stmt(
             else_return,
         } => {
             append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
-            let tuple_path = tuple_access_path_from_expr(*value, arena);
+            let sequence_path = sequence_access_path_from_expr(*value, arena);
             let (tuple_reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -5585,7 +5599,7 @@ fn lower_stmt(
                 items,
                 tuple_reg,
                 &final_ty,
-                tuple_path.as_ref(),
+                sequence_path.as_ref(),
                 *else_return,
                 &ctx.ensures,
                 ctx.ensures_result_symbol,
@@ -9137,7 +9151,7 @@ fn find_named_var_symbol(
     }
 }
 
-fn tuple_access_path_from_expr(expr_id: ExprId, arena: &AstArena) -> Option<AccessPath> {
+fn sequence_access_path_from_expr(expr_id: ExprId, arena: &AstArena) -> Option<AccessPath> {
     match arena.expr(expr_id) {
         Expr::Var(name) => Some(AccessPath::new(*name)),
         Expr::SequenceIndex(index_expr) => {
@@ -9148,9 +9162,9 @@ fn tuple_access_path_from_expr(expr_id: ExprId, arena: &AstArena) -> Option<Acce
             if *index < 0 {
                 return None;
             }
-            let index = u16::try_from(*index).ok()?;
-            let base = tuple_access_path_from_expr(index_expr.base, arena)?;
-            Some(base.tuple_index(index))
+            let index = u32::try_from(*index).ok()?;
+            let base = sequence_access_path_from_expr(index_expr.base, arena)?;
+            Some(base.sequence_index_static(index))
         }
         _ => None,
     }
@@ -9258,7 +9272,7 @@ fn append_record_update_write_events_from_expr(
                 ownership_events,
             );
 
-            let scrutinee_path = tuple_access_path_from_expr(match_expr.scrutinee, arena);
+            let scrutinee_path = sequence_access_path_from_expr(match_expr.scrutinee, arena);
             for arm in &match_expr.arms {
                 if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
                     if let Some(path) = &scrutinee_path {
@@ -9312,6 +9326,7 @@ fn alloc(next: &mut u16) -> u16 {
 mod opt_tests {
     use super::*;
     use crate::passes::run_default_opt_passes;
+    use sm_format::semcode_decode::{decode_semcode_envelope, DecodedAccessPathComponent};
     use sm_front::parse_program;
 
     #[test]
@@ -9337,6 +9352,21 @@ mod opt_tests {
         let path = AccessPath::new(SymbolId(3)).field(camera);
         assert_eq!(path.root, SymbolId(3));
         assert_eq!(path.components, vec![PathComponent::Field(camera)]);
+    }
+
+    #[test]
+    fn access_path_sequence_index_static_can_be_represented() {
+        let path = AccessPath::new(SymbolId(3))
+            .sequence_index_static(2)
+            .sequence_index_static(4);
+        assert_eq!(path.root, SymbolId(3));
+        assert_eq!(
+            path.components,
+            vec![
+                PathComponent::SequenceIndexStatic(2),
+                PathComponent::SequenceIndexStatic(4),
+            ]
+        );
     }
 
     #[test]
@@ -11439,6 +11469,130 @@ mod opt_tests {
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
                     path: AccessPath::new(*ctx_name).field(camera_field),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_sequence_index_borrow_records_sequence_index_static_path() {
+        let src = r#"
+            fn main() {
+                let seq: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+                let (ref left, ref right): (i32, i32) = seq[0];
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: seq_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected sequence binding");
+        };
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(0)
+                        .tuple_index(0),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(0)
+                        .tuple_index(1),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_sequence_index_borrow_encodes_sequence_index_static_component() {
+        let src = r#"
+            fn main() {
+                let seq: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+                let (ref left, ref right): (i32, i32) = seq[0];
+                return;
+            }
+        "#;
+
+        let bytes = compile_program_to_semcode(src).expect("sequence semcode should emit");
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode sequence semcode");
+        let main = functions
+            .iter()
+            .find(|func| func.name == "main")
+            .expect("main fn");
+        assert_eq!(main.borrowed_paths.len(), 2);
+        let root_symbol_id = main.borrowed_paths[0].root_symbol_id;
+        assert_eq!(main.borrowed_paths[1].root_symbol_id, root_symbol_id);
+        assert_eq!(
+            main.borrowed_paths[0].components,
+            vec![
+                DecodedAccessPathComponent::SequenceIndexStatic(0),
+                DecodedAccessPathComponent::TupleIndex(0),
+            ]
+        );
+        assert_eq!(
+            main.borrowed_paths[1].components,
+            vec![
+                DecodedAccessPathComponent::SequenceIndexStatic(0),
+                DecodedAccessPathComponent::TupleIndex(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_sequence_indexes_emit_distinct_static_paths() {
+        let src = r#"
+            fn main() {
+                let seq: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+                let (ref left0, ref right0): (i32, i32) = seq[0];
+                let (ref left1, ref right1): (i32, i32) = seq[1];
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: seq_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected sequence binding");
+        };
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(0)
+                        .tuple_index(0),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(0)
+                        .tuple_index(1),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(1)
+                        .tuple_index(0),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(1)
+                        .tuple_index(1),
                 },
             ]
         );
