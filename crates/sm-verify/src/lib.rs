@@ -1199,10 +1199,10 @@ fn diag(
 mod tests {
     use super::*;
     use sm_format::semcode_format::{
-        compile_program_to_semcode, compile_program_to_semcode_with_options_debug, read_u16_le,
-        read_u32_le, CompileProfile, OptLevel, MAGIC11, MAGIC12, OWNERSHIP_SECTION_TAG,
+        read_u16_le,
+        read_u32_le, MAGIC11, MAGIC12, OWNERSHIP_SECTION_TAG,
     };
-    use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
+    use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr, compile_program_to_semcode, compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
 
     #[test]
     fn verifier_accepts_valid_semcode() {

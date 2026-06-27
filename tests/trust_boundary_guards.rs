@@ -44,10 +44,7 @@ fn sm_vm_dependency_boundaries() {
         !tree.contains("prom-ui"),
         "sm-vm MUST NOT depend on prom-ui"
     );
-    assert!(
-        !tree.contains("sm-ir"),
-        "sm-vm MUST NOT depend on sm-ir"
-    );
+    assert!(!tree.contains("sm-ir"), "sm-vm MUST NOT depend on sm-ir");
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
