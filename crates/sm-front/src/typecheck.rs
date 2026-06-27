@@ -7875,6 +7875,133 @@ mod tests {
     }
 
     #[test]
+    fn typecheck_rejects_overlapping_tuple_element_bindings() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let path = PatternPath::root().tuple_index(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: path.clone(),
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("same tuple element move+borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn typecheck_allows_disjoint_tuple_element_bindings() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: PatternPath::root().tuple_index(1),
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan).expect("different tuple elements must not conflict");
+    }
+
+    #[test]
+    fn typecheck_rejects_tuple_parent_then_child_overlap() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: PatternPath::root(),
+            ty: Type::Tuple(vec![Type::I32]),
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("whole tuple move and child borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn typecheck_rejects_tuple_child_then_parent_overlap() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Borrow,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: PatternPath::root(),
+            ty: Type::Tuple(vec![Type::I32]),
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("child borrow and whole tuple move must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn typecheck_handles_nested_tuple_prefix_overlap() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let nested = PatternPath::root().tuple_index(0).tuple_index(1);
+        let sibling = PatternPath::root().tuple_index(1);
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: nested,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: sibling,
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan)
+            .expect("nested tuple path and sibling path must not conflict");
+    }
+
+    #[test]
     fn record_field_same_path_move_and_borrow_rejects() {
         use crate::types::{
             BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
