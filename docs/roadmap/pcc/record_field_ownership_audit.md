@@ -102,3 +102,7 @@ Planned validation after this doc write:
 
 - `cargo fmt --check`
 - `cargo test --workspace --all-features`
+
+## 9. Closeout Pointer
+
+See [`record_field_ownership_matrix.md`](record_field_ownership_matrix.md) for the finalized layer-by-layer closeout matrix and evidence summary.
