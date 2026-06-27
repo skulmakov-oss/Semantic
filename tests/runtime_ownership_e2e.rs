@@ -3,7 +3,7 @@ use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
     read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC11, MAGIC12, OWNERSHIP_EVENT_KIND_BORROW,
     OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
-    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD, OWNERSHIP_SECTION_TAG,
 };
 use sm_runtime_core::RuntimeTrap;
 use sm_vm::RuntimeError;
@@ -18,6 +18,7 @@ fn run_token_first_main(semcode: &[u8]) -> Result<(), RuntimeError> {
 enum OwnershipPathComponentSpec {
     TupleIndex(u16),
     FieldSymbol(u32),
+    AdtPayload(u32, u16),
 }
 
 #[derive(Clone, Copy)]
@@ -377,7 +378,7 @@ fn runtime_ownership_record_inner_frame_borrow_does_not_leak_after_exit() {
 
 #[test]
 fn runtime_ownership_unsupported_paths_do_not_silently_claim_support() {
-    for src in [adt_source(), schema_source()] {
+    for src in [schema_source()] {
         let bytes = compile_program_to_semcode(src).expect("compile");
         assert_ne!(&bytes[..8], &MAGIC11);
         assert_ne!(&bytes[..8], &MAGIC12);
@@ -865,6 +866,11 @@ fn append_ownership_event(
                 out.push(OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL);
                 out.extend_from_slice(&field.to_le_bytes());
             }
+            OwnershipPathComponentSpec::AdtPayload(variant, index) => {
+                out.push(OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD);
+                out.extend_from_slice(&variant.to_le_bytes());
+                out.extend_from_slice(&index.to_le_bytes());
+            }
         }
     }
 }
@@ -955,6 +961,10 @@ fn parse_function_layout(code: &[u8]) -> FunctionLayout {
                     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => {
                         let _ = read_u32_le(code, &mut cursor).expect("ownership component value");
                     }
+                    OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD => {
+                        let _ = read_u32_le(code, &mut cursor).expect("ownership variant symbol");
+                        let _ = read_u16_le(code, &mut cursor).expect("ownership adt index");
+                    }
                     _ => panic!("unexpected ownership component kind 0x{kind:02x}"),
                 }
             }
@@ -988,4 +998,61 @@ fn next_function<'a>(bytes: &'a [u8], start: usize) -> (String, &'a [u8], usize)
     let code_start = cursor;
     let code_end = code_start + code_len;
     (name, &bytes[code_start..code_end], code_end)
+}
+
+fn option_assignment_source() -> &'static str {
+    r#"
+fn main() {
+    let mut opt: Option(f64) = Option::Some(42.0);
+    opt = Option::None;
+    opt = Option::Some(0.0);
+    return;
+}
+"#
+}
+
+#[test]
+fn runtime_ownership_option_rejects_same_path_write_deterministically() {
+    let bytes = compile_program_to_semcode(option_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "opt",
+                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "opt",
+                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "opt");
+}
+
+#[test]
+fn runtime_ownership_option_sibling_write_passes_on_verified_path() {
+    let bytes = compile_program_to_semcode(option_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "opt",
+                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "opt",
+                components: &[OwnershipPathComponentSpec::AdtPayload(43, 0)],
+            },
+        ],
+    );
+
+    run_token_first_main(&rewritten).expect("sibling adt payload write should pass");
 }
