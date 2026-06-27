@@ -143,3 +143,7 @@ Notes:
 - `cargo run --bin smc -- --help` showed the public CLI command map above.
 - The workspace and `7hell` gates remained green.
 - `bash tools/7hell/run.sh` was not part of this audit turn.
+
+Closeout pointer:
+
+- See [`cli_public_sample_qualification_matrix.md`](cli_public_sample_qualification_matrix.md) for the finalized closeout matrix and evidence summary.
