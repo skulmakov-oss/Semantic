@@ -122,7 +122,14 @@ does not justify skipping that contract step.
 - No sequence ownership implementation.
 - No release qualification claim.
 
-## 8. Validation Evidence
+## 8. Next Contract Step
+
+- Proposed design follow-up:
+  [sequence_ownership_contract_design.md](./sequence_ownership_contract_design.md)
+
+SEQ-1 should decide the vocabulary before any implementation or tests are added.
+
+## 9. Validation Evidence
 
 Commands run for this audit:
 
@@ -161,7 +168,7 @@ Notes:
   showed the Linux shell path can fail in this environment if `cargo` is missing
   from `PATH`. That is an environment limitation, not a repository regression.
 
-## 9. Final Verdict
+## 10. Final Verdict
 
 Sequence runtime support exists, but sequence ownership is not proven.
 
