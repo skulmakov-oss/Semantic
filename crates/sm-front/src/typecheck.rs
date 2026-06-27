@@ -7685,6 +7685,144 @@ mod tests {
         assert_eq!(expr_access_path(expr, &arena), None);
     }
 
+    fn sequence_index_pattern_path(index: i32) -> PatternPath {
+        use crate::types::{NumericLiteral, SequenceIndexExpr};
+
+        let mut arena = AstArena::default();
+        let sym = SymbolId(77);
+        let base = arena.alloc_expr(Expr::Var(sym));
+        let idx = arena.alloc_expr(Expr::NumericLiteral(NumericLiteral::I32(index)));
+        let expr = arena.alloc_expr(Expr::SequenceIndex(SequenceIndexExpr { base, index: idx }));
+        let result = expr_access_path(expr, &arena).expect("sequence index literal should resolve");
+        assert_eq!(result.0, sym);
+        assert_eq!(result.1, PatternPath::root().tuple_index(index as usize));
+        result.1
+    }
+
+    #[test]
+    fn sequence_index_same_path_move_and_borrow_rejects() {
+        use crate::types::{BindingPlan, BindingPlanItem, CaptureMode, SymbolId, Type};
+
+        let path = sequence_index_pattern_path(0);
+        let plan = BindingPlan {
+            items: vec![
+                BindingPlanItem {
+                    name: SymbolId(101),
+                    capture: CaptureMode::Borrow,
+                    path: path.clone(),
+                    ty: Type::I32,
+                },
+                BindingPlanItem {
+                    name: SymbolId(102),
+                    capture: CaptureMode::Move,
+                    path,
+                    ty: Type::I32,
+                },
+            ],
+        };
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("same sequence element move+borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn sequence_index_different_indexes_allow() {
+        use crate::types::{BindingPlan, BindingPlanItem, CaptureMode, SymbolId, Type};
+
+        let plan = BindingPlan {
+            items: vec![
+                BindingPlanItem {
+                    name: SymbolId(201),
+                    capture: CaptureMode::Borrow,
+                    path: sequence_index_pattern_path(0),
+                    ty: Type::I32,
+                },
+                BindingPlanItem {
+                    name: SymbolId(202),
+                    capture: CaptureMode::Move,
+                    path: sequence_index_pattern_path(1),
+                    ty: Type::I32,
+                },
+            ],
+        };
+        validate_binding_plan_conflicts(&plan)
+            .expect("different static sequence indexes must not conflict");
+    }
+
+    #[test]
+    fn sequence_index_parent_then_child_overlap_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SequenceCollectionFamily,
+            SequenceType, SymbolId, Type,
+        };
+
+        let plan = BindingPlan {
+            items: vec![
+                BindingPlanItem {
+                    name: SymbolId(301),
+                    capture: CaptureMode::Move,
+                    path: PatternPath::root(),
+                    ty: Type::Sequence(SequenceType {
+                        family: SequenceCollectionFamily::OrderedSequence,
+                        item: Box::new(Type::I32),
+                    }),
+                },
+                BindingPlanItem {
+                    name: SymbolId(302),
+                    capture: CaptureMode::Borrow,
+                    path: sequence_index_pattern_path(0),
+                    ty: Type::I32,
+                },
+            ],
+        };
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("whole sequence move and child borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn sequence_index_child_then_parent_overlap_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SequenceCollectionFamily,
+            SequenceType, SymbolId, Type,
+        };
+
+        let plan = BindingPlan {
+            items: vec![
+                BindingPlanItem {
+                    name: SymbolId(401),
+                    capture: CaptureMode::Borrow,
+                    path: sequence_index_pattern_path(0),
+                    ty: Type::I32,
+                },
+                BindingPlanItem {
+                    name: SymbolId(402),
+                    capture: CaptureMode::Move,
+                    path: PatternPath::root(),
+                    ty: Type::Sequence(SequenceType {
+                        family: SequenceCollectionFamily::OrderedSequence,
+                        item: Box::new(Type::I32),
+                    }),
+                },
+            ],
+        };
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("child borrow and whole sequence move must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
     #[test]
     fn path_state_normalization_root_subsumes_children() {
         // Adding Moved(root) when Moved(root.0) already exists → root.0 is dropped.
