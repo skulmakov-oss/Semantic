@@ -20,6 +20,9 @@ To run all 7 gates, use the script for your OS:
 ./tools/7hell/run.sh
 ```
 
+## CI Usage
+The `7hell` runner is integrated into the CI pipeline (via `.github/workflows/ci.yml`). The Linux runner (`run.sh`) is executed on every push and PR to protect the PCC qualification boundaries.
+
 ## The 7 Gates
 The script will fail fast if any gate is broken.
 - **Hell 1:** Workspace Health (`cargo fmt`, `check`, `test`)
