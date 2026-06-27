@@ -3692,6 +3692,60 @@ mod tests {
     }
 
     #[test]
+    fn vm_runs_adt_payload_ownership_positive_e2e_path() {
+        let src = r#"
+            enum Maybe {
+                None,
+                Some(f64),
+            }
+
+            fn read_payload(value: Maybe) -> f64 {
+                let ret: f64 = match value {
+                    Maybe::None => { 0.0 }
+                    Maybe::Some(ref inner) => {
+                        let v: f64 = inner;
+                        v
+                    }
+                };
+                return ret;
+            }
+
+            fn main() {
+                let out: f64 = read_payload(Maybe::Some(2.5));
+                assert(out == 2.5);
+                return;
+            }
+        "#;
+
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let (_, envs) = sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let mut found_adt_payload = false;
+        for env in &envs {
+            for path in env.borrowed_paths.iter().chain(env.write_paths.iter()) {
+                for component in &path.components {
+                    if let sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload {
+                        ..
+                    } = component
+                    {
+                        found_adt_payload = true;
+                    }
+                }
+            }
+        }
+        assert!(
+            found_adt_payload,
+            "Expected AdtPayload ownership component to be emitted in SemCode"
+        );
+
+        run_semcode(&bytes).expect("run");
+    }
+
+    // NOTE(ADT-4): A negative E2E test cannot be expressed cleanly right now because the Semantic frontend
+    // does not yet support mutable bindings or mutable re-assignments of ADT payloads (e.g. `inner += 1.0` or mutating the parent `value` while `inner` is borrowed).
+    // Therefore, we rely on the runtime-patched tests added in ADT-3 (like `vm_rejects_adt_payload_write_when_borrowed_same_payload`)
+    // to prove the VM borrow-checker correctness, and we will add the negative E2E test once the language surface is ready.
+
+    #[test]
     fn vm_runs_stage1_record_field_access_path() {
         let src = r#"
             record DecisionContext {
