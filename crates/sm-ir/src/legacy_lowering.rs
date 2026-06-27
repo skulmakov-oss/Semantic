@@ -7,9 +7,9 @@ use crate::semcode_format::{
     OWNERSHIP_SECTION_TAG,
 };
 use sm_front::types::{
-    AdtCtorExpr, AdtPatternItem, ClosureCapturePolicy, ClosureLiteral, ClosureType,
-    ClosureValueFamily, MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget,
-    SequenceCollectionFamily, SequenceType,
+    AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
+    MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget, SequenceCollectionFamily,
+    SequenceType,
 };
 use sm_front::{CallArg, LoopExpr, TuplePatternItem};
 use std::collections::BTreeSet;
