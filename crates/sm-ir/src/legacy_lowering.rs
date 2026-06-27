@@ -372,12 +372,22 @@ impl AccessPath {
             components,
         }
     }
+
+    pub fn adt_payload(&self, variant: SymbolId, index: u16) -> Self {
+        let mut components = self.components.clone();
+        components.push(PathComponent::AdtPayload { variant, index });
+        Self {
+            root: self.root,
+            components,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathComponent {
     TupleIndex(u16),
     Field(SymbolId),
+    AdtPayload { variant: SymbolId, index: u16 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1921,6 +1931,11 @@ fn emit_ownership_events(
                 PathComponent::Field(name) => {
                     out.push(OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL);
                     write_u32_le(out, name.0);
+                }
+                PathComponent::AdtPayload { variant, index } => {
+                    out.push(sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD);
+                    write_u32_le(out, variant.0);
+                    write_u16_le(out, *index);
                 }
             }
         }
@@ -6967,7 +6982,7 @@ fn resolve_sum_match_pattern_for_lowering(
     for (index, (item, declared_ty)) in adt_pat.items.iter().zip(variant.payload.iter()).enumerate()
     {
         let payload_ty = canonicalize_declared_type(declared_ty, record_table, adt_table, arena)?;
-        if let AdtPatternItem::Bind { name, .. } = item {
+        if let sm_front::types::AdtPatternItem::Bind { name, .. } = item {
             bindings.push(LoweredAdtMatchBinding {
                 name: *name,
                 ty: payload_ty,
@@ -9215,7 +9230,22 @@ fn append_record_update_write_events_from_expr(
                 arena,
                 ownership_events,
             );
+            
+            let scrutinee_path = tuple_access_path_from_expr(match_expr.scrutinee, arena);
             for arm in &match_expr.arms {
+                if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
+                    if let Some(path) = &scrutinee_path {
+                        for (idx, item) in adt_pat.items.iter().enumerate() {
+                            if let sm_front::types::AdtPatternItem::Bind { capture: sm_front::types::CaptureMode::Borrow, .. } = item {
+                                ownership_events.push(OwnershipPathEvent {
+                                    kind: OwnershipPathEventKind::Borrow,
+                                    path: path.adt_payload(adt_pat.variant_name, idx as u16),
+                                });
+                            }
+                        }
+                    }
+                }
+                
                 if let Some(guard) = arm.guard {
                     append_record_update_write_events_from_expr(guard, arena, ownership_events);
                 }
@@ -10158,7 +10188,65 @@ mod opt_tests {
             .any(|instr| matches!(instr, IrInstr::TupleGet { index: 1, .. })));
     }
 
+                            #[test]
+    fn lower_adt_match_borrow_capture_records_borrow_path_event() {
+        let src = r#"
+            enum Maybe {
+                None,
+                Some(f64),
+            }
+            fn use_e(e: Maybe) -> f64 {
+                let total: f64 = match e {
+                    Maybe::Some(ref v) => { 1.0 }
+                    _ => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (program, func) = lower_single_function_with_program(src, "use_e");
+        let use_e_func = program.functions.iter().find(|f| program.arena.symbol_name(f.name) == "use_e").unwrap();
+        let e_name = use_e_func.params[0].0;
+        
+        let adt = program.adts.iter().find(|adt| program.arena.symbol_name(adt.name) == "Maybe").unwrap();
+        let variant = adt.variants.iter().find(|v| program.arena.symbol_name(v.name) == "Some").unwrap();
+        
+        assert_eq!(
+            func.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(e_name).adt_payload(variant.name, 0),
+            }]
+        );
+    }
+
     #[test]
+    fn lower_adt_match_move_capture_does_not_record_borrow_path_event() {
+        let src = r#"
+            enum Maybe {
+                None,
+                Some(f64),
+            }
+            fn use_e(e: Maybe) -> f64 {
+                let total: f64 = match e {
+                    Maybe::Some(v) => { 1.0 }
+                    _ => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (program, func) = lower_single_function_with_program(src, "use_e");
+        
+        assert_eq!(
+            func.ownership_events,
+            vec![]
+        );
+    }
+
+#[test]
     fn lower_tuple_borrow_capture_records_borrow_path_event() {
         let src = r#"
             fn pair() -> (i32, i32) = (1, 2);
