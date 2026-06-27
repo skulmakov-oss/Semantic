@@ -635,7 +635,10 @@ fn build_vm_program_view_from_decoded(
                             ) => {
                                 p = p.field(SymbolId(*s));
                             }
-                            sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { variant, index } => {
+                            sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload {
+                                variant,
+                                index,
+                            } => {
                                 p = p.adt_payload(SymbolId(*variant), *index);
                             }
                         }
@@ -4208,6 +4211,138 @@ mod tests {
             }
         "#;
         compile_program_to_semcode(src).expect("compile")
+    }
+
+    fn adt_payload_write_overlap_bytes(
+        borrowed_adt: Option<(u32, u16)>,
+        write_adt: Option<(u32, u16)>,
+    ) -> Vec<u8> {
+        let src = r#"
+            fn main() {
+                let e: f64 = 0.0;
+                let other: f64 = 1.0;
+                e += 2.0;
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        rewrite_adt_main_ownership_section(bytes, borrowed_adt, write_adt)
+    }
+
+    fn rewrite_adt_main_ownership_section(
+        bytes: Vec<u8>,
+        borrowed_adt: Option<(u32, u16)>,
+        write_adt: Option<(u32, u16)>,
+    ) -> Vec<u8> {
+        let mut cursor = 8usize;
+        let name_len = read_u16_le(&bytes, &mut cursor).expect("name len") as usize;
+        let name = read_utf8(&bytes, &mut cursor, name_len).expect("name");
+        assert_eq!(name, "main");
+        let code_len_pos = cursor;
+        let code_len = read_u32_le(&bytes, &mut cursor).expect("code len") as usize;
+        let code_start = cursor;
+        let code_end = code_start + code_len;
+        let code = &bytes[code_start..code_end];
+        let (_, mut decoded_functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let env = decoded_functions.remove(0);
+        let strings = env.strings;
+        let instr_start = env.instr_start_offset;
+        let e_root = strings.iter().position(|s| s == "e").expect("e root index") as u32;
+        let ownership_start = code[..instr_start]
+            .windows(OWNERSHIP_SECTION_TAG.len())
+            .position(|window| window == OWNERSHIP_SECTION_TAG)
+            .expect("OWN0 section");
+        let mut new_code = Vec::with_capacity(code.len());
+        new_code.extend_from_slice(&code[..ownership_start]);
+
+        let mut out_ownership = Vec::new();
+        out_ownership.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        out_ownership.extend_from_slice(&2u16.to_le_bytes());
+        append_adt_payload_ownership_event(
+            &mut out_ownership,
+            OWNERSHIP_EVENT_KIND_BORROW,
+            e_root,
+            borrowed_adt,
+        );
+        append_adt_payload_ownership_event(
+            &mut out_ownership,
+            OWNERSHIP_EVENT_KIND_WRITE,
+            e_root,
+            write_adt,
+        );
+
+        new_code.extend_from_slice(&out_ownership);
+        new_code.extend_from_slice(&code[instr_start..]);
+
+        let mut out = Vec::with_capacity(bytes.len() + new_code.len().saturating_sub(code.len()));
+        out.extend_from_slice(&bytes[..code_len_pos]);
+        out.extend_from_slice(&(new_code.len() as u32).to_le_bytes());
+        out.extend_from_slice(&new_code);
+        out.extend_from_slice(&bytes[code_end..]);
+        out
+    }
+
+    fn append_adt_payload_ownership_event(
+        out: &mut Vec<u8>,
+        kind: u8,
+        root: u32,
+        adt: Option<(u32, u16)>,
+    ) {
+        out.push(kind);
+        out.extend_from_slice(&root.to_le_bytes());
+        match adt {
+            Some((variant, index)) => {
+                out.extend_from_slice(&1u16.to_le_bytes());
+                out.push(sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD);
+                out.extend_from_slice(&variant.to_le_bytes());
+                out.extend_from_slice(&index.to_le_bytes());
+            }
+            None => out.extend_from_slice(&0u16.to_le_bytes()),
+        }
+    }
+
+    #[test]
+    fn vm_rejects_adt_payload_write_when_borrowed_same_payload() {
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((42, 0)));
+        let err = run_semcode(&bytes).expect_err("same ADT payload overlap must fail");
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
+        ));
+        assert_eq!(format!("{err}"), "write path overlaps active borrow");
+    }
+
+    #[test]
+    fn vm_allows_adt_payload_write_when_borrowed_different_index() {
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((42, 1)));
+        run_semcode(&bytes).expect("different index does not overlap");
+    }
+
+    #[test]
+    fn vm_allows_adt_payload_write_when_borrowed_different_variant() {
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((43, 0)));
+        run_semcode(&bytes).expect("different variant does not overlap");
+    }
+
+    #[test]
+    fn vm_rejects_adt_payload_write_when_borrowed_parent_overlaps_child() {
+        let bytes = adt_payload_write_overlap_bytes(None, Some((42, 0)));
+        let err = run_semcode(&bytes).expect_err("adt parent-child overlap must fail");
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
+        ));
+    }
+
+    #[test]
+    fn vm_rejects_adt_payload_write_when_borrowed_child_overlaps_parent() {
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), None);
+        let err = run_semcode(&bytes).expect_err("adt child-parent overlap must fail");
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
+        ));
     }
 
     fn record_field_write_overlap_bytes(
