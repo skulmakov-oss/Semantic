@@ -1,0 +1,7 @@
+fn main() {
+    let pair: (i32, i32) = (1, 2);
+    let (ref left, ref right): (i32, i32) = pair;
+    let _ = left;
+    let _ = right;
+    return;
+}
