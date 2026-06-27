@@ -2,21 +2,19 @@
 
 ## 1. Executive Verdict
 
-Tuple ownership is already supported as a frozen ownership slice for direct
-path access. The repository has evidence across the stack for tuple ownership
-paths: parser/typecheck path tracking, lowering emission, SemCode transport,
-decode, verifier structural admission, VM overlap enforcement, and tuple
-ownership E2E tests.
+Tuple ownership is now fully qualified for direct tuple element ownership
+paths. This audit remains the original tuple/sequence split document, but the
+tuple half should now be read alongside the tuple closeout matrix:
+`docs/roadmap/pcc/tuple_ownership_matrix.md`.
 
-Sequence support is real, but it is a different kind of support. The repository
-has evidence for sequence literals, indexing, iteration, and runtime execution.
-What it does **not** have is a dedicated sequence ownership-path vocabulary or
-sequence ownership E2E evidence. Sequence indexing currently reuses the generic
-access-path machinery, but that is not the same as a sequence ownership slice.
+Sequence ownership is still not a qualified ownership slice. The repository has
+evidence for sequence literals, indexing, iteration, and runtime execution, but
+not for a dedicated sequence ownership-path vocabulary or sequence ownership
+E2E evidence.
 
 Current verdict:
 
-- Tuple ownership: **MOSTLY READY**
+- Tuple ownership: **COMPLETE / PASS for direct tuple element ownership paths**
 - Sequence ownership: **PARTIAL / NOT PROVEN**
 
 Do not claim sequence ownership as equivalent to tuple ownership.
@@ -36,12 +34,13 @@ Do not claim sequence ownership as equivalent to tuple ownership.
 | VM overlap semantics | READY | NOT SUPPORTED | Tuple/record overlap traps in `tests/runtime_ownership_e2e.rs` and `crates/sm-vm/src/semcode_vm.rs` | Tuple READY; Sequence NOT SUPPORTED | No sequence ownership overlap semantics because no sequence ownership paths exist |
 | Positive E2E tests | READY | NOT SUPPORTED | Tuple ownership E2E coverage in `tests/runtime_ownership_e2e.rs`; sequence positive tests live in `tests/pcc7_sequence_acceptance.rs` as runtime tests, not ownership tests | Tuple READY; Sequence NOT SUPPORTED | No positive sequence ownership golden |
 | Negative hardening | READY | NOT SUPPORTED | Tuple/record negative ownership cases in `tests/runtime_ownership_e2e.rs`; verifier malformed ownership tests in `crates/sm-verify/src/lib.rs` | Tuple READY; Sequence NOT SUPPORTED | No sequence ownership negative corpus |
-| 7hell coverage | UNKNOWN | UNKNOWN | `smc 7hell` exists as a CLI diagnostic/readiness route in `README.md`, `docs/spec/cli.md`, and `tests/7hell_e1_report_snapshots.rs` | Tuple UNKNOWN; Sequence UNKNOWN | No tuple/sequence slice-specific 7hell wiring found in this checkout |
-| Docs / closeout | READY | PARTIAL | `docs/spec/runtime_ownership.md`, `docs/spec/semcode.md`, `docs/status/feature_maturity_matrix.md` for tuple; sequence docs cover iteration/indexing only | Tuple READY; Sequence PARTIAL | No tuple/sequence-specific closeout matrix exists yet |
+| 7hell coverage | READY | UNKNOWN | `tools/7hell/run.ps1`, `tools/7hell/run.sh`, `tools/7hell/README.md`, and `docs/roadmap/pcc/7hell_mini_runner.md` now include tuple ownership smoke in Hell 6 | Tuple READY; Sequence UNKNOWN | Sequence-specific 7hell wiring not found |
+| Docs / closeout | READY | PARTIAL | `docs/roadmap/pcc/tuple_ownership_matrix.md`, this audit, and existing ownership docs | Tuple READY; Sequence PARTIAL | Sequence ownership closeout still missing |
 
 ## 3. Tuple Ownership Readiness
 
-Tuple ownership is the stronger half of this audit.
+Tuple ownership is the stronger half of this audit and is now complete for
+direct tuple element ownership paths.
 
 What is already shown:
 
@@ -51,13 +50,13 @@ What is already shown:
 - SemCode carries tuple ownership components;
 - decode and VM remap tuple ownership components back into runtime paths;
 - runtime overlap semantics reject conflicting writes;
-- tuple E2E ownership tests exist.
+- tuple E2E ownership tests exist;
+- tuple smoke is now part of 7hell Hell 6.
 
-Tuple ownership therefore looks like a mostly frozen, end-to-end path family.
-The remaining question is not whether tuple ownership exists, but whether this
-checkout has a dedicated tuple slice closeout gate for it. In this checkout,
-that gate is not surfaced as a separate tuple-specific 7hell qualification
-entry.
+Tuple ownership therefore qualifies as a completed direct tuple element slice.
+The remaining question is not whether tuple ownership exists, but whether the
+project wants any broader tuple-family behavior beyond the direct path cases
+already proven here.
 
 ## 4. Sequence Ownership Readiness
 
@@ -104,8 +103,8 @@ Sequence readiness for ownership is therefore **PARTIAL / NOT PROVEN**.
 
 Tuple gaps:
 
-- no tuple-specific closeout matrix in this checkout;
-- no tuple-specific 7hell wiring was found in a dedicated gate file.
+- no tuple-specific 7hell wiring was found until T-5 added the tuple smoke;
+- no tuple write/update ownership emission was separately qualified.
 
 Sequence gaps:
 
@@ -120,7 +119,8 @@ Compared with the completed ADT payload, Option/Result parity, and direct
 record-field slices:
 
 - Tuple ownership is structurally similar: it has path vocabulary, lowering,
-  SemCode transport, decode, verifier admission, VM enforcement, and tests.
+  SemCode transport, decode, verifier admission, VM enforcement, tests, and
+  7hell smoke.
 - Sequence support is not structurally similar yet. It has runtime value
   support and indexing/iteration, but not ownership-path transport.
 - ADT payload and record-field slices were qualified by end-to-end ownership
@@ -148,8 +148,7 @@ Tuple-focused follow-up:
 - T-2 - tuple lowering ownership emission tests
 - T-3 - tuple source -> SemCode -> VM positive E2E golden
 - T-4 - tuple verifier / VM negative hardening
-- T-5 - add tuple ownership smoke to the local qualification gate when the gate
-  path is available in this checkout
+- T-5 - tuple ownership smoke to the local qualification gate
 
 Sequence follow-up, if the project decides to pursue it separately:
 
@@ -183,7 +182,7 @@ Commands used for this audit:
 - `git log --oneline -10`
 - `Test-Path .\tools\7hell\run.ps1`
 - `Test-Path .\docs\roadmap\pcc\cli_public_sample_qualification_matrix.md`
-- `Test-Path .\docs\roadmap\pcc\record_field_ownership_matrix.md`
+- `Test-Path .\docs\roadmap\pcc\tuple_ownership_matrix.md`
 - `Get-ChildItem docs/dna -Recurse -File | Sort-Object FullName`
 - `Get-Content docs/dna/SEMANTIC_UI_DNA.md`
 - `rg -n "TupleIndex|tuple_index|OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX|PathComponent::TupleIndex|AccessPath::tuple_index|PatternPathElem::TupleIndex" crates tests docs examples`
@@ -197,6 +196,7 @@ Commands used for this audit:
 - `Select-String -Path 'tests/runtime_ownership_e2e.rs' -Pattern 'TupleIndex|FieldSymbol|AdtPayload|BorrowWriteConflict|sequence'`
 - `Select-String -Path 'crates/sm-verify/src/lib.rs' -Pattern 'ownership-path|OWN0|TupleIndex|FieldSymbol|component'`
 - `Get-ChildItem tests/fixtures/pcc7_sequence -File`
+- `cargo test --test tuple_ownership_golden`
 - `cargo fmt --check`
 - `cargo test --workspace --all-features`
 - `powershell -ExecutionPolicy Bypass -File .\\tools\\7hell\\run.ps1`
@@ -205,4 +205,3 @@ Notes:
 
 - The current checkout has `tools/7hell/run.ps1`, and the gate passed.
 - The audit remains doc-only.
-
