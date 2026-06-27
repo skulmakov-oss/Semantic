@@ -446,7 +446,7 @@ fn verify_function_code(
                     has_record_field_ownership = true;
                 }
                 sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
-                    // Variant is a global SymbolId; it cannot be bounds-checked 
+                    // Variant is a global SymbolId; it cannot be bounds-checked
                     // against the local string table. Structural acceptance only.
                 }
                 _ => {}
@@ -1202,10 +1202,12 @@ fn diag(
 mod tests {
     use super::*;
     use sm_format::semcode_format::{
-        read_u16_le,
-        read_u32_le, MAGIC11, MAGIC12, OWNERSHIP_SECTION_TAG,
+        read_u16_le, read_u32_le, MAGIC11, MAGIC12, OWNERSHIP_SECTION_TAG,
     };
-    use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr, compile_program_to_semcode, compile_program_to_semcode_with_options_debug, CompileProfile, OptLevel};
+    use sm_ir::{
+        compile_program_to_semcode, compile_program_to_semcode_with_options_debug,
+        emit_ir_to_semcode, CompileProfile, IrFunction, IrInstr, OptLevel,
+    };
 
     #[test]
     fn verifier_accepts_valid_semcode() {
@@ -1877,6 +1879,62 @@ mod tests {
     }
 
     #[test]
+    fn verifier_accepts_adt_payload_ownership_semcode() {
+        let bytes = adt_payload_ownership_semcode_bytes();
+        let verified = verify_semcode(&bytes).expect("verify");
+        assert_eq!(verified.functions.len(), 2);
+    }
+
+    #[test]
+    fn verifier_rejects_invalid_adt_payload_component_kind() {
+        let mut bytes = adt_payload_ownership_semcode_bytes();
+        let (_, code_start, code_end) = function_code_span(&bytes, "read_payload");
+        let code = &mut bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let component_kind_offset = section_offset + 4 + 2 + 1 + 4 + 2;
+        code[component_kind_offset] = 0xff;
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipSection
+        );
+    }
+
+    #[test]
+    fn verifier_rejects_truncated_adt_payload_missing_variant() {
+        let mut bytes = adt_payload_ownership_semcode_bytes();
+        let (code_len_pos, code_start, code_end) = function_code_span(&bytes, "read_payload");
+        let code = &bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let truncated_code_len = section_offset + 4 + 2 + 1 + 4 + 2 + 1;
+        bytes[code_len_pos..code_len_pos + 4]
+            .copy_from_slice(&(truncated_code_len as u32).to_le_bytes());
+        bytes.truncate(code_start + truncated_code_len);
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipSection
+        );
+    }
+
+    #[test]
+    fn verifier_rejects_truncated_adt_payload_missing_index() {
+        let mut bytes = adt_payload_ownership_semcode_bytes();
+        let (code_len_pos, code_start, code_end) = function_code_span(&bytes, "read_payload");
+        let code = &bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let truncated_code_len = section_offset + 4 + 2 + 1 + 4 + 2 + 1 + 4;
+        bytes[code_len_pos..code_len_pos + 4]
+            .copy_from_slice(&(truncated_code_len as u32).to_le_bytes());
+        bytes.truncate(code_start + truncated_code_len);
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipSection
+        );
+    }
+
+    #[test]
     fn verifier_rejects_record_field_payload_under_v11_capabilities() {
         let mut bytes = record_field_borrow_semcode_bytes();
         bytes[..MAGIC11.len()].copy_from_slice(&MAGIC11);
@@ -2054,6 +2112,32 @@ mod tests {
                 let patched: DecisionContext = ctx with { quality: 1.0 };
                 let _ = patched;
                 return;
+            }
+        "#;
+        compile_program_to_semcode(src).expect("compile")
+    }
+
+    fn adt_payload_ownership_semcode_bytes() -> Vec<u8> {
+        let src = r#"
+            enum Maybe {
+                None,
+                Some(f64),
+            }
+
+            fn read_payload(value: Maybe) -> f64 {
+                let ret: f64 = match value {
+                    Maybe::None => { 0.0 }
+                    Maybe::Some(ref inner) => {
+                        let v: f64 = inner;
+                        v
+                    }
+                };
+                return ret;
+            }
+
+            fn main() {
+                let out: f64 = read_payload(Maybe::Some(2.5));
+                assert(out == 2.5);
             }
         "#;
         compile_program_to_semcode(src).expect("compile")
