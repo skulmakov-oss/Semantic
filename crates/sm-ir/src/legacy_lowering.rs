@@ -10419,6 +10419,45 @@ mod opt_tests {
     }
 
     #[test]
+    fn lower_tuple_elements_emit_distinct_ownership_paths() {
+        let src = r#"
+            fn pair() -> (i32, i32) = (1, 2);
+
+            fn main() {
+                let pair: (i32, i32) = pair();
+                let (ref left, ref right): (i32, i32) = pair;
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let {
+            name: pair_name, ..
+        } = program.arena.stmt(main_fn.body[0])
+        else {
+            panic!("expected pair binding");
+        };
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*pair_name).tuple_index(0),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*pair_name).tuple_index(1),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn lower_tuple_destructuring_assignment_to_tuple_get_ir() {
         let src = r#"
             fn pair(flag: bool) -> (i32, bool) = (1, flag);
