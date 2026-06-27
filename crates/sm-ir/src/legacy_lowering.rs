@@ -10281,9 +10281,108 @@ mod opt_tests {
             fn main() { return; }
         "#;
 
-        let (program, func) = lower_single_function_with_program(src, "use_e");
+        let (_, func) = lower_single_function_with_program(src, "use_e");
 
         assert_eq!(func.ownership_events, vec![]);
+    }
+
+    #[test]
+    fn lower_option_ref_emits_borrow_path() {
+        let src = r#"
+            fn use_opt(opt: Option(f64)) -> f64 {
+                let total: f64 = match opt {
+                    Option::Some(ref value) => { 1.0 }
+                    Option::None => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (mut program, func) = lower_single_function_with_program(src, "use_opt");
+
+        let opt_name = program.arena.intern_symbol("opt");
+        let some_name = program.arena.intern_symbol("Some");
+
+        assert_eq!(
+            func.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(opt_name).adt_payload(some_name, 0),
+            }]
+        );
+    }
+
+    #[test]
+    fn lower_option_move_does_not_emit_borrow() {
+        let src = r#"
+            fn use_opt(opt: Option(f64)) -> f64 {
+                let total: f64 = match opt {
+                    Option::Some(value) => { 1.0 }
+                    Option::None => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (_, func) = lower_single_function_with_program(src, "use_opt");
+
+        assert_eq!(func.ownership_events, vec![]);
+    }
+
+    #[test]
+    fn lower_result_ref_emits_borrow_path() {
+        let src = r#"
+            fn use_result(res: Result(f64, i32)) -> f64 {
+                let total: f64 = match res {
+                    Result::Ok(ref value) => { 1.0 }
+                    Result::Err(err) => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (mut program, func) = lower_single_function_with_program(src, "use_result");
+
+        let res_name = program.arena.intern_symbol("res");
+        let ok_name = program.arena.intern_symbol("Ok");
+
+        assert_eq!(
+            func.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(res_name).adt_payload(ok_name, 0),
+            }]
+        );
+    }
+
+    #[test]
+    fn lower_result_err_ref_emits_borrow_path() {
+        let src = r#"
+            fn use_result(res: Result(f64, i32)) -> f64 {
+                let total: f64 = match res {
+                    Result::Ok(value) => { 1.0 }
+                    Result::Err(ref err) => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (mut program, func) = lower_single_function_with_program(src, "use_result");
+
+        let res_name = program.arena.intern_symbol("res");
+        let err_name = program.arena.intern_symbol("Err");
+
+        assert_eq!(
+            func.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(res_name).adt_payload(err_name, 0),
+            }]
+        );
     }
 
     #[test]
