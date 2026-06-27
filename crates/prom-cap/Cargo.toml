@@ -8,8 +8,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["std"]
-std = ["prom-abi/std", "prom-ui/std"]
+std = ["prom-abi/std"]
 
 [dependencies]
 prom-abi = { path = "../prom-abi", default-features = false }
-prom-ui = { path = "../prom-ui", default-features = false }

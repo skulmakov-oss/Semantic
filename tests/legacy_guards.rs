@@ -280,7 +280,7 @@ fn ton618_content_inventory_is_explicit() {
     let mut matches = BTreeSet::new();
     for file in files {
         let rel = file.to_string_lossy().replace('\\', "/");
-        let txt = fs::read_to_string(&file).expect("read text file");
+        let txt = String::from_utf8_lossy(&std::fs::read(&file).expect("read file")).into_owned();
         if txt.contains("ton618_core") || txt.contains("ton618-core") {
             matches.insert(rel);
         }

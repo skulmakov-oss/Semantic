@@ -37,7 +37,7 @@ sm-ir = { path = "../sm-ir", default-features = false, features = ["std"] }
 sm-emit = { path = "../sm-emit", default-features = false, features = ["std"] }
 sm-sema = { path = "../sm-sema", default-features = false, features = ["std"] }
 sm-verify = { path = "../sm-verify", default-features = false, features = ["std"] }
-sm-vm = { path = "../sm-vm", default-features = false, features = ["std"] }
+sm-vm = { path = "../sm-vm", default-features = false, features = ["std", "disasm"] }
 sm-runtime-core = { path = "../sm-runtime-core", default-features = false, features = ["std"] }
 prom-cap = { path = "../prom-cap", default-features = false, features = ["std"] }
 prom-audit = { path = "../prom-audit", default-features = false, features = ["std"] }

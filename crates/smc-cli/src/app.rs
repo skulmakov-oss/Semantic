@@ -99,7 +99,10 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "run" => cmd_run(&args[1..]),
         "run-smc" => cmd_run_smc(&args[1..]),
         "disasm" => cmd_disasm(&args[1..]),
-        "help" | "--help" | "-h" => Err(usage()),
+        "help" | "--help" | "-h" => {
+            println!("{}", usage());
+            Ok(())
+        }
         other => Err(format!("unknown command '{}'\n\n{}", other, usage())),
     }
 }

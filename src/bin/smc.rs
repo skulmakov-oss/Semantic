@@ -1486,7 +1486,6 @@ fn vm_error_code(error: &VmRuntimeError) -> String {
         VmRuntimeError::InvalidStringId(_) => "InvalidStringId".to_string(),
         VmRuntimeError::HostAbi(_) => "HostAbi".to_string(),
         VmRuntimeError::CapabilityDenied(_) => "CapabilityDenied".to_string(),
-        VmRuntimeError::UiCapabilityDenied(_) => "UiCapabilityDenied".to_string(),
         VmRuntimeError::Trap(trap) => format!("{:?}", trap),
     }
 }

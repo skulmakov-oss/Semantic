@@ -104,7 +104,7 @@ impl std::error::Error for RejectReport {}
 pub struct VerifiedSemCode<'a> {
     bytes: &'a [u8],
     program: VerifiedProgram,
-    decoded: Vec<sm_ir::semcode_decode::DecodedFunctionEnvelope<'a>>,
+    decoded: Vec<sm_format::semcode_decode::DecodedFunctionEnvelope<'a>>,
 }
 
 /// Error type for canonical entry resolution.
@@ -210,7 +210,7 @@ impl<'a> VerifiedSemCode<'a> {
     where
         F: for<'scope> FnOnce(
             &'scope sm_emit::SemcodeHeaderSpec,
-            &'scope [sm_ir::semcode_decode::DecodedFunctionEnvelope<'a>],
+            &'scope [sm_format::semcode_decode::DecodedFunctionEnvelope<'a>],
         ) -> R,
     {
         f(&self.program.header, &self.decoded)
@@ -227,62 +227,72 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
     let mut diagnostics = Vec::new();
     let quotas = RuntimeQuotas::verified_local();
 
-    let (header, decoded_functions) = match sm_ir::semcode_decode::decode_semcode_envelope(bytes) {
-        Ok(v) => v,
-        Err(err) => {
-            let diag = match err {
-                sm_ir::semcode_decode::DecodeError::BadHeader => diag(
-                    VerificationCode::BadHeader,
-                    None,
-                    None,
-                    "SemCode file is shorter than the 8-byte header",
-                ),
-                sm_ir::semcode_decode::DecodeError::UnsupportedVersion { found, .. } => diag(
-                    VerificationCode::UnsupportedVersion,
-                    None,
-                    Some(0),
-                    format!("unsupported SemCode header '{}'", found),
-                ),
-                sm_ir::semcode_decode::DecodeError::TruncatedFunction { offset, msg } => {
-                    diag(VerificationCode::TruncatedFunction, None, Some(offset), msg)
-                }
-                sm_ir::semcode_decode::DecodeError::InvalidFunctionName { offset, msg } => diag(
-                    VerificationCode::InvalidFunctionName,
-                    None,
-                    Some(offset),
-                    msg,
-                ),
-                sm_ir::semcode_decode::DecodeError::InvalidStringTable { offset, msg } => diag(
-                    VerificationCode::InvalidStringTable,
-                    None,
-                    Some(offset),
-                    msg,
-                ),
-                sm_ir::semcode_decode::DecodeError::InvalidDebugSection { offset, msg } => diag(
-                    VerificationCode::InvalidDebugSection,
-                    None,
-                    Some(offset),
-                    msg,
-                ),
-                sm_ir::semcode_decode::DecodeError::InvalidOwnershipSection { offset, msg } => {
-                    diag(
+    let (header, decoded_functions) =
+        match sm_format::semcode_decode::decode_semcode_envelope(bytes) {
+            Ok(v) => v,
+            Err(err) => {
+                let diag = match err {
+                    sm_format::semcode_decode::DecodeError::BadHeader => diag(
+                        VerificationCode::BadHeader,
+                        None,
+                        None,
+                        "SemCode file is shorter than the 8-byte header",
+                    ),
+                    sm_format::semcode_decode::DecodeError::UnsupportedVersion {
+                        found, ..
+                    } => diag(
+                        VerificationCode::UnsupportedVersion,
+                        None,
+                        Some(0),
+                        format!("unsupported SemCode header '{}'", found),
+                    ),
+                    sm_format::semcode_decode::DecodeError::TruncatedFunction { offset, msg } => {
+                        diag(VerificationCode::TruncatedFunction, None, Some(offset), msg)
+                    }
+                    sm_format::semcode_decode::DecodeError::InvalidFunctionName { offset, msg } => {
+                        diag(
+                            VerificationCode::InvalidFunctionName,
+                            None,
+                            Some(offset),
+                            msg,
+                        )
+                    }
+                    sm_format::semcode_decode::DecodeError::InvalidStringTable { offset, msg } => {
+                        diag(
+                            VerificationCode::InvalidStringTable,
+                            None,
+                            Some(offset),
+                            msg,
+                        )
+                    }
+                    sm_format::semcode_decode::DecodeError::InvalidDebugSection { offset, msg } => {
+                        diag(
+                            VerificationCode::InvalidDebugSection,
+                            None,
+                            Some(offset),
+                            msg,
+                        )
+                    }
+                    sm_format::semcode_decode::DecodeError::InvalidOwnershipSection {
+                        offset,
+                        msg,
+                    } => diag(
                         VerificationCode::InvalidOwnershipSection,
                         None,
                         Some(offset),
                         msg,
-                    )
-                }
-                sm_ir::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
-                    VerificationCode::ResourceLimitExceeded,
-                    None,
-                    Some(offset),
-                    msg,
-                ),
-            };
-            diagnostics.push(diag);
-            return Err(RejectReport { diagnostics });
-        }
-    };
+                    ),
+                    sm_format::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
+                        VerificationCode::ResourceLimitExceeded,
+                        None,
+                        Some(offset),
+                        msg,
+                    ),
+                };
+                diagnostics.push(diag);
+                return Err(RejectReport { diagnostics });
+            }
+        };
 
     let mut functions = Vec::new();
     let mut pending_functions = Vec::new();
@@ -396,7 +406,7 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
 
 #[cfg(feature = "std")]
 fn verify_function_code(
-    env: &sm_ir::semcode_decode::DecodedFunctionEnvelope,
+    env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
     header: &SemcodeHeaderSpec,
     quotas: &RuntimeQuotas,
 ) -> Result<PendingVerifiedFunction, RejectReport> {
@@ -436,7 +446,7 @@ fn verify_function_code(
                 p.components.iter().any(|c| {
                     matches!(
                         c,
-                        sm_ir::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_)
+                        sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_)
                     )
                 })
             });

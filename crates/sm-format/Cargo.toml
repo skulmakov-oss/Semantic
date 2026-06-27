@@ -1,0 +1,12 @@
+[package]
+name = "sm-format"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+sm-ir = { path = "../sm-ir", default-features = false }
+
+[features]
+default = ["std"]
+std = ["sm-ir/std"]

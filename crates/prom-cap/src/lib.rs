@@ -7,7 +7,6 @@ pub mod hello_observation_capability;
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use prom_abi::HostCallId;
-use prom_ui::{required_ui_capability, UiCapabilityKind, UiOperationId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityKind {
@@ -144,80 +143,6 @@ pub trait CapabilityChecker {
     }
 }
 
-/// Denial result for a UI capability check.
-///
-/// Mirrors [`CapabilityDenied`] but carries UI-specific types from `prom-ui`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UiCapabilityDenied {
-    pub capability: UiCapabilityKind,
-    pub operation: Option<UiOperationId>,
-    pub code: CapabilityDeniedCode,
-    pub manifest: CapabilityManifestMetadata,
-    pub message: String,
-}
-
-impl UiCapabilityDenied {
-    pub fn new(
-        capability: UiCapabilityKind,
-        operation: Option<UiOperationId>,
-        manifest: CapabilityManifestMetadata,
-        message: impl Into<String>,
-    ) -> Self {
-        Self {
-            capability,
-            operation,
-            code: CapabilityDeniedCode::MissingCapability,
-            manifest,
-            message: message.into(),
-        }
-    }
-}
-
-impl core::fmt::Display for UiCapabilityDenied {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self.operation {
-            Some(op) => write!(
-                f,
-                "UI capability {:?} denied for {:?} [{} {} {:?}]: {}",
-                self.capability,
-                op,
-                self.manifest.schema,
-                self.manifest.version.as_str(),
-                self.code,
-                self.message
-            ),
-            None => write!(
-                f,
-                "UI capability {:?} denied [{} {} {:?}]: {}",
-                self.capability,
-                self.manifest.schema,
-                self.manifest.version.as_str(),
-                self.code,
-                self.message
-            ),
-        }
-    }
-}
-
-#[cfg(feature = "std")]
-impl std::error::Error for UiCapabilityDenied {}
-
-/// Checking contract for the UI application boundary capability surface.
-///
-/// Wired at Wave 1. This trait allows the VM host to deny UI operations
-/// when the required `UiCapabilityKind` is not admitted in the manifest.
-pub trait UiCapabilityChecker {
-    fn require_ui(&self, capability: UiCapabilityKind) -> Result<(), UiCapabilityDenied>;
-
-    fn require_ui_op(&self, op: UiOperationId) -> Result<(), UiCapabilityDenied> {
-        self.require_ui(required_ui_capability(op))
-            .map_err(|mut denied| {
-                denied.operation = Some(op);
-                denied
-            })
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestValidationCode {
     UnsupportedSchema,
@@ -244,10 +169,6 @@ pub struct CapabilityManifest {
     schema: String,
     version: CapabilityManifestVersion,
     allowed: BTreeSet<CapabilityKind>,
-    /// Admitted UI capabilities for the application boundary surface.
-    ///
-    /// Empty by default. Populated by `allow_ui()` at Wave 1.
-    allowed_ui: BTreeSet<UiCapabilityKind>,
 }
 
 impl CapabilityManifest {
@@ -259,7 +180,6 @@ impl CapabilityManifest {
             schema: Self::CURRENT_SCHEMA.into(),
             version: Self::CURRENT_VERSION,
             allowed: BTreeSet::new(),
-            allowed_ui: BTreeSet::new(),
         }
     }
 
@@ -268,7 +188,6 @@ impl CapabilityManifest {
             schema: schema.into(),
             version,
             allowed: BTreeSet::new(),
-            allowed_ui: BTreeSet::new(),
         }
     }
 
@@ -278,18 +197,6 @@ impl CapabilityManifest {
 
     pub fn allows(&self, capability: CapabilityKind) -> bool {
         self.allowed.contains(&capability)
-    }
-
-    /// Admit a UI capability into this manifest.
-    ///
-    /// UI capabilities are post-stable (Wave 1+) and must be explicitly
-    /// granted; they are never included in the default or gate surfaces.
-    pub fn allow_ui(&mut self, capability: UiCapabilityKind) {
-        self.allowed_ui.insert(capability);
-    }
-
-    pub fn allows_ui(&self, capability: UiCapabilityKind) -> bool {
-        self.allowed_ui.contains(&capability)
     }
 
     pub fn metadata(&self) -> CapabilityManifestMetadata {
@@ -358,25 +265,6 @@ impl CapabilityChecker for CapabilityManifest {
                 CapabilityDeniedCode::MissingCapability,
                 self.metadata(),
                 "manifest does not grant this capability",
-            ))
-        }
-    }
-}
-
-impl UiCapabilityChecker for CapabilityManifest {
-    fn require_ui(&self, capability: UiCapabilityKind) -> Result<(), UiCapabilityDenied> {
-        // Manifest schema/version validation applies to all capability checks.
-        self.validate().map_err(|report| {
-            UiCapabilityDenied::new(capability, None, self.metadata(), report.message)
-        })?;
-        if self.allows_ui(capability) {
-            Ok(())
-        } else {
-            Err(UiCapabilityDenied::new(
-                capability,
-                None,
-                self.metadata(),
-                "manifest does not grant this UI capability",
             ))
         }
     }
@@ -475,60 +363,5 @@ mod tests {
             .expect_err("must deny");
         assert_eq!(denied.call, Some(HostCallId::PulseEmit));
         assert_eq!(denied.capability, CapabilityKind::PulseEmit);
-    }
-
-    // --- M7 Wave 1: UI capability checker tests ---
-
-    #[test]
-    fn ui_manifest_denies_missing_ui_capability() {
-        let manifest = CapabilityManifest::new();
-        let denied = manifest
-            .require_ui(UiCapabilityKind::DesktopSession)
-            .expect_err("must deny UI capability when not granted");
-        assert_eq!(denied.capability, UiCapabilityKind::DesktopSession);
-        assert_eq!(denied.code, CapabilityDeniedCode::MissingCapability);
-        assert!(denied.operation.is_none());
-    }
-
-    #[test]
-    fn ui_manifest_admits_explicitly_granted_capability() {
-        let mut manifest = CapabilityManifest::new();
-        manifest.allow_ui(UiCapabilityKind::DesktopSession);
-        manifest.allow_ui(UiCapabilityKind::InputPoll);
-        assert!(manifest.allows_ui(UiCapabilityKind::DesktopSession));
-        assert!(manifest.allows_ui(UiCapabilityKind::InputPoll));
-        assert!(!manifest.allows_ui(UiCapabilityKind::FrameEmit));
-        manifest
-            .require_ui(UiCapabilityKind::DesktopSession)
-            .expect("must admit");
-    }
-
-    #[test]
-    fn require_ui_op_attaches_operation_context() {
-        let manifest = CapabilityManifest::new();
-        let denied = manifest
-            .require_ui_op(UiOperationId::WindowCreate)
-            .expect_err("must deny");
-        assert_eq!(denied.capability, UiCapabilityKind::DesktopSession);
-        assert_eq!(denied.operation, Some(UiOperationId::WindowCreate));
-    }
-
-    #[test]
-    fn gate_surface_never_includes_ui_capabilities() {
-        let manifest = CapabilityManifest::gate_surface();
-        assert!(!manifest.allows_ui(UiCapabilityKind::DesktopSession));
-        assert!(!manifest.allows_ui(UiCapabilityKind::InputPoll));
-        assert!(!manifest.allows_ui(UiCapabilityKind::FrameEmit));
-    }
-
-    #[test]
-    fn ui_capability_denied_display_includes_capability_and_operation() {
-        let manifest = CapabilityManifest::new();
-        let denied = manifest
-            .require_ui_op(UiOperationId::FrameSubmit)
-            .expect_err("must deny");
-        let msg = format!("{}", denied);
-        assert!(msg.contains("FrameEmit"));
-        assert!(msg.contains("FrameSubmit"));
     }
 }

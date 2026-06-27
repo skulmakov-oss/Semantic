@@ -17,6 +17,7 @@ members = [
     "crates/sm-profile",
     "crates/sm-sema",
     "crates/sm-ir",
+    "crates/sm-format",
     "crates/sm-emit",
     "crates/sm-verify",
     "crates/sm-runtime-core",

@@ -18,8 +18,8 @@ fn sm_emit_reexports_semcode_contract_from_sm_ir() {
     let src = fs::read_to_string("crates/sm-emit/src/lib.rs").expect("read sm-emit lib");
 
     assert!(
-        src.contains("pub use sm_ir::semcode_format"),
-        "sm-emit must re-export the canonical SemCode contract from sm-ir"
+        src.contains("pub use sm_format::semcode_format"),
+        "sm-emit must re-export the canonical SemCode contract from sm-format"
     );
     assert!(
         !src.contains("mod semcode_format;"),
