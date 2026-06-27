@@ -78,7 +78,7 @@ echo -e "${GREEN}PASS: Hell 4${NC}"
 # -----------------------------------------------------------------------------
 # Hell 5
 echo -e "\n${CYAN}[ Hell 5 ] VM Ownership Semantics...${NC}"
-cargo test -p sm-vm --all-features --features sm-ir/profile-rust
+cargo test -p sm-vm --all-features
 assert_success "sm-vm tests failed"
 echo -e "${GREEN}PASS: Hell 5${NC}"
 
@@ -88,7 +88,10 @@ echo -e "\n${CYAN}[ Hell 6 ] Source to SemCode Smoke...${NC}"
 mkdir -p target/7hell
 cargo run --bin smc -- compile crates/sm-front/tests/adt_match_local.sm -o target/7hell/adt_match_local.smc
 assert_success "Source compilation smoke test failed"
+cargo run --bin smc -- compile tests/fixtures/pcc6_option_result_diagnostics/positive_option_result_ownership.sm -o target/7hell/positive_option_result_ownership.smc
+assert_success "Option/Result compilation smoke test failed"
 rm -f target/7hell/adt_match_local.smc
+rm -f target/7hell/positive_option_result_ownership.smc
 echo -e "${GREEN}PASS: Hell 6${NC}"
 
 # -----------------------------------------------------------------------------

@@ -80,7 +80,7 @@ Write-Host "PASS: Hell 4" -ForegroundColor Green
 # -----------------------------------------------------------------------------
 # Hell 5
 Write-Host "`n[ Hell 5 ] VM Ownership Semantics..." -ForegroundColor Cyan
-cargo test -p sm-vm --all-features --features sm-ir/profile-rust
+cargo test -p sm-vm --all-features
 Assert-Success "sm-vm tests failed"
 Write-Host "PASS: Hell 5" -ForegroundColor Green
 
@@ -92,7 +92,10 @@ if (-Not (Test-Path "target/7hell")) {
 }
 cargo run --bin smc -- compile crates/sm-front/tests/adt_match_local.sm -o target/7hell/adt_match_local.smc
 Assert-Success "Source compilation smoke test failed"
+cargo run --bin smc -- compile tests/fixtures/pcc6_option_result_diagnostics/positive_option_result_ownership.sm -o target/7hell/positive_option_result_ownership.smc
+Assert-Success "Option/Result compilation smoke test failed"
 Remove-Item -Path "target/7hell/adt_match_local.smc" -Force -ErrorAction Ignore
+Remove-Item -Path "target/7hell/positive_option_result_ownership.smc" -Force -ErrorAction Ignore
 Write-Host "PASS: Hell 6" -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
