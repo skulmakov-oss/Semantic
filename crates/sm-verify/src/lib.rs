@@ -4,7 +4,7 @@
 extern crate std;
 
 #[cfg(feature = "std")]
-use sm_emit::{
+use sm_format::semcode_format::{
     read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
     SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS, CAP_EVENT_POST,
     CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_MAP_VALUES,
@@ -209,7 +209,7 @@ impl<'a> VerifiedSemCode<'a> {
     pub fn with_decoded_envelopes<R, F>(&self, f: F) -> R
     where
         F: for<'scope> FnOnce(
-            &'scope sm_emit::SemcodeHeaderSpec,
+            &'scope sm_format::semcode_format::SemcodeHeaderSpec,
             &'scope [sm_format::semcode_decode::DecodedFunctionEnvelope<'a>],
         ) -> R,
     {
@@ -1198,7 +1198,7 @@ fn diag(
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-    use sm_emit::{
+    use sm_format::semcode_format::{
         compile_program_to_semcode, compile_program_to_semcode_with_options_debug, read_u16_le,
         read_u32_le, CompileProfile, OptLevel, MAGIC11, MAGIC12, OWNERSHIP_SECTION_TAG,
     };

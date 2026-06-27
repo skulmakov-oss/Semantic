@@ -5,7 +5,7 @@ use std::process::Command;
 // Helper to run a cargo command and get output
 fn cargo_tree_deps(crate_name: &str) -> String {
     let output = Command::new("cargo")
-        .args(["tree", "-p", crate_name])
+        .args(["tree", "--edges", "normal", "-p", crate_name])
         .output()
         .expect("failed to execute cargo tree");
 
@@ -43,6 +43,10 @@ fn sm_vm_dependency_boundaries() {
     assert!(
         !tree.contains("prom-ui"),
         "sm-vm MUST NOT depend on prom-ui"
+    );
+    assert!(
+        !tree.contains("sm-ir"),
+        "sm-vm MUST NOT depend on sm-ir"
     );
 }
 

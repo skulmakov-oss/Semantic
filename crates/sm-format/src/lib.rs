@@ -1,15 +1,14 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-// Temporary façade for SemCode format authority split. Physical ownership will move here in later PRs.
+#[cfg(feature = "std")]
+mod local_format;
+
+#[cfg(feature = "std")]
+pub mod semcode_decode;
 
 #[cfg(feature = "std")]
 pub mod semcode_format {
-    pub use sm_ir::semcode_format::*;
-}
-
-#[cfg(feature = "std")]
-pub mod semcode_decode {
-    pub use sm_ir::semcode_decode::*;
+    pub use crate::local_format::*;
 }
 
 #[cfg(all(test, feature = "std"))]
