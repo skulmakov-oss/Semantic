@@ -28,6 +28,7 @@ pub struct DecodedDebugSymbol {
 pub enum DecodedAccessPathComponent {
     TupleIndex(u16),
     FieldSymbol(u32),
+    AdtPayload { variant: u32, index: u16 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -309,6 +310,21 @@ fn parse_string_table_debug_and_ownership(
                             }
                         })?;
                         components.push(DecodedAccessPathComponent::FieldSymbol(field));
+                    }
+                    OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD => {
+                        let variant = read_u32_le(code, &mut cursor).map_err(|_| {
+                            DecodeError::InvalidOwnershipSection {
+                                offset: base_offset + cursor,
+                                msg: "missing ownership adt payload variant",
+                            }
+                        })?;
+                        let index = read_u16_le(code, &mut cursor).map_err(|_| {
+                            DecodeError::InvalidOwnershipSection {
+                                offset: base_offset + cursor,
+                                msg: "missing ownership adt payload index",
+                            }
+                        })?;
+                        components.push(DecodedAccessPathComponent::AdtPayload { variant, index });
                     }
                     _ => {
                         return Err(DecodeError::InvalidOwnershipSection {

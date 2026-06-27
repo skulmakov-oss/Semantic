@@ -438,18 +438,21 @@ fn verify_function_code(
     }
 
     let has_ownership_section = env.has_ownership_section;
-    let has_record_field_ownership =
-        env.borrowed_paths
-            .iter()
-            .chain(env.write_paths.iter())
-            .any(|p| {
-                p.components.iter().any(|c| {
-                    matches!(
-                        c,
-                        sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_)
-                    )
-                })
-            });
+    let mut has_record_field_ownership = false;
+    for p in env.borrowed_paths.iter().chain(env.write_paths.iter()) {
+        for c in &p.components {
+            match c {
+                sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_) => {
+                    has_record_field_ownership = true;
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
+                    // Variant is a global SymbolId; it cannot be bounds-checked 
+                    // against the local string table. Structural acceptance only.
+                }
+                _ => {}
+            }
+        }
+    }
 
     let code = env.code_slice;
     let mut cursor = env.instr_start_offset;

@@ -635,6 +635,9 @@ fn build_vm_program_view_from_decoded(
                             ) => {
                                 p = p.field(SymbolId(*s));
                             }
+                            sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { variant, index } => {
+                                p = p.adt_payload(SymbolId(*variant), *index);
+                            }
                         }
                     }
                     Ok(p)

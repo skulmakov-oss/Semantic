@@ -121,3 +121,4 @@ fn public_api_inventory_matches_checked_in_contract_snapshots() {
         );
     }
 }
+

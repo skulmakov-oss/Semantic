@@ -78,12 +78,22 @@ impl AccessPath {
             components,
         }
     }
+
+    pub fn adt_payload(&self, variant: SymbolId, index: u16) -> Self {
+        let mut components = self.components.clone();
+        components.push(PathComponent::AdtPayload { variant, index });
+        Self {
+            root: self.root,
+            components,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PathComponent {
     TupleIndex(u16),
     Field(SymbolId),
+    AdtPayload { variant: SymbolId, index: u16 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -337,6 +347,14 @@ mod tests {
         let different = AccessPath::new(SymbolId(9)).field(field).tuple_index(0);
         assert_eq!(left, right);
         assert_ne!(left, different);
+        
+        let adt = AccessPath::new(SymbolId(9)).adt_payload(SymbolId(42), 0);
+        let adt_diff_idx = AccessPath::new(SymbolId(9)).adt_payload(SymbolId(42), 1);
+        let adt_diff_var = AccessPath::new(SymbolId(9)).adt_payload(SymbolId(43), 0);
+        assert_eq!(adt, AccessPath::new(SymbolId(9)).adt_payload(SymbolId(42), 0));
+        assert_ne!(adt, adt_diff_idx);
+        assert_ne!(adt, adt_diff_var);
+        assert_ne!(adt, left);
     }
 
     #[test]
