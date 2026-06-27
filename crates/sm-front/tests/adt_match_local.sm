@@ -1,0 +1,15 @@
+enum Maybe {
+    None,
+    Some(f64),
+}
+
+fn get_e() -> Maybe = Maybe::Some(42.0);
+
+fn main() {
+    let e: Maybe = get_e();
+    let total: f64 = match e {
+        Maybe::Some(ref v) => { 1.0 }
+        _ => { 0.0 }
+    };
+    return;
+}
