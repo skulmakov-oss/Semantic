@@ -127,6 +127,28 @@ pub(crate) fn temp_semcode_artifact(scope: &str, fixture_name: &str) -> SemCodeA
     }
 }
 
+pub(crate) fn target_cli_smoke_artifact(scope: &str, fixture_name: &str) -> SemCodeArtifactPath {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join("cli-smoke")
+        .join(scope)
+        .join(format!(
+            "{}_{}_{}_{}",
+            fixture_name,
+            std::process::id(),
+            TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+    std::fs::create_dir_all(&root).expect("mkdir");
+    SemCodeArtifactPath {
+        path: root.join("out.smc"),
+        root,
+    }
+}
+
 pub(crate) fn check_source(source: &impl SourceInputPath) {
     cli_ok(
         vec!["check".to_string(), source.cli_arg()],
