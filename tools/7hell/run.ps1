@@ -94,8 +94,11 @@ cargo run --bin smc -- compile crates/sm-front/tests/adt_match_local.sm -o targe
 Assert-Success "Source compilation smoke test failed"
 cargo run --bin smc -- compile tests/fixtures/pcc6_option_result_diagnostics/positive_option_result_ownership.sm -o target/7hell/positive_option_result_ownership.smc
 Assert-Success "Option/Result compilation smoke test failed"
+cargo run --bin smc -- compile tests/fixtures/pcc4_records/positive_record_field_ownership.sm -o target/7hell/positive_record_field_ownership.smc
+Assert-Success "Record field compilation smoke test failed"
 Remove-Item -Path "target/7hell/adt_match_local.smc" -Force -ErrorAction Ignore
 Remove-Item -Path "target/7hell/positive_option_result_ownership.smc" -Force -ErrorAction Ignore
+Remove-Item -Path "target/7hell/positive_record_field_ownership.smc" -Force -ErrorAction Ignore
 Write-Host "PASS: Hell 6" -ForegroundColor Green
 
 # -----------------------------------------------------------------------------

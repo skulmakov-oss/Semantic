@@ -90,8 +90,11 @@ cargo run --bin smc -- compile crates/sm-front/tests/adt_match_local.sm -o targe
 assert_success "Source compilation smoke test failed"
 cargo run --bin smc -- compile tests/fixtures/pcc6_option_result_diagnostics/positive_option_result_ownership.sm -o target/7hell/positive_option_result_ownership.smc
 assert_success "Option/Result compilation smoke test failed"
+cargo run --bin smc -- compile tests/fixtures/pcc4_records/positive_record_field_ownership.sm -o target/7hell/positive_record_field_ownership.smc
+assert_success "Record field compilation smoke test failed"
 rm -f target/7hell/adt_match_local.smc
 rm -f target/7hell/positive_option_result_ownership.smc
+rm -f target/7hell/positive_record_field_ownership.smc
 echo -e "${GREEN}PASS: Hell 6${NC}"
 
 # -----------------------------------------------------------------------------
