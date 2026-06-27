@@ -105,6 +105,7 @@ serde_json = { version = "1", optional = true }
 # -----------------------------
 [dev-dependencies]
 prom-ui = { path = "crates/prom-ui", default-features = false, features = ["std"] }
+sm-format = { path = "crates/sm-format", default-features = false, features = ["std"] }
 
 # -----------------------------
 # Profiles
