@@ -96,6 +96,8 @@ cargo run --bin smc -- compile tests/fixtures/pcc6_option_result_diagnostics/pos
 Assert-Success "Option/Result compilation smoke test failed"
 cargo run --bin smc -- compile tests/fixtures/pcc4_records/positive_record_field_ownership.sm -o target/7hell/positive_record_field_ownership.smc
 Assert-Success "Record field compilation smoke test failed"
+cargo test --test cli_public_smoke_matrix
+Assert-Success "Public CLI smoke matrix test failed"
 Remove-Item -Path "target/7hell/adt_match_local.smc" -Force -ErrorAction Ignore
 Remove-Item -Path "target/7hell/positive_option_result_ownership.smc" -Force -ErrorAction Ignore
 Remove-Item -Path "target/7hell/positive_record_field_ownership.smc" -Force -ErrorAction Ignore
