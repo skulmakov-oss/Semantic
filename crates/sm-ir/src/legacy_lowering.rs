@@ -5389,7 +5389,11 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
             )?;
-            let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+            let final_ty = if let Some(ann) = ty {
+                canonicalize_declared_type(ann, record_table, adt_table, arena)?
+            } else {
+                vty
+            };
             env.insert_const(*name, final_ty);
             ctx.instrs.push(IrInstr::StoreVar {
                 name: resolve_symbol_name(arena, *name)?.to_string(),
@@ -5418,7 +5422,11 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
             )?;
-            let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+            let final_ty = if let Some(ann) = ty {
+                canonicalize_declared_type(ann, record_table, adt_table, arena)?
+            } else {
+                vty
+            };
             if *is_mut {
                 env.insert_mut(*name, final_ty);
             } else {
@@ -5447,7 +5455,11 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
             )?;
-            let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+            let final_ty = if let Some(ann) = ty {
+                canonicalize_declared_type(ann, record_table, adt_table, arena)?
+            } else {
+                vty
+            };
             bind_tuple_items(
                 items,
                 tuple_reg,
@@ -5564,7 +5576,11 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
             )?;
-            let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+            let final_ty = if let Some(ann) = ty {
+                canonicalize_declared_type(ann, record_table, adt_table, arena)?
+            } else {
+                vty
+            };
             bind_let_else_tuple_items(
                 items,
                 tuple_reg,
@@ -6365,7 +6381,11 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                 )?;
-                let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+                let final_ty = if let Some(ann) = ty {
+                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
+                } else {
+                    vty
+                };
                 block_env.insert_const(*name, final_ty);
                 out.push(IrInstr::StoreVar {
                     name: resolve_symbol_name(arena, *name)?.to_string(),
@@ -6392,7 +6412,11 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                 )?;
-                let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+                let final_ty = if let Some(ann) = ty {
+                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
+                } else {
+                    vty
+                };
                 if *is_mut {
                     block_env.insert_mut(*name, final_ty);
                 } else {
@@ -6418,7 +6442,11 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                 )?;
-                let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+                let final_ty = if let Some(ann) = ty {
+                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
+                } else {
+                    vty
+                };
                 bind_tuple_items(
                     items,
                     tuple_reg,
@@ -7938,8 +7966,7 @@ fn lower_match_expr(
     ) {
         return Err(FrontendError {
             pos: 0,
-            message: "match expression scrutinee must be quad, enum, Option(T), or Result(T, E)"
-                .to_string(),
+            message: format!("match expression scrutinee must be quad, enum, Option(T), or Result(T, E). Got: {:?}", scr_ty),
         });
     }
     let exhaustive_without_default = if match_expr.default.is_none() {
@@ -9230,13 +9257,17 @@ fn append_record_update_write_events_from_expr(
                 arena,
                 ownership_events,
             );
-            
+
             let scrutinee_path = tuple_access_path_from_expr(match_expr.scrutinee, arena);
             for arm in &match_expr.arms {
                 if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
                     if let Some(path) = &scrutinee_path {
                         for (idx, item) in adt_pat.items.iter().enumerate() {
-                            if let sm_front::types::AdtPatternItem::Bind { capture: sm_front::types::CaptureMode::Borrow, .. } = item {
+                            if let sm_front::types::AdtPatternItem::Bind {
+                                capture: sm_front::types::CaptureMode::Borrow,
+                                ..
+                            } = item
+                            {
                                 ownership_events.push(OwnershipPathEvent {
                                     kind: OwnershipPathEventKind::Borrow,
                                     path: path.adt_payload(adt_pat.variant_name, idx as u16),
@@ -9245,7 +9276,7 @@ fn append_record_update_write_events_from_expr(
                         }
                     }
                 }
-                
+
                 if let Some(guard) = arm.guard {
                     append_record_update_write_events_from_expr(guard, arena, ownership_events);
                 }
@@ -10188,7 +10219,7 @@ mod opt_tests {
             .any(|instr| matches!(instr, IrInstr::TupleGet { index: 1, .. })));
     }
 
-                            #[test]
+    #[test]
     fn lower_adt_match_borrow_capture_records_borrow_path_event() {
         let src = r#"
             enum Maybe {
@@ -10206,12 +10237,24 @@ mod opt_tests {
         "#;
 
         let (program, func) = lower_single_function_with_program(src, "use_e");
-        let use_e_func = program.functions.iter().find(|f| program.arena.symbol_name(f.name) == "use_e").unwrap();
+        let use_e_func = program
+            .functions
+            .iter()
+            .find(|f| program.arena.symbol_name(f.name) == "use_e")
+            .unwrap();
         let e_name = use_e_func.params[0].0;
-        
-        let adt = program.adts.iter().find(|adt| program.arena.symbol_name(adt.name) == "Maybe").unwrap();
-        let variant = adt.variants.iter().find(|v| program.arena.symbol_name(v.name) == "Some").unwrap();
-        
+
+        let adt = program
+            .adts
+            .iter()
+            .find(|adt| program.arena.symbol_name(adt.name) == "Maybe")
+            .unwrap();
+        let variant = adt
+            .variants
+            .iter()
+            .find(|v| program.arena.symbol_name(v.name) == "Some")
+            .unwrap();
+
         assert_eq!(
             func.ownership_events,
             vec![OwnershipPathEvent {
@@ -10239,14 +10282,11 @@ mod opt_tests {
         "#;
 
         let (program, func) = lower_single_function_with_program(src, "use_e");
-        
-        assert_eq!(
-            func.ownership_events,
-            vec![]
-        );
+
+        assert_eq!(func.ownership_events, vec![]);
     }
 
-#[test]
+    #[test]
     fn lower_tuple_borrow_capture_records_borrow_path_event() {
         let src = r#"
             fn pair() -> (i32, i32) = (1, 2);

@@ -7899,6 +7899,77 @@ mod tests {
             .expect("prefix-overlap double-borrow must not conflict");
     }
 
+    #[test]
+    fn adt_payload_prefix_overlap_move_and_borrow_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let parent = PatternPath::root().variant(SymbolId(1));
+        let child = PatternPath::root().variant(SymbolId(1)).variant_field(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: parent,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Borrow,
+            path: child,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("prefix-overlap move+borrow must conflict");
+        assert!(err.message.contains("conflicting") || err.message.contains("overlapping"));
+    }
+
+    #[test]
+    fn adt_payload_different_variants_allow() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let path1 = PatternPath::root().variant(SymbolId(1)).variant_field(0);
+        let path2 = PatternPath::root().variant(SymbolId(2)).variant_field(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Move,
+            path: path1,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(4),
+            capture: CaptureMode::Move,
+            path: path2,
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan).expect("different variants must not conflict");
+    }
+
+    #[test]
+    fn adt_payload_different_indexes_allow() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let path1 = PatternPath::root().variant(SymbolId(1)).variant_field(0);
+        let path2 = PatternPath::root().variant(SymbolId(1)).variant_field(1);
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: path1,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Move,
+            path: path2,
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan).expect("different indexes must not conflict");
+    }
+
     // M9.10 Wave B — LetTuple / LetElseTuple path-state tracking
 
     #[test]
