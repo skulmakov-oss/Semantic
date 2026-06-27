@@ -37,6 +37,7 @@ Proves semantic borrow/ownership overlap enforcement at runtime.
 ### Hell 6 — Source to SemCode Smoke
 Proves the end-to-end frontend compiler pipeline works correctly up to the binary artifact generation.
 - Compiles a critical semantic test case (`crates/sm-front/tests/adt_match_local.sm`) into a SemCode artifact (`out.smc`) and ensures the compilation is successful.
+- Compiles the tuple ownership E2E golden fixture (`tests/fixtures/pcc_tuple_ownership/positive_tuple_ownership.sm`) into `target/7hell/positive_tuple_ownership.smc`.
 - Runs the public CLI smoke matrix (`tests/cli_public_smoke_matrix.rs`) across canonical examples to cover `smc check`, `smc run`, `smc compile`, `smc verify`, and `smc run-smc`.
 
 ### Hell 7 — PCC Documentation Integrity
