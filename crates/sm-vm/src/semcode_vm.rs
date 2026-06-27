@@ -641,6 +641,11 @@ fn build_vm_program_view_from_decoded(
                             } => {
                                 p = p.adt_payload(SymbolId(*variant), *index);
                             }
+                            sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(
+                                index,
+                            ) => {
+                                p = p.sequence_index_static(*index);
+                            }
                         }
                     }
                     Ok(p)

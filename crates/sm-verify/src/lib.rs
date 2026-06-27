@@ -449,6 +449,9 @@ fn verify_function_code(
                     // Variant is a global SymbolId; it cannot be bounds-checked
                     // against the local string table. Structural acceptance only.
                 }
+                sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(_) => {
+                    // Static sequence index ownership is structurally accepted.
+                }
                 _ => {}
             }
         }
@@ -1879,6 +1882,30 @@ mod tests {
     }
 
     #[test]
+    fn verifier_accepts_sequence_index_static_ownership_semcode() {
+        let bytes = sequence_index_static_borrow_semcode_bytes();
+        let verified = verify_semcode(&bytes).expect("verify");
+        assert_eq!(verified.functions.len(), 1);
+    }
+
+    #[test]
+    fn verifier_rejects_truncated_sequence_index_static_payload() {
+        let mut bytes = sequence_index_static_borrow_semcode_bytes();
+        let (code_len_pos, code_start, code_end) = function_code_span(&bytes, "main");
+        let code = &bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let truncated_code_len = section_offset + 4 + 2 + 1 + 4 + 2 + 1 + 3;
+        bytes[code_len_pos..code_len_pos + 4]
+            .copy_from_slice(&(truncated_code_len as u32).to_le_bytes());
+        bytes.truncate(code_start + truncated_code_len);
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipSection
+        );
+    }
+
+    #[test]
     fn verifier_accepts_adt_payload_ownership_semcode() {
         let bytes = adt_payload_ownership_semcode_bytes();
         let verified = verify_semcode(&bytes).expect("verify");
@@ -2098,6 +2125,17 @@ mod tests {
             }
         "#;
         compile_program_to_semcode(src).expect("compile")
+    }
+
+    fn sequence_index_static_borrow_semcode_bytes() -> Vec<u8> {
+        let mut bytes = record_field_borrow_semcode_bytes();
+        let (_, code_start, code_end) = function_code_span(&bytes, "main");
+        let code = &mut bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let component_kind_offset = section_offset + 4 + 2 + 1 + 4 + 2;
+        code[component_kind_offset] =
+            sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX;
+        bytes
     }
 
     fn record_field_write_semcode_bytes() -> Vec<u8> {

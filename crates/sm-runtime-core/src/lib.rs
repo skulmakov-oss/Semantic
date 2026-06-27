@@ -70,6 +70,15 @@ impl AccessPath {
         }
     }
 
+    pub fn sequence_index_static(&self, index: u32) -> Self {
+        let mut components = self.components.clone();
+        components.push(PathComponent::SequenceIndexStatic(index));
+        Self {
+            root: self.root,
+            components,
+        }
+    }
+
     pub fn field(&self, name: SymbolId) -> Self {
         let mut components = self.components.clone();
         components.push(PathComponent::Field(name));
@@ -94,6 +103,7 @@ pub enum PathComponent {
     TupleIndex(u16),
     Field(SymbolId),
     AdtPayload { variant: SymbolId, index: u16 },
+    SequenceIndexStatic(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,6 +368,13 @@ mod tests {
         assert_ne!(adt, adt_diff_idx);
         assert_ne!(adt, adt_diff_var);
         assert_ne!(adt, left);
+
+        let sequence = AccessPath::new(SymbolId(9)).sequence_index_static(2);
+        let same_sequence = AccessPath::new(SymbolId(9)).sequence_index_static(2);
+        let different_sequence = AccessPath::new(SymbolId(9)).sequence_index_static(4);
+        assert_eq!(sequence, same_sequence);
+        assert_ne!(sequence, different_sequence);
+        assert_ne!(sequence, left);
     }
 
     #[test]
