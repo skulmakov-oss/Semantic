@@ -3,8 +3,8 @@ use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
     read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC11, MAGIC12, OWNERSHIP_EVENT_KIND_BORROW,
     OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG,
+    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
 use sm_runtime_core::RuntimeTrap;
 use sm_vm::RuntimeError;
@@ -19,6 +19,7 @@ fn run_token_first_main(semcode: &[u8]) -> Result<(), RuntimeError> {
 enum OwnershipPathComponentSpec {
     TupleIndex(u16),
     FieldSymbol(u32),
+    SequenceIndexStatic(u32),
     AdtPayload(u32, u16),
 }
 
@@ -129,6 +130,98 @@ fn runtime_ownership_rejects_child_parent_overlap_deterministically() {
     );
 
     assert_write_overlap_rejects_deterministically(&rewritten, "pair");
+}
+
+#[test]
+fn runtime_ownership_sequence_same_index_conflict_rejects() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_sibling_index_write_passes() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(1)],
+            },
+        ],
+    );
+
+    run_token_first_main(&rewritten).expect("sibling sequence write should pass");
+}
+
+#[test]
+fn runtime_ownership_sequence_parent_child_conflict_rejects() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_child_parent_conflict_rejects() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
 }
 
 #[test]
@@ -617,6 +710,17 @@ fn tuple_assignment_source() -> &'static str {
     "#
 }
 
+fn sequence_assignment_source() -> &'static str {
+    r#"
+        fn main() {
+            let seq: (i32, bool) = (1, true);
+            let other: i32 = 0;
+            (seq, other) = ((2, false), 1);
+            return;
+        }
+    "#
+}
+
 fn record_assignment_source() -> &'static str {
     r#"
         record DecisionContext {
@@ -867,6 +971,10 @@ fn append_ownership_event(
                 out.push(OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL);
                 out.extend_from_slice(&field.to_le_bytes());
             }
+            OwnershipPathComponentSpec::SequenceIndexStatic(index) => {
+                out.push(OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX);
+                out.extend_from_slice(&index.to_le_bytes());
+            }
             OwnershipPathComponentSpec::AdtPayload(variant, index) => {
                 out.push(OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD);
                 out.extend_from_slice(&variant.to_le_bytes());
@@ -898,6 +1006,9 @@ fn record_field_component_ids(bytes: &[u8], target: &str) -> (u32, u32) {
                 }
                 OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => {
                     only_field = Some(read_u32_le(code, &mut cursor).expect("field component"));
+                }
+                OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX => {
+                    let _ = read_u32_le(code, &mut cursor).expect("sequence component");
                 }
                 _ => panic!("unexpected ownership component kind 0x{component_kind:02x}"),
             }
@@ -960,6 +1071,9 @@ fn parse_function_layout(code: &[u8]) -> FunctionLayout {
                         let _ = read_u16_le(code, &mut cursor).expect("ownership component value");
                     }
                     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => {
+                        let _ = read_u32_le(code, &mut cursor).expect("ownership component value");
+                    }
+                    OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX => {
                         let _ = read_u32_le(code, &mut cursor).expect("ownership component value");
                     }
                     OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD => {
