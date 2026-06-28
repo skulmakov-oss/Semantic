@@ -23,6 +23,12 @@ pub mod source;
 pub use arena::{Arena, ArenaId};
 pub use diagnostics::{DiagLevel, Diagnostic};
 pub use ids::{ExprId, StmtId, SymbolId};
+pub use quadro::{
+    iter_mask_indices, QuadMasks, QuadState, QuadroError, QuadroReg, StateDelta, LSB_MASK,
+    MSB_MASK, QUADIT_COUNT, QUADIT_WIDTH,
+};
+#[cfg(feature = "alloc")]
+pub use quadro::{DeltaSoA, MaskIndexIter, QuadroBank};
 #[cfg(feature = "alloc")]
 pub use sigtable::SigTable;
 pub use source::{FileId, SourceMark, Span};
