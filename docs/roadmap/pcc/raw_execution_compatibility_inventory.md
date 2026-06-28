@@ -112,7 +112,19 @@ The following wording remains easy to misread if docs drift:
 - `verify_semcode` is a legacy admission API and should not be presented as the
   preferred token-first boundary for new production code.
 
-## 6. Follow-Up Recommendations
+## 6. Wording Policy
+
+Use the following wording consistently across specs and roadmap docs:
+
+- canonical trusted route: verifier-first and token-first execution through
+  `verify_semcode_token` and `Verified*` token paths;
+- verified compatibility helper: a wrapper around admitted execution that
+  remains compatible, but is not the preferred new canonical boundary;
+- raw lower-level helper: a byte-oriented or internal surface that must not be
+  described as trusted canonical execution;
+- tooling-only route: inspection or disassembly only, not execution.
+
+## 7. Follow-Up Recommendations
 
 Recommended next slices:
 
@@ -127,7 +139,7 @@ Recommended next slices:
 Do not remove raw APIs in this doc. The purpose here is perimeter clarity, not
 API deletion.
 
-## 7. Final Verdict
+## 8. Final Verdict
 
 The execution perimeter now has a canonical inventory:
 
@@ -137,4 +149,3 @@ The execution perimeter now has a canonical inventory:
 - tooling-only route: artifact inspection.
 
 Core Trust Freeze remains **not declared complete**.
-
