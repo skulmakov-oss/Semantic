@@ -313,6 +313,21 @@ impl DeltaSoA {
         self.entered_super.push(delta.entered_super);
         self.left_super.push(delta.left_super);
     }
+
+    pub fn to_aos(&self) -> Vec<StateDelta> {
+        let mut out = Vec::with_capacity(self.len());
+        for index in 0..self.len() {
+            out.push(StateDelta {
+                entered_true: self.entered_true[index],
+                left_true: self.left_true[index],
+                entered_false: self.entered_false[index],
+                left_false: self.left_false[index],
+                entered_super: self.entered_super[index],
+                left_super: self.left_super[index],
+            });
+        }
+        out
+    }
 }
 
 #[cfg(feature = "alloc")]
