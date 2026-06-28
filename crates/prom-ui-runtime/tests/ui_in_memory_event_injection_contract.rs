@@ -92,7 +92,7 @@ fn injected_events_can_be_moved_into_event_buffer_and_polled() {
         InputEvent::new(InputEventKind::KeyUp { key_code: 11 }),
     ]);
 
-    session.run(|_| LoopControl::ExitRequested).unwrap();
+    session.run(|_, _| LoopControl::ExitRequested).unwrap();
 
     let mut buffer = EventBuffer::new();
     for event in session.backend_mut().drain_events() {

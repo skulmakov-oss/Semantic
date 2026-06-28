@@ -1,0 +1,5 @@
+fn main() {
+    let value: i32 = 1;
+    assert(value == 1);
+    return;
+}

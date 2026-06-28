@@ -1,0 +1,12 @@
+record Pair {
+    left: i32,
+    right: i32,
+}
+
+fn main() {
+    let base: Pair = Pair { left: 1, right: 2 };
+    let next: Pair = base with { left: 3 };
+    assert(next.left == 3);
+    assert(next.right == 2);
+    return;
+}

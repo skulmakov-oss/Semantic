@@ -1,0 +1,23 @@
+enum Direction {
+    Up,
+    Right,
+    Down,
+    Left,
+}
+
+fn classify(dir: Direction, is_primary: bool) -> text {
+    let out: text = match dir {
+        Direction::Up if is_primary => { "primary-up" }
+        Direction::Up => { "up" }
+        Direction::Right => { "right" }
+        Direction::Down => { "down" }
+        Direction::Left => { "left" }
+    };
+    return out;
+}
+
+fn main() {
+    assert(classify(Direction::Up, true) == "primary-up");
+    assert(classify(Direction::Up, false) == "up");
+    return;
+}

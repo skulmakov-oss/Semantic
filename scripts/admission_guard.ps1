@@ -15,6 +15,7 @@ param(
     [switch] $PRReady,
     [switch] $MergePreflight,
     [switch] $Readiness,
+    [switch] $CIParity,
     [switch] $FullPreflight,
 
     [string] $BaseRef = "origin/main"
@@ -164,6 +165,61 @@ function Invoke-PRReadyGate {
     }
 }
 
+function Invoke-CIParityGate {
+    Invoke-LocalCiStep "ci/pr-ready: cargo fmt --all --check" {
+        cargo fmt --all --check
+    }
+    Invoke-LocalCiStep "ci/pr-ready: cargo clippy --workspace --all-targets -- -D warnings" {
+        cargo clippy --workspace --all-targets -- -D warnings
+    }
+
+    Invoke-LocalCiStep "ci/boundary-enforcement: cargo test --test legacy_guards --quiet" {
+        cargo test --test legacy_guards --quiet
+    }
+    Invoke-LocalCiStep "ci/boundary-enforcement: cargo test --test frontend_boundaries --quiet" {
+        cargo test --test frontend_boundaries --quiet
+    }
+    Invoke-LocalCiStep "ci/boundary-enforcement: cargo test --test ir_opt_boundaries --quiet" {
+        cargo test --test ir_opt_boundaries --quiet
+    }
+    Invoke-LocalCiStep "ci/boundary-enforcement: cargo test --test dependency_boundaries --quiet" {
+        cargo test --test dependency_boundaries --quiet
+    }
+
+    Invoke-LocalCiStep "ci/public-api-guard: cargo test --test public_api_contracts --quiet" {
+        cargo test --test public_api_contracts --quiet
+    }
+
+    Invoke-LocalCiStep "ci/runtime-release-gates: cargo test --test golden_semcode --quiet" {
+        cargo test --test golden_semcode --quiet
+    }
+    Invoke-LocalCiStep "ci/runtime-release-gates: cargo test --test prometheus_runtime_matrix --quiet" {
+        cargo test --test prometheus_runtime_matrix --quiet
+    }
+    Invoke-LocalCiStep "ci/runtime-release-gates: cargo test --test prometheus_runtime_goldens --quiet" {
+        cargo test --test prometheus_runtime_goldens --quiet
+    }
+    Invoke-LocalCiStep "ci/runtime-release-gates: cargo test --test prometheus_runtime_negative_goldens --quiet" {
+        cargo test --test prometheus_runtime_negative_goldens --quiet
+    }
+    Invoke-LocalCiStep "ci/runtime-release-gates: cargo test --test prometheus_runtime_compat_matrix --quiet" {
+        cargo test --test prometheus_runtime_compat_matrix --quiet
+    }
+
+    $ManifestPath = Join-Path $TempRoot "semantic_v1_release_bundle_manifest.json"
+    Invoke-LocalCiStep "ci/release-bundle-process: verify release bundle process" {
+        pwsh -File scripts/verify_release_bundle.ps1 -ManifestPath $ManifestPath
+    }
+
+    Invoke-LocalCiStep "ci/test-std: cargo test --all-targets --quiet" {
+        cargo test --all-targets --quiet
+    }
+
+    Invoke-LocalCiStep "ci/check-no-std: cargo check --no-default-features --quiet" {
+        cargo check --no-default-features --quiet
+    }
+}
+
 function Invoke-ReadinessGate {
     $ManifestPath = Join-Path $TempRoot "semantic_v1_release_bundle_manifest.json"
     $ProjectRootSmokeFixture = Join-Path $RepoRoot "examples/qualification/pcc9_project_root_minimal"
@@ -259,6 +315,13 @@ if ($Readiness) {
     Write-Host "`n=== GATE MODE: Readiness ==="
     Invoke-ReadinessGate
     Write-Host "`nADMISSION GUARD READINESS PASS"
+    exit 0
+}
+
+if ($CIParity) {
+    Write-Host "`n=== GATE MODE: CIParity ==="
+    Invoke-CIParityGate
+    Write-Host "`nADMISSION GUARD CI PARITY PASS"
     exit 0
 }
 

@@ -1,0 +1,18 @@
+enum Direction {
+    Left,
+    Right,
+}
+
+enum Signal {
+    High,
+    Low,
+}
+
+fn main() {
+    let dir: Direction = Direction::Left;
+    let value: i32 = match dir {
+        Signal::High => { 1 }
+        Direction::Right => { 2 }
+    };
+    return;
+}

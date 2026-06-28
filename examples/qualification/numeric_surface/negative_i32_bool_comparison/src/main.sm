@@ -1,0 +1,4 @@
+fn main() {
+    let cmp: bool = 1 < true;
+    return;
+}

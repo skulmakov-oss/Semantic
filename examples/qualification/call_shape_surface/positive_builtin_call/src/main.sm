@@ -1,0 +1,6 @@
+fn main() {
+    let values: Sequence(i32) = [1, 2];
+    let grown: Sequence(i32) = prepend(push(values, 3), 0);
+    assert(len(grown) == 4);
+    return;
+}

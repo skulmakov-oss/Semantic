@@ -1,0 +1,5 @@
+fn main() {
+    let offset: f64 = 1.0;
+    let value: f64 = (x => x + offset)(2.0);
+    return;
+}

@@ -1,0 +1,9 @@
+fn apply(x: f64) -> f64 {
+    let add: Closure(f64 -> f64) = (y => y + 1.0);
+    return add(x);
+}
+
+fn main() {
+    assert(apply(2.0) == 3.0);
+    return;
+}

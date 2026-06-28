@@ -1,0 +1,4 @@
+format 1
+package project_manifest_surface_package
+manifest_dir .
+module_root src

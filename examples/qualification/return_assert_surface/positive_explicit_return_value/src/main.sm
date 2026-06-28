@@ -1,0 +1,9 @@
+fn answer() -> i32 {
+    return 42;
+}
+
+fn main() {
+    let value: i32 = answer();
+    assert(value == 42);
+    return;
+}

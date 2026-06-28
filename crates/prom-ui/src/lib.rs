@@ -31,6 +31,7 @@ pub mod action_dispatch_record;
 pub mod action_dispatch_route;
 pub mod action_dispatch_summary;
 pub mod action_dispatch_trace;
+pub mod action_mapping;
 pub mod admitted_action;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
@@ -39,13 +40,17 @@ pub mod committed_effect_record;
 pub mod effect_request;
 pub mod effect_request_summary;
 pub mod effect_request_trace;
+pub mod hit_test;
 pub mod host_runtime_effect;
 pub mod host_runtime_effect_denial_trace;
 pub mod host_runtime_effect_result;
+pub mod intent_dispatch;
 pub mod intent_stream;
 pub mod interaction;
 pub mod layout;
+pub mod layout_rect;
 pub mod lowering;
+pub mod minimal_block_layout;
 pub mod model;
 pub mod prepared_effect;
 pub mod prepared_effect_result;
@@ -119,6 +124,7 @@ pub use action_dispatch_trace::{
     trace_interaction_semantic_action_dispatch, InteractionSemanticActionDispatchTraceReason,
     InteractionSemanticActionDispatchTraceReport, InteractionSemanticActionDispatchTraceStatus,
 };
+pub use action_mapping::{DefaultActionMapper, SemanticIntent, UiActionMapper};
 pub use admitted_action::{
     build_interaction_admitted_semantic_action, InteractionAdmittedSemanticAction,
     InteractionAdmittedSemanticActionDispatchReadiness,
@@ -163,6 +169,7 @@ pub use effect_request_trace::{
     trace_interaction_effect_request, InteractionEffectRequestTraceReason,
     InteractionEffectRequestTraceReport, InteractionEffectRequestTraceStatus,
 };
+pub use hit_test::{DefaultHitTester, UiHitTester};
 pub use host_runtime_effect::{
     describe_interaction_host_runtime_effect_boundary, InteractionHostRuntimeAuditWriteRequirement,
     InteractionHostRuntimeEffectBoundaryDecisionShape,
@@ -183,6 +190,7 @@ pub use host_runtime_effect_result::{
     InteractionHostRuntimeEffectBoundaryMissingRequirement,
     InteractionHostRuntimeEffectBoundaryResult, InteractionHostRuntimeEffectBoundaryResultId,
 };
+pub use intent_dispatch::{IntentDispatchError, UiActionDispatcher};
 pub use intent_stream::{
     trace_interaction_intent_stream, InteractionIntentStreamModel, InteractionIntentStreamReport,
     InteractionIntentStreamStats,
@@ -191,10 +199,12 @@ pub use interaction::{
     ElementId, InteractionIntentDescriptor, InteractionIntentId, InteractionIntentKind,
     InteractionModifiers, InteractionSource, InteractionTarget, RegionId, SurfaceId, WindowId,
 };
+pub use layout_rect::{UiLayoutRect, UiLayoutRectEntry, UiLayoutRectModel};
 pub use lowering::{
     lower_ast_to_ir, UiLoweringConfig, UiLoweringDiagnostic, UiLoweringDiagnosticKind,
     UiLoweringDiagnostics, UiLoweringResult,
 };
+pub use minimal_block_layout::{solve_minimal_block_layout, UiMinimalBlockLayoutConfig};
 pub use model::{
     UiAst, UiAstNode, UiAstNodeId, UiAstNodeKind, UiIr, UiIrNode, UiIrNodeId, UiIrNodeKind, UiNode,
     UiNodeId, UiNodeKind, UiNodeResolution, UiTree, UiTreeId,

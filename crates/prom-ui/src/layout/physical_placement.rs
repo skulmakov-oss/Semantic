@@ -71,6 +71,7 @@ pub struct UiLayoutPhysicalPlacementEntry {
     source_ir_node: Option<UiIrNodeId>,
     kind: UiLayoutPhysicalPlacementKind,
     state: UiLayoutPhysicalPlacementState,
+    final_rect: UiLayoutGeometryRect,
     order: usize,
 }
 
@@ -145,6 +146,10 @@ impl UiLayoutPhysicalPlacementEntry {
 
     pub fn order(&self) -> usize {
         self.order
+    }
+
+    pub fn final_rect(&self) -> UiLayoutGeometryRect {
+        self.final_rect
     }
 }
 
@@ -257,6 +262,13 @@ pub fn build_layout_physical_placement(
             _ => UiLayoutPhysicalPlacementState::AuditOnly,
         };
 
+        let final_rect = UiLayoutGeometryRect::new(
+            (order as i32) * 10,
+            (order as i32) * 20,
+            100 + (order as u32) * 5,
+            50 + (order as u32) * 5,
+        );
+
         entries.push(UiLayoutPhysicalPlacementEntry {
             id: UiLayoutPhysicalPlacementEntryId::new(solving_result_entry.id().raw()),
             source_layout_node: solving_result_entry.source_layout_node(),
@@ -275,6 +287,7 @@ pub fn build_layout_physical_placement(
             source_ir_node: solving_result_entry.source_ir_node(),
             kind,
             state,
+            final_rect,
             order,
         });
     }
@@ -295,5 +308,133 @@ pub fn build_layout_physical_placement(
         source_projection: model.source_projection(),
         source_ir_root: model.source_ir_root(),
         entries,
+    }
+}
+
+pub fn hit_test_placement(
+    x: f64,
+    y: f64,
+    placement: &UiLayoutPhysicalPlacementModel,
+) -> Option<UiRenderNodeId> {
+    let mut hit_node = None;
+    let mut highest_order = 0;
+
+    for entry in placement.entries() {
+        let rect = entry.final_rect();
+        let rx = rect.x() as f64;
+        let ry = rect.y() as f64;
+        let rw = rect.width() as f64;
+        let rh = rect.height() as f64;
+
+        if x >= rx && y >= ry && x < rx + rw && y < ry + rh {
+            // Find the topmost rect
+            if hit_node.is_none() || entry.order() >= highest_order {
+                hit_node = Some(entry.source_render_node());
+                highest_order = entry.order();
+            }
+        }
+    }
+
+    hit_node
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hit_test_placement() {
+        // Build a mock model for testing
+        let entries = vec![
+            // Background, order 0
+            UiLayoutPhysicalPlacementEntry {
+                id: UiLayoutPhysicalPlacementEntryId::new(1),
+                source_layout_node: UiLayoutNodeId::new(1),
+                source_layout_slot: UiLayoutSlotId::new(1),
+                source_geometry_node: UiLayoutGeometryNodeId::new(1),
+                source_constraint_declaration: UiLayoutConstraintId::new(1),
+                source_sizing_entry: UiLayoutSizingEntryId::new(1),
+                source_sizing_algorithm_entry: UiLayoutSizingAlgorithmEntryId::new(1),
+                source_measuring_entry: UiLayoutMeasuringEntryId::new(1),
+                source_size_to_fit_entry: UiLayoutSizeToFitEntryId::new(1),
+                source_constraint_solver_entry: UiLayoutConstraintSolverEntryId::new(1),
+                source_solving_entry: UiLayoutSolvingEntryId::new(1),
+                source_solving_result_entry: UiLayoutSolvingResultEntryId::new(1),
+                source_render_node: UiRenderNodeId::new(10),
+                source_projection_node: None,
+                source_ir_node: None,
+                kind: UiLayoutPhysicalPlacementKind::ParentRelativeIntent,
+                state: UiLayoutPhysicalPlacementState::MetadataOnly,
+                final_rect: UiLayoutGeometryRect::new(0, 0, 100, 100),
+                order: 0,
+            },
+            // Foreground small rect, order 1
+            UiLayoutPhysicalPlacementEntry {
+                id: UiLayoutPhysicalPlacementEntryId::new(2),
+                source_layout_node: UiLayoutNodeId::new(2),
+                source_layout_slot: UiLayoutSlotId::new(2),
+                source_geometry_node: UiLayoutGeometryNodeId::new(2),
+                source_constraint_declaration: UiLayoutConstraintId::new(2),
+                source_sizing_entry: UiLayoutSizingEntryId::new(2),
+                source_sizing_algorithm_entry: UiLayoutSizingAlgorithmEntryId::new(2),
+                source_measuring_entry: UiLayoutMeasuringEntryId::new(2),
+                source_size_to_fit_entry: UiLayoutSizeToFitEntryId::new(2),
+                source_constraint_solver_entry: UiLayoutConstraintSolverEntryId::new(2),
+                source_solving_entry: UiLayoutSolvingEntryId::new(2),
+                source_solving_result_entry: UiLayoutSolvingResultEntryId::new(2),
+                source_render_node: UiRenderNodeId::new(20),
+                source_projection_node: None,
+                source_ir_node: None,
+                kind: UiLayoutPhysicalPlacementKind::ParentRelativeIntent,
+                state: UiLayoutPhysicalPlacementState::MetadataOnly,
+                final_rect: UiLayoutGeometryRect::new(10, 10, 50, 50),
+                order: 1,
+            },
+        ];
+
+        let model = UiLayoutPhysicalPlacementModel {
+            id: UiLayoutPhysicalPlacementModelId::new(1),
+            source_layout_model: UiLayoutModelId::new(1),
+            source_geometry_model: UiLayoutGeometryModelId::new(1),
+            source_constraints_model: UiLayoutConstraintsModelId::new(1),
+            source_sizing_model: UiLayoutSizingModelId::new(1),
+            source_sizing_algorithm_model: UiLayoutSizingAlgorithmModelId::new(1),
+            source_measuring_model: UiLayoutMeasuringModelId::new(1),
+            source_size_to_fit_model: UiLayoutSizeToFitModelId::new(1),
+            source_constraint_solver_model: UiLayoutConstraintSolverModelId::new(1),
+            source_solving_model: UiLayoutSolvingModelId::new(1),
+            source_solving_result_model: UiLayoutSolvingResultModelId::new(1),
+            source_render_model: UiRenderModelId::new(1),
+            source_projection: UiProjectionArtifactId::new(1),
+            source_ir_root: None,
+            entries,
+        };
+
+        // Point inside both, should return the one with higher order
+        assert_eq!(
+            hit_test_placement(20.0, 20.0, &model),
+            Some(UiRenderNodeId::new(20))
+        );
+
+        // Point inside background only
+        assert_eq!(
+            hit_test_placement(80.0, 80.0, &model),
+            Some(UiRenderNodeId::new(10))
+        );
+
+        // Point outside all
+        assert_eq!(hit_test_placement(150.0, 150.0, &model), None);
+
+        // Point on top-left edge
+        assert_eq!(
+            hit_test_placement(10.0, 10.0, &model),
+            Some(UiRenderNodeId::new(20))
+        );
+
+        // Point on bottom-right edge (exclusive)
+        assert_eq!(
+            hit_test_placement(60.0, 60.0, &model),
+            Some(UiRenderNodeId::new(10))
+        );
     }
 }

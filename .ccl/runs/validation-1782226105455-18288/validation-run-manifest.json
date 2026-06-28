@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "validation_run_id": "validation-1782226105455-18288",
+  "contract_path": "C:\\Users\\said3\\AppData\\Local\\Temp\\semantic-branch-condition-code-doc-ccl-dogfood.json",
+  "contract_sha256": "34a9d2c12fa0be6cc0437375abf2286e0ccf8e5cd9785a361d39b83e74aa6687",
+  "repo_path": ".",
+  "status": "CONTRACT_FAIL",
+  "started_unix_ms": 1782226105456,
+  "finished_unix_ms": 1782226105457,
+  "commands": [],
+  "github_ci_used_as_evidence": false,
+  "environment_policy": {
+    "mode": "record_only",
+    "status": "pass",
+    "checked": false,
+    "command_results": [],
+    "warnings_count": 0,
+    "violations_count": 0,
+    "redacted_variables_count": 0
+  },
+  "reason": "contract_parse_failed: expected value at line 1 column 1"
+}

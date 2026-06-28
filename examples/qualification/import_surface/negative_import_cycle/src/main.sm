@@ -1,0 +1,5 @@
+Import "a.sm"
+
+fn main() {
+    return;
+}

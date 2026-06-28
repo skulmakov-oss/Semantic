@@ -1,0 +1,10 @@
+fn main() {
+    let m: Map(i32, bool) = map_empty();
+    assert(map_contains(m, 1) == false);
+
+    let m2: Map(i32, bool) = map_set(m, 1, true);
+    assert(map_contains(m2, 1) == true);
+    assert(map_get(m2, 1, false) == true);
+    assert(map_get(m2, 42, false) == false);
+    return;
+}

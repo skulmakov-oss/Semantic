@@ -1,0 +1,27 @@
+enum Direction {
+    Up,
+    Right,
+    Down,
+    Left,
+}
+
+fn describe(opt: Option(Direction)) -> text {
+    let out: text = match opt {
+        Option::Some(dir) => {
+            match dir {
+                Direction::Up => { "up" }
+                Direction::Right => { "right" }
+                Direction::Down => { "down" }
+                Direction::Left => { "left" }
+            }
+        }
+        Option::None => { "none" }
+    };
+    return out;
+}
+
+fn main() {
+    assert(describe(Option::Some(Direction::Left)) == "left");
+    assert(describe(Option::None) == "none");
+    return;
+}

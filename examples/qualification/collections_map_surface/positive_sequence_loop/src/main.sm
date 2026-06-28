@@ -1,0 +1,14 @@
+fn main() {
+    let values: Sequence(i32) = [1, 2, 3];
+    let mut index: i32 = 0;
+    let mut total: i32 = 0;
+
+    while index < len(values) {
+        total = total + values[index];
+        index = index + 1;
+    }
+
+    assert(index == len(values));
+    assert(total == 6);
+    return;
+}

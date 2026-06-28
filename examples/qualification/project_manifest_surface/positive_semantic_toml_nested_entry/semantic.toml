@@ -1,0 +1,5 @@
+[package]
+name = "project_manifest_surface_nested"
+
+[project]
+entry = "examples/main.sm"

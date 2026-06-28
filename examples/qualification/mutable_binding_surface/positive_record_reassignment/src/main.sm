@@ -1,0 +1,10 @@
+record Pair {
+    left: i32,
+    right: i32,
+}
+
+fn main() {
+    let mut pair: Pair = Pair { left: 1, right: 2 };
+    pair = Pair { left: 3, right: 4 };
+    assert(pair.left == 3);
+}

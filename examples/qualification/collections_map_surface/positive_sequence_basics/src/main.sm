@@ -1,0 +1,8 @@
+fn main() {
+    let values: Sequence(i32) = [3, 4, 5];
+    assert(len(values) == 3);
+    assert(values[0] == 3);
+    assert(values[1] == 4);
+    assert(values[2] == 5);
+    return;
+}

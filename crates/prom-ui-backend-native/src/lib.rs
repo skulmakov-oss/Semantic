@@ -13,10 +13,80 @@
 
 extern crate alloc;
 
+#[allow(unused_imports)]
 use prom_ui_runtime::{
     DrawFrame, InputEvent, InputEventKind, LoopControl, UiBackendAdapter, UiRuntimeError,
     WindowConfig,
 };
+
+pub mod action_translation;
+pub mod draw_generation;
+pub mod frame_sink;
+pub mod interaction;
+pub mod session_hook;
+
+pub use action_translation::{DefaultNativeActionTranslator, NativeActionTranslator};
+pub use frame_sink::{UiBackendFrame, UiBackendFrameEntry, UiFrameSink};
+pub use interaction::RoutedInteraction;
+
+/// Raw button state representing physical input evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RawButtonState {
+    Pressed,
+    Released,
+}
+
+/// Raw keyboard key code representing physical input evidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RawKeyCode {
+    KeyA,
+    KeyB,
+    KeyC,
+    KeyD,
+    KeyW,
+    KeyS,
+    Digit0,
+    Digit1,
+    Digit2,
+    Enter,
+    Escape,
+    Space,
+    Unknown(u32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RawMouseButton {
+    Left,
+    Right,
+    Middle,
+    Back,
+    Forward,
+    Other(u32),
+}
+
+/// Inert physical event evidence captured from the host.
+///
+/// This does not infer semantic intent.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RawBackendEvent {
+    WindowResized {
+        width: u32,
+        height: u32,
+    },
+    KeyboardInput {
+        key: RawKeyCode,
+        state: RawButtonState,
+    },
+    PointerMoved {
+        x: f64,
+        y: f64,
+    },
+    MouseInput {
+        button: RawMouseButton,
+        state: RawButtonState,
+    },
+    CloseRequested,
+}
 
 #[cfg(feature = "winit-backend")]
 #[derive(Debug)]
@@ -34,7 +104,30 @@ impl From<winit::error::EventLoopError> for NativeBackendWinitSmokeError {
 
 /// Returns whether this crate was compiled with the `winit-backend` feature.
 pub const fn winit_backend_feature_enabled() -> bool {
-    cfg!(feature = "winit-backend")
+    #[cfg(feature = "winit-backend")]
+    {
+        true
+    }
+    #[cfg(not(feature = "winit-backend"))]
+    {
+        false
+    }
+}
+
+/// Returns whether the `wgpu-backend` Cargo feature is enabled at compile time.
+pub const fn wgpu_backend_feature_enabled() -> bool {
+    #[cfg(feature = "wgpu-backend")]
+    {
+        true
+    }
+    #[cfg(not(feature = "wgpu-backend"))]
+    {
+        false
+    }
+}
+
+pub const fn native_run_loop_safety_lock_available() -> bool {
+    true
 }
 
 #[cfg(feature = "winit-backend")]
@@ -51,7 +144,7 @@ pub mod winit_placeholder {
     use winit::{
         application::ApplicationHandler,
         dpi::LogicalSize,
-        event::{ElementState, WindowEvent},
+        event::{ElementState, MouseButton, WindowEvent},
         event_loop::{ActiveEventLoop, EventLoop},
         keyboard::{KeyCode, PhysicalKey},
         window::{Window, WindowAttributes, WindowId},
@@ -190,6 +283,101 @@ pub mod winit_placeholder {
             WindowEvent::CloseRequested => Some(translate_winit_close_requested()),
             WindowEvent::KeyboardInput { event, .. } => {
                 translate_winit_physical_key(event.state, event.physical_key)
+            }
+            WindowEvent::CursorMoved { position, .. } => Some(prom_ui_runtime::InputEvent::new(
+                prom_ui_runtime::InputEventKind::PointerMoved {
+                    x: position.x,
+                    y: position.y,
+                },
+            )),
+            WindowEvent::MouseInput { state, button, .. } => {
+                let btn_num = match button {
+                    MouseButton::Left => 0,
+                    MouseButton::Right => 1,
+                    MouseButton::Middle => 2,
+                    MouseButton::Back => 3,
+                    MouseButton::Forward => 4,
+                    MouseButton::Other(n) => *n as u32,
+                };
+                let kind = match state {
+                    ElementState::Pressed => {
+                        prom_ui_runtime::InputEventKind::PointerDown { button: btn_num }
+                    }
+                    ElementState::Released => {
+                        prom_ui_runtime::InputEventKind::PointerUp { button: btn_num }
+                    }
+                };
+                Some(prom_ui_runtime::InputEvent::new(kind))
+            }
+            _ => None,
+        }
+    }
+
+    /// Translate a selected winit physical key into `RawKeyCode`.
+    pub const fn translate_winit_to_raw_key_code(key_code: KeyCode) -> super::RawKeyCode {
+        match key_code {
+            KeyCode::KeyA => super::RawKeyCode::KeyA,
+            KeyCode::KeyB => super::RawKeyCode::KeyB,
+            KeyCode::KeyC => super::RawKeyCode::KeyC,
+            KeyCode::KeyD => super::RawKeyCode::KeyD,
+            KeyCode::KeyW => super::RawKeyCode::KeyW,
+            KeyCode::KeyS => super::RawKeyCode::KeyS,
+            KeyCode::Digit0 => super::RawKeyCode::Digit0,
+            KeyCode::Digit1 => super::RawKeyCode::Digit1,
+            KeyCode::Digit2 => super::RawKeyCode::Digit2,
+            KeyCode::Enter => super::RawKeyCode::Enter,
+            KeyCode::Escape => super::RawKeyCode::Escape,
+            KeyCode::Space => super::RawKeyCode::Space,
+            _ => super::RawKeyCode::Unknown(key_code as u32),
+        }
+    }
+
+    /// Translate a winit `ElementState` to `RawButtonState`.
+    pub const fn translate_winit_to_raw_button_state(state: ElementState) -> super::RawButtonState {
+        match state {
+            ElementState::Pressed => super::RawButtonState::Pressed,
+            ElementState::Released => super::RawButtonState::Released,
+        }
+    }
+
+    /// Translate a winit `WindowEvent` into inert `RawBackendEvent` evidence.
+    pub fn translate_winit_to_raw_backend_event(
+        event: &WindowEvent,
+    ) -> Option<super::RawBackendEvent> {
+        match event {
+            WindowEvent::CloseRequested => Some(super::RawBackendEvent::CloseRequested),
+            WindowEvent::Resized(physical_size) => Some(super::RawBackendEvent::WindowResized {
+                width: physical_size.width,
+                height: physical_size.height,
+            }),
+            WindowEvent::KeyboardInput { event, .. } => {
+                let key_code = match event.physical_key {
+                    PhysicalKey::Code(code) => translate_winit_to_raw_key_code(code),
+                    PhysicalKey::Unidentified(_) => return None,
+                };
+                let state = translate_winit_to_raw_button_state(event.state);
+                Some(super::RawBackendEvent::KeyboardInput {
+                    key: key_code,
+                    state,
+                })
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                Some(super::RawBackendEvent::PointerMoved {
+                    x: position.x,
+                    y: position.y,
+                })
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                let button = match button {
+                    winit::event::MouseButton::Left => super::RawMouseButton::Left,
+                    winit::event::MouseButton::Right => super::RawMouseButton::Right,
+                    winit::event::MouseButton::Middle => super::RawMouseButton::Middle,
+                    winit::event::MouseButton::Back => super::RawMouseButton::Back,
+                    winit::event::MouseButton::Forward => super::RawMouseButton::Forward,
+                    winit::event::MouseButton::Other(n) => super::RawMouseButton::Other(*n as u32),
+                };
+                let state = translate_winit_to_raw_button_state(*state);
+                Some(super::RawBackendEvent::MouseInput { button, state })
             }
             _ => None,
         }
@@ -513,8 +701,8 @@ pub mod winit_placeholder {
         /// Existing NativeBackendWinitAppState manual run_app path.
         ManualAppStateRun,
 
-        /// Future step: adapter integration has not been admitted yet.
-        AdapterIntegrationDeferred,
+        /// Adapter is integrated with `NativeBackend::run_event_loop`.
+        AdapterIntegrated,
     }
 
     /// Ownership model for the planned NativeBackend/winit run-loop path.
@@ -523,8 +711,8 @@ pub mod winit_placeholder {
         /// Manual helper consumes NativeBackend and returns summary only.
         ConsumesBackendReturnsSummary,
 
-        /// Future persistent ownership model is intentionally unresolved.
-        PersistentBackendOwnershipDeferred,
+        /// NativeBackend temporarily hosts the winit EventLoop in run_event_loop.
+        HostedInsideBackendRunEventLoop,
     }
 
     /// Preflight readiness for running the NativeBackend-backed winit app state.
@@ -584,10 +772,28 @@ pub mod winit_placeholder {
             }
         }
 
+        /// Current integrated plan.
+        pub const fn current_integrated_plan() -> Self {
+            Self {
+                stage: NativeBackendWinitRunLoopStage::AdapterIntegrated,
+                ownership: NativeBackendWinitRunLoopOwnership::HostedInsideBackendRunEventLoop,
+
+                requires_staged_window_config: true,
+                uses_native_backend_app_state: true,
+                creates_event_loop: true,
+                may_create_native_window: true,
+                may_call_run_app: true,
+
+                integrates_with_backend_run_event_loop: true,
+                mutates_prom_ui_runtime: false,
+                changes_ui_backend_adapter: false,
+                includes_renderer: false,
+                presents_frames: false,
+            }
+        }
+
         pub const fn keeps_runtime_boundary_clean(&self) -> bool {
-            !self.integrates_with_backend_run_event_loop
-                && !self.mutates_prom_ui_runtime
-                && !self.changes_ui_backend_adapter
+            !self.mutates_prom_ui_runtime && !self.changes_ui_backend_adapter
         }
 
         pub const fn keeps_rendering_out_of_scope(&self) -> bool {
@@ -1149,6 +1355,148 @@ pub mod winit_placeholder {
         pub staged_event_count: usize,
     }
 
+    /// Winit run loop host that implements `ApplicationHandler`.
+    ///
+    /// This acts as a bridge between the winit `EventLoop` and `NativeBackend::run_event_loop`.
+    /// It hosts the backend temporarily while the event loop runs.
+    pub struct WinitRunLoopHost<
+        'a,
+        F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame),
+    > {
+        pub backend: &'a mut NativeBackend,
+        pub on_event: F,
+        pub window: Option<alloc::sync::Arc<Window>>,
+        pub window_id: Option<WindowId>,
+
+        #[cfg(feature = "wgpu-backend")]
+        pub wgpu_context: Option<super::wgpu_integration::NativeBackendWgpuContext>,
+        #[cfg(feature = "wgpu-backend")]
+        pub presentation_surface: Option<super::wgpu_integration::NativeBackendPresentationSurface>,
+    }
+
+    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>
+        WinitRunLoopHost<'a, F>
+    {
+        pub fn new(backend: &'a mut NativeBackend, on_event: F) -> Self {
+            Self {
+                backend,
+                on_event,
+                window: None,
+                window_id: None,
+                #[cfg(feature = "wgpu-backend")]
+                wgpu_context: None,
+                #[cfg(feature = "wgpu-backend")]
+                presentation_surface: None,
+            }
+        }
+    }
+
+    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>
+        ApplicationHandler for WinitRunLoopHost<'a, F>
+    {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            if self.window.is_some() {
+                return;
+            }
+
+            if let Some(config) = &self.backend.window_config {
+                let window_attributes = Window::default_attributes()
+                    .with_title(config.title.clone())
+                    .with_inner_size(winit::dpi::LogicalSize::new(config.width, config.height));
+
+                if let Ok(window) = event_loop.create_window(window_attributes) {
+                    self.window_id = Some(window.id());
+                    let window_arc = alloc::sync::Arc::new(window);
+                    self.window = Some(window_arc.clone());
+
+                    #[cfg(feature = "wgpu-backend")]
+                    {
+                        if let Some(context) =
+                            super::wgpu_integration::NativeBackendWgpuContext::new()
+                        {
+                            if let Ok(surface) =
+                                super::wgpu_integration::NativeBackendPresentationSurface::new(
+                                    &context,
+                                    window_arc,
+                                    config.width,
+                                    config.height,
+                                )
+                            {
+                                self.presentation_surface = Some(surface);
+                            }
+                            self.wgpu_context = Some(context);
+                        }
+                    }
+                }
+            }
+        }
+
+        fn window_event(
+            &mut self,
+            event_loop: &ActiveEventLoop,
+            window_id: WindowId,
+            event: WindowEvent,
+        ) {
+            if Some(window_id) != self.window_id {
+                return;
+            }
+
+            #[cfg(feature = "wgpu-backend")]
+            {
+                match &event {
+                    WindowEvent::Resized(physical_size) => {
+                        if let (Some(context), Some(surface)) =
+                            (&self.wgpu_context, &mut self.presentation_surface)
+                        {
+                            surface.resize(context, physical_size.width, physical_size.height);
+                        }
+                    }
+                    WindowEvent::RedrawRequested => {
+                        if let (Some(context), Some(surface)) =
+                            (&self.wgpu_context, &mut self.presentation_surface)
+                        {
+                            let _ = surface.present_semantic_commands(
+                                context,
+                                &self.backend.last_frame_commands,
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if let Some(backend_event) = translate_winit_to_raw_backend_event(&event) {
+                if matches!(backend_event, super::RawBackendEvent::CloseRequested) {
+                    let mut frame = prom_ui_runtime::DrawFrame::new();
+                    (self.on_event)(prom_ui_runtime::LoopControl::ExitRequested, &mut frame);
+                    use prom_ui_runtime::UiBackendAdapter;
+                    let _ = self.backend.draw_frame(&frame);
+                    event_loop.exit();
+                } else {
+                    if let Some(input_event) = translate_winit_window_event(&event) {
+                        self.backend.pending_events.push(input_event);
+                    }
+                    let mut frame = prom_ui_runtime::DrawFrame::new();
+                    (self.on_event)(prom_ui_runtime::LoopControl::Continue, &mut frame);
+                    use prom_ui_runtime::UiBackendAdapter;
+                    let _ = self.backend.draw_frame(&frame);
+                }
+            }
+        }
+
+        fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+            // Unconditionally advance the app loop on every iteration
+            let mut frame = prom_ui_runtime::DrawFrame::new();
+            (self.on_event)(prom_ui_runtime::LoopControl::Continue, &mut frame);
+            use prom_ui_runtime::UiBackendAdapter;
+            let _ = self.backend.draw_frame(&frame);
+            // Redraw continuously
+            if let Some(window) = &self.window {
+                window.request_redraw();
+            }
+        }
+    }
+
     /// Winit ApplicationHandler scaffold backed by `NativeBackend`.
     ///
     /// This is a state scaffold for future native runtime integration.
@@ -1295,15 +1643,16 @@ pub mod winit_placeholder {
     }
 }
 
-/// Skeleton native backend.
+/// Native backend transport boundary.
 ///
-/// This type is intentionally not wired to a platform windowing library yet.
-/// It exists to lock the crate boundary before real native integration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Handles event staging and loop lifecycle without owning
+/// semantic admission or dispatch.
+#[derive(Debug, Clone, PartialEq)]
 pub struct NativeBackend {
     platform_wired: bool,
     window_config: Option<WindowConfig>,
     pending_events: alloc::vec::Vec<InputEvent>,
+    last_frame_commands: alloc::vec::Vec<prom_ui_runtime::DrawCommand>,
     submitted_frames: usize,
     closed: bool,
     run_loop_calls: usize,
@@ -1317,6 +1666,7 @@ impl NativeBackend {
             platform_wired: false,
             window_config: None,
             pending_events: alloc::vec::Vec::new(),
+            last_frame_commands: alloc::vec::Vec::new(),
             submitted_frames: 0,
             closed: false,
             run_loop_calls: 0,
@@ -1456,31 +1806,468 @@ impl UiBackendAdapter for NativeBackend {
         self.closed = true;
     }
 
-    fn run_event_loop<F: FnMut(LoopControl)>(
+    fn run_event_loop<F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
-        mut on_event: F,
+        #[allow(unused_mut)] mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
         self.run_loop_calls = self.run_loop_calls.saturating_add(1);
 
-        let events = self.drain_pending_events();
+        #[cfg(feature = "winit-backend")]
+        {
+            let event_loop = match winit_placeholder::create_winit_event_loop() {
+                Ok(el) => el,
+                Err(_) => return Err(UiRuntimeError::EventLoopFailed),
+            };
 
-        for event in events {
-            self.run_loop_ticks = self.run_loop_ticks.saturating_add(1);
+            let mut host = winit_placeholder::WinitRunLoopHost::new(self, on_event);
 
-            match event.kind {
-                InputEventKind::CloseRequested => {
-                    on_event(LoopControl::ExitRequested);
-                    break;
+            if event_loop.run_app(&mut host).is_err() {
+                return Err(UiRuntimeError::EventLoopFailed);
+            }
+        }
+
+        #[cfg(not(feature = "winit-backend"))]
+        {
+            let events = self.drain_pending_events();
+
+            for event in events {
+                self.run_loop_ticks = self.run_loop_ticks.saturating_add(1);
+
+                match event.kind {
+                    InputEventKind::CloseRequested => {
+                        let mut frame = prom_ui_runtime::DrawFrame::new();
+                        on_event(LoopControl::ExitRequested, &mut frame);
+                        break;
+                    }
+                    _ => {
+                        let mut frame = prom_ui_runtime::DrawFrame::new();
+                        on_event(LoopControl::Continue, &mut frame);
+                    }
                 }
-                _ => on_event(LoopControl::Continue),
             }
         }
 
         Ok(())
     }
 
-    fn draw_frame(&mut self, _frame: &DrawFrame) -> Result<(), UiRuntimeError> {
+    fn draw_frame(&mut self, frame: &DrawFrame) -> Result<(), UiRuntimeError> {
+        self.last_frame_commands = frame.commands().to_vec();
         self.submitted_frames = self.submitted_frames.saturating_add(1);
         Ok(())
+    }
+}
+
+#[cfg(feature = "wgpu-backend")]
+pub fn selected_draw_backend_name() -> &'static str {
+    "wgpu"
+}
+
+#[cfg(feature = "wgpu-backend")]
+pub mod wgpu_integration {
+    //! Feature-gated wgpu integration.
+    //!
+    //! Provides `NativeBackendWgpuContext` and `NativeBackendPresentationSurface`
+    //! which are wired into the `winit` run loop when both `wgpu-backend` and
+    //! `winit-backend` features are enabled.
+
+    use wgpu::{Adapter, Device, Instance, Queue};
+
+    /// Encapsulates the core wgpu primitives.
+    #[derive(Debug)]
+    pub struct NativeBackendWgpuContext {
+        pub instance: Instance,
+        pub adapter: Adapter,
+        pub device: Device,
+        pub queue: Queue,
+        pub pipeline: wgpu::RenderPipeline,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+    struct Vertex {
+        position: [f32; 2],
+        color: [f32; 4],
+    }
+
+    impl Vertex {
+        fn desc() -> wgpu::VertexBufferLayout<'static> {
+            wgpu::VertexBufferLayout {
+                array_stride: core::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x2,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: core::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                        shader_location: 1,
+                        format: wgpu::VertexFormat::Float32x4,
+                    },
+                ],
+            }
+        }
+    }
+
+    impl NativeBackendWgpuContext {
+        /// Initializes the wgpu context asynchronously and blocks using `pollster`.
+        ///
+        /// This creates the instance, requests the default adapter, and requests the device.
+        pub fn new() -> Option<Self> {
+            let instance = Instance::default();
+
+            // Block on adapter request
+            let adapter =
+                pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::default(),
+                    force_fallback_adapter: false,
+                    compatible_surface: None, // No surface yet
+                }))?;
+
+            // Block on device request
+            let (device, queue) = pollster::block_on(adapter.request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("NativeBackend Minimal Device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::downlevel_defaults(),
+                },
+                None,
+            ))
+            .ok()?;
+
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Rect Shader"),
+                source: wgpu::ShaderSource::Wgsl(alloc::borrow::Cow::Borrowed(
+                    "
+                    struct VertexInput {
+                        @location(0) position: vec2<f32>,
+                        @location(1) color: vec4<f32>,
+                    };
+
+                    struct VertexOutput {
+                        @builtin(position) clip_position: vec4<f32>,
+                        @location(0) color: vec4<f32>,
+                    };
+
+                    @vertex
+                    fn vs_main(model: VertexInput) -> VertexOutput {
+                        var out: VertexOutput;
+                        out.clip_position = vec4<f32>(model.position, 0.0, 1.0);
+                        out.color = model.color;
+                        return out;
+                    }
+
+                    @fragment
+                    fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+                        return in.color;
+                    }
+                ",
+                )),
+            });
+
+            let render_pipeline_layout =
+                device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Render Pipeline Layout"),
+                    bind_group_layouts: &[],
+                    push_constant_ranges: &[],
+                });
+
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Render Pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    buffers: &[Vertex::desc()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(wgpu::BlendState::REPLACE),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+            });
+
+            Some(Self {
+                instance,
+                adapter,
+                device,
+                queue,
+                pipeline,
+            })
+        }
+
+        /// Proves minimal draw execution by clearing a dummy texture offscreen.
+        ///
+        /// This records a minimal `RenderPass` without swapchain presentation.
+        pub fn execute_minimal_draw_pass(&self) {
+            let texture_size = wgpu::Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            };
+
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Minimal Draw Dummy Texture"),
+                size: texture_size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+
+            let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Minimal Draw Encoder"),
+                });
+
+            {
+                let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Minimal Draw Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &texture_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.3,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+            }
+
+            self.queue.submit(core::iter::once(encoder.finish()));
+        }
+    }
+
+    /// Feature-gated surface presentation logic.
+    ///
+    /// Requires both `wgpu-backend` and `winit-backend` to link physical pixels to a native window.
+    #[cfg(feature = "winit-backend")]
+    #[derive(Debug)]
+    pub struct NativeBackendPresentationSurface {
+        pub surface: wgpu::Surface<'static>,
+        pub config: wgpu::SurfaceConfiguration,
+    }
+
+    #[cfg(feature = "winit-backend")]
+    impl NativeBackendPresentationSurface {
+        /// Creates a new surface from an `Arc<winit::window::Window>`.
+        pub fn new(
+            context: &NativeBackendWgpuContext,
+            window: alloc::sync::Arc<winit::window::Window>,
+            width: u32,
+            height: u32,
+        ) -> Result<Self, wgpu::CreateSurfaceError> {
+            let surface = context.instance.create_surface(window)?;
+
+            let max_dim = context.device.limits().max_texture_dimension_2d;
+            let w = width.clamp(1, max_dim);
+            let h = height.clamp(1, max_dim);
+
+            let mut config = surface
+                .get_default_config(&context.adapter, w, h)
+                .unwrap_or_else(|| wgpu::SurfaceConfiguration {
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    width: w,
+                    height: h,
+                    present_mode: wgpu::PresentMode::AutoVsync,
+                    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+                    view_formats: alloc::vec![],
+                    desired_maximum_frame_latency: 2,
+                });
+            config.width = w;
+            config.height = h;
+            config.format = wgpu::TextureFormat::Rgba8UnormSrgb;
+            surface.configure(&context.device, &config);
+
+            Ok(Self { surface, config })
+        }
+
+        /// Reconfigures the swapchain upon window resize.
+        pub fn resize(&mut self, context: &NativeBackendWgpuContext, width: u32, height: u32) {
+            let max_dim = context.device.limits().max_texture_dimension_2d;
+            let w = width.clamp(1, max_dim);
+            let h = height.clamp(1, max_dim);
+            if self.config.width != w || self.config.height != h {
+                self.config.width = w;
+                self.config.height = h;
+                self.surface.configure(&context.device, &self.config);
+            }
+        }
+
+        /// Presents a minimal clear color to the surface to prove connectivity.
+        ///
+        /// Returns `false` if the surface was lost or outdated, requiring reconfiguration.
+        pub fn present_minimal_clear(&self, context: &NativeBackendWgpuContext) -> bool {
+            self.present_semantic_commands(context, &[])
+        }
+
+        /// Presents a semantic frame to the surface by mapping `DrawCommand`s to physical wgpu instructions.
+        pub fn present_semantic_commands(
+            &self,
+            context: &NativeBackendWgpuContext,
+            commands: &[prom_ui_runtime::DrawCommand],
+        ) -> bool {
+            let frame = match self.surface.get_current_texture() {
+                Ok(frame) => frame,
+                Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => return false,
+                Err(_e) => return false,
+            };
+
+            let view = frame
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+
+            let mut encoder =
+                context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("Semantic Presentation Encoder"),
+                    });
+
+            // Extract the background color from a semantic Clear command, defaulting to static color if not found.
+            let mut bg_color = wgpu::Color {
+                r: 0.15,
+                g: 0.15,
+                b: 0.2,
+                a: 1.0,
+            };
+
+            let mut vertices = alloc::vec::Vec::new();
+            let surface_width = self.config.width as f32;
+            let surface_height = self.config.height as f32;
+
+            for cmd in commands {
+                match cmd {
+                    prom_ui_runtime::DrawCommand::Clear { color } => {
+                        bg_color = wgpu::Color {
+                            r: color.r as f64 / 255.0,
+                            g: color.g as f64 / 255.0,
+                            b: color.b as f64 / 255.0,
+                            a: color.a as f64 / 255.0,
+                        };
+                    }
+                    prom_ui_runtime::DrawCommand::FillRect { rect, color } => {
+                        let r = color.r as f32 / 255.0;
+                        let g = color.g as f32 / 255.0;
+                        let b = color.b as f32 / 255.0;
+                        let a = color.a as f32 / 255.0;
+                        let c = [r, g, b, a];
+
+                        let x0 = (rect.x as f32 / surface_width) * 2.0 - 1.0;
+                        let y0 = 1.0 - (rect.y as f32 / surface_height) * 2.0;
+                        let x1 = ((rect.x + rect.width as i32) as f32 / surface_width) * 2.0 - 1.0;
+                        let y1 =
+                            1.0 - ((rect.y + rect.height as i32) as f32 / surface_height) * 2.0;
+
+                        // Triangle 1
+                        vertices.push(Vertex {
+                            position: [x0, y0],
+                            color: c,
+                        });
+                        vertices.push(Vertex {
+                            position: [x0, y1],
+                            color: c,
+                        });
+                        vertices.push(Vertex {
+                            position: [x1, y0],
+                            color: c,
+                        });
+                        // Triangle 2
+                        vertices.push(Vertex {
+                            position: [x1, y0],
+                            color: c,
+                        });
+                        vertices.push(Vertex {
+                            position: [x0, y1],
+                            color: c,
+                        });
+                        vertices.push(Vertex {
+                            position: [x1, y1],
+                            color: c,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+
+            let vertex_buffer = if !vertices.is_empty() {
+                use wgpu::util::DeviceExt;
+                Some(
+                    context
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("Rect Vertex Buffer"),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        }),
+                )
+            } else {
+                None
+            };
+
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Semantic Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(bg_color),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+
+                if let Some(vb) = &vertex_buffer {
+                    render_pass.set_pipeline(&context.pipeline);
+                    render_pass.set_vertex_buffer(0, vb.slice(..));
+                    render_pass.draw(0..vertices.len() as u32, 0..1);
+                }
+            }
+
+            context.queue.submit(Some(encoder.finish()));
+            frame.present();
+            true
+        }
     }
 }

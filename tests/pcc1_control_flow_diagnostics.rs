@@ -80,6 +80,18 @@ fn compile_path_does_not_verify(source: &str, label: &str) {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+fn check_path_passes(source: &str, label: &str) {
+    let dir = mk_temp_dir("smc_pcc1_control_flow_diagnostics_check");
+    let input = write_temp_source(&dir, "input.sm", source);
+    let input_arg = input.to_string_lossy().replace('\\', "/");
+
+    smc_cli::run(vec!["check".to_string(), input_arg.clone()]).unwrap_or_else(|err| {
+        panic!("smc check unexpectedly failed for {label} ({input_arg}): {err}")
+    });
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // PCC-1 diagnostic mapping:
 // - Type Hell: invalid loop-control / non-bool condition rejection
 // - User Pain / Diagnostics Hell: stable, specific CLI diagnostics
@@ -180,6 +192,59 @@ fn main() {
     );
     assert!(err.contains("if expression condition must be bool"));
     assert!(err.contains("quad"));
+}
+
+#[test]
+fn pcc1_if_bare_quad_condition_has_stable_diagnostic() {
+    let err = diagnostic_for(
+        r#"
+fn main() {
+    let q: quad = T;
+    if q {
+        return;
+    } else {
+        return;
+    }
+}
+"#,
+        "bare quad condition",
+    );
+    assert!(err.contains("if condition must be bool"));
+    assert!(err.contains("explicit compare is required for quad"));
+}
+
+#[test]
+fn pcc1_if_explicit_true_quad_comparison_has_stable_admission() {
+    check_path_passes(
+        r#"
+fn main() {
+    let q: quad = T;
+    if q == T {
+        return;
+    } else {
+        return;
+    }
+}
+"#,
+        "explicit true quad comparison",
+    );
+}
+
+#[test]
+fn pcc1_if_explicit_false_quad_comparison_has_stable_admission() {
+    check_path_passes(
+        r#"
+fn main() {
+    let q: quad = F;
+    if q == F {
+        return;
+    } else {
+        return;
+    }
+}
+"#,
+        "explicit false quad comparison",
+    );
 }
 
 #[test]

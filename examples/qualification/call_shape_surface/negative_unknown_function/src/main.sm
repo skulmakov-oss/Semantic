@@ -1,0 +1,4 @@
+fn main() {
+    let value: i32 = missing_fn(1);
+    return;
+}

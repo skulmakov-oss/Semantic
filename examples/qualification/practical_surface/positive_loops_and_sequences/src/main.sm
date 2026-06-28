@@ -1,0 +1,26 @@
+fn main() {
+    let mut index: i32 = 0;
+    let mut values: Sequence(i32) = [1, 2];
+
+    while index < len(values) {
+        index = index + 1;
+    }
+
+    loop {
+        if len(values) == 2 {
+            values = push(values, 3);
+            continue;
+        }
+        break;
+    }
+
+    values = prepend(values, 0);
+
+    assert(index == 2);
+    assert(len(values) == 4);
+    assert(values[0] == 0);
+    assert(values[1] == 1);
+    assert(values[2] == 2);
+    assert(values[3] == 3);
+    return;
+}

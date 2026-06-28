@@ -1,0 +1,8 @@
+Import "helpers/math.sm" { add_one }
+Import "helpers/checks.sm" { is_positive }
+
+fn main() {
+    let value: i32 = add_one(1);
+    assert(is_positive(value));
+    return;
+}
