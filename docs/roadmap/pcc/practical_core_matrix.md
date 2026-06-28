@@ -7,6 +7,9 @@ This matrix is a preparation artifact for Core Trust Freeze planning. It is
 honest about qualified behavior, conservative fallbacks, partial proof, and
 deferred work.
 
+`READY` is matrix-local practical qualification, not release stability or Core
+Trust Freeze completion.
+
 Core Trust Boundary Repair v1 is closed, but Core Trust Freeze is not
 automatically closed.
 
