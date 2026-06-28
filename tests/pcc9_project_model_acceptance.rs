@@ -491,6 +491,10 @@ fn normalize_path(path: &std::path::Path) -> String {
         .to_string()
 }
 
+fn normalize_canonical_path(path: &std::path::Path) -> String {
+    normalize_path(&path.canonicalize().expect("canonicalize"))
+}
+
 fn full_cli_path(file_rel: &str) {
     let source = source_fixture(file_rel);
     check_source(&source);
@@ -2009,7 +2013,10 @@ module_root src
     std::fs::write(&dep, "fn core() { return; }\n").expect("write dep");
 
     let resolved = resolve_package_import_path(&importer, "math::core.sm").expect("resolve");
-    assert_eq!(normalize_path(&resolved), normalize_path(&dep));
+    assert_eq!(
+        normalize_canonical_path(&resolved),
+        normalize_canonical_path(&dep)
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
