@@ -225,6 +225,98 @@ fn runtime_ownership_sequence_child_parent_conflict_rejects() {
 }
 
 #[test]
+fn runtime_ownership_sequence_dynamic_borrow_conflicts_with_static_index_zero_write() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_dynamic_borrow_conflicts_with_static_sibling_write() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(1)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_dynamic_borrow_conflicts_with_parent_write() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_parent_borrow_conflicts_with_dynamic_write() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
 fn runtime_ownership_inner_frame_borrow_does_not_leak_after_exit() {
     let bytes = compile_program_to_semcode(multi_frame_source()).expect("compile");
     assert_eq!(&bytes[..8], &MAGIC11);

@@ -392,6 +392,24 @@ impl AccessPath {
     }
 }
 
+#[derive(Clone)]
+enum SequenceOwnershipPath {
+    Exact(AccessPath),
+    DynamicFallback(AccessPath),
+}
+
+impl SequenceOwnershipPath {
+    fn as_path(&self) -> &AccessPath {
+        match self {
+            Self::Exact(path) | Self::DynamicFallback(path) => path,
+        }
+    }
+
+    fn is_dynamic_fallback(&self) -> bool {
+        matches!(self, Self::DynamicFallback(_))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathComponent {
     TupleIndex(u16),
@@ -4211,7 +4229,7 @@ fn bind_tuple_items(
     items: &[TuplePatternItem],
     tuple_reg: u16,
     tuple_ty: &Type,
-    tuple_path: Option<&AccessPath>,
+    tuple_path: Option<&SequenceOwnershipPath>,
     arena: &AstArena,
     next: &mut u16,
     out: &mut Vec<IrInstr>,
@@ -4234,6 +4252,8 @@ fn bind_tuple_items(
             ),
         });
     }
+    let is_dynamic_fallback = tuple_path.is_some_and(SequenceOwnershipPath::is_dynamic_fallback);
+    let mut emitted_dynamic_root = false;
     for (index, (item, item_ty)) in items.iter().zip(item_tys.iter()).enumerate() {
         let (name, capture) = match item {
             TuplePatternItem::Bind { name, capture } => (*name, *capture),
@@ -4272,10 +4292,20 @@ fn bind_tuple_items(
         });
         if capture == sm_front::types::CaptureMode::Borrow {
             if let Some(tuple_path) = tuple_path {
-                ownership_events.push(OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: tuple_path.tuple_index(index),
-                });
+                if is_dynamic_fallback {
+                    if !emitted_dynamic_root {
+                        ownership_events.push(OwnershipPathEvent {
+                            kind: OwnershipPathEventKind::Borrow,
+                            path: tuple_path.as_path().clone(),
+                        });
+                        emitted_dynamic_root = true;
+                    }
+                } else {
+                    ownership_events.push(OwnershipPathEvent {
+                        kind: OwnershipPathEventKind::Borrow,
+                        path: tuple_path.as_path().tuple_index(index),
+                    });
+                }
             }
         }
     }
@@ -5246,7 +5276,7 @@ fn bind_let_else_tuple_items(
     items: &[TuplePatternItem],
     tuple_reg: u16,
     tuple_ty: &Type,
-    tuple_path: Option<&AccessPath>,
+    tuple_path: Option<&SequenceOwnershipPath>,
     else_return: Option<ExprId>,
     contract_ensures: &[ExprId],
     contract_result_symbol: Option<SymbolId>,
@@ -5283,6 +5313,7 @@ fn bind_let_else_tuple_items(
 
     let pattern_id = alloc_loop_expr_id(next);
     let mut deferred_binds = Vec::new();
+    let mut emitted_dynamic_root = false;
     for (index, (item, item_ty)) in items.iter().zip(item_tys.iter()).enumerate() {
         let reg = alloc(next);
         let index = u16::try_from(index).map_err(|_| FrontendError {
@@ -5365,10 +5396,20 @@ fn bind_let_else_tuple_items(
         });
         if capture == sm_front::types::CaptureMode::Borrow {
             if let Some(tuple_path) = tuple_path {
-                ownership_events.push(OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: tuple_path.tuple_index(index),
-                });
+                if tuple_path.is_dynamic_fallback() {
+                    if !emitted_dynamic_root {
+                        ownership_events.push(OwnershipPathEvent {
+                            kind: OwnershipPathEventKind::Borrow,
+                            path: tuple_path.as_path().clone(),
+                        });
+                        emitted_dynamic_root = true;
+                    }
+                } else {
+                    ownership_events.push(OwnershipPathEvent {
+                        kind: OwnershipPathEventKind::Borrow,
+                        path: tuple_path.as_path().tuple_index(index),
+                    });
+                }
             }
         }
     }
@@ -9151,20 +9192,29 @@ fn find_named_var_symbol(
     }
 }
 
-fn sequence_access_path_from_expr(expr_id: ExprId, arena: &AstArena) -> Option<AccessPath> {
+fn sequence_access_path_from_expr(
+    expr_id: ExprId,
+    arena: &AstArena,
+) -> Option<SequenceOwnershipPath> {
     match arena.expr(expr_id) {
-        Expr::Var(name) => Some(AccessPath::new(*name)),
+        Expr::Var(name) => Some(SequenceOwnershipPath::Exact(AccessPath::new(*name))),
         Expr::SequenceIndex(index_expr) => {
+            let base = sequence_access_path_from_expr(index_expr.base, arena)?;
+            let base_path = base.as_path().clone();
+            if base.is_dynamic_fallback() {
+                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
+            }
             let Expr::NumericLiteral(NumericLiteral::I32(index)) = arena.expr(index_expr.index)
             else {
-                return None;
+                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
             };
             if *index < 0 {
-                return None;
+                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
             }
             let index = u32::try_from(*index).ok()?;
-            let base = sequence_access_path_from_expr(index_expr.base, arena)?;
-            Some(base.sequence_index_static(index))
+            Some(SequenceOwnershipPath::Exact(
+                base_path.sequence_index_static(index),
+            ))
         }
         _ => None,
     }
@@ -9273,19 +9323,41 @@ fn append_record_update_write_events_from_expr(
             );
 
             let scrutinee_path = sequence_access_path_from_expr(match_expr.scrutinee, arena);
+            let mut borrowed_dynamic_scrutinee_root = false;
             for arm in &match_expr.arms {
                 if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
                     if let Some(path) = &scrutinee_path {
-                        for (idx, item) in adt_pat.items.iter().enumerate() {
-                            if let sm_front::types::AdtPatternItem::Bind {
-                                capture: sm_front::types::CaptureMode::Borrow,
-                                ..
-                            } = item
-                            {
+                        if path.is_dynamic_fallback() {
+                            let should_borrow = adt_pat.items.iter().any(|item| {
+                                matches!(
+                                    item,
+                                    sm_front::types::AdtPatternItem::Bind {
+                                        capture: sm_front::types::CaptureMode::Borrow,
+                                        ..
+                                    }
+                                )
+                            });
+                            if should_borrow && !borrowed_dynamic_scrutinee_root {
                                 ownership_events.push(OwnershipPathEvent {
                                     kind: OwnershipPathEventKind::Borrow,
-                                    path: path.adt_payload(adt_pat.variant_name, idx as u16),
+                                    path: path.as_path().clone(),
                                 });
+                                borrowed_dynamic_scrutinee_root = true;
+                            }
+                        } else {
+                            for (idx, item) in adt_pat.items.iter().enumerate() {
+                                if let sm_front::types::AdtPatternItem::Bind {
+                                    capture: sm_front::types::CaptureMode::Borrow,
+                                    ..
+                                } = item
+                                {
+                                    ownership_events.push(OwnershipPathEvent {
+                                        kind: OwnershipPathEventKind::Borrow,
+                                        path: path
+                                            .as_path()
+                                            .adt_payload(adt_pat.variant_name, idx as u16),
+                                    });
+                                }
                             }
                         }
                     }
