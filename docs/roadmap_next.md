@@ -11,6 +11,12 @@ Release-freeze checkpoint after `v0.1`/`v0.2`/`v0.3` close-out:
 
 This document tracks the next four closure tracks to move Semantic from "working" to "production-disciplined".
 
+For the next implementation slice, see the internal packed-state substrate roadmap:
+
+- `docs/roadmap/roadmap_pulsar.md`
+
+Pulsar is a planned internal packed-state substrate roadmap. It does not widen the active Core Trust Freeze contour.
+
 Current status:
 - `NEXT-1..NEXT-4` are completed for the current post-`v1.1.1` closure layer.
 - this document now serves as a close-out record for those tracks, not as an

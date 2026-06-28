@@ -134,4 +134,10 @@ Recommended next PR:
 
 after this declaration PR is reviewed and merged.
 
+## Related Roadmap
+
+Pulsar is the internal packed-state acceleration roadmap and remains subordinate to this active contour:
+
+- [docs/roadmap/roadmap_pulsar.md](../roadmap_pulsar.md)
+
 Do not strengthen claims beyond this.
