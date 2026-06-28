@@ -29,7 +29,7 @@ Based on the benchmark baseline and the current `ton618-core` implementation, th
 - `QuadroBank::inverse_inplace`
 - the baseline `Vec<u8>` delta loop
 
-The bank-level loops are the most stable timing band in the local runs and are the clearest candidates for future cleanup or backend work.
+The bank-level rows are workload-level hot spots in this benchmark because each timed closure includes setup, copy, and construction work before the in-place method call. That makes them useful for next-slice review, but not yet isolated measurements of the method bodies alone.
 
 ## Optimization Candidates
 
