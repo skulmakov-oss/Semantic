@@ -25,6 +25,7 @@ CTF is not a final phase after PCC. It runs across PCC.
 - Waypoint review: `docs/roadmap/language_maturity/core_trust_freeze/ctf_waypoint_review_after_wp1_wp4.md`
 - Evidence backlog: `docs/roadmap/language_maturity/core_trust_freeze/ctf_evidence_backlog.md`
 - Promotion rules: `docs/roadmap/language_maturity/core_trust_freeze/freeze_candidate_promotion_rules.md`
+- Pulsar roadmap: `docs/roadmap/roadmap_pulsar.md`
 - Evidence backlog / promotion waypoint: `CTF-WP5 — define CTF evidence backlog and freeze-candidate promotion rules`
 - Project-root trust policy: `docs/roadmap/language_maturity/core_trust_freeze/project_root_trust_policy.md`
 - Project-root trust waypoint: `CTF-WP6 — docs(core-trust-freeze): define project-root trust policy before PCC-9I`
