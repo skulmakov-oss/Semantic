@@ -24,49 +24,46 @@ struct BenchRow {
 fn main() {
     sanity_checks();
 
-    let rows = [
-        bench_row("qreg_merge", QREG_ITERS, 1, || {
-            let left = reg_from_seed(0x1111_2026_0629_0001);
-            let right = reg_from_seed(0x2222_2026_0629_0002);
-            checksum_reg(black_box(left).merge(black_box(right)))
-        }),
-        bench_row("qreg_intersect", QREG_ITERS, 1, || {
-            let left = reg_from_seed(0x3333_2026_0629_0003);
-            let right = reg_from_seed(0x4444_2026_0629_0004);
-            checksum_reg(black_box(left).intersect(black_box(right)))
-        }),
-        bench_row("qreg_inverse", QREG_ITERS, 1, || {
-            checksum_reg(black_box(reg_from_seed(0x5555_2026_0629_0005)).inverse())
-        }),
-        bench_row("qreg_masks_all", QREG_ITERS, 1, || {
-            checksum_masks(black_box(reg_from_seed(0x6666_2026_0629_0006)).masks_all())
-        }),
-        bench_row("qreg_calc_delta", QREG_ITERS, 1, || {
-            let prev = reg_from_seed(0x7777_2026_0629_0007);
-            let next = reg_from_seed(0x8888_2026_0629_0008);
-            checksum_delta(black_box(prev).calc_delta(black_box(next)))
-        }),
-        bench_row("qbank_merge_inplace", BANK_ITERS, NREG, || {
-            bank_merge_checksum()
-        }),
-        bench_row("qbank_intersect_inplace", BANK_ITERS, NREG, || {
-            bank_intersect_checksum()
-        }),
-        bench_row("qbank_inverse_inplace", BANK_ITERS, NREG, || {
-            bank_inverse_checksum()
-        }),
-        bench_row("qbank_calc_deltas_soa", BANK_ITERS, NREG, || {
-            bank_delta_checksum()
-        }),
-        bench_row(
-            "baseline_vec_u8_delta",
-            BASELINE_ITERS,
-            BASELINE_LEN / LANES_PER_REG,
-            baseline_delta_checksum,
-        ),
-    ];
+    let mut rows = Vec::new();
+    push_qreg_method_rows(&mut rows);
+
+    #[cfg(feature = "alloc")]
+    {
+        push_qbank_rows(&mut rows);
+        push_baseline_rows(&mut rows);
+    }
 
     print_report(&rows);
+}
+
+fn push_qreg_method_rows(rows: &mut Vec<BenchRow>) {
+    let merge_left = reg_from_seed(0x1111_2026_0629_0001);
+    let merge_right = reg_from_seed(0x2222_2026_0629_0002);
+    rows.push(bench_row("qreg_merge_method", QREG_ITERS, 1, || {
+        checksum_reg(black_box(merge_left).merge(black_box(merge_right)))
+    }));
+
+    let intersect_left = reg_from_seed(0x3333_2026_0629_0003);
+    let intersect_right = reg_from_seed(0x4444_2026_0629_0004);
+    rows.push(bench_row("qreg_intersect_method", QREG_ITERS, 1, || {
+        checksum_reg(black_box(intersect_left).intersect(black_box(intersect_right)))
+    }));
+
+    let inverse_reg = reg_from_seed(0x5555_2026_0629_0005);
+    rows.push(bench_row("qreg_inverse_method", QREG_ITERS, 1, || {
+        checksum_reg(black_box(inverse_reg).inverse())
+    }));
+
+    let masks_reg = reg_from_seed(0x6666_2026_0629_0006);
+    rows.push(bench_row("qreg_masks_all_method", QREG_ITERS, 1, || {
+        checksum_masks(black_box(masks_reg).masks_all())
+    }));
+
+    let delta_prev = reg_from_seed(0x7777_2026_0629_0007);
+    let delta_next = reg_from_seed(0x8888_2026_0629_0008);
+    rows.push(bench_row("qreg_calc_delta_method", QREG_ITERS, 1, || {
+        checksum_delta(black_box(delta_prev).calc_delta(black_box(delta_next)))
+    }));
 }
 
 fn bench_row(
@@ -100,6 +97,7 @@ fn print_report(rows: &[BenchRow]) {
     println!("Pulsar Quadro microbench");
     println!("build: release");
     println!("note: local numbers only; not a public performance claim");
+    println!("note: workload rows may include setup/copy/reset cost; method rows aim to isolate operation cost");
     println!();
     println!(
         "{:<28} {:>12} {:>13} {:>10} {:>14} {:>14}",
@@ -151,7 +149,103 @@ fn sanity_checks() {
 }
 
 #[cfg(feature = "alloc")]
-fn bank_merge_checksum() -> u64 {
+fn push_qbank_rows(rows: &mut Vec<BenchRow>) {
+    rows.push(bench_row(
+        "qbank_merge_workload",
+        BANK_ITERS,
+        NREG,
+        bank_merge_workload_checksum,
+    ));
+    rows.push(bench_row(
+        "qbank_intersect_workload",
+        BANK_ITERS,
+        NREG,
+        bank_intersect_workload_checksum,
+    ));
+    rows.push(bench_row(
+        "qbank_inverse_workload",
+        BANK_ITERS,
+        NREG,
+        bank_inverse_workload_checksum,
+    ));
+    rows.push(bench_row(
+        "qbank_delta_soa_workload",
+        BANK_ITERS,
+        NREG,
+        bank_delta_workload_checksum,
+    ));
+
+    let mut merge_method_scratch = QuadroBank::from_regs(bank_regs(0x0101_2026_0629_0001, NREG));
+    let merge_method_right = QuadroBank::from_regs(bank_regs(0x0202_2026_0629_0002, NREG));
+    rows.push(bench_row("qbank_merge_method", BANK_ITERS, NREG, || {
+        merge_method_scratch
+            .merge_inplace(black_box(&merge_method_right))
+            .unwrap();
+        bank_checksum(black_box(&merge_method_scratch))
+    }));
+
+    let mut intersect_method_scratch =
+        QuadroBank::from_regs(bank_regs(0x0303_2026_0629_0003, NREG));
+    let intersect_method_right = QuadroBank::from_regs(bank_regs(0x0404_2026_0629_0004, NREG));
+    rows.push(bench_row(
+        "qbank_intersect_method",
+        BANK_ITERS,
+        NREG,
+        || {
+            intersect_method_scratch
+                .intersect_inplace(black_box(&intersect_method_right))
+                .unwrap();
+            bank_checksum(black_box(&intersect_method_scratch))
+        },
+    ));
+
+    let mut inverse_method_scratch = QuadroBank::from_regs(bank_regs(0x0505_2026_0629_0005, NREG));
+    rows.push(bench_row("qbank_inverse_method", BANK_ITERS, NREG, || {
+        inverse_method_scratch.inverse_inplace();
+        bank_checksum(black_box(&inverse_method_scratch))
+    }));
+
+    let delta_method_left = QuadroBank::from_regs(bank_regs(0x0606_2026_0629_0006, NREG));
+    let delta_method_right = QuadroBank::from_regs(bank_regs(0x0707_2026_0629_0007, NREG));
+    rows.push(bench_row(
+        "qbank_delta_soa_method",
+        BANK_ITERS,
+        NREG,
+        || {
+            let delta = delta_method_left
+                .calc_deltas_soa(black_box(&delta_method_right))
+                .unwrap();
+            delta_checksum(black_box(&delta))
+        },
+    ));
+}
+
+#[cfg(feature = "alloc")]
+fn push_baseline_rows(rows: &mut Vec<BenchRow>) {
+    rows.push(bench_row(
+        "baseline_vec_u8_delta_workload",
+        BASELINE_ITERS,
+        BASELINE_LEN / LANES_PER_REG,
+        baseline_delta_checksum_workload,
+    ));
+
+    let baseline_prev = baseline_states(0x0808_2026_0629_0008, BASELINE_LEN);
+    let baseline_next = baseline_states(0x0909_2026_0629_0009, BASELINE_LEN);
+    rows.push(bench_row(
+        "baseline_vec_u8_delta_method",
+        BASELINE_ITERS,
+        BASELINE_LEN / LANES_PER_REG,
+        || {
+            baseline_delta_checksum_from_slices(
+                black_box(&baseline_prev),
+                black_box(&baseline_next),
+            )
+        },
+    ));
+}
+
+#[cfg(feature = "alloc")]
+fn bank_merge_workload_checksum() -> u64 {
     let left_regs = bank_regs(0x0101_2026_0629_0001, NREG);
     let right_regs = bank_regs(0x0202_2026_0629_0002, NREG);
     let left_template = QuadroBank::from_regs(left_regs);
@@ -165,7 +259,7 @@ fn bank_merge_checksum() -> u64 {
 }
 
 #[cfg(feature = "alloc")]
-fn bank_intersect_checksum() -> u64 {
+fn bank_intersect_workload_checksum() -> u64 {
     let left_regs = bank_regs(0x0303_2026_0629_0003, NREG);
     let right_regs = bank_regs(0x0404_2026_0629_0004, NREG);
     let left_template = QuadroBank::from_regs(left_regs);
@@ -179,7 +273,7 @@ fn bank_intersect_checksum() -> u64 {
 }
 
 #[cfg(feature = "alloc")]
-fn bank_inverse_checksum() -> u64 {
+fn bank_inverse_workload_checksum() -> u64 {
     let left_regs = bank_regs(0x0505_2026_0629_0005, NREG);
     let left_template = QuadroBank::from_regs(left_regs);
     let mut scratch = left_template.clone();
@@ -191,7 +285,7 @@ fn bank_inverse_checksum() -> u64 {
 }
 
 #[cfg(feature = "alloc")]
-fn bank_delta_checksum() -> u64 {
+fn bank_delta_workload_checksum() -> u64 {
     let left_regs = bank_regs(0x0606_2026_0629_0006, NREG);
     let right_regs = bank_regs(0x0707_2026_0629_0007, NREG);
     let left = QuadroBank::from_regs(left_regs);
@@ -263,30 +357,15 @@ fn reg_from_seed(mut seed: u64) -> QuadroReg {
     reg
 }
 
-fn small_bank_regs(seed: u64, count: usize) -> Vec<QuadroReg> {
-    bank_regs(seed, count)
-}
-
-fn bank_regs(mut seed: u64, count: usize) -> Vec<QuadroReg> {
-    (0..count)
-        .map(|_| {
-            let mut reg = QuadroReg::new();
-            for lane in 0..LANES_PER_REG {
-                let state = (lcg(&mut seed) & 0b11) as u8;
-                reg.try_set(lane, state).unwrap();
-            }
-            reg
-        })
-        .collect()
-}
-
-fn baseline_states(mut seed: u64, len: usize) -> Vec<u8> {
-    (0..len).map(|_| (lcg(&mut seed) & 0b11) as u8).collect()
-}
-
-fn baseline_delta_checksum() -> u64 {
+#[cfg(feature = "alloc")]
+fn baseline_delta_checksum_workload() -> u64 {
     let prev = baseline_states(0x0808_2026_0629_0008, BASELINE_LEN);
     let next = baseline_states(0x0909_2026_0629_0009, BASELINE_LEN);
+    baseline_delta_checksum_from_slices(&prev, &next)
+}
+
+#[cfg(feature = "alloc")]
+fn baseline_delta_checksum_from_slices(prev: &[u8], next: &[u8]) -> u64 {
     let mut checksum = 0u64;
 
     for (&lhs, &rhs) in prev.iter().zip(next.iter()) {
@@ -311,6 +390,30 @@ fn baseline_delta_checksum() -> u64 {
     }
 
     black_box(checksum)
+}
+
+#[cfg(feature = "alloc")]
+fn small_bank_regs(seed: u64, count: usize) -> Vec<QuadroReg> {
+    bank_regs(seed, count)
+}
+
+#[cfg(feature = "alloc")]
+fn bank_regs(mut seed: u64, count: usize) -> Vec<QuadroReg> {
+    (0..count)
+        .map(|_| {
+            let mut reg = QuadroReg::new();
+            for lane in 0..LANES_PER_REG {
+                let state = (lcg(&mut seed) & 0b11) as u8;
+                reg.try_set(lane, state).unwrap();
+            }
+            reg
+        })
+        .collect()
+}
+
+#[cfg(feature = "alloc")]
+fn baseline_states(mut seed: u64, len: usize) -> Vec<u8> {
+    (0..len).map(|_| (lcg(&mut seed) & 0b11) as u8).collect()
 }
 
 fn lane_mask(index: usize) -> u64 {

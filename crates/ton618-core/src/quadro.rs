@@ -128,41 +128,27 @@ impl QuadroReg {
     }
 
     pub fn mask_null(self) -> u64 {
-        let f = self.0 & LSB_MASK;
-        let t = (self.0 & MSB_MASK) >> 1;
-        !(f | t) & LSB_MASK
+        self.mask_components().null
     }
 
     pub fn mask_strict_false(self) -> u64 {
-        let f = self.0 & LSB_MASK;
-        let t = (self.0 & MSB_MASK) >> 1;
-        f & !t
+        self.mask_components().strict_false
     }
 
     pub fn mask_strict_true(self) -> u64 {
-        let f = self.0 & LSB_MASK;
-        let t = (self.0 & MSB_MASK) >> 1;
-        t & !f
+        self.mask_components().strict_true
     }
 
     pub fn mask_super(self) -> u64 {
-        let f = self.0 & LSB_MASK;
-        let t = (self.0 & MSB_MASK) >> 1;
-        f & t
+        self.mask_components().super_
     }
 
     pub fn mask_non_null(self) -> u64 {
-        self.mask_strict_false() | self.mask_strict_true() | self.mask_super()
+        self.mask_components().non_null
     }
 
     pub fn masks_all(self) -> QuadMasks {
-        QuadMasks {
-            null: self.mask_null(),
-            strict_false: self.mask_strict_false(),
-            strict_true: self.mask_strict_true(),
-            super_: self.mask_super(),
-            non_null: self.mask_non_null(),
-        }
+        self.mask_components()
     }
 
     pub fn try_set_by_mask(&mut self, mask: u64, state: u8) -> Result<(), QuadroError> {
@@ -190,8 +176,8 @@ impl QuadroReg {
     }
 
     pub fn calc_delta(self, next: Self) -> StateDelta {
-        let old = self.masks_all();
-        let new = next.masks_all();
+        let old = self.mask_components();
+        let new = next.mask_components();
         StateDelta {
             entered_true: new.strict_true & !old.strict_true,
             left_true: old.strict_true & !new.strict_true,
@@ -215,6 +201,21 @@ impl QuadroReg {
             return Err(QuadroError::IndexOutOfRange { index });
         }
         Ok((index * QUADIT_WIDTH) as u32)
+    }
+
+    fn mask_components(self) -> QuadMasks {
+        let f = self.0 & LSB_MASK;
+        let t = (self.0 & MSB_MASK) >> 1;
+        let strict_false = f & !t;
+        let strict_true = t & !f;
+        let super_ = f & t;
+        QuadMasks {
+            null: !(f | t) & LSB_MASK,
+            strict_false,
+            strict_true,
+            super_,
+            non_null: strict_false | strict_true | super_,
+        }
     }
 }
 
