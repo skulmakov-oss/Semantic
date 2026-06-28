@@ -71,15 +71,14 @@ jobs:
           pwsh -File scripts/verify_release_bundle.ps1 -ManifestPath "${{ runner.temp }}/semantic_v1_release_bundle_manifest.json"
 
   pcc-qualification-7hell:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Make script executable
-        run: chmod +x tools/7hell/run.sh
       - name: 7hell PCC Qualification Mini-Runner
-        run: bash tools/7hell/run.sh
+        shell: powershell
+        run: .\tools\7hell\run.ps1
 
   test-std:
     runs-on: ubuntu-latest
