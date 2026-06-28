@@ -1118,6 +1118,10 @@ mod tests {
         }
     }
 
+    fn normalize_canonical_path(path: &Path) -> String {
+        normalize_path(&path.canonicalize().expect("canonicalize"))
+    }
+
     fn mk_temp_dir(prefix: &str) -> PathBuf {
         let base = std::env::temp_dir().join(format!(
             "{}_{}_{}",
@@ -1701,7 +1705,10 @@ module_root src
         std::fs::write(&child, "fn child() { return; }\n").expect("write child");
 
         let resolved = resolve_package_import_path(&importer, "child.sm").expect("resolve");
-        assert_eq!(normalize_path(&resolved), normalize_path(&child));
+        assert_eq!(
+            normalize_canonical_path(&resolved),
+            normalize_canonical_path(&child)
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1744,7 +1751,10 @@ module_root src
         std::fs::write(&dep, "fn core() { return; }\n").expect("write dep");
 
         let resolved = resolve_package_import_path(&importer, "math::core.sm").expect("resolve");
-        assert_eq!(normalize_path(&resolved), normalize_path(&dep));
+        assert_eq!(
+            normalize_canonical_path(&resolved),
+            normalize_canonical_path(&dep)
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
