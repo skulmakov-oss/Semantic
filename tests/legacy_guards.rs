@@ -309,6 +309,7 @@ fn ton618_content_inventory_is_explicit() {
         "./docs/legacy-map.md",
         "./docs/roadmap/language_maturity/root_legacy_cleanup_full_scope.md",
         "./docs/roadmap/language_maturity/ton618_compatibility_perimeter_scope.md",
+        "./docs/roadmap/pcc/ctf_no_std_qualification_audit.md",
         "./docs/roadmap/m_tail_closeout.md",
         "./docs/roadmap/tail_t5_legacy_perimeter_check.md",
         "./src/bin/ton618_core.rs",
