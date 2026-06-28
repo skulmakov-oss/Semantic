@@ -11,7 +11,7 @@ Adds to `docs/roadmap/post_ui/`:
 
 ## Design decision
 
-The bridge from declaration to execution is strictly guarded by Admission Gates. 
+The bridge from declaration to execution is strictly guarded by Admission Gates.
 `SemanticIntent` holds zero authority and cannot be dispatched directly. It must pass through Capability and Lifecycle checks within the UI runtime to be upgraded to an `InteractionAdmittedSemanticActionId`. Only this ID can be dispatched to the host or state manager to trigger effects. This prevents "authority leakage" where the UI runtime might otherwise bypass business logic rules.
 
 ## Boundary discipline

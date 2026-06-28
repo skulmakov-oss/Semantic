@@ -23,6 +23,14 @@ Current verifier surface is centered on:
 - `VerifiedEntrySemCode`
 - `EntryResolutionError`
 
+Canonical token-producing admission path:
+
+- `verify_semcode_token`
+
+Compatibility / legacy admission surface:
+
+- `verify_semcode`
+
 ## Verification Scope
 
 Current SemCode verification checks include:
@@ -107,6 +115,11 @@ The standard `.smc` execution route must require `sm-verify` admission.
 
 Helpers that bypass verification may exist for lower-level testing, but they
 must not redefine the public execution contract.
+
+`verify_semcode_token` is the canonical admission boundary for token-first
+execution flows. `verify_semcode` remains a compatibility / legacy admission
+API and should not be described as the preferred canonical boundary for new
+trusted public routes unless a document explicitly distinguishes the two.
 
 ## Review Rule
 

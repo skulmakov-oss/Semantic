@@ -4,7 +4,7 @@
 #[cfg(feature = "std")]
 #[allow(unused_imports)]
 mod semcode_format {
-    pub use sm_emit::{
+    pub use sm_format::semcode_format::{
         read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8, Opcode,
         SemcodeFormatError, SemcodeHeaderSpec,
     };

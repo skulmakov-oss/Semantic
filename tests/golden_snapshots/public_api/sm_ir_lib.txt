@@ -7,10 +7,11 @@ pub mod hello_ir;
 pub mod hello_semcode;
 #[cfg(feature = "std")]
 #[doc(hidden)]
-pub mod semcode_decode;
+pub mod semcode_decode {
+pub use sm_format::semcode_decode::*;
 #[cfg(feature = "std")]
 pub mod semcode_format {
-pub use crate::local_format::{
+pub use sm_format::semcode_format::*;
 #[cfg(feature = "std")]
 pub mod passes;
 #[cfg(feature = "std")]

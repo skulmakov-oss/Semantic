@@ -40,6 +40,8 @@ pub const OWNERSHIP_EVENT_KIND_BORROW: u8 = 0;
 pub const OWNERSHIP_EVENT_KIND_WRITE: u8 = 1;
 pub const OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX: u8 = 0;
 pub const OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL: u8 = 1;
+pub const OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD: u8 = 2;
+pub const OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX: u8 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SemcodeHeaderSpec {

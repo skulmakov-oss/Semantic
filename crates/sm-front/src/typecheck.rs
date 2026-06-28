@@ -7685,6 +7685,144 @@ mod tests {
         assert_eq!(expr_access_path(expr, &arena), None);
     }
 
+    fn sequence_index_pattern_path(index: i32) -> PatternPath {
+        use crate::types::{NumericLiteral, SequenceIndexExpr};
+
+        let mut arena = AstArena::default();
+        let sym = SymbolId(77);
+        let base = arena.alloc_expr(Expr::Var(sym));
+        let idx = arena.alloc_expr(Expr::NumericLiteral(NumericLiteral::I32(index)));
+        let expr = arena.alloc_expr(Expr::SequenceIndex(SequenceIndexExpr { base, index: idx }));
+        let result = expr_access_path(expr, &arena).expect("sequence index literal should resolve");
+        assert_eq!(result.0, sym);
+        assert_eq!(result.1, PatternPath::root().tuple_index(index as usize));
+        result.1
+    }
+
+    #[test]
+    fn sequence_index_same_path_move_and_borrow_rejects() {
+        use crate::types::{BindingPlan, BindingPlanItem, CaptureMode, SymbolId, Type};
+
+        let path = sequence_index_pattern_path(0);
+        let plan = BindingPlan {
+            items: vec![
+                BindingPlanItem {
+                    name: SymbolId(101),
+                    capture: CaptureMode::Borrow,
+                    path: path.clone(),
+                    ty: Type::I32,
+                },
+                BindingPlanItem {
+                    name: SymbolId(102),
+                    capture: CaptureMode::Move,
+                    path,
+                    ty: Type::I32,
+                },
+            ],
+        };
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("same sequence element move+borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn sequence_index_different_indexes_allow() {
+        use crate::types::{BindingPlan, BindingPlanItem, CaptureMode, SymbolId, Type};
+
+        let plan = BindingPlan {
+            items: vec![
+                BindingPlanItem {
+                    name: SymbolId(201),
+                    capture: CaptureMode::Borrow,
+                    path: sequence_index_pattern_path(0),
+                    ty: Type::I32,
+                },
+                BindingPlanItem {
+                    name: SymbolId(202),
+                    capture: CaptureMode::Move,
+                    path: sequence_index_pattern_path(1),
+                    ty: Type::I32,
+                },
+            ],
+        };
+        validate_binding_plan_conflicts(&plan)
+            .expect("different static sequence indexes must not conflict");
+    }
+
+    #[test]
+    fn sequence_index_parent_then_child_overlap_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SequenceCollectionFamily,
+            SequenceType, SymbolId, Type,
+        };
+
+        let plan = BindingPlan {
+            items: vec![
+                BindingPlanItem {
+                    name: SymbolId(301),
+                    capture: CaptureMode::Move,
+                    path: PatternPath::root(),
+                    ty: Type::Sequence(SequenceType {
+                        family: SequenceCollectionFamily::OrderedSequence,
+                        item: Box::new(Type::I32),
+                    }),
+                },
+                BindingPlanItem {
+                    name: SymbolId(302),
+                    capture: CaptureMode::Borrow,
+                    path: sequence_index_pattern_path(0),
+                    ty: Type::I32,
+                },
+            ],
+        };
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("whole sequence move and child borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn sequence_index_child_then_parent_overlap_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SequenceCollectionFamily,
+            SequenceType, SymbolId, Type,
+        };
+
+        let plan = BindingPlan {
+            items: vec![
+                BindingPlanItem {
+                    name: SymbolId(401),
+                    capture: CaptureMode::Borrow,
+                    path: sequence_index_pattern_path(0),
+                    ty: Type::I32,
+                },
+                BindingPlanItem {
+                    name: SymbolId(402),
+                    capture: CaptureMode::Move,
+                    path: PatternPath::root(),
+                    ty: Type::Sequence(SequenceType {
+                        family: SequenceCollectionFamily::OrderedSequence,
+                        item: Box::new(Type::I32),
+                    }),
+                },
+            ],
+        };
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("child borrow and whole sequence move must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
     #[test]
     fn path_state_normalization_root_subsumes_children() {
         // Adding Moved(root) when Moved(root.0) already exists → root.0 is dropped.
@@ -7875,6 +8013,278 @@ mod tests {
     }
 
     #[test]
+    fn typecheck_rejects_overlapping_tuple_element_bindings() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let path = PatternPath::root().tuple_index(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: path.clone(),
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("same tuple element move+borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn typecheck_allows_disjoint_tuple_element_bindings() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: PatternPath::root().tuple_index(1),
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan).expect("different tuple elements must not conflict");
+    }
+
+    #[test]
+    fn typecheck_rejects_tuple_parent_then_child_overlap() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: PatternPath::root(),
+            ty: Type::Tuple(vec![Type::I32]),
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("whole tuple move and child borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn typecheck_rejects_tuple_child_then_parent_overlap() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Borrow,
+            path: PatternPath::root().tuple_index(0),
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: PatternPath::root(),
+            ty: Type::Tuple(vec![Type::I32]),
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("child borrow and whole tuple move must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn typecheck_handles_nested_tuple_prefix_overlap() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let nested = PatternPath::root().tuple_index(0).tuple_index(1);
+        let sibling = PatternPath::root().tuple_index(1);
+        plan.push(BindingPlanItem {
+            name: SymbolId(1),
+            capture: CaptureMode::Move,
+            path: nested,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: sibling,
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan)
+            .expect("nested tuple path and sibling path must not conflict");
+    }
+
+    #[test]
+    fn record_field_same_path_move_and_borrow_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let path = PatternPath::root().record_field(SymbolId(1));
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: path.clone(),
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Borrow,
+            path,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("record field same-path move+borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn record_field_different_fields_allow() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: PatternPath::root().record_field(SymbolId(1)),
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Move,
+            path: PatternPath::root().record_field(SymbolId(4)),
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan).expect("different record fields must not conflict");
+    }
+
+    #[test]
+    fn record_field_parent_child_move_and_borrow_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let parent = PatternPath::root();
+        let child = PatternPath::root().record_field(SymbolId(1));
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Borrow,
+            path: parent,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Move,
+            path: child,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("record field parent/child move+borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn record_field_child_parent_move_and_borrow_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let parent = PatternPath::root();
+        let child = PatternPath::root().record_field(SymbolId(1));
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: child,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Borrow,
+            path: parent,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("record field child/parent move+borrow must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn record_field_nested_prefix_overlap_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let outer = PatternPath::root().record_field(SymbolId(1));
+        let nested = PatternPath::root()
+            .record_field(SymbolId(1))
+            .record_field(SymbolId(2));
+        let sibling = PatternPath::root().record_field(SymbolId(3));
+        plan.push(BindingPlanItem {
+            name: SymbolId(4),
+            capture: CaptureMode::Move,
+            path: outer,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(5),
+            capture: CaptureMode::Borrow,
+            path: nested,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(6),
+            capture: CaptureMode::Borrow,
+            path: sibling,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("nested record field prefix overlap must conflict");
+        assert!(
+            err.message.contains("conflicting") || err.message.contains("overlapping"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
     fn prefix_overlap_two_borrows_ok() {
         // root.0 borrows and root.0.1 also borrows — allowed.
         use crate::types::{
@@ -7897,6 +8307,173 @@ mod tests {
         });
         validate_binding_plan_conflicts(&plan)
             .expect("prefix-overlap double-borrow must not conflict");
+    }
+
+    #[test]
+    fn adt_payload_prefix_overlap_move_and_borrow_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let parent = PatternPath::root().variant(SymbolId(1));
+        let child = PatternPath::root().variant(SymbolId(1)).variant_field(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: parent,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Borrow,
+            path: child,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("prefix-overlap move+borrow must conflict");
+        assert!(err.message.contains("conflicting") || err.message.contains("overlapping"));
+    }
+
+    #[test]
+    fn adt_payload_different_variants_allow() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let path1 = PatternPath::root().variant(SymbolId(1)).variant_field(0);
+        let path2 = PatternPath::root().variant(SymbolId(2)).variant_field(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Move,
+            path: path1,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(4),
+            capture: CaptureMode::Move,
+            path: path2,
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan).expect("different variants must not conflict");
+    }
+
+    #[test]
+    fn adt_payload_different_indexes_allow() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let path1 = PatternPath::root().variant(SymbolId(1)).variant_field(0);
+        let path2 = PatternPath::root().variant(SymbolId(1)).variant_field(1);
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: path1,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Move,
+            path: path2,
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan).expect("different indexes must not conflict");
+    }
+
+    #[test]
+    fn option_same_payload_prefix_overlap_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let some_variant = PatternPath::root().variant(SymbolId(1));
+        let some_payload = some_variant.variant_field(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: some_variant.clone(),
+            ty: Type::Option(Box::new(Type::I32)),
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Borrow,
+            path: some_payload,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("Option::Some move+borrow prefix overlap must conflict");
+        assert!(err.message.contains("conflicting") || err.message.contains("overlapping"));
+    }
+
+    #[test]
+    fn option_disjoint_variants_allow() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let some_variant = PatternPath::root().variant(SymbolId(1));
+        let none_variant = PatternPath::root().variant(SymbolId(2));
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Borrow,
+            path: some_variant,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(4),
+            capture: CaptureMode::Borrow,
+            path: none_variant,
+            ty: Type::Unit,
+        });
+        validate_binding_plan_conflicts(&plan).expect("Option Some vs None must not conflict");
+    }
+
+    #[test]
+    fn result_same_payload_prefix_overlap_rejects() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let ok_variant = PatternPath::root().variant(SymbolId(1));
+        let ok_payload = ok_variant.variant_field(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(2),
+            capture: CaptureMode::Move,
+            path: ok_variant.clone(),
+            ty: Type::Result(Box::new(Type::I32), Box::new(Type::I32)),
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Borrow,
+            path: ok_payload,
+            ty: Type::I32,
+        });
+        let err = validate_binding_plan_conflicts(&plan)
+            .expect_err("Result::Ok move+borrow prefix overlap must conflict");
+        assert!(err.message.contains("conflicting") || err.message.contains("overlapping"));
+    }
+
+    #[test]
+    fn result_disjoint_variants_allow() {
+        use crate::types::{
+            BindingPlan, BindingPlanItem, CaptureMode, PatternPath, SymbolId, Type,
+        };
+        let mut plan = BindingPlan::default();
+        let ok_variant = PatternPath::root().variant(SymbolId(1)).variant_field(0);
+        let err_variant = PatternPath::root().variant(SymbolId(2)).variant_field(0);
+        plan.push(BindingPlanItem {
+            name: SymbolId(3),
+            capture: CaptureMode::Borrow,
+            path: ok_variant,
+            ty: Type::I32,
+        });
+        plan.push(BindingPlanItem {
+            name: SymbolId(4),
+            capture: CaptureMode::Borrow,
+            path: err_variant,
+            ty: Type::I32,
+        });
+        validate_binding_plan_conflicts(&plan).expect("Result Ok vs Err must not conflict");
     }
 
     // M9.10 Wave B — LetTuple / LetElseTuple path-state tracking

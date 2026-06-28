@@ -1,0 +1,34 @@
+fn read_option(opt: Option(f64)) -> f64 {
+    let total: f64 = match opt {
+        Option::Some(ref value) => { 1.0 }
+        Option::None => { 0.0 }
+    };
+    return total;
+}
+
+fn read_result_ok(res: Result(f64, i32)) -> f64 {
+    let total: f64 = match res {
+        Result::Ok(ref value) => { 1.0 }
+        Result::Err(err) => { 0.0 }
+    };
+    return total;
+}
+
+fn read_result_err(res: Result(f64, i32)) -> f64 {
+    let total: f64 = match res {
+        Result::Ok(value) => { 0.0 }
+        Result::Err(ref err) => { 1.0 }
+    };
+    return total;
+}
+
+fn main() {
+    let a: f64 = read_option(Option::Some(2.5));
+    let b: f64 = read_result_ok(Result::Ok(3.5));
+    let c: f64 = read_result_err(Result::Err(7));
+
+    assert(a == 1.0);
+    assert(b == 1.0);
+    assert(c == 1.0);
+    return;
+}

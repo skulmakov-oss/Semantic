@@ -2,7 +2,8 @@
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
     read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC11, MAGIC12, OWNERSHIP_EVENT_KIND_BORROW,
-    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
 use sm_runtime_core::RuntimeTrap;
@@ -18,6 +19,8 @@ fn run_token_first_main(semcode: &[u8]) -> Result<(), RuntimeError> {
 enum OwnershipPathComponentSpec {
     TupleIndex(u16),
     FieldSymbol(u32),
+    SequenceIndexStatic(u32),
+    AdtPayload(u32, u16),
 }
 
 #[derive(Clone, Copy)]
@@ -127,6 +130,190 @@ fn runtime_ownership_rejects_child_parent_overlap_deterministically() {
     );
 
     assert_write_overlap_rejects_deterministically(&rewritten, "pair");
+}
+
+#[test]
+fn runtime_ownership_sequence_same_index_conflict_rejects() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_sibling_index_write_passes() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(1)],
+            },
+        ],
+    );
+
+    run_token_first_main(&rewritten).expect("sibling sequence write should pass");
+}
+
+#[test]
+fn runtime_ownership_sequence_parent_child_conflict_rejects() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_child_parent_conflict_rejects() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_dynamic_borrow_conflicts_with_static_index_zero_write() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(0)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_dynamic_borrow_conflicts_with_static_sibling_write() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[OwnershipPathComponentSpec::SequenceIndexStatic(1)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_dynamic_borrow_conflicts_with_parent_write() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
+}
+
+#[test]
+fn runtime_ownership_sequence_parent_borrow_conflicts_with_dynamic_write() {
+    let bytes = compile_program_to_semcode(sequence_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "seq",
+                components: &[],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "seq",
+                components: &[],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "seq");
 }
 
 #[test]
@@ -377,13 +564,12 @@ fn runtime_ownership_record_inner_frame_borrow_does_not_leak_after_exit() {
 
 #[test]
 fn runtime_ownership_unsupported_paths_do_not_silently_claim_support() {
-    for src in [adt_source(), schema_source()] {
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        assert_ne!(&bytes[..8], &MAGIC11);
-        assert_ne!(&bytes[..8], &MAGIC12);
-        assert!(!any_function_has_ownership_section(&bytes));
-        run_token_first_main(&bytes).expect("run");
-    }
+    let src = schema_source();
+    let bytes = compile_program_to_semcode(src).expect("compile");
+    assert_ne!(&bytes[..8], &MAGIC11);
+    assert_ne!(&bytes[..8], &MAGIC12);
+    assert!(!any_function_has_ownership_section(&bytes));
+    run_token_first_main(&bytes).expect("run");
 
     let _ = compile_program_to_semcode(indirect_record_projection_source())
         .expect_err("indirect record-field projection must not silently claim support");
@@ -615,6 +801,17 @@ fn tuple_assignment_source() -> &'static str {
     "#
 }
 
+fn sequence_assignment_source() -> &'static str {
+    r#"
+        fn main() {
+            let seq: (i32, bool) = (1, true);
+            let other: i32 = 0;
+            (seq, other) = ((2, false), 1);
+            return;
+        }
+    "#
+}
+
 fn record_assignment_source() -> &'static str {
     r#"
         record DecisionContext {
@@ -673,27 +870,6 @@ fn record_multi_frame_source() -> &'static str {
             helper(DecisionContext { camera: N, quality: 0.5 });
             let patched: DecisionContext = ctx with { quality: 1.0 };
             let _ = patched;
-            return;
-        }
-    "#
-}
-
-fn adt_source() -> &'static str {
-    r#"
-        enum Maybe {
-            None,
-            Some(bool),
-        }
-
-        fn choose(flag: bool) -> Maybe {
-            return Maybe::Some(flag);
-        }
-
-        fn main() {
-            let left: Maybe = choose(true);
-            let right: Maybe = Maybe::None;
-            let _ = left;
-            let _ = right;
             return;
         }
     "#
@@ -865,6 +1041,15 @@ fn append_ownership_event(
                 out.push(OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL);
                 out.extend_from_slice(&field.to_le_bytes());
             }
+            OwnershipPathComponentSpec::SequenceIndexStatic(index) => {
+                out.push(OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX);
+                out.extend_from_slice(&index.to_le_bytes());
+            }
+            OwnershipPathComponentSpec::AdtPayload(variant, index) => {
+                out.push(OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD);
+                out.extend_from_slice(&variant.to_le_bytes());
+                out.extend_from_slice(&index.to_le_bytes());
+            }
         }
     }
 }
@@ -891,6 +1076,9 @@ fn record_field_component_ids(bytes: &[u8], target: &str) -> (u32, u32) {
                 }
                 OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => {
                     only_field = Some(read_u32_le(code, &mut cursor).expect("field component"));
+                }
+                OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX => {
+                    let _ = read_u32_le(code, &mut cursor).expect("sequence component");
                 }
                 _ => panic!("unexpected ownership component kind 0x{component_kind:02x}"),
             }
@@ -955,6 +1143,13 @@ fn parse_function_layout(code: &[u8]) -> FunctionLayout {
                     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL => {
                         let _ = read_u32_le(code, &mut cursor).expect("ownership component value");
                     }
+                    OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX => {
+                        let _ = read_u32_le(code, &mut cursor).expect("ownership component value");
+                    }
+                    OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD => {
+                        let _ = read_u32_le(code, &mut cursor).expect("ownership variant symbol");
+                        let _ = read_u16_le(code, &mut cursor).expect("ownership adt index");
+                    }
                     _ => panic!("unexpected ownership component kind 0x{kind:02x}"),
                 }
             }
@@ -988,4 +1183,61 @@ fn next_function<'a>(bytes: &'a [u8], start: usize) -> (String, &'a [u8], usize)
     let code_start = cursor;
     let code_end = code_start + code_len;
     (name, &bytes[code_start..code_end], code_end)
+}
+
+fn option_assignment_source() -> &'static str {
+    r#"
+fn main() {
+    let mut opt: Option(f64) = Option::Some(42.0);
+    opt = Option::None;
+    opt = Option::Some(0.0);
+    return;
+}
+"#
+}
+
+#[test]
+fn runtime_ownership_option_rejects_same_path_write_deterministically() {
+    let bytes = compile_program_to_semcode(option_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "opt",
+                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "opt",
+                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
+            },
+        ],
+    );
+
+    assert_write_overlap_rejects_deterministically(&rewritten, "opt");
+}
+
+#[test]
+fn runtime_ownership_option_sibling_write_passes_on_verified_path() {
+    let bytes = compile_program_to_semcode(option_assignment_source()).expect("compile");
+    let rewritten = rewrite_function_ownership_events(
+        &bytes,
+        "main",
+        &[
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_BORROW,
+                root: "opt",
+                components: &[OwnershipPathComponentSpec::AdtPayload(42, 0)],
+            },
+            OwnershipEventSpec {
+                kind: OWNERSHIP_EVENT_KIND_WRITE,
+                root: "opt",
+                components: &[OwnershipPathComponentSpec::AdtPayload(43, 0)],
+            },
+        ],
+    );
+
+    run_token_first_main(&rewritten).expect("sibling adt payload write should pass");
 }

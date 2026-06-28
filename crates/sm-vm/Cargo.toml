@@ -8,13 +8,17 @@ path = "src/lib.rs"
 
 [features]
 default = ["std"]
-std = ["sm-emit/std", "sm-runtime-core/std", "sm-verify/std", "prom-abi/std", "prom-cap/std", "prom-ui/std"]
+std = ["sm-runtime-core/std", "sm-verify/std", "prom-abi/std", "prom-cap/std"]
+disasm = []
 
 [dependencies]
-sm-emit = { path = "../sm-emit", default-features = false, features = ["std"] }
+
 sm-runtime-core = { path = "../sm-runtime-core", default-features = false, features = ["std"] }
 sm-verify = { path = "../sm-verify", default-features = false, features = ["std"] }
 prom-abi = { path = "../prom-abi", default-features = false, features = ["std"] }
 prom-cap = { path = "../prom-cap", default-features = false, features = ["std"] }
-prom-ui = { path = "../prom-ui", default-features = false, features = ["std"] }
-sm-ir = { path = "../sm-ir", default-features = false, features = ["std"] }
+sm-format = { path = "../sm-format", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+sm-emit = { path = "../sm-emit", default-features = false, features = ["std"] }
+

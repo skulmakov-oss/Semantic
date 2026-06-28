@@ -26,19 +26,23 @@ The VM is not responsible for:
 
 ## Standard Execution Rule
 
-The standard public execution route is:
-
-`verify -> run_verified_semcode* -> execute`
+The canonical trusted execution route is verifier-first and token-first:
+SemCode bytes must pass `sm-verify` admission and produce a verified token
+before trusted VM execution.
 
 Current public verified entrypoints include:
 
-- `run_verified_semcode`
-- `run_verified_semcode_with_config`
-- `run_verified_semcode_with_entry`
-- `run_verified_semcode_with_entry_and_config`
+- token-first canonical execution:
+  - `run_verified_entry_semcode*`
+- verified compatibility helpers:
+  - `run_verified_semcode`
+  - `run_verified_semcode_with_config`
+  - `run_verified_semcode_with_entry`
+  - `run_verified_semcode_with_entry_and_config`
 
 Lower-level helpers may still exist for tests or narrow integration points, but
-they must not redefine the public contract.
+they must not redefine the public contract or be described as the canonical
+trusted route.
 
 ## Runtime Value Model
 

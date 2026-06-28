@@ -1,7 +1,7 @@
 # R12 UI Intent Capability Boundary
 
 ## 1. Purpose
-This boundary document establishes the architectural constraints for UI intent capability gating. It defines how a `SemanticIntent` requests and receives authority before any execution (state mutation or side-effect) is permitted. 
+This boundary document establishes the architectural constraints for UI intent capability gating. It defines how a `SemanticIntent` requests and receives authority before any execution (state mutation or side-effect) is permitted.
 
 It does not implement the capability gate logic, authorization providers, or execution handlers.
 It introduces no source code, tests, Cargo changes, dependencies, or runtime mutations.

@@ -8,7 +8,7 @@ path = "src/lib.rs"
 
 [features]
 default = ["std", "profile-rust", "profile-logos", "debug-symbols"]
-std = ["sm-front/std", "sm-profile/std"]
+std = ["sm-front/std", "sm-profile/std", "sm-format/std"]
 profile-rust = []
 profile-logos = []
 debug-symbols = []
@@ -16,3 +16,4 @@ debug-symbols = []
 [dependencies]
 sm-front = { path = "../sm-front", default-features = false, features = ["std"] }
 sm-profile = { path = "../sm-profile", default-features = false, features = ["std"] }
+sm-format = { path = "../sm-format", default-features = false, features = ["std"] }

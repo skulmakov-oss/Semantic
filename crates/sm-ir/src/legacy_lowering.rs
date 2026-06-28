@@ -3,13 +3,13 @@ use crate::semcode_format::{
     write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC10,
     MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6,
     MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG,
+    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
 use sm_front::types::{
-    AdtCtorExpr, AdtPatternItem, ClosureCapturePolicy, ClosureLiteral, ClosureType,
-    ClosureValueFamily, MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget,
-    SequenceCollectionFamily, SequenceType,
+    AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
+    MatchPattern, NumericLiteral, RecordPatternItem, RecordPatternTarget, SequenceCollectionFamily,
+    SequenceType,
 };
 use sm_front::{CallArg, LoopExpr, TuplePatternItem};
 use std::collections::BTreeSet;
@@ -364,6 +364,15 @@ impl AccessPath {
         }
     }
 
+    pub fn sequence_index_static(&self, index: u32) -> Self {
+        let mut components = self.components.clone();
+        components.push(PathComponent::SequenceIndexStatic(index));
+        Self {
+            root: self.root,
+            components,
+        }
+    }
+
     pub fn field(&self, name: SymbolId) -> Self {
         let mut components = self.components.clone();
         components.push(PathComponent::Field(name));
@@ -372,12 +381,41 @@ impl AccessPath {
             components,
         }
     }
+
+    pub fn adt_payload(&self, variant: SymbolId, index: u16) -> Self {
+        let mut components = self.components.clone();
+        components.push(PathComponent::AdtPayload { variant, index });
+        Self {
+            root: self.root,
+            components,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum SequenceOwnershipPath {
+    Exact(AccessPath),
+    DynamicFallback(AccessPath),
+}
+
+impl SequenceOwnershipPath {
+    fn as_path(&self) -> &AccessPath {
+        match self {
+            Self::Exact(path) | Self::DynamicFallback(path) => path,
+        }
+    }
+
+    fn is_dynamic_fallback(&self) -> bool {
+        matches!(self, Self::DynamicFallback(_))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathComponent {
     TupleIndex(u16),
+    SequenceIndexStatic(u32),
     Field(SymbolId),
+    AdtPayload { variant: SymbolId, index: u16 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1918,9 +1956,18 @@ fn emit_ownership_events(
                     out.push(OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX);
                     write_u16_le(out, *index);
                 }
+                PathComponent::SequenceIndexStatic(index) => {
+                    out.push(OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX);
+                    write_u32_le(out, *index);
+                }
                 PathComponent::Field(name) => {
                     out.push(OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL);
                     write_u32_le(out, name.0);
+                }
+                PathComponent::AdtPayload { variant, index } => {
+                    out.push(sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD);
+                    write_u32_le(out, variant.0);
+                    write_u16_le(out, *index);
                 }
             }
         }
@@ -4182,7 +4229,7 @@ fn bind_tuple_items(
     items: &[TuplePatternItem],
     tuple_reg: u16,
     tuple_ty: &Type,
-    tuple_path: Option<&AccessPath>,
+    tuple_path: Option<&SequenceOwnershipPath>,
     arena: &AstArena,
     next: &mut u16,
     out: &mut Vec<IrInstr>,
@@ -4205,6 +4252,8 @@ fn bind_tuple_items(
             ),
         });
     }
+    let is_dynamic_fallback = tuple_path.is_some_and(SequenceOwnershipPath::is_dynamic_fallback);
+    let mut emitted_dynamic_root = false;
     for (index, (item, item_ty)) in items.iter().zip(item_tys.iter()).enumerate() {
         let (name, capture) = match item {
             TuplePatternItem::Bind { name, capture } => (*name, *capture),
@@ -4243,10 +4292,20 @@ fn bind_tuple_items(
         });
         if capture == sm_front::types::CaptureMode::Borrow {
             if let Some(tuple_path) = tuple_path {
-                ownership_events.push(OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: tuple_path.tuple_index(index),
-                });
+                if is_dynamic_fallback {
+                    if !emitted_dynamic_root {
+                        ownership_events.push(OwnershipPathEvent {
+                            kind: OwnershipPathEventKind::Borrow,
+                            path: tuple_path.as_path().clone(),
+                        });
+                        emitted_dynamic_root = true;
+                    }
+                } else {
+                    ownership_events.push(OwnershipPathEvent {
+                        kind: OwnershipPathEventKind::Borrow,
+                        path: tuple_path.as_path().tuple_index(index),
+                    });
+                }
             }
         }
     }
@@ -5217,7 +5276,7 @@ fn bind_let_else_tuple_items(
     items: &[TuplePatternItem],
     tuple_reg: u16,
     tuple_ty: &Type,
-    tuple_path: Option<&AccessPath>,
+    tuple_path: Option<&SequenceOwnershipPath>,
     else_return: Option<ExprId>,
     contract_ensures: &[ExprId],
     contract_result_symbol: Option<SymbolId>,
@@ -5254,6 +5313,7 @@ fn bind_let_else_tuple_items(
 
     let pattern_id = alloc_loop_expr_id(next);
     let mut deferred_binds = Vec::new();
+    let mut emitted_dynamic_root = false;
     for (index, (item, item_ty)) in items.iter().zip(item_tys.iter()).enumerate() {
         let reg = alloc(next);
         let index = u16::try_from(index).map_err(|_| FrontendError {
@@ -5336,10 +5396,20 @@ fn bind_let_else_tuple_items(
         });
         if capture == sm_front::types::CaptureMode::Borrow {
             if let Some(tuple_path) = tuple_path {
-                ownership_events.push(OwnershipPathEvent {
-                    kind: OwnershipPathEventKind::Borrow,
-                    path: tuple_path.tuple_index(index),
-                });
+                if tuple_path.is_dynamic_fallback() {
+                    if !emitted_dynamic_root {
+                        ownership_events.push(OwnershipPathEvent {
+                            kind: OwnershipPathEventKind::Borrow,
+                            path: tuple_path.as_path().clone(),
+                        });
+                        emitted_dynamic_root = true;
+                    }
+                } else {
+                    ownership_events.push(OwnershipPathEvent {
+                        kind: OwnershipPathEventKind::Borrow,
+                        path: tuple_path.as_path().tuple_index(index),
+                    });
+                }
             }
         }
     }
@@ -5374,7 +5444,11 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
             )?;
-            let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+            let final_ty = if let Some(ann) = ty {
+                canonicalize_declared_type(ann, record_table, adt_table, arena)?
+            } else {
+                vty
+            };
             env.insert_const(*name, final_ty);
             ctx.instrs.push(IrInstr::StoreVar {
                 name: resolve_symbol_name(arena, *name)?.to_string(),
@@ -5403,7 +5477,11 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
             )?;
-            let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+            let final_ty = if let Some(ann) = ty {
+                canonicalize_declared_type(ann, record_table, adt_table, arena)?
+            } else {
+                vty
+            };
             if *is_mut {
                 env.insert_mut(*name, final_ty);
             } else {
@@ -5417,7 +5495,7 @@ fn lower_stmt(
         }
         Stmt::LetTuple { items, ty, value } => {
             append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
-            let tuple_path = tuple_access_path_from_expr(*value, arena);
+            let sequence_path = sequence_access_path_from_expr(*value, arena);
             let (tuple_reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -5432,12 +5510,16 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
             )?;
-            let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+            let final_ty = if let Some(ann) = ty {
+                canonicalize_declared_type(ann, record_table, adt_table, arena)?
+            } else {
+                vty
+            };
             bind_tuple_items(
                 items,
                 tuple_reg,
                 &final_ty,
-                tuple_path.as_ref(),
+                sequence_path.as_ref(),
                 arena,
                 &mut ctx.next_reg,
                 &mut ctx.instrs,
@@ -5534,7 +5616,7 @@ fn lower_stmt(
             else_return,
         } => {
             append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
-            let tuple_path = tuple_access_path_from_expr(*value, arena);
+            let sequence_path = sequence_access_path_from_expr(*value, arena);
             let (tuple_reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -5549,12 +5631,16 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
             )?;
-            let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+            let final_ty = if let Some(ann) = ty {
+                canonicalize_declared_type(ann, record_table, adt_table, arena)?
+            } else {
+                vty
+            };
             bind_let_else_tuple_items(
                 items,
                 tuple_reg,
                 &final_ty,
-                tuple_path.as_ref(),
+                sequence_path.as_ref(),
                 *else_return,
                 &ctx.ensures,
                 ctx.ensures_result_symbol,
@@ -6350,7 +6436,11 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                 )?;
-                let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+                let final_ty = if let Some(ann) = ty {
+                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
+                } else {
+                    vty
+                };
                 block_env.insert_const(*name, final_ty);
                 out.push(IrInstr::StoreVar {
                     name: resolve_symbol_name(arena, *name)?.to_string(),
@@ -6377,7 +6467,11 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                 )?;
-                let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+                let final_ty = if let Some(ann) = ty {
+                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
+                } else {
+                    vty
+                };
                 if *is_mut {
                     block_env.insert_mut(*name, final_ty);
                 } else {
@@ -6403,7 +6497,11 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                 )?;
-                let final_ty = if let Some(ann) = ty { ann.clone() } else { vty };
+                let final_ty = if let Some(ann) = ty {
+                    canonicalize_declared_type(ann, record_table, adt_table, arena)?
+                } else {
+                    vty
+                };
                 bind_tuple_items(
                     items,
                     tuple_reg,
@@ -6967,7 +7065,7 @@ fn resolve_sum_match_pattern_for_lowering(
     for (index, (item, declared_ty)) in adt_pat.items.iter().zip(variant.payload.iter()).enumerate()
     {
         let payload_ty = canonicalize_declared_type(declared_ty, record_table, adt_table, arena)?;
-        if let AdtPatternItem::Bind { name, .. } = item {
+        if let sm_front::types::AdtPatternItem::Bind { name, .. } = item {
             bindings.push(LoweredAdtMatchBinding {
                 name: *name,
                 ty: payload_ty,
@@ -7923,8 +8021,7 @@ fn lower_match_expr(
     ) {
         return Err(FrontendError {
             pos: 0,
-            message: "match expression scrutinee must be quad, enum, Option(T), or Result(T, E)"
-                .to_string(),
+            message: format!("match expression scrutinee must be quad, enum, Option(T), or Result(T, E). Got: {:?}", scr_ty),
         });
     }
     let exhaustive_without_default = if match_expr.default.is_none() {
@@ -9095,20 +9192,29 @@ fn find_named_var_symbol(
     }
 }
 
-fn tuple_access_path_from_expr(expr_id: ExprId, arena: &AstArena) -> Option<AccessPath> {
+fn sequence_access_path_from_expr(
+    expr_id: ExprId,
+    arena: &AstArena,
+) -> Option<SequenceOwnershipPath> {
     match arena.expr(expr_id) {
-        Expr::Var(name) => Some(AccessPath::new(*name)),
+        Expr::Var(name) => Some(SequenceOwnershipPath::Exact(AccessPath::new(*name))),
         Expr::SequenceIndex(index_expr) => {
+            let base = sequence_access_path_from_expr(index_expr.base, arena)?;
+            let base_path = base.as_path().clone();
+            if base.is_dynamic_fallback() {
+                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
+            }
             let Expr::NumericLiteral(NumericLiteral::I32(index)) = arena.expr(index_expr.index)
             else {
-                return None;
+                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
             };
             if *index < 0 {
-                return None;
+                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
             }
-            let index = u16::try_from(*index).ok()?;
-            let base = tuple_access_path_from_expr(index_expr.base, arena)?;
-            Some(base.tuple_index(index))
+            let index = u32::try_from(*index).ok()?;
+            Some(SequenceOwnershipPath::Exact(
+                base_path.sequence_index_static(index),
+            ))
         }
         _ => None,
     }
@@ -9215,7 +9321,48 @@ fn append_record_update_write_events_from_expr(
                 arena,
                 ownership_events,
             );
+
+            let scrutinee_path = sequence_access_path_from_expr(match_expr.scrutinee, arena);
+            let mut borrowed_dynamic_scrutinee_root = false;
             for arm in &match_expr.arms {
+                if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
+                    if let Some(path) = &scrutinee_path {
+                        if path.is_dynamic_fallback() {
+                            let should_borrow = adt_pat.items.iter().any(|item| {
+                                matches!(
+                                    item,
+                                    sm_front::types::AdtPatternItem::Bind {
+                                        capture: sm_front::types::CaptureMode::Borrow,
+                                        ..
+                                    }
+                                )
+                            });
+                            if should_borrow && !borrowed_dynamic_scrutinee_root {
+                                ownership_events.push(OwnershipPathEvent {
+                                    kind: OwnershipPathEventKind::Borrow,
+                                    path: path.as_path().clone(),
+                                });
+                                borrowed_dynamic_scrutinee_root = true;
+                            }
+                        } else {
+                            for (idx, item) in adt_pat.items.iter().enumerate() {
+                                if let sm_front::types::AdtPatternItem::Bind {
+                                    capture: sm_front::types::CaptureMode::Borrow,
+                                    ..
+                                } = item
+                                {
+                                    ownership_events.push(OwnershipPathEvent {
+                                        kind: OwnershipPathEventKind::Borrow,
+                                        path: path
+                                            .as_path()
+                                            .adt_payload(adt_pat.variant_name, idx as u16),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
                 if let Some(guard) = arm.guard {
                     append_record_update_write_events_from_expr(guard, arena, ownership_events);
                 }
@@ -9251,6 +9398,7 @@ fn alloc(next: &mut u16) -> u16 {
 mod opt_tests {
     use super::*;
     use crate::passes::run_default_opt_passes;
+    use sm_format::semcode_decode::{decode_semcode_envelope, DecodedAccessPathComponent};
     use sm_front::parse_program;
 
     #[test]
@@ -9276,6 +9424,21 @@ mod opt_tests {
         let path = AccessPath::new(SymbolId(3)).field(camera);
         assert_eq!(path.root, SymbolId(3));
         assert_eq!(path.components, vec![PathComponent::Field(camera)]);
+    }
+
+    #[test]
+    fn access_path_sequence_index_static_can_be_represented() {
+        let path = AccessPath::new(SymbolId(3))
+            .sequence_index_static(2)
+            .sequence_index_static(4);
+        assert_eq!(path.root, SymbolId(3));
+        assert_eq!(
+            path.components,
+            vec![
+                PathComponent::SequenceIndexStatic(2),
+                PathComponent::SequenceIndexStatic(4),
+            ]
+        );
     }
 
     #[test]
@@ -10159,6 +10322,172 @@ mod opt_tests {
     }
 
     #[test]
+    fn lower_adt_match_borrow_capture_records_borrow_path_event() {
+        let src = r#"
+            enum Maybe {
+                None,
+                Some(f64),
+            }
+            fn use_e(e: Maybe) -> f64 {
+                let total: f64 = match e {
+                    Maybe::Some(ref v) => { 1.0 }
+                    _ => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (program, func) = lower_single_function_with_program(src, "use_e");
+        let use_e_func = program
+            .functions
+            .iter()
+            .find(|f| program.arena.symbol_name(f.name) == "use_e")
+            .unwrap();
+        let e_name = use_e_func.params[0].0;
+
+        let adt = program
+            .adts
+            .iter()
+            .find(|adt| program.arena.symbol_name(adt.name) == "Maybe")
+            .unwrap();
+        let variant = adt
+            .variants
+            .iter()
+            .find(|v| program.arena.symbol_name(v.name) == "Some")
+            .unwrap();
+
+        assert_eq!(
+            func.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(e_name).adt_payload(variant.name, 0),
+            }]
+        );
+    }
+
+    #[test]
+    fn lower_adt_match_move_capture_does_not_record_borrow_path_event() {
+        let src = r#"
+            enum Maybe {
+                None,
+                Some(f64),
+            }
+            fn use_e(e: Maybe) -> f64 {
+                let total: f64 = match e {
+                    Maybe::Some(v) => { 1.0 }
+                    _ => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (_, func) = lower_single_function_with_program(src, "use_e");
+
+        assert_eq!(func.ownership_events, vec![]);
+    }
+
+    #[test]
+    fn lower_option_ref_emits_borrow_path() {
+        let src = r#"
+            fn use_opt(opt: Option(f64)) -> f64 {
+                let total: f64 = match opt {
+                    Option::Some(ref value) => { 1.0 }
+                    Option::None => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (mut program, func) = lower_single_function_with_program(src, "use_opt");
+
+        let opt_name = program.arena.intern_symbol("opt");
+        let some_name = program.arena.intern_symbol("Some");
+
+        assert_eq!(
+            func.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(opt_name).adt_payload(some_name, 0),
+            }]
+        );
+    }
+
+    #[test]
+    fn lower_option_move_does_not_emit_borrow() {
+        let src = r#"
+            fn use_opt(opt: Option(f64)) -> f64 {
+                let total: f64 = match opt {
+                    Option::Some(value) => { 1.0 }
+                    Option::None => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (_, func) = lower_single_function_with_program(src, "use_opt");
+
+        assert_eq!(func.ownership_events, vec![]);
+    }
+
+    #[test]
+    fn lower_result_ref_emits_borrow_path() {
+        let src = r#"
+            fn use_result(res: Result(f64, i32)) -> f64 {
+                let total: f64 = match res {
+                    Result::Ok(ref value) => { 1.0 }
+                    Result::Err(err) => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (mut program, func) = lower_single_function_with_program(src, "use_result");
+
+        let res_name = program.arena.intern_symbol("res");
+        let ok_name = program.arena.intern_symbol("Ok");
+
+        assert_eq!(
+            func.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(res_name).adt_payload(ok_name, 0),
+            }]
+        );
+    }
+
+    #[test]
+    fn lower_result_err_ref_emits_borrow_path() {
+        let src = r#"
+            fn use_result(res: Result(f64, i32)) -> f64 {
+                let total: f64 = match res {
+                    Result::Ok(value) => { 1.0 }
+                    Result::Err(ref err) => { 0.0 }
+                };
+                return total;
+            }
+            fn main() { return; }
+        "#;
+
+        let (mut program, func) = lower_single_function_with_program(src, "use_result");
+
+        let res_name = program.arena.intern_symbol("res");
+        let err_name = program.arena.intern_symbol("Err");
+
+        assert_eq!(
+            func.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(res_name).adt_payload(err_name, 0),
+            }]
+        );
+    }
+
+    #[test]
     fn lower_tuple_borrow_capture_records_borrow_path_event() {
         let src = r#"
             fn pair() -> (i32, i32) = (1, 2);
@@ -10188,6 +10517,45 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Borrow,
                 path: AccessPath::new(*pair_name).tuple_index(0),
             }]
+        );
+    }
+
+    #[test]
+    fn lower_tuple_elements_emit_distinct_ownership_paths() {
+        let src = r#"
+            fn pair() -> (i32, i32) = (1, 2);
+
+            fn main() {
+                let pair: (i32, i32) = pair();
+                let (ref left, ref right): (i32, i32) = pair;
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let {
+            name: pair_name, ..
+        } = program.arena.stmt(main_fn.body[0])
+        else {
+            panic!("expected pair binding");
+        };
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*pair_name).tuple_index(0),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*pair_name).tuple_index(1),
+                },
+            ]
         );
     }
 
@@ -11092,6 +11460,213 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Write,
                 path: AccessPath::new(*ctx_name).field(quality_field),
             }]
+        );
+    }
+
+    #[test]
+    fn lower_record_borrow_capture_records_distinct_field_paths() {
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let DecisionContext { camera: ref seen_camera, quality: ref seen_quality } = ctx;
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let camera_field = program.records[0].fields[0].name;
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*ctx_name).field(camera_field),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*ctx_name).field(quality_field),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_record_copy_with_emits_distinct_field_write_events() {
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let patched: DecisionContext = ctx with { quality: 1.0, camera: T };
+                assert(patched.camera == T);
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let camera_field = program.records[0].fields[0].name;
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Write,
+                    path: AccessPath::new(*ctx_name).field(quality_field),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Write,
+                    path: AccessPath::new(*ctx_name).field(camera_field),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_sequence_index_borrow_records_sequence_index_static_path() {
+        let src = r#"
+            fn main() {
+                let seq: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+                let (ref left, ref right): (i32, i32) = seq[0];
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: seq_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected sequence binding");
+        };
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(0)
+                        .tuple_index(0),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(0)
+                        .tuple_index(1),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_sequence_index_borrow_encodes_sequence_index_static_component() {
+        let src = r#"
+            fn main() {
+                let seq: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+                let (ref left, ref right): (i32, i32) = seq[0];
+                return;
+            }
+        "#;
+
+        let bytes = compile_program_to_semcode(src).expect("sequence semcode should emit");
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode sequence semcode");
+        let main = functions
+            .iter()
+            .find(|func| func.name == "main")
+            .expect("main fn");
+        assert_eq!(main.borrowed_paths.len(), 2);
+        let root_symbol_id = main.borrowed_paths[0].root_symbol_id;
+        assert_eq!(main.borrowed_paths[1].root_symbol_id, root_symbol_id);
+        assert_eq!(
+            main.borrowed_paths[0].components,
+            vec![
+                DecodedAccessPathComponent::SequenceIndexStatic(0),
+                DecodedAccessPathComponent::TupleIndex(0),
+            ]
+        );
+        assert_eq!(
+            main.borrowed_paths[1].components,
+            vec![
+                DecodedAccessPathComponent::SequenceIndexStatic(0),
+                DecodedAccessPathComponent::TupleIndex(1),
+            ]
+        );
+    }
+
+    #[test]
+    fn lower_sequence_indexes_emit_distinct_static_paths() {
+        let src = r#"
+            fn main() {
+                let seq: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+                let (ref left0, ref right0): (i32, i32) = seq[0];
+                let (ref left1, ref right1): (i32, i32) = seq[1];
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: seq_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected sequence binding");
+        };
+        assert_eq!(
+            main.ownership_events,
+            vec![
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(0)
+                        .tuple_index(0),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(0)
+                        .tuple_index(1),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(1)
+                        .tuple_index(0),
+                },
+                OwnershipPathEvent {
+                    kind: OwnershipPathEventKind::Borrow,
+                    path: AccessPath::new(*seq_name)
+                        .sequence_index_static(1)
+                        .tuple_index(1),
+                },
+            ]
         );
     }
 

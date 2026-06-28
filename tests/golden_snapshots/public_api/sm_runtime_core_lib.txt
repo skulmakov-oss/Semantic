@@ -26,7 +26,9 @@ pub root: SymbolId,
 pub components: Vec<PathComponent>,
 pub fn new(root: SymbolId) -> Self {
 pub fn tuple_index(&self, index: u16) -> Self {
+pub fn sequence_index_static(&self, index: u32) -> Self {
 pub fn field(&self, name: SymbolId) -> Self {
+pub fn adt_payload(&self, variant: SymbolId, index: u16) -> Self {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PathComponent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -49,7 +49,7 @@ pub fn has_entry(&self, entry: &str) -> bool {
 pub fn require_entry<'token>( &'token self, entry: &str, ) -> Result<VerifiedEntrySemCode<'token, 'a>, EntryResolutionError> {
 #[cfg(feature = "std")]
 #[doc(hidden)]
-pub fn with_decoded_envelopes<R, F>(&self, f: F) -> R where F: for<'scope> FnOnce( &'scope sm_emit::SemcodeHeaderSpec, &'scope [sm_ir::semcode_decode::DecodedFunctionEnvelope<'a>], ) -> R, {
+pub fn with_decoded_envelopes<R, F>(&self, f: F) -> R where F: for<'scope> FnOnce( &'scope sm_format::semcode_format::SemcodeHeaderSpec, &'scope [sm_format::semcode_decode::DecodedFunctionEnvelope<'a>], ) -> R, {
 #[cfg(feature = "std")]
 pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectReport> {
 #[cfg(feature = "std")]

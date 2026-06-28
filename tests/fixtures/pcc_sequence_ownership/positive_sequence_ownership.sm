@@ -1,0 +1,10 @@
+fn main() {
+    let seq: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+    let (ref left0, ref right0): (i32, i32) = seq[0];
+    let (ref left1, ref right1): (i32, i32) = seq[1];
+    assert(left0 == 1);
+    assert(right0 == 2);
+    assert(left1 == 3);
+    assert(right1 == 4);
+    return;
+}

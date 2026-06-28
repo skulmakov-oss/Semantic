@@ -4,7 +4,7 @@
 extern crate std;
 
 #[cfg(feature = "std")]
-use sm_emit::{
+use sm_format::semcode_format::{
     read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
     SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS, CAP_EVENT_POST,
     CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_MAP_VALUES,
@@ -104,7 +104,7 @@ impl std::error::Error for RejectReport {}
 pub struct VerifiedSemCode<'a> {
     bytes: &'a [u8],
     program: VerifiedProgram,
-    decoded: Vec<sm_ir::semcode_decode::DecodedFunctionEnvelope<'a>>,
+    decoded: Vec<sm_format::semcode_decode::DecodedFunctionEnvelope<'a>>,
 }
 
 /// Error type for canonical entry resolution.
@@ -209,8 +209,8 @@ impl<'a> VerifiedSemCode<'a> {
     pub fn with_decoded_envelopes<R, F>(&self, f: F) -> R
     where
         F: for<'scope> FnOnce(
-            &'scope sm_emit::SemcodeHeaderSpec,
-            &'scope [sm_ir::semcode_decode::DecodedFunctionEnvelope<'a>],
+            &'scope sm_format::semcode_format::SemcodeHeaderSpec,
+            &'scope [sm_format::semcode_decode::DecodedFunctionEnvelope<'a>],
         ) -> R,
     {
         f(&self.program.header, &self.decoded)
@@ -227,62 +227,72 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
     let mut diagnostics = Vec::new();
     let quotas = RuntimeQuotas::verified_local();
 
-    let (header, decoded_functions) = match sm_ir::semcode_decode::decode_semcode_envelope(bytes) {
-        Ok(v) => v,
-        Err(err) => {
-            let diag = match err {
-                sm_ir::semcode_decode::DecodeError::BadHeader => diag(
-                    VerificationCode::BadHeader,
-                    None,
-                    None,
-                    "SemCode file is shorter than the 8-byte header",
-                ),
-                sm_ir::semcode_decode::DecodeError::UnsupportedVersion { found, .. } => diag(
-                    VerificationCode::UnsupportedVersion,
-                    None,
-                    Some(0),
-                    format!("unsupported SemCode header '{}'", found),
-                ),
-                sm_ir::semcode_decode::DecodeError::TruncatedFunction { offset, msg } => {
-                    diag(VerificationCode::TruncatedFunction, None, Some(offset), msg)
-                }
-                sm_ir::semcode_decode::DecodeError::InvalidFunctionName { offset, msg } => diag(
-                    VerificationCode::InvalidFunctionName,
-                    None,
-                    Some(offset),
-                    msg,
-                ),
-                sm_ir::semcode_decode::DecodeError::InvalidStringTable { offset, msg } => diag(
-                    VerificationCode::InvalidStringTable,
-                    None,
-                    Some(offset),
-                    msg,
-                ),
-                sm_ir::semcode_decode::DecodeError::InvalidDebugSection { offset, msg } => diag(
-                    VerificationCode::InvalidDebugSection,
-                    None,
-                    Some(offset),
-                    msg,
-                ),
-                sm_ir::semcode_decode::DecodeError::InvalidOwnershipSection { offset, msg } => {
-                    diag(
+    let (header, decoded_functions) =
+        match sm_format::semcode_decode::decode_semcode_envelope(bytes) {
+            Ok(v) => v,
+            Err(err) => {
+                let diag = match err {
+                    sm_format::semcode_decode::DecodeError::BadHeader => diag(
+                        VerificationCode::BadHeader,
+                        None,
+                        None,
+                        "SemCode file is shorter than the 8-byte header",
+                    ),
+                    sm_format::semcode_decode::DecodeError::UnsupportedVersion {
+                        found, ..
+                    } => diag(
+                        VerificationCode::UnsupportedVersion,
+                        None,
+                        Some(0),
+                        format!("unsupported SemCode header '{}'", found),
+                    ),
+                    sm_format::semcode_decode::DecodeError::TruncatedFunction { offset, msg } => {
+                        diag(VerificationCode::TruncatedFunction, None, Some(offset), msg)
+                    }
+                    sm_format::semcode_decode::DecodeError::InvalidFunctionName { offset, msg } => {
+                        diag(
+                            VerificationCode::InvalidFunctionName,
+                            None,
+                            Some(offset),
+                            msg,
+                        )
+                    }
+                    sm_format::semcode_decode::DecodeError::InvalidStringTable { offset, msg } => {
+                        diag(
+                            VerificationCode::InvalidStringTable,
+                            None,
+                            Some(offset),
+                            msg,
+                        )
+                    }
+                    sm_format::semcode_decode::DecodeError::InvalidDebugSection { offset, msg } => {
+                        diag(
+                            VerificationCode::InvalidDebugSection,
+                            None,
+                            Some(offset),
+                            msg,
+                        )
+                    }
+                    sm_format::semcode_decode::DecodeError::InvalidOwnershipSection {
+                        offset,
+                        msg,
+                    } => diag(
                         VerificationCode::InvalidOwnershipSection,
                         None,
                         Some(offset),
                         msg,
-                    )
-                }
-                sm_ir::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
-                    VerificationCode::ResourceLimitExceeded,
-                    None,
-                    Some(offset),
-                    msg,
-                ),
-            };
-            diagnostics.push(diag);
-            return Err(RejectReport { diagnostics });
-        }
-    };
+                    ),
+                    sm_format::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
+                        VerificationCode::ResourceLimitExceeded,
+                        None,
+                        Some(offset),
+                        msg,
+                    ),
+                };
+                diagnostics.push(diag);
+                return Err(RejectReport { diagnostics });
+            }
+        };
 
     let mut functions = Vec::new();
     let mut pending_functions = Vec::new();
@@ -396,7 +406,7 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
 
 #[cfg(feature = "std")]
 fn verify_function_code(
-    env: &sm_ir::semcode_decode::DecodedFunctionEnvelope,
+    env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
     header: &SemcodeHeaderSpec,
     quotas: &RuntimeQuotas,
 ) -> Result<PendingVerifiedFunction, RejectReport> {
@@ -428,18 +438,24 @@ fn verify_function_code(
     }
 
     let has_ownership_section = env.has_ownership_section;
-    let has_record_field_ownership =
-        env.borrowed_paths
-            .iter()
-            .chain(env.write_paths.iter())
-            .any(|p| {
-                p.components.iter().any(|c| {
-                    matches!(
-                        c,
-                        sm_ir::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_)
-                    )
-                })
-            });
+    let mut has_record_field_ownership = false;
+    for p in env.borrowed_paths.iter().chain(env.write_paths.iter()) {
+        for c in &p.components {
+            match c {
+                sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_) => {
+                    has_record_field_ownership = true;
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload { .. } => {
+                    // Variant is a global SymbolId; it cannot be bounds-checked
+                    // against the local string table. Structural acceptance only.
+                }
+                sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(_) => {
+                    // Static sequence index ownership is structurally accepted.
+                }
+                _ => {}
+            }
+        }
+    }
 
     let code = env.code_slice;
     let mut cursor = env.instr_start_offset;
@@ -1188,11 +1204,13 @@ fn diag(
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
-    use sm_emit::{
-        compile_program_to_semcode, compile_program_to_semcode_with_options_debug, read_u16_le,
-        read_u32_le, CompileProfile, OptLevel, MAGIC11, MAGIC12, OWNERSHIP_SECTION_TAG,
+    use sm_format::semcode_format::{
+        read_u16_le, read_u32_le, MAGIC11, MAGIC12, OWNERSHIP_SECTION_TAG,
     };
-    use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
+    use sm_ir::{
+        compile_program_to_semcode, compile_program_to_semcode_with_options_debug,
+        emit_ir_to_semcode, CompileProfile, IrFunction, IrInstr, OptLevel,
+    };
 
     #[test]
     fn verifier_accepts_valid_semcode() {
@@ -1864,6 +1882,86 @@ mod tests {
     }
 
     #[test]
+    fn verifier_accepts_sequence_index_static_ownership_semcode() {
+        let bytes = sequence_index_static_borrow_semcode_bytes();
+        let verified = verify_semcode(&bytes).expect("verify");
+        assert_eq!(verified.functions.len(), 1);
+    }
+
+    #[test]
+    fn verifier_rejects_truncated_sequence_index_static_payload() {
+        let mut bytes = sequence_index_static_borrow_semcode_bytes();
+        let (code_len_pos, code_start, code_end) = function_code_span(&bytes, "main");
+        let code = &bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let truncated_code_len = section_offset + 4 + 2 + 1 + 4 + 2 + 1 + 3;
+        bytes[code_len_pos..code_len_pos + 4]
+            .copy_from_slice(&(truncated_code_len as u32).to_le_bytes());
+        bytes.truncate(code_start + truncated_code_len);
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipSection
+        );
+    }
+
+    #[test]
+    fn verifier_accepts_adt_payload_ownership_semcode() {
+        let bytes = adt_payload_ownership_semcode_bytes();
+        let verified = verify_semcode(&bytes).expect("verify");
+        assert_eq!(verified.functions.len(), 2);
+    }
+
+    #[test]
+    fn verifier_rejects_invalid_adt_payload_component_kind() {
+        let mut bytes = adt_payload_ownership_semcode_bytes();
+        let (_, code_start, code_end) = function_code_span(&bytes, "read_payload");
+        let code = &mut bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let component_kind_offset = section_offset + 4 + 2 + 1 + 4 + 2;
+        code[component_kind_offset] = 0xff;
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipSection
+        );
+    }
+
+    #[test]
+    fn verifier_rejects_truncated_adt_payload_missing_variant() {
+        let mut bytes = adt_payload_ownership_semcode_bytes();
+        let (code_len_pos, code_start, code_end) = function_code_span(&bytes, "read_payload");
+        let code = &bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let truncated_code_len = section_offset + 4 + 2 + 1 + 4 + 2 + 1;
+        bytes[code_len_pos..code_len_pos + 4]
+            .copy_from_slice(&(truncated_code_len as u32).to_le_bytes());
+        bytes.truncate(code_start + truncated_code_len);
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipSection
+        );
+    }
+
+    #[test]
+    fn verifier_rejects_truncated_adt_payload_missing_index() {
+        let mut bytes = adt_payload_ownership_semcode_bytes();
+        let (code_len_pos, code_start, code_end) = function_code_span(&bytes, "read_payload");
+        let code = &bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let truncated_code_len = section_offset + 4 + 2 + 1 + 4 + 2 + 1 + 4;
+        bytes[code_len_pos..code_len_pos + 4]
+            .copy_from_slice(&(truncated_code_len as u32).to_le_bytes());
+        bytes.truncate(code_start + truncated_code_len);
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidOwnershipSection
+        );
+    }
+
+    #[test]
     fn verifier_rejects_record_field_payload_under_v11_capabilities() {
         let mut bytes = record_field_borrow_semcode_bytes();
         bytes[..MAGIC11.len()].copy_from_slice(&MAGIC11);
@@ -2029,6 +2127,17 @@ mod tests {
         compile_program_to_semcode(src).expect("compile")
     }
 
+    fn sequence_index_static_borrow_semcode_bytes() -> Vec<u8> {
+        let mut bytes = record_field_borrow_semcode_bytes();
+        let (_, code_start, code_end) = function_code_span(&bytes, "main");
+        let code = &mut bytes[code_start..code_end];
+        let section_offset = ownership_section_offset(code);
+        let component_kind_offset = section_offset + 4 + 2 + 1 + 4 + 2;
+        code[component_kind_offset] =
+            sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX;
+        bytes
+    }
+
     fn record_field_write_semcode_bytes() -> Vec<u8> {
         let src = r#"
             record DecisionContext {
@@ -2041,6 +2150,32 @@ mod tests {
                 let patched: DecisionContext = ctx with { quality: 1.0 };
                 let _ = patched;
                 return;
+            }
+        "#;
+        compile_program_to_semcode(src).expect("compile")
+    }
+
+    fn adt_payload_ownership_semcode_bytes() -> Vec<u8> {
+        let src = r#"
+            enum Maybe {
+                None,
+                Some(f64),
+            }
+
+            fn read_payload(value: Maybe) -> f64 {
+                let ret: f64 = match value {
+                    Maybe::None => { 0.0 }
+                    Maybe::Some(ref inner) => {
+                        let v: f64 = inner;
+                        v
+                    }
+                };
+                return ret;
+            }
+
+            fn main() {
+                let out: f64 = read_payload(Maybe::Some(2.5));
+                assert(out == 2.5);
             }
         "#;
         compile_program_to_semcode(src).expect("compile")

@@ -24,15 +24,6 @@ pub manifest: CapabilityManifestMetadata,
 pub message: String,
 pub fn new( capability: CapabilityKind, call: Option<HostCallId>, code: CapabilityDeniedCode, manifest: CapabilityManifestMetadata, message: impl Into<String>, ) -> Self {
 pub trait CapabilityChecker {
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UiCapabilityDenied {
-pub capability: UiCapabilityKind,
-pub operation: Option<UiOperationId>,
-pub code: CapabilityDeniedCode,
-pub manifest: CapabilityManifestMetadata,
-pub message: String,
-pub fn new( capability: UiCapabilityKind, operation: Option<UiOperationId>, manifest: CapabilityManifestMetadata, message: impl Into<String>, ) -> Self {
-pub trait UiCapabilityChecker {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestValidationCode {
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,8 +39,6 @@ pub fn new() -> Self {
 pub fn with_contract(schema: impl Into<String>, version: CapabilityManifestVersion) -> Self {
 pub fn allow(&mut self, capability: CapabilityKind) {
 pub fn allows(&self, capability: CapabilityKind) -> bool {
-pub fn allow_ui(&mut self, capability: UiCapabilityKind) {
-pub fn allows_ui(&self, capability: UiCapabilityKind) -> bool {
 pub fn metadata(&self) -> CapabilityManifestMetadata {
 pub fn validate(&self) -> Result<(), ManifestValidationReport> {
 pub fn gate_surface() -> Self {

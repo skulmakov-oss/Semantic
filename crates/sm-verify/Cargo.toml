@@ -8,12 +8,13 @@ path = "src/lib.rs"
 
 [features]
 default = ["std"]
-std = ["sm-emit/std", "sm-runtime-core/std"]
+std = ["sm-runtime-core/std"]
 
 [dependencies]
-sm-emit = { path = "../sm-emit", default-features = false, features = ["std"] }
+
 sm-runtime-core = { path = "../sm-runtime-core", default-features = false, features = ["std"] }
-sm-ir = { path = "../sm-ir", default-features = false, features = ["std"] }
+sm-format = { path = "../sm-format", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 
+sm-ir = { path = "../sm-ir", default-features = false, features = ["std"] }

@@ -4,8 +4,7 @@ use crate::semcode_format::{
 };
 use crate::QuadVal;
 use prom_abi::{AbiError, AbiValue, HostCallId, PrometheusHostAbi};
-use prom_cap::{CapabilityChecker, CapabilityDenied, UiCapabilityChecker, UiCapabilityDenied};
-use prom_ui::UiOperationId;
+use prom_cap::{CapabilityChecker, CapabilityDenied};
 use sm_runtime_core::hello_observation_sink::{
     HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
 };
@@ -149,16 +148,10 @@ impl<'a> HelloObservationRuntime<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
     BadHeader,
-    UnsupportedBytecodeVersion {
-        found: String,
-        supported: String,
-    },
+    UnsupportedBytecodeVersion { found: String, supported: String },
     BadFormat(String),
     UnknownFunction(String),
-    InvalidJumpAddress {
-        func: String,
-        addr: usize,
-    },
+    InvalidJumpAddress { func: String, addr: usize },
     TypeMismatchRuntime(String),
     StackUnderflow,
     StackOverflow,
@@ -168,9 +161,7 @@ pub enum RuntimeError {
     InvalidStringId(u16),
     HostAbi(AbiError),
     CapabilityDenied(CapabilityDenied),
-    /// A UI operation was attempted but the required UI capability was not
-    /// admitted in the manifest. Wired at M7 Wave 1.
-    UiCapabilityDenied(UiCapabilityDenied),
+
     Trap(RuntimeTrap),
 }
 
@@ -201,7 +192,7 @@ impl core::fmt::Display for RuntimeError {
             RuntimeError::InvalidStringId(id) => write!(f, "invalid string id {}", id),
             RuntimeError::HostAbi(err) => write!(f, "{err}"),
             RuntimeError::CapabilityDenied(err) => write!(f, "{err}"),
-            RuntimeError::UiCapabilityDenied(err) => write!(f, "{err}"),
+
             RuntimeError::Trap(RuntimeTrap::AssertionFailed) => write!(f, "assertion failed"),
             RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict) => {
                 write!(f, "write path overlaps active borrow")
@@ -412,74 +403,6 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     exec_loop(&mut vm, &mut bridge, &mut observation)
 }
 
-/// Compatibility verified-bytes shim.
-///
-/// Preserves older byte-based call sites. Internally performs admission through
-/// `verify_semcode_token`, resolves the entry via `require_entry`, and delegates
-/// to canonical token execution. It should not be preferred for new internal callers.
-///
-/// Run verified SemCode with both a standard capability checker and a UI
-/// capability checker.
-///
-/// UI operations attempted without the corresponding `UiCapabilityKind` in
-/// `ui_capabilities` will return `RuntimeError::UiCapabilityDenied`. This is
-/// the Wave 1 denial path for the M7 UI application boundary track.
-pub fn run_verified_semcode_with_ui_capabilities<
-    H: PrometheusHostAbi,
-    C: CapabilityChecker,
-    U: UiCapabilityChecker,
->(
-    bytes: &[u8],
-    host: &mut H,
-    capabilities: &C,
-    ui_capabilities: &U,
-) -> Result<(), RuntimeError> {
-    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
-    let entry_token = token.require_entry("main").map_err(|err| match err {
-        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
-    })?;
-    run_verified_entry_semcode_with_ui_capabilities(
-        &entry_token,
-        host,
-        capabilities,
-        ui_capabilities,
-    )
-}
-
-/// Canonical verified token execution path.
-///
-/// This is the canonical and preferred path for internal verified execution.
-/// It requires a `VerifiedEntrySemCode` token, ensuring that admission
-/// and entry resolution have already occurred, and does not accept raw bytes.
-pub fn run_verified_entry_semcode_with_ui_capabilities<
-    H: PrometheusHostAbi,
-    C: CapabilityChecker,
-    U: UiCapabilityChecker,
->(
-    token: &VerifiedEntrySemCode<'_, '_>,
-    host: &mut H,
-    capabilities: &C,
-    ui_capabilities: &U,
-) -> Result<(), RuntimeError> {
-    let program = prepare_verified_execution(token)?;
-    let mut vm = VM {
-        functions: program.functions,
-        callstack: Vec::new(),
-        config: ExecutionConfig::for_context(ExecutionContext::KernelBound),
-        effect_calls: 0,
-        symbols: program.runtime_symbols,
-        prng_state: 0,
-    };
-    push_frame(&mut vm, token.entry(), Vec::new(), None)?;
-    let mut bridge = PrometheusUiVmHost {
-        host,
-        capabilities,
-        ui_capabilities,
-    };
-    let mut observation = HelloObservationRuntime::discard();
-    exec_loop(&mut vm, &mut bridge, &mut observation)
-}
-
 /// Canonical verified token execution path.
 ///
 /// This is the canonical and preferred path for internal verified execution.
@@ -574,6 +497,7 @@ fn run_vm_program_view_with_entry_and_config_with_observation_runtime<'a>(
 ///
 /// Intentionally parses raw SemCode for diagnostic output without verifier enforcement.
 /// Not a verified execution API.
+#[cfg(feature = "disasm")]
 pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {
     let program = parse_semcode(bytes)?;
     let spec = program.header;
@@ -618,31 +542,31 @@ fn decode_and_map_errors(
 ) -> Result<
     (
         SemcodeHeaderSpec,
-        Vec<sm_ir::semcode_decode::DecodedFunctionEnvelope<'_>>,
+        Vec<sm_format::semcode_decode::DecodedFunctionEnvelope<'_>>,
     ),
     RuntimeError,
 > {
-    sm_ir::semcode_decode::decode_semcode_envelope(bytes).map_err(|e| match e {
-        sm_ir::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
-        sm_ir::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
+    sm_format::semcode_decode::decode_semcode_envelope(bytes).map_err(|e| match e {
+        sm_format::semcode_decode::DecodeError::BadHeader => RuntimeError::BadHeader,
+        sm_format::semcode_decode::DecodeError::UnsupportedVersion { found, supported } => {
             RuntimeError::UnsupportedBytecodeVersion { found, supported }
         }
-        sm_ir::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
+        sm_format::semcode_decode::DecodeError::TruncatedFunction { msg, .. } => {
             RuntimeError::BadFormat(msg.to_string())
         }
-        sm_ir::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
+        sm_format::semcode_decode::DecodeError::InvalidFunctionName { msg, .. } => {
             RuntimeError::BadFormat(msg.to_string())
         }
-        sm_ir::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
+        sm_format::semcode_decode::DecodeError::InvalidStringTable { msg, .. } => {
             RuntimeError::BadFormat(msg.to_string())
         }
-        sm_ir::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
+        sm_format::semcode_decode::DecodeError::InvalidDebugSection { msg, .. } => {
             RuntimeError::BadFormat(msg.to_string())
         }
-        sm_ir::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
+        sm_format::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
             RuntimeError::BadFormat(msg.to_string())
         }
-        sm_ir::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
+        sm_format::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
             RuntimeError::BadFormat(msg)
         }
     })
@@ -665,7 +589,7 @@ fn prepare_verified_execution(
 
 fn build_vm_program_view_from_decoded(
     header: SemcodeHeaderSpec,
-    decoded_functions: &[sm_ir::semcode_decode::DecodedFunctionEnvelope<'_>],
+    decoded_functions: &[sm_format::semcode_decode::DecodedFunctionEnvelope<'_>],
 ) -> Result<VmProgramView, RuntimeError> {
     let mut out = HashMap::new();
     let mut runtime_symbols = RuntimeSymbolTable::new();
@@ -689,7 +613,7 @@ fn build_vm_program_view_from_decoded(
             .map(|name| runtime_symbols.intern(name))
             .collect::<Vec<_>>();
 
-        let remap_paths = |paths: &[sm_ir::semcode_decode::DecodedAccessPath]| {
+        let remap_paths = |paths: &[sm_format::semcode_decode::DecodedAccessPath]| {
             paths
                 .iter()
                 .map(|path| {
@@ -701,11 +625,26 @@ fn build_vm_program_view_from_decoded(
                     let mut p = AccessPath::new(root);
                     for c in &path.components {
                         match c {
-                            sm_ir::semcode_decode::DecodedAccessPathComponent::TupleIndex(i) => {
+                            sm_format::semcode_decode::DecodedAccessPathComponent::TupleIndex(
+                                i,
+                            ) => {
                                 p = p.tuple_index(*i);
                             }
-                            sm_ir::semcode_decode::DecodedAccessPathComponent::FieldSymbol(s) => {
+                            sm_format::semcode_decode::DecodedAccessPathComponent::FieldSymbol(
+                                s,
+                            ) => {
                                 p = p.field(SymbolId(*s));
+                            }
+                            sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload {
+                                variant,
+                                index,
+                            } => {
+                                p = p.adt_payload(SymbolId(*variant), *index);
+                            }
+                            sm_format::semcode_decode::DecodedAccessPathComponent::SequenceIndexStatic(
+                                index,
+                            ) => {
+                                p = p.sequence_index_static(*index);
                             }
                         }
                     }
@@ -1071,43 +1010,6 @@ trait VmHostBridge {
     fn state_update(&mut self, key: &str, value: Value) -> Result<(), RuntimeError>;
     fn event_post(&mut self, signal: &str) -> Result<(), RuntimeError>;
     fn clock_read(&mut self) -> Result<Value, RuntimeError>;
-
-    /// UI boundary operations — Wave 1 denial path.
-    ///
-    /// Default implementations return not-admitted. Overridden in
-    /// `PrometheusVmHost` when a `UiCapabilityChecker` is provided.
-    #[allow(dead_code)] // intentionally retained as UI host bridge surface
-    fn ui_window_create(&mut self) -> Result<(), RuntimeError> {
-        Err(RuntimeError::BadFormat(
-            "UI operations are not admitted in the current execution context; \
-             M7 UI boundary requires an explicit UiCapabilityChecker"
-                .to_string(),
-        ))
-    }
-    #[allow(dead_code)] // intentionally retained as UI host bridge surface
-    fn ui_window_run(&mut self) -> Result<(), RuntimeError> {
-        Err(RuntimeError::BadFormat(
-            "UI operations are not admitted in the current execution context; \
-             M7 UI boundary requires an explicit UiCapabilityChecker"
-                .to_string(),
-        ))
-    }
-    #[allow(dead_code)] // intentionally retained as UI host bridge surface
-    fn ui_event_poll(&mut self) -> Result<(), RuntimeError> {
-        Err(RuntimeError::BadFormat(
-            "UI operations are not admitted in the current execution context; \
-             M7 UI boundary requires an explicit UiCapabilityChecker"
-                .to_string(),
-        ))
-    }
-    #[allow(dead_code)] // intentionally retained as UI host bridge surface
-    fn ui_frame_submit(&mut self) -> Result<(), RuntimeError> {
-        Err(RuntimeError::BadFormat(
-            "UI operations are not admitted in the current execution context; \
-             M7 UI boundary requires an explicit UiCapabilityChecker"
-                .to_string(),
-        ))
-    }
 }
 
 struct LegacyVmHost;
@@ -1213,112 +1115,6 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
             .clock_read()
             .map(Value::U32)
             .map_err(RuntimeError::HostAbi)
-    }
-}
-
-/// VM host bridge that also carries a `UiCapabilityChecker`.
-///
-/// Created when the caller provides an explicit UI capability manifest.
-/// UI operations check the `UiCapabilityChecker` and return
-/// `RuntimeError::UiCapabilityDenied` when the capability is absent.
-struct PrometheusUiVmHost<'a, H: PrometheusHostAbi, C: CapabilityChecker, U: UiCapabilityChecker> {
-    host: &'a mut H,
-    capabilities: &'a C,
-    #[allow(dead_code)] // intentionally retained as UI host bridge surface
-    ui_capabilities: &'a U,
-}
-
-impl<'a, H: PrometheusHostAbi, C: CapabilityChecker, U: UiCapabilityChecker> VmHostBridge
-    for PrometheusUiVmHost<'a, H, C, U>
-{
-    fn gate_read(&mut self, device_id: u16, port: u16) -> Result<Value, RuntimeError> {
-        self.capabilities
-            .require_call(HostCallId::GateRead)
-            .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .gate_read(device_id, port)
-            .map(value_from_abi)
-            .map_err(RuntimeError::HostAbi)
-    }
-
-    fn gate_write(&mut self, device_id: u16, port: u16, value: Value) -> Result<(), RuntimeError> {
-        self.capabilities
-            .require_call(HostCallId::GateWrite)
-            .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .gate_write(device_id, port, value_to_abi(value)?)
-            .map_err(RuntimeError::HostAbi)
-    }
-
-    fn pulse_emit(&mut self, signal: &str) -> Result<(), RuntimeError> {
-        self.capabilities
-            .require_call(HostCallId::PulseEmit)
-            .map_err(RuntimeError::CapabilityDenied)?;
-        self.host.pulse_emit(signal).map_err(RuntimeError::HostAbi)
-    }
-
-    fn state_query(&mut self, key: &str) -> Result<Value, RuntimeError> {
-        self.capabilities
-            .require_call(HostCallId::StateQuery)
-            .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .state_query(key)
-            .map(value_from_abi)
-            .map_err(RuntimeError::HostAbi)
-    }
-
-    fn state_update(&mut self, key: &str, value: Value) -> Result<(), RuntimeError> {
-        self.capabilities
-            .require_call(HostCallId::StateUpdate)
-            .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .state_update(key, value_to_abi(value)?)
-            .map_err(RuntimeError::HostAbi)
-    }
-
-    fn event_post(&mut self, signal: &str) -> Result<(), RuntimeError> {
-        self.capabilities
-            .require_call(HostCallId::EventPost)
-            .map_err(RuntimeError::CapabilityDenied)?;
-        self.host.event_post(signal).map_err(RuntimeError::HostAbi)
-    }
-
-    fn clock_read(&mut self) -> Result<Value, RuntimeError> {
-        self.capabilities
-            .require_call(HostCallId::ClockRead)
-            .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .clock_read()
-            .map(Value::U32)
-            .map_err(RuntimeError::HostAbi)
-    }
-
-    fn ui_window_create(&mut self) -> Result<(), RuntimeError> {
-        self.ui_capabilities
-            .require_ui_op(UiOperationId::WindowCreate)
-            .map_err(RuntimeError::UiCapabilityDenied)
-        // Actual window creation is deferred to Wave 2 (desktop lifecycle).
-    }
-
-    fn ui_window_run(&mut self) -> Result<(), RuntimeError> {
-        self.ui_capabilities
-            .require_ui_op(UiOperationId::WindowRun)
-            .map_err(RuntimeError::UiCapabilityDenied)
-        // Actual event/frame loop is deferred to Wave 2.
-    }
-
-    fn ui_event_poll(&mut self) -> Result<(), RuntimeError> {
-        self.ui_capabilities
-            .require_ui_op(UiOperationId::EventPoll)
-            .map_err(RuntimeError::UiCapabilityDenied)
-        // Actual event polling is deferred to Wave 2.
-    }
-
-    fn ui_frame_submit(&mut self) -> Result<(), RuntimeError> {
-        self.ui_capabilities
-            .require_ui_op(UiOperationId::FrameSubmit)
-            .map_err(RuntimeError::UiCapabilityDenied)
-        // Actual frame submission is deferred to Wave 3 (drawing surface).
     }
 }
 
@@ -2656,6 +2452,7 @@ fn expect_builtin_binary_f64(name: &str, args: &[Value]) -> Result<(f64, f64), R
     Ok((as_f64(args[0].clone())?, as_f64(args[1].clone())?))
 }
 
+#[cfg(feature = "disasm")]
 fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), RuntimeError> {
     let mut cur = f.instr_start + pc;
     let opcode = Opcode::from_byte(read_u8(&f.code, &mut cur).map_err(map_format_err)?)
@@ -3900,6 +3697,60 @@ mod tests {
     }
 
     #[test]
+    fn vm_runs_adt_payload_ownership_positive_e2e_path() {
+        let src = r#"
+            enum Maybe {
+                None,
+                Some(f64),
+            }
+
+            fn read_payload(value: Maybe) -> f64 {
+                let ret: f64 = match value {
+                    Maybe::None => { 0.0 }
+                    Maybe::Some(ref inner) => {
+                        let v: f64 = inner;
+                        v
+                    }
+                };
+                return ret;
+            }
+
+            fn main() {
+                let out: f64 = read_payload(Maybe::Some(2.5));
+                assert(out == 2.5);
+                return;
+            }
+        "#;
+
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let (_, envs) = sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let mut found_adt_payload = false;
+        for env in &envs {
+            for path in env.borrowed_paths.iter().chain(env.write_paths.iter()) {
+                for component in &path.components {
+                    if let sm_format::semcode_decode::DecodedAccessPathComponent::AdtPayload {
+                        ..
+                    } = component
+                    {
+                        found_adt_payload = true;
+                    }
+                }
+            }
+        }
+        assert!(
+            found_adt_payload,
+            "Expected AdtPayload ownership component to be emitted in SemCode"
+        );
+
+        run_semcode(&bytes).expect("run");
+    }
+
+    // NOTE(ADT-4): A negative E2E test cannot be expressed cleanly right now because the Semantic frontend
+    // does not yet support mutable bindings or mutable re-assignments of ADT payloads (e.g. `inner += 1.0` or mutating the parent `value` while `inner` is borrowed).
+    // Therefore, we rely on the runtime-patched tests added in ADT-3 (like `vm_rejects_adt_payload_write_when_borrowed_same_payload`)
+    // to prove the VM borrow-checker correctness, and we will add the negative E2E test once the language surface is ready.
+
+    #[test]
     fn vm_runs_stage1_record_field_access_path() {
         let src = r#"
             record DecisionContext {
@@ -4421,6 +4272,138 @@ mod tests {
         compile_program_to_semcode(src).expect("compile")
     }
 
+    fn adt_payload_write_overlap_bytes(
+        borrowed_adt: Option<(u32, u16)>,
+        write_adt: Option<(u32, u16)>,
+    ) -> Vec<u8> {
+        let src = r#"
+            fn main() {
+                let e: f64 = 0.0;
+                let other: f64 = 1.0;
+                e += 2.0;
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        rewrite_adt_main_ownership_section(bytes, borrowed_adt, write_adt)
+    }
+
+    fn rewrite_adt_main_ownership_section(
+        bytes: Vec<u8>,
+        borrowed_adt: Option<(u32, u16)>,
+        write_adt: Option<(u32, u16)>,
+    ) -> Vec<u8> {
+        let mut cursor = 8usize;
+        let name_len = read_u16_le(&bytes, &mut cursor).expect("name len") as usize;
+        let name = read_utf8(&bytes, &mut cursor, name_len).expect("name");
+        assert_eq!(name, "main");
+        let code_len_pos = cursor;
+        let code_len = read_u32_le(&bytes, &mut cursor).expect("code len") as usize;
+        let code_start = cursor;
+        let code_end = code_start + code_len;
+        let code = &bytes[code_start..code_end];
+        let (_, mut decoded_functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let env = decoded_functions.remove(0);
+        let strings = env.strings;
+        let instr_start = env.instr_start_offset;
+        let e_root = strings.iter().position(|s| s == "e").expect("e root index") as u32;
+        let ownership_start = code[..instr_start]
+            .windows(OWNERSHIP_SECTION_TAG.len())
+            .position(|window| window == OWNERSHIP_SECTION_TAG)
+            .expect("OWN0 section");
+        let mut new_code = Vec::with_capacity(code.len());
+        new_code.extend_from_slice(&code[..ownership_start]);
+
+        let mut out_ownership = Vec::new();
+        out_ownership.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        out_ownership.extend_from_slice(&2u16.to_le_bytes());
+        append_adt_payload_ownership_event(
+            &mut out_ownership,
+            OWNERSHIP_EVENT_KIND_BORROW,
+            e_root,
+            borrowed_adt,
+        );
+        append_adt_payload_ownership_event(
+            &mut out_ownership,
+            OWNERSHIP_EVENT_KIND_WRITE,
+            e_root,
+            write_adt,
+        );
+
+        new_code.extend_from_slice(&out_ownership);
+        new_code.extend_from_slice(&code[instr_start..]);
+
+        let mut out = Vec::with_capacity(bytes.len() + new_code.len().saturating_sub(code.len()));
+        out.extend_from_slice(&bytes[..code_len_pos]);
+        out.extend_from_slice(&(new_code.len() as u32).to_le_bytes());
+        out.extend_from_slice(&new_code);
+        out.extend_from_slice(&bytes[code_end..]);
+        out
+    }
+
+    fn append_adt_payload_ownership_event(
+        out: &mut Vec<u8>,
+        kind: u8,
+        root: u32,
+        adt: Option<(u32, u16)>,
+    ) {
+        out.push(kind);
+        out.extend_from_slice(&root.to_le_bytes());
+        match adt {
+            Some((variant, index)) => {
+                out.extend_from_slice(&1u16.to_le_bytes());
+                out.push(sm_format::semcode_format::OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD);
+                out.extend_from_slice(&variant.to_le_bytes());
+                out.extend_from_slice(&index.to_le_bytes());
+            }
+            None => out.extend_from_slice(&0u16.to_le_bytes()),
+        }
+    }
+
+    #[test]
+    fn vm_rejects_adt_payload_write_when_borrowed_same_payload() {
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((42, 0)));
+        let err = run_semcode(&bytes).expect_err("same ADT payload overlap must fail");
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
+        ));
+        assert_eq!(format!("{err}"), "write path overlaps active borrow");
+    }
+
+    #[test]
+    fn vm_allows_adt_payload_write_when_borrowed_different_index() {
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((42, 1)));
+        run_semcode(&bytes).expect("different index does not overlap");
+    }
+
+    #[test]
+    fn vm_allows_adt_payload_write_when_borrowed_different_variant() {
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), Some((43, 0)));
+        run_semcode(&bytes).expect("different variant does not overlap");
+    }
+
+    #[test]
+    fn vm_rejects_adt_payload_write_when_borrowed_parent_overlaps_child() {
+        let bytes = adt_payload_write_overlap_bytes(None, Some((42, 0)));
+        let err = run_semcode(&bytes).expect_err("adt parent-child overlap must fail");
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
+        ));
+    }
+
+    #[test]
+    fn vm_rejects_adt_payload_write_when_borrowed_child_overlaps_parent() {
+        let bytes = adt_payload_write_overlap_bytes(Some((42, 0)), None);
+        let err = run_semcode(&bytes).expect_err("adt child-parent overlap must fail");
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)
+        ));
+    }
+
     fn record_field_write_overlap_bytes(
         borrowed_field: Option<&str>,
         write_field: Option<&str>,
@@ -4453,7 +4436,7 @@ mod tests {
         let code_end = code_start + code_len;
         let code = &bytes[code_start..code_end];
         let (_, mut decoded_functions) =
-            sm_ir::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let env = decoded_functions.remove(0);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
@@ -4562,7 +4545,7 @@ mod tests {
         let code_end = code_start + code_len;
         let code = &bytes[code_start..code_end];
         let (_, mut decoded_functions) =
-            sm_ir::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let env = decoded_functions.remove(0);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;

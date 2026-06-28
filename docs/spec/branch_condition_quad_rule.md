@@ -77,4 +77,3 @@ if q {
 - `if` conditions remain `bool`-only.
 - explicit compare semantics keep branch intent readable and non-implicit.
 - this rule does not introduce a general truthiness model.
-

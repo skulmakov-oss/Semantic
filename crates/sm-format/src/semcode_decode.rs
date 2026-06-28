@@ -28,6 +28,8 @@ pub struct DecodedDebugSymbol {
 pub enum DecodedAccessPathComponent {
     TupleIndex(u16),
     FieldSymbol(u32),
+    AdtPayload { variant: u32, index: u16 },
+    SequenceIndexStatic(u32),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +52,15 @@ pub struct DecodedFunctionEnvelope<'a> {
     pub instr_start_offset: usize, // relative to code_slice
     pub code_slice: &'a [u8],      // the full code block for this function
 }
+
+type StringTableDebugOwnershipParse = (
+    Vec<String>,
+    Vec<DecodedDebugSymbol>,
+    Vec<DecodedAccessPath>,
+    Vec<DecodedAccessPath>,
+    bool,
+    usize,
+);
 
 pub fn decode_semcode_envelope<'a>(
     bytes: &'a [u8],
@@ -155,17 +166,7 @@ pub fn decode_semcode_envelope<'a>(
 fn parse_string_table_debug_and_ownership(
     base_offset: usize,
     code: &[u8],
-) -> Result<
-    (
-        Vec<String>,
-        Vec<DecodedDebugSymbol>,
-        Vec<DecodedAccessPath>,
-        Vec<DecodedAccessPath>,
-        bool,
-        usize,
-    ),
-    DecodeError,
-> {
+) -> Result<StringTableDebugOwnershipParse, DecodeError> {
     let mut cursor = 0usize;
     let string_count_offset = base_offset + cursor;
     let count = read_u16_le(code, &mut cursor).map_err(|_| DecodeError::InvalidStringTable {
@@ -251,7 +252,7 @@ fn parse_string_table_debug_and_ownership(
     let mut borrowed_paths = Vec::new();
     let mut write_paths = Vec::new();
     let mut has_ownership_section = false;
-    if cursor + 4 <= code.len() && &code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG {
+    if cursor + 4 <= code.len() && code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG {
         has_ownership_section = true;
         cursor += OWNERSHIP_SECTION_TAG.len();
         let own_count_offset = base_offset + cursor;
@@ -310,6 +311,30 @@ fn parse_string_table_debug_and_ownership(
                         })?;
                         components.push(DecodedAccessPathComponent::FieldSymbol(field));
                     }
+                    OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD => {
+                        let variant = read_u32_le(code, &mut cursor).map_err(|_| {
+                            DecodeError::InvalidOwnershipSection {
+                                offset: base_offset + cursor,
+                                msg: "missing ownership adt payload variant",
+                            }
+                        })?;
+                        let index = read_u16_le(code, &mut cursor).map_err(|_| {
+                            DecodeError::InvalidOwnershipSection {
+                                offset: base_offset + cursor,
+                                msg: "missing ownership adt payload index",
+                            }
+                        })?;
+                        components.push(DecodedAccessPathComponent::AdtPayload { variant, index });
+                    }
+                    OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX => {
+                        let index = read_u32_le(code, &mut cursor).map_err(|_| {
+                            DecodeError::InvalidOwnershipSection {
+                                offset: base_offset + cursor,
+                                msg: "missing ownership sequence index",
+                            }
+                        })?;
+                        components.push(DecodedAccessPathComponent::SequenceIndexStatic(index));
+                    }
                     _ => {
                         return Err(DecodeError::InvalidOwnershipSection {
                             offset: base_offset + cursor,
@@ -345,4 +370,56 @@ fn parse_string_table_debug_and_ownership(
         has_ownership_section,
         cursor,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sequence_ownership_semcode_bytes(index: u32) -> Vec<u8> {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        code.extend_from_slice(&0u32.to_le_bytes());
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX);
+        code.extend_from_slice(&index.to_le_bytes());
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC11);
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(b"main");
+        bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&code);
+        bytes
+    }
+
+    #[test]
+    fn decode_sequence_index_static_ownership_component() {
+        let bytes = sequence_ownership_semcode_bytes(7);
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        let env = &functions[0];
+        assert_eq!(env.borrowed_paths.len(), 1);
+        assert_eq!(
+            env.borrowed_paths[0].components,
+            vec![DecodedAccessPathComponent::SequenceIndexStatic(7)]
+        );
+    }
+
+    #[test]
+    fn decode_rejects_truncated_sequence_index_static_payload() {
+        let mut bytes = sequence_ownership_semcode_bytes(7);
+        let code_len_pos = 8 + 2 + 4;
+        let code_len = u32::from_le_bytes(
+            bytes[code_len_pos..code_len_pos + 4]
+                .try_into()
+                .expect("code len"),
+        );
+        bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(code_len - 1).to_le_bytes());
+        bytes.pop();
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
 }

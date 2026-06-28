@@ -22,7 +22,7 @@ It introduces no source code, tests, Cargo changes, dependencies, or runtime mut
 ## 3. Boundary Summary
 The `UiActionMapper` from the previous phase produces a `SemanticIntent`, which couples an `InteractionActionBindingId` to a `UiProjectedNodeId`. The **Intent Dispatch** phase bridges the gap between this inert intention and the actual execution of side effects.
 
-The `UiIntentDispatcher` acts as a secure switchboard. It takes the `SemanticIntent` and delegates it to the appropriate capability gate within `prom-ui-runtime` based on the requested action. It **never** executes closures directly from the UI tree. 
+The `UiIntentDispatcher` acts as a secure switchboard. It takes the `SemanticIntent` and delegates it to the appropriate capability gate within `prom-ui-runtime` based on the requested action. It **never** executes closures directly from the UI tree.
 
 ## 4. SEMANTIC_UI_DNA Compliance
 PASS - The UI tree and projection engine contain no executable logic or closures.

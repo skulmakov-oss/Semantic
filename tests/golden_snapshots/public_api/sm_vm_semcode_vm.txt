@@ -50,9 +50,8 @@ pub fn run_verified_semcode_with_entry_and_config( bytes: &[u8], entry: &str, co
 pub fn run_verified_semcode_with_host_and_capabilities< H: PrometheusHostAbi, C: CapabilityChecker, >( bytes: &[u8], host: &mut H, capabilities: &C, ) -> Result<(), RuntimeError> {
 pub fn run_verified_semcode_with_host_and_capabilities_and_config< H: PrometheusHostAbi, C: CapabilityChecker, >( bytes: &[u8], entry: &str, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config< H: PrometheusHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
-pub fn run_verified_semcode_with_ui_capabilities< H: PrometheusHostAbi, C: CapabilityChecker, U: UiCapabilityChecker, >( bytes: &[u8], host: &mut H, capabilities: &C, ui_capabilities: &U, ) -> Result<(), RuntimeError> {
-pub fn run_verified_entry_semcode_with_ui_capabilities< H: PrometheusHostAbi, C: CapabilityChecker, U: UiCapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, ui_capabilities: &U, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode( token: &VerifiedEntrySemCode<'_, '_>, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_with_config( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_semcode_with_entry_and_config( bytes: &[u8], entry: &str, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
+#[cfg(feature = "disasm")]
 pub fn disasm_semcode(bytes: &[u8]) -> Result<String, RuntimeError> {

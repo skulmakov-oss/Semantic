@@ -14,7 +14,7 @@ This document finalizes the `R12-UI-INTERACTION-ROUTING-SOURCE-PR` phase. The se
 - **Dependency Isolation**: `prom-ui-runtime` remains entirely ignorant of physical backends. `RoutedInteraction` is correctly generic over the physical event type.
 
 ## 4. Next Phase
-With routing source completed, the event is now paired with its semantic target. The next phase must map this pairing into semantic actions. 
+With routing source completed, the event is now paired with its semantic target. The next phase must map this pairing into semantic actions.
 Recommended next lane: `R12-UI-ACTION-MAPPING-SOURCE-PR`.
 
 ## 5. Final Decision

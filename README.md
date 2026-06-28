@@ -127,7 +127,10 @@ If a change weakens one of these invariants, it should be treated as an architec
 
 ## Current Status
 
-Status: **post-v1 contract-stabilized platform in controlled expansion**.
+Semantic is in an active PCC / Core Trust Freeze preparation phase. The
+current main branch contains a qualified practical-core baseline and
+conservative trust-boundary work, but Core Trust Freeze and stable release
+readiness are not declared complete.
 
 Semantic already has the core staged architecture in place:
 

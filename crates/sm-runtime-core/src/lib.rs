@@ -70,9 +70,27 @@ impl AccessPath {
         }
     }
 
+    pub fn sequence_index_static(&self, index: u32) -> Self {
+        let mut components = self.components.clone();
+        components.push(PathComponent::SequenceIndexStatic(index));
+        Self {
+            root: self.root,
+            components,
+        }
+    }
+
     pub fn field(&self, name: SymbolId) -> Self {
         let mut components = self.components.clone();
         components.push(PathComponent::Field(name));
+        Self {
+            root: self.root,
+            components,
+        }
+    }
+
+    pub fn adt_payload(&self, variant: SymbolId, index: u16) -> Self {
+        let mut components = self.components.clone();
+        components.push(PathComponent::AdtPayload { variant, index });
         Self {
             root: self.root,
             components,
@@ -84,6 +102,8 @@ impl AccessPath {
 pub enum PathComponent {
     TupleIndex(u16),
     Field(SymbolId),
+    AdtPayload { variant: SymbolId, index: u16 },
+    SequenceIndexStatic(u32),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -337,6 +357,24 @@ mod tests {
         let different = AccessPath::new(SymbolId(9)).field(field).tuple_index(0);
         assert_eq!(left, right);
         assert_ne!(left, different);
+
+        let adt = AccessPath::new(SymbolId(9)).adt_payload(SymbolId(42), 0);
+        let adt_diff_idx = AccessPath::new(SymbolId(9)).adt_payload(SymbolId(42), 1);
+        let adt_diff_var = AccessPath::new(SymbolId(9)).adt_payload(SymbolId(43), 0);
+        assert_eq!(
+            adt,
+            AccessPath::new(SymbolId(9)).adt_payload(SymbolId(42), 0)
+        );
+        assert_ne!(adt, adt_diff_idx);
+        assert_ne!(adt, adt_diff_var);
+        assert_ne!(adt, left);
+
+        let sequence = AccessPath::new(SymbolId(9)).sequence_index_static(2);
+        let same_sequence = AccessPath::new(SymbolId(9)).sequence_index_static(2);
+        let different_sequence = AccessPath::new(SymbolId(9)).sequence_index_static(4);
+        assert_eq!(sequence, same_sequence);
+        assert_ne!(sequence, different_sequence);
+        assert_ne!(sequence, left);
     }
 
     #[test]

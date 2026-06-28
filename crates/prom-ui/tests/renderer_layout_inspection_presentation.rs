@@ -228,7 +228,6 @@ fn layout_inspection_public_api_signature_lock() {
         present_layout_inspection(&layout_model);
 
     assert!(!presentation.is_empty());
-    assert!(!presentation.is_empty());
     assert_eq!(presentation.len(), presentation.items().len());
 }
 

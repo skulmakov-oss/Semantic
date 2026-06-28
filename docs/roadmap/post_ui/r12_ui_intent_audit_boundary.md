@@ -14,7 +14,7 @@ It introduces no source code, tests, Cargo changes, dependencies, or runtime mut
 | TBD | Intent Capability Source | MERGED (Assumed) |
 
 ## 3. Boundary Summary
-The `RuntimeIntentDispatcher` currently evaluates intents using a `UiCapabilityEvaluator`. The result of this evaluation—whether it grants an `InteractionAdmittedSemanticAction` or rejects with an `IntentCapabilityError`—must be logged. 
+The `RuntimeIntentDispatcher` currently evaluates intents using a `UiCapabilityEvaluator`. The result of this evaluation—whether it grants an `InteractionAdmittedSemanticAction` or rejects with an `IntentCapabilityError`—must be logged.
 
 The Audit Boundary acts as the mandatory observational phase. It intercepts the admission result, formats a standardized trace report, and sends it to the central audit sink. Only upon successful audit serialization does the flow proceed to the next execution boundary (State Update).
 

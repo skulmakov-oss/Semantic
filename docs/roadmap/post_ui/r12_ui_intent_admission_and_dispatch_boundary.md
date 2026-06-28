@@ -17,7 +17,7 @@ Before a `SemanticIntent` is granted authority, it must be evaluated by the admi
 2. **Lifecycle Gate**: Is the node fully mounted and active? Actions cannot be admitted for nodes that are unmounting, detached, or hidden by policy.
 
 ### 2.2 Authority Minting
-If the intent passes all admission gates, the runtime mints an `InteractionAdmittedSemanticActionId` (or equivalent validated struct, like `InteractionAdmittedSemanticAction`). 
+If the intent passes all admission gates, the runtime mints an `InteractionAdmittedSemanticActionId` (or equivalent validated struct, like `InteractionAdmittedSemanticAction`).
 - **Rule**: `SemanticIntent` has zero authority. `InteractionAdmittedSemanticActionId` possesses execution authority.
 
 ### 2.3 Inert Dispatch
