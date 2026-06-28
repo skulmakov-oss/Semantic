@@ -45,6 +45,32 @@ fn sm_vm_dependency_boundaries() {
         "sm-vm MUST NOT depend on prom-ui"
     );
     assert!(!tree.contains("sm-ir"), "sm-vm MUST NOT depend on sm-ir");
+    assert!(
+        !tree.contains("sm-emit"),
+        "sm-vm MUST NOT depend on sm-emit in the normal graph"
+    );
+}
+
+#[test]
+fn sm_format_dependency_boundaries() {
+    let tree = cargo_tree_deps("sm-format");
+    assert!(
+        !tree.contains("sm-ir"),
+        "sm-format MUST NOT depend on sm-ir"
+    );
+}
+
+#[test]
+fn sm_verify_dependency_boundaries() {
+    let tree = cargo_tree_deps("sm-verify");
+    assert!(
+        !tree.contains("sm-ir"),
+        "sm-verify MUST NOT depend on sm-ir"
+    );
+    assert!(
+        !tree.contains("sm-emit"),
+        "sm-verify MUST NOT depend on sm-emit in the normal graph"
+    );
 }
 
 fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
