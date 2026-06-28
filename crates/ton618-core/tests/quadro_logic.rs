@@ -1,6 +1,7 @@
-use ton618_core::quadro::{
-    iter_mask_indices, DeltaSoA, QuadState, QuadroBank, QuadroError, QuadroReg, LSB_MASK,
-};
+use ton618_core::quadro::{iter_mask_indices, QuadState, QuadroError, QuadroReg, LSB_MASK};
+
+#[cfg(feature = "alloc")]
+use ton618_core::quadro::{DeltaSoA, QuadroBank};
 
 fn lane_mask(index: usize) -> u64 {
     1u64 << (index * 2)
@@ -172,6 +173,7 @@ fn iter_mask_indices_reads_lsb_aligned_lanes() {
     assert!(iter_mask_indices(1u64 << 1).is_err());
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn bank_operations_match_scalar_paths() {
     let mut left = QuadroBank::from_regs(vec![
@@ -223,6 +225,7 @@ fn bank_operations_match_scalar_paths() {
     assert_eq!(left.as_slice(), expected_inverse.as_slice());
 }
 
+#[cfg(feature = "alloc")]
 #[test]
 fn bank_delta_soa_matches_scalar_deltas() {
     let left = QuadroBank::from_regs(vec![
