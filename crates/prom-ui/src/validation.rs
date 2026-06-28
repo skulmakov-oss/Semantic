@@ -833,7 +833,7 @@ mod tests {
     fn empty_ast_is_valid() {
         let ast = UiAst::new();
 
-        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        let result = validate_ast(&ast, &UiAstValidationConfig);
 
         assert_eq!(result, Ok(()));
     }
@@ -842,7 +842,7 @@ mod tests {
     fn single_root_is_valid() {
         let ast = ast_with_nodes([UiAstNode::new(UiAstNodeId::new(1), UiAstNodeKind::Root)]);
 
-        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        let result = validate_ast(&ast, &UiAstValidationConfig);
 
         assert_eq!(result, Ok(()));
     }
@@ -851,7 +851,7 @@ mod tests {
     fn zero_root_non_empty_ast_is_valid_in_first_seed() {
         let ast = ast_with_nodes([UiAstNode::new(UiAstNodeId::new(2), UiAstNodeKind::Element)]);
 
-        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        let result = validate_ast(&ast, &UiAstValidationConfig);
 
         assert_eq!(result, Ok(()));
     }
@@ -863,8 +863,7 @@ mod tests {
             UiAstNode::new(UiAstNodeId::new(2), UiAstNodeKind::Root),
         ]);
 
-        let err =
-            validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("multiple roots");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("multiple roots");
 
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
@@ -879,7 +878,7 @@ mod tests {
             UiAstNode::new(UiAstNodeId::new(3), UiAstNodeKind::Element),
         ]);
 
-        let err = validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("duplicate id");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("duplicate id");
 
         assert!(err
             .diagnostics()
@@ -895,8 +894,7 @@ mod tests {
             UiAstNodeId::new(99),
         )]);
 
-        let err =
-            validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("missing parent");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("missing parent");
 
         assert!(err
             .diagnostics()
@@ -910,7 +908,7 @@ mod tests {
         node.push_child(UiAstNodeId::new(100));
         let ast = ast_with_nodes([node]);
 
-        let err = validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("missing child");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("missing child");
 
         assert!(err
             .diagnostics()
@@ -929,7 +927,7 @@ mod tests {
         );
         let ast = ast_with_nodes([parent, child]);
 
-        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        let result = validate_ast(&ast, &UiAstValidationConfig);
 
         assert_eq!(result, Ok(()));
     }
@@ -944,8 +942,8 @@ mod tests {
         );
         let ast = ast_with_nodes([parent, child]);
 
-        let err = validate_ast(&ast, &UiAstValidationConfig::default())
-            .expect_err("inconsistent relationship");
+        let err =
+            validate_ast(&ast, &UiAstValidationConfig).expect_err("inconsistent relationship");
 
         assert!(err
             .diagnostics()
@@ -960,8 +958,8 @@ mod tests {
         let child = UiAstNode::new(UiAstNodeId::new(11), UiAstNodeKind::Element);
         let ast = ast_with_nodes([parent, child]);
 
-        let err = validate_ast(&ast, &UiAstValidationConfig::default())
-            .expect_err("inconsistent relationship");
+        let err =
+            validate_ast(&ast, &UiAstValidationConfig).expect_err("inconsistent relationship");
 
         assert!(err
             .diagnostics()
@@ -977,7 +975,7 @@ mod tests {
             UiAstNodeId::new(12),
         )]);
 
-        let err = validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("self parent");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("self parent");
 
         assert!(err
             .diagnostics()
@@ -991,7 +989,7 @@ mod tests {
         node.push_child(UiAstNodeId::new(13));
         let ast = ast_with_nodes([node]);
 
-        let err = validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("self child");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("self child");
 
         assert!(err
             .diagnostics()
@@ -1006,8 +1004,7 @@ mod tests {
         let second = UiAstNode::new(UiAstNodeId::new(14), UiAstNodeKind::Element);
         let ast = ast_with_nodes([first, second]);
 
-        let err =
-            validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("multiple failures");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("multiple failures");
 
         assert!(err.len() >= 2);
         assert!(err
@@ -1024,7 +1021,7 @@ mod tests {
     fn validation_does_not_call_lowering() {
         let ast = UiAst::new();
 
-        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        let result = validate_ast(&ast, &UiAstValidationConfig);
 
         assert_eq!(result, Ok(()));
     }
@@ -1033,7 +1030,7 @@ mod tests {
     fn validation_config_is_inert() {
         let config = UiAstValidationConfig;
 
-        assert_eq!(config, UiAstValidationConfig::default());
+        assert_eq!(config, UiAstValidationConfig);
     }
 
     #[test]
@@ -1044,8 +1041,7 @@ mod tests {
             UiAstNodeId::new(17),
         )]);
 
-        let err = validate_ast(&ast, &UiAstValidationConfig::default())
-            .expect_err("structural diagnostic");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("structural diagnostic");
 
         assert!(err
             .diagnostics()
@@ -1137,14 +1133,14 @@ mod tests {
 
         let ast = ast_with_nodes([root, attr, bind, act]);
 
-        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        let result = validate_ast(&ast, &UiAstValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
     #[test]
     fn validation_result_does_not_produce_ir() {
         let ast = UiAst::new();
-        let result: UiAstValidationResult = validate_ast(&ast, &UiAstValidationConfig::default());
+        let result: UiAstValidationResult = validate_ast(&ast, &UiAstValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
@@ -1166,7 +1162,7 @@ mod tests {
 
         let ast = ast_with_nodes([a, b]);
 
-        let result = validate_ast(&ast, &UiAstValidationConfig::default());
+        let result = validate_ast(&ast, &UiAstValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
@@ -1177,7 +1173,7 @@ mod tests {
 
         let ast = ast_with_nodes([root, dup]);
 
-        let err = validate_ast(&ast, &UiAstValidationConfig::default()).expect_err("duplicate id");
+        let err = validate_ast(&ast, &UiAstValidationConfig).expect_err("duplicate id");
 
         assert!(err.iter().any(|d| matches!(d.kind(), UiAstValidationDiagnosticKind::DuplicateNodeId(id) if id == UiAstNodeId::new(1))));
         assert!(!err.is_empty());
@@ -1194,21 +1190,21 @@ mod tests {
     #[test]
     fn empty_ir_is_valid() {
         let ir = UiIr::new();
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
     #[test]
     fn single_ir_root_is_valid() {
         let ir = ir_with_nodes([UiIrNode::new(UiIrNodeId::new(1), UiIrNodeKind::Root)]);
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
     #[test]
     fn zero_root_non_empty_ir_is_valid_in_first_seed() {
         let ir = ir_with_nodes([UiIrNode::new(UiIrNodeId::new(2), UiIrNodeKind::Element)]);
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
@@ -1218,7 +1214,7 @@ mod tests {
             UiIrNode::new(UiIrNodeId::new(1), UiIrNodeKind::Root),
             UiIrNode::new(UiIrNodeId::new(2), UiIrNodeKind::Root),
         ]);
-        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("multiple roots");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("multiple roots");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::MultipleRoots
@@ -1231,7 +1227,7 @@ mod tests {
             UiIrNode::new(UiIrNodeId::new(3), UiIrNodeKind::Root),
             UiIrNode::new(UiIrNodeId::new(3), UiIrNodeKind::Element),
         ]);
-        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("duplicate id");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("duplicate id");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::DuplicateNodeId(id) if id == UiIrNodeId::new(3)
@@ -1245,7 +1241,7 @@ mod tests {
             UiIrNodeKind::Element,
             UiIrNodeId::new(99),
         )]);
-        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("missing parent");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("missing parent");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::MissingParentTarget { node_id, parent_id } if node_id == UiIrNodeId::new(4) && parent_id == UiIrNodeId::new(99)
@@ -1257,7 +1253,7 @@ mod tests {
         let mut node = UiIrNode::new(UiIrNodeId::new(5), UiIrNodeKind::Root);
         node.push_child(UiIrNodeId::new(100));
         let ir = ir_with_nodes([node]);
-        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("missing child");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("missing child");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::MissingChildTarget { node_id, child_id } if node_id == UiIrNodeId::new(5) && child_id == UiIrNodeId::new(100)
@@ -1274,7 +1270,7 @@ mod tests {
             UiIrNodeId::new(6),
         );
         let ir = ir_with_nodes([parent, child]);
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
@@ -1287,8 +1283,7 @@ mod tests {
             UiIrNodeId::new(8),
         );
         let ir = ir_with_nodes([parent, child]);
-        let err = validate_ir(&ir, &UiIrValidationConfig::default())
-            .expect_err("inconsistent relationship");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("inconsistent relationship");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::InconsistentParentChild { parent_id, child_id } if parent_id == UiIrNodeId::new(8) && child_id == UiIrNodeId::new(9)
@@ -1301,8 +1296,7 @@ mod tests {
         parent.push_child(UiIrNodeId::new(11));
         let child = UiIrNode::new(UiIrNodeId::new(11), UiIrNodeKind::Element);
         let ir = ir_with_nodes([parent, child]);
-        let err = validate_ir(&ir, &UiIrValidationConfig::default())
-            .expect_err("inconsistent relationship");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("inconsistent relationship");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::InconsistentParentChild { parent_id, child_id } if parent_id == UiIrNodeId::new(10) && child_id == UiIrNodeId::new(11)
@@ -1316,7 +1310,7 @@ mod tests {
             UiIrNodeKind::Element,
             UiIrNodeId::new(12),
         )]);
-        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("self parent");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("self parent");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::SelfParent(id) if id == UiIrNodeId::new(12)
@@ -1328,7 +1322,7 @@ mod tests {
         let mut node = UiIrNode::new(UiIrNodeId::new(13), UiIrNodeKind::Root);
         node.push_child(UiIrNodeId::new(13));
         let ir = ir_with_nodes([node]);
-        let err = validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("self child");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("self child");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::SelfChild(id) if id == UiIrNodeId::new(13)
@@ -1341,8 +1335,7 @@ mod tests {
         first.push_child(UiIrNodeId::new(15));
         let second = UiIrNode::new(UiIrNodeId::new(14), UiIrNodeKind::Element);
         let ir = ir_with_nodes([first, second]);
-        let err =
-            validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("multiple failures");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("multiple failures");
         assert!(err.len() >= 2);
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
@@ -1357,14 +1350,14 @@ mod tests {
     #[test]
     fn ir_validation_does_not_call_lowering() {
         let ir = UiIr::new();
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
     #[test]
     fn ir_validation_config_is_inert() {
         let config = UiIrValidationConfig;
-        assert_eq!(config, UiIrValidationConfig::default());
+        assert_eq!(config, UiIrValidationConfig);
     }
 
     #[test]
@@ -1374,8 +1367,7 @@ mod tests {
             UiIrNodeKind::Element,
             UiIrNodeId::new(17),
         )]);
-        let err =
-            validate_ir(&ir, &UiIrValidationConfig::default()).expect_err("structural diagnostic");
+        let err = validate_ir(&ir, &UiIrValidationConfig).expect_err("structural diagnostic");
         assert!(err.diagnostics().iter().any(|diagnostic| matches!(
             diagnostic.kind(),
             UiIrValidationDiagnosticKind::MissingParentTarget { node_id, parent_id } if node_id == UiIrNodeId::new(16) && parent_id == UiIrNodeId::new(17)
@@ -1386,7 +1378,7 @@ mod tests {
     fn ir_effect_boundary_is_structural_not_admission() {
         let node = UiIrNode::new(UiIrNodeId::new(100), UiIrNodeKind::EffectBoundary);
         let ir = ir_with_nodes([node]);
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
@@ -1394,7 +1386,7 @@ mod tests {
     fn ir_action_is_structural_not_execution() {
         let node = UiIrNode::new(UiIrNodeId::new(101), UiIrNodeKind::Action);
         let ir = ir_with_nodes([node]);
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
@@ -1402,7 +1394,7 @@ mod tests {
     fn ir_property_is_structural_not_rendering() {
         let node = UiIrNode::new(UiIrNodeId::new(102), UiIrNodeKind::Property);
         let ir = ir_with_nodes([node]);
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 
@@ -1424,7 +1416,7 @@ mod tests {
 
         let ir = ir_with_nodes([a, b]);
 
-        let result = validate_ir(&ir, &UiIrValidationConfig::default());
+        let result = validate_ir(&ir, &UiIrValidationConfig);
         assert_eq!(result, Ok(()));
     }
 }

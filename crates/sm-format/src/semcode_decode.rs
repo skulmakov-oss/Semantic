@@ -53,6 +53,15 @@ pub struct DecodedFunctionEnvelope<'a> {
     pub code_slice: &'a [u8],      // the full code block for this function
 }
 
+type StringTableDebugOwnershipParse = (
+    Vec<String>,
+    Vec<DecodedDebugSymbol>,
+    Vec<DecodedAccessPath>,
+    Vec<DecodedAccessPath>,
+    bool,
+    usize,
+);
+
 pub fn decode_semcode_envelope<'a>(
     bytes: &'a [u8],
 ) -> Result<(SemcodeHeaderSpec, Vec<DecodedFunctionEnvelope<'a>>), DecodeError> {
@@ -157,17 +166,7 @@ pub fn decode_semcode_envelope<'a>(
 fn parse_string_table_debug_and_ownership(
     base_offset: usize,
     code: &[u8],
-) -> Result<
-    (
-        Vec<String>,
-        Vec<DecodedDebugSymbol>,
-        Vec<DecodedAccessPath>,
-        Vec<DecodedAccessPath>,
-        bool,
-        usize,
-    ),
-    DecodeError,
-> {
+) -> Result<StringTableDebugOwnershipParse, DecodeError> {
     let mut cursor = 0usize;
     let string_count_offset = base_offset + cursor;
     let count = read_u16_le(code, &mut cursor).map_err(|_| DecodeError::InvalidStringTable {
@@ -253,7 +252,7 @@ fn parse_string_table_debug_and_ownership(
     let mut borrowed_paths = Vec::new();
     let mut write_paths = Vec::new();
     let mut has_ownership_section = false;
-    if cursor + 4 <= code.len() && &code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG {
+    if cursor + 4 <= code.len() && code[cursor..cursor + 4] == OWNERSHIP_SECTION_TAG {
         has_ownership_section = true;
         cursor += OWNERSHIP_SECTION_TAG.len();
         let own_count_offset = base_offset + cursor;

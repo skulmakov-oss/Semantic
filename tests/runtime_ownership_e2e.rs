@@ -564,13 +564,12 @@ fn runtime_ownership_record_inner_frame_borrow_does_not_leak_after_exit() {
 
 #[test]
 fn runtime_ownership_unsupported_paths_do_not_silently_claim_support() {
-    for src in [schema_source()] {
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        assert_ne!(&bytes[..8], &MAGIC11);
-        assert_ne!(&bytes[..8], &MAGIC12);
-        assert!(!any_function_has_ownership_section(&bytes));
-        run_token_first_main(&bytes).expect("run");
-    }
+    let src = schema_source();
+    let bytes = compile_program_to_semcode(src).expect("compile");
+    assert_ne!(&bytes[..8], &MAGIC11);
+    assert_ne!(&bytes[..8], &MAGIC12);
+    assert!(!any_function_has_ownership_section(&bytes));
+    run_token_first_main(&bytes).expect("run");
 
     let _ = compile_program_to_semcode(indirect_record_projection_source())
         .expect_err("indirect record-field projection must not silently claim support");
@@ -871,27 +870,6 @@ fn record_multi_frame_source() -> &'static str {
             helper(DecisionContext { camera: N, quality: 0.5 });
             let patched: DecisionContext = ctx with { quality: 1.0 };
             let _ = patched;
-            return;
-        }
-    "#
-}
-
-fn adt_source() -> &'static str {
-    r#"
-        enum Maybe {
-            None,
-            Some(bool),
-        }
-
-        fn choose(flag: bool) -> Maybe {
-            return Maybe::Some(flag);
-        }
-
-        fn main() {
-            let left: Maybe = choose(true);
-            let right: Maybe = Maybe::None;
-            let _ = left;
-            let _ = right;
             return;
         }
     "#

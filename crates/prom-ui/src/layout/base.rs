@@ -158,9 +158,8 @@ pub fn layout_render_model(model: &UiRenderModel) -> UiLayoutModel {
     }
 
     let mut nodes = Vec::with_capacity(model.nodes().len());
-    let mut order = 0;
 
-    for render_node in model.nodes() {
+    for (order, render_node) in model.nodes().iter().enumerate() {
         nodes.push(UiLayoutNode {
             id: UiLayoutNodeId::new(render_node.id().raw()),
             source_render_node: render_node.id(),
@@ -169,7 +168,6 @@ pub fn layout_render_model(model: &UiRenderModel) -> UiLayoutModel {
             slot: UiLayoutSlotId::new(2),
             order,
         });
-        order += 1;
     }
 
     UiLayoutModel {
