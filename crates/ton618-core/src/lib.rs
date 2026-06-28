@@ -14,6 +14,7 @@ extern crate alloc;
 pub mod arena;
 pub mod diagnostics;
 pub mod ids;
+pub mod quadro;
 #[cfg(feature = "alloc")]
 pub mod sigtable;
 pub mod source;
