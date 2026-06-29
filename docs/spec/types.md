@@ -143,6 +143,50 @@ Current rules:
   standard-form `Option(T)` / `Result(T, E)` families
 - `quad` is not accepted directly as an `if` condition
 
+### Quad equality
+
+`quad == quad` is a structural identity predicate.
+
+It returns `bool`, not `quad`.
+
+Examples:
+
+- `N == N` -> `true`
+- `F == F` -> `true`
+- `T == T` -> `true`
+- `S == S` -> `true`
+- `N == S` -> `false`
+- `T == S` -> `false`
+- `T == F` -> `false`
+
+This operator does not perform semantic inference, evidence merging,
+consensus detection, or conflict resolution.
+
+`==` and `!=` are identity predicates.
+They always return `bool`.
+They never return `quad`.
+They never drive control flow through implicit `quad` coercion.
+
+Identity predicates answer whether two values have the same source/runtime
+state.
+
+Evidence operators operate on T/F evidence planes and return `quad`.
+
+Therefore:
+
+- `S == S` -> `true : bool`
+- `S && S` -> `S : quad`
+- `S || T` -> `S : quad`
+- `if S` -> rejected
+- `if signal == S` -> admitted because the condition is `bool`
+
+| Family | Example | Result type | Meaning |
+| --- | --- | --- | --- |
+| Identity predicate | `a == b` | `bool` | same value state |
+| Evidence algebra | `a && b`, `a || b`, `!a`, `a -> b` | `quad` | T/F evidence-plane operation |
+| Control-flow predicate | `a == T`, `a == S` | `bool` | explicit boolean condition |
+| Future semantic helper | `quad_consensus(a, b)` | explicit API-defined type | policy-defined analysis |
+
 ## Standard Forms
 
 Current first-wave standard forms:
