@@ -356,6 +356,28 @@ Allowed first shadow targets:
 | batch merge equivalence | pure OR-style structural check |
 | batch intersect equivalence | pure AND-style structural check |
 
+P4 mismatch diagnostics:
+
+A shadow mismatch must not rely on a bare equality assertion as the only diagnostic.
+
+When the baseline path and Pulsar path diverge, the shadow harness must first build a local diagnostic report and only then fail the test or fuzz case.
+
+Required mismatch report fields:
+
+- operation name;
+- input case id or fuzz seed, when available;
+- register index;
+- first differing quadit index, when applicable;
+- baseline raw register / mask / delta;
+- Pulsar raw register / mask / delta;
+- old and new state for delta comparisons;
+- CPU feature path, such as scalar, SIMD, AVX2, NEON, or fallback;
+- enabled Cargo features;
+- compact human-readable summary.
+
+This is local diagnostic evidence only.
+It must not introduce telemetry, remote reporting, runtime behavior changes, VM authority changes, verifier changes, SemCode changes, CTF widening, or PROMETHEUS boundary changes.
+
 P4 non-goals:
 
 - runtime acceleration;
