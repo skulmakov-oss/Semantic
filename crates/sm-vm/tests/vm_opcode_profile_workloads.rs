@@ -153,8 +153,7 @@ const FACT_MERGE_KERNEL: &str = include_str!("fixtures/profiling/fact_merge_kern
 const FACT_INTERSECT_KERNEL: &str = include_str!("fixtures/profiling/fact_intersect_kernel.sm");
 const DELTA_LIKE_KERNEL: &str = include_str!("fixtures/profiling/delta_like_kernel.sm");
 const ANDROMEDA_FACT_WAVE_64: &str = include_str!("fixtures/profiling/andromeda_fact_wave_64.sm");
-const ANDROMEDA_FACT_WAVE_256: &str =
-    include_str!("fixtures/profiling/andromeda_fact_wave_256.sm");
+const ANDROMEDA_FACT_WAVE_256: &str = include_str!("fixtures/profiling/andromeda_fact_wave_256.sm");
 
 #[test]
 fn family_summary_empty_profile_is_zero() {
