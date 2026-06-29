@@ -1,6 +1,6 @@
 # Pulsar Roadmap
 
-Status: v0 substrate baseline closed
+Status: v0 substrate baseline closed; P4 shadow equivalence closed
 Owner: runtime acceleration / packed-state substrate
 Scope type: documentation only
 
@@ -324,8 +324,8 @@ cargo test -p ton618-core --no-default-features --features alloc
 
 ## Next Step: P4 Shadow Adapter Design
 
-P4 is the next safe roadmap phase.
-It is design and equivalence planning first, not acceleration.
+P4 shadow equivalence is closed.
+The next safe roadmap phase is local measurement and candidate selection, not acceleration.
 
 Required constraints:
 
@@ -488,43 +488,130 @@ P4-A non-goals:
 - new public Semantic API claims;
 - release readiness wording.
 
+## P4 Shadow Equivalence Closeout
+
+Status: closed.
+
+P4 completed the shadow/equivalence layer required before any runtime acceleration candidate may be considered.
+
+Completed P4 artifacts:
+
+- evidence contract;
+- shadow equivalence harness skeleton;
+- mask equivalence coverage;
+- state delta equivalence coverage;
+- batch merge equivalence coverage;
+- batch intersect equivalence coverage;
+- deterministic seeded sweep coverage;
+- local mismatch diagnostics.
+
+Completed slices:
+
+- `#1210` - Pulsar v0 closeout and P4 scope;
+- `#1211` - quad equality / evidence algebra boundary;
+- `#1212` - P4-A shadow adapter evidence contract;
+- `#1213` - P4-B shadow equivalence harness skeleton;
+- `#1214` - P4-C shadow equivalence target pack;
+- `#1215` - P4-D deterministic shadow sweep coverage.
+
+P4 evidence covers:
+
+- packed quad state mask extraction;
+- conflict mask equivalence;
+- known mask equivalence;
+- state delta equivalence;
+- batch merge equivalence;
+- batch intersect equivalence;
+- deterministic sweep coverage over valid packed `u64` inputs;
+- structured local mismatch diagnostics.
+
+P4 increases confidence that Pulsar packed-state operations match scalar/reference baselines for the covered operations.
+
+P4 closeout does not claim:
+
+- runtime activation;
+- `sm-vm` integration;
+- verifier integration;
+- SemCode format change;
+- default execution behavior change;
+- production acceleration;
+- public performance claim;
+- release readiness;
+- P5 approval.
+
+P4 complete does not mean P5 approved.
+
+## P5 Promotion Gates
+
+P5 may begin only after all of the following are true:
+
+1. P4 closeout is merged.
+2. A local `sm-vm` profiling / measurement harness exists.
+3. The candidate hot path is measured, not guessed.
+4. The selected candidate has a scalar authority path.
+5. A feature-gated Pulsar candidate path is specified.
+6. Runtime-level equivalence tests are planned.
+7. Fallback behavior is documented.
+8. No verifier, SemCode, CTF, or PROMETHEUS boundary is widened.
+9. No public performance claim is made before benchmark evidence exists.
+10. A promotion review explicitly approves the candidate.
+
+P5 is blocked until a measured hot path exists.
+
+### P5-A Candidate Selection Rule
+
+P5-A must select exactly one narrow acceleration candidate based on measured VM/runtime evidence.
+
+A candidate must not be selected because it is architecturally attractive or theoretically fast.
+It must be selected because profiling shows it is a meaningful hot path.
+
+Candidate selection must include:
+
+- operation name;
+- crate / module;
+- current scalar path;
+- expected Pulsar replacement path;
+- reason it is hot;
+- measurement evidence;
+- fallback path;
+- feature gate;
+- equivalence test plan.
+
+Potential P5 candidates may include, but are not limited to:
+
+- repeated quad logical operations;
+- quad mask extraction in runtime-heavy scenarios;
+- batch-like quad state transitions;
+- state delta calculation if measured hot;
+- merge / intersect patterns if measured hot.
+
+These are candidates only.
+None are approved until measured.
+
+P5 must not start with:
+
+- replacing `sm-vm` execution wholesale;
+- making Pulsar the VM authority;
+- changing SemCode vocabulary;
+- changing verifier admission;
+- changing public Semantic behavior;
+- changing default runtime behavior without a feature gate;
+- adding SIMD before scalar runtime equivalence exists;
+- claiming production performance;
+- widening CTF or PROMETHEUS boundaries.
+
+The next technical step after this closeout is:
+
+P4-F / P5-pre - local `sm-vm` opcode profiling harness.
+
+Before P5-A candidate selection, the project needs a deterministic local VM profiling harness that can collect opcode execution counts and scenario-level measurement data without introducing production telemetry or runtime behavior changes.
+
+This should be local profiling, not production telemetry.
+
 ### P5 - Runtime Acceleration Candidate
 
-Type: controlled implementation
-Depends on: P2 + P4
-
-Goal:
-
-- use Pulsar as an internal acceleration backend only for proven identical operations.
-
-P5 remains blocked until P4 evidence exists.
-
-Allowed first candidates:
-
-| Operation | Why |
-| --- | --- |
-| conflict scan | direct `mask_s` |
-| known mask scan | direct `mask_non_null` |
-| state delta | already modeled |
-| batch merge | pure OR |
-| batch intersect | pure AND |
-
-Not allowed yet:
-
-- symbolic ownership;
-- dynamic index precision;
-- range ownership;
-- iterator ownership;
-- new SemCode vocabulary;
-- verifier admission changes.
-
-Acceptance:
-
-- old tests still pass;
-- new accelerated path has scalar fallback;
-- benchmark shows improvement;
-- behavior equivalence is proven by tests;
-- feature-gated rollout.
+P5 remains a blocked future implementation phase.
+It may only begin after the gates above are satisfied and a measured hot path selects exactly one narrow candidate.
 
 ### P6 - Promotion Review
 
