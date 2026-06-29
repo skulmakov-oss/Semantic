@@ -1,6 +1,6 @@
 # Pulsar Roadmap
 
-Status: draft roadmap
+Status: v0 substrate baseline closed
 Owner: runtime acceleration / packed-state substrate
 Scope type: documentation only
 
@@ -11,7 +11,8 @@ Pulsar is the code name for the fast Semantic compute core for packed quad-state
 Main goal:
 
 - give Semantic a fast low-level substrate for mass processing of N/F/T/S states;
-- do so without violating the active Core Trust Freeze contour.
+- do so without violating the active Core Trust Freeze contour;
+- keep the v0 substrate line closed before any shadow-adapter implementation work begins.
 
 Pulsar does not replace the current `sm-*` crate owners.
 
@@ -25,6 +26,23 @@ Current authority boundaries remain:
 | runtime vocabulary | `sm-runtime-core` |
 | CLI orchestration | `smc-cli` |
 | fast packed-state substrate | `ton618-core` / future `pulsar-*` |
+
+## Pulsar v0 Baseline Closeout
+
+The Pulsar v0 substrate baseline is now merged through the crate-root export closure.
+
+Merged slices:
+
+- `#1193` - register Pulsar implementation roadmap;
+- `#1194` - seed Quadro packed-state engine;
+- `#1195` - expand Quadro correctness matrix;
+- `#1196` - add Quadro microbench harness;
+- `#1207` - record Quadro microbench baseline;
+- `#1208` - clarify scalar Quadro hot path timings;
+- `#1209` - export Quadro substrate at `ton618-core` crate root.
+
+This closeout is documentation only.
+It does not claim release readiness, production readiness, full no_std qualification, or any widening of the active Core Trust Freeze contour.
 
 ## Architecture Role
 
@@ -304,14 +322,67 @@ cargo test -p ton618-core --all-features
 cargo test -p ton618-core --no-default-features --features alloc
 ```
 
+## Next Step: P4 Shadow Adapter Design
+
+P4 is the next safe roadmap phase.
+It is design and equivalence planning first, not acceleration.
+
+Required constraints:
+
+- default runtime behavior must remain unchanged;
+- the adapter must be feature-gated;
+- no VM authority change;
+- no verifier admission change;
+- no SemCode format change;
+- no CTF contour widening;
+- no PROMETHEUS capability or host-boundary change;
+- no public performance or release claim.
+
+P4 entry criteria:
+
+- the v0 baseline closeout is merged;
+- shadow targets are selected;
+- the old-path vs Pulsar-path equivalence strategy is documented;
+- the feature name is fixed, recommended: `pulsar-shadow`;
+- test-only or shadow-only behavior is confirmed.
+
+Allowed first shadow targets:
+
+| Target | Reason |
+| --- | --- |
+| conflict mask calculation | direct mask projection with no behavior widening |
+| known mask calculation | stable structural comparison target |
+| state delta comparison | already modeled by scalar delta outputs |
+| batch merge equivalence | pure OR-style structural check |
+| batch intersect equivalence | pure AND-style structural check |
+
+P4 non-goals:
+
+- runtime acceleration;
+- SemCode vocabulary changes;
+- verifier logic changes;
+- VM dispatch changes;
+- symbolic ownership;
+- range ownership;
+- iterator ownership;
+- new public Semantic API claims;
+- release readiness wording.
+
+P5 remains blocked until P4 evidence exists:
+
+- shadow equivalence tests must exist;
+- old and Pulsar paths must match bit-for-bit;
+- a benchmark advantage must be recorded;
+- a promotion review must be performed.
+
 ### P4 - Shadow Adapter Design
 
-Type: code / test, no production behavior change
+Type: design / equivalence planning
 Depends on: P1 + P3
 
 Goal:
 
-- connect Pulsar as a shadow calculation path without changing runtime behavior.
+- define the shadow calculation path and its evidence gates without changing runtime behavior.
 
 Shape:
 
@@ -347,6 +418,8 @@ Depends on: P2 + P4
 Goal:
 
 - use Pulsar as an internal acceleration backend only for proven identical operations.
+
+P5 remains blocked until P4 evidence exists.
 
 Allowed first candidates:
 
