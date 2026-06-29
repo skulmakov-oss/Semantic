@@ -64,6 +64,8 @@ High quad-family activity does not equal Pulsar batchability.
 
 VM-M3 records fresh opcode-family profile evidence after VM-M2 in [docs/roadmap/sm_vm_vm_m3_opcode_family_evidence.md](sm_vm_vm_m3_opcode_family_evidence.md).
 
+VM-M4 audits the dominant scalar movement pressure in [docs/roadmap/sm_vm_vm_m4_scalar_movement_audit.md](sm_vm_vm_m4_scalar_movement_audit.md).
+
 ## VM-M1 Goals
 
 VM-M1 should answer:
