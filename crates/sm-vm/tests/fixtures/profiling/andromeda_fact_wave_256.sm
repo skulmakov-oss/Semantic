@@ -1,0 +1,95 @@
+fn wave_state(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn wave_pair(index: i32) -> quad {
+    let slot: i32 = index % 8;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                if slot == 3 {
+                    S
+                } else {
+                    if slot == 4 {
+                        S
+                    } else {
+                        if slot == 5 {
+                            T
+                        } else {
+                            if slot == 6 {
+                                F
+                            } else {
+                                N
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut merged_conflicts: i32 = 0;
+    let mut consensus_true: i32 = 0;
+    let mut consensus_false: i32 = 0;
+    let mut consensus_unknown: i32 = 0;
+    let mut consensus_conflict: i32 = 0;
+    let mut total: i32 = 0;
+
+    for i in 0..256 {
+        let observed: quad = wave_state(i);
+        let inferred: quad = wave_pair(i);
+        let merged: quad = observed || inferred;
+        let consensus: quad = observed && inferred;
+
+        total += 1;
+
+        if merged == S {
+            merged_conflicts += 1;
+        }
+
+        if consensus == T {
+            consensus_true += 1;
+        } else {
+            if consensus == F {
+                consensus_false += 1;
+            } else {
+                if consensus == N {
+                    consensus_unknown += 1;
+                } else {
+                    consensus_conflict += 1;
+                }
+            }
+        }
+    }
+
+    assert(total == 256);
+    assert(merged_conflicts > 0);
+    assert(consensus_true > 0);
+    assert(consensus_false > 0);
+    assert(consensus_unknown > 0);
+    assert(consensus_conflict > 0);
+    return;
+}

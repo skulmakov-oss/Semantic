@@ -1,0 +1,51 @@
+fn quad_cycle(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut load_count: i32 = 0;
+    let mut logic_count: i32 = 0;
+    let mut branch_count: i32 = 0;
+    let mut diff_count: i32 = 0;
+
+    for i in 0..64 {
+        let left: quad = quad_cycle(i);
+        let right: quad = quad_cycle(i + 1);
+        let merged: quad = left || right;
+        let consensus: quad = left && right;
+        let inverted: quad = !left;
+
+        if left == N {
+            load_count += 1;
+        }
+        if merged == S {
+            logic_count += 1;
+        }
+        if consensus != N {
+            branch_count += 1;
+        }
+        if inverted != left {
+            diff_count += 1;
+        }
+    }
+
+    assert(load_count > 0);
+    assert(logic_count > 0);
+    assert(branch_count > 0);
+    assert(diff_count > 0);
+    return;
+}
