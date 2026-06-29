@@ -62,6 +62,8 @@ Some workloads showed meaningful `quad_family` activity, but the pressure was mo
 
 High quad-family activity does not equal Pulsar batchability.
 
+VM-M3 records fresh opcode-family profile evidence after VM-M2 in [docs/roadmap/sm_vm_vm_m3_opcode_family_evidence.md](sm_vm_vm_m3_opcode_family_evidence.md).
+
 ## VM-M1 Goals
 
 VM-M1 should answer:
