@@ -68,6 +68,8 @@ VM-M4 audits the dominant scalar movement pressure in [docs/roadmap/sm_vm_vm_m4_
 
 VM-M5 audits lowering shapes behind scalar movement in [docs/roadmap/sm_vm_vm_m5_lowering_shape_scalar_movement_audit.md](sm_vm_vm_m5_lowering_shape_scalar_movement_audit.md).
 
+VM-M6 compares equivalent and near-equivalent source shapes in [docs/roadmap/sm_vm_vm_m6_equivalent_source_shape_scalar_movement.md](sm_vm_vm_m6_equivalent_source_shape_scalar_movement.md).
+
 ## VM-M1 Goals
 
 VM-M1 should answer:
