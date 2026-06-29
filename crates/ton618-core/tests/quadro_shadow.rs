@@ -378,46 +378,46 @@ fn mixed_transition_case() -> (u64, u64) {
     ])
 }
 
-fn baseline_conflict_mask(reg: QuadroReg) -> u64 {
+fn baseline_conflict_mask_raw(raw: u64) -> u64 {
     let mut mask = 0;
     for index in 0..LANES {
-        if reg.try_get(index).unwrap() == QuadState::S {
+        if state_at(raw, index) == QuadState::S {
             mask |= lane_mask(index);
         }
     }
     mask
 }
 
-fn baseline_known_mask(reg: QuadroReg) -> u64 {
+fn baseline_known_mask_raw(raw: u64) -> u64 {
     let mut mask = 0;
     for index in 0..LANES {
-        if reg.try_get(index).unwrap() != QuadState::N {
+        if state_at(raw, index) != QuadState::N {
             mask |= lane_mask(index);
         }
     }
     mask
 }
 
-fn baseline_merge(lhs: QuadroReg, rhs: QuadroReg) -> QuadroReg {
-    let mut reg = QuadroReg::new();
+fn baseline_merge_raw(lhs_raw: u64, rhs_raw: u64) -> u64 {
+    let mut raw = 0;
     for index in 0..LANES {
-        let lhs_state = lhs.try_get(index).unwrap();
-        let rhs_state = rhs.try_get(index).unwrap();
+        let lhs_state = state_at(lhs_raw, index);
+        let rhs_state = state_at(rhs_raw, index);
         let merged = decode_quad_state(lhs_state.bits() | rhs_state.bits());
-        set_lane(&mut reg, index, merged);
+        raw |= (merged.bits() as u64) << (index * QUADIT_WIDTH);
     }
-    reg
+    raw
 }
 
-fn baseline_intersect(lhs: QuadroReg, rhs: QuadroReg) -> QuadroReg {
-    let mut reg = QuadroReg::new();
+fn baseline_intersect_raw(lhs_raw: u64, rhs_raw: u64) -> u64 {
+    let mut raw = 0;
     for index in 0..LANES {
-        let lhs_state = lhs.try_get(index).unwrap();
-        let rhs_state = rhs.try_get(index).unwrap();
+        let lhs_state = state_at(lhs_raw, index);
+        let rhs_state = state_at(rhs_raw, index);
         let intersected = decode_quad_state(lhs_state.bits() & rhs_state.bits());
-        set_lane(&mut reg, index, intersected);
+        raw |= (intersected.bits() as u64) << (index * QUADIT_WIDTH);
     }
-    reg
+    raw
 }
 
 fn baseline_delta(old_raw: u64, new_raw: u64) -> BaselineDelta {
@@ -672,7 +672,7 @@ fn shadow_conflict_mask_matches_scalar_baseline() {
     ];
 
     for (case_id, (name, reg)) in cases.iter().enumerate() {
-        let expected = baseline_conflict_mask(*reg);
+        let expected = baseline_conflict_mask_raw(reg.raw());
         let actual = reg.mask_super();
         let result = shadow_compare_raw(
             ShadowOperation::ConflictMask,
@@ -703,7 +703,7 @@ fn shadow_known_mask_matches_scalar_baseline() {
     ];
 
     for (case_id, (name, reg)) in cases.iter().enumerate() {
-        let expected = baseline_known_mask(*reg);
+        let expected = baseline_known_mask_raw(reg.raw());
         let actual = reg.mask_non_null();
         let result = shadow_compare_raw(
             ShadowOperation::KnownMask,
@@ -822,11 +822,11 @@ fn shadow_batch_merge_matches_scalar_baseline() {
     ];
 
     for (case_id, (name, lhs_regs, rhs_regs)) in cases.into_iter().enumerate() {
-        let expected_regs: Vec<_> = lhs_regs
+        let expected_raws: Vec<_> = lhs_regs
             .iter()
             .copied()
             .zip(rhs_regs.iter().copied())
-            .map(|(lhs, rhs)| baseline_merge(lhs, rhs))
+            .map(|(lhs, rhs)| baseline_merge_raw(lhs.raw(), rhs.raw()))
             .collect();
 
         let mut lhs_bank = QuadroBank::from_regs(lhs_regs.clone());
@@ -837,7 +837,7 @@ fn shadow_batch_merge_matches_scalar_baseline() {
             .iter()
             .copied()
             .zip(rhs_regs.iter().copied())
-            .zip(expected_regs.iter().copied())
+            .zip(expected_raws.iter().copied())
             .enumerate()
         {
             let actual = lhs_bank.as_slice()[index];
@@ -845,12 +845,12 @@ fn shadow_batch_merge_matches_scalar_baseline() {
                 ShadowOperation::BatchMerge,
                 Some(case_id as u64),
                 index,
-                expected.raw(),
+                expected,
                 actual.raw(),
                 ShadowContext {
                     lhs_raw: Some(lhs_raw.raw()),
                     rhs_raw: Some(rhs_raw.raw()),
-                    baseline_detail: Some(expected.raw()),
+                    baseline_detail: Some(expected),
                     pulsar_detail: Some(actual.raw()),
                     ..ShadowContext::default()
                 },
@@ -858,11 +858,13 @@ fn shadow_batch_merge_matches_scalar_baseline() {
             assert_shadow_ok(result);
         }
 
-        assert_eq!(
-            lhs_bank.as_slice(),
-            expected_regs.as_slice(),
-            "batch merge case {name}"
-        );
+        for (index, expected) in expected_raws.iter().copied().enumerate() {
+            assert_eq!(
+                lhs_bank.as_slice()[index].raw(),
+                expected,
+                "batch merge case {name}"
+            );
+        }
     }
 }
 
@@ -963,11 +965,11 @@ fn shadow_batch_intersect_matches_scalar_baseline() {
     ];
 
     for (case_id, (name, lhs_regs, rhs_regs)) in cases.into_iter().enumerate() {
-        let expected_regs: Vec<_> = lhs_regs
+        let expected_raws: Vec<_> = lhs_regs
             .iter()
             .copied()
             .zip(rhs_regs.iter().copied())
-            .map(|(lhs, rhs)| baseline_intersect(lhs, rhs))
+            .map(|(lhs, rhs)| baseline_intersect_raw(lhs.raw(), rhs.raw()))
             .collect();
 
         let mut lhs_bank = QuadroBank::from_regs(lhs_regs.clone());
@@ -978,7 +980,7 @@ fn shadow_batch_intersect_matches_scalar_baseline() {
             .iter()
             .copied()
             .zip(rhs_regs.iter().copied())
-            .zip(expected_regs.iter().copied())
+            .zip(expected_raws.iter().copied())
             .enumerate()
         {
             let actual = lhs_bank.as_slice()[index];
@@ -986,12 +988,12 @@ fn shadow_batch_intersect_matches_scalar_baseline() {
                 ShadowOperation::BatchIntersect,
                 Some(case_id as u64),
                 index,
-                expected.raw(),
+                expected,
                 actual.raw(),
                 ShadowContext {
                     lhs_raw: Some(lhs_raw.raw()),
                     rhs_raw: Some(rhs_raw.raw()),
-                    baseline_detail: Some(expected.raw()),
+                    baseline_detail: Some(expected),
                     pulsar_detail: Some(actual.raw()),
                     ..ShadowContext::default()
                 },
@@ -999,11 +1001,13 @@ fn shadow_batch_intersect_matches_scalar_baseline() {
             assert_shadow_ok(result);
         }
 
-        assert_eq!(
-            lhs_bank.as_slice(),
-            expected_regs.as_slice(),
-            "batch intersect case {name}"
-        );
+        for (index, expected) in expected_raws.iter().copied().enumerate() {
+            assert_eq!(
+                lhs_bank.as_slice()[index].raw(),
+                expected,
+                "batch intersect case {name}"
+            );
+        }
     }
 }
 
