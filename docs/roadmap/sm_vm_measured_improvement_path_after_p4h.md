@@ -66,6 +66,8 @@ VM-M3 records fresh opcode-family profile evidence after VM-M2 in [docs/roadmap/
 
 VM-M4 audits the dominant scalar movement pressure in [docs/roadmap/sm_vm_vm_m4_scalar_movement_audit.md](sm_vm_vm_m4_scalar_movement_audit.md).
 
+VM-M5 audits lowering shapes behind scalar movement in [docs/roadmap/sm_vm_vm_m5_lowering_shape_scalar_movement_audit.md](sm_vm_vm_m5_lowering_shape_scalar_movement_audit.md).
+
 ## VM-M1 Goals
 
 VM-M1 should answer:

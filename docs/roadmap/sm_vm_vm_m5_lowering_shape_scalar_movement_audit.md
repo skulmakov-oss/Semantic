@@ -6,6 +6,8 @@ VM-M5 audits source/lowering shapes that appear to produce scalar movement.
 
 This document does not approve VM optimization, lowering changes, or runtime changes.
 
+VM-M6 compares equivalent and near-equivalent source shapes in [docs/roadmap/sm_vm_vm_m6_equivalent_source_shape_scalar_movement.md](sm_vm_vm_m6_equivalent_source_shape_scalar_movement.md).
+
 ## Context
 
 - VM-M3 showed `scalar_movement` dominates.
