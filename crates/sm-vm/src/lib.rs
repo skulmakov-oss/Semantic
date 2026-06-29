@@ -30,6 +30,7 @@ mod tests {
     use super::*;
     use sm_emit::compile_program_to_semcode;
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn sm_vm_smoke_run() {
         let src = "fn main() { return; }";

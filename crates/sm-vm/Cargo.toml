@@ -9,6 +9,7 @@ path = "src/lib.rs"
 [features]
 default = ["std"]
 std = ["sm-runtime-core/std", "sm-verify/std", "prom-abi/std", "prom-cap/std"]
+vm-profile = []
 disasm = []
 
 [dependencies]
