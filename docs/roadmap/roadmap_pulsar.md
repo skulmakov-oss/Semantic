@@ -432,6 +432,62 @@ Feature name example:
 
 - `pulsar-shadow`
 
+### P4-A - Shadow Adapter Evidence Contract
+
+Type: docs / evidence contract
+Depends on: P4
+
+Goal:
+
+- define how the baseline path and the Pulsar path are compared before any implementation slice expands beyond shadow-only evidence.
+
+Evidence contract:
+
+```text
+baseline path A
+Pulsar path B
+A == B bit-for-bit for the selected target
+if A != B -> build a local diagnostic report, then fail the test or fuzz case
+```
+
+Required mismatch evidence:
+
+- operation name;
+- input case id or fuzz seed, when available;
+- register index;
+- first differing quadit index, when applicable;
+- baseline raw register / mask / delta;
+- Pulsar raw register / mask / delta;
+- old and new state for delta comparisons;
+- CPU feature path, such as scalar, SIMD, AVX2, NEON, or fallback;
+- enabled Cargo features;
+- compact human-readable summary.
+
+This is local diagnostic evidence only.
+It must not introduce telemetry, remote reporting, runtime behavior changes, VM authority changes, verifier changes, SemCode changes, CTF widening, or PROMETHEUS boundary changes.
+
+P4-A first shadow targets:
+
+| Target | Reason |
+| --- | --- |
+| conflict mask calculation | direct mask projection with no behavior widening |
+| known mask calculation | stable structural comparison target |
+| state delta comparison | already modeled by scalar delta outputs |
+| batch merge equivalence | pure OR-style structural check |
+| batch intersect equivalence | pure AND-style structural check |
+
+P4-A non-goals:
+
+- runtime acceleration;
+- SemCode vocabulary changes;
+- verifier logic changes;
+- VM dispatch changes;
+- symbolic ownership;
+- range ownership;
+- iterator ownership;
+- new public Semantic API claims;
+- release readiness wording.
+
 ### P5 - Runtime Acceleration Candidate
 
 Type: controlled implementation
