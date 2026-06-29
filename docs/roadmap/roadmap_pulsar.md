@@ -325,7 +325,7 @@ cargo test -p ton618-core --no-default-features --features alloc
 ## Next Step: P4 Shadow Adapter Design
 
 P4 shadow equivalence is closed.
-The next safe roadmap phase remains design and equivalence planning before any acceleration.
+The next safe roadmap phase is local measurement and candidate selection, not acceleration.
 
 Required constraints:
 
