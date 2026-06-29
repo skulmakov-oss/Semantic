@@ -1,6 +1,11 @@
 use core::fmt;
 
-use ton618_core::quadro::{QuadState, QuadroReg};
+use ton618_core::quadro::{QuadState, QuadroReg, StateDelta, QUADIT_COUNT, QUADIT_WIDTH};
+
+#[cfg(feature = "alloc")]
+use ton618_core::quadro::QuadroBank;
+
+const LANES: usize = QUADIT_COUNT;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ShadowOperation {
@@ -11,7 +16,42 @@ enum ShadowOperation {
     BatchIntersect,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DeltaField {
+    EnteredTrue,
+    LeftTrue,
+    EnteredFalse,
+    LeftFalse,
+    EnteredSuper,
+    LeftSuper,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct BaselineDelta {
+    entered_true: u64,
+    left_true: u64,
+    entered_false: u64,
+    left_false: u64,
+    entered_super: u64,
+    left_super: u64,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct ShadowContext {
+    lhs_raw: Option<u64>,
+    rhs_raw: Option<u64>,
+    old_raw: Option<u64>,
+    new_raw: Option<u64>,
+    expected_mask: Option<u64>,
+    actual_mask: Option<u64>,
+    baseline_detail: Option<u64>,
+    pulsar_detail: Option<u64>,
+    delta_field: Option<DeltaField>,
+    old_state: Option<QuadState>,
+    new_state: Option<QuadState>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ShadowMismatchReport {
     operation: ShadowOperation,
     case_id: Option<u64>,
@@ -21,32 +61,459 @@ struct ShadowMismatchReport {
     pulsar_raw: u64,
     baseline_detail: Option<u64>,
     pulsar_detail: Option<u64>,
+    lhs_raw: Option<u64>,
+    rhs_raw: Option<u64>,
+    old_raw: Option<u64>,
+    new_raw: Option<u64>,
+    expected_mask: Option<u64>,
+    actual_mask: Option<u64>,
+    delta_field: Option<DeltaField>,
+    old_state: Option<QuadState>,
+    new_state: Option<QuadState>,
 }
 
 impl fmt::Display for ShadowMismatchReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:?} case={:?} reg={} quadit={:?} baseline=0x{:016x} pulsar=0x{:016x}",
+            "{:?} case={:?} reg={} lane={:?} baseline=0x{:016x} pulsar=0x{:016x}",
             self.operation,
             self.case_id,
             self.register_index,
             self.quadit_index,
             self.baseline_raw,
             self.pulsar_raw,
-        )
+        )?;
+
+        if let Some(field) = self.delta_field {
+            write!(f, " delta_field={field:?}")?;
+        }
+        if let Some(old_state) = self.old_state {
+            write!(f, " old_state={old_state:?}")?;
+        }
+        if let Some(new_state) = self.new_state {
+            write!(f, " new_state={new_state:?}")?;
+        }
+        if let Some(lhs_raw) = self.lhs_raw {
+            write!(f, " lhs=0x{lhs_raw:016x}")?;
+        }
+        if let Some(rhs_raw) = self.rhs_raw {
+            write!(f, " rhs=0x{rhs_raw:016x}")?;
+        }
+        if let Some(old_raw) = self.old_raw {
+            write!(f, " old=0x{old_raw:016x}")?;
+        }
+        if let Some(new_raw) = self.new_raw {
+            write!(f, " new=0x{new_raw:016x}")?;
+        }
+        if let Some(expected_mask) = self.expected_mask {
+            write!(f, " expected_mask=0x{expected_mask:016x}")?;
+        }
+        if let Some(actual_mask) = self.actual_mask {
+            write!(f, " actual_mask=0x{actual_mask:016x}")?;
+        }
+        if let Some(baseline_detail) = self.baseline_detail {
+            write!(f, " baseline_detail=0x{baseline_detail:016x}")?;
+        }
+        if let Some(pulsar_detail) = self.pulsar_detail {
+            write!(f, " pulsar_detail=0x{pulsar_detail:016x}")?;
+        }
+
+        Ok(())
     }
 }
 
-fn first_differing_quadit_index(baseline_raw: u64, pulsar_raw: u64) -> Option<u8> {
-    let diff = baseline_raw ^ pulsar_raw;
+fn lane_mask(index: usize) -> u64 {
+    1u64 << (index * 2)
+}
+
+fn decode_quad_state(bits: u8) -> QuadState {
+    match bits & 0b11 {
+        0 => QuadState::N,
+        1 => QuadState::F,
+        2 => QuadState::T,
+        3 => QuadState::S,
+        _ => unreachable!(),
+    }
+}
+
+fn encode_quad_state(state: QuadState) -> u8 {
+    state.bits()
+}
+
+fn set_lane(reg: &mut QuadroReg, index: usize, state: QuadState) {
+    reg.try_set(index, encode_quad_state(state)).unwrap();
+}
+
+fn reg_from_lane_fn(mut f: impl FnMut(usize) -> QuadState) -> QuadroReg {
+    let mut reg = QuadroReg::new();
+    for index in 0..LANES {
+        set_lane(&mut reg, index, f(index));
+    }
+    reg
+}
+
+fn all_states() -> [QuadState; 4] {
+    [QuadState::N, QuadState::F, QuadState::T, QuadState::S]
+}
+
+fn pattern_all(state: QuadState) -> QuadroReg {
+    reg_from_lane_fn(|_| state)
+}
+
+fn pattern_all_n() -> QuadroReg {
+    pattern_all(QuadState::N)
+}
+
+fn pattern_all_f() -> QuadroReg {
+    pattern_all(QuadState::F)
+}
+
+fn pattern_all_t() -> QuadroReg {
+    pattern_all(QuadState::T)
+}
+
+fn pattern_all_s() -> QuadroReg {
+    pattern_all(QuadState::S)
+}
+
+fn pattern_repeating_nfts() -> QuadroReg {
+    let states = all_states();
+    reg_from_lane_fn(|index| states[index % states.len()])
+}
+
+fn pattern_repeating_tf() -> QuadroReg {
+    reg_from_lane_fn(|index| {
+        if index % 2 == 0 {
+            QuadState::T
+        } else {
+            QuadState::F
+        }
+    })
+}
+
+fn pattern_repeating_ft() -> QuadroReg {
+    reg_from_lane_fn(|index| {
+        if index % 2 == 0 {
+            QuadState::F
+        } else {
+            QuadState::T
+        }
+    })
+}
+
+fn pattern_sparse_s() -> QuadroReg {
+    reg_from_lane_fn(|index| {
+        if matches!(index, 2 | 9 | 18 | 31) {
+            QuadState::S
+        } else {
+            QuadState::N
+        }
+    })
+}
+
+fn pattern_sparse_n() -> QuadroReg {
+    reg_from_lane_fn(|index| {
+        if matches!(index, 1 | 7 | 19 | 30) {
+            QuadState::N
+        } else {
+            QuadState::F
+        }
+    })
+}
+
+fn pattern_first_lane_conflict() -> QuadroReg {
+    reg_from_lane_fn(|index| {
+        if index == 0 {
+            QuadState::S
+        } else {
+            QuadState::N
+        }
+    })
+}
+
+fn pattern_last_lane_conflict() -> QuadroReg {
+    reg_from_lane_fn(|index| {
+        if index == LANES - 1 {
+            QuadState::S
+        } else {
+            QuadState::N
+        }
+    })
+}
+
+fn pattern_alternating_known_unknown() -> QuadroReg {
+    reg_from_lane_fn(|index| {
+        if index % 2 == 0 {
+            QuadState::T
+        } else {
+            QuadState::N
+        }
+    })
+}
+
+fn pattern_mixed_hand_authored() -> QuadroReg {
+    reg_from_lane_fn(|index| match index % 8 {
+        0 => QuadState::N,
+        1 => QuadState::F,
+        2 => QuadState::T,
+        3 => QuadState::S,
+        4 => QuadState::F,
+        5 => QuadState::T,
+        6 => QuadState::N,
+        _ => QuadState::S,
+    })
+}
+
+fn pattern_mixed_transition() -> QuadroReg {
+    reg_from_lane_fn(|index| match index % 8 {
+        0 => QuadState::T,
+        1 => QuadState::S,
+        2 => QuadState::F,
+        3 => QuadState::N,
+        4 => QuadState::S,
+        5 => QuadState::N,
+        6 => QuadState::T,
+        _ => QuadState::F,
+    })
+}
+
+type Transition = (usize, QuadState, QuadState);
+
+fn pack_transition_case(transitions: &[Transition]) -> (u64, u64) {
+    let mut old_raw = 0;
+    let mut new_raw = 0;
+
+    for &(lane, old_state, new_state) in transitions {
+        let shift = lane * QUADIT_WIDTH;
+        let old_bits = old_state.bits() as u64;
+        let new_bits = new_state.bits() as u64;
+        old_raw |= old_bits << shift;
+        new_raw |= new_bits << shift;
+    }
+
+    (old_raw, new_raw)
+}
+
+fn state_at(raw: u64, lane: usize) -> QuadState {
+    let shift = lane * QUADIT_WIDTH;
+    let bits = ((raw >> shift) & 0b11) as u8;
+    decode_quad_state(bits)
+}
+
+fn all_transition_matrix_case() -> (u64, u64) {
+    pack_transition_case(&[
+        (0, QuadState::N, QuadState::N),
+        (1, QuadState::N, QuadState::F),
+        (2, QuadState::N, QuadState::T),
+        (3, QuadState::N, QuadState::S),
+        (4, QuadState::F, QuadState::N),
+        (5, QuadState::F, QuadState::F),
+        (6, QuadState::F, QuadState::T),
+        (7, QuadState::F, QuadState::S),
+        (8, QuadState::T, QuadState::N),
+        (9, QuadState::T, QuadState::F),
+        (10, QuadState::T, QuadState::T),
+        (11, QuadState::T, QuadState::S),
+        (12, QuadState::S, QuadState::N),
+        (13, QuadState::S, QuadState::F),
+        (14, QuadState::S, QuadState::T),
+        (15, QuadState::S, QuadState::S),
+    ])
+}
+
+fn observation_case() -> (u64, u64) {
+    pack_transition_case(&[
+        (0, QuadState::N, QuadState::T),
+        (1, QuadState::N, QuadState::F),
+        (2, QuadState::N, QuadState::S),
+        (3, QuadState::N, QuadState::N),
+        (4, QuadState::N, QuadState::T),
+        (5, QuadState::N, QuadState::F),
+        (6, QuadState::N, QuadState::S),
+        (7, QuadState::N, QuadState::N),
+    ])
+}
+
+fn resolution_case() -> (u64, u64) {
+    pack_transition_case(&[
+        (0, QuadState::S, QuadState::T),
+        (1, QuadState::S, QuadState::F),
+        (2, QuadState::S, QuadState::N),
+        (3, QuadState::S, QuadState::T),
+        (4, QuadState::S, QuadState::F),
+        (5, QuadState::S, QuadState::N),
+        (6, QuadState::S, QuadState::T),
+        (7, QuadState::S, QuadState::F),
+    ])
+}
+
+fn conflict_formation_case() -> (u64, u64) {
+    pack_transition_case(&[
+        (0, QuadState::T, QuadState::S),
+        (1, QuadState::F, QuadState::S),
+        (2, QuadState::T, QuadState::F),
+        (3, QuadState::F, QuadState::T),
+        (4, QuadState::T, QuadState::S),
+        (5, QuadState::F, QuadState::S),
+        (6, QuadState::T, QuadState::F),
+        (7, QuadState::F, QuadState::T),
+    ])
+}
+
+fn mixed_transition_case() -> (u64, u64) {
+    pack_transition_case(&[
+        (0, QuadState::N, QuadState::S),
+        (1, QuadState::F, QuadState::N),
+        (2, QuadState::T, QuadState::F),
+        (3, QuadState::S, QuadState::T),
+        (4, QuadState::N, QuadState::F),
+        (5, QuadState::T, QuadState::S),
+        (6, QuadState::S, QuadState::N),
+        (7, QuadState::F, QuadState::T),
+        (8, QuadState::N, QuadState::N),
+        (9, QuadState::S, QuadState::S),
+        (10, QuadState::T, QuadState::N),
+        (11, QuadState::F, QuadState::F),
+    ])
+}
+
+fn baseline_conflict_mask(reg: QuadroReg) -> u64 {
+    let mut mask = 0;
+    for index in 0..LANES {
+        if reg.try_get(index).unwrap() == QuadState::S {
+            mask |= lane_mask(index);
+        }
+    }
+    mask
+}
+
+fn baseline_known_mask(reg: QuadroReg) -> u64 {
+    let mut mask = 0;
+    for index in 0..LANES {
+        if reg.try_get(index).unwrap() != QuadState::N {
+            mask |= lane_mask(index);
+        }
+    }
+    mask
+}
+
+fn baseline_merge(lhs: QuadroReg, rhs: QuadroReg) -> QuadroReg {
+    let mut reg = QuadroReg::new();
+    for index in 0..LANES {
+        let lhs_state = lhs.try_get(index).unwrap();
+        let rhs_state = rhs.try_get(index).unwrap();
+        let merged = decode_quad_state(lhs_state.bits() | rhs_state.bits());
+        set_lane(&mut reg, index, merged);
+    }
+    reg
+}
+
+fn baseline_intersect(lhs: QuadroReg, rhs: QuadroReg) -> QuadroReg {
+    let mut reg = QuadroReg::new();
+    for index in 0..LANES {
+        let lhs_state = lhs.try_get(index).unwrap();
+        let rhs_state = rhs.try_get(index).unwrap();
+        let intersected = decode_quad_state(lhs_state.bits() & rhs_state.bits());
+        set_lane(&mut reg, index, intersected);
+    }
+    reg
+}
+
+fn baseline_delta(old_raw: u64, new_raw: u64) -> BaselineDelta {
+    let mut delta = BaselineDelta::default();
+    for index in 0..LANES {
+        let lane = lane_mask(index);
+        let old_state = state_at(old_raw, index);
+        let new_state = state_at(new_raw, index);
+
+        if old_state != QuadState::T && new_state == QuadState::T {
+            delta.entered_true |= lane;
+        }
+        if old_state == QuadState::T && new_state != QuadState::T {
+            delta.left_true |= lane;
+        }
+        if old_state != QuadState::F && new_state == QuadState::F {
+            delta.entered_false |= lane;
+        }
+        if old_state == QuadState::F && new_state != QuadState::F {
+            delta.left_false |= lane;
+        }
+        if old_state != QuadState::S && new_state == QuadState::S {
+            delta.entered_super |= lane;
+        }
+        if old_state == QuadState::S && new_state != QuadState::S {
+            delta.left_super |= lane;
+        }
+    }
+    delta
+}
+
+fn first_differing_quadit_index(left_raw: u64, right_raw: u64) -> Option<u8> {
+    let diff = left_raw ^ right_raw;
     if diff == 0 {
         return None;
     }
 
-    for index in 0..32 {
+    for index in 0..LANES {
         if ((diff >> (index * 2)) & 0b11) != 0 {
             return Some(index as u8);
+        }
+    }
+
+    None
+}
+
+fn first_differing_lane_between_masks(expected_mask: u64, actual_mask: u64) -> Option<u8> {
+    first_differing_quadit_index(expected_mask, actual_mask)
+}
+
+fn first_differing_delta_field(
+    expected: BaselineDelta,
+    actual: StateDelta,
+    old_raw: u64,
+    new_raw: u64,
+) -> Option<(DeltaField, u64, u64, u8, QuadState, QuadState)> {
+    let pairs = [
+        (
+            DeltaField::EnteredTrue,
+            expected.entered_true,
+            actual.entered_true,
+        ),
+        (DeltaField::LeftTrue, expected.left_true, actual.left_true),
+        (
+            DeltaField::EnteredFalse,
+            expected.entered_false,
+            actual.entered_false,
+        ),
+        (
+            DeltaField::LeftFalse,
+            expected.left_false,
+            actual.left_false,
+        ),
+        (
+            DeltaField::EnteredSuper,
+            expected.entered_super,
+            actual.entered_super,
+        ),
+        (
+            DeltaField::LeftSuper,
+            expected.left_super,
+            actual.left_super,
+        ),
+    ];
+
+    for (field, expected_mask, actual_mask) in pairs {
+        if expected_mask != actual_mask {
+            let lane = first_differing_lane_between_masks(expected_mask, actual_mask).unwrap_or(0);
+            return Some((
+                field,
+                expected_mask,
+                actual_mask,
+                lane,
+                state_at(old_raw, lane as usize),
+                state_at(new_raw, lane as usize),
+            ));
         }
     }
 
@@ -59,143 +526,531 @@ fn shadow_compare_raw(
     register_index: usize,
     baseline_raw: u64,
     pulsar_raw: u64,
-) -> Result<(), ShadowMismatchReport> {
+    context: ShadowContext,
+) -> Result<(), Box<ShadowMismatchReport>> {
     if baseline_raw == pulsar_raw {
         return Ok(());
     }
 
-    Err(ShadowMismatchReport {
+    let ShadowContext {
+        lhs_raw,
+        rhs_raw,
+        old_raw,
+        new_raw,
+        expected_mask,
+        actual_mask,
+        baseline_detail,
+        pulsar_detail,
+        delta_field,
+        old_state,
+        new_state,
+    } = context;
+
+    Err(Box::new(ShadowMismatchReport {
         operation,
         case_id,
         register_index,
         quadit_index: first_differing_quadit_index(baseline_raw, pulsar_raw),
         baseline_raw,
         pulsar_raw,
-        baseline_detail: Some(baseline_raw),
-        pulsar_detail: Some(pulsar_raw),
-    })
+        baseline_detail: baseline_detail.or(Some(baseline_raw)),
+        pulsar_detail: pulsar_detail.or(Some(pulsar_raw)),
+        lhs_raw,
+        rhs_raw,
+        old_raw,
+        new_raw,
+        expected_mask,
+        actual_mask,
+        delta_field,
+        old_state,
+        new_state,
+    }))
 }
 
-fn shadow_assert_register_eq(
-    operation: ShadowOperation,
+fn shadow_compare_delta_actual(
     case_id: Option<u64>,
     register_index: usize,
-    baseline: QuadroReg,
-    pulsar: QuadroReg,
-) -> Result<(), ShadowMismatchReport> {
-    shadow_compare_raw(
-        operation,
+    old_raw: u64,
+    new_raw: u64,
+    actual: StateDelta,
+) -> Result<(), Box<ShadowMismatchReport>> {
+    let expected = baseline_delta(old_raw, new_raw);
+
+    if expected == BaselineDelta::from(actual) {
+        return Ok(());
+    }
+
+    let (delta_field, expected_mask, actual_mask, quadit_index, old_state, new_state) =
+        first_differing_delta_field(expected, actual, old_raw, new_raw).unwrap_or((
+            DeltaField::EnteredTrue,
+            expected.entered_true,
+            actual.entered_true,
+            0,
+            state_at(old_raw, 0),
+            state_at(new_raw, 0),
+        ));
+
+    Err(Box::new(ShadowMismatchReport {
+        operation: ShadowOperation::StateDelta,
         case_id,
         register_index,
-        baseline.raw(),
-        pulsar.raw(),
-    )
+        quadit_index: Some(quadit_index),
+        baseline_raw: expected_mask,
+        pulsar_raw: actual_mask,
+        baseline_detail: Some(old_raw),
+        pulsar_detail: Some(new_raw),
+        lhs_raw: None,
+        rhs_raw: None,
+        old_raw: Some(old_raw),
+        new_raw: Some(new_raw),
+        expected_mask: Some(expected_mask),
+        actual_mask: Some(actual_mask),
+        delta_field: Some(delta_field),
+        old_state: Some(old_state),
+        new_state: Some(new_state),
+    }))
 }
 
-fn scalar_checked_baseline() -> QuadroReg {
-    let mut reg = QuadroReg::new();
-    reg.try_set(0, QuadState::F.bits()).unwrap();
-    reg.try_set(2, QuadState::T.bits()).unwrap();
-    reg.try_set(7, QuadState::S.bits()).unwrap();
-    reg.try_set(12, QuadState::F.bits()).unwrap();
-    reg.try_set(31, QuadState::T.bits()).unwrap();
-    reg
+fn shadow_compare_delta(
+    case_id: Option<u64>,
+    register_index: usize,
+    old_raw: u64,
+    new_raw: u64,
+) -> Result<(), Box<ShadowMismatchReport>> {
+    let old = QuadroReg::from_raw(old_raw);
+    let new = QuadroReg::from_raw(new_raw);
+    let actual = old.calc_delta(new);
+    shadow_compare_delta_actual(case_id, register_index, old_raw, new_raw, actual)
 }
 
-fn lane_state_reg(index: usize, state: QuadState) -> QuadroReg {
-    let mut reg = QuadroReg::new();
-    reg.try_set(index, state.bits()).unwrap();
-    reg
+impl From<StateDelta> for BaselineDelta {
+    fn from(value: StateDelta) -> Self {
+        Self {
+            entered_true: value.entered_true,
+            left_true: value.left_true,
+            entered_false: value.entered_false,
+            left_false: value.left_false,
+            entered_super: value.entered_super,
+            left_super: value.left_super,
+        }
+    }
+}
+
+fn assert_shadow_ok(result: Result<(), Box<ShadowMismatchReport>>) {
+    if let Err(report) = result {
+        panic!("{report}");
+    }
+}
+
+fn raw_compare_context(lhs_raw: u64, rhs_raw: u64) -> ShadowContext {
+    ShadowContext {
+        lhs_raw: Some(lhs_raw),
+        rhs_raw: Some(rhs_raw),
+        ..ShadowContext::default()
+    }
+}
+
+fn mask_compare_context(mask: u64) -> ShadowContext {
+    ShadowContext {
+        expected_mask: Some(mask),
+        actual_mask: Some(mask),
+        ..ShadowContext::default()
+    }
 }
 
 #[test]
-fn identical_raw_registers_pass_shadow_comparison() {
-    let baseline = scalar_checked_baseline();
-    let pulsar = QuadroReg::from_raw(baseline.raw());
+fn shadow_conflict_mask_matches_scalar_baseline() {
+    let cases = [
+        ("all_n", pattern_all_n()),
+        ("all_f", pattern_all_f()),
+        ("all_t", pattern_all_t()),
+        ("all_s", pattern_all_s()),
+        ("sparse_s", pattern_sparse_s()),
+        ("first_lane_conflict", pattern_first_lane_conflict()),
+        ("last_lane_conflict", pattern_last_lane_conflict()),
+        ("mixed_hand_authored", pattern_mixed_hand_authored()),
+    ];
 
-    shadow_assert_register_eq(
+    for (case_id, (name, reg)) in cases.iter().enumerate() {
+        let expected = baseline_conflict_mask(*reg);
+        let actual = reg.mask_super();
+        let result = shadow_compare_raw(
+            ShadowOperation::ConflictMask,
+            Some(case_id as u64),
+            0,
+            expected,
+            actual,
+            mask_compare_context(expected),
+        );
+        assert_shadow_ok(result);
+        assert_eq!(expected, actual, "conflict mask case {name}");
+    }
+}
+
+#[test]
+fn shadow_known_mask_matches_scalar_baseline() {
+    let cases = [
+        ("all_n", pattern_all_n()),
+        ("all_f", pattern_all_f()),
+        ("all_t", pattern_all_t()),
+        ("all_s", pattern_all_s()),
+        (
+            "alternating_known_unknown",
+            pattern_alternating_known_unknown(),
+        ),
+        ("sparse_n", pattern_sparse_n()),
+        ("mixed_hand_authored", pattern_mixed_hand_authored()),
+    ];
+
+    for (case_id, (name, reg)) in cases.iter().enumerate() {
+        let expected = baseline_known_mask(*reg);
+        let actual = reg.mask_non_null();
+        let result = shadow_compare_raw(
+            ShadowOperation::KnownMask,
+            Some(case_id as u64),
+            0,
+            expected,
+            actual,
+            mask_compare_context(expected),
+        );
+        assert_shadow_ok(result);
+        assert_eq!(expected, actual, "known mask case {name}");
+    }
+}
+
+#[test]
+fn shadow_state_delta_matches_scalar_baseline() {
+    let cases = [
+        ("all_transition_matrix_case", all_transition_matrix_case()),
+        ("observation_case", observation_case()),
+        ("resolution_case", resolution_case()),
+        ("conflict_formation_case", conflict_formation_case()),
+        ("mixed_transition_case", mixed_transition_case()),
+    ];
+
+    for (case_id, (name, (old_raw, new_raw))) in cases.iter().enumerate() {
+        let expected = baseline_delta(*old_raw, *new_raw);
+        let result = shadow_compare_delta(Some(case_id as u64), 0, *old_raw, *new_raw);
+        assert_shadow_ok(result);
+
+        let old = QuadroReg::from_raw(*old_raw);
+        let new = QuadroReg::from_raw(*new_raw);
+        let actual = old.calc_delta(new);
+        assert_eq!(BaselineDelta::from(actual), expected, "delta case {name}");
+    }
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn shadow_batch_merge_matches_scalar_baseline() {
+    let cases = vec![
+        (
+            "all_n_vs_all_t",
+            vec![
+                pattern_all_n(),
+                pattern_all_n(),
+                pattern_all_n(),
+                pattern_all_n(),
+            ],
+            vec![
+                pattern_all_t(),
+                pattern_all_t(),
+                pattern_all_t(),
+                pattern_all_t(),
+            ],
+        ),
+        (
+            "all_t_vs_all_f",
+            vec![
+                pattern_all_t(),
+                pattern_all_t(),
+                pattern_all_t(),
+                pattern_all_t(),
+            ],
+            vec![
+                pattern_all_f(),
+                pattern_all_f(),
+                pattern_all_f(),
+                pattern_all_f(),
+            ],
+        ),
+        (
+            "mixed_vs_sparse_conflicts",
+            vec![
+                pattern_repeating_nfts(),
+                pattern_sparse_s(),
+                pattern_mixed_hand_authored(),
+                pattern_first_lane_conflict(),
+            ],
+            vec![
+                pattern_sparse_s(),
+                pattern_all_n(),
+                pattern_mixed_transition(),
+                pattern_last_lane_conflict(),
+            ],
+        ),
+        (
+            "alternating_vs_inverse",
+            vec![
+                pattern_repeating_tf(),
+                pattern_repeating_tf(),
+                pattern_repeating_tf(),
+                pattern_repeating_tf(),
+            ],
+            vec![
+                pattern_repeating_ft(),
+                pattern_repeating_ft(),
+                pattern_repeating_ft(),
+                pattern_repeating_ft(),
+            ],
+        ),
+        (
+            "mixed_vs_mixed",
+            vec![
+                pattern_mixed_hand_authored(),
+                pattern_sparse_n(),
+                pattern_all_s(),
+                pattern_all_f(),
+            ],
+            vec![
+                pattern_mixed_transition(),
+                pattern_sparse_s(),
+                pattern_all_n(),
+                pattern_all_t(),
+            ],
+        ),
+    ];
+
+    for (case_id, (name, lhs_regs, rhs_regs)) in cases.into_iter().enumerate() {
+        let expected_regs: Vec<_> = lhs_regs
+            .iter()
+            .copied()
+            .zip(rhs_regs.iter().copied())
+            .map(|(lhs, rhs)| baseline_merge(lhs, rhs))
+            .collect();
+
+        let mut lhs_bank = QuadroBank::from_regs(lhs_regs.clone());
+        let rhs_bank = QuadroBank::from_regs(rhs_regs.clone());
+        lhs_bank.merge_inplace(&rhs_bank).unwrap();
+
+        for (index, ((lhs_raw, rhs_raw), expected)) in lhs_regs
+            .iter()
+            .copied()
+            .zip(rhs_regs.iter().copied())
+            .zip(expected_regs.iter().copied())
+            .enumerate()
+        {
+            let actual = lhs_bank.as_slice()[index];
+            let result = shadow_compare_raw(
+                ShadowOperation::BatchMerge,
+                Some(case_id as u64),
+                index,
+                expected.raw(),
+                actual.raw(),
+                ShadowContext {
+                    lhs_raw: Some(lhs_raw.raw()),
+                    rhs_raw: Some(rhs_raw.raw()),
+                    baseline_detail: Some(expected.raw()),
+                    pulsar_detail: Some(actual.raw()),
+                    ..ShadowContext::default()
+                },
+            );
+            assert_shadow_ok(result);
+        }
+
+        assert_eq!(
+            lhs_bank.as_slice(),
+            expected_regs.as_slice(),
+            "batch merge case {name}"
+        );
+    }
+}
+
+#[cfg(feature = "alloc")]
+#[test]
+fn shadow_batch_intersect_matches_scalar_baseline() {
+    let cases = vec![
+        (
+            "all_s_vs_all_t",
+            vec![
+                pattern_all_s(),
+                pattern_all_s(),
+                pattern_all_s(),
+                pattern_all_s(),
+            ],
+            vec![
+                pattern_all_t(),
+                pattern_all_t(),
+                pattern_all_t(),
+                pattern_all_t(),
+            ],
+        ),
+        (
+            "all_s_vs_all_f",
+            vec![
+                pattern_all_s(),
+                pattern_all_s(),
+                pattern_all_s(),
+                pattern_all_s(),
+            ],
+            vec![
+                pattern_all_f(),
+                pattern_all_f(),
+                pattern_all_f(),
+                pattern_all_f(),
+            ],
+        ),
+        (
+            "all_t_vs_all_f",
+            vec![
+                pattern_all_t(),
+                pattern_all_t(),
+                pattern_all_t(),
+                pattern_all_t(),
+            ],
+            vec![
+                pattern_all_f(),
+                pattern_all_f(),
+                pattern_all_f(),
+                pattern_all_f(),
+            ],
+        ),
+        (
+            "mixed_vs_all_s",
+            vec![
+                pattern_repeating_nfts(),
+                pattern_sparse_s(),
+                pattern_mixed_hand_authored(),
+                pattern_last_lane_conflict(),
+            ],
+            vec![
+                pattern_all_s(),
+                pattern_all_s(),
+                pattern_all_s(),
+                pattern_all_s(),
+            ],
+        ),
+        (
+            "mixed_vs_all_n",
+            vec![
+                pattern_repeating_tf(),
+                pattern_sparse_s(),
+                pattern_mixed_hand_authored(),
+                pattern_first_lane_conflict(),
+            ],
+            vec![
+                pattern_all_n(),
+                pattern_all_n(),
+                pattern_all_n(),
+                pattern_all_n(),
+            ],
+        ),
+        (
+            "mixed_vs_mixed",
+            vec![
+                pattern_mixed_hand_authored(),
+                pattern_sparse_n(),
+                pattern_all_s(),
+                pattern_all_t(),
+            ],
+            vec![
+                pattern_mixed_transition(),
+                pattern_sparse_s(),
+                pattern_all_n(),
+                pattern_all_f(),
+            ],
+        ),
+    ];
+
+    for (case_id, (name, lhs_regs, rhs_regs)) in cases.into_iter().enumerate() {
+        let expected_regs: Vec<_> = lhs_regs
+            .iter()
+            .copied()
+            .zip(rhs_regs.iter().copied())
+            .map(|(lhs, rhs)| baseline_intersect(lhs, rhs))
+            .collect();
+
+        let mut lhs_bank = QuadroBank::from_regs(lhs_regs.clone());
+        let rhs_bank = QuadroBank::from_regs(rhs_regs.clone());
+        lhs_bank.intersect_inplace(&rhs_bank).unwrap();
+
+        for (index, ((lhs_raw, rhs_raw), expected)) in lhs_regs
+            .iter()
+            .copied()
+            .zip(rhs_regs.iter().copied())
+            .zip(expected_regs.iter().copied())
+            .enumerate()
+        {
+            let actual = lhs_bank.as_slice()[index];
+            let result = shadow_compare_raw(
+                ShadowOperation::BatchIntersect,
+                Some(case_id as u64),
+                index,
+                expected.raw(),
+                actual.raw(),
+                ShadowContext {
+                    lhs_raw: Some(lhs_raw.raw()),
+                    rhs_raw: Some(rhs_raw.raw()),
+                    baseline_detail: Some(expected.raw()),
+                    pulsar_detail: Some(actual.raw()),
+                    ..ShadowContext::default()
+                },
+            );
+            assert_shadow_ok(result);
+        }
+
+        assert_eq!(
+            lhs_bank.as_slice(),
+            expected_regs.as_slice(),
+            "batch intersect case {name}"
+        );
+    }
+}
+
+#[test]
+fn shadow_mismatch_report_captures_first_lane_and_inputs() {
+    let lhs = pattern_first_lane_conflict();
+    let rhs = pattern_last_lane_conflict();
+
+    let report = shadow_compare_raw(
         ShadowOperation::ConflictMask,
         Some(0x2026_0629),
         0,
-        baseline,
-        pulsar,
-    )
-    .unwrap();
-}
-
-#[test]
-fn mismatched_raw_registers_report_first_differing_quadit() {
-    let baseline = lane_state_reg(2, QuadState::T);
-    let pulsar = lane_state_reg(2, QuadState::F);
-
-    let report = shadow_assert_register_eq(
-        ShadowOperation::KnownMask,
-        Some(0x2026_0629),
-        3,
-        baseline,
-        pulsar,
+        lhs.raw(),
+        rhs.raw(),
+        raw_compare_context(lhs.raw(), rhs.raw()),
     )
     .unwrap_err();
 
-    assert_eq!(report.operation, ShadowOperation::KnownMask);
+    assert_eq!(report.operation, ShadowOperation::ConflictMask);
     assert_eq!(report.case_id, Some(0x2026_0629));
-    assert_eq!(report.register_index, 3);
-    assert_eq!(report.quadit_index, Some(2));
-    assert_eq!(report.baseline_raw, baseline.raw());
-    assert_eq!(report.pulsar_raw, pulsar.raw());
-    assert_eq!(report.baseline_detail, Some(report.baseline_raw));
-    assert_eq!(report.pulsar_detail, Some(report.pulsar_raw));
-    assert!(!report.to_string().is_empty());
+    assert_eq!(report.quadit_index, Some(0));
+    assert_eq!(report.lhs_raw, Some(lhs.raw()));
+    assert_eq!(report.rhs_raw, Some(rhs.raw()));
 }
 
 #[test]
-fn raw_compare_helper_preserves_structured_failure_shape() {
-    let baseline = QuadroReg::from_raw(0x0000_0000_0000_00f0);
-    let pulsar = QuadroReg::from_raw(0x0000_0000_0000_00f4);
+fn shadow_delta_mismatch_report_captures_changed_lane_and_inputs() {
+    let (old_raw, new_raw) = mixed_transition_case();
+    let old = QuadroReg::from_raw(old_raw);
+    let expected_delta = baseline_delta(old_raw, new_raw);
+    let wrong_delta = old.calc_delta(pattern_all_f());
+    let (delta_field, expected_mask, actual_mask, lane, old_state, new_state) =
+        first_differing_delta_field(expected_delta, wrong_delta, old_raw, new_raw).unwrap();
 
-    let report = shadow_compare_raw(
-        ShadowOperation::StateDelta,
-        None,
-        11,
-        baseline.raw(),
-        pulsar.raw(),
-    )
-    .unwrap_err();
+    let report = shadow_compare_delta_actual(Some(0x2026_0629), 7, old_raw, new_raw, wrong_delta)
+        .unwrap_err();
 
     assert_eq!(report.operation, ShadowOperation::StateDelta);
-    assert_eq!(report.case_id, None);
-    assert_eq!(report.register_index, 11);
-    assert_eq!(report.quadit_index, Some(1));
-    assert_eq!(report.baseline_raw, baseline.raw());
-    assert_eq!(report.pulsar_raw, pulsar.raw());
-}
-
-#[test]
-fn shadow_example_checked_api_matches_packed_constructor_path() {
-    let baseline = scalar_checked_baseline();
-    let pulsar = QuadroReg::from_raw(baseline.raw());
-
-    shadow_assert_register_eq(
-        ShadowOperation::BatchMerge,
-        Some(0x2026_0629),
-        0,
-        baseline,
-        pulsar,
-    )
-    .unwrap();
-}
-
-#[test]
-fn batch_intersect_label_is_available_for_future_targets() {
-    let baseline = QuadroReg::from_raw(0x0000_0000_0000_000f);
-    let pulsar = QuadroReg::from_raw(0x0000_0000_0000_000f);
-
-    shadow_assert_register_eq(
-        ShadowOperation::BatchIntersect,
-        Some(0x2026_0629),
-        2,
-        baseline,
-        pulsar,
-    )
-    .unwrap();
+    assert_eq!(report.case_id, Some(0x2026_0629));
+    assert_eq!(report.register_index, 7);
+    assert_eq!(report.quadit_index, Some(lane));
+    assert_eq!(report.old_raw, Some(old_raw));
+    assert_eq!(report.new_raw, Some(new_raw));
+    assert_eq!(report.delta_field, Some(delta_field));
+    assert_eq!(report.old_state, Some(old_state));
+    assert_eq!(report.new_state, Some(new_state));
+    assert_eq!(report.expected_mask, Some(expected_mask));
+    assert_eq!(report.actual_mask, Some(actual_mask));
+    assert_eq!(baseline_delta(old_raw, new_raw), expected_delta);
 }
