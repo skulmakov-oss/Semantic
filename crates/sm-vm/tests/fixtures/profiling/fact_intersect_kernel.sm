@@ -1,0 +1,138 @@
+fn main() {
+    let mut true_count: i32 = 0;
+    let mut false_count: i32 = 0;
+    let mut unknown_count: i32 = 0;
+    let mut conflict_count: i32 = 0;
+
+    let i01: quad = T && S;
+    if i01 == T {
+        true_count += 1;
+    }
+    if i01 == F {
+        false_count += 1;
+    }
+    if i01 == N {
+        unknown_count += 1;
+    }
+    if i01 == S {
+        conflict_count += 1;
+    }
+
+    let i02: quad = F && S;
+    if i02 == T {
+        true_count += 1;
+    }
+    if i02 == F {
+        false_count += 1;
+    }
+    if i02 == N {
+        unknown_count += 1;
+    }
+    if i02 == S {
+        conflict_count += 1;
+    }
+
+    let i03: quad = T && F;
+    if i03 == T {
+        true_count += 1;
+    }
+    if i03 == F {
+        false_count += 1;
+    }
+    if i03 == N {
+        unknown_count += 1;
+    }
+    if i03 == S {
+        conflict_count += 1;
+    }
+
+    let i04: quad = S && S;
+    if i04 == T {
+        true_count += 1;
+    }
+    if i04 == F {
+        false_count += 1;
+    }
+    if i04 == N {
+        unknown_count += 1;
+    }
+    if i04 == S {
+        conflict_count += 1;
+    }
+
+    let i05: quad = N && T;
+    if i05 == T {
+        true_count += 1;
+    }
+    if i05 == F {
+        false_count += 1;
+    }
+    if i05 == N {
+        unknown_count += 1;
+    }
+    if i05 == S {
+        conflict_count += 1;
+    }
+
+    let i06: quad = N && F;
+    if i06 == T {
+        true_count += 1;
+    }
+    if i06 == F {
+        false_count += 1;
+    }
+    if i06 == N {
+        unknown_count += 1;
+    }
+    if i06 == S {
+        conflict_count += 1;
+    }
+
+    let i07: quad = S && N;
+    if i07 == T {
+        true_count += 1;
+    }
+    if i07 == F {
+        false_count += 1;
+    }
+    if i07 == N {
+        unknown_count += 1;
+    }
+    if i07 == S {
+        conflict_count += 1;
+    }
+
+    let i08: quad = T && T;
+    if i08 == T {
+        true_count += 1;
+    }
+    if i08 == F {
+        false_count += 1;
+    }
+    if i08 == N {
+        unknown_count += 1;
+    }
+    if i08 == S {
+        conflict_count += 1;
+    }
+
+    let i09: quad = F && F;
+    if i09 == T {
+        true_count += 1;
+    }
+    if i09 == F {
+        false_count += 1;
+    }
+    if i09 == N {
+        unknown_count += 1;
+    }
+    if i09 == S {
+        conflict_count += 1;
+    }
+
+    assert(true_count == 2);
+    assert(false_count == 2);
+    assert(unknown_count == 4);
+    assert(conflict_count == 1);
+    return;
+}

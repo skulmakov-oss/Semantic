@@ -1,0 +1,72 @@
+fn main() {
+    let mut conflict_count: i32 = 0;
+    let mut known_count: i32 = 0;
+
+    let m01: quad = N || T;
+    if m01 == S {
+        conflict_count += 1;
+    }
+    if m01 != N {
+        known_count += 1;
+    }
+
+    let m02: quad = N || F;
+    if m02 == S {
+        conflict_count += 1;
+    }
+    if m02 != N {
+        known_count += 1;
+    }
+
+    let m03: quad = T || F;
+    if m03 == S {
+        conflict_count += 1;
+    }
+    if m03 != N {
+        known_count += 1;
+    }
+
+    let m04: quad = F || T;
+    if m04 == S {
+        conflict_count += 1;
+    }
+    if m04 != N {
+        known_count += 1;
+    }
+
+    let m05: quad = S || N;
+    if m05 == S {
+        conflict_count += 1;
+    }
+    if m05 != N {
+        known_count += 1;
+    }
+
+    let m06: quad = S || T;
+    if m06 == S {
+        conflict_count += 1;
+    }
+    if m06 != N {
+        known_count += 1;
+    }
+
+    let m07: quad = S || F;
+    if m07 == S {
+        conflict_count += 1;
+    }
+    if m07 != N {
+        known_count += 1;
+    }
+
+    let m08: quad = N || N;
+    if m08 == S {
+        conflict_count += 1;
+    }
+    if m08 != N {
+        known_count += 1;
+    }
+
+    assert(conflict_count == 5);
+    assert(known_count == 7);
+    return;
+}
