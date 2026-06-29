@@ -38,6 +38,8 @@ struct BaselineDelta {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct ShadowContext {
+    sweep_seed: Option<u64>,
+    sweep_iteration: Option<usize>,
     lhs_raw: Option<u64>,
     rhs_raw: Option<u64>,
     old_raw: Option<u64>,
@@ -57,6 +59,8 @@ struct ShadowMismatchReport {
     case_id: Option<u64>,
     register_index: usize,
     quadit_index: Option<u8>,
+    sweep_seed: Option<u64>,
+    sweep_iteration: Option<usize>,
     baseline_raw: u64,
     pulsar_raw: u64,
     baseline_detail: Option<u64>,
@@ -84,6 +88,12 @@ impl fmt::Display for ShadowMismatchReport {
             self.baseline_raw,
             self.pulsar_raw,
         )?;
+        if let Some(seed) = self.sweep_seed {
+            write!(f, " seed=0x{seed:016x}")?;
+        }
+        if let Some(iteration) = self.sweep_iteration {
+            write!(f, " iter={iteration}")?;
+        }
 
         if let Some(field) = self.delta_field {
             write!(f, " delta_field={field:?}")?;
@@ -378,6 +388,61 @@ fn mixed_transition_case() -> (u64, u64) {
     ])
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ShadowFuzzer {
+    state: u64,
+}
+
+impl ShadowFuzzer {
+    fn new(seed: u64) -> Self {
+        Self {
+            state: if seed == 0 {
+                0x1BAD_B002_7A11_C0DE
+            } else {
+                seed
+            },
+        }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.state = x;
+        x
+    }
+}
+
+const SHADOW_SWEEP_SEEDS: &[u64] = &[
+    0,
+    1,
+    2,
+    3,
+    7,
+    13,
+    31,
+    42,
+    127,
+    255,
+    1024,
+    0x618,
+    u64::MAX,
+    0x5555_5555_5555_5555,
+    0xAAAA_AAAA_AAAA_AAAA,
+    0xDEAD_BEEF_CAFE_BABE,
+    0x0123_4567_89AB_CDEF,
+    0xFEDC_BA98_7654_3210,
+];
+
+const SHADOW_SWEEP_ITERS_PER_SEED: usize = 128;
+
+fn shadow_sweep_case_id(seed_index: usize, iteration_index: usize) -> u64 {
+    (seed_index as u64)
+        .saturating_mul(SHADOW_SWEEP_ITERS_PER_SEED as u64)
+        .saturating_add(iteration_index as u64)
+}
+
 fn baseline_conflict_mask_raw(raw: u64) -> u64 {
     let mut mask = 0;
     for index in 0..LANES {
@@ -533,6 +598,8 @@ fn shadow_compare_raw(
     }
 
     let ShadowContext {
+        sweep_seed,
+        sweep_iteration,
         lhs_raw,
         rhs_raw,
         old_raw,
@@ -555,6 +622,8 @@ fn shadow_compare_raw(
         pulsar_raw,
         baseline_detail: baseline_detail.or(Some(baseline_raw)),
         pulsar_detail: pulsar_detail.or(Some(pulsar_raw)),
+        sweep_seed,
+        sweep_iteration,
         lhs_raw,
         rhs_raw,
         old_raw,
@@ -573,6 +642,7 @@ fn shadow_compare_delta_actual(
     old_raw: u64,
     new_raw: u64,
     actual: StateDelta,
+    context: ShadowContext,
 ) -> Result<(), Box<ShadowMismatchReport>> {
     let expected = baseline_delta(old_raw, new_raw);
 
@@ -595,6 +665,8 @@ fn shadow_compare_delta_actual(
         case_id,
         register_index,
         quadit_index: Some(quadit_index),
+        sweep_seed: context.sweep_seed,
+        sweep_iteration: context.sweep_iteration,
         baseline_raw: expected_mask,
         pulsar_raw: actual_mask,
         baseline_detail: Some(old_raw),
@@ -620,7 +692,14 @@ fn shadow_compare_delta(
     let old = QuadroReg::from_raw(old_raw);
     let new = QuadroReg::from_raw(new_raw);
     let actual = old.calc_delta(new);
-    shadow_compare_delta_actual(case_id, register_index, old_raw, new_raw, actual)
+    shadow_compare_delta_actual(
+        case_id,
+        register_index,
+        old_raw,
+        new_raw,
+        actual,
+        ShadowContext::default(),
+    )
 }
 
 impl From<StateDelta> for BaselineDelta {
@@ -644,6 +723,8 @@ fn assert_shadow_ok(result: Result<(), Box<ShadowMismatchReport>>) {
 
 fn raw_compare_context(lhs_raw: u64, rhs_raw: u64) -> ShadowContext {
     ShadowContext {
+        sweep_seed: None,
+        sweep_iteration: None,
         lhs_raw: Some(lhs_raw),
         rhs_raw: Some(rhs_raw),
         ..ShadowContext::default()
@@ -652,6 +733,8 @@ fn raw_compare_context(lhs_raw: u64, rhs_raw: u64) -> ShadowContext {
 
 fn mask_compare_context(mask: u64) -> ShadowContext {
     ShadowContext {
+        sweep_seed: None,
+        sweep_iteration: None,
         expected_mask: Some(mask),
         actual_mask: Some(mask),
         ..ShadowContext::default()
@@ -1012,6 +1095,107 @@ fn shadow_batch_intersect_matches_scalar_baseline() {
 }
 
 #[test]
+fn shadow_sweep_all_operations_match_scalar_baselines() {
+    let mut checks = 0usize;
+
+    for (seed_index, seed) in SHADOW_SWEEP_SEEDS.iter().copied().enumerate() {
+        let mut fuzzer = ShadowFuzzer::new(seed);
+
+        for iteration in 0..SHADOW_SWEEP_ITERS_PER_SEED {
+            let lhs_raw = fuzzer.next_u64();
+            let rhs_raw = fuzzer.next_u64();
+            let case_id = shadow_sweep_case_id(seed_index, iteration);
+            let context = ShadowContext {
+                sweep_seed: Some(seed),
+                sweep_iteration: Some(iteration),
+                ..ShadowContext::default()
+            };
+
+            let lhs = QuadroReg::from_raw(lhs_raw);
+            let rhs = QuadroReg::from_raw(rhs_raw);
+
+            assert_shadow_ok(shadow_compare_raw(
+                ShadowOperation::ConflictMask,
+                Some(case_id),
+                iteration,
+                baseline_conflict_mask_raw(lhs_raw),
+                lhs.mask_super(),
+                ShadowContext {
+                    expected_mask: Some(baseline_conflict_mask_raw(lhs_raw)),
+                    actual_mask: Some(lhs.mask_super()),
+                    ..context
+                },
+            ));
+
+            assert_shadow_ok(shadow_compare_raw(
+                ShadowOperation::KnownMask,
+                Some(case_id),
+                iteration,
+                baseline_known_mask_raw(lhs_raw),
+                lhs.mask_non_null(),
+                ShadowContext {
+                    expected_mask: Some(baseline_known_mask_raw(lhs_raw)),
+                    actual_mask: Some(lhs.mask_non_null()),
+                    ..context
+                },
+            ));
+
+            let delta = lhs.calc_delta(rhs);
+            assert_shadow_ok(shadow_compare_delta_actual(
+                Some(case_id),
+                iteration,
+                lhs_raw,
+                rhs_raw,
+                delta,
+                context,
+            ));
+
+            let expected_merge = baseline_merge_raw(lhs_raw, rhs_raw);
+            let actual_merge = lhs.merge(rhs).raw();
+            assert_shadow_ok(shadow_compare_raw(
+                ShadowOperation::BatchMerge,
+                Some(case_id),
+                iteration,
+                expected_merge,
+                actual_merge,
+                ShadowContext {
+                    lhs_raw: Some(lhs_raw),
+                    rhs_raw: Some(rhs_raw),
+                    baseline_detail: Some(expected_merge),
+                    pulsar_detail: Some(actual_merge),
+                    ..context
+                },
+            ));
+
+            let expected_intersect = baseline_intersect_raw(lhs_raw, rhs_raw);
+            let actual_intersect = lhs.intersect(rhs).raw();
+            assert_shadow_ok(shadow_compare_raw(
+                ShadowOperation::BatchIntersect,
+                Some(case_id),
+                iteration,
+                expected_intersect,
+                actual_intersect,
+                ShadowContext {
+                    lhs_raw: Some(lhs_raw),
+                    rhs_raw: Some(rhs_raw),
+                    baseline_detail: Some(expected_intersect),
+                    pulsar_detail: Some(actual_intersect),
+                    ..context
+                },
+            ));
+
+            checks += 5;
+        }
+    }
+
+    println!(
+        "shadow sweep ok: seeds={} iters={} checks={checks}",
+        SHADOW_SWEEP_SEEDS.len(),
+        SHADOW_SWEEP_ITERS_PER_SEED
+    );
+}
+
+#[test]
 fn shadow_mismatch_report_captures_first_lane_and_inputs() {
     let lhs = pattern_first_lane_conflict();
     let rhs = pattern_last_lane_conflict();
@@ -1042,8 +1226,15 @@ fn shadow_delta_mismatch_report_captures_changed_lane_and_inputs() {
     let (delta_field, expected_mask, actual_mask, lane, old_state, new_state) =
         first_differing_delta_field(expected_delta, wrong_delta, old_raw, new_raw).unwrap();
 
-    let report = shadow_compare_delta_actual(Some(0x2026_0629), 7, old_raw, new_raw, wrong_delta)
-        .unwrap_err();
+    let report = shadow_compare_delta_actual(
+        Some(0x2026_0629),
+        7,
+        old_raw,
+        new_raw,
+        wrong_delta,
+        ShadowContext::default(),
+    )
+    .unwrap_err();
 
     assert_eq!(report.operation, ShadowOperation::StateDelta);
     assert_eq!(report.case_id, Some(0x2026_0629));
