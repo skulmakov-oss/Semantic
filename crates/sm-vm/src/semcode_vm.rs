@@ -94,11 +94,9 @@ pub struct VM {
     /// PRNG state for random_seed / random_next_i32 (xorshift64; 0 = unseeded).
     pub prng_state: u64,
 }
-
 trait OpcodeProfileSink {
     fn record_opcode(&mut self, opcode: Opcode);
 }
-
 struct NoopOpcodeProfile;
 
 impl OpcodeProfileSink for NoopOpcodeProfile {
@@ -3482,6 +3480,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_fx_literal_call_and_compare_path() {
         let src = r#"
@@ -3506,6 +3505,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_plain_fx_arithmetic_path() {
         let src = r#"
@@ -3539,6 +3539,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_text_literal_and_equality_path() {
         let src = r#"
@@ -3558,6 +3559,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_sequence_literal_index_and_equality_path() {
         let src = r#"
@@ -3577,6 +3579,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_first_class_closure_direct_invocation_path() {
         let src = r#"
@@ -3614,6 +3617,7 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_u32_literal_compare_path() {
         let src = r#"
@@ -3630,6 +3634,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_tuple_return_and_equality_path() {
         let src = r#"
@@ -3650,6 +3655,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_tuple_destructuring_bind_path() {
         let src = r#"
@@ -3868,6 +3874,7 @@ mod tests {
         run_semcode(&bytes).expect("sibling record field write must stay allowed");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_stage1_record_literal_path() {
         let src = r#"
@@ -3889,6 +3896,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_stage1_enum_constructor_path() {
         let src = r#"
@@ -3916,6 +3924,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_option_and_result_standard_form_paths() {
         let src = r#"
@@ -3949,6 +3958,7 @@ mod tests {
         run_semcode(&bytes).expect("Option/Result standard-form paths should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_option_and_result_match_ergonomics_paths() {
         let src = r#"
@@ -3986,6 +3996,7 @@ mod tests {
         run_semcode(&bytes).expect("Option/Result match ergonomics paths should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_stage1_adt_match_path() {
         let src = r#"
@@ -4016,6 +4027,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_exhaustive_adt_match_without_default_path() {
         let src = r#"
@@ -4046,6 +4058,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_adt_payload_ownership_positive_e2e_path() {
         let src = r#"
@@ -4100,6 +4113,7 @@ mod tests {
     // Therefore, we rely on the runtime-patched tests added in ADT-3 (like `vm_rejects_adt_payload_write_when_borrowed_same_payload`)
     // to prove the VM borrow-checker correctness, and we will add the negative E2E test once the language surface is ready.
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_stage1_record_field_access_path() {
         let src = r#"
@@ -4121,6 +4135,7 @@ mod tests {
         run_semcode(&bytes).expect("run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_record_pass_return_and_safe_equality_path() {
         let src = r#"
@@ -4144,6 +4159,7 @@ mod tests {
         run_semcode(&bytes).expect("record pass/return/equality should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_record_access_policy_scenario() {
         let src = r#"
@@ -4185,6 +4201,7 @@ mod tests {
         run_semcode(&bytes).expect("record access-policy scenario should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_record_destructuring_bind_path() {
         let src = r#"
@@ -4206,6 +4223,7 @@ mod tests {
         run_semcode(&bytes).expect("record destructuring bind path should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_record_let_else_path() {
         let src = r#"
@@ -4227,6 +4245,7 @@ mod tests {
         run_semcode(&bytes).expect("record let-else path should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_record_copy_with_path() {
         let src = r#"
@@ -4250,6 +4269,7 @@ mod tests {
         run_semcode(&bytes).expect("record copy-with path should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_record_stage2_ergonomics_scenario() {
         let src = r#"
@@ -4281,6 +4301,7 @@ mod tests {
         run_semcode(&bytes).expect("record stage-2 ergonomics scenario should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_for_range_inclusive_path() {
         let src = r#"
@@ -4311,6 +4332,7 @@ mod tests {
         run_semcode(&bytes).expect("inclusive for-range should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_for_range_empty_half_open_path() {
         let src = r#"
@@ -4329,6 +4351,7 @@ mod tests {
         run_semcode(&bytes).expect("empty half-open for-range should skip body");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_iterable_for_over_sequence_path() {
         let src = r#"
@@ -4351,6 +4374,7 @@ mod tests {
         run_semcode(&bytes).expect("Sequence(T) iterable loop should run");
     }
 
+    #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_iterable_for_over_explicit_record_impl_path() {
         let src = r#"
