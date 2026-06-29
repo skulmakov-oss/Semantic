@@ -270,6 +270,8 @@ VM-M5: docs(sm-vm): audit lowering shape for scalar movement
 
 If follow-up evidence is needed before any code change, the next audit should inspect how source constructs and lowering shape produce repeated local traffic.
 
+VM-M5 audits source/lowering shapes behind scalar movement in [docs/roadmap/sm_vm_vm_m5_lowering_shape_scalar_movement_audit.md](sm_vm_vm_m5_lowering_shape_scalar_movement_audit.md).
+
 ## Non-claims
 
 This document does not claim:
