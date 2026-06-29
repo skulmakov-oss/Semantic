@@ -157,6 +157,8 @@ VM-M7: docs(sm-vm): specify scalar movement micro-fixture matrix
 
 This is the cleanest next step because the current corpus still has several missing controlled pairs. If the matrix is accepted, the follow-up implementation slice can add only the narrow fixtures needed to separate helper, temporary, match/if, loop, and accumulator effects.
 
+VM-M7 specifies the controlled micro-fixture matrix in [docs/roadmap/sm_vm_vm_m7_scalar_movement_micro_fixture_matrix.md](sm_vm_vm_m7_scalar_movement_micro_fixture_matrix.md).
+
 ## Non-claims
 
 This document does not claim:
