@@ -609,6 +609,36 @@ Current `if` expression semantics:
 `quad` is intentionally not treated as an implicit condition type. Users must
 write explicit comparisons.
 
+### Quad values and control flow
+
+`quad` values do not implicitly control execution flow.
+
+`if` conditions must evaluate to `bool`.
+
+A `quad` value may enter control flow only through an explicit predicate, such
+as:
+
+```sm
+if signal == T {
+    ...
+}
+```
+
+or through explicit `match` handling:
+
+```sm
+match signal {
+    T => { ... }
+    F => { ... }
+    N => { ... }
+    S => { ... }
+    _ => { ... }
+}
+```
+
+This prevents semantic uncertainty or conflict from silently selecting a
+control-flow branch.
+
 Current v0 limit:
 
 - `else if` sugar is not yet supported for value-producing `if`; users must
