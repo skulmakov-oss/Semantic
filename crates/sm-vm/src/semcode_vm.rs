@@ -95,6 +95,257 @@ pub struct VM {
     pub prng_state: u64,
 }
 
+trait OpcodeProfileSink {
+    fn record_opcode(&mut self, opcode: Opcode);
+}
+
+struct NoopOpcodeProfile;
+
+impl OpcodeProfileSink for NoopOpcodeProfile {
+    #[inline(always)]
+    fn record_opcode(&mut self, _opcode: Opcode) {}
+}
+
+#[cfg(feature = "vm-profile")]
+const OPCODE_PROFILE_SLOT_COUNT: usize = 69;
+
+#[cfg(feature = "vm-profile")]
+const OPCODE_PROFILE_OPCODES: [Opcode; OPCODE_PROFILE_SLOT_COUNT] = [
+    Opcode::LoadQ,
+    Opcode::LoadBool,
+    Opcode::LoadI32,
+    Opcode::AddI32,
+    Opcode::SubI32,
+    Opcode::MulI32,
+    Opcode::DivI32,
+    Opcode::ModI32,
+    Opcode::ConcatText,
+    Opcode::LoadU32,
+    Opcode::LoadVar,
+    Opcode::StoreVar,
+    Opcode::QAnd,
+    Opcode::QOr,
+    Opcode::QNot,
+    Opcode::QImpl,
+    Opcode::BoolAnd,
+    Opcode::BoolOr,
+    Opcode::BoolNot,
+    Opcode::CmpEq,
+    Opcode::CmpNe,
+    Opcode::CmpI32Lt,
+    Opcode::CmpI32Le,
+    Opcode::Jmp,
+    Opcode::JmpIf,
+    Opcode::Call,
+    Opcode::Ret,
+    Opcode::Assert,
+    Opcode::MakeTuple,
+    Opcode::TupleGet,
+    Opcode::MakeRecord,
+    Opcode::RecordGet,
+    Opcode::MakeAdt,
+    Opcode::AdtTag,
+    Opcode::AdtGet,
+    Opcode::LoadF64,
+    Opcode::AddF64,
+    Opcode::SubF64,
+    Opcode::MulF64,
+    Opcode::DivF64,
+    Opcode::LoadFx,
+    Opcode::AddFx,
+    Opcode::SubFx,
+    Opcode::MulFx,
+    Opcode::DivFx,
+    Opcode::LoadText,
+    Opcode::MakeSequence,
+    Opcode::SequenceGet,
+    Opcode::MakeClosure,
+    Opcode::ClosureCall,
+    Opcode::SequenceLen,
+    Opcode::SequenceIsEmpty,
+    Opcode::SequenceContains,
+    Opcode::SequencePush,
+    Opcode::SequencePrepend,
+    Opcode::SequencePop,
+    Opcode::MapEmpty,
+    Opcode::MapContains,
+    Opcode::MapGet,
+    Opcode::MapSet,
+    Opcode::RngSeed,
+    Opcode::RngNextI32,
+    Opcode::GateRead,
+    Opcode::GateWrite,
+    Opcode::PulseEmit,
+    Opcode::StateQuery,
+    Opcode::StateUpdate,
+    Opcode::EventPost,
+    Opcode::ClockRead,
+];
+
+#[cfg(feature = "vm-profile")]
+fn opcode_profile_index(opcode: Opcode) -> usize {
+    match opcode {
+        Opcode::LoadQ => 0,
+        Opcode::LoadBool => 1,
+        Opcode::LoadI32 => 2,
+        Opcode::AddI32 => 3,
+        Opcode::SubI32 => 4,
+        Opcode::MulI32 => 5,
+        Opcode::DivI32 => 6,
+        Opcode::ModI32 => 7,
+        Opcode::ConcatText => 8,
+        Opcode::LoadU32 => 9,
+        Opcode::LoadVar => 10,
+        Opcode::StoreVar => 11,
+        Opcode::QAnd => 12,
+        Opcode::QOr => 13,
+        Opcode::QNot => 14,
+        Opcode::QImpl => 15,
+        Opcode::BoolAnd => 16,
+        Opcode::BoolOr => 17,
+        Opcode::BoolNot => 18,
+        Opcode::CmpEq => 19,
+        Opcode::CmpNe => 20,
+        Opcode::CmpI32Lt => 21,
+        Opcode::CmpI32Le => 22,
+        Opcode::Jmp => 23,
+        Opcode::JmpIf => 24,
+        Opcode::Call => 25,
+        Opcode::Ret => 26,
+        Opcode::Assert => 27,
+        Opcode::MakeTuple => 28,
+        Opcode::TupleGet => 29,
+        Opcode::MakeRecord => 30,
+        Opcode::RecordGet => 31,
+        Opcode::MakeAdt => 32,
+        Opcode::AdtTag => 33,
+        Opcode::AdtGet => 34,
+        Opcode::LoadF64 => 35,
+        Opcode::AddF64 => 36,
+        Opcode::SubF64 => 37,
+        Opcode::MulF64 => 38,
+        Opcode::DivF64 => 39,
+        Opcode::LoadFx => 40,
+        Opcode::AddFx => 41,
+        Opcode::SubFx => 42,
+        Opcode::MulFx => 43,
+        Opcode::DivFx => 44,
+        Opcode::LoadText => 45,
+        Opcode::MakeSequence => 46,
+        Opcode::SequenceGet => 47,
+        Opcode::MakeClosure => 48,
+        Opcode::ClosureCall => 49,
+        Opcode::SequenceLen => 50,
+        Opcode::SequenceIsEmpty => 51,
+        Opcode::SequenceContains => 52,
+        Opcode::SequencePush => 53,
+        Opcode::SequencePrepend => 54,
+        Opcode::SequencePop => 55,
+        Opcode::MapEmpty => 56,
+        Opcode::MapContains => 57,
+        Opcode::MapGet => 58,
+        Opcode::MapSet => 59,
+        Opcode::RngSeed => 60,
+        Opcode::RngNextI32 => 61,
+        Opcode::GateRead => 62,
+        Opcode::GateWrite => 63,
+        Opcode::PulseEmit => 64,
+        Opcode::StateQuery => 65,
+        Opcode::StateUpdate => 66,
+        Opcode::EventPost => 67,
+        Opcode::ClockRead => 68,
+    }
+}
+
+#[cfg(feature = "vm-profile")]
+#[allow(dead_code)]
+fn opcode_from_profile_index(index: usize) -> Option<Opcode> {
+    OPCODE_PROFILE_OPCODES.get(index).copied()
+}
+
+#[cfg(feature = "vm-profile")]
+#[derive(Debug, Clone)]
+pub struct VmOpcodeProfile {
+    total_instructions: u64,
+    opcode_counts: [u64; OPCODE_PROFILE_SLOT_COUNT],
+}
+
+#[cfg(feature = "vm-profile")]
+impl Default for VmOpcodeProfile {
+    fn default() -> Self {
+        Self {
+            total_instructions: 0,
+            opcode_counts: [0; OPCODE_PROFILE_SLOT_COUNT],
+        }
+    }
+}
+
+#[cfg(feature = "vm-profile")]
+impl VmOpcodeProfile {
+    pub fn total_instructions(&self) -> u64 {
+        self.total_instructions
+    }
+
+    pub fn count(&self, opcode: Opcode) -> u64 {
+        self.opcode_counts[opcode_profile_index(opcode)]
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.total_instructions == 0
+    }
+
+    pub fn top_n(&self, n: usize) -> Vec<(Opcode, u64)> {
+        if n == 0 {
+            return Vec::new();
+        }
+        let mut entries: Vec<(usize, Opcode, u64)> = OPCODE_PROFILE_OPCODES
+            .iter()
+            .enumerate()
+            .filter_map(|(index, &opcode)| {
+                let count = self.opcode_counts[index];
+                (count > 0).then_some((index, opcode, count))
+            })
+            .collect();
+        entries.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        entries
+            .into_iter()
+            .take(n)
+            .map(|(_, opcode, count)| (opcode, count))
+            .collect()
+    }
+
+    pub fn summary_top_n(&self, n: usize) -> String {
+        use std::fmt::Write as _;
+
+        let top = self.top_n(n);
+        let mut out = String::new();
+        let _ = write!(
+            &mut out,
+            "sm-vm opcode profile: total_instructions={} top={}",
+            self.total_instructions,
+            top.len()
+        );
+        for (opcode, count) in top {
+            let _ = write!(&mut out, "\n  {:?}: {}", opcode, count);
+        }
+        out
+    }
+
+    fn record_opcode_slot(&mut self, opcode: Opcode) {
+        self.total_instructions = self.total_instructions.saturating_add(1);
+        let index = opcode_profile_index(opcode);
+        self.opcode_counts[index] = self.opcode_counts[index].saturating_add(1);
+    }
+}
+
+#[cfg(feature = "vm-profile")]
+impl OpcodeProfileSink for VmOpcodeProfile {
+    #[inline(always)]
+    fn record_opcode(&mut self, opcode: Opcode) {
+        self.record_opcode_slot(opcode);
+    }
+}
+
 enum HelloObservationMode<'a> {
     Discard,
     Collect(&'a mut Vec<HelloObservationEvent>),
@@ -434,6 +685,33 @@ pub fn run_verified_entry_semcode_with_config(
         HelloObservationRuntime::discard(),
     )
     .map(|_| ())
+}
+
+/// Local opcode profiling path for verified token execution.
+///
+/// This is a feature-gated, local measurement harness that collects opcode
+/// execution counts for verified VM execution. It does not change VM semantics
+/// and it is not production telemetry.
+#[cfg(feature = "vm-profile")]
+pub fn run_verified_entry_semcode_with_profile(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    config: ExecutionConfig,
+) -> Result<VmOpcodeProfile, RuntimeError> {
+    let program = prepare_verified_execution(token)?;
+    let mut vm = VM {
+        functions: program.functions,
+        callstack: Vec::new(),
+        config,
+        effect_calls: 0,
+        symbols: program.runtime_symbols,
+        prng_state: 0,
+    };
+    push_frame(&mut vm, token.entry(), Vec::new(), None)?;
+    let mut bridge = LegacyVmHost;
+    let mut observation = HelloObservationRuntime::discard();
+    let mut profile = VmOpcodeProfile::default();
+    exec_loop_with_profile(&mut vm, &mut bridge, &mut observation, &mut profile)?;
+    Ok(profile)
 }
 
 /// Raw execution path.
@@ -1123,6 +1401,20 @@ fn exec_loop<'a, H: VmHostBridge>(
     host: &mut H,
     observation: &mut HelloObservationRuntime<'a>,
 ) -> Result<(), RuntimeError> {
+    let mut profile = NoopOpcodeProfile;
+    exec_loop_with_profile(vm, host, observation, &mut profile)
+}
+
+fn exec_loop_with_profile<'a, H, P>(
+    vm: &mut VM,
+    host: &mut H,
+    observation: &mut HelloObservationRuntime<'a>,
+    profile: &mut P,
+) -> Result<(), RuntimeError>
+where
+    H: VmHostBridge,
+    P: OpcodeProfileSink,
+{
     loop {
         let Some(frame_idx) = vm.callstack.len().checked_sub(1) else {
             return Ok(());
@@ -1144,6 +1436,7 @@ fn exec_loop<'a, H: VmHostBridge>(
         let mut cur = f.instr_start + pc;
         let opcode = Opcode::from_byte(read_u8(&f.code, &mut cur).map_err(map_format_err)?)
             .map_err(map_format_err)?;
+        profile.record_opcode(opcode);
         let next_pc: usize;
 
         match opcode {
@@ -2883,6 +3176,63 @@ mod tests {
     use sm_runtime_core::{
         ExecutionConfig, ExecutionContext, PathComponent, QuotaExceeded, QuotaKind, RuntimeTrap,
     };
+
+    #[cfg(feature = "vm-profile")]
+    mod profile_tests {
+        use super::*;
+        use sm_emit::Opcode;
+
+        #[test]
+        fn opcode_profile_starts_empty_and_records_counts() {
+            let mut profile = VmOpcodeProfile::default();
+            assert!(profile.is_empty());
+            assert_eq!(profile.total_instructions(), 0);
+            assert_eq!(profile.count(Opcode::LoadQ), 0);
+            assert!(profile.top_n(0).is_empty());
+
+            profile.record_opcode_slot(Opcode::LoadQ);
+            profile.record_opcode_slot(Opcode::LoadQ);
+            profile.record_opcode_slot(Opcode::QAnd);
+
+            assert!(!profile.is_empty());
+            assert_eq!(profile.total_instructions(), 3);
+            assert_eq!(profile.count(Opcode::LoadQ), 2);
+            assert_eq!(profile.count(Opcode::QAnd), 1);
+            assert_eq!(profile.count(Opcode::Ret), 0);
+        }
+
+        #[test]
+        fn opcode_profile_ranks_and_summarizes_top_entries() {
+            let mut profile = VmOpcodeProfile::default();
+            profile.record_opcode_slot(Opcode::LoadQ);
+            profile.record_opcode_slot(Opcode::LoadQ);
+            profile.record_opcode_slot(Opcode::QAnd);
+            profile.record_opcode_slot(Opcode::QAnd);
+            profile.record_opcode_slot(Opcode::QAnd);
+            profile.record_opcode_slot(Opcode::CmpEq);
+
+            let top = profile.top_n(3);
+            assert_eq!(top.len(), 3);
+            assert_eq!(top[0], (Opcode::QAnd, 3));
+            assert_eq!(top[1], (Opcode::LoadQ, 2));
+            assert_eq!(top[2], (Opcode::CmpEq, 1));
+
+            let summary = profile.summary_top_n(3);
+            assert!(summary.contains("sm-vm opcode profile: total_instructions=6"));
+            assert!(summary.contains("QAnd"));
+            assert!(summary.contains("LoadQ"));
+            assert!(summary.contains("CmpEq"));
+        }
+
+        #[test]
+        fn opcode_profile_table_round_trips_all_slots() {
+            for (index, opcode) in OPCODE_PROFILE_OPCODES.iter().enumerate() {
+                assert_eq!(opcode_profile_index(*opcode), index);
+                assert_eq!(opcode_from_profile_index(index), Some(*opcode));
+            }
+            assert_eq!(opcode_from_profile_index(OPCODE_PROFILE_SLOT_COUNT), None);
+        }
+    }
 
     #[test]
     fn vm_runs_empty_main() {
