@@ -259,6 +259,10 @@ const SCALAR_G2_TRANSITION_EQUALIZED_REPEATED: &str =
     include_str!("fixtures/profiling/scalar_movement/g2/scalar_transition_equalized_repeated.sm");
 const SCALAR_G2_TRANSITION_EQUALIZED_CLASSIFIED: &str =
     include_str!("fixtures/profiling/scalar_movement/g2/scalar_transition_equalized_classified.sm");
+const P5A_QUAD_BATCH_WAVE: &str =
+    include_str!("fixtures/profiling/p5a_probe/p5a_quad_batch_wave.sm");
+const P5A_QUAD_HELPER_MIX: &str =
+    include_str!("fixtures/profiling/p5a_probe/p5a_quad_helper_mix.sm");
 
 #[test]
 fn family_summary_empty_profile_is_zero() {
@@ -715,4 +719,37 @@ fn profile_scalar_g2_transition_equalized_pair() {
     assert!(classified_summary.scalar_movement.count > 0);
     assert!(repeated_summary.integer_ops.count > 0);
     assert!(classified_summary.integer_ops.count > 0);
+}
+
+#[test]
+fn profile_pulsar_p5a_evidence_probe_pair() {
+    let batch_wave_profile = profile_source_fixture("p5a_quad_batch_wave", P5A_QUAD_BATCH_WAVE);
+    let helper_mix_profile = profile_source_fixture("p5a_quad_helper_mix", P5A_QUAD_HELPER_MIX);
+
+    let batch_wave_summary = family_summary(&batch_wave_profile);
+    let helper_mix_summary = family_summary(&helper_mix_profile);
+
+    print_profile_report(
+        &fixture_path("p5a_probe/p5a_quad_batch_wave.sm"),
+        &batch_wave_profile,
+    );
+    print_profile_report(
+        &fixture_path("p5a_probe/p5a_quad_helper_mix.sm"),
+        &helper_mix_profile,
+    );
+    print_pair_report(
+        "p5a-evidence-probe",
+        "p5a_quad_batch_wave.sm",
+        &batch_wave_summary,
+        "p5a_quad_helper_mix.sm",
+        &helper_mix_summary,
+    );
+
+    assert!(batch_wave_summary.total_instructions > 0);
+    assert!(helper_mix_summary.total_instructions > 0);
+    assert!(batch_wave_summary.quad_logic.count > 0);
+    assert!(helper_mix_summary.quad_logic.count > 0);
+    assert!(batch_wave_summary.quad_family.count > 0);
+    assert!(helper_mix_summary.quad_family.count > 0);
+    assert!(helper_mix_summary.calls.count > 0);
 }

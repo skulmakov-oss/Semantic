@@ -1,0 +1,50 @@
+fn quad_wave(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut batch_hits: i32 = 0;
+    let mut logic_hits: i32 = 0;
+    let mut compare_hits: i32 = 0;
+    let mut checksum: i32 = 0;
+
+    for i in 0..128 {
+        let left: quad = quad_wave(i);
+        let right: quad = quad_wave(i + 1);
+        let merged: quad = left || right;
+        let consensus: quad = left && right;
+        let flipped: quad = !left;
+
+        checksum += i;
+
+        if merged == S {
+            batch_hits += 1;
+        }
+        if consensus != N {
+            logic_hits += 1;
+        }
+        if flipped != left {
+            compare_hits += 1;
+        }
+    }
+
+    assert(batch_hits > 0);
+    assert(logic_hits > 0);
+    assert(compare_hits > 0);
+    assert(checksum == 8128);
+    return;
+}
