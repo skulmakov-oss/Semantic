@@ -278,18 +278,22 @@ pub mod winit_placeholder {
     /// This function does not run an event loop and does not mutate backend state.
     pub fn translate_winit_window_event(
         event: &WindowEvent,
+        scale_factor: f64,
     ) -> Option<prom_ui_runtime::InputEvent> {
         match event {
             WindowEvent::CloseRequested => Some(translate_winit_close_requested()),
             WindowEvent::KeyboardInput { event, .. } => {
                 translate_winit_physical_key(event.state, event.physical_key)
             }
-            WindowEvent::CursorMoved { position, .. } => Some(prom_ui_runtime::InputEvent::new(
-                prom_ui_runtime::InputEventKind::PointerMoved {
-                    x: position.x,
-                    y: position.y,
-                },
-            )),
+            WindowEvent::CursorMoved { position, .. } => {
+                let logical = position.to_logical::<f64>(scale_factor);
+                Some(prom_ui_runtime::InputEvent::new(
+                    prom_ui_runtime::InputEventKind::PointerMoved {
+                        x: logical.x,
+                        y: logical.y,
+                    },
+                ))
+            }
             WindowEvent::MouseInput { state, button, .. } => {
                 let btn_num = match button {
                     MouseButton::Left => 0,
@@ -1473,7 +1477,12 @@ pub mod winit_placeholder {
                     let _ = self.backend.draw_frame(&frame);
                     event_loop.exit();
                 } else {
-                    if let Some(input_event) = translate_winit_window_event(&event) {
+                    let scale_factor = self
+                        .window
+                        .as_ref()
+                        .map(|w| w.scale_factor())
+                        .unwrap_or(1.0);
+                    if let Some(input_event) = translate_winit_window_event(&event, scale_factor) {
                         self.backend.pending_events.push(input_event);
                     }
                     let mut frame = prom_ui_runtime::DrawFrame::new();
@@ -1629,7 +1638,12 @@ pub mod winit_placeholder {
 
             self.window_event_calls = self.window_event_calls.saturating_add(1);
 
-            if let Some(input) = translate_winit_window_event(&event) {
+            let scale_factor = self
+                .window
+                .as_ref()
+                .map(|w| w.scale_factor())
+                .unwrap_or(1.0);
+            if let Some(input) = translate_winit_window_event(&event, scale_factor) {
                 if matches!(&input.kind, prom_ui_runtime::InputEventKind::CloseRequested) {
                     self.close_requested = true;
                     self.backend.push_pending_event(input);
@@ -1744,7 +1758,7 @@ impl NativeBackend {
     ///
     /// This does not run a native event loop and does not mutate platform state.
     pub fn stage_winit_window_event(&mut self, event: &winit::event::WindowEvent) -> bool {
-        if let Some(input) = winit_placeholder::translate_winit_window_event(event) {
+        if let Some(input) = winit_placeholder::translate_winit_window_event(event, 1.0) {
             self.push_pending_event(input);
             true
         } else {
