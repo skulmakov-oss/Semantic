@@ -251,6 +251,8 @@ VM-M8 should not:
 - change existing fixtures
 - encode optimization thresholds as tests
 
+VM-M9 records measured evidence from this matrix in [docs/roadmap/sm_vm_vm_m9_scalar_movement_source_shape_evidence.md](sm_vm_vm_m9_scalar_movement_source_shape_evidence.md).
+
 ## Non-claims
 
 This document does not claim:
