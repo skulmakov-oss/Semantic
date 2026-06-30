@@ -113,7 +113,7 @@ struct VmTestObservation {
 #[cfg(test)]
 thread_local! {
     static VM_TEST_TERMINAL_OBSERVATION: std::cell::RefCell<Option<VmTestObservation>> =
-        std::cell::RefCell::new(None);
+        const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
