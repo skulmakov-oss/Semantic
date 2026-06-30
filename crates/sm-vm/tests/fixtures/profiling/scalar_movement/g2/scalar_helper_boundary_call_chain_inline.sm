@@ -1,0 +1,61 @@
+fn main() {
+    let mut score: i32 = 0;
+    let mut chain_hits: i32 = 0;
+    let mut checksum: i32 = 0;
+
+    for i in 0..16 {
+        let class: i32 = i % 4;
+        let state: quad = if class == 0 {
+            N
+        } else {
+            if class == 1 {
+                F
+            } else {
+                if class == 2 {
+                    T
+                } else {
+                    S
+                }
+            }
+        };
+        let next_class: i32 = (i + 1) % 4;
+        let next_state: quad = if next_class == 0 {
+            N
+        } else {
+            if next_class == 1 {
+                F
+            } else {
+                if next_class == 2 {
+                    T
+                } else {
+                    S
+                }
+            }
+        };
+
+        checksum += i;
+
+        if state == N {
+            score += 1;
+        } else {
+            if state == F {
+                score += 2;
+            } else {
+                if state == T {
+                    score += 3;
+                } else {
+                    score += 4;
+                }
+            }
+        }
+
+        if (state || next_state) == S {
+            chain_hits += 1;
+        }
+    }
+
+    assert(score == 40);
+    assert(chain_hits > 0);
+    assert(checksum == 120);
+    return;
+}

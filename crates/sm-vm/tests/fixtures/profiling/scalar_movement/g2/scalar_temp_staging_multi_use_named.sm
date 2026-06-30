@@ -1,0 +1,44 @@
+fn state_from_index(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut merged_score: i32 = 0;
+    let mut recheck_score: i32 = 0;
+    let mut checksum: i32 = 0;
+
+    for i in 0..16 {
+        let observed: quad = state_from_index(i);
+        let inferred: quad = state_from_index(i + 1);
+        let merged: quad = observed || inferred;
+
+        checksum += i;
+
+        if merged == S {
+            merged_score += 1;
+        }
+
+        if merged != N {
+            recheck_score += 1;
+        }
+    }
+
+    assert(merged_score > 0);
+    assert(recheck_score > 0);
+    assert(checksum == 120);
+    return;
+}

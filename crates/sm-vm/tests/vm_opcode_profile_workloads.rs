@@ -170,6 +170,26 @@ fn print_pair_report(
     println!("  delta: count={delta_count} ratio={delta_ratio:.2}%");
 }
 
+fn profile_scalar_pair(
+    pair_name: &str,
+    fixture_a: &str,
+    source_a: &str,
+    fixture_b: &str,
+    source_b: &str,
+) -> (OpcodeFamilySummary, OpcodeFamilySummary) {
+    let profile_a = profile_source_fixture(fixture_a, source_a);
+    let profile_b = profile_source_fixture(fixture_b, source_b);
+
+    let summary_a = family_summary(&profile_a);
+    let summary_b = family_summary(&profile_b);
+
+    print_profile_report(&fixture_path(fixture_a), &profile_a);
+    print_profile_report(&fixture_path(fixture_b), &profile_b);
+    print_pair_report(pair_name, fixture_a, &summary_a, fixture_b, &summary_b);
+
+    (summary_a, summary_b)
+}
+
 fn fixture_path(name: &str) -> String {
     format!("{FIXTURE_DIR}/{name}")
 }
@@ -205,6 +225,40 @@ const SCALAR_TRANSITION_OLD_NEW_REPEATED: &str =
     include_str!("fixtures/profiling/scalar_movement/scalar_transition_old_new_repeated.sm");
 const SCALAR_TRANSITION_OLD_NEW_PACKED_CODE: &str =
     include_str!("fixtures/profiling/scalar_movement/scalar_transition_old_new_packed_code.sm");
+const SCALAR_G2_HELPER_SINGLE_CALL_HELPER: &str = include_str!(
+    "fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_single_call_helper.sm"
+);
+const SCALAR_G2_HELPER_SINGLE_CALL_INLINE: &str = include_str!(
+    "fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_single_call_inline.sm"
+);
+const SCALAR_G2_HELPER_CALL_CHAIN_HELPER: &str = include_str!(
+    "fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_call_chain_helper.sm"
+);
+const SCALAR_G2_HELPER_CALL_CHAIN_INLINE: &str = include_str!(
+    "fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_call_chain_inline.sm"
+);
+const SCALAR_G2_TEMP_SINGLE_USE_NAMED: &str =
+    include_str!("fixtures/profiling/scalar_movement/g2/scalar_temp_staging_single_use_named.sm");
+const SCALAR_G2_TEMP_SINGLE_USE_DIRECT: &str =
+    include_str!("fixtures/profiling/scalar_movement/g2/scalar_temp_staging_single_use_direct.sm");
+const SCALAR_G2_TEMP_MULTI_USE_NAMED: &str =
+    include_str!("fixtures/profiling/scalar_movement/g2/scalar_temp_staging_multi_use_named.sm");
+const SCALAR_G2_TEMP_MULTI_USE_DIRECT: &str =
+    include_str!("fixtures/profiling/scalar_movement/g2/scalar_temp_staging_multi_use_direct.sm");
+const SCALAR_G2_DISPATCH_EQUALIZED_MATCH: &str =
+    include_str!("fixtures/profiling/scalar_movement/g2/scalar_dispatch_equalized_match.sm");
+const SCALAR_G2_DISPATCH_EQUALIZED_IF_CHAIN: &str =
+    include_str!("fixtures/profiling/scalar_movement/g2/scalar_dispatch_equalized_if_chain.sm");
+const SCALAR_G2_LOOP_ACCUMULATOR_EQUALIZED_LOOPED: &str = include_str!(
+    "fixtures/profiling/scalar_movement/g2/scalar_loop_accumulator_equalized_looped.sm"
+);
+const SCALAR_G2_LOOP_ACCUMULATOR_EQUALIZED_EXPLICIT: &str = include_str!(
+    "fixtures/profiling/scalar_movement/g2/scalar_loop_accumulator_equalized_explicit.sm"
+);
+const SCALAR_G2_TRANSITION_EQUALIZED_REPEATED: &str =
+    include_str!("fixtures/profiling/scalar_movement/g2/scalar_transition_equalized_repeated.sm");
+const SCALAR_G2_TRANSITION_EQUALIZED_CLASSIFIED: &str =
+    include_str!("fixtures/profiling/scalar_movement/g2/scalar_transition_equalized_classified.sm");
 
 #[test]
 fn family_summary_empty_profile_is_zero() {
@@ -537,4 +591,128 @@ fn profile_scalar_transition_reload_pair() {
     assert!(packed_summary.scalar_movement.count > 0);
     assert!(repeated_summary.integer_ops.count > 0);
     assert!(packed_summary.integer_ops.count > 0);
+}
+
+#[test]
+fn profile_scalar_g2_helper_single_call_pair() {
+    let (helper_summary, inline_summary) = profile_scalar_pair(
+        "helper-single-call",
+        "scalar_movement/g2/scalar_helper_boundary_single_call_helper.sm",
+        SCALAR_G2_HELPER_SINGLE_CALL_HELPER,
+        "scalar_movement/g2/scalar_helper_boundary_single_call_inline.sm",
+        SCALAR_G2_HELPER_SINGLE_CALL_INLINE,
+    );
+
+    assert!(helper_summary.total_instructions > 0);
+    assert!(inline_summary.total_instructions > 0);
+    assert!(helper_summary.scalar_movement.count > 0);
+    assert!(inline_summary.scalar_movement.count > 0);
+    assert!(helper_summary.calls.count > 0);
+}
+
+#[test]
+fn profile_scalar_g2_helper_call_chain_pair() {
+    let (helper_summary, inline_summary) = profile_scalar_pair(
+        "helper-call-chain",
+        "scalar_movement/g2/scalar_helper_boundary_call_chain_helper.sm",
+        SCALAR_G2_HELPER_CALL_CHAIN_HELPER,
+        "scalar_movement/g2/scalar_helper_boundary_call_chain_inline.sm",
+        SCALAR_G2_HELPER_CALL_CHAIN_INLINE,
+    );
+
+    assert!(helper_summary.total_instructions > 0);
+    assert!(inline_summary.total_instructions > 0);
+    assert!(helper_summary.scalar_movement.count > 0);
+    assert!(inline_summary.scalar_movement.count > 0);
+    assert!(helper_summary.calls.count > 0);
+}
+
+#[test]
+fn profile_scalar_g2_temp_single_use_pair() {
+    let (named_summary, direct_summary) = profile_scalar_pair(
+        "temp-single-use",
+        "scalar_movement/g2/scalar_temp_staging_single_use_named.sm",
+        SCALAR_G2_TEMP_SINGLE_USE_NAMED,
+        "scalar_movement/g2/scalar_temp_staging_single_use_direct.sm",
+        SCALAR_G2_TEMP_SINGLE_USE_DIRECT,
+    );
+
+    assert!(named_summary.total_instructions > 0);
+    assert!(direct_summary.total_instructions > 0);
+    assert!(named_summary.scalar_movement.count > 0);
+    assert!(direct_summary.scalar_movement.count > 0);
+    assert!(named_summary.quad_family.count > 0);
+    assert!(direct_summary.quad_family.count > 0);
+}
+
+#[test]
+fn profile_scalar_g2_temp_multi_use_pair() {
+    let (named_summary, direct_summary) = profile_scalar_pair(
+        "temp-multi-use",
+        "scalar_movement/g2/scalar_temp_staging_multi_use_named.sm",
+        SCALAR_G2_TEMP_MULTI_USE_NAMED,
+        "scalar_movement/g2/scalar_temp_staging_multi_use_direct.sm",
+        SCALAR_G2_TEMP_MULTI_USE_DIRECT,
+    );
+
+    assert!(named_summary.total_instructions > 0);
+    assert!(direct_summary.total_instructions > 0);
+    assert!(named_summary.scalar_movement.count > 0);
+    assert!(direct_summary.scalar_movement.count > 0);
+    assert!(named_summary.quad_family.count > 0);
+    assert!(direct_summary.quad_family.count > 0);
+}
+
+#[test]
+fn profile_scalar_g2_dispatch_equalized_pair() {
+    let (match_summary, if_chain_summary) = profile_scalar_pair(
+        "dispatch-equalized",
+        "scalar_movement/g2/scalar_dispatch_equalized_match.sm",
+        SCALAR_G2_DISPATCH_EQUALIZED_MATCH,
+        "scalar_movement/g2/scalar_dispatch_equalized_if_chain.sm",
+        SCALAR_G2_DISPATCH_EQUALIZED_IF_CHAIN,
+    );
+
+    assert!(match_summary.total_instructions > 0);
+    assert!(if_chain_summary.total_instructions > 0);
+    assert!(match_summary.scalar_movement.count > 0);
+    assert!(if_chain_summary.scalar_movement.count > 0);
+    assert!(match_summary.control_flow.count > 0);
+    assert!(if_chain_summary.control_flow.count > 0);
+}
+
+#[test]
+fn profile_scalar_g2_loop_accumulator_equalized_pair() {
+    let (looped_summary, explicit_summary) = profile_scalar_pair(
+        "loop-accumulator-equalized",
+        "scalar_movement/g2/scalar_loop_accumulator_equalized_looped.sm",
+        SCALAR_G2_LOOP_ACCUMULATOR_EQUALIZED_LOOPED,
+        "scalar_movement/g2/scalar_loop_accumulator_equalized_explicit.sm",
+        SCALAR_G2_LOOP_ACCUMULATOR_EQUALIZED_EXPLICIT,
+    );
+
+    assert!(looped_summary.total_instructions > 0);
+    assert!(explicit_summary.total_instructions > 0);
+    assert!(looped_summary.scalar_movement.count > 0);
+    assert!(explicit_summary.scalar_movement.count > 0);
+    assert!(looped_summary.integer_ops.count > 0);
+    assert!(explicit_summary.integer_ops.count > 0);
+}
+
+#[test]
+fn profile_scalar_g2_transition_equalized_pair() {
+    let (repeated_summary, classified_summary) = profile_scalar_pair(
+        "transition-equalized",
+        "scalar_movement/g2/scalar_transition_equalized_repeated.sm",
+        SCALAR_G2_TRANSITION_EQUALIZED_REPEATED,
+        "scalar_movement/g2/scalar_transition_equalized_classified.sm",
+        SCALAR_G2_TRANSITION_EQUALIZED_CLASSIFIED,
+    );
+
+    assert!(repeated_summary.total_instructions > 0);
+    assert!(classified_summary.total_instructions > 0);
+    assert!(repeated_summary.scalar_movement.count > 0);
+    assert!(classified_summary.scalar_movement.count > 0);
+    assert!(repeated_summary.integer_ops.count > 0);
+    assert!(classified_summary.integer_ops.count > 0);
 }

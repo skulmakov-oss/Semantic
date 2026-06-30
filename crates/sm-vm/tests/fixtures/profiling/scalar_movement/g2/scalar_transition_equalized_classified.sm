@@ -1,0 +1,119 @@
+fn old_state_for(index: i32) -> quad {
+    let state: quad = if index == 0 {
+        N
+    } else {
+        if index == 1 {
+            F
+        } else {
+            if index == 2 {
+                T
+            } else {
+                if index == 3 {
+                    T
+                } else {
+                    if index == 4 {
+                        N
+                    } else {
+                        if index == 5 {
+                            S
+                        } else {
+                            if index == 6 {
+                                F
+                            } else {
+                                F
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    return state;
+}
+
+fn new_state_for(index: i32) -> quad {
+    let state: quad = if index == 0 {
+        T
+    } else {
+        if index == 1 {
+            T
+        } else {
+            if index == 2 {
+                N
+            } else {
+                if index == 3 {
+                    S
+                } else {
+                    if index == 4 {
+                        F
+                    } else {
+                        if index == 5 {
+                            F
+                        } else {
+                            if index == 6 {
+                                N
+                            } else {
+                                S
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    return state;
+}
+
+fn transition_code(old_state: quad, new_state: quad) -> i32 {
+    let code: i32 = if old_state != T && new_state == T {
+        0
+    } else {
+        if old_state == T && new_state != T {
+            1
+        } else {
+            if old_state != F && new_state == F {
+                2
+            } else {
+                3
+            }
+        }
+    };
+    return code;
+}
+
+fn main() {
+    let mut entered_true: i32 = 0;
+    let mut left_true: i32 = 0;
+    let mut entered_false: i32 = 0;
+    let mut left_false: i32 = 0;
+    let mut code_sum: i32 = 0;
+
+    for i in 0..8 {
+        let old_state: quad = old_state_for(i);
+        let new_state: quad = new_state_for(i);
+        let code: i32 = transition_code(old_state, new_state);
+
+        if code == 0 {
+            entered_true += 1;
+        } else {
+            if code == 1 {
+                left_true += 1;
+            } else {
+                if code == 2 {
+                    entered_false += 1;
+                } else {
+                    left_false += 1;
+                }
+            }
+        }
+
+        code_sum += code;
+    }
+
+    assert(entered_true > 0);
+    assert(left_true > 0);
+    assert(entered_false > 0);
+    assert(left_false > 0);
+    assert(code_sum > 0);
+    return;
+}

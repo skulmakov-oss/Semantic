@@ -1,0 +1,34 @@
+fn state_from_index(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut score: i32 = 0;
+    let mut checksum: i32 = 0;
+
+    for i in 0..16 {
+        checksum += i;
+
+        if (state_from_index(i) || state_from_index(i + 1)) == S {
+            score += 1;
+        }
+    }
+
+    assert(score > 0);
+    assert(checksum == 120);
+    return;
+}
