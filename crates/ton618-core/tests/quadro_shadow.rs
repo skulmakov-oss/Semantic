@@ -17,6 +17,11 @@ enum ShadowOperation {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShadowCpuFeaturePath {
+    Scalar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DeltaField {
     EnteredTrue,
     LeftTrue,
@@ -59,6 +64,8 @@ struct ShadowMismatchReport {
     case_id: Option<u64>,
     register_index: usize,
     quadit_index: Option<u8>,
+    cpu_feature_path: ShadowCpuFeaturePath,
+    cargo_features: &'static str,
     sweep_seed: Option<u64>,
     sweep_iteration: Option<usize>,
     baseline_raw: u64,
@@ -80,14 +87,22 @@ impl fmt::Display for ShadowMismatchReport {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "{:?} case={:?} reg={} lane={:?} baseline=0x{:016x} pulsar=0x{:016x}",
+            "{:?} case={:?} reg={} lane={:?} cpu={:?} features={} baseline_raw=0x{:016x} pulsar_raw=0x{:016x}",
             self.operation,
             self.case_id,
             self.register_index,
             self.quadit_index,
+            self.cpu_feature_path,
+            self.cargo_features,
             self.baseline_raw,
             self.pulsar_raw,
         )?;
+        if let Some(baseline_detail) = self.baseline_detail {
+            write!(f, " baseline_detail=0x{baseline_detail:016x}")?;
+        }
+        if let Some(pulsar_detail) = self.pulsar_detail {
+            write!(f, " pulsar_detail=0x{pulsar_detail:016x}")?;
+        }
         if let Some(seed) = self.sweep_seed {
             write!(f, " seed=0x{seed:016x}")?;
         }
@@ -105,31 +120,51 @@ impl fmt::Display for ShadowMismatchReport {
             write!(f, " new_state={new_state:?}")?;
         }
         if let Some(lhs_raw) = self.lhs_raw {
-            write!(f, " lhs=0x{lhs_raw:016x}")?;
+            write!(f, " lhs_raw=0x{lhs_raw:016x}")?;
         }
         if let Some(rhs_raw) = self.rhs_raw {
-            write!(f, " rhs=0x{rhs_raw:016x}")?;
+            write!(f, " rhs_raw=0x{rhs_raw:016x}")?;
         }
         if let Some(old_raw) = self.old_raw {
-            write!(f, " old=0x{old_raw:016x}")?;
+            write!(f, " old_raw=0x{old_raw:016x}")?;
         }
         if let Some(new_raw) = self.new_raw {
-            write!(f, " new=0x{new_raw:016x}")?;
+            write!(f, " new_raw=0x{new_raw:016x}")?;
         }
         if let Some(expected_mask) = self.expected_mask {
-            write!(f, " expected_mask=0x{expected_mask:016x}")?;
+            write!(f, " baseline_mask=0x{expected_mask:016x}")?;
         }
         if let Some(actual_mask) = self.actual_mask {
-            write!(f, " actual_mask=0x{actual_mask:016x}")?;
+            write!(f, " pulsar_mask=0x{actual_mask:016x}")?;
         }
-        if let Some(baseline_detail) = self.baseline_detail {
-            write!(f, " baseline_detail=0x{baseline_detail:016x}")?;
-        }
-        if let Some(pulsar_detail) = self.pulsar_detail {
-            write!(f, " pulsar_detail=0x{pulsar_detail:016x}")?;
+        write!(
+            f,
+            " summary={:?} case={:?} reg={} lane={:?} cpu={:?} features={}",
+            self.operation,
+            self.case_id,
+            self.register_index,
+            self.quadit_index,
+            self.cpu_feature_path,
+            self.cargo_features,
+        )?;
+        if let Some(delta_field) = self.delta_field {
+            write!(f, " delta_field={delta_field:?}")?;
         }
 
         Ok(())
+    }
+}
+
+fn shadow_cpu_feature_path() -> ShadowCpuFeaturePath {
+    ShadowCpuFeaturePath::Scalar
+}
+
+fn shadow_enabled_cargo_features() -> &'static str {
+    match (cfg!(feature = "alloc"), cfg!(feature = "std")) {
+        (true, true) => "alloc,std",
+        (true, false) => "alloc",
+        (false, true) => "std",
+        (false, false) => "none",
     }
 }
 
@@ -618,6 +653,8 @@ fn shadow_compare_raw(
         case_id,
         register_index,
         quadit_index: first_differing_quadit_index(baseline_raw, pulsar_raw),
+        cpu_feature_path: shadow_cpu_feature_path(),
+        cargo_features: shadow_enabled_cargo_features(),
         baseline_raw,
         pulsar_raw,
         baseline_detail: baseline_detail.or(Some(baseline_raw)),
@@ -665,6 +702,8 @@ fn shadow_compare_delta_actual(
         case_id,
         register_index,
         quadit_index: Some(quadit_index),
+        cpu_feature_path: shadow_cpu_feature_path(),
+        cargo_features: shadow_enabled_cargo_features(),
         sweep_seed: context.sweep_seed,
         sweep_iteration: context.sweep_iteration,
         baseline_raw: expected_mask,
@@ -1185,6 +1224,86 @@ fn shadow_sweep_all_operations_match_scalar_baselines() {
             ));
 
             checks += 5;
+
+            #[cfg(feature = "alloc")]
+            {
+                let bank_lhs_regs = (0..4)
+                    .map(|_| QuadroReg::from_raw(fuzzer.next_u64()))
+                    .collect::<Vec<_>>();
+                let bank_rhs_regs = (0..4)
+                    .map(|_| QuadroReg::from_raw(fuzzer.next_u64()))
+                    .collect::<Vec<_>>();
+
+                let expected_merge_raws: Vec<_> = bank_lhs_regs
+                    .iter()
+                    .copied()
+                    .zip(bank_rhs_regs.iter().copied())
+                    .map(|(lhs, rhs)| baseline_merge_raw(lhs.raw(), rhs.raw()))
+                    .collect();
+                let expected_intersect_raws: Vec<_> = bank_lhs_regs
+                    .iter()
+                    .copied()
+                    .zip(bank_rhs_regs.iter().copied())
+                    .map(|(lhs, rhs)| baseline_intersect_raw(lhs.raw(), rhs.raw()))
+                    .collect();
+
+                let mut merged_bank = QuadroBank::from_regs(bank_lhs_regs.clone());
+                let rhs_bank = QuadroBank::from_regs(bank_rhs_regs.clone());
+                merged_bank.merge_inplace(&rhs_bank).unwrap();
+
+                let mut intersected_bank = QuadroBank::from_regs(bank_lhs_regs.clone());
+                intersected_bank.intersect_inplace(&rhs_bank).unwrap();
+
+                for (index, ((lhs_reg, rhs_reg), expected)) in bank_lhs_regs
+                    .iter()
+                    .copied()
+                    .zip(bank_rhs_regs.iter().copied())
+                    .zip(expected_merge_raws.iter().copied())
+                    .enumerate()
+                {
+                    let actual = merged_bank.as_slice()[index];
+                    assert_shadow_ok(shadow_compare_raw(
+                        ShadowOperation::BatchMerge,
+                        Some(case_id),
+                        index,
+                        expected,
+                        actual.raw(),
+                        ShadowContext {
+                            lhs_raw: Some(lhs_reg.raw()),
+                            rhs_raw: Some(rhs_reg.raw()),
+                            baseline_detail: Some(expected),
+                            pulsar_detail: Some(actual.raw()),
+                            ..context
+                        },
+                    ));
+                }
+
+                for (index, ((lhs_reg, rhs_reg), expected)) in bank_lhs_regs
+                    .iter()
+                    .copied()
+                    .zip(bank_rhs_regs.iter().copied())
+                    .zip(expected_intersect_raws.iter().copied())
+                    .enumerate()
+                {
+                    let actual = intersected_bank.as_slice()[index];
+                    assert_shadow_ok(shadow_compare_raw(
+                        ShadowOperation::BatchIntersect,
+                        Some(case_id),
+                        index,
+                        expected,
+                        actual.raw(),
+                        ShadowContext {
+                            lhs_raw: Some(lhs_reg.raw()),
+                            rhs_raw: Some(rhs_reg.raw()),
+                            baseline_detail: Some(expected),
+                            pulsar_detail: Some(actual.raw()),
+                            ..context
+                        },
+                    ));
+                }
+
+                checks += 8;
+            }
         }
     }
 
