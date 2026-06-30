@@ -600,6 +600,8 @@ The canonical P5-A rule remains:
 
 P5-A must select exactly one narrow acceleration candidate based on measured VM/runtime evidence.
 
+See also: [Pulsar P5-A Expected Candidate Path](pulsar_p5a_expected_candidate_path.md).
+
 A candidate must not be selected because it is architecturally attractive or theoretically fast.
 It must be selected because profiling shows it is a meaningful hot path.
 
