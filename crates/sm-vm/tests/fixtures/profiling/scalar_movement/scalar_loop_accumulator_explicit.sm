@@ -1,0 +1,32 @@
+fn main() {
+    let mut total: i32 = 0;
+    let mut count: i32 = 0;
+
+    total += 0;
+    count += 1;
+
+    total += 1;
+    count += 2;
+
+    total += 2;
+    count += 1;
+
+    total += 3;
+    count += 2;
+
+    total += 4;
+    count += 1;
+
+    total += 5;
+    count += 2;
+
+    total += 6;
+    count += 1;
+
+    total += 7;
+    count += 2;
+
+    assert(total == 28);
+    assert(count == 12);
+    return;
+}

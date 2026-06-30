@@ -1,0 +1,61 @@
+fn main() {
+    let mut score: i32 = 0;
+    let mut merged_count: i32 = 0;
+    let mut checksum: i32 = 0;
+
+    for i in 0..16 {
+        let slot: i32 = i % 4;
+        let state: quad = if slot == 0 {
+            N
+        } else {
+            if slot == 1 {
+                F
+            } else {
+                if slot == 2 {
+                    T
+                } else {
+                    S
+                }
+            }
+        };
+        let next_slot: i32 = (i + 1) % 4;
+        let next: quad = if next_slot == 0 {
+            N
+        } else {
+            if next_slot == 1 {
+                F
+            } else {
+                if next_slot == 2 {
+                    T
+                } else {
+                    S
+                }
+            }
+        };
+
+        checksum += i;
+
+        if state == N {
+            score += 1;
+        } else {
+            if state == F {
+                score += 2;
+            } else {
+                if state == T {
+                    score += 3;
+                } else {
+                    score += 4;
+                }
+            }
+        }
+
+        if (state || next) == S {
+            merged_count += 1;
+        }
+    }
+
+    assert(score > 0);
+    assert(merged_count > 0);
+    assert(checksum == 120);
+    return;
+}

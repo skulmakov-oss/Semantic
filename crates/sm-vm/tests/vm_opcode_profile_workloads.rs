@@ -143,6 +143,33 @@ fn print_profile_report(name: &str, profile: &VmOpcodeProfile) {
     println!("{}", format_family_summary(&family_summary(profile)));
 }
 
+fn print_pair_report(
+    pair_name: &str,
+    fixture_a: &str,
+    summary_a: &OpcodeFamilySummary,
+    fixture_b: &str,
+    summary_b: &OpcodeFamilySummary,
+) {
+    let delta_count =
+        summary_a.scalar_movement.count as i64 - summary_b.scalar_movement.count as i64;
+    let delta_ratio = summary_a.scalar_movement.ratio - summary_b.scalar_movement.ratio;
+
+    println!("pair={pair_name}");
+    println!(
+        "  {fixture_a}: {} / {} = {:.2}%",
+        summary_a.scalar_movement.count,
+        summary_a.total_instructions,
+        summary_a.scalar_movement.ratio
+    );
+    println!(
+        "  {fixture_b}: {} / {} = {:.2}%",
+        summary_b.scalar_movement.count,
+        summary_b.total_instructions,
+        summary_b.scalar_movement.ratio
+    );
+    println!("  delta: count={delta_count} ratio={delta_ratio:.2}%");
+}
+
 fn fixture_path(name: &str) -> String {
     format!("{FIXTURE_DIR}/{name}")
 }
@@ -154,6 +181,30 @@ const FACT_INTERSECT_KERNEL: &str = include_str!("fixtures/profiling/fact_inters
 const DELTA_LIKE_KERNEL: &str = include_str!("fixtures/profiling/delta_like_kernel.sm");
 const ANDROMEDA_FACT_WAVE_64: &str = include_str!("fixtures/profiling/andromeda_fact_wave_64.sm");
 const ANDROMEDA_FACT_WAVE_256: &str = include_str!("fixtures/profiling/andromeda_fact_wave_256.sm");
+const SCALAR_HELPER_BOUNDARY_HELPER: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_helper_boundary_helper.sm");
+const SCALAR_HELPER_BOUNDARY_INLINE: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_helper_boundary_inline.sm");
+const SCALAR_TEMP_STAGING_NAMED: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_temp_staging_named.sm");
+const SCALAR_TEMP_STAGING_DIRECT: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_temp_staging_direct.sm");
+const SCALAR_DISPATCH_MATCH: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_dispatch_match.sm");
+const SCALAR_DISPATCH_IF_CHAIN: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_dispatch_if_chain.sm");
+const SCALAR_LOOP_ACCUMULATOR_LOOPED: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_loop_accumulator_looped.sm");
+const SCALAR_LOOP_ACCUMULATOR_EXPLICIT: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_loop_accumulator_explicit.sm");
+const SCALAR_BRANCH_COUNTERS_LOCAL: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_branch_counters_local.sm");
+const SCALAR_BRANCH_COUNTERS_RETURN_VALUE: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_branch_counters_return_value.sm");
+const SCALAR_TRANSITION_OLD_NEW_REPEATED: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_transition_old_new_repeated.sm");
+const SCALAR_TRANSITION_OLD_NEW_PACKED_CODE: &str =
+    include_str!("fixtures/profiling/scalar_movement/scalar_transition_old_new_packed_code.sm");
 
 #[test]
 fn family_summary_empty_profile_is_zero() {
@@ -270,4 +321,220 @@ fn profile_andromeda_fact_wave_256_local() {
     assert!(summary.quad_family.count > 0);
     assert!(summary.control_flow.count > 0);
     assert!(summary.scalar_movement.count > 0);
+}
+
+#[test]
+fn profile_scalar_helper_boundary_pair() {
+    let helper_profile = profile_source_fixture(
+        "scalar_helper_boundary_helper",
+        SCALAR_HELPER_BOUNDARY_HELPER,
+    );
+    let inline_profile = profile_source_fixture(
+        "scalar_helper_boundary_inline",
+        SCALAR_HELPER_BOUNDARY_INLINE,
+    );
+
+    let helper_summary = family_summary(&helper_profile);
+    let inline_summary = family_summary(&inline_profile);
+
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_helper_boundary_helper.sm"),
+        &helper_profile,
+    );
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_helper_boundary_inline.sm"),
+        &inline_profile,
+    );
+    print_pair_report(
+        "helper-boundary",
+        "scalar_helper_boundary_helper.sm",
+        &helper_summary,
+        "scalar_helper_boundary_inline.sm",
+        &inline_summary,
+    );
+
+    assert!(helper_summary.total_instructions > 0);
+    assert!(inline_summary.total_instructions > 0);
+    assert!(helper_summary.scalar_movement.count > 0);
+    assert!(inline_summary.scalar_movement.count > 0);
+    assert!(helper_summary.calls.count > 0);
+}
+
+#[test]
+fn profile_scalar_temp_staging_pair() {
+    let named_profile =
+        profile_source_fixture("scalar_temp_staging_named", SCALAR_TEMP_STAGING_NAMED);
+    let direct_profile =
+        profile_source_fixture("scalar_temp_staging_direct", SCALAR_TEMP_STAGING_DIRECT);
+
+    let named_summary = family_summary(&named_profile);
+    let direct_summary = family_summary(&direct_profile);
+
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_temp_staging_named.sm"),
+        &named_profile,
+    );
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_temp_staging_direct.sm"),
+        &direct_profile,
+    );
+    print_pair_report(
+        "temporary-staging",
+        "scalar_temp_staging_named.sm",
+        &named_summary,
+        "scalar_temp_staging_direct.sm",
+        &direct_summary,
+    );
+
+    assert!(named_summary.total_instructions > 0);
+    assert!(direct_summary.total_instructions > 0);
+    assert!(named_summary.scalar_movement.count > 0);
+    assert!(direct_summary.scalar_movement.count > 0);
+    assert!(named_summary.quad_family.count > 0);
+    assert!(direct_summary.quad_family.count > 0);
+}
+
+#[test]
+fn profile_scalar_dispatch_pair() {
+    let match_profile = profile_source_fixture("scalar_dispatch_match", SCALAR_DISPATCH_MATCH);
+    let if_chain_profile =
+        profile_source_fixture("scalar_dispatch_if_chain", SCALAR_DISPATCH_IF_CHAIN);
+
+    let match_summary = family_summary(&match_profile);
+    let if_chain_summary = family_summary(&if_chain_profile);
+
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_dispatch_match.sm"),
+        &match_profile,
+    );
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_dispatch_if_chain.sm"),
+        &if_chain_profile,
+    );
+    print_pair_report(
+        "dispatch",
+        "scalar_dispatch_match.sm",
+        &match_summary,
+        "scalar_dispatch_if_chain.sm",
+        &if_chain_summary,
+    );
+
+    assert!(match_summary.total_instructions > 0);
+    assert!(if_chain_summary.total_instructions > 0);
+    assert!(match_summary.scalar_movement.count > 0);
+    assert!(if_chain_summary.scalar_movement.count > 0);
+    assert!(match_summary.control_flow.count > 0);
+    assert!(if_chain_summary.control_flow.count > 0);
+}
+
+#[test]
+fn profile_scalar_loop_accumulator_pair() {
+    let looped_profile = profile_source_fixture(
+        "scalar_loop_accumulator_looped",
+        SCALAR_LOOP_ACCUMULATOR_LOOPED,
+    );
+    let explicit_profile = profile_source_fixture(
+        "scalar_loop_accumulator_explicit",
+        SCALAR_LOOP_ACCUMULATOR_EXPLICIT,
+    );
+
+    let looped_summary = family_summary(&looped_profile);
+    let explicit_summary = family_summary(&explicit_profile);
+
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_loop_accumulator_looped.sm"),
+        &looped_profile,
+    );
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_loop_accumulator_explicit.sm"),
+        &explicit_profile,
+    );
+    print_pair_report(
+        "looped-accumulator",
+        "scalar_loop_accumulator_looped.sm",
+        &looped_summary,
+        "scalar_loop_accumulator_explicit.sm",
+        &explicit_summary,
+    );
+
+    assert!(looped_summary.total_instructions > 0);
+    assert!(explicit_summary.total_instructions > 0);
+    assert!(looped_summary.scalar_movement.count > 0);
+    assert!(explicit_summary.scalar_movement.count > 0);
+    assert!(looped_summary.integer_ops.count > 0);
+    assert!(explicit_summary.integer_ops.count > 0);
+}
+
+#[test]
+fn profile_scalar_branch_counter_pair() {
+    let local_profile =
+        profile_source_fixture("scalar_branch_counters_local", SCALAR_BRANCH_COUNTERS_LOCAL);
+    let return_value_profile = profile_source_fixture(
+        "scalar_branch_counters_return_value",
+        SCALAR_BRANCH_COUNTERS_RETURN_VALUE,
+    );
+
+    let local_summary = family_summary(&local_profile);
+    let return_value_summary = family_summary(&return_value_profile);
+
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_branch_counters_local.sm"),
+        &local_profile,
+    );
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_branch_counters_return_value.sm"),
+        &return_value_profile,
+    );
+    print_pair_report(
+        "branch-counters",
+        "scalar_branch_counters_local.sm",
+        &local_summary,
+        "scalar_branch_counters_return_value.sm",
+        &return_value_summary,
+    );
+
+    assert!(local_summary.total_instructions > 0);
+    assert!(return_value_summary.total_instructions > 0);
+    assert!(local_summary.scalar_movement.count > 0);
+    assert!(return_value_summary.scalar_movement.count > 0);
+    assert!(local_summary.control_flow.count > 0);
+    assert!(return_value_summary.control_flow.count > 0);
+}
+
+#[test]
+fn profile_scalar_transition_reload_pair() {
+    let repeated_profile = profile_source_fixture(
+        "scalar_transition_old_new_repeated",
+        SCALAR_TRANSITION_OLD_NEW_REPEATED,
+    );
+    let packed_profile = profile_source_fixture(
+        "scalar_transition_old_new_packed_code",
+        SCALAR_TRANSITION_OLD_NEW_PACKED_CODE,
+    );
+
+    let repeated_summary = family_summary(&repeated_profile);
+    let packed_summary = family_summary(&packed_profile);
+
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_transition_old_new_repeated.sm"),
+        &repeated_profile,
+    );
+    print_profile_report(
+        &fixture_path("scalar_movement/scalar_transition_old_new_packed_code.sm"),
+        &packed_profile,
+    );
+    print_pair_report(
+        "transition-reload",
+        "scalar_transition_old_new_repeated.sm",
+        &repeated_summary,
+        "scalar_transition_old_new_packed_code.sm",
+        &packed_summary,
+    );
+
+    assert!(repeated_summary.total_instructions > 0);
+    assert!(packed_summary.total_instructions > 0);
+    assert!(repeated_summary.scalar_movement.count > 0);
+    assert!(packed_summary.scalar_movement.count > 0);
+    assert!(repeated_summary.integer_ops.count > 0);
+    assert!(packed_summary.integer_ops.count > 0);
 }
