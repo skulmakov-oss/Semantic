@@ -1,6 +1,5 @@
-use std::process::Command;
-use std::io::Write;
 use std::fs;
+use std::process::Command;
 
 fn smc_output(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_smc"))
@@ -18,7 +17,7 @@ fn test_work_prove_canonical_intent() {
     let _ = fs::remove_file(path);
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     // Ensure the command was dispatched properly to the underlying pipeline
     // It should not fail at the intent parsing layer
     assert!(!stderr.contains("Unknown intent"));
@@ -29,7 +28,7 @@ fn test_work_prove_canonical_intent() {
 fn test_work_rejects_non_canonical_intent() {
     let output = smc_output(&["work", "main.sm", "build"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     // Ensure the guard boundary explicitly rejects non-canonical intent
     assert!(stderr.contains("Unknown intent 'build'"));
     assert!(stderr.contains("Did you mean 'work <subject> prove'"));
@@ -39,6 +38,6 @@ fn test_work_rejects_non_canonical_intent() {
 fn test_work_requires_minimum_arguments() {
     let output = smc_output(&["work"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    
+
     assert!(stderr.contains("usage: smc work <subject> <intent>"));
 }

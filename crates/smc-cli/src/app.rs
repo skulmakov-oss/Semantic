@@ -116,23 +116,18 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     }
 }
 
-pub struct WorkControlFrame {
-    pub subject: String,
-    pub intent: String,
-    pub target: Option<String>,
-    pub profile: Option<String>,
-}
-
 fn cmd_work(args: &[String]) -> Result<(), String> {
     if args.len() < 2 {
-        return Err("usage: smc work <subject> <intent> [to <target>] [with <profile>]".to_string());
+        return Err(
+            "usage: smc work <subject> <intent> [to <target>] [with <profile>]".to_string(),
+        );
     }
     let subject = args[0].clone();
     let intent = args[1].clone();
-    
+
     let mut target = None;
     let mut profile = None;
-    
+
     let mut i = 2;
     while i < args.len() {
         if args[i] == "to" {
@@ -153,7 +148,7 @@ fn cmd_work(args: &[String]) -> Result<(), String> {
             return Err(format!("Unexpected token '{}'. The grammar supports: work <subject> <intent> [to <target>] [with <profile>]", args[i]));
         }
     }
-    
+
     let mut sub_args = vec![subject.clone()];
     if let Some(t) = target {
         sub_args.push("-o".to_string());
@@ -163,7 +158,7 @@ fn cmd_work(args: &[String]) -> Result<(), String> {
         sub_args.push("--profile".to_string());
         sub_args.push(p);
     }
-    
+
     match intent.as_str() {
         "check" => cmd_check(&sub_args),
         "prove" => {
@@ -173,9 +168,12 @@ fn cmd_work(args: &[String]) -> Result<(), String> {
             } else {
                 cmd_verify(&sub_args)
             }
-        },
+        }
         "wake" => cmd_run(&sub_args),
-        _ => Err(format!("Unknown intent '{}'. Did you mean 'work <subject> prove' or 'work <subject> seal'?", intent)),
+        _ => Err(format!(
+            "Unknown intent '{}'. Did you mean 'work <subject> prove' or 'work <subject> seal'?",
+            intent
+        )),
     }
 }
 
