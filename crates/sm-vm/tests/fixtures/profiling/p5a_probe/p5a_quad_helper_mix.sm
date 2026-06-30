@@ -1,0 +1,62 @@
+fn quad_wave(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn quad_probe_step(left: quad, right: quad) -> quad {
+    let merged: quad = left || right;
+    let consensus: quad = left && right;
+    let inverted: quad = !left;
+    let result: quad = if merged == S {
+        consensus
+    } else {
+        if consensus == N {
+            inverted
+        } else {
+            merged
+        }
+    };
+    return result;
+}
+
+fn main() {
+    let mut hot_path_hits: i32 = 0;
+    let mut batch_hits: i32 = 0;
+    let mut control_hits: i32 = 0;
+    let mut checksum: i32 = 0;
+
+    for i in 0..128 {
+        let left: quad = quad_wave(i);
+        let right: quad = quad_wave(i + 1);
+        let probe: quad = quad_probe_step(left, right);
+        let merged: quad = left || right;
+
+        checksum += i;
+
+        if probe == S {
+            hot_path_hits += 1;
+        }
+        if merged == S {
+            batch_hits += 1;
+        }
+        if probe != left {
+            control_hits += 1;
+        }
+    }
+
+    assert(checksum == 8128);
+    return;
+}
