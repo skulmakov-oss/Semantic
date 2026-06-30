@@ -1,0 +1,51 @@
+fn helper_transform(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut score: i32 = 0;
+    let mut hit_count: i32 = 0;
+    let mut checksum: i32 = 0;
+
+    for i in 0..8 {
+        let state: quad = helper_transform(i);
+        checksum += i;
+
+        if state == N {
+            score += 1;
+        } else {
+            if state == F {
+                score += 2;
+            } else {
+                if state == T {
+                    score += 3;
+                } else {
+                    score += 4;
+                }
+            }
+        }
+
+        if state == S {
+            hit_count += 1;
+        }
+    }
+
+    assert(score == 20);
+    assert(hit_count == 2);
+    assert(checksum == 28);
+    return;
+}

@@ -1,0 +1,48 @@
+fn state_from_slot(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut total: i32 = 0;
+    let mut count: i32 = 0;
+
+    for i in 0..8 {
+        let state: quad = state_from_slot(i);
+
+        if state == N {
+            total += 1;
+        } else {
+            if state == F {
+                total += 2;
+            } else {
+                if state == T {
+                    total += 3;
+                } else {
+                    total += 4;
+                }
+            }
+        }
+
+        if state == T {
+            count += 1;
+        }
+    }
+
+    assert(total == 20);
+    assert(count == 2);
+    return;
+}
