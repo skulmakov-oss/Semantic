@@ -107,11 +107,75 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "run" => cmd_run(&args[1..]),
         "run-smc" => cmd_run_smc(&args[1..]),
         "disasm" => cmd_disasm(&args[1..]),
+        "work" => cmd_work(&args[1..]),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             Ok(())
         }
         other => Err(format!("unknown command '{}'\n\n{}", other, usage())),
+    }
+}
+
+pub struct WorkControlFrame {
+    pub subject: String,
+    pub intent: String,
+    pub target: Option<String>,
+    pub profile: Option<String>,
+}
+
+fn cmd_work(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err("usage: smc work <subject> <intent> [to <target>] [with <profile>]".to_string());
+    }
+    let subject = args[0].clone();
+    let intent = args[1].clone();
+    
+    let mut target = None;
+    let mut profile = None;
+    
+    let mut i = 2;
+    while i < args.len() {
+        if args[i] == "to" {
+            if i + 1 < args.len() {
+                target = Some(args[i + 1].clone());
+                i += 2;
+            } else {
+                return Err("missing target after 'to'".to_string());
+            }
+        } else if args[i] == "with" {
+            if i + 1 < args.len() {
+                profile = Some(args[i + 1].clone());
+                i += 2;
+            } else {
+                return Err("missing profile after 'with'".to_string());
+            }
+        } else {
+            return Err(format!("Unexpected token '{}'. The grammar supports: work <subject> <intent> [to <target>] [with <profile>]", args[i]));
+        }
+    }
+    
+    let mut sub_args = vec![subject.clone()];
+    if let Some(t) = target {
+        sub_args.push("-o".to_string());
+        sub_args.push(t);
+    }
+    if let Some(p) = profile {
+        sub_args.push("--profile".to_string());
+        sub_args.push(p);
+    }
+    
+    match intent.as_str() {
+        "check" => cmd_check(&sub_args),
+        "prove" => {
+            if subject.ends_with(".sm") || std::path::Path::new(&subject).is_dir() {
+                // Prove on source routes to check
+                cmd_check(&sub_args)
+            } else {
+                cmd_verify(&sub_args)
+            }
+        },
+        "wake" => cmd_run(&sub_args),
+        _ => Err(format!("Unknown intent '{}'. Did you mean 'work <subject> prove' or 'work <subject> seal'?", intent)),
     }
 }
 

@@ -15,6 +15,8 @@ not a runtime change.
 - `bool` decides.
 - `quad` means.
 - Semantic keeps native quad semantics, including uncertainty and conflict.
+- Freedom with a spine: the language should stay expressive, but the verifier
+  and canonical lowering keep the meaning disciplined.
 - Deterministic execution protects meaning; it does not replace expressive
   freedom.
 - Verifier-first admission protects meaning by checking what is allowed before
