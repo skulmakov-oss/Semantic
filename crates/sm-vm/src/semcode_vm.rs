@@ -94,6 +94,75 @@ pub struct VM {
     /// PRNG state for random_seed / random_next_i32 (xorshift64; 0 = unseeded).
     pub prng_state: u64,
 }
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VmTestStatus {
+    Completed,
+    Failed,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct VmTestObservation {
+    status: VmTestStatus,
+    observable: Option<String>,
+    trap: Option<String>,
+}
+
+#[cfg(test)]
+thread_local! {
+    static VM_TEST_TERMINAL_OBSERVATION: std::cell::RefCell<Option<VmTestObservation>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn vm_test_clear_terminal_observation() {
+    VM_TEST_TERMINAL_OBSERVATION.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+}
+
+#[cfg(test)]
+fn vm_test_store_terminal_observation(observation: VmTestObservation) {
+    VM_TEST_TERMINAL_OBSERVATION.with(|slot| {
+        *slot.borrow_mut() = Some(observation);
+    });
+}
+
+#[cfg(test)]
+fn vm_test_take_terminal_observation() -> Option<VmTestObservation> {
+    VM_TEST_TERMINAL_OBSERVATION.with(|slot| slot.borrow_mut().take())
+}
+
+#[cfg(test)]
+fn vm_test_format_terminal_observable(
+    ret_val: &Value,
+    frame: &Frame,
+    symbols: &sm_runtime_core::RuntimeSymbolTable,
+) -> String {
+    let mut locals = frame
+        .locals
+        .iter()
+        .map(|(symbol, value)| {
+            let name = symbols.resolve(*symbol).unwrap_or("<unknown>").to_string();
+            let value = format!("{value:?}");
+            (name, value)
+        })
+        .collect::<Vec<_>>();
+    locals.sort_by(|lhs, rhs| lhs.0.cmp(&rhs.0));
+    let locals = if locals.is_empty() {
+        "[]".to_string()
+    } else {
+        let joined = locals
+            .into_iter()
+            .map(|(name, value)| format!("{name}={value}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{joined}]")
+    };
+    format!("return={ret_val:?}; locals={locals}")
+}
 trait OpcodeProfileSink {
     fn record_opcode(&mut self, opcode: Opcode);
 }
@@ -2240,6 +2309,16 @@ where
                         write_reg(caller, dst as usize, ret_val, &vm.config.quotas)?;
                     }
                 } else {
+                    #[cfg(test)]
+                    {
+                        let observable =
+                            vm_test_format_terminal_observable(&ret_val, &finished, &vm.symbols);
+                        vm_test_store_terminal_observation(VmTestObservation {
+                            status: VmTestStatus::Completed,
+                            observable: Some(observable),
+                            trap: None,
+                        });
+                    }
                     return Ok(());
                 }
                 continue;
@@ -3229,6 +3308,173 @@ mod tests {
                 assert_eq!(opcode_from_profile_index(index), Some(*opcode));
             }
             assert_eq!(opcode_from_profile_index(OPCODE_PROFILE_SLOT_COUNT), None);
+        }
+    }
+
+    mod helper_boundary_result_observation_tests {
+        use super::*;
+
+        fn observe_verified_entry_semcode(name: &str, source: &str) -> VmTestObservation {
+            let bytes = compile_program_to_semcode(source)
+                .unwrap_or_else(|err| panic!("{name}: compile failed: {err:?}"));
+            let token = sm_verify::verify_semcode_token(&bytes)
+                .unwrap_or_else(|err| panic!("{name}: verify failed: {err}"));
+            let entry = token
+                .require_entry("main")
+                .unwrap_or_else(|err| panic!("{name}: entry resolution failed: {err:?}"));
+
+            vm_test_clear_terminal_observation();
+            let result = run_verified_entry_semcode_with_config(
+                &entry,
+                ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+            );
+            match result {
+                Ok(()) => vm_test_take_terminal_observation().unwrap_or(VmTestObservation {
+                    status: VmTestStatus::Failed,
+                    observable: None,
+                    trap: Some(format!("{name}: missing terminal observation")),
+                }),
+                Err(err) => VmTestObservation {
+                    status: VmTestStatus::Failed,
+                    observable: None,
+                    trap: Some(format!("{err}")),
+                },
+            }
+        }
+
+        fn canonicalize_terminal_observable(observable: &str, semantic_locals: &[&str]) -> String {
+            let (ret_part, locals_part) = observable
+                .split_once("; locals=")
+                .expect("terminal observable return/locals split");
+            let locals_part = locals_part
+                .strip_prefix('[')
+                .and_then(|s| s.strip_suffix(']'))
+                .expect("terminal observable locals list");
+
+            let locals = locals_part
+                .split(", ")
+                .filter_map(|entry| entry.split_once('='))
+                .map(|(name, value)| (name.trim(), value.trim()))
+                .collect::<Vec<_>>();
+
+            let mut selected = Vec::new();
+            for wanted in semantic_locals {
+                if let Some((_, value)) = locals.iter().find(|(name, _)| name == wanted) {
+                    selected.push(format!("{wanted}={value}"));
+                }
+            }
+
+            format!("{ret_part}; locals=[{}]", selected.join(", "))
+        }
+
+        #[test]
+        fn private_vm_observation_helper_captures_terminal_state() {
+            let observation = observe_verified_entry_semcode("empty_main", "fn main() { return; }");
+            assert_eq!(observation.status, VmTestStatus::Completed);
+            assert!(observation.trap.is_none());
+
+            let observable = observation
+                .observable
+                .as_deref()
+                .expect("terminal observable");
+            assert!(observable.contains("return=Unit"));
+            assert!(observable.contains("locals=[]"));
+        }
+
+        struct HelperBoundaryPair {
+            name: &'static str,
+            helper_fixture: &'static str,
+            inline_fixture: &'static str,
+            helper_source: &'static str,
+            inline_source: &'static str,
+            semantic_locals: &'static [&'static str],
+        }
+
+        const HELPER_BOUNDARY_PAIRS: &[HelperBoundaryPair] = &[
+            HelperBoundaryPair {
+                name: "vm-m9 helper boundary",
+                helper_fixture: "scalar_helper_boundary_helper.sm",
+                inline_fixture: "scalar_helper_boundary_inline.sm",
+                helper_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/scalar_helper_boundary_helper.sm"
+                ),
+                inline_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/scalar_helper_boundary_inline.sm"
+                ),
+                semantic_locals: &["checksum", "merged_count", "score"],
+            },
+            HelperBoundaryPair {
+                name: "g2 helper single-call",
+                helper_fixture: "scalar_helper_boundary_single_call_helper.sm",
+                inline_fixture: "scalar_helper_boundary_single_call_inline.sm",
+                helper_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_single_call_helper.sm"
+                ),
+                inline_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_single_call_inline.sm"
+                ),
+                semantic_locals: &["checksum", "hit_count", "score"],
+            },
+            HelperBoundaryPair {
+                name: "g2 helper call-chain",
+                helper_fixture: "scalar_helper_boundary_call_chain_helper.sm",
+                inline_fixture: "scalar_helper_boundary_call_chain_inline.sm",
+                helper_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_call_chain_helper.sm"
+                ),
+                inline_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_call_chain_inline.sm"
+                ),
+                semantic_locals: &["checksum", "chain_hits", "score"],
+            },
+        ];
+
+        fn assert_helper_boundary_pair_equivalence(pair: &HelperBoundaryPair) {
+            let helper = observe_verified_entry_semcode(pair.helper_fixture, pair.helper_source);
+            let inline = observe_verified_entry_semcode(pair.inline_fixture, pair.inline_source);
+            let helper_observable = helper.observable.as_deref().map(|observable| {
+                canonicalize_terminal_observable(observable, pair.semantic_locals)
+            });
+            let inline_observable = inline.observable.as_deref().map(|observable| {
+                canonicalize_terminal_observable(observable, pair.semantic_locals)
+            });
+
+            println!("pair: {}", pair.name);
+            println!(
+                "  helper: status={:?} observable={:?}",
+                helper.status, helper.observable
+            );
+            println!(
+                "  inline:  status={:?} observable={:?}",
+                inline.status, inline.observable
+            );
+
+            assert_eq!(
+                helper.status,
+                VmTestStatus::Completed,
+                "{} helper run did not complete",
+                pair.name
+            );
+            assert_eq!(
+                inline.status,
+                VmTestStatus::Completed,
+                "{} inline run did not complete",
+                pair.name
+            );
+            assert!(helper.trap.is_none(), "{} helper run trapped", pair.name);
+            assert!(inline.trap.is_none(), "{} inline run trapped", pair.name);
+            assert_eq!(
+                helper_observable, inline_observable,
+                "{} helper and inline observations diverged",
+                pair.name
+            );
+        }
+
+        #[test]
+        fn helper_boundary_pair_equivalence_harness_matches_terminal_observations() {
+            for pair in HELPER_BOUNDARY_PAIRS {
+                assert_helper_boundary_pair_equivalence(pair);
+            }
         }
     }
 
