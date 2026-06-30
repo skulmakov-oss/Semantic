@@ -1,0 +1,154 @@
+fn old_state_for(index: i32) -> quad {
+    let state: quad = if index == 0 {
+        N
+    } else {
+        if index == 1 {
+            F
+        } else {
+            if index == 2 {
+                T
+            } else {
+                if index == 3 {
+                    S
+                } else {
+                    if index == 4 {
+                        N
+                    } else {
+                        if index == 5 {
+                            N
+                        } else {
+                            if index == 6 {
+                                N
+                            } else {
+                                if index == 7 {
+                                    S
+                                } else {
+                                    if index == 8 {
+                                        S
+                                    } else {
+                                        if index == 9 {
+                                            S
+                                        } else {
+                                            if index == 10 {
+                                                T
+                                            } else {
+                                                if index == 11 {
+                                                    F
+                                                } else {
+                                                    if index == 12 {
+                                                        T
+                                                    } else {
+                                                        F
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    return state;
+}
+
+fn new_state_for(index: i32) -> quad {
+    let state: quad = if index == 0 {
+        N
+    } else {
+        if index == 1 {
+            F
+        } else {
+            if index == 2 {
+                T
+            } else {
+                if index == 3 {
+                    S
+                } else {
+                    if index == 4 {
+                        T
+                    } else {
+                        if index == 5 {
+                            F
+                        } else {
+                            if index == 6 {
+                                S
+                            } else {
+                                if index == 7 {
+                                    T
+                                } else {
+                                    if index == 8 {
+                                        F
+                                    } else {
+                                        if index == 9 {
+                                            N
+                                        } else {
+                                            if index == 10 {
+                                                S
+                                            } else {
+                                                if index == 11 {
+                                                    S
+                                                } else {
+                                                    if index == 12 {
+                                                        F
+                                                    } else {
+                                                        T
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut entered_true: i32 = 0;
+    let mut left_true: i32 = 0;
+    let mut entered_false: i32 = 0;
+    let mut left_false: i32 = 0;
+    let mut entered_super: i32 = 0;
+    let mut left_super: i32 = 0;
+
+    for i in 0..14 {
+        let old_state: quad = old_state_for(i);
+        let new_state: quad = new_state_for(i);
+
+        if old_state != T && new_state == T {
+            entered_true += 1;
+        }
+        if old_state == T && new_state != T {
+            left_true += 1;
+        }
+        if old_state != F && new_state == F {
+            entered_false += 1;
+        }
+        if old_state == F && new_state != F {
+            left_false += 1;
+        }
+        if old_state != S && new_state == S {
+            entered_super += 1;
+        }
+        if old_state == S && new_state != S {
+            left_super += 1;
+        }
+    }
+
+    assert(entered_true == 3);
+    assert(left_true == 2);
+    assert(entered_false == 3);
+    assert(left_false == 2);
+    assert(entered_super == 3);
+    assert(left_super == 3);
+    return;
+}

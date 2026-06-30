@@ -1,0 +1,59 @@
+fn state_from_index(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn classify_state(state: quad) -> i32 {
+    let code: i32 = match state {
+        N => { 0 }
+        F => { 1 }
+        T => { 2 }
+        _ => { 3 }
+    };
+    return code;
+}
+
+fn main() {
+    let mut n_count: i32 = 0;
+    let mut f_count: i32 = 0;
+    let mut t_count: i32 = 0;
+    let mut s_count: i32 = 0;
+
+    for i in 0..32 {
+        let state: quad = state_from_index(i);
+        let code: i32 = classify_state(state);
+
+        if code == 0 {
+            n_count += 1;
+        } else {
+            if code == 1 {
+                f_count += 1;
+            } else {
+                if code == 2 {
+                    t_count += 1;
+                } else {
+                    s_count += 1;
+                }
+            }
+        }
+    }
+
+    assert(n_count > 0);
+    assert(f_count > 0);
+    assert(t_count > 0);
+    assert(s_count > 0);
+    return;
+}

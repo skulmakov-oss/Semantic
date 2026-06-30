@@ -1,0 +1,92 @@
+fn wave_state(index: i32) -> quad {
+    let slot: i32 = index % 4;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                S
+            }
+        }
+    };
+    return state;
+}
+
+fn wave_pair(index: i32) -> quad {
+    let slot: i32 = index % 8;
+    let state: quad = if slot == 0 {
+        N
+    } else {
+        if slot == 1 {
+            F
+        } else {
+            if slot == 2 {
+                T
+            } else {
+                if slot == 3 {
+                    S
+                } else {
+                    if slot == 4 {
+                        S
+                    } else {
+                        if slot == 5 {
+                            T
+                        } else {
+                            if slot == 6 {
+                                F
+                            } else {
+                                N
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    };
+    return state;
+}
+
+fn main() {
+    let mut merged_conflicts: i32 = 0;
+    let mut consensus_score: i32 = 0;
+    let mut invert_score: i32 = 0;
+
+    for i in 0..32 {
+        let observed: quad = wave_state(i);
+        let inferred: quad = wave_pair(i);
+        let merged: quad = observed || inferred;
+        let consensus: quad = observed && inferred;
+        let inverted: quad = !observed;
+
+        if merged == S {
+            merged_conflicts += 1;
+        }
+
+        if consensus == T {
+            consensus_score += 1;
+        } else {
+            if consensus == F {
+                consensus_score += 2;
+            } else {
+                if consensus == N {
+                    consensus_score += 3;
+                } else {
+                    consensus_score += 4;
+                }
+            }
+        }
+
+        if inverted != observed {
+            invert_score += 1;
+        }
+    }
+
+    assert(merged_conflicts > 0);
+    assert(consensus_score > 0);
+    assert(invert_score > 0);
+    return;
+}

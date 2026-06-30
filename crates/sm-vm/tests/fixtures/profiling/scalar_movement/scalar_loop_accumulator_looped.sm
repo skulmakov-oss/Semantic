@@ -1,0 +1,17 @@
+fn main() {
+    let mut total: i32 = 0;
+    let mut count: i32 = 0;
+
+    for i in 0..8 {
+        total += i;
+        if i % 2 == 0 {
+            count += 1;
+        } else {
+            count += 2;
+        }
+    }
+
+    assert(total == 28);
+    assert(count == 12);
+    return;
+}
