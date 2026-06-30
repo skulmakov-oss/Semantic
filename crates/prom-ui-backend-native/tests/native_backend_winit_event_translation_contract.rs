@@ -61,7 +61,7 @@ fn unsupported_physical_key_returns_none() {
 
 #[test]
 fn window_event_close_requested_translates() {
-    let event = translate_winit_window_event(&WindowEvent::CloseRequested)
+    let event = translate_winit_window_event(&WindowEvent::CloseRequested, 1.0)
         .expect("CloseRequested must translate");
 
     assert_eq!(event.kind, InputEventKind::CloseRequested);
