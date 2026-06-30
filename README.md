@@ -24,6 +24,7 @@ source
 - Want to try the pipeline: run the zero-effect verifier smoke path in `Quickstart`.
 - Want the contract: start with `docs/spec/index.md`, `docs/spec/semcode.md`, `docs/spec/verifier.md`, and `docs/spec/vm.md`.
 - Want the active development track: read `docs/language/semantic_hello_*`.
+- [Semantic VM Verified Execution Core](docs/architecture/svm_verified_execution_core.md) — current scalar `sm-vm` verified execution path, admission gate, local evidence/profiling paths, and current Pulsar/P5-A status.
 
 ## Minimal Smoke Example
 
