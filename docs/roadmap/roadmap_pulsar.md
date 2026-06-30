@@ -1,6 +1,6 @@
 # Pulsar Roadmap
 
-Status: v0 substrate baseline closed; P4 shadow equivalence closed
+Status: v0 substrate baseline closed; P4 shadow equivalence closed and evidence-repaired; P5-A blocked by current profiling evidence
 Owner: runtime acceleration / packed-state substrate
 Scope type: documentation only
 
@@ -541,6 +541,20 @@ P4 closeout does not claim:
 
 P4 complete does not mean P5 approved.
 
+### P4 Evidence Repair
+
+P4 shadow equivalence was later evidence-repaired by PR `#1237`.
+
+The repair completed the remaining diagnostic and batch-path coverage gaps:
+
+- `ShadowMismatchReport` records CPU feature path.
+- `ShadowMismatchReport` records enabled Cargo features.
+- alloc-gated seeded sweep exercises `QuadroBank::merge_inplace`.
+- alloc-gated seeded sweep exercises `QuadroBank::intersect_inplace`.
+
+This repair remains shadow/test-only.
+It does not approve runtime activation, P5-A, P5-B, VM integration, SemCode changes, verifier changes, or public performance claims.
+
 ## P5 Promotion Gates
 
 P5 may begin only after all of the following are true:
@@ -557,6 +571,30 @@ P5 may begin only after all of the following are true:
 10. A promotion review explicitly approves the candidate.
 
 P5 is blocked until a measured hot path exists.
+
+P5-A remains blocked after `#1237`.
+
+Reason:
+
+- `#1237` repaired P4 shadow evidence quality.
+- `#1237` did not provide new runtime hot-path measurements.
+- `#1237` did not show a meaningful, batchable quad-state VM hot path.
+- `#1237` did not approve runtime integration.
+
+P5-A may reopen only from fresh measured runtime evidence.
+
+The `15%` value used in P4-H is a local conservative review heuristic for that evidence report, not a canonical Pulsar promotion gate.
+
+The canonical P5-A rule remains:
+
+- select exactly one narrow candidate;
+- base selection on measured VM/runtime evidence;
+- require a meaningful hot path;
+- require scalar authority path;
+- require feature-gated Pulsar candidate path;
+- require runtime-level equivalence test plan;
+- require fallback documentation;
+- require explicit promotion review.
 
 ### P5-A Candidate Selection Rule
 
