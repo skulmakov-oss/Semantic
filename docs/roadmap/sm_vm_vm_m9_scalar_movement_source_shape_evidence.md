@@ -173,6 +173,7 @@ Alternative options:
 - `VM-M10: docs(sm-vm): select first scalar movement implementation audit candidate` if the project wants to make a narrower evidence decision before any new fixtures.
 - `VM-M10: docs(sm-vm): audit lowering implementation for strongest scalar movement delta` only after a much cleaner controlled pair exists.
 - `VM-M10: docs(sm-vm): specify result-equivalence checking for profiling fixtures` if the main limitation becomes fixture-level equivalence evidence rather than scalar movement signal.
+- `VM-M11` records measured evidence from the VM-M10 G2 fixture set in `docs/roadmap/sm_vm_vm_m11_second_generation_scalar_movement_evidence.md`.
 
 ## Non-claims
 
