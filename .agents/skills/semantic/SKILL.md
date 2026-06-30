@@ -268,6 +268,24 @@ Rules:
 - Display order may vary in UI/infographics.
 - Encoding order and semantic meaning must not vary.
 
+SEMANTIC_LANGUAGE_PRINCIPLES_FOR_ASSISTANTS:
+- Preserve the `bool` / `quad` boundary: `bool` decides, `quad` means.
+- Never imply an implicit `quad -> bool` collapse.
+- Frame determinism as what makes expressive programs trustworthy, not as a
+  constraint that narrows meaning.
+- Frame verifier-first admission as protection for meaning and execution
+  boundaries, not as a cage.
+- Keep uncertainty and conflict visible instead of smoothing them away.
+- Keep every surface syntax form tied to canonical deterministic lowering.
+- Preserve verifier and SemCode authority boundaries when describing the
+  language or its execution model.
+- Treat local profiling, evidence, and roadmap notes as diagnostic surfaces, not
+  production telemetry.
+- Avoid overclaiming runtime acceleration, P5-A status, GPU/Vulkan plans, or
+  production performance from local evidence.
+- When in doubt, prefer wording that preserves admitted scope over wording that
+  implies broader capability.
+
 PROMETHEUS_RULES:
 - Semantic core remains deterministic and effect-controlled.
 - PROMETHEUS boundary owns external interaction.
