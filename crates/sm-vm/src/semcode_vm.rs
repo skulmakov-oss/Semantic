@@ -3342,6 +3342,31 @@ mod tests {
             }
         }
 
+        fn canonicalize_terminal_observable(observable: &str, semantic_locals: &[&str]) -> String {
+            let (ret_part, locals_part) = observable
+                .split_once("; locals=")
+                .expect("terminal observable return/locals split");
+            let locals_part = locals_part
+                .strip_prefix('[')
+                .and_then(|s| s.strip_suffix(']'))
+                .expect("terminal observable locals list");
+
+            let locals = locals_part
+                .split(", ")
+                .filter_map(|entry| entry.split_once('='))
+                .map(|(name, value)| (name.trim(), value.trim()))
+                .collect::<Vec<_>>();
+
+            let mut selected = Vec::new();
+            for wanted in semantic_locals {
+                if let Some((_, value)) = locals.iter().find(|(name, _)| name == wanted) {
+                    selected.push(format!("{wanted}={value}"));
+                }
+            }
+
+            format!("{ret_part}; locals=[{}]", selected.join(", "))
+        }
+
         #[test]
         fn private_vm_observation_helper_captures_terminal_state() {
             let observation = observe_verified_entry_semcode("empty_main", "fn main() { return; }");
@@ -3354,6 +3379,102 @@ mod tests {
                 .expect("terminal observable");
             assert!(observable.contains("return=Unit"));
             assert!(observable.contains("locals=[]"));
+        }
+
+        struct HelperBoundaryPair {
+            name: &'static str,
+            helper_fixture: &'static str,
+            inline_fixture: &'static str,
+            helper_source: &'static str,
+            inline_source: &'static str,
+            semantic_locals: &'static [&'static str],
+        }
+
+        const HELPER_BOUNDARY_PAIRS: &[HelperBoundaryPair] = &[
+            HelperBoundaryPair {
+                name: "vm-m9 helper boundary",
+                helper_fixture: "scalar_helper_boundary_helper.sm",
+                inline_fixture: "scalar_helper_boundary_inline.sm",
+                helper_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/scalar_helper_boundary_helper.sm"
+                ),
+                inline_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/scalar_helper_boundary_inline.sm"
+                ),
+                semantic_locals: &["checksum", "merged_count", "score"],
+            },
+            HelperBoundaryPair {
+                name: "g2 helper single-call",
+                helper_fixture: "scalar_helper_boundary_single_call_helper.sm",
+                inline_fixture: "scalar_helper_boundary_single_call_inline.sm",
+                helper_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_single_call_helper.sm"
+                ),
+                inline_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_single_call_inline.sm"
+                ),
+                semantic_locals: &["checksum", "hit_count", "score"],
+            },
+            HelperBoundaryPair {
+                name: "g2 helper call-chain",
+                helper_fixture: "scalar_helper_boundary_call_chain_helper.sm",
+                inline_fixture: "scalar_helper_boundary_call_chain_inline.sm",
+                helper_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_call_chain_helper.sm"
+                ),
+                inline_source: include_str!(
+                    "../tests/fixtures/profiling/scalar_movement/g2/scalar_helper_boundary_call_chain_inline.sm"
+                ),
+                semantic_locals: &["checksum", "chain_hits", "score"],
+            },
+        ];
+
+        fn assert_helper_boundary_pair_equivalence(pair: &HelperBoundaryPair) {
+            let helper = observe_verified_entry_semcode(pair.helper_fixture, pair.helper_source);
+            let inline = observe_verified_entry_semcode(pair.inline_fixture, pair.inline_source);
+            let helper_observable = helper.observable.as_deref().map(|observable| {
+                canonicalize_terminal_observable(observable, pair.semantic_locals)
+            });
+            let inline_observable = inline.observable.as_deref().map(|observable| {
+                canonicalize_terminal_observable(observable, pair.semantic_locals)
+            });
+
+            println!("pair: {}", pair.name);
+            println!(
+                "  helper: status={:?} observable={:?}",
+                helper.status, helper.observable
+            );
+            println!(
+                "  inline:  status={:?} observable={:?}",
+                inline.status, inline.observable
+            );
+
+            assert_eq!(
+                helper.status,
+                VmTestStatus::Completed,
+                "{} helper run did not complete",
+                pair.name
+            );
+            assert_eq!(
+                inline.status,
+                VmTestStatus::Completed,
+                "{} inline run did not complete",
+                pair.name
+            );
+            assert!(helper.trap.is_none(), "{} helper run trapped", pair.name);
+            assert!(inline.trap.is_none(), "{} inline run trapped", pair.name);
+            assert_eq!(
+                helper_observable, inline_observable,
+                "{} helper and inline observations diverged",
+                pair.name
+            );
+        }
+
+        #[test]
+        fn helper_boundary_pair_equivalence_harness_matches_terminal_observations() {
+            for pair in HELPER_BOUNDARY_PAIRS {
+                assert_helper_boundary_pair_equivalence(pair);
+            }
         }
     }
 
