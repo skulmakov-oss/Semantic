@@ -56,13 +56,22 @@ If any of the following happens, block the external PR:
 
 ## Current Workspace Note
 
-In this workspace, the validation path was attempted locally after provisioning
-Ruby and MSYS2 build tools, but `bundle install` still fails while building
-Linguist's native dependencies (`charlock_holmes` and `rugged`) on Windows.
+In this workspace, local validation was completed after provisioning Ruby,
+MSYS2 build tools, a temporary `charlock_holmes` encoding stub, and a scratch
+Linguist checkout with a draft `Semantic` entry plus canonical `.sm` samples.
 
-That means the workflow is documented, but the external PR remains blocked
-until validation is run in an environment that can complete the native Linguist
-build successfully.
+The validation results were:
+
+- `rule_state_decision.sm` -> `Semantic`
+- `data_audit_record_iterable.sm` -> `Semantic`
+- `cli_batch_core.sm` -> `Semantic`
+- `positive_selected_import.sm` -> `Semantic`
+- `wave2_local_helper_import.sm` -> `Semantic`
+- `README.md` -> `Markdown`
+
+That means the workflow is no longer blocked in this workspace. The draft entry
+and representative samples are sufficient for the external Linguist PR to be
+prepared once the repo-side preparation branch is merged.
 
 ## Related Documents
 
