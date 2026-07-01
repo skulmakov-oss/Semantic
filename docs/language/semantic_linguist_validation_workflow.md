@@ -56,11 +56,13 @@ If any of the following happens, block the external PR:
 
 ## Current Workspace Note
 
-In this workspace, Ruby and Bundler are not available on `PATH`, so a full
-Linguist execution check cannot be completed here.
+In this workspace, the validation path was attempted locally after provisioning
+Ruby and MSYS2 build tools, but `bundle install` still fails while building
+Linguist's native dependencies (`charlock_holmes` and `rugged`) on Windows.
 
 That means the workflow is documented, but the external PR remains blocked
-until validation is run in an environment that can execute Linguist itself.
+until validation is run in an environment that can complete the native Linguist
+build successfully.
 
 ## Related Documents
 
