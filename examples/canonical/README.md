@@ -16,6 +16,19 @@ This pack is intentionally split into:
 - five positive examples inside the current `qualified limited release` contour
 - one boundary example that shows a still-real limit honestly
 
+This pack is also the canonical `.sm` sample surface intended for future GitHub
+Linguist review. The five positive examples are small, readable, and stable
+enough to serve as representative language samples:
+
+- `cli_batch_core`
+- `rule_state_decision`
+- `data_audit_record_iterable`
+- `wave2_local_helper_import`
+- `positive_selected_import`
+
+The boundary example remains included as an honest exclusion marker and should
+not be treated as a positive sample for Linguist detection.
+
 ## Canonical Examples
 
 1. `cli_batch_core`
