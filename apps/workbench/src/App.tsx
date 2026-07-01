@@ -48,6 +48,7 @@ import {
   type WorkbenchDiagnostic,
 } from './diagnostics'
 import './App.css'
+import { RendererLayoutInspector } from './components/RendererLayoutInspector'
 
 type ScreenSpec = {
   path: string
@@ -999,6 +1000,16 @@ function App() {
               <span className="nav-meta">{route.eyebrow}</span>
             </NavLink>
           ))}
+          <NavLink
+            to="/inspector"
+            end={false}
+            className={({ isActive }) =>
+              isActive ? 'nav-link nav-link-active' : 'nav-link'
+            }
+          >
+            <span className="nav-label">Renderer / Layout Inspector</span>
+            <span className="nav-meta">prototype only</span>
+          </NavLink>
         </nav>
 
         <section className="sidebar-card">
@@ -1114,6 +1125,7 @@ function App() {
               }
             />
           ))}
+          <Route path="/inspector" element={<RendererLayoutInspector />} />
         </Routes>
       </main>
     </div>
