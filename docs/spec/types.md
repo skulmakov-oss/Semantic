@@ -145,6 +145,45 @@ Current rules:
 - the user-facing quad predicate vocabulary is documented in
   [`docs/language/quad_language_design.md`](../language/quad_language_design.md)
 
+### Quad lexical model
+
+The current lexical model keeps quad tokens explicit and compact:
+
+- `N` means unknown
+- `F` means false
+- `T` means true
+- `S` means conflict
+
+These values are semantic data, not truthiness aliases.
+`S` is not silently normalized away, and `N` is not collapsed into `F`.
+
+### Quad operation families
+
+The source contract groups quad operators into three families:
+
+- identity predicates: `==` and `!=`
+- evidence operators: `&&`, `||`, `!`, `->`
+- explicit control predicates: comparisons such as `q == T`, `q == F`, and
+  quad selection through `match`
+
+The families are intentionally distinct:
+
+- identity predicates return `bool`
+- evidence operators return `quad`
+- control predicates return `bool` and are the only path into branch selection
+
+### Quad predicate vocabulary
+
+Current source-level branch vocabulary stays explicit:
+
+- `if q == T { ... }`
+- `if q == F { ... }`
+- `match q { N => ... F => ... T => ... S => ... _ => ... }`
+
+Design notes for future quad-heavy surface syntax may use `when` or `is` as
+compact vocabulary, but the current contract still requires explicit
+comparison or `match`.
+
 ### Quad equality
 
 `quad == quad` is a structural identity predicate.

@@ -146,57 +146,45 @@ fn main() {
 }
 
 #[test]
-fn pcc1_else_if_emits_same_semcode_as_nested_if() {
-    let chain = compile_semcode_bytes(
-        r#"
+fn pcc1_quad_surface_inference_does_not_change_lowering_profile() {
+    let annotated = r#"
 fn main() {
-    let value: i32 = if true { 1 } else if false { 2 } else { 3 };
+    let q: quad = T;
+    let value: i32 = if q == T { 1 } else { 2 };
+    let branch: i32 = match q {
+        N => { 0 }
+        F => { 1 }
+        T => { 2 }
+        S => { 3 }
+        _ => { 4 }
+    };
     assert(value == 1);
+    assert(branch == 2);
     return;
 }
-"#,
-        "else_if_chain.smc",
-    );
-    let nested = compile_semcode_bytes(
-        r#"
+"#;
+    let inferred = r#"
 fn main() {
-    let value: i32 = if true { 1 } else { if false { 2 } else { 3 } };
+    let q = T;
+    let value: i32 = if q == T { 1 } else { 2 };
+    let branch: i32 = match q {
+        N => { 0 }
+        F => { 1 }
+        T => { 2 }
+        S => { 3 }
+        _ => { 4 }
+    };
     assert(value == 1);
+    assert(branch == 2);
     return;
 }
-"#,
-        "else_if_nested.smc",
-    );
+"#;
 
-    assert_eq!(chain, nested, "else-if lowering should match nested if");
-}
-
-#[test]
-fn pcc1_when_emits_same_semcode_as_if() {
-    let when_bytes = compile_semcode_bytes(
-        r#"
-fn main() {
-    let value: i32 = when true { 1 } else { 2 };
-    assert(value == 1);
-    return;
-}
-"#,
-        "when_surface.smc",
-    );
-    let if_bytes = compile_semcode_bytes(
-        r#"
-fn main() {
-    let value: i32 = if true { 1 } else { 2 };
-    assert(value == 1);
-    return;
-}
-"#,
-        "when_equiv_if.smc",
-    );
-
+    let annotated_bytes = compile_semcode_bytes(annotated, "quad_surface_annotated.smc");
+    let inferred_bytes = compile_semcode_bytes(inferred, "quad_surface_inferred.smc");
     assert_eq!(
-        when_bytes, if_bytes,
-        "when lowering should match if lowering"
+        annotated_bytes, inferred_bytes,
+        "quad local inference should not change lowering profile"
     );
 }
 

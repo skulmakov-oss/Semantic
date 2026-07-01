@@ -1,117 +1,61 @@
 # Quad Surface Lowering Density Audit
 
-Status: docs-only audit note
-Owner: language maturity stream
-Scope: quad-heavy surface syntax lowering density
-Non-goal: optimizer implementation
+Status: documentation audit
+Track: Semantic language / quad surface
+Scope type: documentation only
 
-## 1. Purpose
+## Purpose
 
-This document audits whether the proposed quad surface syntax reduces only
-visual noise, or also lowers lowering/runtime noise on the current admitted
-surface.
+This audit records whether quad-heavy surface syntax stays readable without
+changing the canonical lowering contract.
 
-The audit is docs-only. It does not approve optimizer implementation, SemCode
-format changes, verifier changes, or VM behavior changes.
+The goal is not to tighten the grammar. The goal is to make the lowering path
+visible enough that dense quad code still reads as deliberate semantics rather
+than accidental boolean noise.
 
-## 2. Audit Summary
+## Current Findings
 
-The surface track already improves readability, but the lowering story is mixed.
+- `let q = T;` stays compact when the initializer already fixes the meaning
+- `if q == T { ... }` keeps the branch predicate explicit
+- `match q { ... }` is the densest readable form when all four quad values
+  matter
+- `else if` remains nested `if` sugar and does not add a hidden branch family
+- `bool` remains the control type; `quad` remains semantic state
 
-Observed positive points:
+## Accepted Density Pattern
 
-- `is` is a direct predicate alias and lowers to the same equality form as
-  `==` against a quad literal.
-- `when` lowers to the same canonical nested expression-`if` shape as the
-  core form.
-- `else if` lowers to nested `else { if ... }` semantics.
-- expression-bodied functions lower to the same returned-value block shape as
-  an explicit `return`.
-- compact `match` over quad or scalar cases keeps the source shorter than a
-  manually nested branch chain.
+The current accepted density pattern is:
 
-Observed lowering-density risks:
-
-- `match` still emits explicit branch labels, jumps, comparison registers, and
-  result staging variables in the IR backend.
-- `match` currently uses per-arm `LoadQ` / `LoadI32` plus `CmpEq` / `JmpIf`
-  control flow rather than a denser decision-table or jump-table form.
-- `match` lowering still carries a dedicated result temporary such as
-  `__match_expr_*_result`.
-- `when` and `else if` are compact in source, but they do not remove the
-  canonical `if`-shaped control-flow cost.
-- local inference removes source annotations, not lowering artifacts.
-- repeated quad expressions are not common-subexpression eliminated by the
-  current surface contract alone.
-
-Audit verdict:
-
-```text
-The quad surface track improves source density, but lowering/runtime density
-is only partially improved today.
-`is`, `when`, and `else if` are thin aliases over existing canonical forms.
-`match` is denser than hand-written branching in source, but its current IR
-shape still allocates control labels and staging locals.
-No optimizer seam is approved by this audit.
+```semantic
+let boot:quad = T;
+if boot==T { observe "ready"; } else { observe "pending"; }
 ```
 
-CTF touched: none
-Reason: docs-only audit; no runtime value, trap, determinism, verifier,
-capability, or trace change.
+```semantic
+match boot {
+    N=>{ observe "unknown"; }
+    F=>{ observe "false"; }
+    T=>{ observe "true"; }
+    S=>{ observe "conflict"; }
+    _=>{ observe "fallback"; }
+}
+```
 
-## 3. Current Lowering Shape
+## Audit Conclusion
 
-| Surface form | Current lowering impression | Density outcome |
-| --- | --- | --- |
-| `x is S` | equality predicate alias | low-noise, already compact |
-| `when cond { ... } else { ... }` | nested expression `if` | compact source, same control-flow shape |
-| `else if` | nested `else { if ... }` | compact source, same control-flow shape |
-| expression-bodied fn | block + final `return` | compact source, same return boundary |
-| `match` on quad | compare/jump ladder | compact source, still control-flow heavy |
-| `match` on scalar | compare/jump ladder | compact source, still control-flow heavy |
-| local inference | source annotations removed | no lowering-density gain by itself |
+The lowering density is acceptable when:
 
-## 4. Candidate Improvements
+- branch intent is explicit
+- conflict remains visible
+- canonical lowering stays deterministic
+- the source does not require truthiness to be understood
 
-The following ideas are candidates only:
+## Non-Goals
 
-1. compact `match` lowering into a more structured decision DAG when profiling
-   proves it is worthwhile;
-2. remove redundant staging locals for trivial expression-bodied returns when
-   the canonical block form can be preserved without extra move noise;
-3. consider IR-level CSE for repeated quad expressions rather than in the
-   frontend;
-4. keep local inference conservative so it remains a source-density feature,
-   not a hidden optimization claim.
+This audit does not:
 
-None of these are approved by this audit.
+- change compiler behavior
+- add a formatter
+- define a new grammar
+- replace `docs/spec/*`
 
-## 5. Future Profiling Plan
-
-Recommended evidence loop:
-
-1. compile the current quad surface examples through `smc compile`;
-2. compare IR instruction counts and emitted SemCode size against the core
-   form;
-3. keep stable fixture pairs for `if`, `else if`, `when`, `match`, and
-   expression-bodied functions;
-4. only consider an optimizer or lowering rewrite if the profile repeatedly
-   shows a durable reduction in instruction count or staging locals;
-5. keep the verifier-first and deterministic execution contracts unchanged.
-
-## 6. Out of Scope
-
-- optimizer implementation;
-- SemCode format changes;
-- verifier admission changes;
-- VM execution changes;
-- capability or audit behavior changes;
-- P5-A reopening;
-- hidden truthiness or hidden coercions.
-
-## 7. Related Docs
-
-- [`docs/roadmap/language_maturity/quad_language_design_roadmap.md`](quad_language_design_roadmap.md)
-- [`docs/language/quad_language_design.md`](../../language/quad_language_design.md)
-- [`docs/language/quad_surface_syntax_migration.md`](../../language/quad_surface_syntax_migration.md)
-- [`docs/language/semantic_language_experience.md`](../../language/semantic_language_experience.md)

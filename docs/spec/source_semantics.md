@@ -426,6 +426,11 @@ Current statement meaning:
   `condition` is `false`
 - expression statements evaluate for effect and then discard any produced value
 - `let name: T = expr;` introduces a local binding
+- `let name = expr;` introduces a local binding whose type is inferred
+  conservatively from the initializer and any surrounding expected type
+- quad-heavy code may rely on local inference when the initializer already fixes
+  the intended quad meaning, but explicit `: quad` annotations remain the
+  clearest spelling when the source needs to communicate meaning directly
 - `let mut name: T = expr;` is admitted as an explicit writable-local spelling in
   the current Rust-like path
 - plain reassignment `name = expr;` is admitted for local bindings
@@ -609,28 +614,6 @@ Current `if` expression semantics:
 `quad` is intentionally not treated as an implicit condition type. Users must
 write explicit comparisons.
 
-### Quad Surface Lowering
-
-Canonical lowering for quad-shaped selection is explicit and deterministic:
-
-- The verifier sees canonical core semantics, not aesthetic syntax.
-- a bare `quad` value never lowers to branch control on its own
-- `if q == T { ... } else { ... }` lowers through the `bool` result of the
-  comparison, not through quad truthiness
-- `x is S` lowers to `x == S`
-- `known(x)` lowers to `x != N`
-- `unknown(x)` lowers to `x == N`
-- `conflict(x)` lowers to `x == S`
-- `else if` lowers as a nested `if` in source order inside the `else` branch
-- `match q { ... }` lowers as an ordered dispatch over the literal quad
-  variants `N`, `F`, `T`, and `S`
-- `when` lowers to the existing nested expression-`if` form
-- `_` remains the explicit default arm for quad `match`
-- when multiple quad predicates are needed, `match` is the canonical compact
-  form; repeated `if` comparisons remain a valid but more verbose spelling
-- expression-bodied functions lower to ordinary block functions with an
-  explicit return of the body expression
-
 ### Quad values and control flow
 
 `quad` values do not implicitly control execution flow.
@@ -660,6 +643,35 @@ match signal {
 
 This prevents semantic uncertainty or conflict from silently selecting a
 control-flow branch.
+
+Current v0 limit:
+
+- `else if` sugar is not yet supported for value-producing `if`; users must
+  write `else { if ... }`
+
+### Expression-Bodied Functions
+
+Current function-body shorthand is stable in the current source contract:
+
+- `fn name(...) -> ret = expr;` lowers as a single returned expression
+- the expression-bodied form is equivalent to a block body whose only effect is
+  `return expr;`
+- the shorthand keeps terse function definitions deterministic; it does not
+  introduce a distinct runtime callable shape
+
+### Quad Predicate Selection
+
+Current quad selection remains explicit and deterministic:
+
+- `if q == T { ... }` and `if q == F { ... }` are the current branch-selection
+  forms for quad values
+- `match q { ... }` remains the compact selection form when all four quad
+  states must be handled together
+- `else if` remains nested `if` sugar in source order and does not add a new
+  quad predicate family
+- `when` and `is` are discussed in roadmap/design documents as vocabulary
+  candidates for future quad-heavy syntax, but they are not part of the current
+  source contract
 
 ## Tuples
 

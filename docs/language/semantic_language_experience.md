@@ -1,144 +1,158 @@
 # Semantic Language Experience
 
-Status: language-experience design record
+Status: language-experience doctrine
+Scope type: documentation only
 
 ## Purpose
 
-This document records the user-facing experience posture for Semantic as a
-language.
+This document describes the experience layer around the Semantic language:
+tone, narrative, examples, and the visible way quad-heavy code should feel.
 
-It is not grammar, not type theory, and not verifier policy. It is the
-human-facing story around how Semantic should feel to use while remaining
-honest about its boundaries.
+It does not change grammar, verifier admission, lowering, or runtime behavior.
+
+## Experience Roadmap
+
+The experience track is intentionally ordered:
+
+1. emotional contract
+2. verifier posture
+3. uncertainty and conflict visibility
+4. action vocabulary
+5. onboarding narrative
+6. positive quad patterns
+7. conflict quarantine pattern
+8. quad-first examples
+9. documentation tone
 
 ## Emotional Contract
 
 Semantic should feel:
 
-- explicit rather than mysterious;
-- deterministic rather than fragile;
-- capable of density without becoming opaque;
-- strict about admission without sounding punitive;
-- expressive about uncertainty and conflict instead of flattening them;
-- trustworthy because canonical lowering is visible.
+- precise
+- calm
+- evidence-backed
+- expressive without being slippery
+- deterministic without being sterile
 
-Semantic should not feel like a hidden translation layer that silently rewrites
-meaning.
+The language should not feel like a toy, a slogan, or a hidden policy engine.
 
-## Onboarding Narrative
+## Verifier As Exoskeleton
 
-The first user-facing story should be:
+The verifier is the exoskeleton that keeps meaning upright.
 
-1. write clear source;
-2. let the frontend and typechecker validate it;
-3. lower to canonical core semantics;
-4. admit the artifact through the verifier;
-5. execute only after admission;
-6. keep effects behind explicit boundaries.
+It should be described as support for expression, not as a cage around it.
+The point is to keep hard boundaries visible while still allowing the language
+to carry complex intent.
 
-That narrative should be visible in docs, examples, and roadmap material.
+## Uncertainty And Conflict
 
-## Action Vocabulary
+Uncertainty and conflict are first-class semantic material.
 
-User-facing language should favor verbs that explain intent:
+- unknown is visible
+- conflict is visible
+- denial is visible
+- quarantine is visible
 
-- `check` for source validation;
-- `compile` for lowering to SemCode;
-- `verify` for admission;
-- `run` for execution;
-- `match` for explicit selection;
-- `when` for compact rule selection;
-- `is` for readable quad predicates;
-- `known`, `unknown`, and `conflict` for explicit quad-state vocabulary.
-
-Action words should not imply hidden authority.
-
-## Code Style Principles
-
-Semantic code should prefer:
-
-- explicit public signatures;
-- local density where it improves readability;
-- `bool` for control flow;
-- `quad` for semantic state;
-- canonical lowering over decorative syntax;
-- named intermediate values only when they improve evidence or reuse;
-- concise examples that still show the verifier boundary.
-
-These principles complement, not replace, [`semantic_style.md`](semantic_style.md)
-and [`semantic_language_principles.md`](semantic_language_principles.md).
+The language experience should not flatten these into generic failure states.
 
 ## Freedom With A Spine
 
-Semantic should give users room to express dense quad-heavy logic, but the
-language needs a spine:
+Semantic should remain flexible in how users express intent, but the spine is
+fixed:
 
-- canonical lowering stays stable;
-- verifier authority stays visible;
-- `quad` does not collapse into `bool`;
-- uncertainty stays visible;
-- conflict stays visible;
-- examples stay honest about implementation status.
+- canonical lowering
+- verifier-first admission
+- deterministic execution
+- explicit boundaries
 
-## Positive Quad Handling
+This is the principle that keeps the language free without making it vague.
 
-Positive quad handling means the language treats quad state as something users
-can work with directly, not something to be avoided.
+## Action Vocabulary
 
-Good patterns:
+The language-experience vocabulary should make intent legible:
 
-- keep `S` visible as conflict;
-- use `known(x)` when the user wants intent, not raw bit fiddling;
-- prefer `match` when several quad states are being selected;
-- use `when` only when the branch selection reads more naturally as rule
-  selection;
-- keep `bool` conditions explicit.
+- state
+- require
+- observe
+- complete
+- compare
+- select
+- admit
+- quarantine
 
-## Conflict Quarantine UX Pattern
+These words should help the reader understand the role of a construct before
+they inspect the implementation.
 
-Conflict should be visible and quarantined, not erased.
+## Onboarding Narrative
 
-The recommended language-level message is:
+The first readable story about Semantic should be:
 
-- this value is in conflict;
-- the conflict is not hidden;
-- branch control still requires an explicit `bool` predicate;
-- the user must choose how to resolve or inspect the conflict.
+1. `bool` decides.
+2. `quad` means.
+3. explicit predicates control flow.
+4. verifier-first keeps semantics admitted.
+5. canonical lowering keeps meaning deterministic.
 
-This is a UX principle, not a new runtime state machine.
+## Positive Quad Handling Pattern
+
+When quad values are handled well, the code should:
+
+- keep `N`, `F`, `T`, and `S` visible
+- avoid pretending unknown is false
+- avoid pretending conflict is harmless
+- use explicit selection when control flow matters
+
+## Conflict Quarantine Pattern
+
+Conflict should not disappear.
+
+It should be:
+
+- visible in the surface
+- quarantined where needed
+- traceable in docs and diagnostics
+- handled explicitly rather than hidden behind a generic no-op
+
+## Quad-First Examples
+
+Examples should prefer quad-shaped intent when the semantic task is about
+uncertainty, evidence, or conflict.
+
+```semantic
+let boot:quad = T;
+if boot==T { observe "ready"; }
+```
+
+```semantic
+match boot {
+    N=>{ observe "unknown"; }
+    F=>{ observe "not ready"; }
+    T=>{ observe "ready"; }
+    S=>{ observe "conflict"; }
+    _=>{ observe "fallback"; }
+}
+```
+
+## Documentation Tone
+
+Documentation should be:
+
+- direct
+- honest about current scope
+- careful about current vs planned behavior
+- free of marketing language
+- free of accidental stability claims
+
+Tone should tell the reader what the language does, what it does not do, and
+what is still planned.
 
 ## Non-Goals
 
-This document does not claim:
+This document does not:
 
-- new syntax is implemented just because it is documented;
-- any verifier widening;
-- any VM widening;
-- any SemCode widening;
-- any hidden truthiness model;
-- any implicit `quad -> bool`;
-- any release-status widening;
-- any UI authority.
+- add UI or Workbench policy
+- redefine the verifier
+- widen runtime behavior
+- change parser admission
+- define a release promise
 
-## Related Docs
-
-- [`docs/roadmap/language_maturity/semantic_language_experience_roadmap.md`](../roadmap/language_maturity/semantic_language_experience_roadmap.md)
-- [`docs/language/semantic_emotional_contract.md`](semantic_emotional_contract.md)
-- [`docs/language/semantic_onboarding_narrative.md`](semantic_onboarding_narrative.md)
-- [`docs/language/semantic_action_vocabulary.md`](semantic_action_vocabulary.md)
-- [`docs/language/semantic_code_style_principles.md`](semantic_code_style_principles.md)
-- [`docs/language/semantic_freedom_with_a_spine.md`](semantic_freedom_with_a_spine.md)
-- [`docs/language/semantic_visible_conflict_handling.md`](semantic_visible_conflict_handling.md)
-- [`docs/language/semantic_visible_uncertainty_handling.md`](semantic_visible_uncertainty_handling.md)
-- [`docs/language/semantic_conflict_visible_semantic_state.md`](semantic_conflict_visible_semantic_state.md)
-- [`docs/language/semantic_uncertainty_first_class_material.md`](semantic_uncertainty_first_class_material.md)
-- [`docs/language/semantic_positive_quad_handling.md`](semantic_positive_quad_handling.md)
-- [`docs/language/semantic_conflict_quarantine_ux_pattern.md`](semantic_conflict_quarantine_ux_pattern.md)
-- [`docs/language/semantic_verifier_exoskeleton.md`](semantic_verifier_exoskeleton.md)
-- [`docs/language/semantic_language_non_goals.md`](semantic_language_non_goals.md)
-- [`docs/language/semantic_documentation_tone.md`](semantic_documentation_tone.md)
-- [`docs/examples/semantic_language_experience_examples.md`](../examples/semantic_language_experience_examples.md)
-- [`docs/roadmap/language_maturity/semantic_language_experience_closeout.md`](../roadmap/language_maturity/semantic_language_experience_closeout.md)
-- [`docs/language/quad_language_design.md`](quad_language_design.md)
-- [`docs/language/semantic_style.md`](semantic_style.md)
-- [`docs/language/semantic_language_principles.md`](semantic_language_principles.md)

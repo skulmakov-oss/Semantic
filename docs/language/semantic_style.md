@@ -5,8 +5,6 @@ Status: first-pass compact quad-style density doctrine
 See also:
 
 - [`semantic_command_lexicon.md`](semantic_command_lexicon.md)
-- [`semantic_documentation_tone.md`](semantic_documentation_tone.md)
-- [`../examples/semantic_language_experience_examples.md`](../examples/semantic_language_experience_examples.md)
 
 ## 1. Purpose
 
@@ -122,11 +120,6 @@ This shape:
 
 Quad-heavy source should stay compact without becoming opaque.
 
-See also:
-
-- [`quad_language_design.md`](quad_language_design.md)
-- [`../examples/quad_language_examples.md`](../examples/quad_language_examples.md)
-
 ```semantic
 if q==T { ... } else if q==F { ... } else { ... }
 ```
@@ -147,7 +140,7 @@ if boot==T { observe "ready"; }
 ```
 
 These are visual examples only.
-They are not a grammar expansion and do not alter verifier or runtime meaning.
+They do not change the grammar or the verified execution contract.
 
 ## 7. Density Decision Table
 

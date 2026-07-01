@@ -75,14 +75,15 @@ pub fn demo_inspector_tree() -> InspectorNode {
 }
 
 pub fn flatten_nodes(root: &InspectorNode) -> Vec<&InspectorNode> {
-    let mut nodes = Vec::new();
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
+    fn visit<'a>(node: &'a InspectorNode, nodes: &mut Vec<&'a InspectorNode>) {
         nodes.push(node);
-        for child in node.children.iter().rev() {
-            stack.push(child);
+        for child in &node.children {
+            visit(child, nodes);
         }
     }
+
+    let mut nodes = Vec::new();
+    visit(root, &mut nodes);
     nodes
 }
 
