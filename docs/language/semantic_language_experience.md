@@ -156,3 +156,8 @@ This document does not:
 - change parser admission
 - define a release promise
 
+## Related Docs
+
+- [`docs/language/semantic_sugar_track.md`](semantic_sugar_track.md)
+- [`docs/roadmap/language_maturity/semantic_sugar_track_roadmap.md`](../roadmap/language_maturity/semantic_sugar_track_roadmap.md)
+

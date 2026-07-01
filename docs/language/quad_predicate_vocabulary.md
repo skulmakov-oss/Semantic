@@ -62,6 +62,13 @@ That means:
 - conditions remain `bool`;
 - quad values do not become branch control by implication.
 
+The current vocabulary is:
+
+- `x is S` -> `x == S`
+- `known(x)` -> `x != N`
+- `unknown(x)` -> `x == N`
+- `conflict(x)` -> `x == S`
+
 ## Non-Goals
 
 This document does not approve:

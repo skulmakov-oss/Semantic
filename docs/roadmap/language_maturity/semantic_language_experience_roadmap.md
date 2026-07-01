@@ -28,7 +28,8 @@ It is a documentation roadmap, not an implementation promise.
 9. [`conflict quarantine UX pattern`](../../language/semantic_conflict_quarantine_ux_pattern.md)
 10. [`non-goals`](../../language/semantic_language_non_goals.md)
 11. [`examples`](../../examples/semantic_language_experience_examples.md)
-12. [`closeout record`](semantic_language_experience_closeout.md)
+12. [`sugar track`](../../language/semantic_sugar_track.md)
+13. [`closeout record`](semantic_language_experience_closeout.md)
 
 ## Guardrails
 
