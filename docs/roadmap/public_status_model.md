@@ -8,6 +8,11 @@ Primary owners: release discipline, readiness posture, public-facing truth
 This document defines the canonical status vocabulary used by readiness-facing
 and release-facing Semantic documents.
 
+The public identity terms used by the repository are frozen separately in
+`docs/NAMING.md`: `Semantic Language` is the canonical public language name,
+`Semantic` is the short form, `.sm` is the primary public source extension, and
+`.smc` is the generated SemCode artifact.
+
 Its purpose is not to widen scope, reinterpret existing behavior, or change the
 current release verdict.
 

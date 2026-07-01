@@ -47,6 +47,8 @@ This is a zero-effect program. It is useful for checking the core path without c
 
 A Semantic program is compiled into SemCode, admitted by a verifier, and then executed by a deterministic VM under explicit runtime limits and capability boundaries.
 
+The canonical public language name is `Semantic Language`. `Semantic` is the short form used throughout the repository prose and tooling references.
+
 The core execution path is:
 
 ```text
@@ -75,10 +77,10 @@ The public contract is centered in `docs/spec/*`. Historical roadmap notes and l
 
 ## Semantic Language canonical samples
 
-Semantic is the programming language in this repository. In the public surface:
+Semantic Language is the programming language in this repository. In the public surface:
 
-- `.sm` is Semantic source;
-- `.smc` is the compiled SemCode artifact;
+- `.sm` is the primary Semantic Language source extension;
+- `.smc` is the compiled SemCode artifact generated from source;
 - `smc` is the command-line toolchain owner.
 
 These samples are intended as the canonical public sample surface for Semantic Language. They are backed by [`tests/canonical_examples.rs`](tests/canonical_examples.rs) and kept distinct from qualification fixtures, benchmark programs, readiness drafts, and internal or experimental examples.
