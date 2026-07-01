@@ -7,7 +7,13 @@ Define the deterministic grammar and the internal control-frame model for the Se
 
 The Work Layer parses commands using a deterministic, token-based grammar. It strictly rejects unstructured natural language to guarantee predictability.
 
-The current dispatcher admits these intent shapes:
+The permitted grammar shapes are:
+1. `work <subject> <intent>`
+2. `work <subject> <intent> to <target>`
+3. `work <subject> <intent> with <profile>`
+4. `work <subject> <intent> to <target> with <profile>`
+
+The current dispatcher also treats these as the canonical, user-facing intent forms:
 1. `work <subject> check`
 2. `work <subject> prove`
 3. `work <subject> wake`
@@ -16,9 +22,9 @@ The current dispatcher admits these intent shapes:
 ### Token Roles
 - **`work`**: The universal dispatch verb.
 - **`<subject>`**: The entity being operated upon (e.g., a project, file, module, or specific namespace).
-- **`<intent>`**: The canonical operation requested (e.g., `check`, `prove`, `seal`, `wake`, as defined in the vocabulary).
-- **`to <target>`**: Optional for `seal`. Defines the destination output artifact path.
-- **`with <profile>`**: Optional for `seal`. Defines the compile profile to use when sealing.
+- **`<intent>`**: The canonical operation requested (e.g., `check`, `prove`, `seal`, `wake`, `trace`, as defined in the vocabulary).
+- **`to <target>`**: Optional. Defines a destination, output boundary, or transformation endpoint in the control frame. The current dispatcher consumes it only for `seal`.
+- **`with <profile>`**: Optional. Defines the configuration, security profile, or parameter set in the control frame. The current dispatcher consumes it only for `seal`.
 
 ## Lowering to Typed Control Frames
 
