@@ -7,18 +7,18 @@ Define the deterministic grammar and the internal control-frame model for the Se
 
 The Work Layer parses commands using a deterministic, token-based grammar. It strictly rejects unstructured natural language to guarantee predictability.
 
-The permitted grammar shapes are:
-1. `work <subject> <intent>`
-2. `work <subject> <intent> to <target>`
-3. `work <subject> <intent> with <profile>`
-4. `work <subject> <intent> to <target> with <profile>`
+The current dispatcher admits these intent shapes:
+1. `work <subject> check`
+2. `work <subject> prove`
+3. `work <subject> wake`
+4. `work <subject> seal to <target> [with <profile>]`
 
 ### Token Roles
 - **`work`**: The universal dispatch verb.
 - **`<subject>`**: The entity being operated upon (e.g., a project, file, module, or specific namespace).
-- **`<intent>`**: The canonical operation requested (e.g., `check`, `prove`, `seal`, `trace`, as defined in the vocabulary).
-- **`to <target>`**: Optional. Defines a destination, output boundary, or transformation endpoint (e.g., `to out/`, `to image`).
-- **`with <profile>`**: Optional. Defines the configuration, security profile, or parameter set to apply (e.g., `with release`, `with strict`).
+- **`<intent>`**: The canonical operation requested (e.g., `check`, `prove`, `seal`, `wake`, as defined in the vocabulary).
+- **`to <target>`**: Optional for `seal`. Defines the destination output artifact path.
+- **`with <profile>`**: Optional for `seal`. Defines the compile profile to use when sealing.
 
 ## Lowering to Typed Control Frames
 
@@ -34,6 +34,7 @@ pub struct WorkControlFrame {
 ```
 
 Each parsed string token maps to a typed enum or structured path/identifier within this frame.
+The current CLI consumes `target` and `profile` only for `seal`; other intents keep the fields available in the control frame but do not forward them as raw lower-layer flags.
 
 ## Error Handling and Feedback
 
@@ -43,9 +44,9 @@ To ensure a smooth user experience, the parser implements strict boundary checks
 - It yields a friendly, structured error message.
 
 ### Example Error Shapes
-- **Unknown Intent:** 
+- **Unknown Intent:**
   `Error: Unknown intent 'compile'. Did you mean 'work <subject> prove' or 'work <subject> seal'?`
-- **Invalid Shape:** 
+- **Invalid Shape:**
   `Error: Unexpected token 'using'. The grammar supports: work <subject> <intent> [to <target>] [with <profile>]`
 
 This strict feedback loop teaches the user the canonical shapes without causing unpredictable internal behavior.
