@@ -5,6 +5,8 @@ Status: first-pass compact quad-style density doctrine
 See also:
 
 - [`semantic_command_lexicon.md`](semantic_command_lexicon.md)
+- [`semantic_documentation_tone.md`](semantic_documentation_tone.md)
+- [`../examples/semantic_language_experience_examples.md`](../examples/semantic_language_experience_examples.md)
 
 ## 1. Purpose
 

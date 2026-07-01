@@ -115,9 +115,58 @@ Proposed surface form:
 fn quad_probe_step(left: quad, right: quad) -> quad = left || right;
 ```
 
+## Example 6: `when` selection
+
+Current core form:
+
+```semantic
+let state: quad = if ready == T {
+    N
+} else {
+    S
+};
+```
+
+Proposed surface form:
+
+```semantic
+let state: quad = when ready == T {
+    N
+} else {
+    S
+};
+```
+
+## Example 7: compact predicate chain
+
+Current core form:
+
+```semantic
+if value == S {
+    ...
+} else {
+    if value == N {
+        ...
+    } else {
+        ...
+    }
+}
+```
+
+Proposed surface form:
+
+```semantic
+if value is S {
+    ...
+} else if unknown(value) {
+    ...
+} else {
+    ...
+}
+```
+
 ## Warning
 
 These examples preserve the `bool` / `quad` boundary. They do not approve
 implicit `quad -> bool`, and they do not claim parser or verifier support by
 themselves.
-

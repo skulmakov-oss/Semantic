@@ -146,6 +146,61 @@ fn main() {
 }
 
 #[test]
+fn pcc1_else_if_emits_same_semcode_as_nested_if() {
+    let chain = compile_semcode_bytes(
+        r#"
+fn main() {
+    let value: i32 = if true { 1 } else if false { 2 } else { 3 };
+    assert(value == 1);
+    return;
+}
+"#,
+        "else_if_chain.smc",
+    );
+    let nested = compile_semcode_bytes(
+        r#"
+fn main() {
+    let value: i32 = if true { 1 } else { if false { 2 } else { 3 } };
+    assert(value == 1);
+    return;
+}
+"#,
+        "else_if_nested.smc",
+    );
+
+    assert_eq!(chain, nested, "else-if lowering should match nested if");
+}
+
+#[test]
+fn pcc1_when_emits_same_semcode_as_if() {
+    let when_bytes = compile_semcode_bytes(
+        r#"
+fn main() {
+    let value: i32 = when true { 1 } else { 2 };
+    assert(value == 1);
+    return;
+}
+"#,
+        "when_surface.smc",
+    );
+    let if_bytes = compile_semcode_bytes(
+        r#"
+fn main() {
+    let value: i32 = if true { 1 } else { 2 };
+    assert(value == 1);
+    return;
+}
+"#,
+        "when_equiv_if.smc",
+    );
+
+    assert_eq!(
+        when_bytes, if_bytes,
+        "when lowering should match if lowering"
+    );
+}
+
+#[test]
 fn pcc1_while_emits_stable_semcode() {
     assert_positive_semcode_stable(
         r#"

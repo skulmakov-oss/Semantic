@@ -2500,9 +2500,8 @@ impl<'a> Parser<'a> {
         // M9.4 Wave 2: integer range patterns `1..=5` or `1..5`
         if self.check(TokenKind::Num) {
             let text = self.peek().text.clone();
-            // Only admit plain integer literals (no suffix, no decimal point).
-            let is_plain_int =
-                !text.contains('.') && !text.contains("i32") && !text.contains("u32");
+            // Only admit integer forms here; floats are still rejected.
+            let is_plain_int = !text.contains('.');
             if is_plain_int {
                 // Lookahead: is the token after the number `..` or `..=`?
                 // We need to consume the number then check.
@@ -2528,15 +2527,24 @@ impl<'a> Parser<'a> {
                         inclusive,
                     }));
                 }
-                // Not a range — put the number back by returning an error explaining
-                // plain numeric patterns aren't supported outside ranges.
-                return Err(FrontendError {
-                    pos: self.pos(),
-                    message: format!(
-                        "plain integer literal '{}' is not a valid match pattern; use a range like {}..={} or an ADT pattern",
-                        num_text, num_text, num_text
-                    ),
-                });
+                let (core, suffix) = split_numeric_suffix(&num_text);
+                if let Some(suffix) = suffix {
+                    if suffix != "i32" && suffix != "u32" {
+                        return Err(FrontendError {
+                            pos: self.pos(),
+                            message: format!(
+                                "integer match pattern does not accept numeric suffix '{}'",
+                                suffix
+                            ),
+                        });
+                    }
+                }
+                let value = parse_i64_pattern_bound(core)?;
+                return Ok(MatchPattern::IntRange(IntRangePattern {
+                    start: value,
+                    end: value,
+                    inclusive: true,
+                }));
             }
         }
         if self.check(TokenKind::Ident) {

@@ -6096,12 +6096,18 @@ fn lower_stmt(
             )?;
             if !matches!(
                 scr_ty,
-                Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _)
+                Type::Quad
+                    | Type::Adt(_)
+                    | Type::Option(_)
+                    | Type::Result(_, _)
+                    | Type::I32
+                    | Type::U32
             ) {
                 return Err(FrontendError {
                     pos: 0,
-                    message: "match scrutinee must be quad, enum, Option(T), or Result(T, E)"
-                        .to_string(),
+                    message:
+                        "match scrutinee must be quad, enum, Option(T), Result(T, E), i32, or u32"
+                            .to_string(),
                 });
             }
             let exhaustive_without_default = if default.is_empty() {
@@ -6196,6 +6202,84 @@ fn lower_stmt(
                         ctx.instrs.push(IrInstr::LoadQ {
                             dst: lit_reg,
                             val: expect_quad_match_pattern(&arm.pat)?,
+                        });
+                        let cmp_reg = alloc(&mut ctx.next_reg);
+                        ctx.instrs.push(IrInstr::CmpEq {
+                            dst: cmp_reg,
+                            lhs: scr_reg,
+                            rhs: lit_reg,
+                        });
+                        ctx.instrs.push(IrInstr::JmpIf {
+                            cond: cmp_reg,
+                            label: arm_labels[i].clone(),
+                        });
+                        ctx.instrs.push(IrInstr::Jmp {
+                            label: next_label.clone(),
+                        });
+
+                        ctx.instrs.push(IrInstr::Label {
+                            name: arm_labels[i].clone(),
+                        });
+                        let mut arm_env = env.clone();
+                        arm_env.push_scope();
+                        if let Some(guard_reg) = lower_match_guard(
+                            arm.guard,
+                            arena,
+                            &mut ctx.next_reg,
+                            &mut ctx.instrs,
+                            &arm_env,
+                            &mut ctx.loop_stack,
+                            fn_table,
+                            record_table,
+                            adt_table,
+                            ret_ty.clone(),
+                            &mut ctx.closure_state,
+                        )? {
+                            let guarded_body_label = format!("match_{}_body_{}", mid, i);
+                            ctx.instrs.push(IrInstr::JmpIf {
+                                cond: guard_reg,
+                                label: guarded_body_label.clone(),
+                            });
+                            ctx.instrs.push(IrInstr::Jmp { label: next_label });
+                            ctx.instrs.push(IrInstr::Label {
+                                name: guarded_body_label,
+                            });
+                        }
+                        for s in &arm.block {
+                            lower_stmt(
+                                *s,
+                                arena,
+                                ctx,
+                                &mut arm_env,
+                                ret_ty.clone(),
+                                fn_table,
+                                record_table,
+                                adt_table,
+                            )?;
+                        }
+                        arm_env.pop_scope();
+                        ctx.instrs.push(IrInstr::Jmp {
+                            label: end_label.clone(),
+                        });
+                    }
+                }
+                Type::I32 | Type::U32 => {
+                    for (i, arm) in arms.iter().enumerate() {
+                        if i > 0 {
+                            ctx.instrs.push(IrInstr::Label {
+                                name: format!("match_{}_check_{}", mid, i),
+                            });
+                        }
+                        let next_label = if i + 1 < arms.len() {
+                            format!("match_{}_check_{}", mid, i + 1)
+                        } else {
+                            default_label.clone()
+                        };
+
+                        let lit_reg = alloc(&mut ctx.next_reg);
+                        ctx.instrs.push(IrInstr::LoadI32 {
+                            dst: lit_reg,
+                            val: expect_int_match_pattern(&arm.pat)?,
                         });
                         let cmp_reg = alloc(&mut ctx.next_reg);
                         ctx.instrs.push(IrInstr::CmpEq {
@@ -6931,6 +7015,31 @@ fn expect_quad_match_pattern(pat: &MatchPattern) -> Result<QuadVal, FrontendErro
                 message: "wildcard/or/range match pattern lowering is not yet implemented in the IR backend".to_string(),
             })
         }
+    }
+}
+
+fn expect_int_match_pattern(pat: &MatchPattern) -> Result<i32, FrontendError> {
+    match pat {
+        MatchPattern::IntRange(range) if range.start == range.end => {
+            i32::try_from(range.start).map_err(|_| FrontendError {
+                pos: 0,
+                message: "integer match pattern literal is outside i32 range".to_string(),
+            })
+        }
+        MatchPattern::IntRange(_) => Err(FrontendError {
+            pos: 0,
+            message: "integer range match pattern lowering is not yet implemented in the IR backend"
+                .to_string(),
+        }),
+        MatchPattern::Adt(_) => Err(FrontendError {
+            pos: 0,
+            message: "enum match pattern requires enum scrutinee in lowering".to_string(),
+        }),
+        // M9.4 Wave 1: these patterns are typecheck-only in M9.4; lowering is deferred.
+        MatchPattern::Wildcard | MatchPattern::Or(_) | MatchPattern::Quad(_) => Err(FrontendError {
+            pos: 0,
+            message: "wildcard/or/quad match pattern lowering is not yet implemented in the IR backend".to_string(),
+        }),
     }
 }
 
@@ -7687,12 +7796,18 @@ fn lower_loop_expr_stmt(
             )?;
             if !matches!(
                 scr_ty,
-                Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _)
+                Type::Quad
+                    | Type::Adt(_)
+                    | Type::Option(_)
+                    | Type::Result(_, _)
+                    | Type::I32
+                    | Type::U32
             ) {
                 return Err(FrontendError {
                     pos: 0,
-                    message: "match scrutinee must be quad, enum, Option(T), or Result(T, E)"
-                        .to_string(),
+                    message:
+                        "match scrutinee must be quad, enum, Option(T), Result(T, E), i32, or u32"
+                            .to_string(),
                 });
             }
             let exhaustive_without_default = if default.is_empty() {
@@ -8017,11 +8132,14 @@ fn lower_match_expr(
     )?;
     if !matches!(
         scr_ty,
-        Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _)
+        Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _) | Type::I32 | Type::U32
     ) {
         return Err(FrontendError {
             pos: 0,
-            message: format!("match expression scrutinee must be quad, enum, Option(T), or Result(T, E). Got: {:?}", scr_ty),
+            message: format!(
+                "match expression scrutinee must be quad, enum, Option(T), Result(T, E), i32, or u32. Got: {:?}",
+                scr_ty
+            ),
         });
     }
     let exhaustive_without_default = if match_expr.default.is_none() {
@@ -8073,6 +8191,103 @@ fn lower_match_expr(
                 out.push(IrInstr::LoadQ {
                     dst: lit_reg,
                     val: expect_quad_match_pattern(&arm.pat)?,
+                });
+                let cmp_reg = alloc(next);
+                out.push(IrInstr::CmpEq {
+                    dst: cmp_reg,
+                    lhs: scr_reg,
+                    rhs: lit_reg,
+                });
+                out.push(IrInstr::JmpIf {
+                    cond: cmp_reg,
+                    label: arm_labels[i].clone(),
+                });
+                out.push(IrInstr::Jmp {
+                    label: next_label.clone(),
+                });
+
+                out.push(IrInstr::Label {
+                    name: arm_labels[i].clone(),
+                });
+                let mut arm_env = env.clone();
+                arm_env.push_scope();
+                if let Some(guard_reg) = lower_match_guard(
+                    arm.guard,
+                    arena,
+                    next,
+                    out,
+                    &arm_env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    ret_ty.clone(),
+                    closure_state,
+                )? {
+                    let guarded_body_label = format!("match_expr_{}_body_{}", id, i);
+                    out.push(IrInstr::JmpIf {
+                        cond: guard_reg,
+                        label: guarded_body_label.clone(),
+                    });
+                    out.push(IrInstr::Jmp { label: next_label });
+                    out.push(IrInstr::Label {
+                        name: guarded_body_label,
+                    });
+                }
+                let (arm_reg, arm_ty) = lower_value_block_expr(
+                    &arm.block,
+                    arena,
+                    next,
+                    out,
+                    &arm_env,
+                    loop_stack,
+                    fn_table,
+                    record_table,
+                    adt_table,
+                    expected.clone(),
+                    ret_ty.clone(),
+                    closure_state,
+                )?;
+                arm_env.pop_scope();
+                if let Some(ref expected_ty) = result_ty {
+                    if *expected_ty != arm_ty {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "match expression branch type mismatch in lowering: expected {:?}, got {:?}",
+                                expected_ty, arm_ty
+                            ),
+                        });
+                    }
+                } else {
+                    result_ty = Some(arm_ty);
+                }
+                out.push(IrInstr::StoreVar {
+                    name: result_name.clone(),
+                    src: arm_reg,
+                });
+                out.push(IrInstr::Jmp {
+                    label: end_label.clone(),
+                });
+            }
+        }
+        Type::I32 | Type::U32 => {
+            for (i, arm) in match_expr.arms.iter().enumerate() {
+                if i > 0 {
+                    out.push(IrInstr::Label {
+                        name: format!("match_expr_{}_check_{}", id, i),
+                    });
+                }
+                let next_label = if i + 1 < match_expr.arms.len() {
+                    format!("match_expr_{}_check_{}", id, i + 1)
+                } else {
+                    default_label.clone()
+                };
+
+                let lit_reg = alloc(next);
+                out.push(IrInstr::LoadI32 {
+                    dst: lit_reg,
+                    val: expect_int_match_pattern(&arm.pat)?,
                 });
                 let cmp_reg = alloc(next);
                 out.push(IrInstr::CmpEq {

@@ -86,6 +86,7 @@ fn assert_check_rejects(rel: &str, needle: &str) {
 fn match_surface_positive_fixtures_run_end_to_end() {
     let positive_cases = [
         "examples/qualification/match_surface/positive_enum_exhaustive_match/src/main.sm",
+        "examples/qualification/match_surface/positive_scalar_literal_match_selection/src/main.sm",
         "examples/qualification/match_surface/positive_option_result_match/src/main.sm",
         "examples/qualification/match_surface/positive_match_guard_bool/src/main.sm",
         "examples/qualification/match_surface/positive_nested_match/src/main.sm",

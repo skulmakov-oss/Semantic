@@ -3787,6 +3787,88 @@ mod tests {
     }
 
     #[test]
+    fn when_expression_typechecks_for_bool_result() {
+        let src = r#"
+            fn main() {
+                let total: bool = when true { true } else { false };
+                if total { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("when bool expression should typecheck");
+    }
+
+    #[test]
+    fn when_expression_typechecks_for_quad_result() {
+        let src = r#"
+            fn main() {
+                let total: quad = when T == T { N } else { S };
+                let same = total == total;
+                if same { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("when quad expression should typecheck");
+    }
+
+    #[test]
+    fn when_expression_rejects_non_bool_condition() {
+        let src = r#"
+            fn main() {
+                let total: quad = when T { N } else { S };
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("when condition must be bool");
+        assert!(
+            err.message.contains("when condition must be bool")
+                || err.message.contains("condition must be bool")
+                || err.message.contains("cannot compare"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn when_expression_rejects_arm_type_mismatch() {
+        let src = r#"
+            fn main() {
+                let total: f64 = when true { 1.0 } else { true };
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("when arm mismatch must reject");
+        assert!(
+            err.message.contains("branch type mismatch")
+                || err.message.contains("cannot compare")
+                || err.message.contains("mismatch"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn is_predicate_rejects_non_quad_comparison() {
+        let src = r#"
+            fn main() {
+                let value: bool = true is S;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("non-quad is predicate must reject");
+        assert!(
+            err.message.contains("cannot compare Bool and Quad")
+                || err.message.contains("quad")
+                || err.message.contains("mismatch"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
     fn match_expression_typechecks_when_arms_match() {
         let src = r#"
             fn main() {
@@ -3801,6 +3883,25 @@ mod tests {
         "#;
 
         typecheck_source(src).expect("match expression should typecheck");
+    }
+
+    #[test]
+    fn match_expression_typechecks_with_integer_literal_cases() {
+        let src = r#"
+            fn main() {
+                let index: u32 = 1u32;
+                let total: quad = match index {
+                    0u32 => { N }
+                    1u32 => { F }
+                    2u32 => { T }
+                    _ => { S }
+                };
+                let same = total == total;
+                if same { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("integer literal match cases should typecheck");
     }
 
     #[test]
@@ -3859,6 +3960,25 @@ mod tests {
     }
 
     #[test]
+    fn match_expression_requires_default_arm_for_scalar_cases() {
+        let src = r#"
+            fn main() {
+                let total: quad = match 1u32 {
+                    0u32 => { N }
+                    1u32 => { F }
+                    2u32 => { T }
+                };
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("scalar match without wildcard must reject");
+        assert!(err
+            .message
+            .contains("match expression requires default arm '_'"));
+    }
+
+    #[test]
     fn match_expression_requires_quad_scrutinee() {
         let src = r#"
             fn main() {
@@ -3874,6 +3994,25 @@ mod tests {
         assert!(err
             .message
             .contains("match expression is allowed only for quad"));
+    }
+
+    #[test]
+    fn match_expression_rejects_integer_cases_on_quad_scrutinee() {
+        let src = r#"
+            fn main() {
+                let total: quad = match T {
+                    0 => { N }
+                    _ => { S }
+                };
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("integer match cases on quad scrutinee must reject");
+        assert!(err
+            .message
+            .contains("integer match pattern requires i32 or u32 scrutinee"));
     }
 
     #[test]
@@ -4088,6 +4227,35 @@ mod tests {
     }
 
     #[test]
+    fn expression_bodied_function_returns_quad() {
+        let src = r#"
+            fn idq(q: quad) -> quad = q;
+
+            fn main() {
+                let got: quad = idq(T);
+                let ok: bool = got == T;
+                if ok { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("expression-bodied quad function should typecheck");
+    }
+
+    #[test]
+    fn expression_bodied_function_returns_bool() {
+        let src = r#"
+            fn not_false(b: bool) -> bool = b;
+
+            fn main() {
+                let got: bool = not_false(true);
+                if got { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("expression-bodied bool function should typecheck");
+    }
+
+    #[test]
     fn local_let_without_annotation_infers_from_value() {
         let src = r#"
             fn main() {
@@ -4098,6 +4266,78 @@ mod tests {
         "#;
 
         typecheck_source(src).expect("local let inference should typecheck");
+    }
+
+    #[test]
+    fn local_let_without_annotation_infers_quad_values() {
+        let src = r#"
+            fn main() {
+                let left: quad = T;
+                let right: quad = S;
+                let merged = left || right;
+                let ok: bool = merged == S;
+                if ok { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("quad local let inference should typecheck");
+    }
+
+    #[test]
+    fn local_let_without_annotation_infers_bool_predicates() {
+        let src = r#"
+            fn main() {
+                let left: quad = T;
+                let right: quad = S;
+                let same = left == right;
+                if same { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("bool predicate local let inference should typecheck");
+    }
+
+    #[test]
+    fn local_let_without_annotation_accepts_integer_literal_default() {
+        let src = r#"
+            fn main() {
+                let value = 0;
+                let ok: bool = value == 0;
+                if ok { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("integer literal local let inference should typecheck");
+    }
+
+    #[test]
+    fn local_let_explicit_annotation_still_typechecks() {
+        let src = r#"
+            fn main() {
+                let left: quad = T;
+                let right: quad = S;
+                let merged: quad = left || right;
+                let ok: bool = merged == S;
+                if ok { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("explicit local annotation should still typecheck");
+    }
+
+    #[test]
+    fn local_let_unresolved_type_reports_diagnostic() {
+        let src = r#"
+            fn main() {
+                let map = map_empty();
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("unresolved let inference must reject");
+        assert!(err
+            .message
+            .contains("map_empty() requires a contextual Map(K, V) type"));
     }
 
     #[test]
@@ -11513,8 +11753,30 @@ pub(crate) fn build_match_pattern_plan(
     adt_table: &AdtTable,
 ) -> Result<(), FrontendError> {
     match pat {
-        MatchPattern::Wildcard | MatchPattern::Quad(_) => Ok(()),
+        MatchPattern::Wildcard => Ok(()),
+        MatchPattern::Quad(_) => {
+            if matches!(expected_ty, Type::Quad) {
+                Ok(())
+            } else {
+                Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "quad match pattern requires quad scrutinee, got {:?}",
+                        expected_ty
+                    ),
+                })
+            }
+        }
         MatchPattern::IntRange(range) => {
+            if !matches!(expected_ty, Type::I32 | Type::U32) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "integer match pattern requires i32 or u32 scrutinee, got {:?}",
+                        expected_ty
+                    ),
+                });
+            }
             if range.start > range.end {
                 return Err(FrontendError {
                     pos: 0,

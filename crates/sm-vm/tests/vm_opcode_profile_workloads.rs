@@ -170,6 +170,43 @@ fn print_pair_report(
     println!("  delta: count={delta_count} ratio={delta_ratio:.2}%");
 }
 
+fn print_density_report(label: &str, profile: &VmOpcodeProfile) {
+    let summary = family_summary(profile);
+
+    println!("density={label}");
+    println!("  total_instructions={}", summary.total_instructions);
+    println!(
+        "  quad_logic_ratio={:.2}% quad_family_ratio={:.2}% scalar_movement_ratio={:.2}% control_flow_ratio={:.2}% calls_ratio={:.2}%",
+        summary.quad_logic.ratio,
+        summary.quad_family.ratio,
+        summary.scalar_movement.ratio,
+        summary.control_flow.ratio,
+        summary.calls.ratio,
+    );
+    println!(
+        "  load_var={} store_var={} jmp={} jmp_if={}",
+        profile.count(Opcode::LoadVar),
+        profile.count(Opcode::StoreVar),
+        profile.count(Opcode::Jmp),
+        profile.count(Opcode::JmpIf),
+    );
+}
+
+fn print_density_delta(label: &str, core: &VmOpcodeProfile, surface: &VmOpcodeProfile) {
+    let core_total = core.total_instructions() as i64;
+    let surface_total = surface.total_instructions() as i64;
+
+    println!("density-delta={label}");
+    println!("  total_instructions_delta={}", surface_total - core_total);
+    println!(
+        "  load_var_delta={} store_var_delta={} jmp_delta={} jmp_if_delta={}",
+        surface.count(Opcode::LoadVar) as i64 - core.count(Opcode::LoadVar) as i64,
+        surface.count(Opcode::StoreVar) as i64 - core.count(Opcode::StoreVar) as i64,
+        surface.count(Opcode::Jmp) as i64 - core.count(Opcode::Jmp) as i64,
+        surface.count(Opcode::JmpIf) as i64 - core.count(Opcode::JmpIf) as i64,
+    );
+}
+
 fn profile_scalar_pair(
     pair_name: &str,
     fixture_a: &str,
@@ -263,6 +300,9 @@ const P5A_QUAD_BATCH_WAVE: &str =
     include_str!("fixtures/profiling/p5a_probe/p5a_quad_batch_wave.sm");
 const P5A_QUAD_HELPER_MIX: &str =
     include_str!("fixtures/profiling/p5a_probe/p5a_quad_helper_mix.sm");
+const P5A_QUAD_BATCH_WAVE_SURFACE: &str =
+    include_str!("fixtures/profiling/p5a_probe/p5a_quad_batch_wave_surface.sm");
+const DENSE_QUAD_PROBE: &str = include_str!("fixtures/profiling/dense_quad_probe.sm");
 
 #[test]
 fn family_summary_empty_profile_is_zero() {
@@ -752,4 +792,33 @@ fn profile_pulsar_p5a_evidence_probe_pair() {
     assert!(batch_wave_summary.quad_family.count > 0);
     assert!(helper_mix_summary.quad_family.count > 0);
     assert!(helper_mix_summary.calls.count > 0);
+}
+
+#[test]
+fn profile_quad_surface_lowering_against_core_form() {
+    let core_profile = profile_source_fixture("p5a_quad_batch_wave", P5A_QUAD_BATCH_WAVE);
+    let surface_profile =
+        profile_source_fixture("p5a_quad_batch_wave_surface", P5A_QUAD_BATCH_WAVE_SURFACE);
+    let dense_profile = profile_source_fixture("dense_quad_probe", DENSE_QUAD_PROBE);
+
+    let core_summary = family_summary(&core_profile);
+    let surface_summary = family_summary(&surface_profile);
+    let dense_summary = family_summary(&dense_profile);
+
+    print_density_report("p5a_quad_batch_wave.sm", &core_profile);
+    print_density_report("p5a_quad_batch_wave_surface.sm", &surface_profile);
+    print_density_report("dense_quad_probe.sm", &dense_profile);
+    print_density_delta("core-vs-surface", &core_profile, &surface_profile);
+
+    assert!(core_summary.total_instructions > 0);
+    assert!(surface_summary.total_instructions > 0);
+    assert!(dense_summary.total_instructions > 0);
+    assert!(core_summary.quad_family.count > 0);
+    assert!(surface_summary.quad_family.count > 0);
+    assert!(dense_summary.quad_family.count > 0);
+    assert!(core_summary.control_flow.count > 0);
+    assert!(surface_summary.control_flow.count > 0);
+    assert!(dense_summary.control_flow.count > 0);
+    assert!(surface_summary.scalar_movement.count > 0);
+    assert!(dense_summary.scalar_movement.count > 0);
 }
