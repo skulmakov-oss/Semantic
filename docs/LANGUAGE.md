@@ -1,7 +1,9 @@
-# Semantic
+# Semantic Language
 
-Semantic is not just a programming language and not just syntax sugar over an existing VM.
+Semantic Language is not just a programming language and not just syntax sugar over an existing VM.
 It is a utilitarian language for describing reasoning processes, inference rules, and semantic state transitions inside the PROMETHEUS system model.
+
+The canonical public language name is `Semantic Language`. `Semantic` is the short form used in repository prose.
 
 Its purpose is to express meaning-oriented logic with the same rigor that ordinary languages apply to computation.
 
