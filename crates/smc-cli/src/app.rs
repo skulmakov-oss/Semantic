@@ -107,12 +107,149 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "run" => cmd_run(&args[1..]),
         "run-smc" => cmd_run_smc(&args[1..]),
         "disasm" => cmd_disasm(&args[1..]),
+        "work" => cmd_work(&args[1..]),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             Ok(())
         }
         other => Err(format!("unknown command '{}'\n\n{}", other, usage())),
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkControlFrame {
+    pub subject: String,
+    pub intent: String,
+    pub target: Option<String>,
+    pub profile: Option<String>,
+}
+
+fn cmd_work(args: &[String]) -> Result<(), String> {
+    let frame = parse_work_control_frame(args)?;
+    let subject = frame.subject.clone();
+
+    match frame.intent.as_str() {
+        "check" => cmd_check(&[subject]),
+        "prove" => cmd_work_prove(&subject, frame.profile.as_deref()),
+        "wake" => cmd_work_wake(&subject),
+        "seal" => cmd_work_seal(&frame),
+        _ => Err(format!(
+            "Unknown intent '{}'. Did you mean 'work <subject> prove' or 'work <subject> seal'?",
+            frame.intent
+        )),
+    }
+}
+
+fn parse_work_control_frame(args: &[String]) -> Result<WorkControlFrame, String> {
+    if args.len() < 2 {
+        return Err(
+            "usage: smc work <subject> <intent> [to <target>] [with <profile>]".to_string(),
+        );
+    }
+    let subject = args[0].clone();
+    let intent = args[1].clone();
+    let mut target = None;
+    let mut profile = None;
+
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "to" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "missing target after 'to'".to_string())?;
+                target = Some(value.clone());
+                i += 2;
+            }
+            "with" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "missing profile after 'with'".to_string())?;
+                profile = Some(value.clone());
+                i += 2;
+            }
+            other => {
+                return Err(format!(
+                    "Unexpected token '{}'. The grammar supports: work <subject> <intent> [to <target>] [with <profile>]",
+                    other
+                ));
+            }
+        }
+    }
+
+    Ok(WorkControlFrame {
+        subject,
+        intent,
+        target,
+        profile,
+    })
+}
+
+fn work_subject_path(subject: &str) -> Result<PathBuf, String> {
+    let input_path = Path::new(subject);
+    if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)
+    } else {
+        Ok(input_path.to_path_buf())
+    }
+}
+
+fn work_is_semcode_artifact(subject: &str) -> bool {
+    Path::new(subject)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("smc"))
+}
+
+fn cmd_work_prove(subject: &str, _profile: Option<&str>) -> Result<(), String> {
+    if work_is_semcode_artifact(subject) {
+        return cmd_verify(&[subject.to_string()]);
+    }
+
+    let root = work_subject_path(subject)?;
+    let src = read_source_with_package_admission(&root)?;
+    let bytes = compile_program_to_semcode_with_options_debug(
+        &src,
+        CompileProfile::Auto,
+        OptLevel::O0,
+        false,
+    )
+    .map_err(|e| e.to_string())?;
+    let verified = verify_semcode(&bytes).map_err(|report| report.to_string())?;
+    println!(
+        "verified '{}' ({} function(s), header={}, epoch={}.{})",
+        subject,
+        verified.functions.len(),
+        String::from_utf8_lossy(&verified.header.magic),
+        verified.header.epoch,
+        verified.header.rev
+    );
+    Ok(())
+}
+
+fn cmd_work_wake(subject: &str) -> Result<(), String> {
+    if work_is_semcode_artifact(subject) {
+        cmd_run_smc(&[subject.to_string()])
+    } else {
+        cmd_run(&[subject.to_string()])
+    }
+}
+
+fn cmd_work_seal(frame: &WorkControlFrame) -> Result<(), String> {
+    if work_is_semcode_artifact(&frame.subject) {
+        return Err("work seal expects source input, not SemCode".to_string());
+    }
+    let target = frame
+        .target
+        .as_ref()
+        .ok_or_else(|| "missing target after 'to'".to_string())?;
+
+    let mut args = vec![frame.subject.clone(), "-o".to_string(), target.clone()];
+    if let Some(profile) = &frame.profile {
+        args.push("--profile".to_string());
+        args.push(profile.clone());
+    }
+    cmd_compile(&args)
 }
 
 fn cmd_compile(args: &[String]) -> Result<(), String> {
@@ -2519,6 +2656,7 @@ fn usage() -> String {
         "  smc features",
         "  smc explain <error-code|--list>",
         "  smc repl",
+        "  smc work <subject> <intent> [to <target>] [with <profile>]",
         "  smc verify <input.smc>",
         "  smc run <input.sm|project-root>",
         "  smc run-smc <input.smc>",

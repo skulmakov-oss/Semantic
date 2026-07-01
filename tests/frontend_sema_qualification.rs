@@ -36,6 +36,24 @@ fn test_valid_primitive_bindings() {
 }
 
 #[test]
+fn test_inferred_quad_local_bindings() {
+    let src = r#"
+        fn main() {
+            let q = T;
+            let b = q == T;
+            let m = match q {
+                N => { 0 }
+                F => { 1 }
+                T => { 2 }
+                S => { 3 }
+                _ => { 4 }
+            };
+        }
+    "#;
+    check_ok(src);
+}
+
+#[test]
 fn test_invalid_primitive_assignments() {
     let err1 = check_err("fn main() { let b: bool = 42; }");
     assert!(err1.contains("mismatch"), "got: {}", err1);
