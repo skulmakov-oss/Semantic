@@ -35,8 +35,7 @@ Current examples include:
 - `E0220` to `E0233` for `Law` and `When` parsing
 - `E0234` to `E0237` for type/expression-level parser expectations
 - block-expression parse failures such as missing trailing tail values
-- `if`-expression parse failures such as missing `else` or rejected `else if`
-  sugar in value position
+- `if`-expression parse failures such as missing `else` in value position
 - expression-bodied function parse failures such as missing trailing `;`
 - pipeline parse failures such as missing function-stage targets after `|>`
 - short-lambda parse failures such as standalone non-invoked lambdas

@@ -25,6 +25,22 @@ Therefore:
 - `if state == T { ... } else { ... }` is accepted;
 - `if state == F { ... } else { ... }` is accepted.
 
+## Canonical Lowering
+
+Quad-controlled branching lowers through explicit predicates, not truthiness.
+
+The canonical forms are:
+
+- `if q == T { ... } else { ... }`
+- `if q == F { ... } else { ... }`
+- `if q is S { ... } else { ... }`
+- `match q { N => { ... } F => { ... } T => { ... } S => { ... } _ => { ... } }`
+- surface helpers such as `x is S`, `known(x)`, `unknown(x)`, and
+  `conflict(x)` lower to these same canonical bool predicates
+
+`else if` remains nested `if` sugar and does not introduce a separate quad
+condition rule.
+
 ## Diagnostics
 
 The source-facing diagnostic for a bare `quad` condition is expected to keep

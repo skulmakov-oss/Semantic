@@ -609,6 +609,28 @@ Current `if` expression semantics:
 `quad` is intentionally not treated as an implicit condition type. Users must
 write explicit comparisons.
 
+### Quad Surface Lowering
+
+Canonical lowering for quad-shaped selection is explicit and deterministic:
+
+- The verifier sees canonical core semantics, not aesthetic syntax.
+- a bare `quad` value never lowers to branch control on its own
+- `if q == T { ... } else { ... }` lowers through the `bool` result of the
+  comparison, not through quad truthiness
+- `x is S` lowers to `x == S`
+- `known(x)` lowers to `x != N`
+- `unknown(x)` lowers to `x == N`
+- `conflict(x)` lowers to `x == S`
+- `else if` lowers as a nested `if` in source order inside the `else` branch
+- `match q { ... }` lowers as an ordered dispatch over the literal quad
+  variants `N`, `F`, `T`, and `S`
+- `when` lowers to the existing nested expression-`if` form
+- `_` remains the explicit default arm for quad `match`
+- when multiple quad predicates are needed, `match` is the canonical compact
+  form; repeated `if` comparisons remain a valid but more verbose spelling
+- expression-bodied functions lower to ordinary block functions with an
+  explicit return of the body expression
+
 ### Quad values and control flow
 
 `quad` values do not implicitly control execution flow.
@@ -638,11 +660,6 @@ match signal {
 
 This prevents semantic uncertainty or conflict from silently selecting a
 control-flow branch.
-
-Current v0 limit:
-
-- `else if` sugar is not yet supported for value-producing `if`; users must
-  write `else { if ... }`
 
 ## Tuples
 

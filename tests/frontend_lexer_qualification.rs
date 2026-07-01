@@ -66,7 +66,7 @@ fn test_operator_tokenization() {
 
 #[test]
 fn test_keyword_tokenization() {
-    let input = "fn requires ensures invariant record schema enum const trait impl let for in guard if else while loop break continue where with return match true false System Entity Law When Pulse Profile Import ref quad bool i32 u32 fx f64 N F T S";
+    let input = "fn requires ensures invariant record schema enum const trait impl let for in guard if else is when while loop break continue where with return match true false System Entity Law When Pulse Profile Import ref quad bool i32 u32 fx f64 N F T S";
     let expected = vec![
         TokenKind::KwFn,
         TokenKind::KwRequires,
@@ -84,6 +84,8 @@ fn test_keyword_tokenization() {
         TokenKind::KwGuard,
         TokenKind::KwIf,
         TokenKind::KwElse,
+        TokenKind::KwIs,
+        TokenKind::KwWhen,
         TokenKind::KwWhile,
         TokenKind::KwLoop,
         TokenKind::KwBreak,

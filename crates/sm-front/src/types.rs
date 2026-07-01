@@ -920,6 +920,7 @@ pub enum TokenKind {
     KwGuard,
     KwIf,
     KwElse,
+    KwIs,
     KwWhile,
     KwLoop,
     KwBreak,

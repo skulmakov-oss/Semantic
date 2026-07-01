@@ -116,6 +116,37 @@ This shape:
 - may be considered by future grammar / style work
 - is not accepted as executable syntax
 
+## 6.1 Dense Quad Selection Examples
+
+Quad-heavy source should stay compact without becoming opaque.
+
+See also:
+
+- [`quad_language_design.md`](quad_language_design.md)
+- [`../examples/quad_language_examples.md`](../examples/quad_language_examples.md)
+
+```semantic
+if q==T { ... } else if q==F { ... } else { ... }
+```
+
+```semantic
+match q {
+    N=>{ ... }
+    F=>{ ... }
+    T=>{ ... }
+    S=>{ ... }
+    _=>{ ... }
+}
+```
+
+```semantic
+let boot:quad = T;
+if boot==T { observe "ready"; }
+```
+
+These are visual examples only.
+They are not a grammar expansion and do not alter verifier or runtime meaning.
+
 ## 7. Density Decision Table
 
 | concern | legacy-shaped risk | Semantic density direction | status |

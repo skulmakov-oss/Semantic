@@ -3774,6 +3774,19 @@ mod tests {
     }
 
     #[test]
+    fn if_expression_accepts_else_if_sugar() {
+        let src = r#"
+            fn main() {
+                let total: i32 = if true { 1 } else if false { 2 } else { 3 };
+                let same = total == total;
+                if same { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("else-if sugar should typecheck");
+    }
+
+    #[test]
     fn match_expression_typechecks_when_arms_match() {
         let src = r#"
             fn main() {
@@ -4072,6 +4085,19 @@ mod tests {
         "#;
 
         typecheck_source(src).expect("expression-bodied function should typecheck");
+    }
+
+    #[test]
+    fn local_let_without_annotation_infers_from_value() {
+        let src = r#"
+            fn main() {
+                let total = 1 + 2;
+                let ok: bool = total == 3;
+                if ok { return; } else { return; }
+            }
+        "#;
+
+        typecheck_source(src).expect("local let inference should typecheck");
     }
 
     #[test]

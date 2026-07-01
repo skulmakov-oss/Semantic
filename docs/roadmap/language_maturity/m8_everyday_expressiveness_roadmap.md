@@ -6,6 +6,9 @@ Related documents:
 
 - `docs/roadmap/language_maturity/m8_everyday_expressiveness_blueprint.md`
 - `docs/roadmap/language_maturity/m8_everyday_expressiveness_phased_implementation_plan.md`
+- `docs/roadmap/language_maturity/semantic_language_experience_roadmap.md`
+- `docs/language/semantic_language_experience.md`
+- `docs/language/quad_language_design.md`
 
 ## Goal
 

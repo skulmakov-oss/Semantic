@@ -328,6 +328,8 @@ fn tokenize_line(
                     "guard" => TokenKind::KwGuard,
                     "if" => TokenKind::KwIf,
                     "else" => TokenKind::KwElse,
+                    "is" => TokenKind::KwIs,
+                    "when" => TokenKind::KwWhen,
                     "while" => TokenKind::KwWhile,
                     "loop" => TokenKind::KwLoop,
                     "break" => TokenKind::KwBreak,
