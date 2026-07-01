@@ -1,5 +1,6 @@
 mod calculator_shell;
 mod demo_interaction;
+mod renderer_layout_inspector;
 
 use demo_interaction::{render_demo_frame, DemoInteraction};
 use prom_ui::layout::{
@@ -21,6 +22,8 @@ use prom_ui::projection::{
 use prom_ui::render_projection_to_model;
 use prom_ui_backend_native::NativeBackend;
 use prom_ui_runtime::{DesktopSession, EventBuffer, LoopControl, SessionState, WindowConfig};
+use renderer_layout_inspector::{demo_inspector_tree, render_inspector_text};
+use std::env;
 
 fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
     let mut artifact = UiProjectionArtifact::new(UiProjectionArtifactId::new(100));
@@ -52,6 +55,13 @@ fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
 }
 
 fn main() {
+    if inspector_requested() {
+        let tree = demo_inspector_tree();
+        let output = render_inspector_text(&tree, "root");
+        println!("{output}");
+        return;
+    }
+
     println!("=== Semantic UI Application Boundary - Native Render Demo ===");
 
     let config = WindowConfig::new("Semantic UI Demo - WGPU Native", 800, 600);
@@ -92,4 +102,15 @@ fn main() {
 
     let _ = session.close();
     println!("Session state after close: {:?}", session.state());
+}
+
+fn inspector_requested() -> bool {
+    if env::args().any(|arg| arg == "inspector" || arg == "--inspector") {
+        return true;
+    }
+
+    match env::var("PROM_UI_DEMO") {
+        Ok(value) => value.eq_ignore_ascii_case("inspector"),
+        Err(_) => false,
+    }
 }

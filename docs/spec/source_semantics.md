@@ -426,6 +426,11 @@ Current statement meaning:
   `condition` is `false`
 - expression statements evaluate for effect and then discard any produced value
 - `let name: T = expr;` introduces a local binding
+- `let name = expr;` introduces a local binding whose type is inferred
+  conservatively from the initializer and any surrounding expected type
+- quad-heavy code may rely on local inference when the initializer already fixes
+  the intended quad meaning, but explicit `: quad` annotations remain the
+  clearest spelling when the source needs to communicate meaning directly
 - `let mut name: T = expr;` is admitted as an explicit writable-local spelling in
   the current Rust-like path
 - plain reassignment `name = expr;` is admitted for local bindings
@@ -643,6 +648,30 @@ Current v0 limit:
 
 - `else if` sugar is not yet supported for value-producing `if`; users must
   write `else { if ... }`
+
+### Expression-Bodied Functions
+
+Current function-body shorthand is stable in the current source contract:
+
+- `fn name(...) -> ret = expr;` lowers as a single returned expression
+- the expression-bodied form is equivalent to a block body whose only effect is
+  `return expr;`
+- the shorthand keeps terse function definitions deterministic; it does not
+  introduce a distinct runtime callable shape
+
+### Quad Predicate Selection
+
+Current quad selection remains explicit and deterministic:
+
+- `if q == T { ... }` and `if q == F { ... }` are the current branch-selection
+  forms for quad values
+- `match q { ... }` remains the compact selection form when all four quad
+  states must be handled together
+- `else if` remains nested `if` sugar in source order and does not add a new
+  quad predicate family
+- `when` and `is` are discussed in roadmap/design documents as vocabulary
+  candidates for future quad-heavy syntax, but they are not part of the current
+  source contract
 
 ## Tuples
 
