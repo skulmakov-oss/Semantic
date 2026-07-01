@@ -159,6 +159,8 @@ Current v0 record limits:
 - `RecordName { field: expr, ... }` is the current stage-1 record construction form
 - `record_value.field_name` is the current stage-1 read-only field access form
 - `record_value with { field: expr, ... }` is the current stage-2 immutable record update form
+- record literals and record updates may use field punning shorthand when the
+  field name and the in-scope binding name are the same
 - record literal fields must appear exactly once by name
 - lowering preserves declaration-slot order rather than source-field order
 - record types may now appear in executable local bindings, parameters, and returns
@@ -214,6 +216,7 @@ Current statement forms:
 - `guard condition else return expr;`
 - `assert(condition);`
 - `if condition { ... } else { ... }`
+- `if condition { ... } else if condition { ... } else { ... }`
 - `match quad_expr { T => { ... } ... _ => { ... } }`
 - `match quad_expr { T if ready == true => { ... } ... _ => { ... } }`
 - `match maybe_expr { Maybe::Some(value) => { ... } _ => { ... } }`
@@ -341,6 +344,8 @@ Current expression forms:
 - `match` expressions with value-producing arms:
   - `match state { T => { 1.0 } _ => { 0.0 } }`
   - `match state { T if ready == true => { 1.0 } _ => { 0.0 } }`
+- `when` expressions for quad-oriented rule selection:
+  - `when ready { 1.0 } else { 0.0 }`
 - `loop` expressions with explicit `break value`:
   - `loop { break 1.0; }`
   - `loop { if ready { break 1.0; } else { break 0.0; } }`
@@ -354,6 +359,7 @@ Current expression forms:
   - `+`, `-`
   - `<`, `<=`, `>`, `>=`
   - `==`, `!=`
+  - `is`
   - `&&`, `||`
   - `->`
 
@@ -368,6 +374,66 @@ Current v0 numeric-literal limits:
 - typed literal spelling does not imply new integer arithmetic beyond the
   already documented operator surface
 - tuple literal arity must be at least 2 in the current contract
+
+## Field Punning And Tail Expressions
+
+The current source contract keeps a narrow, deterministic sugar layer for
+readability. These forms are syntax-only conveniences and lower into the same
+canonical core shapes as their explicit counterparts.
+
+### Field Punning
+
+Field punning is accepted in record literals and record updates when a field
+name is spelled exactly the same as an in-scope binding name.
+
+Current forms:
+
+- `RecordName { field }`
+- `record_value with { field }`
+
+Canonical lowering:
+
+- `RecordName { field }` lowers to `RecordName { field: field }`
+- `record_value with { field }` lowers to `record_value with { field: field }`
+
+Current constraints:
+
+- the field name must resolve to a local binding in scope
+- the shorthand does not introduce a new binding
+- the shorthand does not rename or infer a different field name
+- the shorthand is available only where the surrounding record form is already valid
+
+### Tail Expression Return
+
+Value-producing blocks may end with a final expression that becomes the block
+result without an explicit `return`.
+
+Current form:
+
+- `{ let d = x - y; abs(d) }`
+
+Canonical lowering:
+
+- the tail expression lowers as if the block contained `return abs(d);`
+
+Current constraints:
+
+- the shorthand applies only when the block is already in value position
+- intermediate statements still require semicolons
+- a trailing expression without `;` is the only implicit-return form
+- statement-only blocks do not gain an implicit return rule
+- the shorthand does not change control-flow exhaustiveness rules for `if`,
+  `match`, or `loop`
+
+### Related Lowering Rule
+
+Both sugar forms preserve the current canonical lowering discipline:
+
+- the parser accepts the surface form only when the underlying core shape is
+  already well-typed and unambiguous
+- lowering expands the sugar before SemCode generation
+- diagnostics should point back to the canonical explicit form when the sugar
+  is malformed
 
 Current text-literal limits:
 
@@ -608,6 +674,9 @@ Current source restrictions:
 
 - `if quad_expr` is forbidden; users must write an explicit comparison
 - `match` currently accepts only `quad` scrutinees
+- `when` is an expression-level surface form for explicit boolean selection
+- `is` is a readable alias for explicit quad comparison, not a truthiness
+  coercion
 - quad implication uses `->`
 
 ## Builtin Calls

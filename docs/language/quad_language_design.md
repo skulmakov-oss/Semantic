@@ -39,7 +39,7 @@ QLD covers:
 
 The verifier sees canonical core semantics, not aesthetic syntax.
 
-Future surface forms lower to the following core forms:
+Current surface forms lower to the following core forms:
 
 | Surface | Canonical lowering |
 | --- | --- |
