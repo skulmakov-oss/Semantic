@@ -1,0 +1,48 @@
+fn quad_wave_slot(slot: i32) -> quad = if slot == 0 {
+    N
+} else {
+    if slot == 1 {
+        F
+    } else {
+        if slot == 2 {
+            T
+        } else {
+            S
+        }
+    }
+};
+
+fn quad_wave(index: i32) -> quad = quad_wave_slot(index % 4);
+
+fn main() {
+    let mut batch_hits = 0;
+    let mut logic_hits = 0;
+    let mut compare_hits = 0;
+    let mut checksum = 0;
+
+    for i in 0..128 {
+        let left = quad_wave(i);
+        let right = quad_wave(i + 1);
+        let merged = left || right;
+        let consensus = left && right;
+        let flipped = !left;
+
+        checksum += i;
+
+        if merged == S {
+            batch_hits += 1;
+        }
+        if consensus == N {
+            logic_hits += 1;
+        }
+        if flipped != left {
+            compare_hits += 1;
+        }
+    }
+
+    assert(batch_hits > 0);
+    assert(logic_hits > 0);
+    assert(compare_hits > 0);
+    assert(checksum == 8128);
+    return;
+}

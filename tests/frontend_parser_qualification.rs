@@ -1,4 +1,6 @@
 use sm_front::parse_rustlike_with_profile;
+use sm_front::types::MatchPattern;
+use sm_front::{Expr, Stmt};
 use sm_profile::ParserProfile;
 
 fn parse(src: &str) -> sm_front::Program {
@@ -49,6 +51,76 @@ fn test_function_shape_parsing() {
     "#;
     let prog = parse(src);
     assert!(prog.functions.len() >= 5);
+}
+
+#[test]
+fn test_expression_bodied_function_lowering_shape_matches_block_return() {
+    let src = r#"
+        fn expr_bodied(x: quad) -> quad = x;
+        fn block_bodied(x: quad) -> quad { return x; }
+    "#;
+    let prog = parse(src);
+
+    assert_eq!(prog.functions.len(), 2);
+
+    let expr_func = &prog.functions[0];
+    let block_func = &prog.functions[1];
+
+    let expr_stmt = prog.arena.stmt(expr_func.body[0]);
+    let block_stmt = prog.arena.stmt(block_func.body[0]);
+
+    let Stmt::Return(Some(expr_value)) = expr_stmt else {
+        panic!("expected expression-bodied function to lower to return statement");
+    };
+    let Stmt::Return(Some(block_value)) = block_stmt else {
+        panic!("expected block-bodied function to contain return statement");
+    };
+
+    let Expr::Var(_) = prog.arena.expr(*expr_value) else {
+        panic!("expected expression-bodied return value to be the function parameter");
+    };
+    let Expr::Var(_) = prog.arena.expr(*block_value) else {
+        panic!("expected block-bodied return value to be the function parameter");
+    };
+
+    assert_eq!(expr_func.body.len(), 1);
+    assert_eq!(block_func.body.len(), 1);
+}
+
+#[test]
+fn test_match_integer_literal_cases_lower_to_singleton_ranges() {
+    let src = r#"
+        fn main() {
+            let index: u32 = 1u32;
+            let out: quad = match index {
+                0 => { N }
+                1 => { F }
+                2 => { T }
+                _ => { S }
+            };
+            return;
+        }
+    "#;
+    let prog = parse(src);
+
+    let func = &prog.functions[0];
+    let Stmt::Let { value, .. } = prog.arena.stmt(func.body[1]) else {
+        panic!("expected leading let statement");
+    };
+    let Expr::Match(match_expr) = prog.arena.expr(*value) else {
+        panic!("expected match expression");
+    };
+
+    assert_eq!(match_expr.arms.len(), 3);
+    for (arm, expected) in match_expr.arms.iter().zip([0, 1, 2]) {
+        let MatchPattern::IntRange(range) = &arm.pat else {
+            panic!("expected integer literal case to lower to a singleton range");
+        };
+        assert_eq!(range.start, expected);
+        assert_eq!(range.end, expected);
+        assert!(range.inclusive);
+    }
+    assert!(match_expr.default.is_some());
 }
 
 #[test]

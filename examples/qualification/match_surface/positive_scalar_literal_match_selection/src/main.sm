@@ -1,0 +1,17 @@
+fn pick(index: i32) -> quad {
+    let out: quad = match index {
+        0 => { N }
+        1 => { F }
+        2 => { T }
+        _ => { S }
+    };
+    return out;
+}
+
+fn main() {
+    assert(pick(0) == N);
+    assert(pick(1) == F);
+    assert(pick(2) == T);
+    assert(pick(9) == S);
+    return;
+}

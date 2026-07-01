@@ -142,6 +142,8 @@ Current rules:
 - `match` currently operates on `quad`, nominal enum scrutinees, and the
   standard-form `Option(T)` / `Result(T, E)` families
 - `quad` is not accepted directly as an `if` condition
+- the user-facing quad predicate vocabulary is documented in
+  [`docs/language/quad_language_design.md`](../language/quad_language_design.md)
 
 ### Quad lexical model
 
@@ -224,6 +226,7 @@ Therefore:
 | Identity predicate | `a == b` | `bool` | same value state |
 | Evidence algebra | `a && b`, `a || b`, `!a`, `a -> b` | `quad` | T/F evidence-plane operation |
 | Control-flow predicate | `a == T`, `a == S` | `bool` | explicit boolean condition |
+| Readable quad predicate | `a is S`, `known(a)`, `unknown(a)`, `conflict(a)` | `bool` | surface alias for an existing bool predicate |
 | Future semantic helper | `quad_consensus(a, b)` | explicit API-defined type | policy-defined analysis |
 
 ## Standard Forms

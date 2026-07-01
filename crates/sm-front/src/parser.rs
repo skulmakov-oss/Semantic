@@ -1368,6 +1368,13 @@ impl<'a> Parser<'a> {
                     .alloc_expr(Expr::Binary(left, BinaryOp::Eq, right));
                 continue;
             }
+            if self.eat(TokenKind::KwIs) {
+                let right = self.parse_cmp()?;
+                left = self
+                    .arena
+                    .alloc_expr(Expr::Binary(left, BinaryOp::Eq, right));
+                continue;
+            }
             if self.eat(TokenKind::Ne) {
                 let right = self.parse_cmp()?;
                 left = self
@@ -1559,7 +1566,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_primary_atom(&mut self) -> Result<ExprId, FrontendError> {
-        if self.eat(TokenKind::KwIf) {
+        if self.eat(TokenKind::KwIf) || self.eat(TokenKind::KwWhen) {
             return self.parse_if_expr_after_kw_if();
         }
         if self.eat(TokenKind::KwMatch) {
@@ -2379,12 +2386,16 @@ impl<'a> Parser<'a> {
             });
         }
         if self.check(TokenKind::KwIf) {
-            return Err(FrontendError {
-                pos: self.pos(),
-                message:
-                    "else-if sugar is not supported in if expressions yet; use else { if ... }"
-                        .to_string(),
-            });
+            self.expect(TokenKind::KwIf, "expected 'if' after 'else'")?;
+            let nested_if = self.parse_if_expr_after_kw_if()?;
+            return Ok(self.arena.alloc_expr(Expr::If(IfExpr {
+                condition,
+                then_block,
+                else_block: BlockExpr {
+                    statements: Vec::new(),
+                    tail: nested_if,
+                },
+            })));
         }
         let else_block = self.parse_value_block()?;
         Ok(self.arena.alloc_expr(Expr::If(IfExpr {
@@ -2489,9 +2500,8 @@ impl<'a> Parser<'a> {
         // M9.4 Wave 2: integer range patterns `1..=5` or `1..5`
         if self.check(TokenKind::Num) {
             let text = self.peek().text.clone();
-            // Only admit plain integer literals (no suffix, no decimal point).
-            let is_plain_int =
-                !text.contains('.') && !text.contains("i32") && !text.contains("u32");
+            // Only admit integer forms here; floats are still rejected.
+            let is_plain_int = !text.contains('.');
             if is_plain_int {
                 // Lookahead: is the token after the number `..` or `..=`?
                 // We need to consume the number then check.
@@ -2517,15 +2527,24 @@ impl<'a> Parser<'a> {
                         inclusive,
                     }));
                 }
-                // Not a range — put the number back by returning an error explaining
-                // plain numeric patterns aren't supported outside ranges.
-                return Err(FrontendError {
-                    pos: self.pos(),
-                    message: format!(
-                        "plain integer literal '{}' is not a valid match pattern; use a range like {}..={} or an ADT pattern",
-                        num_text, num_text, num_text
-                    ),
-                });
+                let (core, suffix) = split_numeric_suffix(&num_text);
+                if let Some(suffix) = suffix {
+                    if suffix != "i32" && suffix != "u32" {
+                        return Err(FrontendError {
+                            pos: self.pos(),
+                            message: format!(
+                                "integer match pattern does not accept numeric suffix '{}'",
+                                suffix
+                            ),
+                        });
+                    }
+                }
+                let value = parse_i64_pattern_bound(core)?;
+                return Ok(MatchPattern::IntRange(IntRangePattern {
+                    start: value,
+                    end: value,
+                    inclusive: true,
+                }));
             }
         }
         if self.check(TokenKind::Ident) {
@@ -4594,7 +4613,7 @@ fn main() {
     }
 
     #[test]
-    fn rustlike_parser_rejects_else_if_sugar_in_if_expression() {
+    fn rustlike_parser_accepts_else_if_sugar_in_if_expression() {
         let src = r#"
 fn main() {
     let value: f64 = if true { 1.0 } else if false { 2.0 } else { 3.0 };
@@ -4602,11 +4621,65 @@ fn main() {
 }
 "#;
 
-        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
-            .expect_err("else-if sugar must reject in value position");
-        assert!(err
-            .message
-            .contains("else-if sugar is not supported in if expressions yet"));
+        let program = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("else-if sugar should parse in value position");
+        let func = &program.functions[0];
+        let Stmt::Let { value, .. } = program.arena.stmt(func.body[0]) else {
+            panic!("expected leading let statement");
+        };
+        let Expr::If(outer_if) = program.arena.expr(*value) else {
+            panic!("expected if expression");
+        };
+        let Expr::If(inner_if) = program.arena.expr(outer_if.else_block.tail) else {
+            panic!("expected nested if expression in else-if sugar");
+        };
+        let Expr::BoolLiteral(true) = program.arena.expr(outer_if.condition) else {
+            panic!("expected outer condition");
+        };
+        let Expr::BoolLiteral(false) = program.arena.expr(inner_if.condition) else {
+            panic!("expected nested condition");
+        };
+    }
+
+    #[test]
+    fn rustlike_parser_accepts_is_predicate_as_equality_sugar() {
+        let src = r#"
+fn main() {
+    let q: quad = T;
+    let value: bool = q is S;
+    return;
+}
+"#;
+
+        let program = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("is predicate should parse as equality sugar");
+        let func = &program.functions[0];
+        let Stmt::Let { value, .. } = program.arena.stmt(func.body[1]) else {
+            panic!("expected predicate let statement");
+        };
+        let Expr::Binary(_, BinaryOp::Eq, _) = program.arena.expr(*value) else {
+            panic!("expected is predicate to lower to equality in the AST");
+        };
+    }
+
+    #[test]
+    fn rustlike_parser_accepts_when_surface_syntax() {
+        let src = r#"
+fn main() {
+    let value: f64 = when true { 1.0 } else { 2.0 };
+    return;
+}
+"#;
+
+        let program = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("when expression should parse");
+        let func = &program.functions[0];
+        let Stmt::Let { value, .. } = program.arena.stmt(func.body[0]) else {
+            panic!("expected leading let statement");
+        };
+        let Expr::If(_) = program.arena.expr(*value) else {
+            panic!("expected when surface syntax to lower to if expression");
+        };
     }
 
     #[test]
