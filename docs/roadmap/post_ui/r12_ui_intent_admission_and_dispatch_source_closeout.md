@@ -17,7 +17,7 @@ This document finalizes the `R12-UI-INTENT-ADMISSION-AND-DISPATCH-SOURCE-PR` pha
 ## 4. Next Phase
 With the entire interaction pipeline (Routing -> Mapping -> Admission -> Dispatch) structurally complete in the core, the next phase must integrate this full pipeline into the `prom-ui-backend-native` event loop.
 
-Recommended next lane: `R12-UI-INTERACTION-PIPELINE-INTEGRATION-BOUNDARY-PR`.
+Recommended next lane: `R12-UI-INTERACTION-PIPELINE-INTEGRATION-SOURCE-PR`.
 
 ## 5. Final Decision
 PASS — R12 UI Intent Admission and Dispatch Source fully implemented and closed out.
