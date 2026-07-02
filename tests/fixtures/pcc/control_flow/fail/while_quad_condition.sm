@@ -1,0 +1,13 @@
+fn bad_while(state: quad) -> i32 {
+    let mut count: i32 = 0;
+
+    while state {
+        count = count + 1;
+    }
+
+    return count;
+}
+
+fn main() {
+    let _ = bad_while(T);
+}

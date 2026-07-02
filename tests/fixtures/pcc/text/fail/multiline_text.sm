@@ -1,0 +1,5 @@
+fn main() {
+    let message: text = "line one
+line two";
+    print(message);
+}

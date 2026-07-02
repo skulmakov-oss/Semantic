@@ -1,0 +1,7 @@
+fn main() {
+    let mut flags: Map(i32, bool) = map_empty();
+
+    flags = map_set(flags, 1, 42);
+
+    assert(map_get(flags, 1));
+}

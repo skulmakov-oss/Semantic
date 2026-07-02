@@ -176,3 +176,29 @@ CTF-WP6 defines future evidence requirements for project-root determinism before
 Project-root discovery, `semantic.toml`, `src/main.sm`, `smc new`, and project-level 7hell remain open until separately evidenced.
 
 WP6 does not add project-root determinism artifacts.
+
+## PCC / CTF Sync Follow-Ups
+
+The closed PCC practical phase expands the deterministic surface that CTF must
+keep explicit:
+
+- `text + text`;
+- `to_text(i32/u32/bool/quad)`;
+- `Sequence(T)` iteration and helper behavior;
+- `Map(K, V)` helper behavior for the admitted baseline;
+- `assert`;
+- `print(text)`.
+
+Current follow-up posture:
+
+```text
+SYNC-PASS-WITH-FOLLOWUPS
+```
+
+Open wording items:
+
+- map iteration stays out of scope to avoid ordering ambiguity;
+- helper determinism should be recorded without implying a broader collections
+  freeze;
+- `print(text)` remains an observable output surface, but capability wording is
+  handled separately.

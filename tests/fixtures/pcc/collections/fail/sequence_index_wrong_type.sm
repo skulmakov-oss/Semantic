@@ -1,0 +1,7 @@
+fn main() {
+    let values: Sequence(i32) = [1, 2, 3];
+    let index: bool = true;
+    let value: i32 = values[index];
+
+    assert(value == 1);
+}

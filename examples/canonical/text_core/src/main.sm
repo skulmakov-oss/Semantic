@@ -1,0 +1,30 @@
+fn build_status(name: text, value: i32) -> text {
+    let prefix: text = "sensor:";
+    let separator: text = "=";
+
+    return prefix + name + separator + to_text(value);
+}
+
+fn check_status(message: text) -> i32 {
+    if message == "" {
+        return -1;
+    }
+
+    if message != "sensor:pressure=42" {
+        return -2;
+    }
+
+    return 1;
+}
+
+fn main() {
+    let name: text = "pressure";
+    let value: i32 = 42;
+    let message: text = build_status(name, value);
+
+    assert(message == "sensor:pressure=42");
+    assert(message != "");
+    assert(check_status(message) == 1);
+
+    print(message);
+}

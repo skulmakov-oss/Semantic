@@ -1,0 +1,5 @@
+fn main() {
+    let state: quad = T;
+    let message: text = "state=" + state;
+    print(message);
+}

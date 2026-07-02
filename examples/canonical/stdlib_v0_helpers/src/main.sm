@@ -1,0 +1,88 @@
+fn build_values() -> Sequence(i32) {
+    let mut values: Sequence(i32) = [2, 3];
+
+    values = prepend(values, 1);
+    values = push(values, 4);
+
+    assert(len(values) == 4);
+    assert(is_empty(values) == false);
+    assert(contains(values, 3));
+
+    return values;
+}
+
+fn sum_values(values: Sequence(i32)) -> i32 {
+    let mut total: i32 = 0;
+
+    for value in values {
+        total = total + value;
+    }
+
+    return total;
+}
+
+fn pop_score() -> i32 {
+    let mut values: Sequence(i32) = [1, 2, 3];
+
+    values = pop(values);
+
+    assert(len(values) == 2);
+    assert(contains(values, 3) == false);
+
+    return sum_values(values);
+}
+
+fn build_flags() -> Map(i32, bool) {
+    let mut flags: Map(i32, bool) = map_empty();
+
+    flags = map_set(flags, 1, true);
+    flags = map_set(flags, 2, false);
+
+    assert(map_contains(flags, 1));
+    assert(map_contains(flags, 2));
+    assert(map_get(flags, 1, false) == true);
+    assert(map_get(flags, 2, true) == false);
+
+    return flags;
+}
+
+fn score_flags(flags: Map(i32, bool)) -> i32 {
+    let mut score: i32 = 0;
+
+    if map_get(flags, 1, false) {
+        score = score + 10;
+    }
+
+    if map_get(flags, 2, false) {
+        score = score + 20;
+    }
+
+    return score;
+}
+
+fn build_report(total: i32, score: i32) -> text {
+    let prefix: text = "stdlib-v0:";
+    let separator: text = ":";
+
+    return prefix + to_text(total) + separator + to_text(score);
+}
+
+fn main() {
+    let values: Sequence(i32) = build_values();
+    let flags: Map(i32, bool) = build_flags();
+
+    let total: i32 = sum_values(values);
+    let pop_total: i32 = pop_score();
+    let score: i32 = score_flags(flags);
+
+    assert(total == 10);
+    assert(pop_total == 3);
+    assert(score == 10);
+
+    let report: text = build_report(total, score);
+
+    assert(report == "stdlib-v0:10:10");
+    assert(report != "");
+
+    print(report);
+}

@@ -1,0 +1,12 @@
+fn bad_match(state: quad) -> i32 {
+    match state {
+        T => return 1;
+        F => return 0;
+        N => return 2;
+        S => return -1;
+    }
+}
+
+fn main() {
+    let _ = bad_match(T);
+}

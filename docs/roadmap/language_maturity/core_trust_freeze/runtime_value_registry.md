@@ -87,3 +87,32 @@ Boundary notes:
 - text / to_text: no universal reflection; debug_render remains internal-only;
 - controlled observation carrier / event: narrow verified-observation evidence exists, but it is not a general stdout family and stays separate from raw observation text;
 - Project Model: Semantic.package baseline is project-adjacent evidence, not a runtime value family unless runtime representation is later introduced.
+
+## PCC / CTF Sync Follow-Ups
+
+The closed PCC practical phase adds evidence-backed usage of the following
+runtime-relevant families:
+
+- `text`;
+- `Sequence(T)`;
+- `Map(K, V)`;
+- `Option(T)`;
+- `Result(T, E)`.
+
+Sync outcome:
+
+```text
+SYNC-PASS-WITH-FOLLOWUPS
+```
+
+Follow-up wording work should keep these families visible in the registry
+without turning this document into a VM implementation spec.
+
+Open registry wording questions:
+
+- whether `text` should be called a runtime value family, a source/runtime
+  surface, or both;
+- whether collection carriers should describe helper-return shapes in the
+  registry or only in feature docs;
+- whether `Option(T)` and `Result(T, E)` should remain freeze-candidate wording
+  until later trace or replay evidence exists.

@@ -3,6 +3,11 @@
 ## 1. Purpose
 This boundary document defines the future windowing lifecycle boundary for Semantic UI.
 
+Status note:
+the repository already contains a feature-gated native windowing/WGPU path and a dedicated reality audit at
+[r12_ui_native_wgpu_renderer_reality_audit.md](./r12_ui_native_wgpu_renderer_reality_audit.md).
+Treat this document as the windowing contract boundary, not as proof that native windowing is absent.
+
 It does not implement native windowing, winit integration, event loop behavior, surface creation, drawing, frame presentation, hit testing, interaction, runtime handoff, action execution, effect execution, or capability admission.
 
 ## 2. Closed Basis

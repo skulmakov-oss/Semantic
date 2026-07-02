@@ -1,0 +1,63 @@
+fn sum_to(limit: i32) -> i32 {
+    let mut i: i32 = 0;
+    let mut acc: i32 = 0;
+
+    while i < limit {
+        acc = acc + i;
+        i = i + 1;
+    }
+
+    return acc;
+}
+
+fn find_first_over(limit: i32, threshold: i32) -> i32 {
+    let mut i: i32 = 0;
+
+    while i < limit {
+        if i > threshold {
+            return i;
+        }
+
+        i = i + 1;
+    }
+
+    return -1;
+}
+
+fn count_skipping(limit: i32, skip: i32) -> i32 {
+    let mut i: i32 = 0;
+    let mut count: i32 = 0;
+
+    while i < limit {
+        if i == skip {
+            i = i + 1;
+            continue;
+        }
+
+        count = count + 1;
+        i = i + 1;
+    }
+
+    return count;
+}
+
+fn loop_until(limit: i32) -> i32 {
+    let mut i: i32 = 0;
+
+    loop {
+        if i >= limit {
+            break;
+        }
+
+        i = i + 1;
+    }
+
+    return i;
+}
+
+fn main() {
+    assert(sum_to(5) == 10);
+    assert(find_first_over(10, 6) == 7);
+    assert(count_skipping(5, 2) == 4);
+    assert(loop_until(5) == 5);
+}

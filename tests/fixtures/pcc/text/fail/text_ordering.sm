@@ -1,0 +1,8 @@
+fn main() {
+    let left: text = "a";
+    let right: text = "b";
+
+    if left < right {
+        print("ordered");
+    }
+}
