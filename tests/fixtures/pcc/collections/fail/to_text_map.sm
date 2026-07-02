@@ -1,0 +1,9 @@
+fn main() {
+    let mut flags: Map(i32, bool) = map_empty();
+
+    flags = map_set(flags, 1, true);
+
+    let message: text = to_text(flags);
+
+    print(message);
+}

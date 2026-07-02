@@ -1,0 +1,8 @@
+fn bad_continue() -> i32 {
+    continue;
+    return 0;
+}
+
+fn main() {
+    let _ = bad_continue();
+}

@@ -1,0 +1,6 @@
+fn main() {
+    let values: Sequence(i32) = [1, 2, 3];
+    let message: text = to_text(values);
+
+    print(message);
+}

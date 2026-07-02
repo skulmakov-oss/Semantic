@@ -1,0 +1,8 @@
+fn main() {
+    let mut flags: Map(i32, bool) = map_empty();
+
+    flags = map_set(flags, 1, true);
+    flags = map_remove(flags, 1);
+
+    assert(map_contains(flags, 1) == false);
+}
