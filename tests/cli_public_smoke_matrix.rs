@@ -40,6 +40,31 @@ fn cli_public_smoke_matrix_covers_canonical_source_and_artifact_paths() {
             "data_audit_record_iterable",
         ),
         (
+            "examples/canonical/text_collections_toolbox/src/main.sm",
+            "text_collections_toolbox",
+        ),
+        (
+            "examples/canonical/stdlib_v0_helpers/src/main.sm",
+            "stdlib_v0_helpers",
+        ),
+        (
+            "examples/canonical/collections_core/src/main.sm",
+            "collections_core",
+        ),
+        ("examples/canonical/text_core/src/main.sm", "text_core"),
+        (
+            "examples/canonical/match_control_flow/src/main.sm",
+            "match_control_flow",
+        ),
+        (
+            "examples/canonical/option_result_control_flow/src/main.sm",
+            "option_result_control_flow",
+        ),
+        (
+            "examples/canonical/loop_control_flow/src/main.sm",
+            "loop_control_flow",
+        ),
+        (
             "examples/canonical/rule_state_decision/src/main.sm",
             "rule_state_decision",
         ),

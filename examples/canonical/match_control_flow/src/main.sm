@@ -1,0 +1,53 @@
+fn classify_signal(state: quad) -> i32 {
+    let result: i32 = match state {
+        T => { 10 }
+        F => { 0 }
+        N => { 1 }
+        S => { -10 }
+        _ => { 0 }
+    };
+    return result;
+}
+
+fn route_signal(state: quad, priority: i32) -> i32 {
+    let result: i32 = match state {
+        S => { -100 }
+        N => { 0 }
+        F => { -1 }
+        T => {
+            if priority > 5 {
+                20
+            } else {
+                10
+            }
+        }
+        _ => { 0 }
+    };
+    return result;
+}
+
+fn alarm_level(state: quad, priority: i32) -> i32 {
+    let class: i32 = classify_signal(state);
+    let route: i32 = route_signal(state, priority);
+
+    if class < 0 {
+        return class;
+    }
+
+    if route < 0 {
+        return route;
+    }
+
+    return class + route;
+}
+
+fn main() {
+    let stable: i32 = alarm_level(T, 7);
+    let unknown: i32 = alarm_level(N, 3);
+    let conflict: i32 = alarm_level(S, 9);
+
+    assert(stable == 30);
+    assert(unknown == 1);
+    assert(conflict == -10);
+    return;
+}

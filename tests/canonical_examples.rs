@@ -71,6 +71,13 @@ fn canonical_positive_examples_check_run_compile_and_verify() {
         "examples/canonical/cli_batch_core/src/main.sm",
         "examples/canonical/rule_state_decision/src/main.sm",
         "examples/canonical/data_audit_record_iterable/src/main.sm",
+        "examples/canonical/text_collections_toolbox/src/main.sm",
+        "examples/canonical/stdlib_v0_helpers/src/main.sm",
+        "examples/canonical/collections_core/src/main.sm",
+        "examples/canonical/text_core/src/main.sm",
+        "examples/canonical/match_control_flow/src/main.sm",
+        "examples/canonical/option_result_control_flow/src/main.sm",
+        "examples/canonical/loop_control_flow/src/main.sm",
         "examples/canonical/wave2_local_helper_import/src/main.sm",
         "examples/canonical/positive_selected_import/src/main.sm",
     ] {

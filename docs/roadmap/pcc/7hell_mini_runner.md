@@ -39,6 +39,11 @@ Proves the end-to-end frontend compiler pipeline works correctly up to the binar
 - Compiles a critical semantic test case (`crates/sm-front/tests/adt_match_local.sm`) into a SemCode artifact (`out.smc`) and ensures the compilation is successful.
 - Compiles the tuple ownership E2E golden fixture (`tests/fixtures/pcc_tuple_ownership/positive_tuple_ownership.sm`) into `target/7hell/positive_tuple_ownership.smc`.
 - Runs the public CLI smoke matrix (`tests/cli_public_smoke_matrix.rs`) across canonical examples to cover `smc check`, `smc run`, `smc compile`, `smc verify`, and `smc run-smc`.
+- Runs the PCC control-flow negative diagnostics harness (`tests/pcc_control_flow_negative.rs`) to cover stable fail-fast markers for loop, match, and return-path rejection cases.
+- Runs the PCC text negative diagnostics harness (`tests/pcc_text_negative.rs`) to cover stable fail-fast markers for text concatenation, `to_text(record)`, multiline text, and text-ordering rejection cases.
+- Runs the PCC collections negative diagnostics harness (`tests/pcc_collections_negative.rs`) to cover stable fail-fast markers for unsupported map removal, map iteration, collection formatting, and type-mismatch rejection cases.
+- Runs the PCC stdlib negative diagnostics harness (`tests/pcc_stdlib_negative.rs`) to cover stable fail-fast markers for non-text `print(...)`, collection printing, `to_text(record)`, `to_text(collection)`, and premature stdlib namespace usage.
+- See [PCC-STDLIB-5 closeout](stdlib_v0_closeout.md) for the final Stdlib v0 contour summary.
 
 ### Hell 7 — PCC Documentation Integrity
 Proves that architectural documentation matches code reality.

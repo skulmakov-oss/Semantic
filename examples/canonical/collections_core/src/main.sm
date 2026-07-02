@@ -1,0 +1,58 @@
+fn sum_values(values: Sequence(i32)) -> i32 {
+    let mut total: i32 = 0;
+
+    for value in values {
+        total = total + value;
+    }
+
+    return total;
+}
+
+fn sequence_score() -> i32 {
+    let mut values: Sequence(i32) = [2, 3];
+
+    values = prepend(values, 1);
+    values = push(values, 4);
+
+    assert(len(values) == 4);
+    assert(is_empty(values) == false);
+    assert(contains(values, 3));
+
+    return sum_values(values);
+}
+
+fn pop_score() -> i32 {
+    let mut values: Sequence(i32) = [1, 2, 3];
+
+    values = pop(values);
+
+    assert(len(values) == 2);
+    assert(contains(values, 3) == false);
+
+    return sum_values(values);
+}
+
+fn map_score() -> i32 {
+    let mut flags: Map(i32, bool) = map_empty();
+
+    flags = map_set(flags, 1, true);
+    flags = map_set(flags, 2, false);
+
+    assert(map_contains(flags, 1));
+    assert(map_contains(flags, 2));
+    assert(map_get(flags, 1, false) == true);
+    assert(map_get(flags, 2, true) == false);
+
+    if map_get(flags, 1, false) {
+        return 10;
+    }
+
+    return -1;
+}
+
+fn main() {
+    assert(sequence_score() == 10);
+    assert(pop_score() == 3);
+    assert(map_score() == 10);
+    return;
+}

@@ -30,7 +30,7 @@ The script will fail fast if any gate is broken.
 - **Hell 3:** SemCode Format Authority (`sm-format` isolation and `rg` leakage checks)
 - **Hell 4:** Verifier Negative Corpus (`sm-verify` admission tests)
 - **Hell 5:** VM Ownership Semantics (`sm-vm` borrow/overlap tests)
-- **Hell 6:** Source to SemCode Smoke (golden pipeline compilation, tuple/record/Option-Result smoke, and public CLI smoke matrix)
+- **Hell 6:** Source to SemCode Smoke (golden pipeline compilation, tuple/record/Option-Result smoke, public CLI smoke matrix, and PCC control-flow + text + collections + stdlib negative diagnostics)
 - **Hell 7:** PCC Documentation Integrity (matrix and architecture docs exist)
 
 Read more at: `docs/roadmap/pcc/7hell_mini_runner.md`

@@ -1,0 +1,38 @@
+fn summarize_batch(codes: Sequence(i32)) -> text {
+    let status0: Map(i32, bool) = map_empty();
+    let status1: Map(i32, bool) = map_set(status0, 0, true);
+    let status2: Map(i32, bool) = map_set(status1, 2, true);
+    let status_flags: Map(i32, bool) = map_set(status2, 9, true);
+
+    if len(codes) == 0 {
+        return "batch=0,status=empty";
+    }
+
+    let has_error: bool = contains(codes, 9);
+    let has_retry: bool = contains(codes, 2);
+    let count: text = to_text(len(codes));
+
+    if has_error == true && map_get(status_flags, 9, false) == true {
+        return "batch=" + count + ",status=error";
+    }
+
+    if has_retry == true && map_get(status_flags, 2, false) == true {
+        return "batch=" + count + ",status=retry";
+    }
+
+    if map_get(status_flags, codes[0], false) == true {
+        return "batch=" + count + ",status=ok";
+    }
+
+    return "batch=" + count + ",status=unknown";
+}
+
+fn main() {
+    let values: Sequence(i32) = [2, 1, 0];
+    let staged: Sequence(i32) = push(values, 4);
+    let normalized: Sequence(i32) = prepend(staged, 7);
+    let summary: text = summarize_batch(values);
+    assert(len(normalized) == 5);
+    assert(summary == "batch=3,status=retry");
+    return;
+}

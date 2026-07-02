@@ -56,6 +56,13 @@ Inventory:
 | `cli_batch_core` | small CLI-style computation core | qualified limited release | public `run` / `compile` example |
 | `rule_state_decision` | record-oriented rule/state decision logic | qualified limited release | current canonical record example |
 | `data_audit_record_iterable` | direct-record `Iterable` traversal | qualified limited release | current canonical record-heavy example |
+| `text_collections_toolbox` | practical toolbox control/text/collections example | qualified limited release | canonical sample for current practical surface |
+| `stdlib_v0_helpers` | practical stdlib v0 helper-surface example | qualified limited release | canonical sample for helper-surface boundaries |
+| `collections_core` | standalone practical collections surface example | qualified limited release | canonical sample for collections-only surface |
+| `text_core` | standalone practical text surface example | qualified limited release | canonical sample for text-only surface |
+| `match_control_flow` | practical `match`-driven quad control-flow example | qualified limited release | canonical sample for quad routing |
+| `option_result_control_flow` | practical `Option` / `Result` control-flow example | qualified limited release | canonical sample for option/result routing |
+| `loop_control_flow` | practical loop-driven control-flow example | qualified limited release | canonical sample for admitted `while` / `loop` / `break` / `continue` |
 | `wave2_local_helper_import` | helper-module executable authoring | qualified limited release | public source workflow example |
 | `positive_selected_import` | selected import executable authoring | qualified limited release | public source workflow example |
 | `boundary_alias_import` | boundary example for executable alias import | out of scope | intentionally rejected boundary example |

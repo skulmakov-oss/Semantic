@@ -53,6 +53,84 @@ cargo run --bin smc -- run examples/canonical/rule_state_decision/src/main.sm
 cargo run --bin smc -- run examples/canonical/data_audit_record_iterable/src/main.sm
 ```
 
+### `text_collections_toolbox`
+
+- path: `examples/canonical/text_collections_toolbox/`
+- purpose: practical toolbox example for control flow, text, collections, and stdlib
+- current reading: `qualified limited release`
+- first command:
+
+```powershell
+cargo run --bin smc -- run examples/canonical/text_collections_toolbox/src/main.sm
+```
+
+### `stdlib_v0_helpers`
+
+- path: `examples/canonical/stdlib_v0_helpers/`
+- purpose: practical helper-surface example for current PCC stdlib v0
+- current reading: `qualified limited release`
+- first command:
+
+```powershell
+cargo run --bin smc -- check examples/canonical/stdlib_v0_helpers/src/main.sm
+```
+
+### `collections_core`
+
+- path: `examples/canonical/collections_core/`
+- purpose: standalone practical collections surface example
+- current reading: `qualified limited release`
+- first command:
+
+```powershell
+cargo run --bin smc -- run examples/canonical/collections_core/src/main.sm
+```
+
+### `text_core`
+
+- path: `examples/canonical/text_core/`
+- purpose: standalone practical `text` surface example
+- current reading: `qualified limited release`
+- first command:
+
+```powershell
+cargo run --bin smc -- run examples/canonical/text_core/src/main.sm
+```
+
+### `match_control_flow`
+
+- path: `examples/canonical/match_control_flow/`
+- purpose: practical `match`-driven control-flow over `quad`
+- current reading: `qualified limited release`
+- first command:
+
+```powershell
+cargo run --bin smc -- run examples/canonical/match_control_flow/src/main.sm
+```
+
+### `option_result_control_flow`
+
+- path: `examples/canonical/option_result_control_flow/`
+- purpose: practical `Option` / `Result` control flow over the admitted public surface
+- current reading: `qualified limited release`
+- first command:
+
+```powershell
+cargo run --bin smc -- run examples/canonical/option_result_control_flow/src/main.sm
+```
+
+### `loop_control_flow`
+
+- path: `examples/canonical/loop_control_flow/`
+- purpose: practical loop-driven control flow over admitted `while`, `loop`,
+  `break`, and `continue`
+- current reading: `qualified limited release`
+- first command:
+
+```powershell
+cargo run --bin smc -- run examples/canonical/loop_control_flow/src/main.sm
+```
+
 ### `wave2_local_helper_import`
 
 - path: `examples/canonical/wave2_local_helper_import/`
