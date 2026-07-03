@@ -1,6 +1,6 @@
 # R12 UI Native/WGPU Reality Reconciliation
 
-Status: Draft
+Status: Audited
 Track: POST-UI / R12
 Purpose: record the current documentation/code alignment issue around native WGPU rendering reality
 
@@ -154,12 +154,11 @@ It only records the need to reconcile code reality and architectural documentati
 
 ## 8. Practical next step
 
-The next safe PR should be docs-only and should either:
+This note has now been superseded by the dedicated reality audit at:
 
-1. update older renderer boundary docs with a clear supersession/status note, or
-2. create a reality audit that classifies the WGPU path as admitted, experimental, or split-status.
+- [r12_ui_native_wgpu_renderer_reality_audit.md](./r12_ui_native_wgpu_renderer_reality_audit.md)
 
-Until then, the safest wording is:
+Until a separate closeout updates the older boundary docs, the safest wording is:
 
 ```text
 The native WGPU path exists behind feature gates and is demonstrated in the UI demo, but the exact renderer admission status must be reconciled against the older boundary documents before it is treated as a widened stable UI contract.

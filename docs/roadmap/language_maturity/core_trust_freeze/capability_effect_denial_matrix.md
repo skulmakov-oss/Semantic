@@ -76,3 +76,24 @@ Reading admitted project files is tooling input, not language host capability.
 Project-root support must not introduce network IO, registry access, remote package fetch, or telemetry.
 
 No project-root capability widening is added by WP6.
+
+## PCC / CTF Sync Follow-Ups
+
+The closed PCC practical phase keeps the current capability wording under
+pressure from `print(text)`.
+
+`print(text)` remains:
+
+- canonical-safe for PCC practical examples;
+- capability-aware in principle;
+- not a host-ABI widening claim;
+- not a license to treat user-visible output as unrestricted host IO.
+
+Follow-up wording should keep this explicit without reclassifying `print(text)`
+as a general host-effect API.
+
+Sync outcome:
+
+```text
+SYNC-PASS-WITH-FOLLOWUPS
+```

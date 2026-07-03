@@ -1,0 +1,10 @@
+record Sensor {
+    id: i32,
+}
+
+fn main() {
+    let sensor: Sensor = Sensor { id: 1 };
+    let message: text = to_text(sensor);
+
+    print(message);
+}

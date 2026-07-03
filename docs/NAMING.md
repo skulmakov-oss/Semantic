@@ -11,14 +11,15 @@ This note defines the project's naming rules and the meaning of its short forms.
 
 ## Product Names
 
-- `Semantic Language`: the language and overall project identity.
+- `Semantic Language`: the canonical public language name and overall project identity.
+- `Semantic`: the short form used in prose, headings, and tooling references.
 - `TON618 Core`: the low-level core/engine identity.
 
 ## File Extensions
 
-- `.sm`: source code for Semantic Language.
+- `.sm`: the primary public source code extension for Semantic Language.
 - `.sem`: textual machine/intermediate representation.
-- `.smc`: compiled SemCode bytecode.
+- `.smc`: compiled SemCode bytecode generated from `.sm` source.
 
 ## Tools
 

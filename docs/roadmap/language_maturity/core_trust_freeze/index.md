@@ -34,6 +34,15 @@ CTF is not a final phase after PCC. It runs across PCC.
 - 7hell Diagnostics Hell seam audit: `reports/7hell_diag_report_quality_seam_audit.md`
 - 7hell PCC stage mapping: `docs/roadmap/language_maturity/7hell_pcc4_pcc9_stage_mapping.md`
 - 7hell initial fixture selection: `docs/roadmap/language_maturity/7hell_initial_fixture_selection.md`
+- PCC / CTF sync checkpoint: `docs/roadmap/pcc/pcc_ctf_sync_checkpoint.md`
+- PCC / CTF sync closeout: `docs/roadmap/pcc/pcc_ctf_sync_closeout.md`
+- CTF sync issue pack:
+  - `docs/roadmap/language_maturity/core_trust_freeze/ctf_sync_runtime_value_registry.md`
+  - `docs/roadmap/language_maturity/core_trust_freeze/ctf_sync_trap_taxonomy.md`
+  - `docs/roadmap/language_maturity/core_trust_freeze/ctf_sync_determinism_matrix.md`
+  - `docs/roadmap/language_maturity/core_trust_freeze/ctf_sync_capability_print_text.md`
+  - `docs/roadmap/language_maturity/core_trust_freeze/ctf_sync_golden_trace_policy.md`
+  - `docs/roadmap/language_maturity/core_trust_freeze/ctf_sync_closeout.md`
 - SymbolId hot-path audit: `docs/roadmap/language_maturity/core_trust_freeze/symbolid_hot_path_audit.md`
 - Map open-edge policy: `docs/roadmap/language_maturity/core_trust_freeze/map_open_edge_policy.md`
 - PCC waypoint review: `docs/roadmap/language_maturity/pcc_waypoint_review_after_pcc4_pcc9.md`

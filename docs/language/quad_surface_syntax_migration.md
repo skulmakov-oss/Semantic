@@ -236,9 +236,8 @@ type boundary.
 
 ## Status Notes
 
-- `== S` and the other current core forms are implemented today.
-- `is`, `when`, `else if`, `match`, and expression-bodied functions are part of
-  the QLD surface-syntax track.
+- `== S`, `is`, `when`, `else if`, `match`, and expression-bodied functions
+  are part of the current QLD surface-syntax track.
 - conservative local `let` inference is implemented today for obvious local
   values.
 - This guide documents the migration path; it does not widen release claims.

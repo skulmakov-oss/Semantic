@@ -13,8 +13,28 @@ It replaces the earlier planning-only pack in:
 
 This pack is intentionally split into:
 
-- five positive examples inside the current `qualified limited release` contour
+- twelve positive examples inside the current `qualified limited release` contour
 - one boundary example that shows a still-real limit honestly
+
+This pack is also the canonical `.sm` sample surface intended for future GitHub
+Linguist review. The twelve positive examples are small, readable, and stable
+enough to serve as representative language samples:
+
+- `cli_batch_core`
+- `rule_state_decision`
+- `data_audit_record_iterable`
+- `text_collections_toolbox`
+- `stdlib_v0_helpers`
+- `collections_core`
+- `text_core`
+- `match_control_flow`
+- `option_result_control_flow`
+- `loop_control_flow`
+- `wave2_local_helper_import`
+- `positive_selected_import`
+
+The boundary example remains included as an honest exclusion marker and should
+not be treated as a positive sample for Linguist detection.
 
 ## Canonical Examples
 
@@ -31,17 +51,48 @@ This pack is intentionally split into:
    - purpose: data-heavy audit pass over direct-record `Iterable` dispatch
    - current reading: `qualified limited release`
 
-4. `wave2_local_helper_import`
+4. `text_collections_toolbox`
+   - purpose: practical toolbox example for control flow, text, collections,
+     and stdlib
+   - current reading: `qualified limited release`
+
+5. `stdlib_v0_helpers`
+   - purpose: practical helper-surface example for current PCC stdlib v0
+   - current reading: `qualified limited release`
+
+6. `collections_core`
+   - purpose: standalone practical collections surface example
+   - current reading: `qualified limited release`
+
+7. `text_core`
+   - purpose: standalone practical `text` surface example
+   - current reading: `qualified limited release`
+
+8. `match_control_flow`
+   - purpose: practical `match`-driven control-flow over `quad`
+   - current reading: `qualified limited release`
+
+9. `option_result_control_flow`
+   - purpose: practical `Option` / `Result` control flow over the admitted
+     public surface
+   - current reading: `qualified limited release`
+
+10. `loop_control_flow`
+   - purpose: practical loop-driven control flow over admitted `while`,
+     `loop`, `break`, and `continue`
+   - current reading: `qualified limited release`
+
+11. `wave2_local_helper_import`
    - purpose: admitted helper-module executable authoring with direct local-path
      bare import
    - current reading: `qualified limited release`
 
-5. `positive_selected_import`
+12. `positive_selected_import`
    - purpose: admitted helper-module executable authoring with direct local-path
      selected import over the current function-only helper slice
    - current reading: `qualified limited release`
 
-6. `boundary_alias_import`
+13. `boundary_alias_import`
    - purpose: honest boundary example showing that top-level alias import on the
      executable path is still rejected
    - current reading: `out of scope`

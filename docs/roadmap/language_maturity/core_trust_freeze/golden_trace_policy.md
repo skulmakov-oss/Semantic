@@ -138,3 +138,31 @@ CTF-WP6 defines the trust policy for future project-root behavior, but it does n
 Future PCC-9I work may add positive project-root check / run traces, project diagnostics traces, and project-root replay traces when behavior is implemented and stable.
 
 Project manifest helper traces are still not project-root execution traces.
+
+## PCC / CTF Sync Follow-Ups
+
+The closed PCC practical phase identifies canonical anchors that are plausible
+future trace candidates:
+
+- `match_control_flow`;
+- `option_result_control_flow`;
+- `loop_control_flow`;
+- `text_core`;
+- `collections_core`;
+- `stdlib_v0_helpers`.
+
+These are not automatically golden traces.
+
+Current follow-up posture:
+
+```text
+SYNC-PASS-WITH-FOLLOWUPS
+```
+
+Policy reminders:
+
+- canonical anchors can remain docs/test evidence without becoming golden
+  traces immediately;
+- negative harness output can stay marker-based without full snapshot locking;
+- `print(text)` output should only enter traces if trace policy explicitly
+  requires it.

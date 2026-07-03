@@ -1,0 +1,5 @@
+fn main() {
+    let message: text = text::to_text(42);
+
+    print(message);
+}

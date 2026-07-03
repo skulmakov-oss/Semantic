@@ -1,0 +1,8 @@
+fn bad_break() -> i32 {
+    break;
+    return 0;
+}
+
+fn main() {
+    let _ = bad_break();
+}

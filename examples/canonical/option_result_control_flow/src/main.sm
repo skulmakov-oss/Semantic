@@ -1,0 +1,49 @@
+fn option_score(value: Option(i32)) -> i32 {
+    let score: i32 = match value {
+        Option::Some(x) => { x }
+        Option::None => { 0 }
+        _ => { -100 }
+    };
+    return score;
+}
+
+fn result_score(value: Result(i32, i32)) -> i32 {
+    let score: i32 = match value {
+        Result::Ok(x) => { x }
+        Result::Err(code) => { 0 - code }
+        _ => { -100 }
+    };
+    return score;
+}
+
+fn combine(option_value: Option(i32), result_value: Result(i32, i32)) -> i32 {
+    let option_part: i32 = option_score(option_value);
+    let result_part: i32 = result_score(result_value);
+
+    if option_part < 0 {
+        return option_part;
+    }
+
+    if result_part < 0 {
+        return result_part;
+    }
+
+    return option_part + result_part;
+}
+
+fn main() {
+    let ok_option: Option(i32) = Option::Some(10);
+    let none_option: Option(i32) = Option::None;
+
+    let ok_result: Result(i32, i32) = Result::Ok(20);
+    let err_result: Result(i32, i32) = Result::Err(7);
+
+    assert(option_score(ok_option) == 10);
+    assert(option_score(none_option) == 0);
+
+    assert(result_score(ok_result) == 20);
+    assert(result_score(err_result) == -7);
+
+    assert(combine(Option::Some(3), Result::Ok(4)) == 7);
+    return;
+}

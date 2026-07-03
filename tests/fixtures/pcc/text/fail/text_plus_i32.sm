@@ -1,0 +1,4 @@
+fn main() {
+    let message: text = "value=" + 42;
+    print(message);
+}

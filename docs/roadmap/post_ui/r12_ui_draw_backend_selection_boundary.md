@@ -3,6 +3,11 @@
 ## 1. Purpose
 This boundary document defines the selection of `wgpu` as the sole authorized minimal draw backend for the UI framework inside the `prom-ui-backend-native` crate.
 
+Status note:
+the repository now contains a feature-gated native WGPU path and a dedicated reality audit at
+[r12_ui_native_wgpu_renderer_reality_audit.md](./r12_ui_native_wgpu_renderer_reality_audit.md).
+Treat this document as the boundary that governs the future draw contract, not as evidence that WGPU is absent.
+
 It does not implement any new source code.
 It does not change tests, Cargo features, dependencies, or Admission Guard.
 It does not introduce draw execution, frame presentation, or visual output logic.
@@ -43,6 +48,7 @@ Existing repository facts from the accepted baseline:
 - `wgpu` dependency exists.
 - `NativeBackendWgpuContext` skeleton exists.
 - `prom-ui` core has zero `wgpu` or `winit` dependencies.
+- The feature-gated native WGPU path is already present in the backend-native crate and is documented separately by the native WGPU reality audit.
 
 ## 6. Ownership Boundary
 This selection designates that:

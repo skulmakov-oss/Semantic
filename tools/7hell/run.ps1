@@ -100,6 +100,18 @@ cargo run --bin smc -- compile tests/fixtures/pcc_tuple_ownership/positive_tuple
 Assert-Success "Tuple ownership compilation smoke test failed"
 cargo test --test cli_public_smoke_matrix
 Assert-Success "Public CLI smoke matrix test failed"
+Write-Host "Running PCC control-flow negative diagnostics..." -ForegroundColor Cyan
+cargo test --test pcc_control_flow_negative
+Assert-Success "PCC control-flow negative diagnostics test failed"
+Write-Host "Running PCC text negative diagnostics..." -ForegroundColor Cyan
+cargo test --test pcc_text_negative
+Assert-Success "PCC text negative diagnostics test failed"
+Write-Host "Running PCC collections negative diagnostics..." -ForegroundColor Cyan
+cargo test --test pcc_collections_negative
+Assert-Success "PCC collections negative diagnostics test failed"
+Write-Host "Running PCC stdlib negative diagnostics..." -ForegroundColor Cyan
+cargo test --test pcc_stdlib_negative
+Assert-Success "PCC stdlib negative diagnostics test failed"
 Remove-Item -Path "target/7hell/adt_match_local.smc" -Force -ErrorAction Ignore
 Remove-Item -Path "target/7hell/positive_option_result_ownership.smc" -Force -ErrorAction Ignore
 Remove-Item -Path "target/7hell/positive_record_field_ownership.smc" -Force -ErrorAction Ignore

@@ -607,6 +607,8 @@ Current `if` semantics:
 Current `if` expression semantics:
 
 - `if condition { ... } else { ... }` may appear in value position
+- `if condition { ... } else if condition { ... } else { ... }` is also
+  admitted and lowers through the same nested `if` structure
 - both branches are evaluated through value-producing block semantics
 - both branches must produce the same type
 - `else` is required for value-producing `if`
@@ -646,8 +648,8 @@ control-flow branch.
 
 Current v0 limit:
 
-- `else if` sugar is not yet supported for value-producing `if`; users must
-  write `else { if ... }`
+- `if` still requires `bool` conditions; `quad` is not an implicit condition
+  type
 
 ### Expression-Bodied Functions
 
@@ -667,11 +669,11 @@ Current quad selection remains explicit and deterministic:
   forms for quad values
 - `match q { ... }` remains the compact selection form when all four quad
   states must be handled together
+- `when` is the compact expression-selection form used in quad-heavy code; it
+  lowers to the canonical nested expression-`if` shape
+- `is` is a readable alias for explicit quad comparison and lowers to `==`
 - `else if` remains nested `if` sugar in source order and does not add a new
   quad predicate family
-- `when` and `is` are discussed in roadmap/design documents as vocabulary
-  candidates for future quad-heavy syntax, but they are not part of the current
-  source contract
 
 ## Tuples
 

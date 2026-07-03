@@ -4,6 +4,11 @@
 
 This document defines the boundary for a future R12 UI renderer.
 
+Status note:
+the repository already contains a feature-gated native WGPU path and a dedicated reality audit at
+[r12_ui_native_wgpu_renderer_reality_audit.md](./r12_ui_native_wgpu_renderer_reality_audit.md).
+This boundary remains the read-only renderer contract boundary, but it should not be read as claiming that native renderer support is entirely absent.
+
 It does not implement renderer code.
 It defines what a future renderer may consume from UiProjectionArtifact and what it must not infer or execute.
 

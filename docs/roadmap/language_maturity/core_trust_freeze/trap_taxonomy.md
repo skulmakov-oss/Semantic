@@ -124,6 +124,34 @@ This does not close:
 - semantic.toml diagnostics;
 - 7hell readiness.
 
+## PCC / CTF Sync Follow-Ups
+
+The closed PCC practical phase adds new diagnostic edges that remain important
+for trust wording, even where the current docs already classify the visible
+behavior.
+
+Open trap taxonomy wording items:
+
+- `map_get` missing-key behavior;
+- sequence out-of-bounds access;
+- empty `pop`;
+- non-text `print(...)`;
+- unsupported `to_text(...)` targets;
+- invalid collection key / value / index types;
+- unsupported collection formatting.
+
+These are currently understood as a mix of compile-time diagnostics, runtime
+trap candidates, or future policy items depending on the surface.
+
+Sync outcome:
+
+```text
+SYNC-PASS-WITH-FOLLOWUPS
+```
+
+The important boundary remains unchanged: PCC diagnostics can be stable without
+being forced into a single frozen trap label prematurely.
+
 ## 5. Planned / non-admitted classes
 
 None remain in the current PCC practical-core trap set.

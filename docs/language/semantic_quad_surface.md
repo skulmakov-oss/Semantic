@@ -49,10 +49,14 @@ The current admitted branch vocabulary is explicit:
 
 - `if q == T { ... }`
 - `if q == F { ... }`
+- `if q is S { ... }`
+- `known(q)`
+- `unknown(q)`
+- `conflict(q)`
 - `match q { N => ... F => ... T => ... S => ... _ => ... }`
 
-Roadmap vocabulary candidates such as `when` and `is` should be treated as
-design candidates, not as current admitted grammar.
+`when` is the compact expression-selection form used in quad-heavy code, and
+`is` is the readable surface alias for explicit quad comparison.
 
 ## Surface Syntax
 
@@ -86,7 +90,9 @@ Canonical lowering stays deterministic:
 
 - `if q == T { ... }` lowers through the `bool` result of the comparison
 - `if q == F { ... }` lowers the same way
+- `if q is S { ... }` lowers through the same `bool` comparison path
 - `else if` lowers as nested `if` in source order
+- `when` lowers as nested expression `if`
 - `match q` lowers as ordered dispatch over the quad literals
 - `_` remains the explicit default arm
 
@@ -151,7 +157,6 @@ if boot==T { observe "ready"; }
 
 This document does not:
 
-- claim `when` or `is` are currently admitted parser forms
 - collapse `quad` into boolean truthiness
 - widen runtime behavior
 - change verifier policy
