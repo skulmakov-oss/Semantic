@@ -8,12 +8,11 @@ use prom_ui::renderer::{
     present_render_trace, render_projection_to_model, UiRenderDiagnosticItem,
     UiRenderDiagnosticKind, UiRenderDiagnosticSeverity, UiRenderDiagnosticsPresentation,
     UiRenderDiagnosticsPresentationId, UiRenderError, UiRenderInspectionItem,
-    UiRenderInspectionItemKind, UiRenderInspectionPresentation,
-    UiRenderInspectionPresentationId, UiRenderInspectionSection, UiRenderInspectionSectionKind,
-    UiRenderMarker, UiRenderMarkerItem, UiRenderMarkerPresentation, UiRenderMarkerPresentationId,
-    UiRenderModel, UiRenderModelId, UiRenderNode, UiRenderNodeId, UiRenderNodeKind,
-    UiRenderTraceLink, UiRenderTraceLinkKind, UiRenderTracePresentation,
-    UiRenderTracePresentationId,
+    UiRenderInspectionItemKind, UiRenderInspectionPresentation, UiRenderInspectionPresentationId,
+    UiRenderInspectionSection, UiRenderInspectionSectionKind, UiRenderMarker, UiRenderMarkerItem,
+    UiRenderMarkerPresentation, UiRenderMarkerPresentationId, UiRenderModel, UiRenderModelId,
+    UiRenderNode, UiRenderNodeId, UiRenderNodeKind, UiRenderTraceLink, UiRenderTraceLinkKind,
+    UiRenderTracePresentation, UiRenderTracePresentationId,
 };
 
 // ============================================================================
