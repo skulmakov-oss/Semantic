@@ -4,8 +4,15 @@ use prom_ui::projection::{
     UiProjectionArtifactId,
 };
 use prom_ui::renderer::{
-    render_projection_to_model, UiRenderError, UiRenderMarker, UiRenderModel, UiRenderModelId,
-    UiRenderNode, UiRenderNodeId, UiRenderNodeKind,
+    present_render_diagnostics, present_render_inspection, present_render_markers,
+    present_render_trace, render_projection_to_model, UiRenderDiagnosticItem,
+    UiRenderDiagnosticKind, UiRenderDiagnosticSeverity, UiRenderDiagnosticsPresentation,
+    UiRenderDiagnosticsPresentationId, UiRenderError, UiRenderInspectionItem,
+    UiRenderInspectionItemKind, UiRenderInspectionPresentation, UiRenderInspectionPresentationId,
+    UiRenderInspectionSection, UiRenderInspectionSectionKind, UiRenderMarker, UiRenderMarkerItem,
+    UiRenderMarkerPresentation, UiRenderMarkerPresentationId, UiRenderModel, UiRenderModelId,
+    UiRenderNode, UiRenderNodeId, UiRenderNodeKind, UiRenderTraceLink, UiRenderTraceLinkKind,
+    UiRenderTracePresentation, UiRenderTracePresentationId,
 };
 
 // ============================================================================
@@ -54,6 +61,59 @@ fn render_node_accessor_surface_is_locked() {
     let _: fn(&UiRenderNode) -> Option<UiIrNodeId> = UiRenderNode::source_ir_node;
     let _: fn(&UiRenderNode) -> UiRenderNodeKind = UiRenderNode::kind;
     let _: fn(&UiRenderNode) -> &[UiRenderMarker] = UiRenderNode::markers;
+}
+
+#[test]
+fn renderer_presentation_surface_is_locked() {
+    let _: fn(&UiRenderModel) -> UiRenderDiagnosticsPresentation = present_render_diagnostics;
+    let _: fn(&UiRenderModel) -> UiRenderTracePresentation = present_render_trace;
+    let _: fn(&UiRenderModel) -> UiRenderMarkerPresentation = present_render_markers;
+    let _: fn(
+        &UiRenderModel,
+        &UiRenderDiagnosticsPresentation,
+        &UiRenderTracePresentation,
+        &UiRenderMarkerPresentation,
+    ) -> UiRenderInspectionPresentation = present_render_inspection;
+
+    fn assert_diag_presentation(_: &UiRenderDiagnosticsPresentation) {}
+    fn assert_diag_presentation_id(_: UiRenderDiagnosticsPresentationId) {}
+    fn assert_diag_item(_: &UiRenderDiagnosticItem) {}
+    fn assert_diag_kind(_: UiRenderDiagnosticKind) {}
+    fn assert_diag_severity(_: UiRenderDiagnosticSeverity) {}
+    fn assert_trace_presentation(_: &UiRenderTracePresentation) {}
+    fn assert_trace_presentation_id(_: UiRenderTracePresentationId) {}
+    fn assert_trace_link(_: &UiRenderTraceLink) {}
+    fn assert_trace_link_kind(_: UiRenderTraceLinkKind) {}
+    fn assert_marker_presentation(_: &UiRenderMarkerPresentation) {}
+    fn assert_marker_presentation_id(_: UiRenderMarkerPresentationId) {}
+    fn assert_marker_item(_: &UiRenderMarkerItem) {}
+    fn assert_inspection_presentation(_: &UiRenderInspectionPresentation) {}
+    fn assert_inspection_presentation_id(_: UiRenderInspectionPresentationId) {}
+    fn assert_inspection_section(_: &UiRenderInspectionSection) {}
+    fn assert_inspection_section_kind(_: UiRenderInspectionSectionKind) {}
+    fn assert_inspection_item(_: &UiRenderInspectionItem) {}
+    fn assert_inspection_item_kind(_: UiRenderInspectionItemKind) {}
+
+    let _ = (
+        assert_diag_presentation,
+        assert_diag_presentation_id,
+        assert_diag_item,
+        assert_diag_kind,
+        assert_diag_severity,
+        assert_trace_presentation,
+        assert_trace_presentation_id,
+        assert_trace_link,
+        assert_trace_link_kind,
+        assert_marker_presentation,
+        assert_marker_presentation_id,
+        assert_marker_item,
+        assert_inspection_presentation,
+        assert_inspection_presentation_id,
+        assert_inspection_section,
+        assert_inspection_section_kind,
+        assert_inspection_item,
+        assert_inspection_item_kind,
+    );
 }
 
 // ============================================================================
