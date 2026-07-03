@@ -47,8 +47,16 @@ fn calculator_reference_scenario_is_executable() {
     assert!(!initial_frame.is_empty(), "initial render should emit draw commands");
     let initial_snapshot = frame_to_snapshot(&initial_frame);
     assert!(
+        !initial_snapshot.is_empty(),
+        "initial snapshot should not be empty"
+    );
+    assert!(
         initial_snapshot.contains("value=\"0\""),
         "initial snapshot should include the zero display"
+    );
+    assert!(
+        initial_snapshot.contains("value=\"Semantic Calculator\""),
+        "initial snapshot should include the calculator title"
     );
 
     for label in ["7", "+", "3", "="] {
@@ -71,7 +79,15 @@ fn calculator_reference_scenario_is_executable() {
 
     let final_snapshot = frame_to_snapshot(&final_frame);
     assert!(
+        !final_snapshot.is_empty(),
+        "final snapshot should not be empty"
+    );
+    assert!(
         final_snapshot.contains("value=\"10\""),
         "final snapshot should include the evaluated result"
+    );
+    assert!(
+        final_snapshot.contains("value=\"Semantic Calculator\""),
+        "final snapshot should include the calculator title"
     );
 }
