@@ -71,6 +71,7 @@ pub fn inset_rect(rect: UiLayoutGeometryRect, inset: i32) -> UiLayoutGeometryRec
     UiLayoutGeometryRect::new(x, y, width, height)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn grid_cell(
     origin_x: i32,
     origin_y: i32,
@@ -265,13 +266,14 @@ fn glyph_advance(scale: i32) -> i32 {
 fn draw_glyph(frame: &mut DrawFrame, x: i32, y: i32, ch: char, scale: i32, color: Color) {
     let rows = glyph_rows(ch.to_ascii_uppercase());
     for (row_index, row_bits) in rows.iter().enumerate() {
+        let row_index = row_index as i32;
         for col in 0..5 {
             if row_bits & (1 << (4 - col)) == 0 {
                 continue;
             }
 
-            let px = x + (col as i32 * scale);
-            let py = y + (row_index as i32 * scale);
+            let px = x + (col * scale);
+            let py = y + (row_index * scale);
             frame.fill_rect(Rect::new(px, py, scale as u32, scale as u32), color);
         }
     }
