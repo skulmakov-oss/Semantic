@@ -1,4 +1,4 @@
-use crate::calculator_shell::CalculatorShell;
+use crate::calculator_shell::{ui_shell, CalculatorShell};
 use prom_ui::action_binding::InteractionActionBindingId;
 use prom_ui::layout::physical_placement::{hit_test_placement, UiLayoutPhysicalPlacementModel};
 use prom_ui::projection::UiProjectedNodeId;
@@ -32,6 +32,14 @@ pub struct DemoState {
     denied_count: u32,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DemoSceneMode {
+    #[default]
+    Calculator,
+    Diagnostics,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct DemoActionBindings {
     bindings: HashMap<UiRenderNodeId, (UiProjectedNodeId, InteractionActionBindingId)>,
@@ -63,6 +71,7 @@ pub struct DemoInteraction {
     bindings: DemoActionBindings,
     admission_gate: RuntimeIntentAdmission,
     calculator: CalculatorShell,
+    scene_mode: DemoSceneMode,
 }
 
 impl DemoInteraction {
@@ -72,6 +81,15 @@ impl DemoInteraction {
             bindings: DemoActionBindings::new(),
             admission_gate: RuntimeIntentAdmission::new(),
             calculator: CalculatorShell::new(),
+            scene_mode: DemoSceneMode::Calculator,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_diagnostics() -> Self {
+        Self {
+            scene_mode: DemoSceneMode::Diagnostics,
+            ..Self::new()
         }
     }
 
@@ -98,6 +116,56 @@ impl DemoInteraction {
     }
 
     fn handle_event(
+        &mut self,
+        event: &InputEvent,
+        placement: &UiLayoutPhysicalPlacementModel,
+    ) -> LoopControl {
+        match self.scene_mode {
+            DemoSceneMode::Calculator => self.handle_calculator_event(event, placement),
+            DemoSceneMode::Diagnostics => self.handle_diagnostics_event(event, placement),
+        }
+    }
+
+    fn handle_calculator_event(
+        &mut self,
+        event: &InputEvent,
+        placement: &UiLayoutPhysicalPlacementModel,
+    ) -> LoopControl {
+        match event.kind {
+            InputEventKind::CloseRequested => LoopControl::ExitRequested,
+            InputEventKind::KeyDown { key_code: 27 } => LoopControl::ExitRequested,
+            InputEventKind::PointerMoved { x, y } => {
+                self.state.pointer_x = x as i32;
+                self.state.pointer_y = y as i32;
+                if let Some(bounds) = placement_bounds(placement) {
+                    self.calculator.handle_pointer_moved(x, y, bounds);
+                }
+                LoopControl::Continue
+            }
+            InputEventKind::PointerDown { .. } => {
+                if let Some(bounds) = placement_bounds(placement) {
+                    self.state.pointer_x = self.state.pointer_x.max(0);
+                    self.state.pointer_y = self.state.pointer_y.max(0);
+                    self.calculator.handle_pointer_down(
+                        self.state.pointer_x as f64,
+                        self.state.pointer_y as f64,
+                        bounds,
+                    );
+                }
+                self.state.is_pointer_down = true;
+                LoopControl::Continue
+            }
+            InputEventKind::PointerUp { .. } => {
+                self.state.is_pointer_down = false;
+                self.calculator.handle_pointer_up();
+                LoopControl::Continue
+            }
+            InputEventKind::KeyDown { .. } => LoopControl::Continue,
+            InputEventKind::KeyUp { .. } => LoopControl::Continue,
+        }
+    }
+
+    fn handle_diagnostics_event(
         &mut self,
         event: &InputEvent,
         placement: &UiLayoutPhysicalPlacementModel,
@@ -193,12 +261,17 @@ pub fn render_demo_frame(
     placement: &UiLayoutPhysicalPlacementModel,
     interaction: &DemoInteraction,
 ) -> DrawFrame {
-    let mut out_frame = generate_draw_frame(placement);
+    let mut out_frame = match interaction.scene_mode {
+        DemoSceneMode::Calculator => DrawFrame::new(),
+        DemoSceneMode::Diagnostics => generate_draw_frame(placement),
+    };
+
     render_feedback_overlays(
         &mut out_frame,
         placement,
         interaction.state(),
         interaction.calculator(),
+        interaction.scene_mode,
     );
     out_frame
 }
@@ -208,16 +281,31 @@ fn render_feedback_overlays(
     placement: &UiLayoutPhysicalPlacementModel,
     state: &DemoState,
     calculator: &CalculatorShell,
+    scene_mode: DemoSceneMode,
 ) {
-    if let Some(bounds) = placement_bounds(placement) {
-        draw_scene_backdrop(out_frame, bounds);
-        draw_scene_header(out_frame, bounds);
-        draw_scene_cards(out_frame, placement, state);
-        draw_status_area(out_frame, bounds, state);
-        calculator.render(out_frame, bounds);
+    let bounds = match scene_mode {
+        DemoSceneMode::Calculator => calculator_scene_bounds(placement),
+        DemoSceneMode::Diagnostics => placement_bounds(placement),
+    };
+
+    if let Some(bounds) = bounds {
+        match scene_mode {
+            DemoSceneMode::Calculator => {
+                calculator.render(out_frame, bounds);
+            }
+            DemoSceneMode::Diagnostics => {
+                draw_scene_backdrop(out_frame, bounds);
+                draw_scene_header(out_frame, bounds);
+                draw_scene_cards(out_frame, placement, state);
+                draw_status_area(out_frame, bounds, state);
+                calculator.render_panel(out_frame, bounds, ui_shell::default_theme());
+            }
+        }
     }
 
-    draw_pointer_marker(out_frame, state);
+    if matches!(scene_mode, DemoSceneMode::Diagnostics) {
+        draw_pointer_marker(out_frame, state);
+    }
 }
 
 fn draw_hovered_feedback(out_frame: &mut DrawFrame, rect: prom_ui::layout::UiLayoutGeometryRect) {
@@ -287,6 +375,19 @@ fn placement_bounds(
         (max_x - min_x + 56) as u32,
         (max_y - min_y + 172) as u32,
     ))
+}
+
+fn calculator_scene_bounds(
+    placement: &UiLayoutPhysicalPlacementModel,
+) -> Option<prom_ui::layout::UiLayoutGeometryRect> {
+    placement_bounds(placement).map(|bounds| {
+        prom_ui::layout::UiLayoutGeometryRect::new(
+            bounds.x(),
+            bounds.y(),
+            bounds.width().max(760),
+            bounds.height().max(560),
+        )
+    })
 }
 
 fn draw_scene_backdrop(out_frame: &mut DrawFrame, bounds: prom_ui::layout::UiLayoutGeometryRect) {
@@ -600,6 +701,10 @@ mod tests {
     use prom_ui_runtime::{InputEvent, InputEventKind};
 
     fn test_interaction() -> DemoInteraction {
+        DemoInteraction::new_diagnostics()
+    }
+
+    fn test_calculator_interaction() -> DemoInteraction {
         DemoInteraction::new()
     }
 
@@ -747,22 +852,47 @@ mod tests {
         assert!(commands.iter().any(|cmd| matches!(
             cmd,
             prom_ui_runtime::DrawCommand::DrawText { text, .. }
-                if text.contains("Calculator")
-        )));
-        assert!(commands.iter().any(|cmd| matches!(
-            cmd,
-            prom_ui_runtime::DrawCommand::DrawText { text, .. }
-                if text.contains("Semantic bridge: not connected")
-        )));
-        assert!(commands.iter().any(|cmd| matches!(
-            cmd,
-            prom_ui_runtime::DrawCommand::DrawText { text, .. }
                 if text.contains("Pointer:")
         )));
         assert!(commands.iter().any(|cmd| matches!(
             cmd,
             prom_ui_runtime::DrawCommand::DrawText { text, .. }
                 if text.contains("Denied marker")
+        )));
+        assert!(commands.iter().any(|cmd| matches!(
+            cmd,
+            prom_ui_runtime::DrawCommand::FillRect { color, .. }
+                if *color == Color::rgb(205, 216, 229)
+        )));
+    }
+
+    #[test]
+    fn primary_calculator_scene_omits_demo_status_and_cards() {
+        let placement = test_placement();
+        let interaction = test_calculator_interaction();
+
+        let frame = render_demo_frame(&placement, &interaction);
+        let commands = frame.commands();
+
+        assert!(commands.iter().any(|cmd| matches!(
+            cmd,
+            prom_ui_runtime::DrawCommand::FillRect { color, .. }
+                if *color == Color::WHITE
+        )));
+        assert!(commands.iter().any(|cmd| matches!(
+            cmd,
+            prom_ui_runtime::DrawCommand::FillRect { color, .. }
+                if *color == Color::rgb(205, 216, 229)
+        )));
+        assert!(!commands.iter().any(|cmd| matches!(
+            cmd,
+            prom_ui_runtime::DrawCommand::DrawText { text, .. }
+                if text.contains("Demo status")
+        )));
+        assert!(!commands.iter().any(|cmd| matches!(
+            cmd,
+            prom_ui_runtime::DrawCommand::DrawText { text, .. }
+                if text.contains("Primary region")
         )));
     }
 }

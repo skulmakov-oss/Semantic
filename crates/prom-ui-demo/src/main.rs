@@ -64,7 +64,7 @@ fn main() {
 
     println!("=== Semantic UI Application Boundary - Native Render Demo ===");
 
-    let config = WindowConfig::new("Semantic UI Demo - WGPU Native", 800, 600);
+    let config = WindowConfig::new("Semantic Calculator", 800, 600);
     let backend = NativeBackend::new();
 
     let mut session =
