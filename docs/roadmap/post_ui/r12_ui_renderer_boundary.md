@@ -5,9 +5,16 @@
 This document defines the boundary for a future R12 UI renderer.
 
 Status note:
-the repository already contains a feature-gated native WGPU path and a dedicated reality audit at
+the repository already contains a feature-gated native WGPU path and dedicated reality notes at
+[ui_reentry_3_native_wgpu_reality_alignment.md](./ui_reentry_3_native_wgpu_reality_alignment.md),
+[r12_ui_native_wgpu_reality_reconciliation.md](./r12_ui_native_wgpu_reality_reconciliation.md), and
 [r12_ui_native_wgpu_renderer_reality_audit.md](./r12_ui_native_wgpu_renderer_reality_audit.md).
-This boundary remains the read-only renderer contract boundary, but it should not be read as claiming that native renderer support is entirely absent.
+This boundary remains the read-only renderer contract boundary, but it should not be read as claiming that native renderer support is entirely absent or only hypothetical.
+
+Reconciliation note:
+the renderer contract is still an abstract UI presentation contract;
+the admitted native/WGPU presentation path lives in `prom-ui-backend-native` behind feature gates;
+the renderer contract and the backend-native presentation path are separate ownership layers.
 
 It does not implement renderer code.
 It defines what a future renderer may consume from UiProjectionArtifact and what it must not infer or execute.
@@ -27,7 +34,7 @@ Projection substrate final state:
 - diagnostics and trace references exist;
 - PropertyCarrier / ActionCarrier / EffectBoundaryMarker are inert classifications;
 - public API lock exists;
-- renderer is absent.
+- renderer backend implementation is absent; the abstract renderer contract is present.
 
 ## 3. Renderer Position in Pipeline
 
