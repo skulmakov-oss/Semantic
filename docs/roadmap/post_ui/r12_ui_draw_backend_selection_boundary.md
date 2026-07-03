@@ -4,9 +4,16 @@
 This boundary document defines the selection of `wgpu` as the sole authorized minimal draw backend for the UI framework inside the `prom-ui-backend-native` crate.
 
 Status note:
-the repository now contains a feature-gated native WGPU path and a dedicated reality audit at
+the repository now contains a feature-gated native WGPU path and dedicated reality notes at
+[ui_reentry_3_native_wgpu_reality_alignment.md](./ui_reentry_3_native_wgpu_reality_alignment.md),
+[r12_ui_native_wgpu_reality_reconciliation.md](./r12_ui_native_wgpu_reality_reconciliation.md), and
 [r12_ui_native_wgpu_renderer_reality_audit.md](./r12_ui_native_wgpu_renderer_reality_audit.md).
-Treat this document as the boundary that governs the future draw contract, not as evidence that WGPU is absent.
+Treat this document as the boundary that governs the draw contract, not as evidence that WGPU is absent or purely hypothetical.
+
+Reconciliation note:
+the admitted native/WGPU path is feature-gated and backend-native owned;
+this document does not perform a backend switch;
+the browser/native split remains a boundary topic, not a semantic authority transfer.
 
 It does not implement any new source code.
 It does not change tests, Cargo features, dependencies, or Admission Guard.
@@ -25,12 +32,12 @@ It does not introduce draw execution, frame presentation, or visual output logic
 The native backend layer (`prom-ui-backend-native`) has fully integrated windowing (`winit`). To draw actual pixels on the screen, a rendering backend must be selected.
 
 Current state:
-- The `prom-ui-backend-native` crate possesses an inert `wgpu-backend` feature and baseline initialization context (`NativeBackendWgpuContext`).
-- No draw logic uses it.
+- The `prom-ui-backend-native` crate possesses a feature-gated `wgpu-backend` path and baseline initialization context (`NativeBackendWgpuContext`).
+- The path is admitted as current backend-native reality, but draw execution remains bounded to the backend layer.
 - `prom-ui` core has no rendering backend.
 
 Future boundary under review:
-- `wgpu` is confirmed as the draw backend.
+- `wgpu` is the draw backend already represented in backend-native reality.
 - `prom-ui` core remains fully abstracted and isolated from `wgpu`.
 - Draw execution logic will be restricted exclusively to `prom-ui-backend-native`.
 - All drawing instructions from the core will be sent via neutral boundary representations (`UiBackendFrame`).
@@ -48,7 +55,7 @@ Existing repository facts from the accepted baseline:
 - `wgpu` dependency exists.
 - `NativeBackendWgpuContext` skeleton exists.
 - `prom-ui` core has zero `wgpu` or `winit` dependencies.
-- The feature-gated native WGPU path is already present in the backend-native crate and is documented separately by the native WGPU reality audit.
+- The feature-gated native WGPU path is already present in the backend-native crate and is documented separately by the native WGPU reality audit and the re-entry checkpoint.
 
 ## 6. Ownership Boundary
 This selection designates that:
