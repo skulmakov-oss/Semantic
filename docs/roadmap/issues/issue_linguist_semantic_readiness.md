@@ -1,236 +1,32 @@
-Title: linguist: track Semantic language recognition readiness
+# Linguist: Semantic Recognition Readiness
 
-## Description
+## Status
 
-Prepare Semantic for a future GitHub Linguist submission without opening a premature upstream PR.
+Not submit-ready.
 
-Semantic source files using the `.sm` extension should eventually be recognized by GitHub Linguist as the `Semantic` language, but the project is not submit-ready yet.
+## Purpose
 
-This issue tracks the readiness work required before creating a real Linguist PR.
+Track readiness for GitHub Linguist recognition of the Semantic language.
 
-## Current Status
+This document is a readiness track, not a submission claim.
 
-Status: not submit-ready
+## Scope
 
-Reasons:
+- document the current recognition readiness surface;
+- keep the upstream PR blocked until usage evidence is strong enough;
+- keep the blocker wording explicit;
+- keep this aligned with the candidate grammar repo and sample plan.
 
-- no public syntax highlighting grammar repository is available yet;
-- grammar license compatibility has not been confirmed;
-- GitHub Search usage evidence for `.sm` has not been collected and validated;
-- `.sm` extension conflict status in Linguist has not been confirmed locally;
-- canonical real-world Semantic samples need to be finalized;
-- no upstream Linguist PR should be opened until the readiness checklist is complete.
+## Acceptance Criteria
 
-## Non-goal
+- the document says `not submit-ready`;
+- the document says `readiness track`;
+- the document says `blocked by usage evidence`;
+- the document says `no upstream PR yet`;
+- the document does not claim Linguist acceptance.
 
-This issue is not a Linguist PR body.
+## Notes
 
-Do not submit to `github-linguist/linguist` from the current state.
+GitHub Linguist should not be treated as already accepting Semantic.
 
-The purpose is to make the eventual submission boring, evidence-backed, and compliant with Linguist expectations.
-
-## Readiness Checklist
-
-### 1. Extension Conflict Check
-
-Confirm whether `.sm` is already associated with another language in Linguist.
-
-Suggested local check:
-
-```bash
-grep -n '"\.sm"' lib/linguist/languages.yml
-```
-
-Acceptance:
-
-- conflict status is documented;
-- if `.sm` is already used, required heuristic/samples strategy is defined;
-- if `.sm` is not used, note that no heuristic is required unless classifier behavior shows ambiguity.
-
-### 2. Usage Evidence
-
-Collect GitHub Search evidence for `.sm` usage.
-
-Suggested evidence query:
-
-```text
-NOT is:fork path:*.sm Semantic
-```
-
-Acceptance:
-
-- search URL is recorded;
-- indexed result count is recorded;
-- evidence excludes forks;
-- distribution across unique `user/repo` combinations is checked manually;
-- if results are dominated by `skulmakov-oss/Semantic` or closely related repos, this is documented honestly;
-- current result does not overclaim readiness.
-
-Evidence status:
-
-- current `.sm` usage evidence: pending
-- search URL: pending
-- indexed result count: pending
-- unique repo distribution: pending
-- dominant owner/repo risk: pending
-- conclusion: pending
-
-### 3. Grammar Repository
-
-Prepare a public syntax highlighting grammar repository.
-
-Candidate names:
-
-- `tree-sitter-semantic`
-- `vscode-semantic`
-- `semantic-textmate-grammar`
-
-Preferred first target:
-
-- TextMate-compatible grammar
-- scopeName: `source.semantic`
-
-Acceptance:
-
-- public grammar repository exists;
-- grammar has a compatible open-source license;
-- grammar covers canonical Semantic syntax;
-- grammar can highlight representative `.sm` files;
-- grammar URL is stable enough to reference from Linguist;
-- grammar can be added through Linguist’s grammar import workflow.
-
-Grammar status:
-
-- grammar repo: pending
-- license: pending
-- scopeName: `source.semantic`
-- grammar type: pending
-- local validation: pending
-
-### 4. Canonical Samples
-
-Prepare real-world Semantic samples for future `samples/Semantic/`.
-
-Sample requirements:
-
-- not just "hello world";
-- representative of actual Semantic usage;
-- licensed clearly;
-- small enough for Linguist samples;
-- stable enough to preserve as canonical examples.
-
-Suggested sample set:
-
-- `samples/Semantic/weather_station.sm`
-- `samples/Semantic/deterministic_safe.sm`
-- `samples/Semantic/quad_decision.sm`
-- `samples/Semantic/module_imports.sm`
-
-Acceptance:
-
-- at least 2 canonical `.sm` samples are ready;
-- sample license is documented;
-- samples compile/check in Semantic repository if applicable;
-- samples demonstrate distinctive Semantic syntax:
-  - `quad`;
-  - `N | F | T | S`;
-  - explicit `if state == T` style;
-  - deterministic function structure;
-  - Semantic-specific declarations or contracts where appropriate.
-
-### 5. Linguist Language Entry Draft
-
-Prepare, but do not submit, the future `languages.yml` entry.
-
-Draft shape:
-
-```yml
-Semantic:
-  type: programming
-  color: "#1D4E89"
-  extensions:
-  - ".sm"
-  tm_scope: source.semantic
-  ace_mode: text
-  language_id: <generated by script/update-ids later>
-```
-
-Acceptance:
-
-- language name is frozen as `Semantic`;
-- `.sm` is confirmed as primary source extension;
-- color rationale is documented;
-- `tm_scope` matches grammar repository;
-- `language_id` is not invented manually.
-
-### 6. Local Linguist Validation Plan
-
-Prepare the future local validation commands.
-
-Expected validation:
-
-```bash
-bundle exec ruby -Itest test/test_language.rb -n /test_find_by_extension/
-bundle exec ruby -Itest test/test_language.rb -n /test_all_languages_have_a_language_id_set/
-bundle exec ruby -Itest test/test_language.rb -n /test_all_languages_have_grammars/
-bundle exec ruby -Itest test/test_classifier.rb
-```
-
-Acceptance:
-
-- local Linguist checkout can run tests;
-- future Semantic patch passes targeted tests;
-- classifier behavior does not misclassify common `.sm` samples.
-
-## Future Submit Conditions
-
-A real Linguist PR may be prepared only when all of the following are true:
-
-- [ ] grammar repo exists
-- [ ] grammar license is compatible
-- [ ] grammar URL is stable
-- [ ] `.sm` conflict status is known
-- [ ] usage evidence is strong enough
-- [ ] samples are canonical and licensed
-- [ ] `languages.yml` entry is prepared
-- [ ] `script/add-grammar` works
-- [ ] `script/update-ids` was run
-- [ ] targeted tests pass
-- [ ] PR template can be filled without placeholders
-
-## Explicit Blockers
-
-The future upstream PR is blocked by:
-
-- BLOCKER-1: Missing grammar repo URL
-- BLOCKER-2: Missing grammar license confirmation
-- BLOCKER-3: Missing GitHub Search usage evidence
-- BLOCKER-4: Unknown `.sm` conflict status in Linguist
-
-## Out of Scope
-
-Do not do the following in this track:
-
-- open an upstream Linguist PR immediately;
-- claim Semantic is already accepted by Linguist;
-- claim `.sm` has enough public usage without evidence;
-- add weak tutorial-only samples;
-- invent a `language_id`;
-- submit without grammar;
-- submit with placeholder checklist items.
-
-## Final Readiness Output
-
-When this issue is complete, produce:
-
-`linguist_semantic_pr_body.md`
-
-That file should contain the real upstream PR body, with:
-
-- grammar repo URL;
-- sample list;
-- sample license statement;
-- GitHub Search evidence;
-- validation commands;
-- conflict/heuristics statement;
-- complete checklist with no placeholder fields.
+The only honest position at this stage is that the project is collecting readiness evidence.

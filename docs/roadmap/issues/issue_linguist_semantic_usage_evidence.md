@@ -1,27 +1,28 @@
-Title: linguist: collect `.sm` usage evidence for Semantic
+# Linguist: Semantic `.sm` Usage Evidence
 
-## Description
+## Status
 
-Collect and document GitHub Search evidence for the `.sm` extension before any Linguist submission.
+Blocked by usage evidence.
 
-## Evidence Query
+## Purpose
 
-```text
-NOT is:fork path:*.sm Semantic
-```
+Collect and document public `.sm` usage evidence for Semantic before any upstream Linguist submission.
+
+## Scope
+
+- record the search URL;
+- record the indexed result count;
+- exclude forks from the evidence;
+- check the distribution across unique `user/repo` combinations;
+- document honestly if the evidence is dominated by `skulmakov-oss/Semantic` or related repos.
 
 ## Acceptance Criteria
 
-- search URL is recorded;
-- indexed result count is recorded;
-- evidence excludes forks;
-- distribution across unique `user/repo` combinations is checked manually;
-- if results are dominated by `skulmakov-oss/Semantic` or related repos, that risk is documented honestly;
-- current result does not overclaim readiness.
+- the upstream PR remains blocked until public `.sm` usage evidence is strong enough;
+- the document does not overclaim readiness;
+- the document does not treat a search query alone as proof;
+- the document does not claim the `.sm` threshold is met without a count and distribution check.
 
-## Non-goals
+## Notes
 
-- do not treat the query as proof by itself;
-- do not open the upstream PR before usage evidence is recorded;
-- do not claim the `.sm` threshold is met without a count and distribution check.
-
+This is an evidence collection track, not a submission track.

@@ -1,16 +1,21 @@
-Title: linguist: finalize canonical Semantic samples
+# Linguist: Semantic Canonical Samples
 
-## Description
+## Status
 
-Prepare canonical real-world Semantic samples for future `samples/Semantic/` inclusion.
+Readiness samples.
 
-## Sample Requirements
+## Purpose
 
-- not just "hello world";
-- representative of actual Semantic usage;
-- licensed clearly;
-- small enough for Linguist samples;
-- stable enough to preserve as canonical examples.
+Prepare canonical Semantic samples for future `samples/Semantic/` inclusion.
+
+These samples support readiness, but they do not prove Linguist acceptance.
+
+## Scope
+
+- select small representative `.sm` examples;
+- keep them licensed clearly;
+- keep them stable enough for Linguist samples;
+- keep them representative of actual Semantic usage.
 
 ## Suggested Sample Set
 
@@ -21,14 +26,11 @@ Prepare canonical real-world Semantic samples for future `samples/Semantic/` inc
 
 ## Acceptance Criteria
 
-- at least 2 canonical `.sm` samples are ready;
-- sample license is documented;
-- samples compile/check in the Semantic repository if applicable;
-- samples demonstrate distinctive Semantic syntax and control flow.
+- the samples are marked as readiness or canonical candidates;
+- the document does not say samples alone prove readiness;
+- the document does not overclaim upstream Linguist acceptance;
+- the document does not replace the grammar repo or usage evidence tracks.
 
-## Non-goals
+## Notes
 
-- do not submit weak tutorial-only examples;
-- do not invent licensing statements;
-- do not treat canonical samples as sufficient without grammar and usage evidence.
-
+Samples are useful evidence, but they are not the whole readiness story.

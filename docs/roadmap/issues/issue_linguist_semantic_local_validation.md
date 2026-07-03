@@ -1,27 +1,26 @@
-Title: linguist: prepare local validation plan for Semantic
+# Linguist: Semantic Local Validation
 
-## Description
+## Status
 
-Prepare and verify the local Linguist validation plan that will be used once the Semantic language patch is ready.
+Local validation pending.
 
-## Expected Validation
+## Purpose
 
-```bash
-bundle exec ruby -Itest test/test_language.rb -n /test_find_by_extension/
-bundle exec ruby -Itest test/test_language.rb -n /test_all_languages_have_a_language_id_set/
-bundle exec ruby -Itest test/test_language.rb -n /test_all_languages_have_grammars/
-bundle exec ruby -Itest test/test_classifier.rb
-```
+Prepare a local validation plan for the Semantic Linguist readiness work.
+
+## Scope
+
+- define local validation steps for the readiness track;
+- keep the environment dependency explicit;
+- avoid claiming validation success unless it is actually run in the target environment.
 
 ## Acceptance Criteria
 
-- local Linguist checkout can run tests;
-- targeted tests are defined and runnable;
-- future Semantic patch passes the selected checks;
-- classifier behavior is not regressed.
+- the document says `local validation pending` or equivalent;
+- the document says `planned` or `environment-dependent`;
+- the document does not claim tests pass without an actual run;
+- the document does not overclaim readiness.
 
-## Non-goals
+## Notes
 
-- do not claim readiness without the grammar repo and usage evidence;
-- do not open the upstream PR from this issue;
-- do not invent a `language_id`.
+Local validation is part of the readiness track, but it is not proof of upstream acceptance.

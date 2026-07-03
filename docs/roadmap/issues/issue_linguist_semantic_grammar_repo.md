@@ -1,34 +1,29 @@
-Title: linguist: create Semantic grammar repository
+# Linguist: Semantic Grammar Repository
 
-## Description
+## Status
 
-Create a public syntax highlighting grammar repository for Semantic so a future Linguist import can reference a stable grammar URL.
+Readiness infrastructure.
+
+## Purpose
+
+Prepare the public grammar repository needed for Semantic language recognition.
+
+This is infrastructure for readiness, not an acceptance claim.
 
 ## Scope
 
-Preferred target:
-
-- TextMate-compatible grammar
-- scopeName: `source.semantic`
-
-Candidate repository names:
-
-- `tree-sitter-semantic`
-- `vscode-semantic`
-- `semantic-textmate-grammar`
+- confirm the grammar repository exists or is ready to be created;
+- keep `scopeName: source.semantic` documented;
+- keep the grammar license to verify;
+- keep the upstream Linguist submission blocked until the broader evidence is ready.
 
 ## Acceptance Criteria
 
-- public grammar repository exists;
-- grammar has a compatible open-source license;
-- grammar covers canonical Semantic syntax;
-- grammar can highlight representative `.sm` files;
-- grammar URL is stable enough to reference from Linguist;
-- grammar can be added through Linguist’s grammar import workflow.
+- the document frames the grammar repo as readiness infrastructure;
+- the document does not say GitHub Linguist has accepted Semantic;
+- the document does not say Semantic highlighting is ready upstream;
+- the document keeps the usage-evidence blocker visible.
 
-## Non-goals
+## Notes
 
-- do not open the upstream Linguist PR yet;
-- do not invent compatibility claims without a published license;
-- do not treat a local grammar stub as production-ready.
-
+This track can define the grammar-repo surface, but it does not by itself prove readiness for upstream submission.
