@@ -203,6 +203,8 @@ Calculator shell evidence may come from:
 - draw-command command count
 - stable render output
 
+See `docs/spec/ui/calculator_reference_scenario.md` for the canonical `7 + 3 = 10` interaction scenario.
+
 This document does not define the full snapshot policy.
 
 See `#1313` for the draw-command snapshot policy follow-up.
