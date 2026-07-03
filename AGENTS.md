@@ -57,3 +57,14 @@ mcp_codebase-memo_get_architecture({ "project": "<display_name>" })
 - `search_code(pattern, project)` — Grep-like text search within indexed files
 - `manage_adr(action)` — CRUD for Architecture Decision Records
 - `ingest_traces(traces)` — Ingest runtime traces to validate HTTP edges
+
+## RuFlo / Codex MCP operating rules
+
+- RuFlo is an orchestration assistant, not the architectural authority.
+- Inspect repository state before changing files.
+- Prefer small, auditable patches.
+- Do not rewrite Semantic core invariants without explicit instruction.
+- Do not add dependencies without justification.
+- Preserve verifier-first design, determinism, and evidence boundaries.
+- After each change, run the smallest relevant check first.
+- Do not push or commit unless explicitly instructed.
