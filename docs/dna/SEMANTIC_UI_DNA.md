@@ -4,6 +4,14 @@ Status: architecture doctrine
 Track: POST-UI / Semantic UI Application Boundary
 Scope type: documentation only
 
+## Doctrine Extension
+
+This document is extended by:
+
+- [`SEMANTIC_UI_DNA_v2.md`](SEMANTIC_UI_DNA_v2.md) - Intent-Driven Projection, zero-glue authoring, UI IR, Action IR, ProjectionBundle delivery, freshness, denial/recovery projection, and multi-client projection.
+
+The v2 doctrine extends this document. It does not replace the original Semantic UI ownership, renderer boundary, authority non-transfer, Quad-state, evidence/trace, and UI state separation principles.
+
 ## Core Principle
 
 Semantic UI is a Semantic-native UI architecture.
