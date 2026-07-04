@@ -1,0 +1,8 @@
+[package]
+name = "ui-shell-kit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+prom-ui = { path = "../../crates/prom-ui" }
+prom-ui-runtime = { path = "../../crates/prom-ui-runtime" }

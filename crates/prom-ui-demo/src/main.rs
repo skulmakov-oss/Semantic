@@ -1,4 +1,3 @@
-mod calculator_shell;
 mod demo_interaction;
 mod renderer_layout_inspector;
 
@@ -55,6 +54,8 @@ fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
 }
 
 fn main() {
+    let calculator_smoke = env::args().any(|arg| arg == "--calculator-smoke");
+
     if inspector_requested() {
         let tree = demo_inspector_tree();
         let output = render_inspector_text(&tree, "root");
@@ -86,6 +87,9 @@ fn main() {
     }
 
     let mut interaction = DemoInteraction::new();
+    if calculator_smoke {
+        interaction.seed_calculator_smoke(&placement);
+    }
 
     session
         .run(move |buf: &mut EventBuffer, out_frame| {

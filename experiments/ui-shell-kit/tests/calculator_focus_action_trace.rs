@@ -1,122 +1,90 @@
+use prom_ui::layout::UiLayoutGeometryRect;
 use ui_shell_kit::action::UiAction;
 use ui_shell_kit::calculator_controller::CalculatorController;
-use ui_shell_kit::calculator_scene::{calculator_button_label, calculator_layout};
+use ui_shell_kit::calculator_scene::{calculator_layout, CalculatorButton};
 use ui_shell_kit::event::{UiEvent, UiEventKind, UiPointerButton};
-use ui_shell_kit::geometry::UiRect;
 use ui_shell_kit::paint::UiFrame;
-use ui_shell_kit::theme::UiShellTheme;
 
-fn button_center(rect: UiRect) -> (i32, i32) {
+fn button_center(rect: UiLayoutGeometryRect) -> (f64, f64) {
     (
-        rect.x + rect.width as i32 / 2,
-        rect.y + rect.height as i32 / 2,
+        (rect.x() + rect.width() as i32 / 2) as f64,
+        (rect.y() + rect.height() as i32 / 2) as f64,
     )
 }
 
 fn press_button(
     controller: &mut CalculatorController,
-    layout: &ui_shell_kit::calculator_scene::CalculatorLayout,
+    scene: UiLayoutGeometryRect,
     label: &str,
-) -> (Vec<UiAction>, ui_shell_kit::hit_test::HitTargetId) {
-    let (_button, rect) = layout
+) -> (Vec<UiAction>, CalculatorButton) {
+    let layout = calculator_layout(scene);
+    let (button, rect) = layout
         .buttons
         .iter()
-        .find(|(button, _)| calculator_button_label(*button) == label)
+        .find(|(button, _)| button.label() == label)
+        .copied()
         .expect("calculator button exists in reference layout");
-    let target_id = layout
-        .hit_targets
-        .iter()
-        .find(|target| target.rect == *rect)
-        .expect("button hit target exists in reference layout")
-        .id;
 
-    let (x, y) = button_center(*rect);
-    let event = UiEvent {
-        kind: UiEventKind::PointerDown {
+    let (x, y) = button_center(rect);
+    let actions = controller.handle_event(
+        UiEvent::new(UiEventKind::PointerDown {
             x,
             y,
             button: UiPointerButton::Primary,
-        },
-    };
-
-    let actions = controller.handle_event(event, layout).drain();
-    assert!(
-        !actions.is_empty(),
-        "pressing {label} should emit at least one action"
-    );
-    assert!(
-        actions.iter().any(|action| matches!(
-            action,
-            UiAction::ButtonPressed { .. } | UiAction::CalculatorButtonPressed { .. } | UiAction::FocusChanged { .. }
-        )),
-        "pressing {label} should emit calculator interaction evidence"
+        }),
+        scene,
     );
 
-    (actions, target_id)
+    (actions, button)
 }
 
-fn action_contains_button_press(actions: &[UiAction], label: &'static str) -> bool {
-    actions.iter().any(|action| matches!(
-        action,
-        UiAction::CalculatorButtonPressed { label: pressed_label } if *pressed_label == label
-    ))
+fn action_contains_button_press(actions: &[UiAction], label: &str) -> bool {
+    actions
+        .iter()
+        .any(|action| matches!(action, UiAction::ButtonPressed(button) if button.label() == label))
 }
 
-fn action_contains_button_id(actions: &[UiAction], target_id: u32) -> bool {
-    actions.iter().any(|action| matches!(
-        action,
-        UiAction::ButtonPressed { id } if id.0 == target_id
-    ))
-}
-
-fn action_contains_focus_change(actions: &[UiAction], target_id: ui_shell_kit::hit_test::HitTargetId) -> bool {
-    actions.iter().any(|action| matches!(
-        action,
-        UiAction::FocusChanged { to: Some(id), .. } if *id == target_id
-    ))
+fn action_contains_focus_change(actions: &[UiAction], button: CalculatorButton) -> bool {
+    actions
+        .iter()
+        .any(|action| matches!(action, UiAction::FocusChanged(Some(focused)) if *focused == button))
 }
 
 #[test]
 fn calculator_focus_action_trace_is_executable() {
     let mut controller = CalculatorController::new();
-    let scene = UiRect::new(0, 0, 800, 600);
-    let theme = UiShellTheme::default();
-    let layout = calculator_layout(scene);
+    let scene = UiLayoutGeometryRect::new(0, 0, 800, 600);
 
     let mut initial_frame = UiFrame::new();
-    controller.render(&mut initial_frame, scene, &theme);
-    assert_eq!(controller.state.display, "0");
-    assert_eq!(controller.focus.current(), None);
+    controller.render(&mut initial_frame, scene);
+    assert_eq!(controller.display_text(), "0");
+    assert_eq!(controller.focus().current(), None);
 
-    let (actions_7, target_7) = press_button(&mut controller, &layout, "7");
+    let (actions_7, target_7) = press_button(&mut controller, scene, "7");
     assert!(action_contains_button_press(&actions_7, "7"));
-    assert!(action_contains_button_id(&actions_7, target_7.0));
     assert!(action_contains_focus_change(&actions_7, target_7));
-    assert_eq!(controller.focus.current(), Some(target_7));
-    assert_eq!(controller.state.display, "7");
+    assert_eq!(controller.focus().current(), Some(target_7));
+    assert_eq!(controller.display_text(), "7");
 
-    let (actions_plus, target_plus) = press_button(&mut controller, &layout, "+");
+    let (actions_plus, target_plus) = press_button(&mut controller, scene, "+");
     assert!(action_contains_button_press(&actions_plus, "+"));
-    assert!(action_contains_button_id(&actions_plus, target_plus.0));
     assert!(action_contains_focus_change(&actions_plus, target_plus));
-    assert_eq!(controller.focus.current(), Some(target_plus));
-    assert_eq!(controller.state.display, "7");
+    assert_eq!(controller.focus().current(), Some(target_plus));
+    assert_eq!(controller.display_text(), "7");
 
-    let (actions_3, target_3) = press_button(&mut controller, &layout, "3");
+    let (actions_3, target_3) = press_button(&mut controller, scene, "3");
     assert!(action_contains_button_press(&actions_3, "3"));
-    assert!(action_contains_button_id(&actions_3, target_3.0));
     assert!(action_contains_focus_change(&actions_3, target_3));
-    assert_eq!(controller.focus.current(), Some(target_3));
-    assert_eq!(controller.state.display, "3");
+    assert_eq!(controller.focus().current(), Some(target_3));
+    assert_eq!(controller.display_text(), "3");
 
-    let (actions_equals, target_equals) = press_button(&mut controller, &layout, "=");
+    let (actions_equals, target_equals) = press_button(&mut controller, scene, "=");
     assert!(action_contains_button_press(&actions_equals, "="));
-    assert!(action_contains_button_id(&actions_equals, target_equals.0));
     assert!(action_contains_focus_change(&actions_equals, target_equals));
-    assert_eq!(controller.focus.current(), Some(target_equals));
-    assert_eq!(controller.state.display, "10");
+    assert_eq!(controller.focus().current(), Some(target_equals));
+    assert_eq!(controller.display_text(), "10");
 
     let mut final_frame = UiFrame::new();
-    controller.render(&mut final_frame, scene, &theme);
+    controller.render(&mut final_frame, scene);
     assert!(!final_frame.is_empty());
 }

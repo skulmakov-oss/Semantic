@@ -1,4 +1,3 @@
-use crate::calculator_shell::{ui_shell, CalculatorShell};
 use prom_ui::action_binding::InteractionActionBindingId;
 use prom_ui::layout::physical_placement::{hit_test_placement, UiLayoutPhysicalPlacementModel};
 use prom_ui::projection::UiProjectedNodeId;
@@ -9,6 +8,10 @@ use prom_ui_runtime::{
     Color, DrawFrame, InputEvent, InputEventKind, LoopControl, Rect, RuntimeIntentAdmission,
 };
 use std::collections::HashMap;
+use ui_shell_kit::{
+    calculator_scene::calculator_layout, CalculatorController, UiEvent, UiEventKind, UiFrame,
+    UiPointerButton,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DispatchFeedback {
@@ -70,7 +73,7 @@ pub struct DemoInteraction {
     state: DemoState,
     bindings: DemoActionBindings,
     admission_gate: RuntimeIntentAdmission,
-    calculator: CalculatorShell,
+    calculator: CalculatorController,
     scene_mode: DemoSceneMode,
 }
 
@@ -80,7 +83,7 @@ impl DemoInteraction {
             state: DemoState::default(),
             bindings: DemoActionBindings::new(),
             admission_gate: RuntimeIntentAdmission::new(),
-            calculator: CalculatorShell::new(),
+            calculator: CalculatorController::new(),
             scene_mode: DemoSceneMode::Calculator,
         }
     }
@@ -97,8 +100,36 @@ impl DemoInteraction {
         &self.state
     }
 
-    pub fn calculator(&self) -> &CalculatorShell {
+    pub fn calculator(&self) -> &CalculatorController {
         &self.calculator
+    }
+
+    pub fn seed_calculator_smoke(&mut self, placement: &UiLayoutPhysicalPlacementModel) {
+        let Some(scene_bounds) = calculator_scene_bounds(placement) else {
+            return;
+        };
+
+        let layout = calculator_layout(scene_bounds);
+        let scripted_buttons = ["7", "+", "3", "="];
+
+        let mut events = Vec::new();
+        for label in scripted_buttons {
+            let Some((_, rect)) = layout
+                .buttons
+                .iter()
+                .find(|(button, _)| button.label() == label)
+            else {
+                continue;
+            };
+
+            let x = rect.x() as f64 + (rect.width() as f64 / 2.0);
+            let y = rect.y() as f64 + (rect.height() as f64 / 2.0);
+            events.push(InputEvent::new(InputEventKind::PointerMoved { x, y }));
+            events.push(InputEvent::new(InputEventKind::PointerDown { button: 1 }));
+            events.push(InputEvent::new(InputEventKind::PointerUp { button: 1 }));
+        }
+
+        let _ = self.apply_events(&events, placement);
     }
 
     pub fn apply_events(
@@ -137,18 +168,23 @@ impl DemoInteraction {
             InputEventKind::PointerMoved { x, y } => {
                 self.state.pointer_x = x as i32;
                 self.state.pointer_y = y as i32;
-                if let Some(bounds) = placement_bounds(placement) {
-                    self.calculator.handle_pointer_moved(x, y, bounds);
+                if let Some(bounds) = calculator_scene_bounds(placement) {
+                    let _ = self
+                        .calculator
+                        .handle_event(UiEvent::new(UiEventKind::PointerMoved { x, y }), bounds);
                 }
                 LoopControl::Continue
             }
             InputEventKind::PointerDown { .. } => {
-                if let Some(bounds) = placement_bounds(placement) {
+                if let Some(bounds) = calculator_scene_bounds(placement) {
                     self.state.pointer_x = self.state.pointer_x.max(0);
                     self.state.pointer_y = self.state.pointer_y.max(0);
-                    self.calculator.handle_pointer_down(
-                        self.state.pointer_x as f64,
-                        self.state.pointer_y as f64,
+                    let _ = self.calculator.handle_event(
+                        UiEvent::new(UiEventKind::PointerDown {
+                            x: self.state.pointer_x as f64,
+                            y: self.state.pointer_y as f64,
+                            button: UiPointerButton::Primary,
+                        }),
                         bounds,
                     );
                 }
@@ -157,7 +193,16 @@ impl DemoInteraction {
             }
             InputEventKind::PointerUp { .. } => {
                 self.state.is_pointer_down = false;
-                self.calculator.handle_pointer_up();
+                if let Some(bounds) = calculator_scene_bounds(placement) {
+                    let _ = self.calculator.handle_event(
+                        UiEvent::new(UiEventKind::PointerUp {
+                            x: self.state.pointer_x as f64,
+                            y: self.state.pointer_y as f64,
+                            button: UiPointerButton::Primary,
+                        }),
+                        bounds,
+                    );
+                }
                 LoopControl::Continue
             }
             InputEventKind::KeyDown { .. } => LoopControl::Continue,
@@ -180,9 +225,12 @@ impl DemoInteraction {
             InputEventKind::PointerDown { .. } => {
                 self.handle_pointer_down();
                 if let Some(bounds) = placement_bounds(placement) {
-                    self.calculator.handle_pointer_down(
-                        self.state.pointer_x as f64,
-                        self.state.pointer_y as f64,
+                    let _ = self.calculator.handle_event(
+                        UiEvent::new(UiEventKind::PointerDown {
+                            x: self.state.pointer_x as f64,
+                            y: self.state.pointer_y as f64,
+                            button: UiPointerButton::Primary,
+                        }),
                         bounds,
                     );
                 }
@@ -190,7 +238,16 @@ impl DemoInteraction {
             }
             InputEventKind::PointerUp { .. } => {
                 self.handle_pointer_up();
-                self.calculator.handle_pointer_up();
+                if let Some(bounds) = placement_bounds(placement) {
+                    let _ = self.calculator.handle_event(
+                        UiEvent::new(UiEventKind::PointerUp {
+                            x: self.state.pointer_x as f64,
+                            y: self.state.pointer_y as f64,
+                            button: UiPointerButton::Primary,
+                        }),
+                        bounds,
+                    );
+                }
                 LoopControl::Continue
             }
             InputEventKind::KeyDown { key_code } => {
@@ -206,7 +263,9 @@ impl DemoInteraction {
         self.state.pointer_y = y as i32;
         self.state.hovered_node = hit_test_placement(x, y, placement);
         if let Some(bounds) = placement_bounds(placement) {
-            self.calculator.handle_pointer_moved(x, y, bounds);
+            let _ = self
+                .calculator
+                .handle_event(UiEvent::new(UiEventKind::PointerMoved { x, y }), bounds);
         }
     }
 
@@ -261,50 +320,53 @@ pub fn render_demo_frame(
     placement: &UiLayoutPhysicalPlacementModel,
     interaction: &DemoInteraction,
 ) -> DrawFrame {
-    let mut out_frame = match interaction.scene_mode {
-        DemoSceneMode::Calculator => DrawFrame::new(),
-        DemoSceneMode::Diagnostics => generate_draw_frame(placement),
-    };
+    match interaction.scene_mode {
+        DemoSceneMode::Calculator => {
+            let mut ui_frame = UiFrame::new();
+            let Some(bounds) = calculator_scene_bounds(placement) else {
+                return DrawFrame::new();
+            };
 
-    render_feedback_overlays(
-        &mut out_frame,
-        placement,
-        interaction.state(),
-        interaction.calculator(),
-        interaction.scene_mode,
-    );
-    out_frame
+            interaction.calculator().render(&mut ui_frame, bounds);
+            ui_frame.into_draw_frame()
+        }
+        DemoSceneMode::Diagnostics => {
+            let mut out_frame = generate_draw_frame(placement);
+            render_feedback_overlays(
+                &mut out_frame,
+                placement,
+                interaction.state(),
+                interaction.calculator(),
+            );
+            out_frame
+        }
+    }
 }
 
 fn render_feedback_overlays(
     out_frame: &mut DrawFrame,
     placement: &UiLayoutPhysicalPlacementModel,
     state: &DemoState,
-    calculator: &CalculatorShell,
-    scene_mode: DemoSceneMode,
+    calculator: &CalculatorController,
 ) {
-    let bounds = match scene_mode {
-        DemoSceneMode::Calculator => calculator_scene_bounds(placement),
-        DemoSceneMode::Diagnostics => placement_bounds(placement),
-    };
+    let bounds = placement_bounds(placement);
 
     if let Some(bounds) = bounds {
-        match scene_mode {
-            DemoSceneMode::Calculator => {
-                calculator.render(out_frame, bounds);
-            }
-            DemoSceneMode::Diagnostics => {
-                draw_scene_backdrop(out_frame, bounds);
-                draw_scene_header(out_frame, bounds);
-                draw_scene_cards(out_frame, placement, state);
-                draw_status_area(out_frame, bounds, state);
-                calculator.render_panel(out_frame, bounds, ui_shell::default_theme());
-            }
-        }
-    }
+        draw_scene_backdrop(out_frame, bounds);
+        draw_scene_header(out_frame, bounds);
+        draw_scene_cards(out_frame, placement, state);
+        draw_status_area(out_frame, bounds, state);
 
-    if matches!(scene_mode, DemoSceneMode::Diagnostics) {
+        let mut ui_frame = UiFrame::new();
+        calculator.render_panel(&mut ui_frame, bounds);
+        append_ui_frame(out_frame, &ui_frame);
         draw_pointer_marker(out_frame, state);
+    }
+}
+
+fn append_ui_frame(out_frame: &mut DrawFrame, ui_frame: &UiFrame) {
+    for command in ui_frame.commands() {
+        out_frame.push(command.clone());
     }
 }
 
@@ -816,6 +878,7 @@ mod tests {
     fn render_feedback_adds_borders_and_markers() {
         let placement = test_placement();
         let mut interaction = test_interaction();
+        let theme = ui_shell_kit::default_theme();
 
         interaction.state.pointer_x = 15;
         interaction.state.pointer_y = 25;
@@ -862,7 +925,7 @@ mod tests {
         assert!(commands.iter().any(|cmd| matches!(
             cmd,
             prom_ui_runtime::DrawCommand::FillRect { color, .. }
-                if *color == Color::rgb(205, 216, 229)
+                if *color == theme.muted_text
         )));
     }
 
@@ -870,6 +933,7 @@ mod tests {
     fn primary_calculator_scene_omits_demo_status_and_cards() {
         let placement = test_placement();
         let interaction = test_calculator_interaction();
+        let theme = ui_shell_kit::default_theme();
 
         let frame = render_demo_frame(&placement, &interaction);
         let commands = frame.commands();
@@ -882,7 +946,7 @@ mod tests {
         assert!(commands.iter().any(|cmd| matches!(
             cmd,
             prom_ui_runtime::DrawCommand::FillRect { color, .. }
-                if *color == Color::rgb(205, 216, 229)
+                if *color == theme.muted_text
         )));
         assert!(!commands.iter().any(|cmd| matches!(
             cmd,
