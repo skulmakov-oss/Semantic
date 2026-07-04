@@ -48,7 +48,7 @@ fn calculator_shell_render_evidence_is_deterministic() {
     };
 
     for label in ["7", "+", "3", "="] {
-        let _ = press(&mut controller, label);
+        press(&mut controller, label);
     }
 
     let (final_frame_a, final_snapshot_a) = render_snapshot(&controller, scene);
