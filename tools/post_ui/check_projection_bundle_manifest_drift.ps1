@@ -45,6 +45,14 @@ Assert-FileExists -Path $draftPath -Label "manifest draft"
 $sketch = Get-Content -Raw -LiteralPath $sketchPath
 $draft = Get-Content -Raw -LiteralPath $draftPath
 
+$draftConstantMarker = "pub const MINIMAL_SKETCH_MANIFEST_DRAFT"
+$draftConstantStart = $draft.IndexOf($draftConstantMarker)
+if ($draftConstantStart -lt 0) {
+    Fail "FAIL: Missing Rust manifest draft constant marker: $draftConstantMarker"
+}
+
+$draftEvidence = $draft.Substring($draftConstantStart)
+
 $sharedAnchors = @(
     @{ Name = "bundle id"; Text = "bundle.example.minimal" },
     @{ Name = "bundle version"; Text = "0-sketch" },
@@ -71,7 +79,7 @@ $sharedAnchors = @(
 )
 
 foreach ($anchor in $sharedAnchors) {
-    Assert-AnchorInBoth -Name $anchor.Name -Text $anchor.Text -SketchContent $sketch -DraftContent $draft
+    Assert-AnchorInBoth -Name $anchor.Name -Text $anchor.Text -SketchContent $sketch -DraftContent $draftEvidence
 }
 
 $policyAnchors = @(
@@ -84,7 +92,7 @@ $policyAnchors = @(
 )
 
 foreach ($anchor in $policyAnchors) {
-    Assert-AnchorInBoth -Name $anchor.Name -Text $anchor.Text -SketchContent $sketch -DraftContent $draft
+    Assert-AnchorInBoth -Name $anchor.Name -Text $anchor.Text -SketchContent $sketch -DraftContent $draftEvidence
 }
 
 Write-Host "PASS: ProjectionBundle manifest sketch/draft anchors match"
