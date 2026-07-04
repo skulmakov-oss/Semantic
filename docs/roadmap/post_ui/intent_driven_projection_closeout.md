@@ -85,8 +85,10 @@ Required reading order:
 9. `docs/spec/ui/task_projection_model.md`
 10. `docs/spec/ui/multi_client_freshness_model.md`
 11. `docs/spec/ui/projection_bundle_delivery.md`
-12. `docs/roadmap/post_ui/ui_shell_kit_projection_alignment.md`
-13. `docs/roadmap/post_ui/intent_driven_projection_closeout.md`
+12. `docs/roadmap/post_ui/projection_bundle_fixture_inventory.md`
+13. `docs/spec/ui/projection_bundle_basis.md`
+14. `docs/roadmap/post_ui/ui_shell_kit_projection_alignment.md`
+15. `docs/roadmap/post_ui/intent_driven_projection_closeout.md`
 
 ```text
 Read the doctrine before the mechanism.
@@ -245,6 +247,9 @@ No loader.
 No runtime.
 No shell player.
 No production wiring.
+
+`ProjectionBundle Basis v0` is the claim boundary for the current fixture evidence contour.
+It records that the current achieved level is Level 3 only and that reader/parser, loader, runtime, and production UI behavior are not claimed.
 
 Do not create that fixture in this PR.
 
