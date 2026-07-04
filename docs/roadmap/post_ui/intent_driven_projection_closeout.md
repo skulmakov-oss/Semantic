@@ -108,7 +108,8 @@ Ownership remains split:
 - Patch streams own projection updates.
 - Shell owns rendering behavior.
 - Renderer owns pixels.
-- Verifier / admission owns authority decisions.
+- Verifier / admission owns semantic admission decisions.
+- Capability / audit authority owns capability checks, host-effect permission, critical action authorization, and audit evidence boundaries.
 - Runtime owns execution / scheduling only where explicitly specified.
 
 ```text
@@ -162,6 +163,7 @@ No production UI wiring.
 No Workbench dependency.
 No ui-shell-kit promotion.
 No verifier / VM / SemCode changes.
+No capability / audit authority widening.
 
 ```text
 Specified does not mean implemented.
