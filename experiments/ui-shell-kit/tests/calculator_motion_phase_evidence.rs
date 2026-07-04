@@ -9,15 +9,8 @@ fn render_phase_snapshot(phase: f32) -> (UiFrame, String) {
     let theme = UiShellTheme::default();
     let scene = UiRect::new(0, 0, 760, 560);
 
-    let _registry = render_calculator_scene_with_phase(
-        &mut frame,
-        scene,
-        "123",
-        None,
-        None,
-        theme,
-        phase,
-    );
+    let _registry =
+        render_calculator_scene_with_phase(&mut frame, scene, "123", None, None, theme, phase);
 
     let snapshot = frame_to_snapshot(&frame);
     (frame, snapshot)
@@ -75,7 +68,10 @@ fn calculator_motion_phase_evidence_is_deterministic() {
         "Settled phase should be deterministic"
     );
 
-    assert_ne!(entrance_a, settling_a, "Entrance and Settling should differ");
+    assert_ne!(
+        entrance_a, settling_a,
+        "Entrance and Settling should differ"
+    );
     assert_ne!(settling_a, settled_a, "Settling and Settled should differ");
     assert_ne!(entrance_a, settled_a, "Entrance and Settled should differ");
 }

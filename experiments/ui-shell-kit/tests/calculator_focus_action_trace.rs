@@ -47,7 +47,9 @@ fn press_button(
     assert!(
         actions.iter().any(|action| matches!(
             action,
-            UiAction::ButtonPressed { .. } | UiAction::CalculatorButtonPressed { .. } | UiAction::FocusChanged { .. }
+            UiAction::ButtonPressed { .. }
+                | UiAction::CalculatorButtonPressed { .. }
+                | UiAction::FocusChanged { .. }
         )),
         "pressing {label} should emit calculator interaction evidence"
     );
@@ -56,24 +58,33 @@ fn press_button(
 }
 
 fn action_contains_button_press(actions: &[UiAction], label: &'static str) -> bool {
-    actions.iter().any(|action| matches!(
-        action,
-        UiAction::CalculatorButtonPressed { label: pressed_label } if *pressed_label == label
-    ))
+    actions.iter().any(|action| {
+        matches!(
+            action,
+            UiAction::CalculatorButtonPressed { label: pressed_label } if *pressed_label == label
+        )
+    })
 }
 
 fn action_contains_button_id(actions: &[UiAction], target_id: u32) -> bool {
-    actions.iter().any(|action| matches!(
-        action,
-        UiAction::ButtonPressed { id } if id.0 == target_id
-    ))
+    actions.iter().any(|action| {
+        matches!(
+            action,
+            UiAction::ButtonPressed { id } if id.0 == target_id
+        )
+    })
 }
 
-fn action_contains_focus_change(actions: &[UiAction], target_id: ui_shell_kit::hit_test::HitTargetId) -> bool {
-    actions.iter().any(|action| matches!(
-        action,
-        UiAction::FocusChanged { to: Some(id), .. } if *id == target_id
-    ))
+fn action_contains_focus_change(
+    actions: &[UiAction],
+    target_id: ui_shell_kit::hit_test::HitTargetId,
+) -> bool {
+    actions.iter().any(|action| {
+        matches!(
+            action,
+            UiAction::FocusChanged { to: Some(id), .. } if *id == target_id
+        )
+    })
 }
 
 #[test]

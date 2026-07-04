@@ -8,7 +8,10 @@ use ui_shell_kit::snapshot::frame_to_snapshot;
 use ui_shell_kit::theme::UiShellTheme;
 
 fn button_center(rect: UiRect) -> (i32, i32) {
-    (rect.x + rect.width as i32 / 2, rect.y + rect.height as i32 / 2)
+    (
+        rect.x + rect.width as i32 / 2,
+        rect.y + rect.height as i32 / 2,
+    )
 }
 
 fn press_button(
@@ -44,7 +47,10 @@ fn calculator_reference_scenario_is_executable() {
     let mut initial_frame = UiFrame::new();
     controller.render(&mut initial_frame, scene, &theme);
     assert_eq!(controller.state.display, "0");
-    assert!(!initial_frame.is_empty(), "initial render should emit draw commands");
+    assert!(
+        !initial_frame.is_empty(),
+        "initial render should emit draw commands"
+    );
     let initial_snapshot = frame_to_snapshot(&initial_frame);
     assert!(
         !initial_snapshot.is_empty(),
@@ -62,11 +68,15 @@ fn calculator_reference_scenario_is_executable() {
     for label in ["7", "+", "3", "="] {
         let actions = press_button(&mut controller, &layout, label);
         assert!(
-            actions.iter().any(|action| matches!(action, UiAction::CalculatorButtonPressed { .. })),
+            actions
+                .iter()
+                .any(|action| matches!(action, UiAction::CalculatorButtonPressed { .. })),
             "pressing {label} should emit a calculator button action"
         );
         assert!(
-            actions.iter().any(|action| matches!(action, UiAction::ButtonPressed { .. })),
+            actions
+                .iter()
+                .any(|action| matches!(action, UiAction::ButtonPressed { .. })),
             "pressing {label} should emit a button press action"
         );
     }
@@ -75,7 +85,10 @@ fn calculator_reference_scenario_is_executable() {
 
     let mut final_frame = UiFrame::new();
     controller.render(&mut final_frame, scene, &theme);
-    assert!(!final_frame.is_empty(), "final render should emit draw commands");
+    assert!(
+        !final_frame.is_empty(),
+        "final render should emit draw commands"
+    );
 
     let final_snapshot = frame_to_snapshot(&final_frame);
     assert!(

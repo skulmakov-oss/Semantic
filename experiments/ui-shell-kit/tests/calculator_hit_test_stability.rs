@@ -22,8 +22,14 @@ fn canonical_button(
         .iter()
         .find(|(button, _)| calculator_button_label(*button) == label)
         .expect("calculator button exists in reference layout");
-    assert!(rect.width > 0, "canonical button {label} must have non-empty width");
-    assert!(rect.height > 0, "canonical button {label} must have non-empty height");
+    assert!(
+        rect.width > 0,
+        "canonical button {label} must have non-empty width"
+    );
+    assert!(
+        rect.height > 0,
+        "canonical button {label} must have non-empty height"
+    );
 
     let target_id = layout
         .hit_targets
@@ -110,7 +116,9 @@ fn calculator_hit_test_stability_is_executable() {
         assert!(
             actions.iter().any(|action| matches!(
                 action,
-                UiAction::CalculatorButtonPressed { .. } | UiAction::ButtonPressed { .. } | UiAction::FocusChanged { .. }
+                UiAction::CalculatorButtonPressed { .. }
+                    | UiAction::ButtonPressed { .. }
+                    | UiAction::FocusChanged { .. }
             )),
             "pressing {label} should emit calculator interaction evidence",
         );
@@ -132,9 +140,10 @@ fn calculator_hit_test_stability_is_executable() {
     };
     let outside_actions = controller.handle_event(outside_event, &layout).drain();
     assert!(
-        outside_actions
-            .iter()
-            .all(|action| !matches!(action, UiAction::CalculatorButtonPressed { .. } | UiAction::ButtonPressed { .. })),
+        outside_actions.iter().all(|action| !matches!(
+            action,
+            UiAction::CalculatorButtonPressed { .. } | UiAction::ButtonPressed { .. }
+        )),
         "outside hit must not emit calculator button actions",
     );
     assert_eq!(controller.state.display, "10");
