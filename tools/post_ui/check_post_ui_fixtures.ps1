@@ -46,6 +46,10 @@ $guards = @(
     @{
         Name = "ProjectionBundle manifest draft type guard"
         Path = Join-Path $repoRoot "tools/post_ui/check_projection_bundle_manifest_draft.ps1"
+    },
+    @{
+        Name = "ProjectionBundle manifest sketch/draft drift guard"
+        Path = Join-Path $repoRoot "tools/post_ui/check_projection_bundle_manifest_drift.ps1"
     }
 )
 
