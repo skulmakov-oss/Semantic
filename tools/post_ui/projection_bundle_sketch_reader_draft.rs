@@ -10,6 +10,7 @@
 
 use std::env;
 use std::fs;
+use std::path::Path;
 use std::process;
 
 const EXPECTED_CONTAINS: &[(&str, &str)] = &[
@@ -122,12 +123,19 @@ fn normalize_repo_root(raw: &str) -> String {
 }
 
 fn read_sketch(repo_root: &str) -> String {
-    let sketch_path = format!(
-        r"{}\tests\fixtures\post_ui\projection_bundle\manifest_minimal.sketch.md",
-        repo_root
-    );
-    fs::read_to_string(&sketch_path)
-        .unwrap_or_else(|err| fail(format!("cannot read manifest sketch at {}: {}", sketch_path, err)))
+    let sketch_path = Path::new(repo_root)
+        .join("tests")
+        .join("fixtures")
+        .join("post_ui")
+        .join("projection_bundle")
+        .join("manifest_minimal.sketch.md");
+    fs::read_to_string(&sketch_path).unwrap_or_else(|err| {
+        fail(format!(
+            "cannot read manifest sketch at {}: {}",
+            sketch_path.display(),
+            err
+        ))
+    })
 }
 
 fn extract_scalar(content: &str, key: &str) -> Option<String> {
