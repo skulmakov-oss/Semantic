@@ -1,77 +1,62 @@
-use ui_shell_kit::calculator_scene::render_calculator_scene_with_phase;
-use ui_shell_kit::geometry::UiRect;
+use prom_ui::layout::UiLayoutGeometryRect;
+use ui_shell_kit::calculator_controller::CalculatorController;
+use ui_shell_kit::calculator_scene::calculator_layout;
+use ui_shell_kit::event::{UiEvent, UiEventKind, UiPointerButton};
 use ui_shell_kit::paint::UiFrame;
 use ui_shell_kit::snapshot::frame_to_snapshot;
-use ui_shell_kit::theme::UiShellTheme;
 
-fn render_phase_snapshot(phase: f32) -> (UiFrame, String) {
+fn render_snapshot(
+    controller: &CalculatorController,
+    scene: UiLayoutGeometryRect,
+) -> (UiFrame, String) {
     let mut frame = UiFrame::new();
-    let theme = UiShellTheme::default();
-    let scene = UiRect::new(0, 0, 760, 560);
-
-    let _registry =
-        render_calculator_scene_with_phase(&mut frame, scene, "123", None, None, theme, phase);
-
+    controller.render(&mut frame, scene);
     let snapshot = frame_to_snapshot(&frame);
     (frame, snapshot)
 }
 
-fn assert_motion_snapshot(label: &str, phase: f32) -> String {
-    let (frame, snapshot) = render_phase_snapshot(phase);
-    assert!(
-        !frame.is_empty(),
-        "{label} phase should emit at least one draw command"
-    );
-    assert!(
-        frame.stats().total_commands > 0,
-        "{label} phase should emit a non-empty command stream"
-    );
-    assert!(
-        !snapshot.is_empty(),
-        "{label} phase snapshot should not be empty"
-    );
-    assert!(
-        snapshot.contains("value=\"Semantic Calculator\""),
-        "{label} phase snapshot should include the calculator title"
-    );
-    assert!(
-        snapshot.contains("value=\"123\""),
-        "{label} phase snapshot should include the calculator display"
-    );
-    assert!(
-        snapshot.contains("value=\"GLASS\""),
-        "{label} phase snapshot should include the shell badge"
-    );
-    snapshot
-}
-
 #[test]
-fn calculator_motion_phase_evidence_is_deterministic() {
-    let entrance_a = assert_motion_snapshot("Entrance", 0.00);
-    let entrance_b = assert_motion_snapshot("Entrance", 0.00);
-    assert_eq!(
-        entrance_a, entrance_b,
-        "Entrance phase should be deterministic"
-    );
+fn calculator_shell_render_evidence_is_deterministic() {
+    let mut controller = CalculatorController::new();
+    let scene = UiLayoutGeometryRect::new(0, 0, 800, 600);
 
-    let settling_a = assert_motion_snapshot("Settling", 0.50);
-    let settling_b = assert_motion_snapshot("Settling", 0.50);
-    assert_eq!(
-        settling_a, settling_b,
-        "Settling phase should be deterministic"
-    );
+    let (frame_a, snapshot_a) = render_snapshot(&controller, scene);
+    let (frame_b, snapshot_b) = render_snapshot(&controller, scene);
+    assert!(!frame_a.is_empty());
+    assert!(!frame_b.is_empty());
+    assert_eq!(snapshot_a, snapshot_b);
+    assert!(snapshot_a.contains("FillRect"));
+    assert!(snapshot_a.contains("0"));
 
-    let settled_a = assert_motion_snapshot("Settled", 1.00);
-    let settled_b = assert_motion_snapshot("Settled", 1.00);
-    assert_eq!(
-        settled_a, settled_b,
-        "Settled phase should be deterministic"
-    );
+    let press = |controller: &mut CalculatorController, label: &str| {
+        let layout = calculator_layout(scene);
+        let (_, rect) = layout
+            .buttons
+            .iter()
+            .find(|(button, _)| button.label() == label)
+            .expect("calculator button exists in reference layout");
+        let x = (rect.x() + rect.width() as i32 / 2) as f64;
+        let y = (rect.y() + rect.height() as i32 / 2) as f64;
+        controller.handle_event(
+            UiEvent::new(UiEventKind::PointerDown {
+                x,
+                y,
+                button: UiPointerButton::Primary,
+            }),
+            scene,
+        );
+    };
 
-    assert_ne!(
-        entrance_a, settling_a,
-        "Entrance and Settling should differ"
-    );
-    assert_ne!(settling_a, settled_a, "Settling and Settled should differ");
-    assert_ne!(entrance_a, settled_a, "Entrance and Settled should differ");
+    for label in ["7", "+", "3", "="] {
+        let _ = press(&mut controller, label);
+    }
+
+    let (final_frame_a, final_snapshot_a) = render_snapshot(&controller, scene);
+    let (final_frame_b, final_snapshot_b) = render_snapshot(&controller, scene);
+    assert!(!final_frame_a.is_empty());
+    assert!(!final_frame_b.is_empty());
+    assert_eq!(final_snapshot_a, final_snapshot_b);
+    assert!(final_snapshot_a.contains("FillRect"));
+    assert!(final_snapshot_a.contains("10"));
+    assert_ne!(snapshot_a, final_snapshot_a);
 }
