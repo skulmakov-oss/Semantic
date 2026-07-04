@@ -42,6 +42,10 @@ $guards = @(
     @{
         Name = "ProjectionBundle fixture anchor guard"
         Path = Join-Path $repoRoot "tools/post_ui/check_projection_bundle_fixtures.ps1"
+    },
+    @{
+        Name = "ProjectionBundle manifest draft type guard"
+        Path = Join-Path $repoRoot "tools/post_ui/check_projection_bundle_manifest_draft.ps1"
     }
 )
 
