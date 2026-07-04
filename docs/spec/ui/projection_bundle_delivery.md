@@ -253,7 +253,8 @@ Required distinctions:
 - `ReadOnlyDashboard` cannot expose control affordances unless separately approved.
 
 ```text
-Critical control surfaces require pinned or explicitly verified bundles.
+Critical control surfaces require CriticalPinned bundles.
+Verification is additional evidence, not a substitute for pinning.
 ```
 
 Safety class defines activation posture and control expectations.
