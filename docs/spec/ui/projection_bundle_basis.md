@@ -60,6 +60,16 @@ This basis exists to prevent overclaiming and to define the current evidence bou
 - is: text-anchor drift guard between the inert sketch and the Rust draft constant body
 - is not: parser verification, Rust AST analysis, loader verification, or runtime verification
 
+`tools/post_ui/projection_bundle_sketch_reader_draft.rs`
+- is: fixture-facing executable reader draft for one inert sketch, plus a deterministic negative fixture check
+- is not: general reader/parser behavior, loader behavior, runtime behavior, or production UI wiring
+- evidence: the inert positive manifest sketch is accepted; the invalid manifest sketch with `allow_production_activation: true` is rejected
+
+`tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1`
+- is: compile-and-run guard for the fixture-facing sketch reader draft
+- is not: runtime activation, loader validation, verification, or proof of general reader/parser behavior
+- evidence: the reader draft guard exits successfully on the accepted positive sketch and the rejected negative sketch
+
 ## 3. Claim Levels
 
 Claim Level 0 — Text exists
@@ -86,11 +96,29 @@ Claim Level 6 — Runtime behavior
 Claim Level 7 — Production UI behavior
 - Production UI wiring is safe, correct, and ready for release use.
 
-Current achieved level: Level 3 only.
+Current achieved level: Level 3 baseline, plus narrow sketch-reader evidence only.
 
 Levels 4–7 are not claimed.
 
-## 4. What Current Guards Prove
+## 4. Narrow Reader Evidence Note
+
+After the sketch reader draft guard, the evidence contour includes a narrow reader-facing check:
+
+- the inert positive manifest sketch is accepted;
+- the invalid manifest sketch with `allow_production_activation: true` is rejected;
+- the check is fixture-facing and test-only.
+
+This is narrow Level 4 reader evidence for the current sketch reader draft only.
+
+Level 4 is not generally achieved.
+
+It does not claim general Level 4 reader/parser behavior.
+It does not claim loader behavior.
+It does not claim runtime behavior.
+It does not claim verification behavior.
+It does not claim production UI behavior.
+
+## 5. What Current Guards Prove
 
 The current guards prove only repo-local evidence conditions, such as:
 
@@ -102,7 +130,7 @@ The current guards prove only repo-local evidence conditions, such as:
 
 These checks prove only that these checked conditions hold at the checked revision.
 
-## 5. What Current Guards Do Not Prove
+## 6. What Current Guards Do Not Prove
 
 The current guards do not prove that:
 
@@ -122,7 +150,7 @@ The current guards do not prove that:
 - security is proven.
 - compatibility with future serialization is proven.
 
-## 6. Allowed Claims
+## 7. Allowed Claims
 
 | Claim | Allowed wording |
 | --- | --- |
@@ -131,7 +159,7 @@ The current guards do not prove that:
 | Rust draft compiles | The fixture-facing draft type file compiles as standalone metadata. |
 | Sketch and draft align | The sketch and Rust draft constant body share selected literal anchors. |
 
-## 7. Forbidden Claims
+## 8. Forbidden Claims
 
 | Forbidden claim | Reason |
 | --- | --- |
@@ -142,7 +170,7 @@ The current guards do not prove that:
 | The Rust draft is the public API | The draft is fixture-facing only and not a crate. |
 | Runtime can consume this bundle | No runtime reader or activation path exists. |
 
-## 8. Authority Boundaries
+## 9. Authority Boundaries
 
 Semantic owns meaning.
 Projection owns presentation intent.
@@ -160,7 +188,7 @@ Runtime owns execution / scheduling only where explicitly specified.
 This basis document does not move authority between layers.
 ```
 
-## 9. Promotion Gates
+## 10. Promotion Gates
 
 Before Level 4:
 - a separately approved reader/parser basis;
@@ -189,7 +217,7 @@ Before Level 7:
 - user-visible denial behavior;
 - rollback/fallback evidence.
 
-## 10. Non-Goals
+## 11. Non-Goals
 
 This document is not a parser specification.
 This document is not a serialization specification.
@@ -198,7 +226,7 @@ This document is not a runtime contract.
 This document is not a security proof.
 This document is not a production readiness claim.
 
-## 11. Working Rule for Future PRs
+## 12. Working Rule for Future PRs
 
 Every future ProjectionBundle PR must state which claim level it changes.
 
