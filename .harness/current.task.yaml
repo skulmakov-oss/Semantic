@@ -1,25 +1,26 @@
 task:
-  id: LOCAL-HARNESS-CURRENT-TASK-ALLOWED-PATHS
-  title: Fix harness-check to read allowed paths
-  type: harness-fix
+  id: POST-UI-READER-CORE-DOCS-CLOSEOUT
+  title: Close out ProjectionBundle reader-core evidence docs
+  type: docs-closeout
   mode: active
 
 intent:
-  summary: Make harness-check dynamic so it reads allowed_paths from the current task
+  summary: Record the already-merged fixture-facing ProjectionBundle sketch reader-core evidence closeout.
 
 layer:
-  name: tooling
-  owner: repo-local
+  name: documentation
+  owner: post-ui
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - scripts/harness-check.ps1
+    - docs/roadmap/post_ui/projection_bundle_reader_evidence_closeout.md
 
   forbidden_paths:
-    - docs/**
+    - scripts/**
     - tools/**
     - tests/**
+    - tests/fixtures/**
     - Cargo.toml
     - Cargo.lock
 
@@ -28,21 +29,35 @@ actions:
     - read
     - edit_allowed_paths
     - push
+    - create_pr
 
   forbidden:
-    - modify_docs
+    - modify_tools
+    - modify_reader_code
     - modify_fixtures
     - modify_golden_outputs
     - modify_cargo_toml
     - modify_cargo_lock
+    - general_parser_claim
+    - schema_claim
+    - loader_claim
+    - runtime_claim
+    - production_ui_claim
 
 constraints:
-  - harness infrastructure fix only
-  - no docs changes
-  - no tool/code reader changes
+  - docs closeout only
+  - fixture-facing ProjectionBundle sketch reader-core evidence only
+  - no tool/code changes
   - no fixture changes
   - no golden output changes
   - no Cargo changes
+  - no general parser claim
+  - no schema claim
+  - no loader claim
+  - no runtime claim
+  - no production UI claim
+  - no general Level 4 claim
+  - no Level 5+ claim
 
 verification:
   required:
@@ -50,4 +65,4 @@ verification:
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
 
 report:
-  output: .harness/reports/LOCAL-HARNESS-CURRENT-TASK-ALLOWED-PATHS.md
+  output: .harness/reports/POST-UI-READER-CORE-DOCS-CLOSEOUT.md

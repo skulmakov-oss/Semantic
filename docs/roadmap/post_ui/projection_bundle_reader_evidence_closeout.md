@@ -87,3 +87,36 @@ It does not claim general Level 4 reader/parser behavior.
 It does not claim loader behavior.
 It does not claim runtime behavior.
 It does not claim production UI behavior.
+
+## Reader-core publication closeout
+
+Merged publication steps:
+
+- #1358 - harness publication gate for the reader-core candidate.
+- #1359 - fixture-facing ProjectionBundle reader-core evidence.
+- #1360 - dynamic Harness path-scope fix for allowed_paths and forbidden_paths.
+
+Evidence recorded after publication:
+
+- The reader guard runs Rust unit tests before compiling the standalone reader draft.
+- Positive output generation derives from parsed reader state.
+- Negative report generation derives from parsed reader state.
+- Section scanning, array scanning, and source_refs extraction are represented in the reader core.
+- Scalar and section ordering checks use parsed positions.
+- Positive and negative validation paths use a single-parse flow.
+- Golden outputs remained unchanged.
+- Post-merge validation on main passed:
+  - scripts/harness-check.ps1
+  - tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1
+  - tools/post_ui/check_post_ui_fixtures.ps1
+  - cargo fmt --check
+  - cargo check --tests --quiet
+  - git diff --check
+
+Boundary:
+
+- This is fixture-facing ProjectionBundle sketch reader-core evidence only.
+- It is not a general parser claim.
+- It is not a schema claim.
+- It is not a loader, runtime reader, verifier, activation path, production UI path, or public API claim.
+- It does not imply general Level 4 or Level 5+ readiness.
