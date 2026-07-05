@@ -7,6 +7,7 @@
 // It does not verify bundles.
 // It does not authorize production UI wiring.
 #![forbid(unsafe_code)]
+#![allow(dead_code)]
 
 use std::env;
 use std::fs;
@@ -409,8 +410,8 @@ enum NegativeRule {
     },
 }
 
-#[derive(Clone)]
-struct ManifestSnapshot {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchReaderOutput {
     bundle_id: String,
     bundle_version: String,
     projection_id: String,
@@ -437,11 +438,159 @@ struct ManifestSnapshot {
     allow_critical_update_during_quarantine: String,
 }
 
-#[derive(Clone)]
+type ManifestSnapshot = SketchReaderOutput;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchScalar {
+    section: String,
+    key: String,
+    value: String,
+    line: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchSection {
+    name: String,
+    path: String,
+    start_line: usize,
+    end_line: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchArray {
+    section: String,
+    key: String,
+    values: Vec<String>,
+    line: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchReaderCore {
+    text_block: String,
+    scalars: Vec<SketchScalar>,
+    sections: Vec<SketchSection>,
+    arrays: Vec<SketchArray>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct NegativeCaseResult {
     name: &'static str,
     input: String,
+    status: NegativeCaseStatus,
     reason: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NegativeCaseStatus {
+    Rejected,
+    UnexpectedPass,
+    WrongReason,
+}
+
+impl NegativeCaseStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            NegativeCaseStatus::Rejected => "rejected",
+            NegativeCaseStatus::UnexpectedPass => "unexpected_pass",
+            NegativeCaseStatus::WrongReason => "wrong_reason",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NegativeReport {
+    cases: Vec<NegativeCaseResult>,
+}
+
+impl NegativeReport {
+    fn new() -> Self {
+        Self { cases: Vec::new() }
+    }
+
+    fn from_cases(cases: Vec<NegativeCaseResult>) -> Self {
+        Self { cases }
+    }
+
+    fn push_case(&mut self, case: NegativeCaseResult) {
+        self.cases.push(case);
+    }
+
+    fn accepted_positive(&self) -> usize {
+        1
+    }
+
+    fn rejected_negative(&self) -> usize {
+        self.cases
+            .iter()
+            .filter(|case| case.status == NegativeCaseStatus::Rejected)
+            .count()
+    }
+
+    fn unexpected_pass(&self) -> usize {
+        self.cases
+            .iter()
+            .filter(|case| case.status == NegativeCaseStatus::UnexpectedPass)
+            .count()
+    }
+
+    fn wrong_reason(&self) -> usize {
+        self.cases
+            .iter()
+            .filter(|case| case.status == NegativeCaseStatus::WrongReason)
+            .count()
+    }
+
+    fn with_unexpected_pass(mut self, name: &'static str, input: impl Into<String>) -> Self {
+        self.push_case(NegativeCaseResult {
+            name,
+            input: input.into(),
+            status: NegativeCaseStatus::UnexpectedPass,
+            reason: String::new(),
+        });
+        self
+    }
+
+    fn with_wrong_reason(
+        mut self,
+        name: &'static str,
+        input: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        self.push_case(NegativeCaseResult {
+            name,
+            input: input.into(),
+            status: NegativeCaseStatus::WrongReason,
+            reason: reason.into(),
+        });
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReaderErrorKind {
+    MissingRequiredField,
+    MalformedField,
+    UnknownField,
+    DuplicateField,
+    FieldOrdering,
+    InvalidPolicyValue,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ReaderError {
+    kind: ReaderErrorKind,
+    field: String,
+    message: String,
+}
+
+impl ReaderError {
+    fn new(kind: ReaderErrorKind, field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            field: field.into(),
+            message: message.into(),
+        }
+    }
 }
 
 fn fail(message: impl AsRef<str>) -> ! {
@@ -486,21 +635,187 @@ fn read_fixture(repo_root: &str, relative_path: &[&str]) -> String {
     })
 }
 
-fn extract_scalar(content: &str, key: &str) -> Option<String> {
-    let prefix = format!("{}:", key);
+fn extract_text_block(content: &str) -> Result<String, ReaderError> {
+    let mut in_text_block = false;
+    let mut block = String::new();
+    let mut found_block = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(&prefix) {
-            let mut value = rest.trim().trim_end_matches(',').trim();
-            if let Some(stripped) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-                value = stripped;
+        if !in_text_block {
+            if trimmed == "```text" {
+                in_text_block = true;
+                found_block = true;
             }
-            return Some(value.to_string());
+            continue;
+        }
+
+        if trimmed == "```" {
+            return Ok(block);
+        }
+
+        block.push_str(line);
+        block.push('\n');
+    }
+
+    if found_block {
+        Err(ReaderError::new(
+            ReaderErrorKind::MalformedField,
+            "projection_bundle",
+            "unterminated text block",
+        ))
+    } else {
+        Err(ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            "projection_bundle",
+            "missing required text block",
+        ))
+    }
+}
+
+fn scan_scalars(text_block: &str) -> SketchReaderCore {
+    let mut scalars = Vec::new();
+    let mut sections: Vec<SketchSection> = Vec::new();
+    let mut arrays = Vec::new();
+    let mut section_stack: Vec<usize> = Vec::new();
+    let mut current_array: Option<SketchArray> = None;
+
+    for (index, line) in text_block.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if current_array.is_some() {
+            if trimmed == "]" {
+                arrays.push(current_array.take().unwrap());
+                continue;
+            }
+
+            if let Some(array) = current_array.as_mut() {
+                let candidate = trimmed.trim_end_matches(',');
+                if let Some(value) = candidate
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                {
+                    array.values.push(value.to_string());
+                }
+            }
+
+            continue;
+        }
+
+        if trimmed == "}" {
+            if let Some(section_index) = section_stack.pop() {
+                if let Some(section) = sections.get_mut(section_index) {
+                    section.end_line = Some(index + 1);
+                }
+            }
+            continue;
+        }
+
+        if trimmed.ends_with('{') {
+            let section = trimmed.trim_end_matches('{').trim().to_string();
+            if !section.is_empty() {
+                let path = if let Some(parent_index) = section_stack.last() {
+                    let parent_path = sections
+                        .get(*parent_index)
+                        .map(|section| section.path.clone())
+                        .unwrap_or_default();
+                    if parent_path.is_empty() {
+                        section.clone()
+                    } else {
+                        format!("{}/{}", parent_path, section)
+                    }
+                } else {
+                    section.clone()
+                };
+
+                sections.push(SketchSection {
+                    name: section,
+                    path,
+                    start_line: index + 1,
+                    end_line: None,
+                });
+                section_stack.push(sections.len() - 1);
+            }
+            continue;
+        }
+
+        if let Some((key, rest)) = trimmed.split_once(':') {
+            let key = key.trim();
+            let value = rest.trim();
+            if value.starts_with('[') {
+                let section = section_stack
+                    .last()
+                    .and_then(|section_index| sections.get(*section_index))
+                    .map(|section| section.path.clone())
+                    .unwrap_or_default();
+
+                if value == "[]" {
+                    arrays.push(SketchArray {
+                        section,
+                        key: key.to_string(),
+                        values: Vec::new(),
+                        line: index + 1,
+                    });
+                } else {
+                    let mut array = SketchArray {
+                        section,
+                        key: key.to_string(),
+                        values: Vec::new(),
+                        line: index + 1,
+                    };
+
+                    if value.ends_with(']') && value != "[" {
+                        let inner = value
+                            .trim_start_matches('[')
+                            .trim_end_matches(']')
+                            .trim();
+                        if !inner.is_empty() {
+                            for part in inner.split(',') {
+                                let item = part.trim().trim_matches('"');
+                                if !item.is_empty() {
+                                    array.values.push(item.to_string());
+                                }
+                            }
+                        }
+                        arrays.push(array);
+                    } else {
+                        current_array = Some(array);
+                    }
+                }
+                continue;
+            }
+
+            scalars.push(SketchScalar {
+                section: section_stack
+                    .last()
+                    .and_then(|section_index| sections.get(*section_index))
+                    .map(|section| section.path.clone())
+                    .unwrap_or_default(),
+                key: key.to_string(),
+                value: value.trim_end_matches(',').trim().trim_matches('"').to_string(),
+                line: index + 1,
+            });
         }
     }
 
-    None
+    if let Some(array) = current_array.take() {
+        arrays.push(array);
+    }
+
+    SketchReaderCore {
+        text_block: text_block.to_string(),
+        scalars,
+        sections,
+        arrays,
+    }
+}
+
+fn parse_sketch_core(content: &str) -> Result<SketchReaderCore, ReaderError> {
+    let text_block = extract_text_block(content)?;
+    Ok(scan_scalars(&text_block))
 }
 
 fn normalize_line_endings(text: &str) -> String {
@@ -524,85 +839,453 @@ fn require_contains(content: &str, label: &str, needle: &str) -> Result<(), Stri
     Ok(())
 }
 
-fn require_scalar(content: &str, label: &str, key: &str, expected: &str) -> Result<String, String> {
-    let actual = extract_scalar(content, key)
-        .ok_or_else(|| format!("missing required field {}: {}", label, key))?;
+fn find_scalar_core<'a>(core: &'a SketchReaderCore, key: &str) -> Option<&'a SketchScalar> {
+    core.scalars.iter().find(|scalar| scalar.key == key)
+}
 
-    if actual != expected {
-        return Err(format!(
-            "field {} mismatch: expected {:?}, got {:?}",
-            label, expected, actual
+fn count_scalar_occurrences_core(core: &SketchReaderCore, key: &str) -> usize {
+    core.scalars.iter().filter(|scalar| scalar.key == key).count()
+}
+
+fn find_section_core<'a>(core: &'a SketchReaderCore, path: &str) -> Option<&'a SketchSection> {
+    core.sections.iter().find(|section| section.path == path)
+}
+
+fn find_array_core<'a>(
+    core: &'a SketchReaderCore,
+    section: &str,
+    key: &str,
+) -> Option<&'a SketchArray> {
+    core.arrays
+        .iter()
+        .find(|array| array.section == section && array.key == key)
+}
+
+fn require_required_scalar_core(
+    core: &SketchReaderCore,
+    key: &str,
+    expected: &str,
+) -> Result<String, ReaderError> {
+    let scalar = find_scalar_core(core, key).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            key,
+            format!("missing required field {}", key),
+        )
+    })?;
+
+    if scalar.value != expected {
+        return Err(ReaderError::new(
+            ReaderErrorKind::InvalidPolicyValue,
+            key,
+            format!(
+                "field {} mismatch: expected {:?}, got {:?}",
+                key, expected, scalar.value
+            ),
         ));
     }
 
-    Ok(actual)
+    Ok(scalar.value.clone())
 }
 
-fn count_scalar_occurrences(content: &str, key: &str) -> usize {
-    let prefix = format!("{}:", key);
+fn require_non_empty_scalar_core(core: &SketchReaderCore, key: &str) -> Result<(), ReaderError> {
+    let scalar = find_scalar_core(core, key).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            key,
+            format!("missing required field {}", key),
+        )
+    })?;
 
-    content
-        .lines()
-        .filter(|line| line.trim().starts_with(&prefix))
-        .count()
-}
-
-fn find_first_line_index(content: &str, needle: &str) -> Option<usize> {
-    for (index, line) in content.lines().enumerate() {
-        if line.trim().starts_with(needle) {
-            return Some(index);
-        }
-    }
-
-    None
-}
-
-fn require_non_empty_scalar(content: &str, key: &str) -> Result<(), String> {
-    let count = count_scalar_occurrences(content, key);
-    if count == 0 {
-        return Err(format!("missing required field {}", key));
-    }
-
-    if count > 1 {
-        return Err(format!("duplicate_field: {}", key));
-    }
-
-    let actual = extract_scalar(content, key).unwrap_or_default();
-    if actual.is_empty() {
-        return Err(format!("malformed_field: {} is empty", key));
+    if scalar.value.is_empty() {
+        return Err(ReaderError::new(
+            ReaderErrorKind::MalformedField,
+            key,
+            format!("malformed_field: {} is empty", key),
+        ));
     }
 
     Ok(())
 }
 
-fn require_boolean_scalar(content: &str, key: &str) -> Result<(), String> {
-    let count = count_scalar_occurrences(content, key);
-    if count == 0 {
-        return Err(format!("missing required field {}", key));
-    }
+fn require_boolean_scalar_core(core: &SketchReaderCore, key: &str) -> Result<(), ReaderError> {
+    let scalar = find_scalar_core(core, key).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            key,
+            format!("missing required field {}", key),
+        )
+    })?;
 
-    if count > 1 {
-        return Err(format!("duplicate_field: {}", key));
-    }
-
-    let actual = extract_scalar(content, key).unwrap_or_default();
-    match actual.as_str() {
+    match scalar.value.as_str() {
         "true" | "false" => Ok(()),
-        _ => Err(format!("malformed_field: {} must be boolean", key)),
+        _ => Err(ReaderError::new(
+            ReaderErrorKind::MalformedField,
+            key,
+            format!("malformed_field: {} must be boolean", key),
+        )),
     }
 }
 
-fn require_no_duplicate_scalars(
-    content: &str,
+fn require_source_refs_core(core: &SketchReaderCore) -> Result<(String, String), ReaderError> {
+    let array = find_array_core(core, "projection_bundle", "source_refs").ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            "source_refs",
+            "missing required source_refs array",
+        )
+    })?;
+
+    if array.values.len() != 2 {
+        return Err(ReaderError::new(
+            ReaderErrorKind::MalformedField,
+            "source_refs",
+            "malformed_field: source_refs must contain exactly two values",
+        ));
+    }
+
+    Ok((array.values[0].clone(), array.values[1].clone()))
+}
+
+fn require_no_duplicate_scalars_core(
+    core: &SketchReaderCore,
     keys: &[&str],
     skipped_key: Option<&str>,
-) -> Result<(), String> {
+) -> Result<(), ReaderError> {
     for key in keys {
         if skipped_key == Some(*key) {
             continue;
         }
 
-        if count_scalar_occurrences(content, key) > 1 {
+        if count_scalar_occurrences_core(core, key) > 1 {
+            return Err(ReaderError::new(
+                ReaderErrorKind::DuplicateField,
+                *key,
+                format!("duplicate_field: {}", key),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn require_no_known_unknown_fields_core(core: &SketchReaderCore) -> Result<(), ReaderError> {
+    for key in ["unknown_future_field", "allow_unreviewed_activation"] {
+        if count_scalar_occurrences_core(core, key) > 0 {
+            return Err(ReaderError::new(
+                ReaderErrorKind::UnknownField,
+                key,
+                format!("unknown_field: {}", key),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn require_scalar_order_core(
+    core: &SketchReaderCore,
+    earlier: &str,
+    later: &str,
+) -> Result<(), ReaderError> {
+    let earlier_scalar = find_scalar_core(core, earlier).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            earlier,
+            format!("field_ordering: {} must appear before {}", earlier, later),
+        )
+    })?;
+    let later_scalar = find_scalar_core(core, later).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            later,
+            format!("field_ordering: {} must appear before {}", earlier, later),
+        )
+    })?;
+
+    if earlier_scalar.line < later_scalar.line {
+        Ok(())
+    } else {
+        Err(ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            later,
+            format!("field_ordering: {} must appear before {}", earlier, later),
+        ))
+    }
+}
+
+fn require_section_order_core(
+    core: &SketchReaderCore,
+    earlier_path: &str,
+    later_path: &str,
+) -> Result<(), ReaderError> {
+    let earlier_label = earlier_path
+        .trim()
+        .trim_start_matches("projection_bundle/")
+        .trim();
+    let later_label = later_path
+        .trim()
+        .trim_start_matches("projection_bundle/")
+        .trim();
+
+    let earlier_section = find_section_core(core, earlier_path).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            earlier_path,
+            format!(
+                "field_ordering: {} must appear before {}",
+                earlier_label, later_label
+            ),
+        )
+    })?;
+    let later_section = find_section_core(core, later_path).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            later_path,
+            format!(
+                "field_ordering: {} must appear before {}",
+                earlier_label, later_label
+            ),
+        )
+    })?;
+
+    if earlier_section.start_line < later_section.start_line {
+        Ok(())
+    } else {
+        Err(ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            later_path,
+            format!(
+                "field_ordering: {} must appear before {}",
+                earlier_label, later_label
+            ),
+        ))
+    }
+}
+
+
+fn require_no_known_unknown_fields_except_core(
+    core: &SketchReaderCore,
+    allowed_unknown_fields: &[&str],
+) -> Result<(), String> {
+    for key in ["unknown_future_field", "allow_unreviewed_activation"] {
+        if allowed_unknown_fields.contains(&key) {
+            continue;
+        }
+        if count_scalar_occurrences_core(core, key) > 0 {
+            return Err(format!("unknown_field: {}", key));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sketch_except_core(
+    core: &SketchReaderCore,
+    skipped_key: Option<&str>,
+    allowed_unknown_fields: &[&str],
+    skip_order_check: bool,
+) -> Result<(), String> {
+    for &(label, needle) in EXPECTED_CONTAINS {
+        if !core.text_block.contains(needle) {
+            return Err(format!("missing required anchor {}: {}", label, needle));
+        }
+    }
+
+    for &(_label, key, expected) in EXPECTED_SCALARS {
+        if skipped_key == Some(key) {
+            continue;
+        }
+        require_required_scalar_core(core, key, expected).map_err(|err| err.message)?;
+    }
+
+    let expected_keys = [
+        "bundle_id",
+        "bundle_version",
+        "projection_id",
+        "ui_ir_ref",
+        "binding_graph_ref",
+        "action_ir_ref",
+        "role_dictionary_version",
+        "renderer_profile",
+        "safety_class",
+        "criticality",
+        "freshness_policy",
+        "hash",
+        "signature",
+        "created_by",
+        "created_at",
+        "compiler_identity",
+        "require_verification",
+        "allow_runtime_tree_streaming",
+        "allow_production_activation",
+        "require_safe_update_boundary",
+        "allow_critical_update_during_pending_unknown",
+        "allow_critical_update_during_quarantine",
+    ];
+
+    require_no_duplicate_scalars_core(core, &expected_keys, skipped_key).map_err(|err| err.message)?;
+    require_no_known_unknown_fields_except_core(core, allowed_unknown_fields)?;
+
+    if !skip_order_check {
+        require_scalar_order_core(
+            core,
+            "bundle_version",
+            "projection_id",
+        ).map_err(|err| err.message)?;
+        require_section_order_core(
+            core,
+            "projection_bundle/activation_policy",
+            "projection_bundle/update_policy",
+        ).map_err(|err| err.message)?;
+    }
+
+    Ok(())
+}
+
+fn validate_sketch_without_order_core(
+    core: &SketchReaderCore,
+    skipped_key: Option<&str>,
+    allowed_unknown_fields: &[&str],
+) -> Result<(), String> {
+    for &(label, needle) in EXPECTED_CONTAINS {
+        if !core.text_block.contains(needle) {
+            return Err(format!("missing required anchor {}: {}", label, needle));
+        }
+    }
+
+    for &(_label, key, expected) in EXPECTED_SCALARS {
+        if skipped_key == Some(key) {
+            continue;
+        }
+        require_required_scalar_core(core, key, expected).map_err(|err| err.message)?;
+    }
+
+    let expected_keys = [
+        "bundle_id",
+        "bundle_version",
+        "projection_id",
+        "ui_ir_ref",
+        "binding_graph_ref",
+        "action_ir_ref",
+        "role_dictionary_version",
+        "renderer_profile",
+        "safety_class",
+        "criticality",
+        "freshness_policy",
+        "hash",
+        "signature",
+        "created_by",
+        "created_at",
+        "compiler_identity",
+        "require_verification",
+        "allow_runtime_tree_streaming",
+        "allow_production_activation",
+        "require_safe_update_boundary",
+        "allow_critical_update_during_pending_unknown",
+        "allow_critical_update_during_quarantine",
+    ];
+
+    require_no_duplicate_scalars_core(core, &expected_keys, skipped_key).map_err(|err| err.message)?;
+    require_no_known_unknown_fields_except_core(core, allowed_unknown_fields)?;
+
+    Ok(())
+}
+
+fn validate_sketch_core(core: &SketchReaderCore) -> Result<ManifestSnapshot, String> {
+    validate_sketch_except_core(core, None, &[], false)?;
+
+    let bundle_id = require_required_scalar_core(core, "bundle_id", "bundle.example.minimal").map_err(|err| err.message)?;
+    let bundle_version = require_required_scalar_core(core, "bundle_version", "0-sketch").map_err(|err| err.message)?;
+    let projection_id = require_required_scalar_core(core, "projection_id", "ExampleMinimalProjection").map_err(|err| err.message)?;
+    let ui_ir_ref = require_required_scalar_core(core, "ui_ir_ref", "ui_ir.example.minimal").map_err(|err| err.message)?;
+    let binding_graph_ref = require_required_scalar_core(core, "binding_graph_ref", "binding_graph.example.minimal").map_err(|err| err.message)?;
+    let action_ir_ref = require_required_scalar_core(core, "action_ir_ref", "action_ir.example.minimal").map_err(|err| err.message)?;
+    let role_dictionary_version = require_required_scalar_core(core, "role_dictionary_version", "ui-roles.0-sketch").map_err(|err| err.message)?;
+    let renderer_profile = require_required_scalar_core(core, "renderer_profile", "semantic-shell.reference-sketch").map_err(|err| err.message)?;
+    let safety_class = require_required_scalar_core(core, "safety_class", "VerifiedDynamic").map_err(|err| err.message)?;
+    let criticality = require_required_scalar_core(core, "criticality", "NonCritical").map_err(|err| err.message)?;
+    let freshness_policy = require_required_scalar_core(core, "freshness_policy", "FreshForControl").map_err(|err| err.message)?;
+    let hash = require_required_scalar_core(core, "hash", "sha256:SKETCH-NOT-A-REAL-HASH").map_err(|err| err.message)?;
+    let signature = require_required_scalar_core(core, "signature", "signature:SKETCH-NOT-A-REAL-SIGNATURE").map_err(|err| err.message)?;
+    let created_by = require_required_scalar_core(core, "created_by", "semantic-projection-compiler.SKETCH").map_err(|err| err.message)?;
+    let created_at = require_required_scalar_core(core, "created_at", "not-a-real-timestamp").map_err(|err| err.message)?;
+    let compiler_identity = require_required_scalar_core(core, "compiler_identity", "semantic-projection-compiler.0-sketch").map_err(|err| err.message)?;
+    let require_verification = require_required_scalar_core(core, "require_verification", "true").map_err(|err| err.message)?;
+    let allow_runtime_tree_streaming = require_required_scalar_core(core, "allow_runtime_tree_streaming", "false").map_err(|err| err.message)?;
+    let allow_production_activation = require_required_scalar_core(core, "allow_production_activation", "false").map_err(|err| err.message)?;
+    let require_safe_update_boundary = require_required_scalar_core(core, "require_safe_update_boundary", "true").map_err(|err| err.message)?;
+    let allow_critical_update_during_pending_unknown = require_required_scalar_core(core, "allow_critical_update_during_pending_unknown", "false").map_err(|err| err.message)?;
+    let allow_critical_update_during_quarantine = require_required_scalar_core(core, "allow_critical_update_during_quarantine", "false").map_err(|err| err.message)?;
+
+    let (source_ref_0, source_ref_1) = require_source_refs_core(core).map_err(|err| err.message)?;
+
+    Ok(ManifestSnapshot {
+        bundle_id,
+        bundle_version,
+        projection_id,
+        source_ref_0,
+        source_ref_1,
+        ui_ir_ref,
+        binding_graph_ref,
+        action_ir_ref,
+        role_dictionary_version,
+        renderer_profile,
+        safety_class,
+        criticality,
+        freshness_policy,
+        hash,
+        signature,
+        created_by,
+        created_at,
+        compiler_identity,
+        require_verification,
+        allow_runtime_tree_streaming,
+        allow_production_activation,
+        require_safe_update_boundary,
+        allow_critical_update_during_pending_unknown,
+        allow_critical_update_during_quarantine,
+    })
+}
+
+fn extract_scalar(content: &str, key: &str) -> Option<String> {
+    let core = parse_sketch_core(content).ok()?;
+    find_scalar_core(&core, key).map(|scalar| scalar.value.clone())
+}
+
+fn count_scalar_occurrences(content: &str, key: &str) -> usize {
+    match parse_sketch_core(content) {
+        Ok(core) => count_scalar_occurrences_core(&core, key),
+        Err(_) => 0,
+    }
+}
+
+fn require_scalar(content: &str, _label: &str, key: &str, expected: &str) -> Result<String, String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    require_required_scalar_core(&core, key, expected).map_err(|err| err.message)
+}
+
+fn require_non_empty_scalar(content: &str, key: &str) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    require_non_empty_scalar_core(&core, key).map_err(|err| err.message)
+}
+
+fn require_boolean_scalar(content: &str, key: &str) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    require_boolean_scalar_core(&core, key).map_err(|err| err.message)
+}
+
+fn require_no_duplicate_scalars(
+    content: &str,
+    expected_keys: &[&str],
+    skipped_key: Option<&str>,
+) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    for key in expected_keys {
+        if skipped_key == Some(*key) {
+            continue;
+        }
+
+        if count_scalar_occurrences_core(&core, key) > 1 {
             return Err(format!("duplicate_field: {}", key));
         }
     }
@@ -614,12 +1297,14 @@ fn require_no_known_unknown_fields_except(
     content: &str,
     allowed_unknown_fields: &[&str],
 ) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+
     for key in ["unknown_future_field", "allow_unreviewed_activation"] {
         if allowed_unknown_fields.contains(&key) {
             continue;
         }
 
-        if count_scalar_occurrences(content, key) > 0 {
+        if count_scalar_occurrences_core(&core, key) > 0 {
             return Err(format!("unknown_field: {}", key));
         }
     }
@@ -627,14 +1312,38 @@ fn require_no_known_unknown_fields_except(
     Ok(())
 }
 
-fn require_field_order(content: &str, earlier: &str, later: &str, reason: &str) -> Result<(), String> {
-    let earlier_index = find_first_line_index(content, earlier).ok_or_else(|| reason.to_string())?;
-    let later_index = find_first_line_index(content, later).ok_or_else(|| reason.to_string())?;
-
-    if earlier_index < later_index {
-        Ok(())
+fn require_field_order(
+    content: &str,
+    earlier: &str,
+    later: &str,
+    rejection_reason: &str,
+) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    let _ = rejection_reason;
+    if earlier.contains('{') || later.contains('{') {
+        let earlier_label = earlier
+            .trim()
+            .trim_end_matches('{')
+            .trim_end_matches(':')
+            .trim();
+        let later_label = later
+            .trim()
+            .trim_end_matches('{')
+            .trim_end_matches(':')
+            .trim();
+        require_section_order_core(
+            &core,
+            &format!("projection_bundle/{}", earlier_label),
+            &format!("projection_bundle/{}", later_label),
+        )
+        .map_err(|err| err.message)
     } else {
-        Err(reason.to_string())
+        require_scalar_order_core(
+            &core,
+            earlier.trim().trim_end_matches(':'),
+            later.trim().trim_end_matches(':'),
+        )
+        .map_err(|err| err.message)
     }
 }
 
@@ -751,6 +1460,7 @@ fn validate_sketch_without_order(
 }
 
 fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
     validate_sketch_except(content, None, &[], false)?;
 
     let bundle_id = require_scalar(content, "bundle id", "bundle_id", "bundle.example.minimal")?;
@@ -844,13 +1554,15 @@ fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
         "allow_critical_update_during_quarantine",
         "false",
     )?;
+    let (source_ref_0, source_ref_1) =
+        require_source_refs_core(&core).map_err(|err| err.message)?;
 
     Ok(ManifestSnapshot {
         bundle_id,
         bundle_version,
         projection_id,
-        source_ref_0: "semantic.source.example".to_string(),
-        source_ref_1: "projection.source.example".to_string(),
+        source_ref_0,
+        source_ref_1,
         ui_ir_ref,
         binding_graph_ref,
         action_ir_ref,
@@ -875,8 +1587,8 @@ fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
 
 fn validate_positive_fixture(repo_root: &str) -> Result<ManifestSnapshot, String> {
     let sketch = read_sketch(repo_root);
-
-    validate_sketch(&sketch)
+    let core = parse_sketch_core(&sketch).map_err(|err| err.message)?;
+    validate_sketch_core(&core)
 }
 
 fn validate_negative_fixture(
@@ -885,6 +1597,7 @@ fn validate_negative_fixture(
 ) -> Result<NegativeCaseResult, String> {
     let sketch = read_fixture(repo_root, case.relative_path);
     let input = repo_relative_path(case.relative_path);
+    let core = parse_sketch_core(&sketch).map_err(|err| err.message)?;
 
     match case.rule {
         NegativeRule::MissingField {
@@ -892,9 +1605,9 @@ fn validate_negative_fixture(
             key,
         } => {
             let skip_order_check = matches!(key, "projection_id" | "bundle_version");
-            validate_sketch_except(&sketch, Some(key), &[], skip_order_check)?;
+            validate_sketch_except_core(&core, Some(key), &[], skip_order_check)?;
 
-            if extract_scalar(&sketch, key).is_some() {
+            if find_scalar_core(&core, key).map(|s| s.value.clone()).is_some() {
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
             }
 
@@ -909,6 +1622,7 @@ fn validate_negative_fixture(
             Ok(NegativeCaseResult {
                 name: case.name,
                 input,
+                status: NegativeCaseStatus::Rejected,
                 reason,
             })
         }
@@ -919,9 +1633,9 @@ fn validate_negative_fixture(
             rejected_value,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, Some(key), &[], false)?;
+            validate_sketch_except_core(&core, Some(key), &[], false)?;
 
-            match extract_scalar(&sketch, key) {
+            match find_scalar_core(&core, key).map(|s| s.value.clone()) {
                 Some(actual) if actual == expected_value => {
                     Err(format!("negative fixture unexpectedly passed: {}", case.name))
                 }
@@ -937,6 +1651,7 @@ fn validate_negative_fixture(
                     Ok(NegativeCaseResult {
                         name: case.name,
                         input,
+                        status: NegativeCaseStatus::Rejected,
                         reason,
                     })
                 }
@@ -951,9 +1666,9 @@ fn validate_negative_fixture(
             key,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, Some(key), &[], false)?;
+            validate_sketch_except_core(&core, Some(key), &[], false)?;
 
-            match require_non_empty_scalar(&sketch, key) {
+            match require_non_empty_scalar_core(&core, key).map_err(|err| err.message) {
                 Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
                 Err(reason) => {
                     if !reason.contains(case.expected_error_substring) || reason != rejection_reason {
@@ -966,6 +1681,7 @@ fn validate_negative_fixture(
                     Ok(NegativeCaseResult {
                         name: case.name,
                         input,
+                        status: NegativeCaseStatus::Rejected,
                         reason,
                     })
                 }
@@ -975,9 +1691,9 @@ fn validate_negative_fixture(
             key,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, Some(key), &[], false)?;
+            validate_sketch_except_core(&core, Some(key), &[], false)?;
 
-            match require_boolean_scalar(&sketch, key) {
+            match require_boolean_scalar_core(&core, key).map_err(|err| err.message) {
                 Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
                 Err(reason) => {
                     if !reason.contains(case.expected_error_substring) || reason != rejection_reason {
@@ -990,6 +1706,7 @@ fn validate_negative_fixture(
                     Ok(NegativeCaseResult {
                         name: case.name,
                         input,
+                        status: NegativeCaseStatus::Rejected,
                         reason,
                     })
                 }
@@ -999,9 +1716,9 @@ fn validate_negative_fixture(
             key,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, None, &[key], false)?;
+            validate_sketch_except_core(&core, None, &[key], false)?;
 
-            if count_scalar_occurrences(&sketch, key) == 0 {
+            if count_scalar_occurrences_core(&core, key) == 0 {
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
             }
 
@@ -1016,6 +1733,7 @@ fn validate_negative_fixture(
             Ok(NegativeCaseResult {
                 name: case.name,
                 input,
+                status: NegativeCaseStatus::Rejected,
                 reason,
             })
         }
@@ -1023,9 +1741,9 @@ fn validate_negative_fixture(
             key,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, Some(key), &[], false)?;
+            validate_sketch_except_core(&core, Some(key), &[], false)?;
 
-            if count_scalar_occurrences(&sketch, key) <= 1 {
+            if count_scalar_occurrences_core(&core, key) <= 1 {
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
             }
 
@@ -1040,17 +1758,26 @@ fn validate_negative_fixture(
             Ok(NegativeCaseResult {
                 name: case.name,
                 input,
+                status: NegativeCaseStatus::Rejected,
                 reason,
             })
         }
         NegativeRule::FieldOrdering {
             earlier,
             later,
-            rejection_reason,
+            rejection_reason: _,
         } => {
-            validate_sketch_without_order(&sketch, None, &[])?;
+            validate_sketch_without_order_core(&core, None, &[])?;
 
-            match require_field_order(&sketch, earlier, later, rejection_reason) {
+            match {
+                let earlier_label = earlier.trim().trim_end_matches('{').trim_end_matches(':').trim();
+                let later_label = later.trim().trim_end_matches('{').trim_end_matches(':').trim();
+                if earlier.contains('{') || later.contains('{') {
+                    require_section_order_core(&core, &format!("projection_bundle/{}", earlier_label), &format!("projection_bundle/{}", later_label)).map_err(|err| err.message)
+                } else {
+                    require_scalar_order_core(&core, earlier_label, later_label).map_err(|err| err.message)
+                }
+            } {
                 Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
                 Err(reason) => {
                     if !reason.contains(case.expected_error_substring) {
@@ -1063,6 +1790,7 @@ fn validate_negative_fixture(
                     Ok(NegativeCaseResult {
                         name: case.name,
                         input,
+                        status: NegativeCaseStatus::Rejected,
                         reason,
                     })
                 }
@@ -1071,15 +1799,15 @@ fn validate_negative_fixture(
     }
 }
 
-fn validate_negative_pack(repo_root: &str) -> Result<Vec<NegativeCaseResult>, String> {
-    let mut results = Vec::with_capacity(NEGATIVE_CASES.len());
+fn validate_negative_pack(repo_root: &str) -> Result<NegativeReport, String> {
+    let mut report = NegativeReport::new();
 
     for case in NEGATIVE_CASES {
         let result = validate_negative_fixture(repo_root, case)?;
-        results.push(result);
+        report.push_case(result);
     }
 
-    Ok(results)
+    Ok(report)
 }
 
 fn render_positive_output(snapshot: &ManifestSnapshot) -> String {
@@ -1206,25 +1934,40 @@ fn render_positive_output(snapshot: &ManifestSnapshot) -> String {
     normalize_line_endings(&out)
 }
 
-fn render_negative_report(results: &[NegativeCaseResult]) -> String {
+fn render_negative_report(report: &NegativeReport) -> String {
     let mut out = String::new();
     push_line(&mut out, "ProjectionBundleSketchReaderNegativeReport v0");
     push_line(&mut out, "scope=fixture-facing");
     push_line(&mut out, "status=rejected-negative-pack");
     push_line(&mut out, "");
 
-    for (index, case) in results.iter().enumerate() {
+    for (index, case) in report.cases.iter().enumerate() {
         push_line(&mut out, &format!("case.{}.name={}", index, case.name));
         push_line(&mut out, &format!("case.{}.input={}", index, case.input));
-        push_line(&mut out, &format!("case.{}.status=rejected", index));
+        push_line(
+            &mut out,
+            &format!("case.{}.status={}", index, case.status.as_str()),
+        );
         push_line(&mut out, &format!("case.{}.reason={}", index, case.reason));
         push_line(&mut out, "");
     }
 
-    push_line(&mut out, "summary.accepted_positive=1");
-    push_line(&mut out, &format!("summary.rejected_negative={}", results.len()));
-    push_line(&mut out, "summary.unexpected_pass=0");
-    push_line(&mut out, "summary.wrong_reason=0");
+    push_line(
+        &mut out,
+        &format!("summary.accepted_positive={}", report.accepted_positive()),
+    );
+    push_line(
+        &mut out,
+        &format!("summary.rejected_negative={}", report.rejected_negative()),
+    );
+    push_line(
+        &mut out,
+        &format!("summary.unexpected_pass={}", report.unexpected_pass()),
+    );
+    push_line(
+        &mut out,
+        &format!("summary.wrong_reason={}", report.wrong_reason()),
+    );
     push_line(&mut out, "");
     push_line(&mut out, "[authority]");
     push_line(&mut out, "loader_claim=false");
@@ -1243,8 +1986,417 @@ fn emit_positive_output(repo_root: &str) -> Result<String, String> {
 }
 
 fn emit_negative_report(repo_root: &str) -> Result<String, String> {
-    let results = validate_negative_pack(repo_root)?;
-    Ok(render_negative_report(&results))
+    let report = validate_negative_pack(repo_root)?;
+    Ok(render_negative_report(&report))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    fn sample_positive_text() -> String {
+        [
+            "```text",
+            "projection_bundle {",
+            "  bundle_id: \"bundle.example.minimal\"",
+            "  bundle_version: \"0-sketch\"",
+            "  projection_id: \"ExampleMinimalProjection\"",
+            "",
+            "  source_refs: [",
+            "    \"semantic.source.example\"",
+            "    \"projection.source.example\"",
+            "  ]",
+            "",
+            "  artifacts {",
+            "    ui_ir_ref: \"ui_ir.example.minimal\"",
+            "    binding_graph_ref: \"binding_graph.example.minimal\"",
+            "    action_ir_ref: \"action_ir.example.minimal\"",
+            "  }",
+            "",
+            "  compatibility {",
+            "    role_dictionary_version: \"ui-roles.0-sketch\"",
+            "    renderer_profile: \"semantic-shell.reference-sketch\"",
+            "  }",
+            "",
+            "  safety {",
+            "    safety_class: \"VerifiedDynamic\"",
+            "    criticality: \"NonCritical\"",
+            "    required_capabilities: []",
+            "    freshness_policy: \"FreshForControl\"",
+            "  }",
+            "",
+            "  trust {",
+            "    hash: \"sha256:SKETCH-NOT-A-REAL-HASH\"",
+            "    signature: \"signature:SKETCH-NOT-A-REAL-SIGNATURE\"",
+            "    created_by: \"semantic-projection-compiler.SKETCH\"",
+            "    created_at: \"not-a-real-timestamp\"",
+            "    compiler_identity: \"semantic-projection-compiler.0-sketch\"",
+            "  }",
+            "",
+            "  activation_policy {",
+            "    require_verification: true",
+            "    allow_runtime_tree_streaming: false",
+            "    allow_production_activation: false",
+            "  }",
+            "",
+            "  update_policy {",
+            "    require_safe_update_boundary: true",
+            "    allow_critical_update_during_pending_unknown: false",
+            "    allow_critical_update_during_quarantine: false",
+            "  }",
+            "",
+            "  diagnostics {",
+            "    expected: []",
+            "  }",
+            "}",
+            "```",
+        ]
+        .join("\n")
+    }
+
+    fn current_repo_root() -> String {
+        std::env::current_dir()
+            .unwrap_or_else(|err| panic!("current_dir failed: {}", err))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn expected_positive_output() -> String {
+        fs::read_to_string(
+            Path::new("tests")
+                .join("fixtures")
+                .join("post_ui")
+                .join("projection_bundle")
+                .join("expected")
+                .join("manifest_minimal.reader.out.txt"),
+        )
+        .unwrap_or_else(|err| panic!("failed to read positive golden: {}", err))
+    }
+
+    fn expected_negative_report() -> String {
+        fs::read_to_string(
+            Path::new("tests")
+                .join("fixtures")
+                .join("post_ui")
+                .join("projection_bundle")
+                .join("expected")
+                .join("negative_pack.reader.out.txt"),
+        )
+        .unwrap_or_else(|err| panic!("failed to read negative golden: {}", err))
+    }
+
+    fn normalize_compared_text(text: &str) -> String {
+        normalize_line_endings(text)
+            .trim_end_matches('\n')
+            .to_string()
+    }
+
+    #[test]
+    fn extracts_text_block() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        assert!(core.text_block.contains("projection_bundle {"));
+        assert!(core.text_block.contains("activation_policy {"));
+    }
+
+    #[test]
+    fn scans_section_start_lines() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        let root = find_section_core(&core, "projection_bundle").expect("root section");
+        let activation = find_section_core(&core, "projection_bundle/activation_policy")
+            .expect("activation section");
+        let update =
+            find_section_core(&core, "projection_bundle/update_policy").expect("update section");
+
+        assert_eq!(root.start_line, 1);
+        assert!(activation.start_line > root.start_line);
+        assert!(update.start_line > activation.start_line);
+    }
+
+    #[test]
+    fn scans_section_end_lines() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        let root = find_section_core(&core, "projection_bundle").expect("root section");
+        let activation = find_section_core(&core, "projection_bundle/activation_policy")
+            .expect("activation section");
+        let update =
+            find_section_core(&core, "projection_bundle/update_policy").expect("update section");
+
+        let root_end = root.end_line.expect("root end");
+        let activation_end = activation.end_line.expect("activation end");
+        let update_end = update.end_line.expect("update end");
+
+        assert!(root_end > update_end);
+        assert!(activation_end > activation.start_line);
+        assert!(update_end > update.start_line);
+    }
+
+    #[test]
+    fn scans_source_refs_array_values() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        let (source_ref_0, source_ref_1) =
+            require_source_refs_core(&core).expect("source refs");
+
+        assert_eq!(source_ref_0, "semantic.source.example");
+        assert_eq!(source_ref_1, "projection.source.example");
+    }
+
+    #[test]
+    fn detects_empty_bundle_id() {
+        let sketch = sample_positive_text().replace(
+            "  bundle_id: \"bundle.example.minimal\"",
+            "  bundle_id: \"\"",
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_non_empty_scalar_core(&core, "bundle_id").expect_err("expected malformed bundle_id");
+        assert_eq!(err.message, "malformed_field: bundle_id is empty");
+    }
+
+    #[test]
+    fn detects_malformed_boolean() {
+        let sketch = sample_positive_text().replace(
+            "    require_verification: true",
+            "    require_verification: \"not-a-bool\"",
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_boolean_scalar_core(&core, "require_verification")
+            .expect_err("expected malformed boolean");
+        assert_eq!(err.message, "malformed_field: require_verification must be boolean");
+    }
+
+    #[test]
+    fn detects_unknown_future_field() {
+        let sketch = sample_positive_text().replacen(
+            "  projection_id: \"ExampleMinimalProjection\"",
+            "  unknown_future_field: \"must-reject\"\n  projection_id: \"ExampleMinimalProjection\"",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_no_known_unknown_fields_core(&core).expect_err("expected unknown field");
+        assert_eq!(err.message, "unknown_field: unknown_future_field");
+    }
+
+    #[test]
+    fn detects_allow_unreviewed_activation() {
+        let sketch = sample_positive_text().replacen(
+            "    allow_runtime_tree_streaming: false",
+            "    allow_unreviewed_activation: true\n    allow_runtime_tree_streaming: false",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_no_known_unknown_fields_core(&core).expect_err("expected unknown field");
+        assert_eq!(err.message, "unknown_field: allow_unreviewed_activation");
+    }
+
+    #[test]
+    fn detects_duplicate_bundle_id() {
+        let sketch = sample_positive_text().replacen(
+            "  bundle_id: \"bundle.example.minimal\"",
+            "  bundle_id: \"bundle.example.minimal\"\n  bundle_id: \"bundle.example.duplicate\"",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_no_duplicate_scalars_core(&core, &["bundle_id", "require_verification"], None)
+            .expect_err("expected duplicate bundle_id");
+        assert_eq!(err.message, "duplicate_field: bundle_id");
+    }
+
+    #[test]
+    fn detects_duplicate_require_verification() {
+        let sketch = sample_positive_text().replacen(
+            "    require_verification: true",
+            "    require_verification: true\n    require_verification: false",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_no_duplicate_scalars_core(&core, &["bundle_id", "require_verification"], None)
+            .expect_err("expected duplicate require_verification");
+        assert_eq!(err.message, "duplicate_field: require_verification");
+    }
+
+    #[test]
+    fn detects_identity_ordering_violation() {
+        let sketch = sample_positive_text().replacen(
+            "  bundle_version: \"0-sketch\"\n  projection_id: \"ExampleMinimalProjection\"",
+            "  projection_id: \"ExampleMinimalProjection\"\n  bundle_version: \"0-sketch\"",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_scalar_order_core(&core, "bundle_version", "projection_id")
+            .expect_err("expected order violation");
+        assert_eq!(
+            err.message,
+            "field_ordering: bundle_version must appear before projection_id"
+        );
+    }
+
+    #[test]
+    fn detects_policy_block_ordering_violation() {
+        let sketch = [
+            "```text",
+            "projection_bundle {",
+            "  bundle_id: \"bundle.example.minimal\"",
+            "  bundle_version: \"0-sketch\"",
+            "  projection_id: \"ExampleMinimalProjection\"",
+            "",
+            "  source_refs: [",
+            "    \"semantic.source.example\"",
+            "    \"projection.source.example\"",
+            "  ]",
+            "",
+            "  artifacts {",
+            "    ui_ir_ref: \"ui_ir.example.minimal\"",
+            "    binding_graph_ref: \"binding_graph.example.minimal\"",
+            "    action_ir_ref: \"action_ir.example.minimal\"",
+            "  }",
+            "",
+            "  compatibility {",
+            "    role_dictionary_version: \"ui-roles.0-sketch\"",
+            "    renderer_profile: \"semantic-shell.reference-sketch\"",
+            "  }",
+            "",
+            "  safety {",
+            "    safety_class: \"VerifiedDynamic\"",
+            "    criticality: \"NonCritical\"",
+            "    required_capabilities: []",
+            "    freshness_policy: \"FreshForControl\"",
+            "  }",
+            "",
+            "  trust {",
+            "    hash: \"sha256:SKETCH-NOT-A-REAL-HASH\"",
+            "    signature: \"signature:SKETCH-NOT-A-REAL-SIGNATURE\"",
+            "    created_by: \"semantic-projection-compiler.SKETCH\"",
+            "    created_at: \"not-a-real-timestamp\"",
+            "    compiler_identity: \"semantic-projection-compiler.0-sketch\"",
+            "  }",
+            "",
+            "  update_policy {",
+            "    require_safe_update_boundary: true",
+            "    allow_critical_update_during_pending_unknown: false",
+            "    allow_critical_update_during_quarantine: false",
+            "  }",
+            "",
+            "  activation_policy {",
+            "    require_verification: true",
+            "    allow_runtime_tree_streaming: false",
+            "    allow_production_activation: false",
+            "  }",
+            "",
+            "  diagnostics {",
+            "    expected: []",
+            "  }",
+            "}",
+            "```",
+        ]
+        .join("\n");
+
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_section_order_core(
+            &core,
+            "projection_bundle/activation_policy",
+            "projection_bundle/update_policy",
+        )
+            .expect_err("expected order violation");
+        assert_eq!(
+            err.message,
+            "field_ordering: activation_policy must appear before update_policy"
+        );
+    }
+
+    #[test]
+    fn positive_snapshot_source_refs_come_from_parsed_source_refs() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        let (source_ref_0, source_ref_1) =
+            require_source_refs_core(&core).expect("source refs");
+        assert_eq!(source_ref_0, "semantic.source.example");
+        assert_eq!(source_ref_1, "projection.source.example");
+
+        let snapshot = validate_sketch(&sample_positive_text()).expect("snapshot");
+        assert_eq!(snapshot.source_ref_0, source_ref_0);
+        assert_eq!(snapshot.source_ref_1, source_ref_1);
+    }
+
+    #[test]
+    fn source_ref_mutation_changes_parsed_snapshot_in_an_inline_test() {
+        let mutated = sample_positive_text().replace(
+            "projection.source.example",
+            "projection.source.mutated",
+        );
+        let core = parse_sketch_core(&mutated).expect("core parse");
+        let (source_ref_0, source_ref_1) =
+            require_source_refs_core(&core).expect("source refs");
+
+        assert_eq!(source_ref_0, "semantic.source.example");
+        assert_eq!(source_ref_1, "projection.source.mutated");
+    }
+
+    #[test]
+    fn positive_output_is_generated_from_parsed_reader_output() {
+        let repo_root = current_repo_root();
+        let snapshot = validate_positive_fixture(&repo_root).expect("positive snapshot");
+        let actual = emit_positive_output(&repo_root).expect("positive output");
+        let derived = render_positive_output(&snapshot);
+        assert_eq!(
+            normalize_compared_text(&actual),
+            normalize_compared_text(&derived)
+        );
+    }
+
+    #[test]
+    fn golden_positive_output_unchanged() {
+        let repo_root = current_repo_root();
+        let actual = emit_positive_output(&repo_root).expect("positive output");
+        let expected = expected_positive_output();
+        assert_eq!(
+            normalize_compared_text(&actual),
+            normalize_compared_text(&expected)
+        );
+    }
+
+    #[test]
+    fn negative_report_contains_16_case_results() {
+        let repo_root = current_repo_root();
+        let report = validate_negative_pack(&repo_root).expect("negative report");
+        assert_eq!(report.cases.len(), 16);
+    }
+
+    #[test]
+    fn negative_report_summary_is_derived_from_case_results() {
+        let repo_root = current_repo_root();
+        let report = validate_negative_pack(&repo_root).expect("negative report");
+        assert_eq!(report.accepted_positive(), 1);
+        assert_eq!(report.rejected_negative(), 16);
+        assert_eq!(report.unexpected_pass(), 0);
+        assert_eq!(report.wrong_reason(), 0);
+    }
+
+    #[test]
+    fn wrong_expected_reason_increments_wrong_reason() {
+        let report = NegativeReport::new().with_wrong_reason("case", "input", "wrong reason");
+        assert_eq!(report.wrong_reason(), 1);
+        assert_eq!(report.unexpected_pass(), 0);
+        assert_eq!(report.rejected_negative(), 0);
+    }
+
+    #[test]
+    fn unexpected_accepted_negative_increments_unexpected_pass() {
+        let report = NegativeReport::new().with_unexpected_pass("case", "input");
+        assert_eq!(report.unexpected_pass(), 1);
+        assert_eq!(report.wrong_reason(), 0);
+        assert_eq!(report.rejected_negative(), 0);
+    }
+
+    #[test]
+    fn golden_negative_report_unchanged() {
+        let repo_root = current_repo_root();
+        let actual = emit_negative_report(&repo_root).expect("negative output");
+        let expected = expected_negative_report();
+        assert_eq!(
+            normalize_compared_text(&actual),
+            normalize_compared_text(&expected)
+        );
+    }
 }
 
 fn main() {
