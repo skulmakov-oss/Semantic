@@ -947,8 +947,16 @@ fn require_source_refs_core(core: &SketchReaderCore) -> Result<(String, String),
     Ok((array.values[0].clone(), array.values[1].clone()))
 }
 
-fn require_no_duplicate_scalars_core(core: &SketchReaderCore, keys: &[&str]) -> Result<(), ReaderError> {
+fn require_no_duplicate_scalars_core(
+    core: &SketchReaderCore,
+    keys: &[&str],
+    skipped_key: Option<&str>,
+) -> Result<(), ReaderError> {
     for key in keys {
+        if skipped_key == Some(*key) {
+            continue;
+        }
+
         if count_scalar_occurrences_core(core, key) > 1 {
             return Err(ReaderError::new(
                 ReaderErrorKind::DuplicateField,
@@ -1053,6 +1061,190 @@ fn require_section_order_core(
             ),
         ))
     }
+}
+
+
+fn require_no_known_unknown_fields_except_core(
+    core: &SketchReaderCore,
+    allowed_unknown_fields: &[&str],
+) -> Result<(), String> {
+    for key in ["unknown_future_field", "allow_unreviewed_activation"] {
+        if allowed_unknown_fields.contains(&key) {
+            continue;
+        }
+        if count_scalar_occurrences_core(core, key) > 0 {
+            return Err(format!("unknown_field: {}", key));
+        }
+    }
+    Ok(())
+}
+
+fn validate_sketch_except_core(
+    core: &SketchReaderCore,
+    skipped_key: Option<&str>,
+    allowed_unknown_fields: &[&str],
+    skip_order_check: bool,
+) -> Result<(), String> {
+    for &(label, needle) in EXPECTED_CONTAINS {
+        if !core.text_block.contains(needle) {
+            return Err(format!("missing required anchor {}: {}", label, needle));
+        }
+    }
+
+    for &(_label, key, expected) in EXPECTED_SCALARS {
+        if skipped_key == Some(key) {
+            continue;
+        }
+        require_required_scalar_core(core, key, expected).map_err(|err| err.message)?;
+    }
+
+    let expected_keys = [
+        "bundle_id",
+        "bundle_version",
+        "projection_id",
+        "ui_ir_ref",
+        "binding_graph_ref",
+        "action_ir_ref",
+        "role_dictionary_version",
+        "renderer_profile",
+        "safety_class",
+        "criticality",
+        "freshness_policy",
+        "hash",
+        "signature",
+        "created_by",
+        "created_at",
+        "compiler_identity",
+        "require_verification",
+        "allow_runtime_tree_streaming",
+        "allow_production_activation",
+        "require_safe_update_boundary",
+        "allow_critical_update_during_pending_unknown",
+        "allow_critical_update_during_quarantine",
+    ];
+
+    require_no_duplicate_scalars_core(core, &expected_keys, skipped_key).map_err(|err| err.message)?;
+    require_no_known_unknown_fields_except_core(core, allowed_unknown_fields)?;
+
+    if !skip_order_check {
+        require_scalar_order_core(
+            core,
+            "bundle_version",
+            "projection_id",
+        ).map_err(|err| err.message)?;
+        require_section_order_core(
+            core,
+            "projection_bundle/activation_policy",
+            "projection_bundle/update_policy",
+        ).map_err(|err| err.message)?;
+    }
+
+    Ok(())
+}
+
+fn validate_sketch_without_order_core(
+    core: &SketchReaderCore,
+    skipped_key: Option<&str>,
+    allowed_unknown_fields: &[&str],
+) -> Result<(), String> {
+    for &(label, needle) in EXPECTED_CONTAINS {
+        if !core.text_block.contains(needle) {
+            return Err(format!("missing required anchor {}: {}", label, needle));
+        }
+    }
+
+    for &(_label, key, expected) in EXPECTED_SCALARS {
+        if skipped_key == Some(key) {
+            continue;
+        }
+        require_required_scalar_core(core, key, expected).map_err(|err| err.message)?;
+    }
+
+    let expected_keys = [
+        "bundle_id",
+        "bundle_version",
+        "projection_id",
+        "ui_ir_ref",
+        "binding_graph_ref",
+        "action_ir_ref",
+        "role_dictionary_version",
+        "renderer_profile",
+        "safety_class",
+        "criticality",
+        "freshness_policy",
+        "hash",
+        "signature",
+        "created_by",
+        "created_at",
+        "compiler_identity",
+        "require_verification",
+        "allow_runtime_tree_streaming",
+        "allow_production_activation",
+        "require_safe_update_boundary",
+        "allow_critical_update_during_pending_unknown",
+        "allow_critical_update_during_quarantine",
+    ];
+
+    require_no_duplicate_scalars_core(core, &expected_keys, skipped_key).map_err(|err| err.message)?;
+    require_no_known_unknown_fields_except_core(core, allowed_unknown_fields)?;
+
+    Ok(())
+}
+
+fn validate_sketch_core(core: &SketchReaderCore) -> Result<ManifestSnapshot, String> {
+    validate_sketch_except_core(core, None, &[], false)?;
+
+    let bundle_id = require_required_scalar_core(core, "bundle_id", "bundle.example.minimal").map_err(|err| err.message)?;
+    let bundle_version = require_required_scalar_core(core, "bundle_version", "0-sketch").map_err(|err| err.message)?;
+    let projection_id = require_required_scalar_core(core, "projection_id", "ExampleMinimalProjection").map_err(|err| err.message)?;
+    let ui_ir_ref = require_required_scalar_core(core, "ui_ir_ref", "ui_ir.example.minimal").map_err(|err| err.message)?;
+    let binding_graph_ref = require_required_scalar_core(core, "binding_graph_ref", "binding_graph.example.minimal").map_err(|err| err.message)?;
+    let action_ir_ref = require_required_scalar_core(core, "action_ir_ref", "action_ir.example.minimal").map_err(|err| err.message)?;
+    let role_dictionary_version = require_required_scalar_core(core, "role_dictionary_version", "ui-roles.0-sketch").map_err(|err| err.message)?;
+    let renderer_profile = require_required_scalar_core(core, "renderer_profile", "semantic-shell.reference-sketch").map_err(|err| err.message)?;
+    let safety_class = require_required_scalar_core(core, "safety_class", "VerifiedDynamic").map_err(|err| err.message)?;
+    let criticality = require_required_scalar_core(core, "criticality", "NonCritical").map_err(|err| err.message)?;
+    let freshness_policy = require_required_scalar_core(core, "freshness_policy", "FreshForControl").map_err(|err| err.message)?;
+    let hash = require_required_scalar_core(core, "hash", "sha256:SKETCH-NOT-A-REAL-HASH").map_err(|err| err.message)?;
+    let signature = require_required_scalar_core(core, "signature", "signature:SKETCH-NOT-A-REAL-SIGNATURE").map_err(|err| err.message)?;
+    let created_by = require_required_scalar_core(core, "created_by", "semantic-projection-compiler.SKETCH").map_err(|err| err.message)?;
+    let created_at = require_required_scalar_core(core, "created_at", "not-a-real-timestamp").map_err(|err| err.message)?;
+    let compiler_identity = require_required_scalar_core(core, "compiler_identity", "semantic-projection-compiler.0-sketch").map_err(|err| err.message)?;
+    let require_verification = require_required_scalar_core(core, "require_verification", "true").map_err(|err| err.message)?;
+    let allow_runtime_tree_streaming = require_required_scalar_core(core, "allow_runtime_tree_streaming", "false").map_err(|err| err.message)?;
+    let allow_production_activation = require_required_scalar_core(core, "allow_production_activation", "false").map_err(|err| err.message)?;
+    let require_safe_update_boundary = require_required_scalar_core(core, "require_safe_update_boundary", "true").map_err(|err| err.message)?;
+    let allow_critical_update_during_pending_unknown = require_required_scalar_core(core, "allow_critical_update_during_pending_unknown", "false").map_err(|err| err.message)?;
+    let allow_critical_update_during_quarantine = require_required_scalar_core(core, "allow_critical_update_during_quarantine", "false").map_err(|err| err.message)?;
+
+    let (source_ref_0, source_ref_1) = require_source_refs_core(core).map_err(|err| err.message)?;
+
+    Ok(ManifestSnapshot {
+        bundle_id,
+        bundle_version,
+        projection_id,
+        source_ref_0,
+        source_ref_1,
+        ui_ir_ref,
+        binding_graph_ref,
+        action_ir_ref,
+        role_dictionary_version,
+        renderer_profile,
+        safety_class,
+        criticality,
+        freshness_policy,
+        hash,
+        signature,
+        created_by,
+        created_at,
+        compiler_identity,
+        require_verification,
+        allow_runtime_tree_streaming,
+        allow_production_activation,
+        require_safe_update_boundary,
+        allow_critical_update_during_pending_unknown,
+        allow_critical_update_during_quarantine,
+    })
 }
 
 fn extract_scalar(content: &str, key: &str) -> Option<String> {
@@ -1395,8 +1587,8 @@ fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
 
 fn validate_positive_fixture(repo_root: &str) -> Result<ManifestSnapshot, String> {
     let sketch = read_sketch(repo_root);
-
-    validate_sketch(&sketch)
+    let core = parse_sketch_core(&sketch).map_err(|err| err.message)?;
+    validate_sketch_core(&core)
 }
 
 fn validate_negative_fixture(
@@ -1405,6 +1597,7 @@ fn validate_negative_fixture(
 ) -> Result<NegativeCaseResult, String> {
     let sketch = read_fixture(repo_root, case.relative_path);
     let input = repo_relative_path(case.relative_path);
+    let core = parse_sketch_core(&sketch).map_err(|err| err.message)?;
 
     match case.rule {
         NegativeRule::MissingField {
@@ -1412,9 +1605,9 @@ fn validate_negative_fixture(
             key,
         } => {
             let skip_order_check = matches!(key, "projection_id" | "bundle_version");
-            validate_sketch_except(&sketch, Some(key), &[], skip_order_check)?;
+            validate_sketch_except_core(&core, Some(key), &[], skip_order_check)?;
 
-            if extract_scalar(&sketch, key).is_some() {
+            if find_scalar_core(&core, key).map(|s| s.value.clone()).is_some() {
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
             }
 
@@ -1440,9 +1633,9 @@ fn validate_negative_fixture(
             rejected_value,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, Some(key), &[], false)?;
+            validate_sketch_except_core(&core, Some(key), &[], false)?;
 
-            match extract_scalar(&sketch, key) {
+            match find_scalar_core(&core, key).map(|s| s.value.clone()) {
                 Some(actual) if actual == expected_value => {
                     Err(format!("negative fixture unexpectedly passed: {}", case.name))
                 }
@@ -1473,9 +1666,9 @@ fn validate_negative_fixture(
             key,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, Some(key), &[], false)?;
+            validate_sketch_except_core(&core, Some(key), &[], false)?;
 
-            match require_non_empty_scalar(&sketch, key) {
+            match require_non_empty_scalar_core(&core, key).map_err(|err| err.message) {
                 Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
                 Err(reason) => {
                     if !reason.contains(case.expected_error_substring) || reason != rejection_reason {
@@ -1498,9 +1691,9 @@ fn validate_negative_fixture(
             key,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, Some(key), &[], false)?;
+            validate_sketch_except_core(&core, Some(key), &[], false)?;
 
-            match require_boolean_scalar(&sketch, key) {
+            match require_boolean_scalar_core(&core, key).map_err(|err| err.message) {
                 Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
                 Err(reason) => {
                     if !reason.contains(case.expected_error_substring) || reason != rejection_reason {
@@ -1523,9 +1716,9 @@ fn validate_negative_fixture(
             key,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, None, &[key], false)?;
+            validate_sketch_except_core(&core, None, &[key], false)?;
 
-            if count_scalar_occurrences(&sketch, key) == 0 {
+            if count_scalar_occurrences_core(&core, key) == 0 {
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
             }
 
@@ -1548,9 +1741,9 @@ fn validate_negative_fixture(
             key,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, Some(key), &[], false)?;
+            validate_sketch_except_core(&core, Some(key), &[], false)?;
 
-            if count_scalar_occurrences(&sketch, key) <= 1 {
+            if count_scalar_occurrences_core(&core, key) <= 1 {
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
             }
 
@@ -1572,11 +1765,19 @@ fn validate_negative_fixture(
         NegativeRule::FieldOrdering {
             earlier,
             later,
-            rejection_reason,
+            rejection_reason: _,
         } => {
-            validate_sketch_without_order(&sketch, None, &[])?;
+            validate_sketch_without_order_core(&core, None, &[])?;
 
-            match require_field_order(&sketch, earlier, later, rejection_reason) {
+            match {
+                let earlier_label = earlier.trim().trim_end_matches('{').trim_end_matches(':').trim();
+                let later_label = later.trim().trim_end_matches('{').trim_end_matches(':').trim();
+                if earlier.contains('{') || later.contains('{') {
+                    require_section_order_core(&core, &format!("projection_bundle/{}", earlier_label), &format!("projection_bundle/{}", later_label)).map_err(|err| err.message)
+                } else {
+                    require_scalar_order_core(&core, earlier_label, later_label).map_err(|err| err.message)
+                }
+            } {
                 Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
                 Err(reason) => {
                     if !reason.contains(case.expected_error_substring) {
@@ -1996,7 +2197,7 @@ mod tests {
             1,
         );
         let core = parse_sketch_core(&sketch).expect("core parse");
-        let err = require_no_duplicate_scalars_core(&core, &["bundle_id", "require_verification"])
+        let err = require_no_duplicate_scalars_core(&core, &["bundle_id", "require_verification"], None)
             .expect_err("expected duplicate bundle_id");
         assert_eq!(err.message, "duplicate_field: bundle_id");
     }
@@ -2009,7 +2210,7 @@ mod tests {
             1,
         );
         let core = parse_sketch_core(&sketch).expect("core parse");
-        let err = require_no_duplicate_scalars_core(&core, &["bundle_id", "require_verification"])
+        let err = require_no_duplicate_scalars_core(&core, &["bundle_id", "require_verification"], None)
             .expect_err("expected duplicate require_verification");
         assert_eq!(err.message, "duplicate_field: require_verification");
     }
