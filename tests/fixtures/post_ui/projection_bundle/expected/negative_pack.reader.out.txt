@@ -1,0 +1,55 @@
+ProjectionBundleSketchReaderNegativeReport v0
+scope=fixture-facing
+status=rejected-negative-pack
+
+case.0.name=manifest_activation_enabled
+case.0.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_activation_enabled.sketch.md
+case.0.status=rejected
+case.0.reason=production activation policy: allow_production_activation is true
+
+case.1.name=manifest_missing_bundle_id
+case.1.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_missing_bundle_id.sketch.md
+case.1.status=rejected
+case.1.reason=missing required field bundle id
+
+case.2.name=manifest_missing_projection_id
+case.2.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_missing_projection_id.sketch.md
+case.2.status=rejected
+case.2.reason=missing required field projection id
+
+case.3.name=manifest_runtime_tree_streaming_enabled
+case.3.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_runtime_tree_streaming_enabled.sketch.md
+case.3.status=rejected
+case.3.reason=runtime tree streaming policy: allow_runtime_tree_streaming is true
+
+case.4.name=manifest_verification_disabled
+case.4.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_verification_disabled.sketch.md
+case.4.status=rejected
+case.4.reason=verification policy: require_verification is false
+
+case.5.name=manifest_safe_update_boundary_disabled
+case.5.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_safe_update_boundary_disabled.sketch.md
+case.5.status=rejected
+case.5.reason=safe update boundary policy: require_safe_update_boundary is false
+
+case.6.name=manifest_pending_unknown_update_enabled
+case.6.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_pending_unknown_update_enabled.sketch.md
+case.6.status=rejected
+case.6.reason=pending unknown update policy: allow_critical_update_during_pending_unknown is true
+
+case.7.name=manifest_quarantine_update_enabled
+case.7.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_quarantine_update_enabled.sketch.md
+case.7.status=rejected
+case.7.reason=quarantine update policy: allow_critical_update_during_quarantine is true
+
+summary.accepted_positive=1
+summary.rejected_negative=8
+summary.unexpected_pass=0
+summary.wrong_reason=0
+
+[authority]
+loader_claim=false
+runtime_claim=false
+production_ui_claim=false
+general_level_4_claim=false
+level_5_plus_claim=false
