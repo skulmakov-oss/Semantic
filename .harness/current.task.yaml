@@ -1,11 +1,11 @@
 task:
-  id: POST-UI-READER-CORE-PUBLICATION-GATE
-  title: Allow ProjectionBundle reader-core candidate publication
-  type: publication-gate
+  id: LOCAL-HARNESS-CURRENT-TASK-ALLOWED-PATHS
+  title: Fix harness-check to read allowed paths
+  type: harness-fix
   mode: active
 
 intent:
-  summary: Allow publication of the already-audited ProjectionBundle reader-core candidate.
+  summary: Make harness-check dynamic so it reads allowed_paths from the current task
 
 layer:
   name: tooling
@@ -14,12 +14,12 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - tools/post_ui/projection_bundle_sketch_reader_draft.rs
-    - tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1
+    - scripts/harness-check.ps1
 
   forbidden_paths:
     - docs/**
-    - tests/fixtures/**
+    - tools/**
+    - tests/**
     - Cargo.toml
     - Cargo.lock
 
@@ -27,7 +27,6 @@ actions:
   allowed:
     - read
     - edit_allowed_paths
-    - create_pr
     - push
 
   forbidden:
@@ -36,27 +35,14 @@ actions:
     - modify_golden_outputs
     - modify_cargo_toml
     - modify_cargo_lock
-    - loader_claim
-    - runtime_claim
-    - production_ui_claim
-    - parser_claim
 
 constraints:
-  - reader-core candidate publication only
-  - fixture-facing evidence only
+  - harness infrastructure fix only
   - no docs changes
-  - no fixtures changes
+  - no tool/code reader changes
+  - no fixture changes
   - no golden output changes
-  - no Cargo.toml changes
-  - no Cargo.lock changes
-  - no schema claim
-  - no general parser claim
-  - no loader claim
-  - no runtime claim
-  - no activation path claim
-  - no production UI claim
-  - no general Level 4 claim
-  - no Level 5+ claim
+  - no Cargo changes
 
 verification:
   required:
@@ -64,4 +50,4 @@ verification:
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
 
 report:
-  output: .harness/reports/POST-UI-READER-CORE-PUBLICATION-GATE.md
+  output: .harness/reports/LOCAL-HARNESS-CURRENT-TASK-ALLOWED-PATHS.md
