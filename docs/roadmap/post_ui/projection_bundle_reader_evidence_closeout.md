@@ -80,3 +80,10 @@ The reader/parser basis is now the next specification boundary before implementa
 Any transition toward loader/runtime/production requires a separate task and explicit gate.
 
 The reader/parser basis and Level-4 evidence matrix define future promotion requirements. They do not change the current achieved level.
+
+The first Level-4 evidence expansion pack adds fixture-facing malformed-field, unknown-field, duplicate-field, and field-ordering rejection evidence.
+This strengthens narrow reader-facing fixture evidence only.
+It does not claim general Level 4 reader/parser behavior.
+It does not claim loader behavior.
+It does not claim runtime behavior.
+It does not claim production UI behavior.
