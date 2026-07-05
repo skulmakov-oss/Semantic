@@ -350,6 +350,22 @@ fn validate_sketch(content: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_sketch_except(content: &str, skipped_key: &str) -> Result<(), String> {
+    for &(label, needle) in EXPECTED_CONTAINS {
+        require_contains(content, label, needle)?;
+    }
+
+    for &(label, key, expected) in EXPECTED_SCALARS {
+        if key == skipped_key {
+            continue;
+        }
+
+        require_scalar(content, label, key, expected)?;
+    }
+
+    Ok(())
+}
+
 fn validate_positive_fixture(repo_root: &str) -> Result<(), String> {
     let sketch = read_sketch(repo_root);
 
@@ -364,6 +380,8 @@ fn validate_negative_fixture(repo_root: &str, case: &NegativeFixtureCase) -> Res
             label,
             key,
         } => {
+            validate_sketch_except(&sketch, key)?;
+
             if extract_scalar(&sketch, key).is_some() {
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
             }
@@ -376,17 +394,21 @@ fn validate_negative_fixture(repo_root: &str, case: &NegativeFixtureCase) -> Res
             expected_value,
             rejected_value,
             rejection_reason,
-        } => match extract_scalar(&sketch, key) {
-            Some(actual) if actual == rejected_value => Err(rejection_reason.to_string()),
-            Some(actual) if actual == expected_value => {
-                Err(format!("negative fixture unexpectedly passed: {}", case.name))
+        } => {
+            validate_sketch_except(&sketch, key)?;
+
+            match extract_scalar(&sketch, key) {
+                Some(actual) if actual == rejected_value => Err(rejection_reason.to_string()),
+                Some(actual) if actual == expected_value => {
+                    Err(format!("negative fixture unexpectedly passed: {}", case.name))
+                }
+                Some(actual) => Err(format!(
+                    "field {} mismatch: expected {:?}, got {:?}",
+                    label, expected_value, actual
+                )),
+                None => Err(format!("missing required field {}", key)),
             }
-            Some(actual) => Err(format!(
-                "field {} mismatch: expected {:?}, got {:?}",
-                label, expected_value, actual
-            )),
-            None => Err(format!("missing required field {}", key)),
-        },
+        }
     }
 }
 
