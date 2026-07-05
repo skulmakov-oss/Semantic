@@ -13,39 +13,6 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
-const EXPECTED_CONTAINS: &[(&str, &str)] = &[
-    ("bundle id", "bundle.example.minimal"),
-    ("bundle version", "0-sketch"),
-    ("projection id", "ExampleMinimalProjection"),
-    ("semantic source ref", "semantic.source.example"),
-    ("projection source ref", "projection.source.example"),
-    ("ui ir ref", "ui_ir.example.minimal"),
-    ("binding graph ref", "binding_graph.example.minimal"),
-    ("action ir ref", "action_ir.example.minimal"),
-    ("role dictionary version", "ui-roles.0-sketch"),
-    ("renderer profile", "semantic-shell.reference-sketch"),
-    ("safety class", "VerifiedDynamic"),
-    ("criticality", "NonCritical"),
-    ("freshness policy", "FreshForControl"),
-    ("hash", "sha256:SKETCH-NOT-A-REAL-HASH"),
-    ("signature", "signature:SKETCH-NOT-A-REAL-SIGNATURE"),
-    ("created by", "semantic-projection-compiler.SKETCH"),
-    ("created at", "not-a-real-timestamp"),
-    ("compiler identity", "semantic-projection-compiler.0-sketch"),
-    ("runtime tree streaming disabled", "allow_runtime_tree_streaming: false"),
-    ("production activation disabled", "allow_production_activation: false"),
-    (
-        "pending unknown updates disabled",
-        "allow_critical_update_during_pending_unknown: false",
-    ),
-    (
-        "quarantine updates disabled",
-        "allow_critical_update_during_quarantine: false",
-    ),
-    ("verification required", "require_verification: true"),
-    ("safe update boundary required", "require_safe_update_boundary: true"),
-];
-
 const EXPECTED_SCALARS: &[(&str, &str, &str)] = &[
     ("bundle id", "bundle_id", "bundle.example.minimal"),
     ("bundle version", "bundle_version", "0-sketch"),
@@ -111,6 +78,185 @@ const EXPECTED_SCALARS: &[(&str, &str, &str)] = &[
     ),
 ];
 
+const EXPECTED_CONTAINS: &[(&str, &str)] = &[
+    ("semantic source ref", "semantic.source.example"),
+    ("projection source ref", "projection.source.example"),
+];
+
+const NEGATIVE_CASES: &[NegativeFixtureCase] = &[
+    NegativeFixtureCase {
+        name: "manifest_activation_enabled",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_activation_enabled.sketch.md",
+        ],
+        expected_error_substring: "production activation policy",
+        rule: NegativeRule::ScalarValue {
+            label: "production activation policy",
+            key: "allow_production_activation",
+            expected_value: "false",
+            rejected_value: "true",
+            rejection_reason: "production activation policy: allow_production_activation is true",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_missing_bundle_id",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_missing_bundle_id.sketch.md",
+        ],
+        expected_error_substring: "bundle id",
+        rule: NegativeRule::MissingField {
+            label: "bundle id",
+            key: "bundle_id",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_missing_projection_id",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_missing_projection_id.sketch.md",
+        ],
+        expected_error_substring: "projection id",
+        rule: NegativeRule::MissingField {
+            label: "projection id",
+            key: "projection_id",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_runtime_tree_streaming_enabled",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_runtime_tree_streaming_enabled.sketch.md",
+        ],
+        expected_error_substring: "runtime tree streaming",
+        rule: NegativeRule::ScalarValue {
+            label: "runtime tree streaming policy",
+            key: "allow_runtime_tree_streaming",
+            expected_value: "false",
+            rejected_value: "true",
+            rejection_reason: "runtime tree streaming policy: allow_runtime_tree_streaming is true",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_verification_disabled",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_verification_disabled.sketch.md",
+        ],
+        expected_error_substring: "verification",
+        rule: NegativeRule::ScalarValue {
+            label: "verification policy",
+            key: "require_verification",
+            expected_value: "true",
+            rejected_value: "false",
+            rejection_reason: "verification policy: require_verification is false",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_safe_update_boundary_disabled",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_safe_update_boundary_disabled.sketch.md",
+        ],
+        expected_error_substring: "safe update boundary",
+        rule: NegativeRule::ScalarValue {
+            label: "safe update boundary policy",
+            key: "require_safe_update_boundary",
+            expected_value: "true",
+            rejected_value: "false",
+            rejection_reason: "safe update boundary policy: require_safe_update_boundary is false",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_pending_unknown_update_enabled",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_pending_unknown_update_enabled.sketch.md",
+        ],
+        expected_error_substring: "pending unknown",
+        rule: NegativeRule::ScalarValue {
+            label: "pending unknown update policy",
+            key: "allow_critical_update_during_pending_unknown",
+            expected_value: "false",
+            rejected_value: "true",
+            rejection_reason:
+                "pending unknown update policy: allow_critical_update_during_pending_unknown is true",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_quarantine_update_enabled",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_quarantine_update_enabled.sketch.md",
+        ],
+        expected_error_substring: "quarantine",
+        rule: NegativeRule::ScalarValue {
+            label: "quarantine update policy",
+            key: "allow_critical_update_during_quarantine",
+            expected_value: "false",
+            rejected_value: "true",
+            rejection_reason:
+                "quarantine update policy: allow_critical_update_during_quarantine is true",
+        },
+    },
+];
+
+#[derive(Clone, Copy)]
+struct NegativeFixtureCase {
+    name: &'static str,
+    relative_path: &'static [&'static str],
+    expected_error_substring: &'static str,
+    rule: NegativeRule,
+}
+
+#[derive(Clone, Copy)]
+enum NegativeRule {
+    MissingField {
+        label: &'static str,
+        key: &'static str,
+    },
+    ScalarValue {
+        label: &'static str,
+        key: &'static str,
+        expected_value: &'static str,
+        rejected_value: &'static str,
+        rejection_reason: &'static str,
+    },
+}
+
 fn fail(message: impl AsRef<str>) -> ! {
     eprintln!("FAIL: {}", message.as_ref());
     process::exit(1);
@@ -170,90 +316,78 @@ fn extract_scalar(content: &str, key: &str) -> Option<String> {
     None
 }
 
-fn expect_contains(content: &str, label: &str, needle: &str) {
+fn require_contains(content: &str, label: &str, needle: &str) -> Result<(), String> {
     if !content.contains(needle) {
-        fail(format!("missing required anchor {}: {}", label, needle));
+        return Err(format!("missing required anchor {}: {}", label, needle));
     }
+
+    Ok(())
 }
 
-fn expect_scalar(content: &str, label: &str, key: &str, expected: &str) {
-    let actual = extract_scalar(content, key).unwrap_or_else(|| {
-        fail(format!("missing required field {}: {}", label, key));
-    });
+fn require_scalar(content: &str, label: &str, key: &str, expected: &str) -> Result<(), String> {
+    let actual = extract_scalar(content, key)
+        .ok_or_else(|| format!("missing required field {}: {}", label, key))?;
 
     if actual != expected {
-        fail(format!(
+        return Err(format!(
             "field {} mismatch: expected {:?}, got {:?}",
             label, expected, actual
         ));
     }
+
+    Ok(())
 }
 
-fn validate_positive_fixture(repo_root: &str) {
+fn validate_sketch(content: &str) -> Result<(), String> {
+    for &(label, needle) in EXPECTED_CONTAINS {
+        require_contains(content, label, needle)?;
+    }
+
+    for &(label, key, expected) in EXPECTED_SCALARS {
+        require_scalar(content, label, key, expected)?;
+    }
+
+    Ok(())
+}
+
+fn validate_positive_fixture(repo_root: &str) -> Result<(), String> {
     let sketch = read_sketch(repo_root);
 
-    for &(label, needle) in EXPECTED_CONTAINS {
-        expect_contains(&sketch, label, needle);
-    }
-
-    for &(label, key, expected) in EXPECTED_SCALARS {
-        expect_scalar(&sketch, label, key, expected);
-    }
+    validate_sketch(&sketch)
 }
 
-fn validate_negative_fixture(repo_root: &str) -> Result<(), String> {
-    let sketch = read_fixture(
-        repo_root,
-        &[
-            "tests",
-            "fixtures",
-            "post_ui",
-            "projection_bundle",
-            "invalid",
-            "manifest_activation_enabled.sketch.md",
-        ],
-    );
+fn validate_negative_fixture(repo_root: &str, case: &NegativeFixtureCase) -> Result<(), String> {
+    let sketch = read_fixture(repo_root, case.relative_path);
 
-    for &(label, needle) in EXPECTED_CONTAINS {
-        if label == "production activation disabled" {
-            continue;
-        }
-        if !sketch.contains(needle) {
-            return Err(format!("missing required anchor {}: {}", label, needle));
-        }
-    }
+    match case.rule {
+        NegativeRule::MissingField {
+            label,
+            key,
+        } => {
+            if extract_scalar(&sketch, key).is_some() {
+                return Err(format!("negative fixture unexpectedly passed: {}", case.name));
+            }
 
-    for &(label, key, expected) in EXPECTED_SCALARS {
-        if key == "allow_production_activation" {
-            continue;
+            Err(format!("missing required field {}", label))
         }
-        let actual = extract_scalar(&sketch, key).ok_or_else(|| {
-            format!("missing required field {}: {}", label, key)
-        })?;
-        if actual != expected {
-            return Err(format!(
+        NegativeRule::ScalarValue {
+            label,
+            key,
+            expected_value,
+            rejected_value,
+            rejection_reason,
+        } => match extract_scalar(&sketch, key) {
+            Some(actual) if actual == rejected_value => Err(rejection_reason.to_string()),
+            Some(actual) if actual == expected_value => {
+                Err(format!("negative fixture unexpectedly passed: {}", case.name))
+            }
+            Some(actual) => Err(format!(
                 "field {} mismatch: expected {:?}, got {:?}",
-                label, expected, actual
-            ));
-        }
+                label, expected_value, actual
+            )),
+            None => Err(format!("missing required field {}", key)),
+        },
     }
-
-    let activation_actual = extract_scalar(&sketch, "allow_production_activation").ok_or_else(|| {
-        "missing required field production activation policy: allow_production_activation".to_string()
-    })?;
-
-    if activation_actual == "false" {
-        return Err("negative fixture unexpectedly passed".to_string());
-    }
-
-    if activation_actual != "true" {
-        return Err(format!(
-            "production activation policy mismatch: expected true, got {}",
-            activation_actual
-        ));
-    }
-
-    Err("production activation policy rejection: allow_production_activation is true".to_string())
 }
 
 fn main() {
@@ -261,14 +395,20 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| fail("missing repository root argument"));
     let repo_root = normalize_repo_root(&repo_root);
-    validate_positive_fixture(&repo_root);
+    if let Err(reason) = validate_positive_fixture(&repo_root) {
+        fail(format!("positive fixture failed: {}", reason));
+    }
 
-    let negative_result = validate_negative_fixture(&repo_root);
-    match negative_result {
-        Ok(_) => fail("negative fixture unexpectedly passed"),
-        Err(reason) => {
-            if !reason.contains("production activation policy") {
-                fail(format!("negative fixture failed for wrong reason: {}", reason));
+    for case in NEGATIVE_CASES {
+        match validate_negative_fixture(&repo_root, case) {
+            Ok(_) => fail(format!("negative fixture unexpectedly passed: {}", case.name)),
+            Err(reason) => {
+                if !reason.contains(case.expected_error_substring) {
+                    fail(format!(
+                        "negative fixture failed for wrong reason: {}: {}",
+                        case.name, reason
+                    ));
+                }
             }
         }
     }
