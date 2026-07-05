@@ -54,6 +54,10 @@ $guards = @(
     @{
         Name = "ProjectionBundle sketch reader draft guard"
         Path = Join-Path $repoRoot "tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1"
+    },
+    @{
+        Name = "ProjectionBundle claim boundary guard"
+        Path = Join-Path $repoRoot "tools/post_ui/check_projection_bundle_claim_boundaries.ps1"
     }
 )
 

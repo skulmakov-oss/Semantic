@@ -88,8 +88,9 @@ Required reading order:
 12. `docs/roadmap/post_ui/projection_bundle_fixture_inventory.md`
 13. `docs/spec/ui/projection_bundle_basis.md`
 14. `docs/spec/ui/projection_bundle_reader_parser_entry_gate.md`
-15. `docs/roadmap/post_ui/ui_shell_kit_projection_alignment.md`
-16. `docs/roadmap/post_ui/intent_driven_projection_closeout.md`
+15. `docs/roadmap/post_ui/projection_bundle_reader_evidence_closeout.md`
+16. `docs/roadmap/post_ui/ui_shell_kit_projection_alignment.md`
+17. `docs/roadmap/post_ui/intent_driven_projection_closeout.md`
 
 ```text
 Read the doctrine before the mechanism.
@@ -98,6 +99,8 @@ Read the closeout before opening new work.
 ```
 
 The closeout comes last so future tasks do not treat the docs stack as an implementation license.
+
+`ProjectionBundle Reader Evidence Closeout` records the current fixture-facing reader evidence contour after the golden output pack. It does not claim general Level 4 behavior, loader behavior, runtime behavior, or production UI behavior.
 
 ## 4. Authority Map
 

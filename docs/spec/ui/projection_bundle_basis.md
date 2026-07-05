@@ -61,15 +61,23 @@ This basis exists to prevent overclaiming and to define the current evidence bou
 - is not: parser verification, Rust AST analysis, loader verification, or runtime verification
 
 `tools/post_ui/projection_bundle_sketch_reader_draft.rs`
-- is: fixture-facing executable reader draft for one inert sketch, plus a deterministic negative fixture check
+- is: fixture-facing executable reader draft for one inert sketch, plus deterministic negative fixture and golden output checks
 - is not: general reader/parser behavior, loader behavior, runtime behavior, or production UI wiring
-- evidence: the inert positive manifest sketch is accepted; the invalid manifest sketch with `allow_production_activation: true` is rejected
-- evidence type: narrow reader-facing fixture evidence for the sketch reader draft only
+- evidence: the inert positive manifest sketch is accepted; the invalid manifest sketch with `allow_production_activation: true` is rejected; the positive normalized reader output golden fixture matches; the negative rejection report golden fixture matches; the exact golden comparison guard passes
+- evidence type: narrow reader-facing fixture evidence
 
 `tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1`
-- is: compile-and-run guard for the fixture-facing sketch reader draft
+- is: compile-and-run guard for the fixture-facing sketch reader draft and exact golden comparison
 - is not: runtime activation, loader validation, verification, or proof of general reader/parser behavior
-- evidence: the reader draft guard exits successfully on the accepted positive sketch and the rejected negative sketch
+- evidence: the reader draft guard exits successfully on the accepted positive sketch, the rejected negative sketch, and the emitted golden output pack
+
+`tests/fixtures/post_ui/projection_bundle/expected/manifest_minimal.reader.out.txt`
+- is: golden normalized reader output for the accepted positive sketch
+- is not: final serialization, parser input, loader input, runtime input, or production UI wiring
+
+`tests/fixtures/post_ui/projection_bundle/expected/negative_pack.reader.out.txt`
+- is: golden rejection report for the rejected negative pack
+- is not: final serialization, parser input, loader input, runtime input, or production UI wiring
 
 ## 3. Claim Levels
 
@@ -103,13 +111,16 @@ Levels 4–7 are not claimed.
 
 ## 4. Narrow Reader Evidence Note
 
-After the sketch reader draft guard, the evidence contour includes a narrow reader-facing check:
+After the sketch reader draft and golden output pack, the evidence contour includes a narrow reader-facing fixture evidence:
 
+- positive normalized reader output golden fixture;
+- negative rejection report golden fixture;
+- exact golden comparison guard;
 - the inert positive manifest sketch is accepted;
 - the invalid manifest sketch with `allow_production_activation: true` is rejected;
 - the check is fixture-facing and test-only.
 
-This is narrow reader-facing fixture evidence for the current sketch reader draft only.
+Current achieved level remains: Level 3 baseline.
 
 Level 4 is not generally achieved.
 
@@ -235,4 +246,4 @@ If a PR increases the claim level, it must add evidence for that level.
 
 If no new evidence is added, the PR must not increase the claim level.
 
-Do not use words like implemented, verified, secure, runtime-ready, or production-ready unless the corresponding basis level and evidence exist.
+Do not use words like implemented, verified, secure, runtime-prepared, or production-prepared unless the corresponding basis level and evidence exist.
