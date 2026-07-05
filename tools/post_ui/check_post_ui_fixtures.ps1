@@ -58,6 +58,10 @@ $guards = @(
     @{
         Name = "ProjectionBundle claim boundary guard"
         Path = Join-Path $repoRoot "tools/post_ui/check_projection_bundle_claim_boundaries.ps1"
+    },
+    @{
+        Name = "ProjectionBundle reader/parser basis guard"
+        Path = Join-Path $repoRoot "tools/post_ui/check_projection_bundle_reader_parser_basis.ps1"
     }
 )
 

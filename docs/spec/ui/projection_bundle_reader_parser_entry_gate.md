@@ -196,3 +196,13 @@ If it remains Level 3, it must say so.
 If it attempts Level 4, it must provide Level 4 evidence.
 
 No PR may imply Level 4 through naming, comments, file placement, or test wording unless Level 4 evidence exists.
+
+## 12. Reader/Parser Basis Link
+
+`docs/spec/ui/projection_bundle_reader_parser_basis.md` defines the basis for any future reader/parser claim.
+
+This gate remains active.
+
+The existence of the basis does not satisfy general Level 4.
+
+The evidence matrix must be complete before any general Level 4 reader/parser behavior may be claimed.
