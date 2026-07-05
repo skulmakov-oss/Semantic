@@ -86,12 +86,13 @@ Required reading order:
 10. `docs/spec/ui/multi_client_freshness_model.md`
 11. `docs/spec/ui/projection_bundle_delivery.md`
 12. `docs/roadmap/post_ui/projection_bundle_fixture_inventory.md`
-13. `docs/spec/ui/projection_bundle_reader_parser_entry_gate.md`
-14. `docs/spec/ui/projection_bundle_reader_parser_basis.md`
-15. `docs/roadmap/post_ui/projection_bundle_level4_evidence_matrix.md`
-16. `docs/roadmap/post_ui/projection_bundle_reader_evidence_closeout.md`
-17. `docs/roadmap/post_ui/ui_shell_kit_projection_alignment.md`
-18. `docs/roadmap/post_ui/intent_driven_projection_closeout.md`
+13. `docs/spec/ui/projection_bundle_basis.md`
+14. `docs/spec/ui/projection_bundle_reader_parser_entry_gate.md`
+15. `docs/spec/ui/projection_bundle_reader_parser_basis.md`
+16. `docs/roadmap/post_ui/projection_bundle_level4_evidence_matrix.md`
+17. `docs/roadmap/post_ui/projection_bundle_reader_evidence_closeout.md`
+18. `docs/roadmap/post_ui/ui_shell_kit_projection_alignment.md`
+19. `docs/roadmap/post_ui/intent_driven_projection_closeout.md`
 
 ```text
 Read the doctrine before the mechanism.
