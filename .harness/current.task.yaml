@@ -61,7 +61,7 @@ constraints:
 verification:
   required:
     - git diff --check
-    - bash scripts/harness-check.sh
+    - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
 
 report:
   output: .harness/reports/POST-UI-READER-CORE-PUBLICATION-GATE.md
