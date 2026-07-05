@@ -126,6 +126,7 @@ try {
 
     $negativeOutput = Invoke-ReaderMode -BinaryPath $binaryPath -Arguments @("--emit-negative-report", $repoRoot) -TempRoot $tempRoot -Label "negative"
     $negativeExpected = Get-Content -LiteralPath $negativeExpectedPath -Raw
+    # The exact golden negative report remains the source of truth for policy evidence cases.
     Compare-NormalizedText -Actual $negativeOutput -Expected $negativeExpected -FailureMessage "FAIL: negative reader report mismatch"
 
     Write-Output $expected

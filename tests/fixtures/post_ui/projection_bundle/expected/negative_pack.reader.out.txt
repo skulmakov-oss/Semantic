@@ -42,8 +42,48 @@ case.7.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_quarantin
 case.7.status=rejected
 case.7.reason=quarantine update policy: allow_critical_update_during_quarantine is true
 
+case.8.name=manifest_malformed_bundle_id_empty
+case.8.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_malformed_bundle_id_empty.sketch.md
+case.8.status=rejected
+case.8.reason=malformed_field: bundle_id is empty
+
+case.9.name=manifest_malformed_require_verification
+case.9.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_malformed_require_verification.sketch.md
+case.9.status=rejected
+case.9.reason=malformed_field: require_verification must be boolean
+
+case.10.name=manifest_unknown_root_field
+case.10.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_unknown_root_field.sketch.md
+case.10.status=rejected
+case.10.reason=unknown_field: unknown_future_field
+
+case.11.name=manifest_unknown_activation_policy_field
+case.11.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_unknown_activation_policy_field.sketch.md
+case.11.status=rejected
+case.11.reason=unknown_field: allow_unreviewed_activation
+
+case.12.name=manifest_duplicate_bundle_id
+case.12.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_duplicate_bundle_id.sketch.md
+case.12.status=rejected
+case.12.reason=duplicate_field: bundle_id
+
+case.13.name=manifest_duplicate_require_verification
+case.13.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_duplicate_require_verification.sketch.md
+case.13.status=rejected
+case.13.reason=duplicate_field: require_verification
+
+case.14.name=manifest_out_of_order_identity
+case.14.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_out_of_order_identity.sketch.md
+case.14.status=rejected
+case.14.reason=field_ordering: bundle_version must appear before projection_id
+
+case.15.name=manifest_out_of_order_policy_blocks
+case.15.input=tests/fixtures/post_ui/projection_bundle/invalid/manifest_out_of_order_policy_blocks.sketch.md
+case.15.status=rejected
+case.15.reason=field_ordering: activation_policy must appear before update_policy
+
 summary.accepted_positive=1
-summary.rejected_negative=8
+summary.rejected_negative=16
 summary.unexpected_pass=0
 summary.wrong_reason=0
 

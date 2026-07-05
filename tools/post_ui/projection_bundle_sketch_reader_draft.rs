@@ -232,6 +232,137 @@ const NEGATIVE_CASES: &[NegativeFixtureCase] = &[
                 "quarantine update policy: allow_critical_update_during_quarantine is true",
         },
     },
+    NegativeFixtureCase {
+        name: "manifest_malformed_bundle_id_empty",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_malformed_bundle_id_empty.sketch.md",
+        ],
+        expected_error_substring: "malformed_field: bundle_id is empty",
+        rule: NegativeRule::MalformedEmpty {
+            key: "bundle_id",
+            rejection_reason: "malformed_field: bundle_id is empty",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_malformed_require_verification",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_malformed_require_verification.sketch.md",
+        ],
+        expected_error_substring: "malformed_field: require_verification must be boolean",
+        rule: NegativeRule::MalformedBoolean {
+            key: "require_verification",
+            rejection_reason: "malformed_field: require_verification must be boolean",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_unknown_root_field",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_unknown_root_field.sketch.md",
+        ],
+        expected_error_substring: "unknown_field: unknown_future_field",
+        rule: NegativeRule::UnknownField {
+            key: "unknown_future_field",
+            rejection_reason: "unknown_field: unknown_future_field",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_unknown_activation_policy_field",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_unknown_activation_policy_field.sketch.md",
+        ],
+        expected_error_substring: "unknown_field: allow_unreviewed_activation",
+        rule: NegativeRule::UnknownField {
+            key: "allow_unreviewed_activation",
+            rejection_reason: "unknown_field: allow_unreviewed_activation",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_duplicate_bundle_id",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_duplicate_bundle_id.sketch.md",
+        ],
+        expected_error_substring: "duplicate_field: bundle_id",
+        rule: NegativeRule::DuplicateField {
+            key: "bundle_id",
+            rejection_reason: "duplicate_field: bundle_id",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_duplicate_require_verification",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_duplicate_require_verification.sketch.md",
+        ],
+        expected_error_substring: "duplicate_field: require_verification",
+        rule: NegativeRule::DuplicateField {
+            key: "require_verification",
+            rejection_reason: "duplicate_field: require_verification",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_out_of_order_identity",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_out_of_order_identity.sketch.md",
+        ],
+        expected_error_substring: "field_ordering: bundle_version must appear before projection_id",
+        rule: NegativeRule::FieldOrdering {
+            earlier: "bundle_version:",
+            later: "projection_id:",
+            rejection_reason: "field_ordering: bundle_version must appear before projection_id",
+        },
+    },
+    NegativeFixtureCase {
+        name: "manifest_out_of_order_policy_blocks",
+        relative_path: &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_out_of_order_policy_blocks.sketch.md",
+        ],
+        expected_error_substring:
+            "field_ordering: activation_policy must appear before update_policy",
+        rule: NegativeRule::FieldOrdering {
+            earlier: "activation_policy {",
+            later: "update_policy {",
+            rejection_reason: "field_ordering: activation_policy must appear before update_policy",
+        },
+    },
 ];
 
 #[derive(Clone, Copy)]
@@ -253,6 +384,27 @@ enum NegativeRule {
         key: &'static str,
         expected_value: &'static str,
         rejected_value: &'static str,
+        rejection_reason: &'static str,
+    },
+    MalformedEmpty {
+        key: &'static str,
+        rejection_reason: &'static str,
+    },
+    MalformedBoolean {
+        key: &'static str,
+        rejection_reason: &'static str,
+    },
+    UnknownField {
+        key: &'static str,
+        rejection_reason: &'static str,
+    },
+    DuplicateField {
+        key: &'static str,
+        rejection_reason: &'static str,
+    },
+    FieldOrdering {
+        earlier: &'static str,
+        later: &'static str,
         rejection_reason: &'static str,
     },
 }
@@ -386,10 +538,220 @@ fn require_scalar(content: &str, label: &str, key: &str, expected: &str) -> Resu
     Ok(actual)
 }
 
-fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
+fn count_scalar_occurrences(content: &str, key: &str) -> usize {
+    let prefix = format!("{}:", key);
+
+    content
+        .lines()
+        .filter(|line| line.trim().starts_with(&prefix))
+        .count()
+}
+
+fn find_first_line_index(content: &str, needle: &str) -> Option<usize> {
+    for (index, line) in content.lines().enumerate() {
+        if line.trim().starts_with(needle) {
+            return Some(index);
+        }
+    }
+
+    None
+}
+
+fn require_non_empty_scalar(content: &str, key: &str) -> Result<(), String> {
+    let count = count_scalar_occurrences(content, key);
+    if count == 0 {
+        return Err(format!("missing required field {}", key));
+    }
+
+    if count > 1 {
+        return Err(format!("duplicate_field: {}", key));
+    }
+
+    let actual = extract_scalar(content, key).unwrap_or_default();
+    if actual.is_empty() {
+        return Err(format!("malformed_field: {} is empty", key));
+    }
+
+    Ok(())
+}
+
+fn require_boolean_scalar(content: &str, key: &str) -> Result<(), String> {
+    let count = count_scalar_occurrences(content, key);
+    if count == 0 {
+        return Err(format!("missing required field {}", key));
+    }
+
+    if count > 1 {
+        return Err(format!("duplicate_field: {}", key));
+    }
+
+    let actual = extract_scalar(content, key).unwrap_or_default();
+    match actual.as_str() {
+        "true" | "false" => Ok(()),
+        _ => Err(format!("malformed_field: {} must be boolean", key)),
+    }
+}
+
+fn require_no_duplicate_scalars(
+    content: &str,
+    keys: &[&str],
+    skipped_key: Option<&str>,
+) -> Result<(), String> {
+    for key in keys {
+        if skipped_key == Some(*key) {
+            continue;
+        }
+
+        if count_scalar_occurrences(content, key) > 1 {
+            return Err(format!("duplicate_field: {}", key));
+        }
+    }
+
+    Ok(())
+}
+
+fn require_no_known_unknown_fields_except(
+    content: &str,
+    allowed_unknown_fields: &[&str],
+) -> Result<(), String> {
+    for key in ["unknown_future_field", "allow_unreviewed_activation"] {
+        if allowed_unknown_fields.contains(&key) {
+            continue;
+        }
+
+        if count_scalar_occurrences(content, key) > 0 {
+            return Err(format!("unknown_field: {}", key));
+        }
+    }
+
+    Ok(())
+}
+
+fn require_field_order(content: &str, earlier: &str, later: &str, reason: &str) -> Result<(), String> {
+    let earlier_index = find_first_line_index(content, earlier).ok_or_else(|| reason.to_string())?;
+    let later_index = find_first_line_index(content, later).ok_or_else(|| reason.to_string())?;
+
+    if earlier_index < later_index {
+        Ok(())
+    } else {
+        Err(reason.to_string())
+    }
+}
+
+fn validate_sketch_except(
+    content: &str,
+    skipped_key: Option<&str>,
+    allowed_unknown_fields: &[&str],
+    skip_order_check: bool,
+) -> Result<(), String> {
     for &(label, needle) in EXPECTED_CONTAINS {
         require_contains(content, label, needle)?;
     }
+
+    for &(label, key, expected) in EXPECTED_SCALARS {
+        if skipped_key == Some(key) {
+            continue;
+        }
+
+        require_scalar(content, label, key, expected)?;
+    }
+
+    let expected_keys = [
+        "bundle_id",
+        "bundle_version",
+        "projection_id",
+        "ui_ir_ref",
+        "binding_graph_ref",
+        "action_ir_ref",
+        "role_dictionary_version",
+        "renderer_profile",
+        "safety_class",
+        "criticality",
+        "freshness_policy",
+        "hash",
+        "signature",
+        "created_by",
+        "created_at",
+        "compiler_identity",
+        "require_verification",
+        "allow_runtime_tree_streaming",
+        "allow_production_activation",
+        "require_safe_update_boundary",
+        "allow_critical_update_during_pending_unknown",
+        "allow_critical_update_during_quarantine",
+    ];
+
+    require_no_duplicate_scalars(content, &expected_keys, skipped_key)?;
+    require_no_known_unknown_fields_except(content, allowed_unknown_fields)?;
+
+    if !skip_order_check {
+        require_field_order(
+            content,
+            "bundle_version:",
+            "projection_id:",
+            "field_ordering: bundle_version must appear before projection_id",
+        )?;
+        require_field_order(
+            content,
+            "activation_policy {",
+            "update_policy {",
+            "field_ordering: activation_policy must appear before update_policy",
+        )?;
+    }
+
+    Ok(())
+}
+
+fn validate_sketch_without_order(
+    content: &str,
+    skipped_key: Option<&str>,
+    allowed_unknown_fields: &[&str],
+) -> Result<(), String> {
+    for &(label, needle) in EXPECTED_CONTAINS {
+        require_contains(content, label, needle)?;
+    }
+
+    for &(label, key, expected) in EXPECTED_SCALARS {
+        if skipped_key == Some(key) {
+            continue;
+        }
+
+        require_scalar(content, label, key, expected)?;
+    }
+
+    let expected_keys = [
+        "bundle_id",
+        "bundle_version",
+        "projection_id",
+        "ui_ir_ref",
+        "binding_graph_ref",
+        "action_ir_ref",
+        "role_dictionary_version",
+        "renderer_profile",
+        "safety_class",
+        "criticality",
+        "freshness_policy",
+        "hash",
+        "signature",
+        "created_by",
+        "created_at",
+        "compiler_identity",
+        "require_verification",
+        "allow_runtime_tree_streaming",
+        "allow_production_activation",
+        "require_safe_update_boundary",
+        "allow_critical_update_during_pending_unknown",
+        "allow_critical_update_during_quarantine",
+    ];
+
+    require_no_duplicate_scalars(content, &expected_keys, skipped_key)?;
+    require_no_known_unknown_fields_except(content, allowed_unknown_fields)?;
+
+    Ok(())
+}
+
+fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
+    validate_sketch_except(content, None, &[], false)?;
 
     let bundle_id = require_scalar(content, "bundle id", "bundle_id", "bundle.example.minimal")?;
     let bundle_version =
@@ -511,22 +873,6 @@ fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
     })
 }
 
-fn validate_sketch_except(content: &str, skipped_key: &str) -> Result<(), String> {
-    for &(label, needle) in EXPECTED_CONTAINS {
-        require_contains(content, label, needle)?;
-    }
-
-    for &(label, key, expected) in EXPECTED_SCALARS {
-        if key == skipped_key {
-            continue;
-        }
-
-        require_scalar(content, label, key, expected)?;
-    }
-
-    Ok(())
-}
-
 fn validate_positive_fixture(repo_root: &str) -> Result<ManifestSnapshot, String> {
     let sketch = read_sketch(repo_root);
 
@@ -545,7 +891,8 @@ fn validate_negative_fixture(
             label,
             key,
         } => {
-            validate_sketch_except(&sketch, key)?;
+            let skip_order_check = matches!(key, "projection_id" | "bundle_version");
+            validate_sketch_except(&sketch, Some(key), &[], skip_order_check)?;
 
             if extract_scalar(&sketch, key).is_some() {
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
@@ -572,7 +919,7 @@ fn validate_negative_fixture(
             rejected_value,
             rejection_reason,
         } => {
-            validate_sketch_except(&sketch, key)?;
+            validate_sketch_except(&sketch, Some(key), &[], false)?;
 
             match extract_scalar(&sketch, key) {
                 Some(actual) if actual == expected_value => {
@@ -598,6 +945,127 @@ fn validate_negative_fixture(
                     label, expected_value, actual
                 )),
                 None => Err(format!("missing required field {}", key)),
+            }
+        }
+        NegativeRule::MalformedEmpty {
+            key,
+            rejection_reason,
+        } => {
+            validate_sketch_except(&sketch, Some(key), &[], false)?;
+
+            match require_non_empty_scalar(&sketch, key) {
+                Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
+                Err(reason) => {
+                    if !reason.contains(case.expected_error_substring) || reason != rejection_reason {
+                        return Err(format!(
+                            "negative fixture failed for wrong reason: {}: {}",
+                            case.name, reason
+                        ));
+                    }
+
+                    Ok(NegativeCaseResult {
+                        name: case.name,
+                        input,
+                        reason,
+                    })
+                }
+            }
+        }
+        NegativeRule::MalformedBoolean {
+            key,
+            rejection_reason,
+        } => {
+            validate_sketch_except(&sketch, Some(key), &[], false)?;
+
+            match require_boolean_scalar(&sketch, key) {
+                Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
+                Err(reason) => {
+                    if !reason.contains(case.expected_error_substring) || reason != rejection_reason {
+                        return Err(format!(
+                            "negative fixture failed for wrong reason: {}: {}",
+                            case.name, reason
+                        ));
+                    }
+
+                    Ok(NegativeCaseResult {
+                        name: case.name,
+                        input,
+                        reason,
+                    })
+                }
+            }
+        }
+        NegativeRule::UnknownField {
+            key,
+            rejection_reason,
+        } => {
+            validate_sketch_except(&sketch, None, &[key], false)?;
+
+            if count_scalar_occurrences(&sketch, key) == 0 {
+                return Err(format!("negative fixture unexpectedly passed: {}", case.name));
+            }
+
+            let reason = rejection_reason.to_string();
+            if !reason.contains(case.expected_error_substring) {
+                return Err(format!(
+                    "negative fixture failed for wrong reason: {}: {}",
+                    case.name, reason
+                ));
+            }
+
+            Ok(NegativeCaseResult {
+                name: case.name,
+                input,
+                reason,
+            })
+        }
+        NegativeRule::DuplicateField {
+            key,
+            rejection_reason,
+        } => {
+            validate_sketch_except(&sketch, Some(key), &[], false)?;
+
+            if count_scalar_occurrences(&sketch, key) <= 1 {
+                return Err(format!("negative fixture unexpectedly passed: {}", case.name));
+            }
+
+            let reason = rejection_reason.to_string();
+            if !reason.contains(case.expected_error_substring) {
+                return Err(format!(
+                    "negative fixture failed for wrong reason: {}: {}",
+                    case.name, reason
+                ));
+            }
+
+            Ok(NegativeCaseResult {
+                name: case.name,
+                input,
+                reason,
+            })
+        }
+        NegativeRule::FieldOrdering {
+            earlier,
+            later,
+            rejection_reason,
+        } => {
+            validate_sketch_without_order(&sketch, None, &[])?;
+
+            match require_field_order(&sketch, earlier, later, rejection_reason) {
+                Ok(()) => Err(format!("negative fixture unexpectedly passed: {}", case.name)),
+                Err(reason) => {
+                    if !reason.contains(case.expected_error_substring) {
+                        return Err(format!(
+                            "negative fixture failed for wrong reason: {}: {}",
+                            case.name, reason
+                        ));
+                    }
+
+                    Ok(NegativeCaseResult {
+                        name: case.name,
+                        input,
+                        reason,
+                    })
+                }
             }
         }
     }
