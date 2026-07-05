@@ -1,0 +1,67 @@
+task:
+  id: POST-UI-READER-CORE-PUBLICATION-GATE
+  title: Allow ProjectionBundle reader-core candidate publication
+  type: publication-gate
+  mode: active
+
+intent:
+  summary: Allow publication of the already-audited ProjectionBundle reader-core candidate.
+
+layer:
+  name: tooling
+  owner: repo-local
+
+scope:
+  allowed_paths:
+    - .harness/current.task.yaml
+    - tools/post_ui/projection_bundle_sketch_reader_draft.rs
+    - tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1
+
+  forbidden_paths:
+    - docs/**
+    - tests/fixtures/**
+    - Cargo.toml
+    - Cargo.lock
+
+actions:
+  allowed:
+    - read
+    - edit_allowed_paths
+    - create_pr
+    - push
+
+  forbidden:
+    - modify_docs
+    - modify_fixtures
+    - modify_golden_outputs
+    - modify_cargo_toml
+    - modify_cargo_lock
+    - loader_claim
+    - runtime_claim
+    - production_ui_claim
+    - parser_claim
+
+constraints:
+  - reader-core candidate publication only
+  - fixture-facing evidence only
+  - no docs changes
+  - no fixtures changes
+  - no golden output changes
+  - no Cargo.toml changes
+  - no Cargo.lock changes
+  - no schema claim
+  - no general parser claim
+  - no loader claim
+  - no runtime claim
+  - no activation path claim
+  - no production UI claim
+  - no general Level 4 claim
+  - no Level 5+ claim
+
+verification:
+  required:
+    - git diff --check
+    - bash scripts/harness-check.sh
+
+report:
+  output: .harness/reports/POST-UI-READER-CORE-PUBLICATION-GATE.md
