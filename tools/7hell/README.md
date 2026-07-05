@@ -22,6 +22,7 @@ To run all 7 gates locally, use the full runner for your OS:
 
 ## CI Usage
 The CI pipeline uses the fast gate (`tools/7hell/run_ci.ps1`) to keep PR checks short. The full runner remains available locally via `run.ps1` / `run.sh` for the complete qualification pack.
+The full runner also has a separate manual/nightly GitHub workflow for cases where the complete pack needs to run in CI without blocking PR checks.
 
 ## The 7 Gates
 The script will fail fast if any gate is broken.
