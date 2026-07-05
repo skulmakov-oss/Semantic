@@ -7,6 +7,7 @@
 // It does not verify bundles.
 // It does not authorize production UI wiring.
 #![forbid(unsafe_code)]
+#![allow(dead_code)]
 
 use std::env;
 use std::fs;
@@ -409,8 +410,8 @@ enum NegativeRule {
     },
 }
 
-#[derive(Clone)]
-struct ManifestSnapshot {
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchReaderOutput {
     bundle_id: String,
     bundle_version: String,
     projection_id: String,
@@ -437,11 +438,54 @@ struct ManifestSnapshot {
     allow_critical_update_during_quarantine: String,
 }
 
+type ManifestSnapshot = SketchReaderOutput;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchScalar {
+    section: String,
+    key: String,
+    value: String,
+    line: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchReaderCore {
+    text_block: String,
+    scalars: Vec<SketchScalar>,
+}
+
 #[derive(Clone)]
 struct NegativeCaseResult {
     name: &'static str,
     input: String,
     reason: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReaderErrorKind {
+    MissingRequiredField,
+    MalformedField,
+    UnknownField,
+    DuplicateField,
+    FieldOrdering,
+    InvalidPolicyValue,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ReaderError {
+    kind: ReaderErrorKind,
+    field: String,
+    message: String,
+}
+
+impl ReaderError {
+    fn new(kind: ReaderErrorKind, field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            field: field.into(),
+            message: message.into(),
+        }
+    }
 }
 
 fn fail(message: impl AsRef<str>) -> ! {
@@ -486,21 +530,95 @@ fn read_fixture(repo_root: &str, relative_path: &[&str]) -> String {
     })
 }
 
-fn extract_scalar(content: &str, key: &str) -> Option<String> {
-    let prefix = format!("{}:", key);
+fn extract_text_block(content: &str) -> Result<String, ReaderError> {
+    let mut in_text_block = false;
+    let mut block = String::new();
+    let mut found_block = false;
 
     for line in content.lines() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix(&prefix) {
-            let mut value = rest.trim().trim_end_matches(',').trim();
-            if let Some(stripped) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-                value = stripped;
+        if !in_text_block {
+            if trimmed == "```text" {
+                in_text_block = true;
+                found_block = true;
             }
-            return Some(value.to_string());
+            continue;
+        }
+
+        if trimmed == "```" {
+            return Ok(block);
+        }
+
+        block.push_str(line);
+        block.push('\n');
+    }
+
+    if found_block {
+        Err(ReaderError::new(
+            ReaderErrorKind::MalformedField,
+            "projection_bundle",
+            "unterminated text block",
+        ))
+    } else {
+        Err(ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            "projection_bundle",
+            "missing required text block",
+        ))
+    }
+}
+
+fn scan_scalars(text_block: &str) -> Vec<SketchScalar> {
+    let mut scalars = Vec::new();
+    let mut section_stack: Vec<String> = Vec::new();
+
+    for (index, line) in text_block.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed == "}" {
+            let _ = section_stack.pop();
+            continue;
+        }
+
+        if trimmed.ends_with('{') {
+            let section = trimmed.trim_end_matches('{').trim().to_string();
+            if !section.is_empty() {
+                section_stack.push(section);
+            }
+            continue;
+        }
+
+        if let Some((key, rest)) = trimmed.split_once(':') {
+            let key = key.trim();
+            if key.ends_with('[') {
+                continue;
+            }
+
+            let mut value = rest.trim().trim_end_matches(',').trim().to_string();
+            if let Some(stripped) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+                value = stripped.to_string();
+            }
+
+            scalars.push(SketchScalar {
+                section: section_stack.join("/"),
+                key: key.to_string(),
+                value,
+                line: index + 1,
+            });
         }
     }
 
-    None
+    scalars
+}
+
+fn parse_sketch_core(content: &str) -> Result<SketchReaderCore, ReaderError> {
+    let text_block = extract_text_block(content)?;
+    let scalars = scan_scalars(&text_block);
+
+    Ok(SketchReaderCore { text_block, scalars })
 }
 
 fn normalize_line_endings(text: &str) -> String {
@@ -524,85 +642,205 @@ fn require_contains(content: &str, label: &str, needle: &str) -> Result<(), Stri
     Ok(())
 }
 
-fn require_scalar(content: &str, label: &str, key: &str, expected: &str) -> Result<String, String> {
-    let actual = extract_scalar(content, key)
-        .ok_or_else(|| format!("missing required field {}: {}", label, key))?;
+fn find_scalar_core<'a>(core: &'a SketchReaderCore, key: &str) -> Option<&'a SketchScalar> {
+    core.scalars.iter().find(|scalar| scalar.key == key)
+}
 
-    if actual != expected {
-        return Err(format!(
-            "field {} mismatch: expected {:?}, got {:?}",
-            label, expected, actual
+fn count_scalar_occurrences_core(core: &SketchReaderCore, key: &str) -> usize {
+    core.scalars.iter().filter(|scalar| scalar.key == key).count()
+}
+
+fn require_required_scalar_core(
+    core: &SketchReaderCore,
+    key: &str,
+    expected: &str,
+) -> Result<String, ReaderError> {
+    let scalar = find_scalar_core(core, key).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            key,
+            format!("missing required field {}", key),
+        )
+    })?;
+
+    if scalar.value != expected {
+        return Err(ReaderError::new(
+            ReaderErrorKind::InvalidPolicyValue,
+            key,
+            format!(
+                "field {} mismatch: expected {:?}, got {:?}",
+                key, expected, scalar.value
+            ),
         ));
     }
 
-    Ok(actual)
+    Ok(scalar.value.clone())
 }
 
-fn count_scalar_occurrences(content: &str, key: &str) -> usize {
-    let prefix = format!("{}:", key);
+fn require_non_empty_scalar_core(core: &SketchReaderCore, key: &str) -> Result<(), ReaderError> {
+    let scalar = find_scalar_core(core, key).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            key,
+            format!("missing required field {}", key),
+        )
+    })?;
 
-    content
-        .lines()
-        .filter(|line| line.trim().starts_with(&prefix))
-        .count()
-}
-
-fn find_first_line_index(content: &str, needle: &str) -> Option<usize> {
-    for (index, line) in content.lines().enumerate() {
-        if line.trim().starts_with(needle) {
-            return Some(index);
-        }
-    }
-
-    None
-}
-
-fn require_non_empty_scalar(content: &str, key: &str) -> Result<(), String> {
-    let count = count_scalar_occurrences(content, key);
-    if count == 0 {
-        return Err(format!("missing required field {}", key));
-    }
-
-    if count > 1 {
-        return Err(format!("duplicate_field: {}", key));
-    }
-
-    let actual = extract_scalar(content, key).unwrap_or_default();
-    if actual.is_empty() {
-        return Err(format!("malformed_field: {} is empty", key));
+    if scalar.value.is_empty() {
+        return Err(ReaderError::new(
+            ReaderErrorKind::MalformedField,
+            key,
+            format!("malformed_field: {} is empty", key),
+        ));
     }
 
     Ok(())
 }
 
-fn require_boolean_scalar(content: &str, key: &str) -> Result<(), String> {
-    let count = count_scalar_occurrences(content, key);
-    if count == 0 {
-        return Err(format!("missing required field {}", key));
-    }
+fn require_boolean_scalar_core(core: &SketchReaderCore, key: &str) -> Result<(), ReaderError> {
+    let scalar = find_scalar_core(core, key).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            key,
+            format!("missing required field {}", key),
+        )
+    })?;
 
-    if count > 1 {
-        return Err(format!("duplicate_field: {}", key));
-    }
-
-    let actual = extract_scalar(content, key).unwrap_or_default();
-    match actual.as_str() {
+    match scalar.value.as_str() {
         "true" | "false" => Ok(()),
-        _ => Err(format!("malformed_field: {} must be boolean", key)),
+        _ => Err(ReaderError::new(
+            ReaderErrorKind::MalformedField,
+            key,
+            format!("malformed_field: {} must be boolean", key),
+        )),
     }
+}
+
+fn require_no_duplicate_scalars_core(core: &SketchReaderCore, keys: &[&str]) -> Result<(), ReaderError> {
+    for key in keys {
+        if count_scalar_occurrences_core(core, key) > 1 {
+            return Err(ReaderError::new(
+                ReaderErrorKind::DuplicateField,
+                *key,
+                format!("duplicate_field: {}", key),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn require_no_known_unknown_fields_core(core: &SketchReaderCore) -> Result<(), ReaderError> {
+    for key in ["unknown_future_field", "allow_unreviewed_activation"] {
+        if count_scalar_occurrences_core(core, key) > 0 {
+            return Err(ReaderError::new(
+                ReaderErrorKind::UnknownField,
+                key,
+                format!("unknown_field: {}", key),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn require_field_order_core(core: &SketchReaderCore, earlier: &str, later: &str) -> Result<(), ReaderError> {
+    let earlier_label = earlier
+        .trim()
+        .trim_end_matches(':')
+        .trim_end_matches('{')
+        .trim();
+    let later_label = later
+        .trim()
+        .trim_end_matches(':')
+        .trim_end_matches('{')
+        .trim();
+
+    let find_line = |needle: &str| -> Option<usize> {
+        core.text_block.lines().enumerate().find_map(|(index, line)| {
+            let trimmed = line.trim();
+            if trimmed.starts_with(needle) {
+                Some(index + 1)
+            } else {
+                None
+            }
+        })
+    };
+
+    let earlier_line = find_line(earlier_label).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            earlier,
+            format!(
+                "field_ordering: {} must appear before {}",
+                earlier_label, later_label
+            ),
+        )
+    })?;
+    let later_line = find_line(later_label).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            later,
+            format!(
+                "field_ordering: {} must appear before {}",
+                earlier_label, later_label
+            ),
+        )
+    })?;
+
+    if earlier_line < later_line {
+        Ok(())
+    } else {
+        Err(ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            later,
+            format!(
+                "field_ordering: {} must appear before {}",
+                earlier_label, later_label
+            ),
+        ))
+    }
+}
+
+fn extract_scalar(content: &str, key: &str) -> Option<String> {
+    let core = parse_sketch_core(content).ok()?;
+    find_scalar_core(&core, key).map(|scalar| scalar.value.clone())
+}
+
+fn count_scalar_occurrences(content: &str, key: &str) -> usize {
+    match parse_sketch_core(content) {
+        Ok(core) => count_scalar_occurrences_core(&core, key),
+        Err(_) => 0,
+    }
+}
+
+fn require_scalar(content: &str, _label: &str, key: &str, expected: &str) -> Result<String, String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    require_required_scalar_core(&core, key, expected).map_err(|err| err.message)
+}
+
+fn require_non_empty_scalar(content: &str, key: &str) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    require_non_empty_scalar_core(&core, key).map_err(|err| err.message)
+}
+
+fn require_boolean_scalar(content: &str, key: &str) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    require_boolean_scalar_core(&core, key).map_err(|err| err.message)
 }
 
 fn require_no_duplicate_scalars(
     content: &str,
-    keys: &[&str],
+    expected_keys: &[&str],
     skipped_key: Option<&str>,
 ) -> Result<(), String> {
-    for key in keys {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    for key in expected_keys {
         if skipped_key == Some(*key) {
             continue;
         }
 
-        if count_scalar_occurrences(content, key) > 1 {
+        if count_scalar_occurrences_core(&core, key) > 1 {
             return Err(format!("duplicate_field: {}", key));
         }
     }
@@ -614,12 +852,14 @@ fn require_no_known_unknown_fields_except(
     content: &str,
     allowed_unknown_fields: &[&str],
 ) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+
     for key in ["unknown_future_field", "allow_unreviewed_activation"] {
         if allowed_unknown_fields.contains(&key) {
             continue;
         }
 
-        if count_scalar_occurrences(content, key) > 0 {
+        if count_scalar_occurrences_core(&core, key) > 0 {
             return Err(format!("unknown_field: {}", key));
         }
     }
@@ -627,15 +867,25 @@ fn require_no_known_unknown_fields_except(
     Ok(())
 }
 
-fn require_field_order(content: &str, earlier: &str, later: &str, reason: &str) -> Result<(), String> {
-    let earlier_index = find_first_line_index(content, earlier).ok_or_else(|| reason.to_string())?;
-    let later_index = find_first_line_index(content, later).ok_or_else(|| reason.to_string())?;
-
-    if earlier_index < later_index {
-        Ok(())
-    } else {
-        Err(reason.to_string())
-    }
+fn require_field_order(
+    content: &str,
+    earlier: &str,
+    later: &str,
+    rejection_reason: &str,
+) -> Result<(), String> {
+    let earlier_key = earlier
+        .trim()
+        .trim_end_matches(':')
+        .trim_end_matches('{')
+        .trim();
+    let later_key = later
+        .trim()
+        .trim_end_matches(':')
+        .trim_end_matches('{')
+        .trim();
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    let _ = rejection_reason;
+    require_field_order_core(&core, earlier_key, later_key).map_err(|err| err.message)
 }
 
 fn validate_sketch_except(
@@ -1245,6 +1495,297 @@ fn emit_positive_output(repo_root: &str) -> Result<String, String> {
 fn emit_negative_report(repo_root: &str) -> Result<String, String> {
     let results = validate_negative_pack(repo_root)?;
     Ok(render_negative_report(&results))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    fn sample_positive_text() -> String {
+        [
+            "```text",
+            "projection_bundle {",
+            "  bundle_id: \"bundle.example.minimal\"",
+            "  bundle_version: \"0-sketch\"",
+            "  projection_id: \"ExampleMinimalProjection\"",
+            "",
+            "  source_refs: [",
+            "    \"semantic.source.example\"",
+            "    \"projection.source.example\"",
+            "  ]",
+            "",
+            "  artifacts {",
+            "    ui_ir_ref: \"ui_ir.example.minimal\"",
+            "    binding_graph_ref: \"binding_graph.example.minimal\"",
+            "    action_ir_ref: \"action_ir.example.minimal\"",
+            "  }",
+            "",
+            "  compatibility {",
+            "    role_dictionary_version: \"ui-roles.0-sketch\"",
+            "    renderer_profile: \"semantic-shell.reference-sketch\"",
+            "  }",
+            "",
+            "  safety {",
+            "    safety_class: \"VerifiedDynamic\"",
+            "    criticality: \"NonCritical\"",
+            "    required_capabilities: []",
+            "    freshness_policy: \"FreshForControl\"",
+            "  }",
+            "",
+            "  trust {",
+            "    hash: \"sha256:SKETCH-NOT-A-REAL-HASH\"",
+            "    signature: \"signature:SKETCH-NOT-A-REAL-SIGNATURE\"",
+            "    created_by: \"semantic-projection-compiler.SKETCH\"",
+            "    created_at: \"not-a-real-timestamp\"",
+            "    compiler_identity: \"semantic-projection-compiler.0-sketch\"",
+            "  }",
+            "",
+            "  activation_policy {",
+            "    require_verification: true",
+            "    allow_runtime_tree_streaming: false",
+            "    allow_production_activation: false",
+            "  }",
+            "",
+            "  update_policy {",
+            "    require_safe_update_boundary: true",
+            "    allow_critical_update_during_pending_unknown: false",
+            "    allow_critical_update_during_quarantine: false",
+            "  }",
+            "",
+            "  diagnostics {",
+            "    expected: []",
+            "  }",
+            "}",
+            "```",
+        ]
+        .join("\n")
+    }
+
+    fn current_repo_root() -> String {
+        std::env::current_dir()
+            .unwrap_or_else(|err| panic!("current_dir failed: {}", err))
+            .to_string_lossy()
+            .to_string()
+    }
+
+    fn expected_positive_output() -> String {
+        fs::read_to_string(
+            Path::new("tests")
+                .join("fixtures")
+                .join("post_ui")
+                .join("projection_bundle")
+                .join("expected")
+                .join("manifest_minimal.reader.out.txt"),
+        )
+        .unwrap_or_else(|err| panic!("failed to read positive golden: {}", err))
+    }
+
+    fn expected_negative_report() -> String {
+        fs::read_to_string(
+            Path::new("tests")
+                .join("fixtures")
+                .join("post_ui")
+                .join("projection_bundle")
+                .join("expected")
+                .join("negative_pack.reader.out.txt"),
+        )
+        .unwrap_or_else(|err| panic!("failed to read negative golden: {}", err))
+    }
+
+    fn normalize_compared_text(text: &str) -> String {
+        normalize_line_endings(text)
+            .trim_end_matches('\n')
+            .to_string()
+    }
+
+    #[test]
+    fn extracts_text_block() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        assert!(core.text_block.contains("projection_bundle {"));
+        assert!(core.text_block.contains("activation_policy {"));
+    }
+
+    #[test]
+    fn detects_empty_bundle_id() {
+        let sketch = sample_positive_text().replace(
+            "  bundle_id: \"bundle.example.minimal\"",
+            "  bundle_id: \"\"",
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_non_empty_scalar_core(&core, "bundle_id").expect_err("expected malformed bundle_id");
+        assert_eq!(err.message, "malformed_field: bundle_id is empty");
+    }
+
+    #[test]
+    fn detects_malformed_boolean() {
+        let sketch = sample_positive_text().replace(
+            "    require_verification: true",
+            "    require_verification: \"not-a-bool\"",
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_boolean_scalar_core(&core, "require_verification")
+            .expect_err("expected malformed boolean");
+        assert_eq!(err.message, "malformed_field: require_verification must be boolean");
+    }
+
+    #[test]
+    fn detects_unknown_future_field() {
+        let sketch = sample_positive_text().replacen(
+            "  projection_id: \"ExampleMinimalProjection\"",
+            "  unknown_future_field: \"must-reject\"\n  projection_id: \"ExampleMinimalProjection\"",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_no_known_unknown_fields_core(&core).expect_err("expected unknown field");
+        assert_eq!(err.message, "unknown_field: unknown_future_field");
+    }
+
+    #[test]
+    fn detects_allow_unreviewed_activation() {
+        let sketch = sample_positive_text().replacen(
+            "    allow_runtime_tree_streaming: false",
+            "    allow_unreviewed_activation: true\n    allow_runtime_tree_streaming: false",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_no_known_unknown_fields_core(&core).expect_err("expected unknown field");
+        assert_eq!(err.message, "unknown_field: allow_unreviewed_activation");
+    }
+
+    #[test]
+    fn detects_duplicate_bundle_id() {
+        let sketch = sample_positive_text().replacen(
+            "  bundle_id: \"bundle.example.minimal\"",
+            "  bundle_id: \"bundle.example.minimal\"\n  bundle_id: \"bundle.example.duplicate\"",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_no_duplicate_scalars_core(&core, &["bundle_id", "require_verification"])
+            .expect_err("expected duplicate bundle_id");
+        assert_eq!(err.message, "duplicate_field: bundle_id");
+    }
+
+    #[test]
+    fn detects_duplicate_require_verification() {
+        let sketch = sample_positive_text().replacen(
+            "    require_verification: true",
+            "    require_verification: true\n    require_verification: false",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_no_duplicate_scalars_core(&core, &["bundle_id", "require_verification"])
+            .expect_err("expected duplicate require_verification");
+        assert_eq!(err.message, "duplicate_field: require_verification");
+    }
+
+    #[test]
+    fn detects_identity_ordering_violation() {
+        let sketch = sample_positive_text().replacen(
+            "  bundle_version: \"0-sketch\"\n  projection_id: \"ExampleMinimalProjection\"",
+            "  projection_id: \"ExampleMinimalProjection\"\n  bundle_version: \"0-sketch\"",
+            1,
+        );
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_field_order_core(&core, "bundle_version:", "projection_id:")
+            .expect_err("expected order violation");
+        assert_eq!(
+            err.message,
+            "field_ordering: bundle_version must appear before projection_id"
+        );
+    }
+
+    #[test]
+    fn detects_policy_block_ordering_violation() {
+        let sketch = [
+            "```text",
+            "projection_bundle {",
+            "  bundle_id: \"bundle.example.minimal\"",
+            "  bundle_version: \"0-sketch\"",
+            "  projection_id: \"ExampleMinimalProjection\"",
+            "",
+            "  source_refs: [",
+            "    \"semantic.source.example\"",
+            "    \"projection.source.example\"",
+            "  ]",
+            "",
+            "  artifacts {",
+            "    ui_ir_ref: \"ui_ir.example.minimal\"",
+            "    binding_graph_ref: \"binding_graph.example.minimal\"",
+            "    action_ir_ref: \"action_ir.example.minimal\"",
+            "  }",
+            "",
+            "  compatibility {",
+            "    role_dictionary_version: \"ui-roles.0-sketch\"",
+            "    renderer_profile: \"semantic-shell.reference-sketch\"",
+            "  }",
+            "",
+            "  safety {",
+            "    safety_class: \"VerifiedDynamic\"",
+            "    criticality: \"NonCritical\"",
+            "    required_capabilities: []",
+            "    freshness_policy: \"FreshForControl\"",
+            "  }",
+            "",
+            "  trust {",
+            "    hash: \"sha256:SKETCH-NOT-A-REAL-HASH\"",
+            "    signature: \"signature:SKETCH-NOT-A-REAL-SIGNATURE\"",
+            "    created_by: \"semantic-projection-compiler.SKETCH\"",
+            "    created_at: \"not-a-real-timestamp\"",
+            "    compiler_identity: \"semantic-projection-compiler.0-sketch\"",
+            "  }",
+            "",
+            "  update_policy {",
+            "    require_safe_update_boundary: true",
+            "    allow_critical_update_during_pending_unknown: false",
+            "    allow_critical_update_during_quarantine: false",
+            "  }",
+            "",
+            "  activation_policy {",
+            "    require_verification: true",
+            "    allow_runtime_tree_streaming: false",
+            "    allow_production_activation: false",
+            "  }",
+            "",
+            "  diagnostics {",
+            "    expected: []",
+            "  }",
+            "}",
+            "```",
+        ]
+        .join("\n");
+
+        let core = parse_sketch_core(&sketch).expect("core parse");
+        let err = require_field_order_core(&core, "activation_policy {", "update_policy {")
+            .expect_err("expected order violation");
+        assert_eq!(
+            err.message,
+            "field_ordering: activation_policy must appear before update_policy"
+        );
+    }
+
+    #[test]
+    fn positive_fixture_still_emits_unchanged_output() {
+        let repo_root = current_repo_root();
+        let actual = emit_positive_output(&repo_root).expect("positive output");
+        let expected = expected_positive_output();
+        assert_eq!(
+            normalize_compared_text(&actual),
+            normalize_compared_text(&expected)
+        );
+    }
+
+    #[test]
+    fn negative_report_still_emits_unchanged_output() {
+        let repo_root = current_repo_root();
+        let actual = emit_negative_report(&repo_root).expect("negative output");
+        let expected = expected_negative_report();
+        assert_eq!(
+            normalize_compared_text(&actual),
+            normalize_compared_text(&expected)
+        );
+    }
 }
 
 fn main() {

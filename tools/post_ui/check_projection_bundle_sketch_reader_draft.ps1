@@ -105,10 +105,21 @@ $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("post_ui_projection_bun
 $null = New-Item -ItemType Directory -Path $tempRoot -Force
 
 try {
+    $testBinaryPath = Join-Path $tempRoot "projection_bundle_sketch_reader_draft_tests.exe"
     $binaryPath = Join-Path $tempRoot "projection_bundle_sketch_reader_draft.exe"
     $rustcExe = $rustcInfo.Path
     if ([string]::IsNullOrWhiteSpace($rustcExe)) {
         $rustcExe = $rustcInfo.Source
+    }
+
+    & $rustcExe --edition=2021 --test -o $testBinaryPath $readerPath
+    if ($LASTEXITCODE -ne 0) {
+        Fail "FAIL: rust unit tests failed for $readerPath"
+    }
+
+    & $testBinaryPath
+    if ($LASTEXITCODE -ne 0) {
+        Fail "FAIL: rust unit tests failed for $readerPath"
     }
 
     & $rustcExe --edition=2021 -o $binaryPath $readerPath
