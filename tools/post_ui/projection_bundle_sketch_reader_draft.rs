@@ -449,9 +449,27 @@ struct SketchScalar {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchSection {
+    name: String,
+    path: String,
+    start_line: usize,
+    end_line: Option<usize>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SketchArray {
+    section: String,
+    key: String,
+    values: Vec<String>,
+    line: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct SketchReaderCore {
     text_block: String,
     scalars: Vec<SketchScalar>,
+    sections: Vec<SketchSection>,
+    arrays: Vec<SketchArray>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -655,9 +673,12 @@ fn extract_text_block(content: &str) -> Result<String, ReaderError> {
     }
 }
 
-fn scan_scalars(text_block: &str) -> Vec<SketchScalar> {
+fn scan_scalars(text_block: &str) -> SketchReaderCore {
     let mut scalars = Vec::new();
-    let mut section_stack: Vec<String> = Vec::new();
+    let mut sections: Vec<SketchSection> = Vec::new();
+    let mut arrays = Vec::new();
+    let mut section_stack: Vec<usize> = Vec::new();
+    let mut current_array: Option<SketchArray> = None;
 
     for (index, line) in text_block.lines().enumerate() {
         let trimmed = line.trim();
@@ -665,47 +686,136 @@ fn scan_scalars(text_block: &str) -> Vec<SketchScalar> {
             continue;
         }
 
+        if current_array.is_some() {
+            if trimmed == "]" {
+                arrays.push(current_array.take().unwrap());
+                continue;
+            }
+
+            if let Some(array) = current_array.as_mut() {
+                let candidate = trimmed.trim_end_matches(',');
+                if let Some(value) = candidate
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                {
+                    array.values.push(value.to_string());
+                }
+            }
+
+            continue;
+        }
+
         if trimmed == "}" {
-            let _ = section_stack.pop();
+            if let Some(section_index) = section_stack.pop() {
+                if let Some(section) = sections.get_mut(section_index) {
+                    section.end_line = Some(index + 1);
+                }
+            }
             continue;
         }
 
         if trimmed.ends_with('{') {
             let section = trimmed.trim_end_matches('{').trim().to_string();
             if !section.is_empty() {
-                section_stack.push(section);
+                let path = if let Some(parent_index) = section_stack.last() {
+                    let parent_path = sections
+                        .get(*parent_index)
+                        .map(|section| section.path.clone())
+                        .unwrap_or_default();
+                    if parent_path.is_empty() {
+                        section.clone()
+                    } else {
+                        format!("{}/{}", parent_path, section)
+                    }
+                } else {
+                    section.clone()
+                };
+
+                sections.push(SketchSection {
+                    name: section,
+                    path,
+                    start_line: index + 1,
+                    end_line: None,
+                });
+                section_stack.push(sections.len() - 1);
             }
             continue;
         }
 
         if let Some((key, rest)) = trimmed.split_once(':') {
             let key = key.trim();
-            if key.ends_with('[') {
+            let value = rest.trim();
+            if value.starts_with('[') {
+                let section = section_stack
+                    .last()
+                    .and_then(|section_index| sections.get(*section_index))
+                    .map(|section| section.path.clone())
+                    .unwrap_or_default();
+
+                if value == "[]" {
+                    arrays.push(SketchArray {
+                        section,
+                        key: key.to_string(),
+                        values: Vec::new(),
+                        line: index + 1,
+                    });
+                } else {
+                    let mut array = SketchArray {
+                        section,
+                        key: key.to_string(),
+                        values: Vec::new(),
+                        line: index + 1,
+                    };
+
+                    if value.ends_with(']') && value != "[" {
+                        let inner = value
+                            .trim_start_matches('[')
+                            .trim_end_matches(']')
+                            .trim();
+                        if !inner.is_empty() {
+                            for part in inner.split(',') {
+                                let item = part.trim().trim_matches('"');
+                                if !item.is_empty() {
+                                    array.values.push(item.to_string());
+                                }
+                            }
+                        }
+                        arrays.push(array);
+                    } else {
+                        current_array = Some(array);
+                    }
+                }
                 continue;
             }
 
-            let mut value = rest.trim().trim_end_matches(',').trim().to_string();
-            if let Some(stripped) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
-                value = stripped.to_string();
-            }
-
             scalars.push(SketchScalar {
-                section: section_stack.join("/"),
+                section: section_stack
+                    .last()
+                    .and_then(|section_index| sections.get(*section_index))
+                    .map(|section| section.path.clone())
+                    .unwrap_or_default(),
                 key: key.to_string(),
-                value,
+                value: value.trim_end_matches(',').trim().trim_matches('"').to_string(),
                 line: index + 1,
             });
         }
     }
 
-    scalars
+    if let Some(array) = current_array.take() {
+        arrays.push(array);
+    }
+
+    SketchReaderCore {
+        text_block: text_block.to_string(),
+        scalars,
+        sections,
+        arrays,
+    }
 }
 
 fn parse_sketch_core(content: &str) -> Result<SketchReaderCore, ReaderError> {
     let text_block = extract_text_block(content)?;
-    let scalars = scan_scalars(&text_block);
-
-    Ok(SketchReaderCore { text_block, scalars })
+    Ok(scan_scalars(&text_block))
 }
 
 fn normalize_line_endings(text: &str) -> String {
@@ -735,6 +845,20 @@ fn find_scalar_core<'a>(core: &'a SketchReaderCore, key: &str) -> Option<&'a Ske
 
 fn count_scalar_occurrences_core(core: &SketchReaderCore, key: &str) -> usize {
     core.scalars.iter().filter(|scalar| scalar.key == key).count()
+}
+
+fn find_section_core<'a>(core: &'a SketchReaderCore, path: &str) -> Option<&'a SketchSection> {
+    core.sections.iter().find(|section| section.path == path)
+}
+
+fn find_array_core<'a>(
+    core: &'a SketchReaderCore,
+    section: &str,
+    key: &str,
+) -> Option<&'a SketchArray> {
+    core.arrays
+        .iter()
+        .find(|array| array.section == section && array.key == key)
 }
 
 fn require_required_scalar_core(
@@ -803,6 +927,26 @@ fn require_boolean_scalar_core(core: &SketchReaderCore, key: &str) -> Result<(),
     }
 }
 
+fn require_source_refs_core(core: &SketchReaderCore) -> Result<(String, String), ReaderError> {
+    let array = find_array_core(core, "projection_bundle", "source_refs").ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::MissingRequiredField,
+            "source_refs",
+            "missing required source_refs array",
+        )
+    })?;
+
+    if array.values.len() != 2 {
+        return Err(ReaderError::new(
+            ReaderErrorKind::MalformedField,
+            "source_refs",
+            "malformed_field: source_refs must contain exactly two values",
+        ));
+    }
+
+    Ok((array.values[0].clone(), array.values[1].clone()))
+}
+
 fn require_no_duplicate_scalars_core(core: &SketchReaderCore, keys: &[&str]) -> Result<(), ReaderError> {
     for key in keys {
         if count_scalar_occurrences_core(core, key) > 1 {
@@ -831,56 +975,78 @@ fn require_no_known_unknown_fields_core(core: &SketchReaderCore) -> Result<(), R
     Ok(())
 }
 
-fn require_field_order_core(core: &SketchReaderCore, earlier: &str, later: &str) -> Result<(), ReaderError> {
-    let earlier_label = earlier
-        .trim()
-        .trim_end_matches(':')
-        .trim_end_matches('{')
-        .trim();
-    let later_label = later
-        .trim()
-        .trim_end_matches(':')
-        .trim_end_matches('{')
-        .trim();
-
-    let find_line = |needle: &str| -> Option<usize> {
-        core.text_block.lines().enumerate().find_map(|(index, line)| {
-            let trimmed = line.trim();
-            if trimmed.starts_with(needle) {
-                Some(index + 1)
-            } else {
-                None
-            }
-        })
-    };
-
-    let earlier_line = find_line(earlier_label).ok_or_else(|| {
+fn require_scalar_order_core(
+    core: &SketchReaderCore,
+    earlier: &str,
+    later: &str,
+) -> Result<(), ReaderError> {
+    let earlier_scalar = find_scalar_core(core, earlier).ok_or_else(|| {
         ReaderError::new(
             ReaderErrorKind::FieldOrdering,
             earlier,
-            format!(
-                "field_ordering: {} must appear before {}",
-                earlier_label, later_label
-            ),
+            format!("field_ordering: {} must appear before {}", earlier, later),
         )
     })?;
-    let later_line = find_line(later_label).ok_or_else(|| {
+    let later_scalar = find_scalar_core(core, later).ok_or_else(|| {
         ReaderError::new(
             ReaderErrorKind::FieldOrdering,
             later,
-            format!(
-                "field_ordering: {} must appear before {}",
-                earlier_label, later_label
-            ),
+            format!("field_ordering: {} must appear before {}", earlier, later),
         )
     })?;
 
-    if earlier_line < later_line {
+    if earlier_scalar.line < later_scalar.line {
         Ok(())
     } else {
         Err(ReaderError::new(
             ReaderErrorKind::FieldOrdering,
             later,
+            format!("field_ordering: {} must appear before {}", earlier, later),
+        ))
+    }
+}
+
+fn require_section_order_core(
+    core: &SketchReaderCore,
+    earlier_path: &str,
+    later_path: &str,
+) -> Result<(), ReaderError> {
+    let earlier_label = earlier_path
+        .trim()
+        .trim_start_matches("projection_bundle/")
+        .trim();
+    let later_label = later_path
+        .trim()
+        .trim_start_matches("projection_bundle/")
+        .trim();
+
+    let earlier_section = find_section_core(core, earlier_path).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            earlier_path,
+            format!(
+                "field_ordering: {} must appear before {}",
+                earlier_label, later_label
+            ),
+        )
+    })?;
+    let later_section = find_section_core(core, later_path).ok_or_else(|| {
+        ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            later_path,
+            format!(
+                "field_ordering: {} must appear before {}",
+                earlier_label, later_label
+            ),
+        )
+    })?;
+
+    if earlier_section.start_line < later_section.start_line {
+        Ok(())
+    } else {
+        Err(ReaderError::new(
+            ReaderErrorKind::FieldOrdering,
+            later_path,
             format!(
                 "field_ordering: {} must appear before {}",
                 earlier_label, later_label
@@ -960,19 +1126,33 @@ fn require_field_order(
     later: &str,
     rejection_reason: &str,
 ) -> Result<(), String> {
-    let earlier_key = earlier
-        .trim()
-        .trim_end_matches(':')
-        .trim_end_matches('{')
-        .trim();
-    let later_key = later
-        .trim()
-        .trim_end_matches(':')
-        .trim_end_matches('{')
-        .trim();
     let core = parse_sketch_core(content).map_err(|err| err.message)?;
     let _ = rejection_reason;
-    require_field_order_core(&core, earlier_key, later_key).map_err(|err| err.message)
+    if earlier.contains('{') || later.contains('{') {
+        let earlier_label = earlier
+            .trim()
+            .trim_end_matches('{')
+            .trim_end_matches(':')
+            .trim();
+        let later_label = later
+            .trim()
+            .trim_end_matches('{')
+            .trim_end_matches(':')
+            .trim();
+        require_section_order_core(
+            &core,
+            &format!("projection_bundle/{}", earlier_label),
+            &format!("projection_bundle/{}", later_label),
+        )
+        .map_err(|err| err.message)
+    } else {
+        require_scalar_order_core(
+            &core,
+            earlier.trim().trim_end_matches(':'),
+            later.trim().trim_end_matches(':'),
+        )
+        .map_err(|err| err.message)
+    }
 }
 
 fn validate_sketch_except(
@@ -1088,6 +1268,7 @@ fn validate_sketch_without_order(
 }
 
 fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
     validate_sketch_except(content, None, &[], false)?;
 
     let bundle_id = require_scalar(content, "bundle id", "bundle_id", "bundle.example.minimal")?;
@@ -1181,13 +1362,15 @@ fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
         "allow_critical_update_during_quarantine",
         "false",
     )?;
+    let (source_ref_0, source_ref_1) =
+        require_source_refs_core(&core).map_err(|err| err.message)?;
 
     Ok(ManifestSnapshot {
         bundle_id,
         bundle_version,
         projection_id,
-        source_ref_0: "semantic.source.example".to_string(),
-        source_ref_1: "projection.source.example".to_string(),
+        source_ref_0,
+        source_ref_1,
         ui_ir_ref,
         binding_graph_ref,
         action_ir_ref,
@@ -1717,6 +1900,48 @@ mod tests {
     }
 
     #[test]
+    fn scans_section_start_lines() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        let root = find_section_core(&core, "projection_bundle").expect("root section");
+        let activation = find_section_core(&core, "projection_bundle/activation_policy")
+            .expect("activation section");
+        let update =
+            find_section_core(&core, "projection_bundle/update_policy").expect("update section");
+
+        assert_eq!(root.start_line, 1);
+        assert!(activation.start_line > root.start_line);
+        assert!(update.start_line > activation.start_line);
+    }
+
+    #[test]
+    fn scans_section_end_lines() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        let root = find_section_core(&core, "projection_bundle").expect("root section");
+        let activation = find_section_core(&core, "projection_bundle/activation_policy")
+            .expect("activation section");
+        let update =
+            find_section_core(&core, "projection_bundle/update_policy").expect("update section");
+
+        let root_end = root.end_line.expect("root end");
+        let activation_end = activation.end_line.expect("activation end");
+        let update_end = update.end_line.expect("update end");
+
+        assert!(root_end > update_end);
+        assert!(activation_end > activation.start_line);
+        assert!(update_end > update.start_line);
+    }
+
+    #[test]
+    fn scans_source_refs_array_values() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        let (source_ref_0, source_ref_1) =
+            require_source_refs_core(&core).expect("source refs");
+
+        assert_eq!(source_ref_0, "semantic.source.example");
+        assert_eq!(source_ref_1, "projection.source.example");
+    }
+
+    #[test]
     fn detects_empty_bundle_id() {
         let sketch = sample_positive_text().replace(
             "  bundle_id: \"bundle.example.minimal\"",
@@ -1797,7 +2022,7 @@ mod tests {
             1,
         );
         let core = parse_sketch_core(&sketch).expect("core parse");
-        let err = require_field_order_core(&core, "bundle_version:", "projection_id:")
+        let err = require_scalar_order_core(&core, "bundle_version", "projection_id")
             .expect_err("expected order violation");
         assert_eq!(
             err.message,
@@ -1866,12 +2091,43 @@ mod tests {
         .join("\n");
 
         let core = parse_sketch_core(&sketch).expect("core parse");
-        let err = require_field_order_core(&core, "activation_policy {", "update_policy {")
+        let err = require_section_order_core(
+            &core,
+            "projection_bundle/activation_policy",
+            "projection_bundle/update_policy",
+        )
             .expect_err("expected order violation");
         assert_eq!(
             err.message,
             "field_ordering: activation_policy must appear before update_policy"
         );
+    }
+
+    #[test]
+    fn positive_snapshot_source_refs_come_from_parsed_source_refs() {
+        let core = parse_sketch_core(&sample_positive_text()).expect("core parse");
+        let (source_ref_0, source_ref_1) =
+            require_source_refs_core(&core).expect("source refs");
+        assert_eq!(source_ref_0, "semantic.source.example");
+        assert_eq!(source_ref_1, "projection.source.example");
+
+        let snapshot = validate_sketch(&sample_positive_text()).expect("snapshot");
+        assert_eq!(snapshot.source_ref_0, source_ref_0);
+        assert_eq!(snapshot.source_ref_1, source_ref_1);
+    }
+
+    #[test]
+    fn source_ref_mutation_changes_parsed_snapshot_in_an_inline_test() {
+        let mutated = sample_positive_text().replace(
+            "projection.source.example",
+            "projection.source.mutated",
+        );
+        let core = parse_sketch_core(&mutated).expect("core parse");
+        let (source_ref_0, source_ref_1) =
+            require_source_refs_core(&core).expect("source refs");
+
+        assert_eq!(source_ref_0, "semantic.source.example");
+        assert_eq!(source_ref_1, "projection.source.mutated");
     }
 
     #[test]
