@@ -454,11 +454,98 @@ struct SketchReaderCore {
     scalars: Vec<SketchScalar>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct NegativeCaseResult {
     name: &'static str,
     input: String,
+    status: NegativeCaseStatus,
     reason: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NegativeCaseStatus {
+    Rejected,
+    UnexpectedPass,
+    WrongReason,
+}
+
+impl NegativeCaseStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            NegativeCaseStatus::Rejected => "rejected",
+            NegativeCaseStatus::UnexpectedPass => "unexpected_pass",
+            NegativeCaseStatus::WrongReason => "wrong_reason",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NegativeReport {
+    cases: Vec<NegativeCaseResult>,
+}
+
+impl NegativeReport {
+    fn new() -> Self {
+        Self { cases: Vec::new() }
+    }
+
+    fn from_cases(cases: Vec<NegativeCaseResult>) -> Self {
+        Self { cases }
+    }
+
+    fn push_case(&mut self, case: NegativeCaseResult) {
+        self.cases.push(case);
+    }
+
+    fn accepted_positive(&self) -> usize {
+        1
+    }
+
+    fn rejected_negative(&self) -> usize {
+        self.cases
+            .iter()
+            .filter(|case| case.status == NegativeCaseStatus::Rejected)
+            .count()
+    }
+
+    fn unexpected_pass(&self) -> usize {
+        self.cases
+            .iter()
+            .filter(|case| case.status == NegativeCaseStatus::UnexpectedPass)
+            .count()
+    }
+
+    fn wrong_reason(&self) -> usize {
+        self.cases
+            .iter()
+            .filter(|case| case.status == NegativeCaseStatus::WrongReason)
+            .count()
+    }
+
+    fn with_unexpected_pass(mut self, name: &'static str, input: impl Into<String>) -> Self {
+        self.push_case(NegativeCaseResult {
+            name,
+            input: input.into(),
+            status: NegativeCaseStatus::UnexpectedPass,
+            reason: String::new(),
+        });
+        self
+    }
+
+    fn with_wrong_reason(
+        mut self,
+        name: &'static str,
+        input: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        self.push_case(NegativeCaseResult {
+            name,
+            input: input.into(),
+            status: NegativeCaseStatus::WrongReason,
+            reason: reason.into(),
+        });
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1159,6 +1246,7 @@ fn validate_negative_fixture(
             Ok(NegativeCaseResult {
                 name: case.name,
                 input,
+                status: NegativeCaseStatus::Rejected,
                 reason,
             })
         }
@@ -1187,6 +1275,7 @@ fn validate_negative_fixture(
                     Ok(NegativeCaseResult {
                         name: case.name,
                         input,
+                        status: NegativeCaseStatus::Rejected,
                         reason,
                     })
                 }
@@ -1216,6 +1305,7 @@ fn validate_negative_fixture(
                     Ok(NegativeCaseResult {
                         name: case.name,
                         input,
+                        status: NegativeCaseStatus::Rejected,
                         reason,
                     })
                 }
@@ -1240,6 +1330,7 @@ fn validate_negative_fixture(
                     Ok(NegativeCaseResult {
                         name: case.name,
                         input,
+                        status: NegativeCaseStatus::Rejected,
                         reason,
                     })
                 }
@@ -1266,6 +1357,7 @@ fn validate_negative_fixture(
             Ok(NegativeCaseResult {
                 name: case.name,
                 input,
+                status: NegativeCaseStatus::Rejected,
                 reason,
             })
         }
@@ -1290,6 +1382,7 @@ fn validate_negative_fixture(
             Ok(NegativeCaseResult {
                 name: case.name,
                 input,
+                status: NegativeCaseStatus::Rejected,
                 reason,
             })
         }
@@ -1313,6 +1406,7 @@ fn validate_negative_fixture(
                     Ok(NegativeCaseResult {
                         name: case.name,
                         input,
+                        status: NegativeCaseStatus::Rejected,
                         reason,
                     })
                 }
@@ -1321,15 +1415,15 @@ fn validate_negative_fixture(
     }
 }
 
-fn validate_negative_pack(repo_root: &str) -> Result<Vec<NegativeCaseResult>, String> {
-    let mut results = Vec::with_capacity(NEGATIVE_CASES.len());
+fn validate_negative_pack(repo_root: &str) -> Result<NegativeReport, String> {
+    let mut report = NegativeReport::new();
 
     for case in NEGATIVE_CASES {
         let result = validate_negative_fixture(repo_root, case)?;
-        results.push(result);
+        report.push_case(result);
     }
 
-    Ok(results)
+    Ok(report)
 }
 
 fn render_positive_output(snapshot: &ManifestSnapshot) -> String {
@@ -1456,25 +1550,40 @@ fn render_positive_output(snapshot: &ManifestSnapshot) -> String {
     normalize_line_endings(&out)
 }
 
-fn render_negative_report(results: &[NegativeCaseResult]) -> String {
+fn render_negative_report(report: &NegativeReport) -> String {
     let mut out = String::new();
     push_line(&mut out, "ProjectionBundleSketchReaderNegativeReport v0");
     push_line(&mut out, "scope=fixture-facing");
     push_line(&mut out, "status=rejected-negative-pack");
     push_line(&mut out, "");
 
-    for (index, case) in results.iter().enumerate() {
+    for (index, case) in report.cases.iter().enumerate() {
         push_line(&mut out, &format!("case.{}.name={}", index, case.name));
         push_line(&mut out, &format!("case.{}.input={}", index, case.input));
-        push_line(&mut out, &format!("case.{}.status=rejected", index));
+        push_line(
+            &mut out,
+            &format!("case.{}.status={}", index, case.status.as_str()),
+        );
         push_line(&mut out, &format!("case.{}.reason={}", index, case.reason));
         push_line(&mut out, "");
     }
 
-    push_line(&mut out, "summary.accepted_positive=1");
-    push_line(&mut out, &format!("summary.rejected_negative={}", results.len()));
-    push_line(&mut out, "summary.unexpected_pass=0");
-    push_line(&mut out, "summary.wrong_reason=0");
+    push_line(
+        &mut out,
+        &format!("summary.accepted_positive={}", report.accepted_positive()),
+    );
+    push_line(
+        &mut out,
+        &format!("summary.rejected_negative={}", report.rejected_negative()),
+    );
+    push_line(
+        &mut out,
+        &format!("summary.unexpected_pass={}", report.unexpected_pass()),
+    );
+    push_line(
+        &mut out,
+        &format!("summary.wrong_reason={}", report.wrong_reason()),
+    );
     push_line(&mut out, "");
     push_line(&mut out, "[authority]");
     push_line(&mut out, "loader_claim=false");
@@ -1493,8 +1602,8 @@ fn emit_positive_output(repo_root: &str) -> Result<String, String> {
 }
 
 fn emit_negative_report(repo_root: &str) -> Result<String, String> {
-    let results = validate_negative_pack(repo_root)?;
-    Ok(render_negative_report(&results))
+    let report = validate_negative_pack(repo_root)?;
+    Ok(render_negative_report(&report))
 }
 
 #[cfg(test)]
@@ -1766,7 +1875,19 @@ mod tests {
     }
 
     #[test]
-    fn positive_fixture_still_emits_unchanged_output() {
+    fn positive_output_is_generated_from_parsed_reader_output() {
+        let repo_root = current_repo_root();
+        let snapshot = validate_positive_fixture(&repo_root).expect("positive snapshot");
+        let actual = emit_positive_output(&repo_root).expect("positive output");
+        let derived = render_positive_output(&snapshot);
+        assert_eq!(
+            normalize_compared_text(&actual),
+            normalize_compared_text(&derived)
+        );
+    }
+
+    #[test]
+    fn golden_positive_output_unchanged() {
         let repo_root = current_repo_root();
         let actual = emit_positive_output(&repo_root).expect("positive output");
         let expected = expected_positive_output();
@@ -1777,7 +1898,40 @@ mod tests {
     }
 
     #[test]
-    fn negative_report_still_emits_unchanged_output() {
+    fn negative_report_contains_16_case_results() {
+        let repo_root = current_repo_root();
+        let report = validate_negative_pack(&repo_root).expect("negative report");
+        assert_eq!(report.cases.len(), 16);
+    }
+
+    #[test]
+    fn negative_report_summary_is_derived_from_case_results() {
+        let repo_root = current_repo_root();
+        let report = validate_negative_pack(&repo_root).expect("negative report");
+        assert_eq!(report.accepted_positive(), 1);
+        assert_eq!(report.rejected_negative(), 16);
+        assert_eq!(report.unexpected_pass(), 0);
+        assert_eq!(report.wrong_reason(), 0);
+    }
+
+    #[test]
+    fn wrong_expected_reason_increments_wrong_reason() {
+        let report = NegativeReport::new().with_wrong_reason("case", "input", "wrong reason");
+        assert_eq!(report.wrong_reason(), 1);
+        assert_eq!(report.unexpected_pass(), 0);
+        assert_eq!(report.rejected_negative(), 0);
+    }
+
+    #[test]
+    fn unexpected_accepted_negative_increments_unexpected_pass() {
+        let report = NegativeReport::new().with_unexpected_pass("case", "input");
+        assert_eq!(report.unexpected_pass(), 1);
+        assert_eq!(report.wrong_reason(), 0);
+        assert_eq!(report.rejected_negative(), 0);
+    }
+
+    #[test]
+    fn golden_negative_report_unchanged() {
         let repo_root = current_repo_root();
         let actual = emit_negative_report(&repo_root).expect("negative output");
         let expected = expected_negative_report();
