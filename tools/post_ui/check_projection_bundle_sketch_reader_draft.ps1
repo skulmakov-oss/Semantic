@@ -40,10 +40,18 @@ try {
         Fail "FAIL: rustc compilation failed for $readerPath"
     }
 
-    & $binaryPath $repoRoot
+    $output = & $binaryPath $repoRoot 2>&1
     if ($LASTEXITCODE -ne 0) {
         Fail "FAIL: ProjectionBundle sketch reader draft failed"
     }
+
+    $outputText = $output | Out-String
+    $expected = "PASS: ProjectionBundle sketch reader draft accepted positive and rejected negative manifest anchors"
+    if (-not $outputText.Contains($expected)) {
+        Fail "FAIL: missing success output: $expected"
+    }
+
+    Write-Output $expected
 }
 finally {
     if (Test-Path -LiteralPath $tempRoot) {

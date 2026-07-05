@@ -138,6 +138,21 @@ fn read_sketch(repo_root: &str) -> String {
     })
 }
 
+fn read_fixture(repo_root: &str, relative_path: &[&str]) -> String {
+    let mut path = Path::new(repo_root).to_path_buf();
+    for part in relative_path {
+        path = path.join(part);
+    }
+
+    fs::read_to_string(&path).unwrap_or_else(|err| {
+        fail(format!(
+            "cannot read fixture at {}: {}",
+            path.display(),
+            err
+        ))
+    })
+}
+
 fn extract_scalar(content: &str, key: &str) -> Option<String> {
     let prefix = format!("{}:", key);
 
@@ -174,20 +189,91 @@ fn expect_scalar(content: &str, label: &str, key: &str, expected: &str) {
     }
 }
 
+fn validate_positive_fixture(repo_root: &str) {
+    let sketch = read_sketch(repo_root);
+
+    for &(label, needle) in EXPECTED_CONTAINS {
+        expect_contains(&sketch, label, needle);
+    }
+
+    for &(label, key, expected) in EXPECTED_SCALARS {
+        expect_scalar(&sketch, label, key, expected);
+    }
+}
+
+fn validate_negative_fixture(repo_root: &str) -> Result<(), String> {
+    let sketch = read_fixture(
+        repo_root,
+        &[
+            "tests",
+            "fixtures",
+            "post_ui",
+            "projection_bundle",
+            "invalid",
+            "manifest_activation_enabled.sketch.md",
+        ],
+    );
+
+    for &(label, needle) in EXPECTED_CONTAINS {
+        if label == "production activation disabled" {
+            continue;
+        }
+        if !sketch.contains(needle) {
+            return Err(format!("missing required anchor {}: {}", label, needle));
+        }
+    }
+
+    for &(label, key, expected) in EXPECTED_SCALARS {
+        if key == "allow_production_activation" {
+            continue;
+        }
+        let actual = extract_scalar(&sketch, key).ok_or_else(|| {
+            format!("missing required field {}: {}", label, key)
+        })?;
+        if actual != expected {
+            return Err(format!(
+                "field {} mismatch: expected {:?}, got {:?}",
+                label, expected, actual
+            ));
+        }
+    }
+
+    let activation_actual = extract_scalar(&sketch, "allow_production_activation").ok_or_else(|| {
+        "missing required field production activation policy: allow_production_activation".to_string()
+    })?;
+
+    if activation_actual == "false" {
+        return Err("negative fixture unexpectedly passed".to_string());
+    }
+
+    if activation_actual != "true" {
+        return Err(format!(
+            "production activation policy mismatch: expected true, got {}",
+            activation_actual
+        ));
+    }
+
+    Err("production activation policy rejection: allow_production_activation is true".to_string())
+}
+
 fn main() {
     let repo_root = env::args()
         .nth(1)
         .unwrap_or_else(|| fail("missing repository root argument"));
     let repo_root = normalize_repo_root(&repo_root);
-    let sketch = read_sketch(&repo_root);
+    validate_positive_fixture(&repo_root);
 
-    for (label, needle) in EXPECTED_CONTAINS {
-        expect_contains(&sketch, label, needle);
+    let negative_result = validate_negative_fixture(&repo_root);
+    match negative_result {
+        Ok(_) => fail("negative fixture unexpectedly passed"),
+        Err(reason) => {
+            if !reason.contains("production activation policy") {
+                fail(format!("negative fixture failed for wrong reason: {}", reason));
+            }
+        }
     }
 
-    for (label, key, expected) in EXPECTED_SCALARS {
-        expect_scalar(&sketch, label, key, expected);
-    }
-
-    println!("PASS: ProjectionBundle sketch reader draft matched expected manifest anchors");
+    println!(
+        "PASS: ProjectionBundle sketch reader draft accepted positive and rejected negative manifest anchors"
+    );
 }
