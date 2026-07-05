@@ -55,6 +55,12 @@ Current evidence:
 
 This evidence is sufficient for Level 3 only.
 
+The current sketch reader evidence contour strengthens fixture-facing evidence, but it does not satisfy this gate.
+
+General Level 4 remains not claimed.
+
+A separate reader/parser basis is still required before any general Level 4 reader/parser claim.
+
 ## 3. What Level 4 Would Mean
 
 Level 4 means a separately approved reader or parser can consume an approved ProjectionBundle evidence format and produce a deterministic, testable representation without loader, runtime, verification, or production UI authority.
