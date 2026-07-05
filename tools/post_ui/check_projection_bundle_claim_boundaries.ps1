@@ -108,19 +108,38 @@ foreach ($anchor in $requiredAnchors) {
     Assert-ContainsAny -Contents $contents -Needle $anchor
 }
 
+# Boundary-safe negative statements such as "not claimed" or
+# "does not claim loader behavior" must remain allowed.
+# This guard rejects affirmative/readiness claims, not vocabulary itself.
 $forbiddenPhrases = @(
     "Level 4 achieved",
     "Level 4 implemented",
+    "Level-4 achieved",
+    "Level-4 implemented",
     "general Level 4 achieved",
     "general Level 4 reader/parser behavior is achieved",
     "reader/parser implemented",
     "parser implemented",
+    "general parser implemented",
+    "ProjectionBundle parser implemented",
+    "ProjectionBundle reader/parser implemented",
     "loader-ready",
     "runtime-ready",
     "production-ready",
+    "loader ready",
+    "runtime ready",
+    "production ready",
+    "activation path ready",
+    "public API ready",
     "activation-ready",
     "verification-ready",
-    "security proven"
+    "security proven",
+    "Level 5 achieved",
+    "Level 5 implemented",
+    "Level-5 achieved",
+    "Level-5 implemented",
+    "Level 5+ achieved",
+    "Level 5+ implemented"
 )
 
 foreach ($phrase in $forbiddenPhrases) {

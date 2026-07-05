@@ -1,24 +1,24 @@
 task:
-  id: POST-UI-READER-CORE-DOCS-CLOSEOUT
-  title: Close out ProjectionBundle reader-core evidence docs
-  type: docs-closeout
+  id: POST-UI-PROJECTION-BUNDLE-CLAIM-BOUNDARY-GUARD
+  title: Strengthen ProjectionBundle claim-boundary guard
+  type: guard-improvement
   mode: active
 
 intent:
-  summary: Record the already-merged fixture-facing ProjectionBundle sketch reader-core evidence closeout.
+  summary: Extend the ProjectionBundle claim-boundary guard to reject accidental reader/parser, loader, runtime, production UI, Level 4, and Level 5+ overclaims.
 
 layer:
-  name: documentation
+  name: tooling
   owner: post-ui
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - docs/roadmap/post_ui/projection_bundle_reader_evidence_closeout.md
+    - tools/post_ui/check_projection_bundle_claim_boundaries.ps1
 
   forbidden_paths:
+    - docs/**
     - scripts/**
-    - tools/**
     - tests/**
     - tests/fixtures/**
     - Cargo.toml
@@ -32,23 +32,24 @@ actions:
     - create_pr
 
   forbidden:
-    - modify_tools
+    - modify_docs
     - modify_reader_code
     - modify_fixtures
     - modify_golden_outputs
     - modify_cargo_toml
     - modify_cargo_lock
-    - general_parser_claim
-    - schema_claim
     - loader_claim
     - runtime_claim
     - production_ui_claim
+    - level4_claim
+    - level5_claim
 
 constraints:
-  - docs closeout only
-  - fixture-facing ProjectionBundle sketch reader-core evidence only
-  - no tool/code changes
-  - no fixture changes
+  - guard improvement only
+  - claim-boundary enforcement only
+  - no docs changes
+  - no reader code changes
+  - no fixtures changes
   - no golden output changes
   - no Cargo changes
   - no general parser claim
@@ -63,6 +64,8 @@ verification:
   required:
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
+    - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_projection_bundle_claim_boundaries.ps1
+    - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_post_ui_fixtures.ps1
 
 report:
-  output: .harness/reports/POST-UI-READER-CORE-DOCS-CLOSEOUT.md
+  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-CLAIM-BOUNDARY-GUARD.md
