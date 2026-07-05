@@ -64,6 +64,7 @@ This basis exists to prevent overclaiming and to define the current evidence bou
 - is: fixture-facing executable reader draft for one inert sketch, plus a deterministic negative fixture check
 - is not: general reader/parser behavior, loader behavior, runtime behavior, or production UI wiring
 - evidence: the inert positive manifest sketch is accepted; the invalid manifest sketch with `allow_production_activation: true` is rejected
+- evidence type: narrow reader-facing fixture evidence for the sketch reader draft only
 
 `tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1`
 - is: compile-and-run guard for the fixture-facing sketch reader draft
@@ -96,7 +97,7 @@ Claim Level 6 — Runtime behavior
 Claim Level 7 — Production UI behavior
 - Production UI wiring is safe, correct, and ready for release use.
 
-Current achieved level: Level 3 baseline, plus narrow sketch-reader evidence only.
+Current achieved level: Level 3 baseline.
 
 Levels 4–7 are not claimed.
 
@@ -108,7 +109,7 @@ After the sketch reader draft guard, the evidence contour includes a narrow read
 - the invalid manifest sketch with `allow_production_activation: true` is rejected;
 - the check is fixture-facing and test-only.
 
-This is narrow Level 4 reader evidence for the current sketch reader draft only.
+This is narrow reader-facing fixture evidence for the current sketch reader draft only.
 
 Level 4 is not generally achieved.
 
