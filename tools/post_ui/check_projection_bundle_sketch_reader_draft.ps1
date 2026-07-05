@@ -3,6 +3,8 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $readerPath = Join-Path $repoRoot "tools/post_ui/projection_bundle_sketch_reader_draft.rs"
+$positiveExpectedPath = Join-Path $repoRoot "tests/fixtures/post_ui/projection_bundle/expected/manifest_minimal.reader.out.txt"
+$negativeExpectedPath = Join-Path $repoRoot "tests/fixtures/post_ui/projection_bundle/expected/negative_pack.reader.out.txt"
 
 function Fail {
     param([string]$Message)
@@ -19,6 +21,80 @@ function Assert-FileExists {
 }
 
 Assert-FileExists -Path $readerPath -Label "sketch reader draft"
+Assert-FileExists -Path $positiveExpectedPath -Label "positive golden output"
+Assert-FileExists -Path $negativeExpectedPath -Label "negative golden report"
+
+function Normalize-Lf {
+    param([string]$Text)
+
+    return $Text -replace "`r`n", "`n" -replace "`r", "`n"
+}
+
+function Compare-NormalizedText {
+    param(
+        [string]$Actual,
+        [string]$Expected,
+        [string]$FailureMessage
+    )
+
+    $actualNormalized = (Normalize-Lf $Actual).TrimEnd("`r", "`n")
+    $expectedNormalized = (Normalize-Lf $Expected).TrimEnd("`r", "`n")
+
+    if ($actualNormalized -ne $expectedNormalized) {
+        Fail $FailureMessage
+    }
+}
+
+function Invoke-ReaderMode {
+    param(
+        [string]$BinaryPath,
+        [string[]]$Arguments,
+        [string]$TempRoot,
+        [string]$Label
+    )
+
+    $stdoutPath = Join-Path $TempRoot "$Label.stdout.txt"
+    $stderrPath = Join-Path $TempRoot "$Label.stderr.txt"
+
+    $process = Start-Process `
+        -FilePath $BinaryPath `
+        -ArgumentList $Arguments `
+        -NoNewWindow `
+        -Wait `
+        -PassThru `
+        -RedirectStandardOutput $stdoutPath `
+        -RedirectStandardError $stderrPath
+
+    $stdout = if (Test-Path -LiteralPath $stdoutPath) {
+        Get-Content -LiteralPath $stdoutPath -Raw
+    } else {
+        ""
+    }
+
+    $stderr = if (Test-Path -LiteralPath $stderrPath) {
+        Get-Content -LiteralPath $stderrPath -Raw
+    } else {
+        ""
+    }
+
+    if ($process.ExitCode -ne 0) {
+        $stderrText = (Normalize-Lf $stderr).TrimEnd("`r", "`n")
+        if (-not [string]::IsNullOrWhiteSpace($stderrText)) {
+            Fail "FAIL: projection bundle sketch reader draft failed: $stderrText"
+        }
+
+        Fail "FAIL: projection bundle sketch reader draft failed"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($stderr)) {
+        $stderrText = (Normalize-Lf $stderr).TrimEnd("`r", "`n")
+        if (-not [string]::IsNullOrWhiteSpace($stderrText)) {
+            Fail "FAIL: unexpected stderr from reader draft: $stderrText"
+        }
+    }
+
+    return $stdout
+}
 
 $rustcInfo = Get-Command rustc -ErrorAction SilentlyContinue
 if ($null -eq $rustcInfo) {
@@ -40,16 +116,17 @@ try {
         Fail "FAIL: rustc compilation failed for $readerPath"
     }
 
-    $output = & $binaryPath $repoRoot 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Fail "FAIL: ProjectionBundle sketch reader draft failed"
-    }
-
-    $outputText = $output | Out-String
     $expected = "PASS: ProjectionBundle sketch reader draft accepted positive and rejected negative manifest anchors"
-    if (-not $outputText.Contains($expected)) {
-        Fail "FAIL: missing success output: $expected"
-    }
+    $defaultOutput = Invoke-ReaderMode -BinaryPath $binaryPath -Arguments @($repoRoot) -TempRoot $tempRoot -Label "default"
+    Compare-NormalizedText -Actual $defaultOutput -Expected $expected -FailureMessage "FAIL: missing success output: $expected"
+
+    $positiveOutput = Invoke-ReaderMode -BinaryPath $binaryPath -Arguments @("--emit-positive-output", $repoRoot) -TempRoot $tempRoot -Label "positive"
+    $positiveExpected = Get-Content -LiteralPath $positiveExpectedPath -Raw
+    Compare-NormalizedText -Actual $positiveOutput -Expected $positiveExpected -FailureMessage "FAIL: positive reader output mismatch"
+
+    $negativeOutput = Invoke-ReaderMode -BinaryPath $binaryPath -Arguments @("--emit-negative-report", $repoRoot) -TempRoot $tempRoot -Label "negative"
+    $negativeExpected = Get-Content -LiteralPath $negativeExpectedPath -Raw
+    Compare-NormalizedText -Actual $negativeOutput -Expected $negativeExpected -FailureMessage "FAIL: negative reader report mismatch"
 
     Write-Output $expected
 }

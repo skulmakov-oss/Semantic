@@ -257,6 +257,41 @@ enum NegativeRule {
     },
 }
 
+#[derive(Clone)]
+struct ManifestSnapshot {
+    bundle_id: String,
+    bundle_version: String,
+    projection_id: String,
+    source_ref_0: String,
+    source_ref_1: String,
+    ui_ir_ref: String,
+    binding_graph_ref: String,
+    action_ir_ref: String,
+    role_dictionary_version: String,
+    renderer_profile: String,
+    safety_class: String,
+    criticality: String,
+    freshness_policy: String,
+    hash: String,
+    signature: String,
+    created_by: String,
+    created_at: String,
+    compiler_identity: String,
+    require_verification: String,
+    allow_runtime_tree_streaming: String,
+    allow_production_activation: String,
+    require_safe_update_boundary: String,
+    allow_critical_update_during_pending_unknown: String,
+    allow_critical_update_during_quarantine: String,
+}
+
+#[derive(Clone)]
+struct NegativeCaseResult {
+    name: &'static str,
+    input: String,
+    reason: String,
+}
+
 fn fail(message: impl AsRef<str>) -> ! {
     eprintln!("FAIL: {}", message.as_ref());
     process::exit(1);
@@ -316,6 +351,19 @@ fn extract_scalar(content: &str, key: &str) -> Option<String> {
     None
 }
 
+fn normalize_line_endings(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn push_line(out: &mut String, line: &str) {
+    out.push_str(line);
+    out.push('\n');
+}
+
+fn repo_relative_path(relative_path: &[&str]) -> String {
+    relative_path.join("/")
+}
+
 fn require_contains(content: &str, label: &str, needle: &str) -> Result<(), String> {
     if !content.contains(needle) {
         return Err(format!("missing required anchor {}: {}", label, needle));
@@ -324,7 +372,7 @@ fn require_contains(content: &str, label: &str, needle: &str) -> Result<(), Stri
     Ok(())
 }
 
-fn require_scalar(content: &str, label: &str, key: &str, expected: &str) -> Result<(), String> {
+fn require_scalar(content: &str, label: &str, key: &str, expected: &str) -> Result<String, String> {
     let actual = extract_scalar(content, key)
         .ok_or_else(|| format!("missing required field {}: {}", label, key))?;
 
@@ -335,19 +383,132 @@ fn require_scalar(content: &str, label: &str, key: &str, expected: &str) -> Resu
         ));
     }
 
-    Ok(())
+    Ok(actual)
 }
 
-fn validate_sketch(content: &str) -> Result<(), String> {
+fn validate_sketch(content: &str) -> Result<ManifestSnapshot, String> {
     for &(label, needle) in EXPECTED_CONTAINS {
         require_contains(content, label, needle)?;
     }
 
-    for &(label, key, expected) in EXPECTED_SCALARS {
-        require_scalar(content, label, key, expected)?;
-    }
+    let bundle_id = require_scalar(content, "bundle id", "bundle_id", "bundle.example.minimal")?;
+    let bundle_version =
+        require_scalar(content, "bundle version", "bundle_version", "0-sketch")?;
+    let projection_id =
+        require_scalar(content, "projection id", "projection_id", "ExampleMinimalProjection")?;
+    let ui_ir_ref = require_scalar(content, "ui ir ref", "ui_ir_ref", "ui_ir.example.minimal")?;
+    let binding_graph_ref = require_scalar(
+        content,
+        "binding graph ref",
+        "binding_graph_ref",
+        "binding_graph.example.minimal",
+    )?;
+    let action_ir_ref =
+        require_scalar(content, "action ir ref", "action_ir_ref", "action_ir.example.minimal")?;
+    let role_dictionary_version = require_scalar(
+        content,
+        "role dictionary version",
+        "role_dictionary_version",
+        "ui-roles.0-sketch",
+    )?;
+    let renderer_profile = require_scalar(
+        content,
+        "renderer profile",
+        "renderer_profile",
+        "semantic-shell.reference-sketch",
+    )?;
+    let safety_class =
+        require_scalar(content, "safety class", "safety_class", "VerifiedDynamic")?;
+    let criticality = require_scalar(content, "criticality", "criticality", "NonCritical")?;
+    let freshness_policy = require_scalar(
+        content,
+        "freshness policy",
+        "freshness_policy",
+        "FreshForControl",
+    )?;
+    let hash = require_scalar(content, "hash", "hash", "sha256:SKETCH-NOT-A-REAL-HASH")?;
+    let signature = require_scalar(
+        content,
+        "signature",
+        "signature",
+        "signature:SKETCH-NOT-A-REAL-SIGNATURE",
+    )?;
+    let created_by = require_scalar(
+        content,
+        "created by",
+        "created_by",
+        "semantic-projection-compiler.SKETCH",
+    )?;
+    let created_at = require_scalar(content, "created at", "created_at", "not-a-real-timestamp")?;
+    let compiler_identity = require_scalar(
+        content,
+        "compiler identity",
+        "compiler_identity",
+        "semantic-projection-compiler.0-sketch",
+    )?;
+    let require_verification = require_scalar(
+        content,
+        "verification policy",
+        "require_verification",
+        "true",
+    )?;
+    let allow_runtime_tree_streaming = require_scalar(
+        content,
+        "runtime tree streaming policy",
+        "allow_runtime_tree_streaming",
+        "false",
+    )?;
+    let allow_production_activation = require_scalar(
+        content,
+        "production activation policy",
+        "allow_production_activation",
+        "false",
+    )?;
+    let require_safe_update_boundary = require_scalar(
+        content,
+        "safe update boundary policy",
+        "require_safe_update_boundary",
+        "true",
+    )?;
+    let allow_critical_update_during_pending_unknown = require_scalar(
+        content,
+        "pending unknown update policy",
+        "allow_critical_update_during_pending_unknown",
+        "false",
+    )?;
+    let allow_critical_update_during_quarantine = require_scalar(
+        content,
+        "quarantine update policy",
+        "allow_critical_update_during_quarantine",
+        "false",
+    )?;
 
-    Ok(())
+    Ok(ManifestSnapshot {
+        bundle_id,
+        bundle_version,
+        projection_id,
+        source_ref_0: "semantic.source.example".to_string(),
+        source_ref_1: "projection.source.example".to_string(),
+        ui_ir_ref,
+        binding_graph_ref,
+        action_ir_ref,
+        role_dictionary_version,
+        renderer_profile,
+        safety_class,
+        criticality,
+        freshness_policy,
+        hash,
+        signature,
+        created_by,
+        created_at,
+        compiler_identity,
+        require_verification,
+        allow_runtime_tree_streaming,
+        allow_production_activation,
+        require_safe_update_boundary,
+        allow_critical_update_during_pending_unknown,
+        allow_critical_update_during_quarantine,
+    })
 }
 
 fn validate_sketch_except(content: &str, skipped_key: &str) -> Result<(), String> {
@@ -366,14 +527,18 @@ fn validate_sketch_except(content: &str, skipped_key: &str) -> Result<(), String
     Ok(())
 }
 
-fn validate_positive_fixture(repo_root: &str) -> Result<(), String> {
+fn validate_positive_fixture(repo_root: &str) -> Result<ManifestSnapshot, String> {
     let sketch = read_sketch(repo_root);
 
     validate_sketch(&sketch)
 }
 
-fn validate_negative_fixture(repo_root: &str, case: &NegativeFixtureCase) -> Result<(), String> {
+fn validate_negative_fixture(
+    repo_root: &str,
+    case: &NegativeFixtureCase,
+) -> Result<NegativeCaseResult, String> {
     let sketch = read_fixture(repo_root, case.relative_path);
+    let input = repo_relative_path(case.relative_path);
 
     match case.rule {
         NegativeRule::MissingField {
@@ -386,7 +551,19 @@ fn validate_negative_fixture(repo_root: &str, case: &NegativeFixtureCase) -> Res
                 return Err(format!("negative fixture unexpectedly passed: {}", case.name));
             }
 
-            Err(format!("missing required field {}", label))
+            let reason = format!("missing required field {}", label);
+            if !reason.contains(case.expected_error_substring) {
+                return Err(format!(
+                    "negative fixture failed for wrong reason: {}: {}",
+                    case.name, reason
+                ));
+            }
+
+            Ok(NegativeCaseResult {
+                name: case.name,
+                input,
+                reason,
+            })
         }
         NegativeRule::ScalarValue {
             label,
@@ -398,9 +575,23 @@ fn validate_negative_fixture(repo_root: &str, case: &NegativeFixtureCase) -> Res
             validate_sketch_except(&sketch, key)?;
 
             match extract_scalar(&sketch, key) {
-                Some(actual) if actual == rejected_value => Err(rejection_reason.to_string()),
                 Some(actual) if actual == expected_value => {
                     Err(format!("negative fixture unexpectedly passed: {}", case.name))
+                }
+                Some(actual) if actual == rejected_value => {
+                    let reason = rejection_reason.to_string();
+                    if !reason.contains(case.expected_error_substring) {
+                        return Err(format!(
+                            "negative fixture failed for wrong reason: {}: {}",
+                            case.name, reason
+                        ));
+                    }
+
+                    Ok(NegativeCaseResult {
+                        name: case.name,
+                        input,
+                        reason,
+                    })
                 }
                 Some(actual) => Err(format!(
                     "field {} mismatch: expected {:?}, got {:?}",
@@ -412,30 +603,234 @@ fn validate_negative_fixture(repo_root: &str, case: &NegativeFixtureCase) -> Res
     }
 }
 
-fn main() {
-    let repo_root = env::args()
-        .nth(1)
-        .unwrap_or_else(|| fail("missing repository root argument"));
-    let repo_root = normalize_repo_root(&repo_root);
-    if let Err(reason) = validate_positive_fixture(&repo_root) {
-        fail(format!("positive fixture failed: {}", reason));
-    }
+fn validate_negative_pack(repo_root: &str) -> Result<Vec<NegativeCaseResult>, String> {
+    let mut results = Vec::with_capacity(NEGATIVE_CASES.len());
 
     for case in NEGATIVE_CASES {
-        match validate_negative_fixture(&repo_root, case) {
-            Ok(_) => fail(format!("negative fixture unexpectedly passed: {}", case.name)),
-            Err(reason) => {
-                if !reason.contains(case.expected_error_substring) {
-                    fail(format!(
-                        "negative fixture failed for wrong reason: {}: {}",
-                        case.name, reason
-                    ));
-                }
-            }
-        }
+        let result = validate_negative_fixture(repo_root, case)?;
+        results.push(result);
     }
 
-    println!(
-        "PASS: ProjectionBundle sketch reader draft accepted positive and rejected negative manifest anchors"
+    Ok(results)
+}
+
+fn render_positive_output(snapshot: &ManifestSnapshot) -> String {
+    let mut out = String::new();
+    push_line(&mut out, "ProjectionBundleSketchReaderOutput v0");
+    push_line(&mut out, "scope=fixture-facing");
+    push_line(
+        &mut out,
+        "input=tests/fixtures/post_ui/projection_bundle/manifest_minimal.sketch.md",
     );
+    push_line(&mut out, "status=accepted");
+    push_line(&mut out, "");
+    push_line(&mut out, "[identity]");
+    push_line(&mut out, &format!("bundle_id={}", snapshot.bundle_id));
+    push_line(
+        &mut out,
+        &format!("bundle_version={}", snapshot.bundle_version),
+    );
+    push_line(
+        &mut out,
+        &format!("projection_id={}", snapshot.projection_id),
+    );
+    push_line(&mut out, "");
+    push_line(&mut out, "[sources]");
+    push_line(&mut out, &format!("source_ref.0={}", snapshot.source_ref_0));
+    push_line(&mut out, &format!("source_ref.1={}", snapshot.source_ref_1));
+    push_line(&mut out, "");
+    push_line(&mut out, "[artifacts]");
+    push_line(&mut out, &format!("ui_ir_ref={}", snapshot.ui_ir_ref));
+    push_line(
+        &mut out,
+        &format!("binding_graph_ref={}", snapshot.binding_graph_ref),
+    );
+    push_line(&mut out, &format!("action_ir_ref={}", snapshot.action_ir_ref));
+    push_line(&mut out, "");
+    push_line(&mut out, "[compatibility]");
+    push_line(
+        &mut out,
+        &format!(
+            "role_dictionary_version={}",
+            snapshot.role_dictionary_version
+        ),
+    );
+    push_line(
+        &mut out,
+        &format!("renderer_profile={}", snapshot.renderer_profile),
+    );
+    push_line(&mut out, "");
+    push_line(&mut out, "[safety]");
+    push_line(&mut out, &format!("safety_class={}", snapshot.safety_class));
+    push_line(&mut out, &format!("criticality={}", snapshot.criticality));
+    push_line(
+        &mut out,
+        &format!("freshness_policy={}", snapshot.freshness_policy),
+    );
+    push_line(&mut out, "");
+    push_line(&mut out, "[trust]");
+    push_line(&mut out, &format!("hash={}", snapshot.hash));
+    push_line(&mut out, &format!("signature={}", snapshot.signature));
+    push_line(&mut out, &format!("created_by={}", snapshot.created_by));
+    push_line(&mut out, &format!("created_at={}", snapshot.created_at));
+    push_line(
+        &mut out,
+        &format!("compiler_identity={}", snapshot.compiler_identity),
+    );
+    push_line(&mut out, "trust_status=placeholder");
+    push_line(&mut out, "verification_status=not_verified");
+    push_line(&mut out, "");
+    push_line(&mut out, "[activation_policy]");
+    push_line(
+        &mut out,
+        &format!(
+            "require_verification={}",
+            snapshot.require_verification
+        ),
+    );
+    push_line(
+        &mut out,
+        &format!(
+            "allow_runtime_tree_streaming={}",
+            snapshot.allow_runtime_tree_streaming
+        ),
+    );
+    push_line(
+        &mut out,
+        &format!(
+            "allow_production_activation={}",
+            snapshot.allow_production_activation
+        ),
+    );
+    push_line(&mut out, "activation_ready=false");
+    push_line(&mut out, "");
+    push_line(&mut out, "[update_policy]");
+    push_line(
+        &mut out,
+        &format!(
+            "require_safe_update_boundary={}",
+            snapshot.require_safe_update_boundary
+        ),
+    );
+    push_line(
+        &mut out,
+        &format!(
+            "allow_critical_update_during_pending_unknown={}",
+            snapshot.allow_critical_update_during_pending_unknown
+        ),
+    );
+    push_line(
+        &mut out,
+        &format!(
+            "allow_critical_update_during_quarantine={}",
+            snapshot.allow_critical_update_during_quarantine
+        ),
+    );
+    push_line(&mut out, "");
+    push_line(&mut out, "[authority]");
+    push_line(&mut out, "loader_claim=false");
+    push_line(&mut out, "runtime_claim=false");
+    push_line(&mut out, "production_ui_claim=false");
+    push_line(&mut out, "general_level_4_claim=false");
+    push_line(&mut out, "level_5_plus_claim=false");
+    push_line(&mut out, "");
+
+    normalize_line_endings(&out)
+}
+
+fn render_negative_report(results: &[NegativeCaseResult]) -> String {
+    let mut out = String::new();
+    push_line(&mut out, "ProjectionBundleSketchReaderNegativeReport v0");
+    push_line(&mut out, "scope=fixture-facing");
+    push_line(&mut out, "status=rejected-negative-pack");
+    push_line(&mut out, "");
+
+    for (index, case) in results.iter().enumerate() {
+        push_line(&mut out, &format!("case.{}.name={}", index, case.name));
+        push_line(&mut out, &format!("case.{}.input={}", index, case.input));
+        push_line(&mut out, &format!("case.{}.status=rejected", index));
+        push_line(&mut out, &format!("case.{}.reason={}", index, case.reason));
+        push_line(&mut out, "");
+    }
+
+    push_line(&mut out, "summary.accepted_positive=1");
+    push_line(&mut out, &format!("summary.rejected_negative={}", results.len()));
+    push_line(&mut out, "summary.unexpected_pass=0");
+    push_line(&mut out, "summary.wrong_reason=0");
+    push_line(&mut out, "");
+    push_line(&mut out, "[authority]");
+    push_line(&mut out, "loader_claim=false");
+    push_line(&mut out, "runtime_claim=false");
+    push_line(&mut out, "production_ui_claim=false");
+    push_line(&mut out, "general_level_4_claim=false");
+    push_line(&mut out, "level_5_plus_claim=false");
+    push_line(&mut out, "");
+
+    normalize_line_endings(&out)
+}
+
+fn emit_positive_output(repo_root: &str) -> Result<String, String> {
+    let snapshot = validate_positive_fixture(repo_root)?;
+    Ok(render_positive_output(&snapshot))
+}
+
+fn emit_negative_report(repo_root: &str) -> Result<String, String> {
+    let results = validate_negative_pack(repo_root)?;
+    Ok(render_negative_report(&results))
+}
+
+fn main() {
+    let mut args = env::args().skip(1);
+    let first = args
+        .next()
+        .unwrap_or_else(|| fail("missing repository root argument"));
+
+    let (mode, repo_root) = match first.as_str() {
+        "--emit-positive-output" | "--emit-negative-report" => {
+            let repo_root = args
+                .next()
+                .unwrap_or_else(|| fail("missing repository root argument"));
+            if args.next().is_some() {
+                fail("unexpected extra arguments");
+            }
+
+            (Some(first), normalize_repo_root(&repo_root))
+        }
+        _ => {
+            if args.next().is_some() {
+                fail("unexpected extra arguments");
+            }
+
+            (None, normalize_repo_root(&first))
+        }
+    };
+
+    match mode.as_deref() {
+        Some("--emit-positive-output") => match emit_positive_output(&repo_root) {
+            Ok(output) => {
+                print!("{}", output);
+            }
+            Err(reason) => fail(format!("positive fixture failed: {}", reason)),
+        },
+        Some("--emit-negative-report") => match emit_negative_report(&repo_root) {
+            Ok(output) => {
+                print!("{}", output);
+            }
+            Err(reason) => fail(format!("negative pack failed: {}", reason)),
+        },
+        None => {
+            if let Err(reason) = validate_positive_fixture(&repo_root) {
+                fail(format!("positive fixture failed: {}", reason));
+            }
+
+            if let Err(reason) = validate_negative_pack(&repo_root) {
+                fail(format!("negative fixture failed: {}", reason));
+            }
+
+            println!(
+                "PASS: ProjectionBundle sketch reader draft accepted positive and rejected negative manifest anchors"
+            );
+        }
+        Some(other) => fail(format!("unsupported mode: {}", other)),
+    }
 }
