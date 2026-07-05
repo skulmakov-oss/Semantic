@@ -8,7 +8,7 @@ This is **not** the full release qualification runner.
 - The `sm-verify` and `sm-vm` test gates currently explicitly enable `sm-ir/profile-rust` because verifier fixtures depend on Rust-like profile paths to successfully compile.
 
 ## Execution
-To run all 7 gates, use the script for your OS:
+To run all 7 gates locally, use the full runner for your OS:
 
 **Windows:**
 ```powershell
@@ -21,7 +21,7 @@ To run all 7 gates, use the script for your OS:
 ```
 
 ## CI Usage
-The `7hell` runner is integrated into the CI pipeline (via `.github/workflows/ci.yml`). The Linux runner (`run.sh`) is executed on every push and PR to protect the PCC qualification boundaries.
+The CI pipeline uses the fast gate (`tools/7hell/run_ci.ps1`) to keep PR checks short. The full runner remains available locally via `run.ps1` / `run.sh` for the complete qualification pack.
 
 ## The 7 Gates
 The script will fail fast if any gate is broken.
