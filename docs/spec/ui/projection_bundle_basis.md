@@ -111,7 +111,7 @@ Levels 4–7 are not claimed.
 
 ## 4. Narrow Reader Evidence Note
 
-After the sketch reader draft and golden output pack, the evidence contour includes a narrow reader-facing fixture evidence:
+After #1353 and the golden output pack, the evidence contour includes a narrow reader-facing fixture evidence:
 
 - positive normalized reader output golden fixture;
 - negative rejection report golden fixture;

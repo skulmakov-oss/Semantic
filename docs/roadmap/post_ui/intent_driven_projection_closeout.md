@@ -86,11 +86,12 @@ Required reading order:
 10. `docs/spec/ui/multi_client_freshness_model.md`
 11. `docs/spec/ui/projection_bundle_delivery.md`
 12. `docs/roadmap/post_ui/projection_bundle_fixture_inventory.md`
-13. `docs/spec/ui/projection_bundle_basis.md`
-14. `docs/spec/ui/projection_bundle_reader_parser_entry_gate.md`
-15. `docs/roadmap/post_ui/projection_bundle_reader_evidence_closeout.md`
-16. `docs/roadmap/post_ui/ui_shell_kit_projection_alignment.md`
-17. `docs/roadmap/post_ui/intent_driven_projection_closeout.md`
+13. `docs/spec/ui/projection_bundle_reader_parser_entry_gate.md`
+14. `docs/spec/ui/projection_bundle_reader_parser_basis.md`
+15. `docs/roadmap/post_ui/projection_bundle_level4_evidence_matrix.md`
+16. `docs/roadmap/post_ui/projection_bundle_reader_evidence_closeout.md`
+17. `docs/roadmap/post_ui/ui_shell_kit_projection_alignment.md`
+18. `docs/roadmap/post_ui/intent_driven_projection_closeout.md`
 
 ```text
 Read the doctrine before the mechanism.
@@ -101,6 +102,8 @@ Read the closeout before opening new work.
 The closeout comes last so future tasks do not treat the docs stack as an implementation license.
 
 `ProjectionBundle Reader Evidence Closeout` records the current fixture-facing reader evidence contour after the golden output pack. It does not claim general Level 4 behavior, loader behavior, runtime behavior, or production UI behavior.
+
+The reader/parser basis and Level-4 evidence matrix define future promotion requirements. They do not claim general Level 4 behavior, loader behavior, runtime behavior, or production UI behavior.
 
 ## 4. Authority Map
 

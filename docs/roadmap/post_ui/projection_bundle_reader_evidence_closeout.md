@@ -75,4 +75,8 @@ The next allowed transition must be one of:
 - deterministic output shape review;
 - claim-boundary guard improvement.
 
+The reader/parser basis is now the next specification boundary before implementation work.
+
 Any transition toward loader/runtime/production requires a separate task and explicit gate.
+
+The reader/parser basis and Level-4 evidence matrix define future promotion requirements. They do not change the current achieved level.
