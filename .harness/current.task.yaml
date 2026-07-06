@@ -1,11 +1,11 @@
 task:
-  id: POST-UI-PROJECTION-BUNDLE-CLAIM-BOUNDARY-GUARD
-  title: Strengthen ProjectionBundle claim-boundary guard
+  id: POST-UI-PROJECTION-BUNDLE-LEVEL5-READINESS-GUARD
+  title: Block ProjectionBundle Level 5 readiness overclaims
   type: guard-improvement
   mode: active
 
 intent:
-  summary: Extend the ProjectionBundle claim-boundary guard to reject accidental reader/parser, loader, runtime, production UI, Level 4, and Level 5+ overclaims.
+  summary: Extend the ProjectionBundle claim-boundary guard to reject affirmative Level 5 and Level 5+ readiness overclaims while preserving legal negative boundary statements.
 
 layer:
   name: tooling
@@ -68,4 +68,4 @@ verification:
     - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_post_ui_fixtures.ps1
 
 report:
-  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-CLAIM-BOUNDARY-GUARD.md
+  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-LEVEL5-READINESS-GUARD.md
