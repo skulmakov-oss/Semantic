@@ -65,9 +65,13 @@ function Assert-NotContains {
     }
 }
 
+# Keep every ProjectionBundle claim-bearing doc in this canonical scanner.
+# The aggregate POST-UI guard must not drift across separate forbidden lists.
 $paths = @{
     basis = Join-Path $repoRoot "docs/spec/ui/projection_bundle_basis.md"
     gate = Join-Path $repoRoot "docs/spec/ui/projection_bundle_reader_parser_entry_gate.md"
+    readerParserBasis = Join-Path $repoRoot "docs/spec/ui/projection_bundle_reader_parser_basis.md"
+    level4Matrix = Join-Path $repoRoot "docs/roadmap/post_ui/projection_bundle_level4_evidence_matrix.md"
     closeout = Join-Path $repoRoot "docs/roadmap/post_ui/projection_bundle_reader_evidence_closeout.md"
     index = Join-Path $repoRoot "docs/roadmap/post_ui/intent_driven_projection_closeout.md"
 }
@@ -108,19 +112,38 @@ foreach ($anchor in $requiredAnchors) {
     Assert-ContainsAny -Contents $contents -Needle $anchor
 }
 
+# Boundary-safe negative statements such as "not claimed" or
+# "does not claim loader behavior" must remain allowed.
+# This guard rejects affirmative/readiness claims, not vocabulary itself.
 $forbiddenPhrases = @(
     "Level 4 achieved",
     "Level 4 implemented",
+    "Level-4 achieved",
+    "Level-4 implemented",
     "general Level 4 achieved",
     "general Level 4 reader/parser behavior is achieved",
     "reader/parser implemented",
     "parser implemented",
+    "general parser implemented",
+    "ProjectionBundle parser implemented",
+    "ProjectionBundle reader/parser implemented",
     "loader-ready",
     "runtime-ready",
     "production-ready",
+    "loader ready",
+    "runtime ready",
+    "production ready",
+    "activation path ready",
+    "public API ready",
     "activation-ready",
     "verification-ready",
-    "security proven"
+    "security proven",
+    "Level 5 achieved",
+    "Level 5 implemented",
+    "Level-5 achieved",
+    "Level-5 implemented",
+    "Level 5+ achieved",
+    "Level 5+ implemented"
 )
 
 foreach ($phrase in $forbiddenPhrases) {
