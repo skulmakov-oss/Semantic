@@ -42,8 +42,9 @@ actions:
     - level4_claim
 
 constraints:
-  - test only
-  - no behavior changes
+  - reader-draft validation behavior change only
+  - duplicate section rejection only
+  - duplicate scalar behavior unchanged
   - no docs changes
   - no Cargo changes
   - no loader claim
