@@ -38,6 +38,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L25)
   [projection_bundle/diagnostics] expected = [] (L51)
 hash_shape: placeholder
+signature_shape: placeholder
 unknown_items: none
 validation_result: rejected
 primary_error: duplicate_field: allow_runtime_tree_streaming
@@ -86,6 +87,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L26)
   [projection_bundle/diagnostics] expected = [] (L51)
 hash_shape: placeholder
+signature_shape: placeholder
 unknown_items: none
 validation_result: rejected
 primary_error: missing required anchor semantic source ref: semantic.source.example
@@ -129,6 +131,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L25)
   [projection_bundle/diagnostics] expected = [] (L50)
 hash_shape: placeholder
+signature_shape: placeholder
 unknown_items: none
 validation_result: accepted
 ---
@@ -171,6 +174,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L33)
   [projection_bundle/diagnostics] expected = [] (L50)
 hash_shape: placeholder
+signature_shape: placeholder
 unknown_items: none
 validation_result: accepted
 ---
@@ -198,7 +202,7 @@ scalars: 22 total
   [projection_bundle/safety] criticality = NonCritical (L24)
   [projection_bundle/safety] freshness_policy = FreshForControl (L26)
   [projection_bundle/trust] hash = just-a-string-without-prefix (L30)
-  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L31)
+  [projection_bundle/trust] signature = invalid-signature-shape (L31)
   [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L32)
   [projection_bundle/trust] created_at = not-a-real-timestamp (L33)
   [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L34)
@@ -213,6 +217,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L25)
   [projection_bundle/diagnostics] expected = [] (L50)
 hash_shape: malformed
+signature_shape: malformed
 unknown_items: none
 validation_result: rejected
 primary_error: malformed_hash_shape
@@ -256,6 +261,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L25)
   [projection_bundle/diagnostics] expected = [] (L50)
 hash_shape: sha256_like
+signature_shape: signature_like
 unknown_items: none
 validation_result: rejected
 primary_error: field hash mismatch: expected "sha256:SKETCH-NOT-A-REAL-HASH", got "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -301,6 +307,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L28)
   [projection_bundle/diagnostics] expected = [] (L53)
 hash_shape: placeholder
+signature_shape: placeholder
 unknown_items: both
 validation_result: rejected
 primary_error: unknown_section: projection_bundle/safety/unknown_nested_section
@@ -345,6 +352,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L26)
   [projection_bundle/diagnostics] expected = [] (L51)
 hash_shape: placeholder
+signature_shape: placeholder
 unknown_items: found_unknown_fields
 validation_result: rejected
 primary_error: unknown_field: unknown_scalar
