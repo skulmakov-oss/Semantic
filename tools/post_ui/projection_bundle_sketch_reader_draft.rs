@@ -2457,6 +2457,22 @@ fn run_probe(path: &str) -> Result<String, String> {
         }
     }
 
+    if let Ok(core) = parse_sketch_core(&content) {
+        let mut trust_shape = "unknown";
+        for scalar in &core.scalars {
+            if scalar.section == "projection_bundle/trust" && scalar.key == "hash" {
+                if scalar.value == "sha256:SKETCH-NOT-A-REAL-HASH" {
+                    trust_shape = "placeholder";
+                } else if scalar.value.starts_with("sha256:") && scalar.value.len() == 71 {
+                    trust_shape = "sha256_like";
+                } else {
+                    trust_shape = "malformed";
+                }
+            }
+        }
+        push_line(&mut out, &format!("trust_shape: {}", trust_shape));
+    }
+
     match validate_sketch(&content) {
         Ok(_) => {
             push_line(&mut out, "validation_result: accepted");
