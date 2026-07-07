@@ -2463,7 +2463,7 @@ fn run_probe(path: &str) -> Result<String, String> {
             if scalar.section == "projection_bundle/trust" && scalar.key == "hash" {
                 if scalar.value == "sha256:SKETCH-NOT-A-REAL-HASH" {
                     hash_shape = "placeholder";
-                } else if scalar.value.starts_with("sha256:") && scalar.value.len() == 71 {
+                } else if scalar.value.starts_with("sha256:") && scalar.value.len() == 71 && scalar.value[7..].chars().all(|c| c.is_ascii_hexdigit()) {
                     hash_shape = "sha256_like";
                 } else {
                     hash_shape = "malformed";
