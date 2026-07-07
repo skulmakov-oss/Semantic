@@ -2536,6 +2536,7 @@ fn run_probe(path: &str) -> Result<String, String> {
 
     if let Ok(core) = parse_sketch_core(&content) {
         let mut hash_shape = "unknown";
+        let mut signature_shape = "unknown";
         let mut has_unknown_sections = false;
         let mut has_unknown_fields = false;
 
@@ -2585,13 +2586,23 @@ fn run_probe(path: &str) -> Result<String, String> {
         }
 
         for scalar in &core.scalars {
-            if scalar.section == "projection_bundle/trust" && scalar.key == "hash" {
-                if scalar.value == "sha256:SKETCH-NOT-A-REAL-HASH" {
-                    hash_shape = "placeholder";
-                } else if scalar.value.starts_with("sha256:") && scalar.value.len() == 71 && scalar.value[7..].chars().all(|c| c.is_ascii_hexdigit()) {
-                    hash_shape = "sha256_like";
-                } else {
-                    hash_shape = "malformed";
+            if scalar.section == "projection_bundle/trust" {
+                if scalar.key == "hash" {
+                    if scalar.value == "sha256:SKETCH-NOT-A-REAL-HASH" {
+                        hash_shape = "placeholder";
+                    } else if scalar.value.starts_with("sha256:") && scalar.value.len() == 71 && scalar.value[7..].chars().all(|c| c.is_ascii_hexdigit()) {
+                        hash_shape = "sha256_like";
+                    } else {
+                        hash_shape = "malformed";
+                    }
+                } else if scalar.key == "signature" {
+                    if scalar.value == "signature:SKETCH-NOT-A-REAL-SIGNATURE" {
+                        signature_shape = "placeholder";
+                    } else if scalar.value.starts_with("signature:") && scalar.value.len() == 74 && scalar.value[10..].chars().all(|c| c.is_ascii_hexdigit()) {
+                        signature_shape = "signature_like";
+                    } else {
+                        signature_shape = "malformed";
+                    }
                 }
             }
             if !known_fields.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
@@ -2613,6 +2624,7 @@ fn run_probe(path: &str) -> Result<String, String> {
         };
 
         push_line(&mut out, &format!("hash_shape: {}", hash_shape));
+        push_line(&mut out, &format!("signature_shape: {}", signature_shape));
         push_line(&mut out, &format!("unknown_items: {}", unknown_items));
     }
 
