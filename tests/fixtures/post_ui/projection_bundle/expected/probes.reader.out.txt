@@ -302,7 +302,8 @@ arrays: 3 total
   [projection_bundle/diagnostics] expected = [] (L53)
 hash_shape: placeholder
 unknown_items: both
-validation_result: accepted
+validation_result: rejected
+primary_error: unknown_section: projection_bundle/safety/unknown_nested_section
 ---
 fixture: probe_unknown_scalar.sketch.md
 text_block: found
@@ -345,7 +346,8 @@ arrays: 3 total
   [projection_bundle/diagnostics] expected = [] (L51)
 hash_shape: placeholder
 unknown_items: found_unknown_fields
-validation_result: accepted
+validation_result: rejected
+primary_error: unknown_field: unknown_scalar
 ---
 fixture: probe_unterminated_text_block.sketch.md
 core_parse_error: unterminated text block
