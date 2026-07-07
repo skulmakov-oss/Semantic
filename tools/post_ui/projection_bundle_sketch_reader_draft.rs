@@ -572,6 +572,7 @@ enum ReaderErrorKind {
     MalformedField,
     UnknownField,
     DuplicateField,
+    DuplicateSection,
     FieldOrdering,
     InvalidPolicyValue,
 }
@@ -851,6 +852,10 @@ fn find_section_core<'a>(core: &'a SketchReaderCore, path: &str) -> Option<&'a S
     core.sections.iter().find(|section| section.path == path)
 }
 
+fn count_section_occurrences_core(core: &SketchReaderCore, path: &str) -> usize {
+    core.sections.iter().filter(|section| section.path == path).count()
+}
+
 fn find_array_core<'a>(
     core: &'a SketchReaderCore,
     section: &str,
@@ -962,6 +967,23 @@ fn require_no_duplicate_scalars_core(
                 ReaderErrorKind::DuplicateField,
                 *key,
                 format!("duplicate_field: {}", key),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn require_no_duplicate_sections_core(
+    core: &SketchReaderCore,
+    paths: &[&str],
+) -> Result<(), ReaderError> {
+    for path in paths {
+        if count_section_occurrences_core(core, path) > 1 {
+            return Err(ReaderError::new(
+                ReaderErrorKind::DuplicateSection,
+                *path,
+                format!("duplicate_section: {}", path),
             ));
         }
     }
@@ -1243,6 +1265,17 @@ fn validate_sketch_except_core(
         "allow_critical_update_during_quarantine",
     ];
 
+    let expected_sections = [
+        "projection_bundle/artifacts",
+        "projection_bundle/compatibility",
+        "projection_bundle/safety",
+        "projection_bundle/trust",
+        "projection_bundle/activation_policy",
+        "projection_bundle/update_policy",
+        "projection_bundle/diagnostics",
+    ];
+    require_no_duplicate_sections_core(core, &expected_sections).map_err(|err| err.message)?;
+
     require_no_duplicate_scalars_core(core, &expected_keys, skipped_key).map_err(|err| err.message)?;
     require_no_known_unknown_fields_except_core(core, allowed_unknown_fields)?;
 
@@ -1416,6 +1449,19 @@ fn require_no_duplicate_scalars(
     Ok(())
 }
 
+fn require_no_duplicate_sections(
+    content: &str,
+    expected_sections: &[&str],
+) -> Result<(), String> {
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    for path in expected_sections {
+        if count_section_occurrences_core(&core, path) > 1 {
+            return Err(format!("duplicate_section: {}", path));
+        }
+    }
+    Ok(())
+}
+
 fn require_no_known_unknown_fields_except(
     content: &str,
     allowed_unknown_fields: &[&str],
@@ -1505,6 +1551,17 @@ fn validate_sketch_except(
         "allow_critical_update_during_pending_unknown",
         "allow_critical_update_during_quarantine",
     ];
+
+    let expected_sections = [
+        "projection_bundle/artifacts",
+        "projection_bundle/compatibility",
+        "projection_bundle/safety",
+        "projection_bundle/trust",
+        "projection_bundle/activation_policy",
+        "projection_bundle/update_policy",
+        "projection_bundle/diagnostics",
+    ];
+    require_no_duplicate_sections(content, &expected_sections)?;
 
     require_no_duplicate_scalars(content, &expected_keys, skipped_key)?;
     require_no_known_unknown_fields_except(content, allowed_unknown_fields)?;

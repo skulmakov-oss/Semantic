@@ -44,7 +44,7 @@ hash_shape: placeholder
 signature_shape: placeholder
 unknown_items: none
 validation_result: rejected
-primary_error: duplicate_field: require_verification
+primary_error: duplicate_section: projection_bundle/activation_policy
 ---
 fixture: probe_duplicate_artifacts_section.sketch.md
 text_block: found
@@ -92,7 +92,7 @@ hash_shape: placeholder
 signature_shape: placeholder
 unknown_items: none
 validation_result: rejected
-primary_error: duplicate_field: ui_ir_ref
+primary_error: duplicate_section: projection_bundle/artifacts
 ---
 fixture: probe_duplicate_conflicting_policy.sketch.md
 text_block: found
@@ -187,7 +187,7 @@ hash_shape: malformed
 signature_shape: malformed
 unknown_items: none
 validation_result: rejected
-primary_error: duplicate_field: hash
+primary_error: duplicate_section: projection_bundle/trust
 ---
 fixture: probe_duplicate_update_policy_section.sketch.md
 text_block: found
@@ -235,7 +235,7 @@ hash_shape: placeholder
 signature_shape: placeholder
 unknown_items: none
 validation_result: rejected
-primary_error: duplicate_field: require_safe_update_boundary
+primary_error: duplicate_section: projection_bundle/update_policy
 ---
 fixture: probe_missing_activation_policy_section.sketch.md
 text_block: found
