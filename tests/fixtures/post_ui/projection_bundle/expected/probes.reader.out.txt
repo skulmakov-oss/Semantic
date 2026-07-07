@@ -43,10 +43,289 @@ unknown_items: none
 validation_result: rejected
 primary_error: duplicate_field: allow_runtime_tree_streaming
 ---
+fixture: probe_missing_activation_policy_section.sketch.md
+text_block: found
+sections: 7 total
+  projection_bundle (L1 - L46)
+  projection_bundle/artifacts (L11 - L15)
+  projection_bundle/compatibility (L17 - L20)
+  projection_bundle/safety (L22 - L27)
+  projection_bundle/trust (L29 - L35)
+  projection_bundle/update_policy (L37 - L41)
+  projection_bundle/diagnostics (L43 - L45)
+scalars: 19 total
+  [projection_bundle] bundle_id = bundle.example.minimal (L2)
+  [projection_bundle] bundle_version = 0-sketch (L3)
+  [projection_bundle] projection_id = ExampleMinimalProjection (L4)
+  [projection_bundle/artifacts] ui_ir_ref = ui_ir.example.minimal (L12)
+  [projection_bundle/artifacts] binding_graph_ref = binding_graph.example.minimal (L13)
+  [projection_bundle/artifacts] action_ir_ref = action_ir.example.minimal (L14)
+  [projection_bundle/compatibility] role_dictionary_version = ui-roles.0-sketch (L18)
+  [projection_bundle/compatibility] renderer_profile = semantic-shell.reference-sketch (L19)
+  [projection_bundle/safety] safety_class = VerifiedDynamic (L23)
+  [projection_bundle/safety] criticality = NonCritical (L24)
+  [projection_bundle/safety] freshness_policy = FreshForControl (L26)
+  [projection_bundle/trust] hash = sha256:SKETCH-NOT-A-REAL-HASH (L30)
+  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L31)
+  [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L32)
+  [projection_bundle/trust] created_at = not-a-real-timestamp (L33)
+  [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L34)
+  [projection_bundle/update_policy] require_safe_update_boundary = true (L38)
+  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L39)
+  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L40)
+arrays: 3 total
+  [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
+  [projection_bundle/safety] required_capabilities = [] (L25)
+  [projection_bundle/diagnostics] expected = [] (L44)
+hash_shape: placeholder
+signature_shape: placeholder
+unknown_items: none
+validation_result: rejected
+primary_error: missing required field allow_runtime_tree_streaming
+---
+fixture: probe_missing_artifacts_section.sketch.md
+text_block: found
+sections: 7 total
+  projection_bundle (L1 - L46)
+  projection_bundle/compatibility (L11 - L14)
+  projection_bundle/safety (L16 - L21)
+  projection_bundle/trust (L23 - L29)
+  projection_bundle/activation_policy (L31 - L35)
+  projection_bundle/update_policy (L37 - L41)
+  projection_bundle/diagnostics (L43 - L45)
+scalars: 19 total
+  [projection_bundle] bundle_id = bundle.example.minimal (L2)
+  [projection_bundle] bundle_version = 0-sketch (L3)
+  [projection_bundle] projection_id = ExampleMinimalProjection (L4)
+  [projection_bundle/compatibility] role_dictionary_version = ui-roles.0-sketch (L12)
+  [projection_bundle/compatibility] renderer_profile = semantic-shell.reference-sketch (L13)
+  [projection_bundle/safety] safety_class = VerifiedDynamic (L17)
+  [projection_bundle/safety] criticality = NonCritical (L18)
+  [projection_bundle/safety] freshness_policy = FreshForControl (L20)
+  [projection_bundle/trust] hash = sha256:SKETCH-NOT-A-REAL-HASH (L24)
+  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L25)
+  [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L26)
+  [projection_bundle/trust] created_at = not-a-real-timestamp (L27)
+  [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L28)
+  [projection_bundle/activation_policy] require_verification = true (L32)
+  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L33)
+  [projection_bundle/activation_policy] allow_production_activation = false (L34)
+  [projection_bundle/update_policy] require_safe_update_boundary = true (L38)
+  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L39)
+  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L40)
+arrays: 3 total
+  [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
+  [projection_bundle/safety] required_capabilities = [] (L19)
+  [projection_bundle/diagnostics] expected = [] (L44)
+hash_shape: placeholder
+signature_shape: placeholder
+unknown_items: none
+validation_result: rejected
+primary_error: missing required field ui_ir_ref
+---
+fixture: probe_missing_compatibility_section.sketch.md
+text_block: found
+sections: 7 total
+  projection_bundle (L1 - L47)
+  projection_bundle/artifacts (L11 - L15)
+  projection_bundle/safety (L17 - L22)
+  projection_bundle/trust (L24 - L30)
+  projection_bundle/activation_policy (L32 - L36)
+  projection_bundle/update_policy (L38 - L42)
+  projection_bundle/diagnostics (L44 - L46)
+scalars: 20 total
+  [projection_bundle] bundle_id = bundle.example.minimal (L2)
+  [projection_bundle] bundle_version = 0-sketch (L3)
+  [projection_bundle] projection_id = ExampleMinimalProjection (L4)
+  [projection_bundle/artifacts] ui_ir_ref = ui_ir.example.minimal (L12)
+  [projection_bundle/artifacts] binding_graph_ref = binding_graph.example.minimal (L13)
+  [projection_bundle/artifacts] action_ir_ref = action_ir.example.minimal (L14)
+  [projection_bundle/safety] safety_class = VerifiedDynamic (L18)
+  [projection_bundle/safety] criticality = NonCritical (L19)
+  [projection_bundle/safety] freshness_policy = FreshForControl (L21)
+  [projection_bundle/trust] hash = sha256:SKETCH-NOT-A-REAL-HASH (L25)
+  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L26)
+  [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L27)
+  [projection_bundle/trust] created_at = not-a-real-timestamp (L28)
+  [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L29)
+  [projection_bundle/activation_policy] require_verification = true (L33)
+  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L34)
+  [projection_bundle/activation_policy] allow_production_activation = false (L35)
+  [projection_bundle/update_policy] require_safe_update_boundary = true (L39)
+  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L40)
+  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L41)
+arrays: 3 total
+  [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
+  [projection_bundle/safety] required_capabilities = [] (L20)
+  [projection_bundle/diagnostics] expected = [] (L45)
+hash_shape: placeholder
+signature_shape: placeholder
+unknown_items: none
+validation_result: rejected
+primary_error: missing required field role_dictionary_version
+---
+fixture: probe_missing_diagnostics_section.sketch.md
+text_block: found
+sections: 7 total
+  projection_bundle (L1 - L48)
+  projection_bundle/artifacts (L11 - L15)
+  projection_bundle/compatibility (L17 - L20)
+  projection_bundle/safety (L22 - L27)
+  projection_bundle/trust (L29 - L35)
+  projection_bundle/activation_policy (L37 - L41)
+  projection_bundle/update_policy (L43 - L47)
+scalars: 22 total
+  [projection_bundle] bundle_id = bundle.example.minimal (L2)
+  [projection_bundle] bundle_version = 0-sketch (L3)
+  [projection_bundle] projection_id = ExampleMinimalProjection (L4)
+  [projection_bundle/artifacts] ui_ir_ref = ui_ir.example.minimal (L12)
+  [projection_bundle/artifacts] binding_graph_ref = binding_graph.example.minimal (L13)
+  [projection_bundle/artifacts] action_ir_ref = action_ir.example.minimal (L14)
+  [projection_bundle/compatibility] role_dictionary_version = ui-roles.0-sketch (L18)
+  [projection_bundle/compatibility] renderer_profile = semantic-shell.reference-sketch (L19)
+  [projection_bundle/safety] safety_class = VerifiedDynamic (L23)
+  [projection_bundle/safety] criticality = NonCritical (L24)
+  [projection_bundle/safety] freshness_policy = FreshForControl (L26)
+  [projection_bundle/trust] hash = sha256:SKETCH-NOT-A-REAL-HASH (L30)
+  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L31)
+  [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L32)
+  [projection_bundle/trust] created_at = not-a-real-timestamp (L33)
+  [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L34)
+  [projection_bundle/activation_policy] require_verification = true (L38)
+  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L39)
+  [projection_bundle/activation_policy] allow_production_activation = false (L40)
+  [projection_bundle/update_policy] require_safe_update_boundary = true (L44)
+  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L45)
+  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L46)
+arrays: 2 total
+  [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
+  [projection_bundle/safety] required_capabilities = [] (L25)
+hash_shape: placeholder
+signature_shape: placeholder
+unknown_items: none
+validation_result: accepted
+---
+fixture: probe_missing_safety_section.sketch.md
+text_block: found
+sections: 7 total
+  projection_bundle (L1 - L45)
+  projection_bundle/artifacts (L11 - L15)
+  projection_bundle/compatibility (L17 - L20)
+  projection_bundle/trust (L22 - L28)
+  projection_bundle/activation_policy (L30 - L34)
+  projection_bundle/update_policy (L36 - L40)
+  projection_bundle/diagnostics (L42 - L44)
+scalars: 19 total
+  [projection_bundle] bundle_id = bundle.example.minimal (L2)
+  [projection_bundle] bundle_version = 0-sketch (L3)
+  [projection_bundle] projection_id = ExampleMinimalProjection (L4)
+  [projection_bundle/artifacts] ui_ir_ref = ui_ir.example.minimal (L12)
+  [projection_bundle/artifacts] binding_graph_ref = binding_graph.example.minimal (L13)
+  [projection_bundle/artifacts] action_ir_ref = action_ir.example.minimal (L14)
+  [projection_bundle/compatibility] role_dictionary_version = ui-roles.0-sketch (L18)
+  [projection_bundle/compatibility] renderer_profile = semantic-shell.reference-sketch (L19)
+  [projection_bundle/trust] hash = sha256:SKETCH-NOT-A-REAL-HASH (L23)
+  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L24)
+  [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L25)
+  [projection_bundle/trust] created_at = not-a-real-timestamp (L26)
+  [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L27)
+  [projection_bundle/activation_policy] require_verification = true (L31)
+  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L32)
+  [projection_bundle/activation_policy] allow_production_activation = false (L33)
+  [projection_bundle/update_policy] require_safe_update_boundary = true (L37)
+  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L38)
+  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L39)
+arrays: 2 total
+  [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
+  [projection_bundle/diagnostics] expected = [] (L43)
+hash_shape: placeholder
+signature_shape: placeholder
+unknown_items: none
+validation_result: rejected
+primary_error: missing required field safety_class
+---
 fixture: probe_missing_text_block.sketch.md
 core_parse_error: missing required text block
 validation_result: rejected
 primary_error: missing required text block
+---
+fixture: probe_missing_trust_section.sketch.md
+text_block: found
+sections: 7 total
+  projection_bundle (L1 - L44)
+  projection_bundle/artifacts (L11 - L15)
+  projection_bundle/compatibility (L17 - L20)
+  projection_bundle/safety (L22 - L27)
+  projection_bundle/activation_policy (L29 - L33)
+  projection_bundle/update_policy (L35 - L39)
+  projection_bundle/diagnostics (L41 - L43)
+scalars: 17 total
+  [projection_bundle] bundle_id = bundle.example.minimal (L2)
+  [projection_bundle] bundle_version = 0-sketch (L3)
+  [projection_bundle] projection_id = ExampleMinimalProjection (L4)
+  [projection_bundle/artifacts] ui_ir_ref = ui_ir.example.minimal (L12)
+  [projection_bundle/artifacts] binding_graph_ref = binding_graph.example.minimal (L13)
+  [projection_bundle/artifacts] action_ir_ref = action_ir.example.minimal (L14)
+  [projection_bundle/compatibility] role_dictionary_version = ui-roles.0-sketch (L18)
+  [projection_bundle/compatibility] renderer_profile = semantic-shell.reference-sketch (L19)
+  [projection_bundle/safety] safety_class = VerifiedDynamic (L23)
+  [projection_bundle/safety] criticality = NonCritical (L24)
+  [projection_bundle/safety] freshness_policy = FreshForControl (L26)
+  [projection_bundle/activation_policy] require_verification = true (L30)
+  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L31)
+  [projection_bundle/activation_policy] allow_production_activation = false (L32)
+  [projection_bundle/update_policy] require_safe_update_boundary = true (L36)
+  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L37)
+  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L38)
+arrays: 3 total
+  [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
+  [projection_bundle/safety] required_capabilities = [] (L25)
+  [projection_bundle/diagnostics] expected = [] (L42)
+hash_shape: unknown
+signature_shape: unknown
+unknown_items: none
+validation_result: rejected
+primary_error: missing required field hash
+---
+fixture: probe_missing_update_policy_section.sketch.md
+text_block: found
+sections: 7 total
+  projection_bundle (L1 - L46)
+  projection_bundle/artifacts (L11 - L15)
+  projection_bundle/compatibility (L17 - L20)
+  projection_bundle/safety (L22 - L27)
+  projection_bundle/trust (L29 - L35)
+  projection_bundle/activation_policy (L37 - L41)
+  projection_bundle/diagnostics (L43 - L45)
+scalars: 19 total
+  [projection_bundle] bundle_id = bundle.example.minimal (L2)
+  [projection_bundle] bundle_version = 0-sketch (L3)
+  [projection_bundle] projection_id = ExampleMinimalProjection (L4)
+  [projection_bundle/artifacts] ui_ir_ref = ui_ir.example.minimal (L12)
+  [projection_bundle/artifacts] binding_graph_ref = binding_graph.example.minimal (L13)
+  [projection_bundle/artifacts] action_ir_ref = action_ir.example.minimal (L14)
+  [projection_bundle/compatibility] role_dictionary_version = ui-roles.0-sketch (L18)
+  [projection_bundle/compatibility] renderer_profile = semantic-shell.reference-sketch (L19)
+  [projection_bundle/safety] safety_class = VerifiedDynamic (L23)
+  [projection_bundle/safety] criticality = NonCritical (L24)
+  [projection_bundle/safety] freshness_policy = FreshForControl (L26)
+  [projection_bundle/trust] hash = sha256:SKETCH-NOT-A-REAL-HASH (L30)
+  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L31)
+  [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L32)
+  [projection_bundle/trust] created_at = not-a-real-timestamp (L33)
+  [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L34)
+  [projection_bundle/activation_policy] require_verification = true (L38)
+  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L39)
+  [projection_bundle/activation_policy] allow_production_activation = false (L40)
+arrays: 3 total
+  [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
+  [projection_bundle/safety] required_capabilities = [] (L25)
+  [projection_bundle/diagnostics] expected = [] (L44)
+hash_shape: placeholder
+signature_shape: placeholder
+unknown_items: none
+validation_result: rejected
+primary_error: missing required field allow_critical_update_during_pending_unknown
 ---
 fixture: probe_multiline_array_variants.sketch.md
 text_block: found
