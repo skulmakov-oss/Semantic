@@ -1,11 +1,11 @@
 task:
-  id: POST-UI-PROJECTION-BUNDLE-LEVEL5-READINESS-GUARD
-  title: Block ProjectionBundle Level 5 readiness overclaims
-  type: guard-improvement
+  id: POST-UI-PROJECTION-BUNDLE-READER-PROBES
+  title: Probe ProjectionBundle sketch reader behavior
+  type: experiment
   mode: active
 
 intent:
-  summary: Extend the ProjectionBundle claim-boundary guard to reject affirmative Level 5 and Level 5+ readiness overclaims while preserving legal negative boundary statements.
+  summary: experiment(post-ui): probe ProjectionBundle sketch reader behavior
 
 layer:
   name: tooling
@@ -14,13 +14,14 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - tools/post_ui/check_projection_bundle_claim_boundaries.ps1
+    - tools/post_ui/projection_bundle_sketch_reader_draft.rs
+    - tools/post_ui/check_projection_bundle_reader_probes.ps1
+    - tests/fixtures/post_ui/projection_bundle/probes/**
+    - tests/fixtures/post_ui/projection_bundle/expected/probes.reader.out.txt
 
   forbidden_paths:
     - docs/**
     - scripts/**
-    - tests/**
-    - tests/fixtures/**
     - Cargo.toml
     - Cargo.lock
 
@@ -33,39 +34,27 @@ actions:
 
   forbidden:
     - modify_docs
-    - modify_reader_code
-    - modify_fixtures
-    - modify_golden_outputs
     - modify_cargo_toml
     - modify_cargo_lock
     - loader_claim
     - runtime_claim
     - production_ui_claim
     - level4_claim
-    - level5_claim
 
 constraints:
-  - guard improvement only
-  - claim-boundary enforcement only
+  - experiment only
   - no docs changes
-  - no reader code changes
-  - no fixtures changes
-  - no golden output changes
   - no Cargo changes
-  - no general parser claim
-  - no schema claim
   - no loader claim
   - no runtime claim
   - no production UI claim
-  - no general Level 4 claim
-  - no Level 5+ claim
+  - no Level 4 claim
 
 verification:
   required:
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
-    - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_projection_bundle_claim_boundaries.ps1
-    - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_post_ui_fixtures.ps1
+    - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_projection_bundle_reader_probes.ps1
 
 report:
-  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-LEVEL5-READINESS-GUARD.md
+  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-PROBES.md

@@ -2399,11 +2399,82 @@ mod tests {
     }
 }
 
+fn run_probe(path: &str) -> Result<String, String> {
+    let content = fs::read_to_string(path).map_err(|e| format!("io error: {}", e))?;
+    let file_name = Path::new(path).file_name().unwrap_or_default().to_string_lossy();
+
+    let mut out = String::new();
+    push_line(&mut out, &format!("fixture: {}", file_name));
+
+    match parse_sketch_core(&content) {
+        Ok(core) => {
+            push_line(
+                &mut out,
+                &format!(
+                    "text_block: {}",
+                    if core.text_block.is_empty() {
+                        "missing"
+                    } else {
+                        "found"
+                    }
+                ),
+            );
+            push_line(&mut out, &format!("sections: {} total", core.sections.len()));
+            for section in &core.sections {
+                let end = section
+                    .end_line
+                    .map(|l| l.to_string())
+                    .unwrap_or_else(|| "EOF".to_string());
+                push_line(
+                    &mut out,
+                    &format!("  {} (L{} - L{})", section.path, section.start_line, end),
+                );
+            }
+            push_line(&mut out, &format!("scalars: {} total", core.scalars.len()));
+            for scalar in &core.scalars {
+                push_line(
+                    &mut out,
+                    &format!(
+                        "  [{}] {} = {} (L{})",
+                        scalar.section, scalar.key, scalar.value, scalar.line
+                    ),
+                );
+            }
+            push_line(&mut out, &format!("arrays: {} total", core.arrays.len()));
+            for array in &core.arrays {
+                let joined = array.values.join(", ");
+                push_line(
+                    &mut out,
+                    &format!(
+                        "  [{}] {} = [{}] (L{})",
+                        array.section, array.key, joined, array.line
+                    ),
+                );
+            }
+        }
+        Err(e) => {
+            push_line(&mut out, &format!("core_parse_error: {}", e.message));
+        }
+    }
+
+    match validate_sketch(&content) {
+        Ok(_) => {
+            push_line(&mut out, "validation_result: accepted");
+        }
+        Err(e) => {
+            push_line(&mut out, "validation_result: rejected");
+            push_line(&mut out, &format!("primary_error: {}", e));
+        }
+    }
+    push_line(&mut out, "---");
+    Ok(out)
+}
+
 fn main() {
     let mut args = env::args().skip(1);
     let first = args
         .next()
-        .unwrap_or_else(|| fail("missing repository root argument"));
+        .unwrap_or_else(|| fail("missing repository root or probe argument"));
 
     let (mode, repo_root) = match first.as_str() {
         "--emit-positive-output" | "--emit-negative-report" => {
@@ -2416,6 +2487,16 @@ fn main() {
 
             (Some(first), normalize_repo_root(&repo_root))
         }
+        "--probe-fixture" => {
+            let file_path = args
+                .next()
+                .unwrap_or_else(|| fail("missing probe fixture path"));
+            if args.next().is_some() {
+                fail("unexpected extra arguments");
+            }
+
+            (Some(first), file_path)
+        }
         _ => {
             if args.next().is_some() {
                 fail("unexpected extra arguments");
@@ -2426,6 +2507,12 @@ fn main() {
     };
 
     match mode.as_deref() {
+        Some("--probe-fixture") => match run_probe(&repo_root) {
+            Ok(output) => {
+                print!("{}", output);
+            }
+            Err(e) => fail(format!("probe failed: {}", e)),
+        },
         Some("--emit-positive-output") => match emit_positive_output(&repo_root) {
             Ok(output) => {
                 print!("{}", output);
