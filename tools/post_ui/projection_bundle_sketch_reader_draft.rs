@@ -2459,6 +2459,54 @@ fn run_probe(path: &str) -> Result<String, String> {
 
     if let Ok(core) = parse_sketch_core(&content) {
         let mut hash_shape = "unknown";
+        let mut has_unknown_sections = false;
+        let mut has_unknown_fields = false;
+
+        let known_sections = [
+            "projection_bundle",
+            "projection_bundle/artifacts",
+            "projection_bundle/compatibility",
+            "projection_bundle/safety",
+            "projection_bundle/trust",
+            "projection_bundle/activation_policy",
+            "projection_bundle/update_policy",
+            "projection_bundle/diagnostics",
+        ];
+
+        let known_fields = [
+            ("projection_bundle", "bundle_id"),
+            ("projection_bundle", "bundle_version"),
+            ("projection_bundle", "projection_id"),
+            ("projection_bundle", "source_refs"),
+            ("projection_bundle/artifacts", "ui_ir_ref"),
+            ("projection_bundle/artifacts", "binding_graph_ref"),
+            ("projection_bundle/artifacts", "action_ir_ref"),
+            ("projection_bundle/compatibility", "role_dictionary_version"),
+            ("projection_bundle/compatibility", "renderer_profile"),
+            ("projection_bundle/safety", "safety_class"),
+            ("projection_bundle/safety", "criticality"),
+            ("projection_bundle/safety", "freshness_policy"),
+            ("projection_bundle/safety", "required_capabilities"),
+            ("projection_bundle/trust", "hash"),
+            ("projection_bundle/trust", "signature"),
+            ("projection_bundle/trust", "created_by"),
+            ("projection_bundle/trust", "created_at"),
+            ("projection_bundle/trust", "compiler_identity"),
+            ("projection_bundle/activation_policy", "require_verification"),
+            ("projection_bundle/activation_policy", "allow_runtime_tree_streaming"),
+            ("projection_bundle/activation_policy", "allow_production_activation"),
+            ("projection_bundle/update_policy", "require_safe_update_boundary"),
+            ("projection_bundle/update_policy", "allow_critical_update_during_pending_unknown"),
+            ("projection_bundle/update_policy", "allow_critical_update_during_quarantine"),
+            ("projection_bundle/diagnostics", "expected"),
+        ];
+
+        for section in &core.sections {
+            if !known_sections.contains(&section.path.as_str()) {
+                has_unknown_sections = true;
+            }
+        }
+
         for scalar in &core.scalars {
             if scalar.section == "projection_bundle/trust" && scalar.key == "hash" {
                 if scalar.value == "sha256:SKETCH-NOT-A-REAL-HASH" {
@@ -2469,8 +2517,26 @@ fn run_probe(path: &str) -> Result<String, String> {
                     hash_shape = "malformed";
                 }
             }
+            if !known_fields.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
+                has_unknown_fields = true;
+            }
         }
+
+        for array in &core.arrays {
+            if !known_fields.contains(&(array.section.as_str(), array.key.as_str())) {
+                has_unknown_fields = true;
+            }
+        }
+
+        let unknown_items = match (has_unknown_sections, has_unknown_fields) {
+            (true, true) => "both",
+            (true, false) => "found_unknown_sections",
+            (false, true) => "found_unknown_scalars",
+            (false, false) => "none",
+        };
+
         push_line(&mut out, &format!("hash_shape: {}", hash_shape));
+        push_line(&mut out, &format!("unknown_items: {}", unknown_items));
     }
 
     match validate_sketch(&content) {

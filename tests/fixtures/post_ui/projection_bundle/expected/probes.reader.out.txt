@@ -38,6 +38,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L25)
   [projection_bundle/diagnostics] expected = [] (L51)
 hash_shape: placeholder
+unknown_items: none
 validation_result: rejected
 primary_error: duplicate_field: allow_runtime_tree_streaming
 ---
@@ -85,6 +86,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L26)
   [projection_bundle/diagnostics] expected = [] (L51)
 hash_shape: placeholder
+unknown_items: none
 validation_result: rejected
 primary_error: missing required anchor semantic source ref: semantic.source.example
 ---
@@ -127,6 +129,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L25)
   [projection_bundle/diagnostics] expected = [] (L50)
 hash_shape: placeholder
+unknown_items: none
 validation_result: accepted
 ---
 fixture: probe_section_order_accepted.sketch.md
@@ -168,6 +171,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L33)
   [projection_bundle/diagnostics] expected = [] (L50)
 hash_shape: placeholder
+unknown_items: none
 validation_result: accepted
 ---
 fixture: probe_trust_invalid_shape.sketch.md
@@ -209,6 +213,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L25)
   [projection_bundle/diagnostics] expected = [] (L50)
 hash_shape: malformed
+unknown_items: none
 validation_result: rejected
 primary_error: field hash mismatch: expected "sha256:SKETCH-NOT-A-REAL-HASH", got "just-a-string-without-prefix"
 ---
@@ -251,6 +256,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L25)
   [projection_bundle/diagnostics] expected = [] (L50)
 hash_shape: sha256_like
+unknown_items: none
 validation_result: rejected
 primary_error: field hash mismatch: expected "sha256:SKETCH-NOT-A-REAL-HASH", got "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 ---
@@ -295,6 +301,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L28)
   [projection_bundle/diagnostics] expected = [] (L53)
 hash_shape: placeholder
+unknown_items: both
 validation_result: accepted
 ---
 fixture: probe_unknown_scalar.sketch.md
@@ -337,6 +344,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L26)
   [projection_bundle/diagnostics] expected = [] (L51)
 hash_shape: placeholder
+unknown_items: found_unknown_scalars
 validation_result: accepted
 ---
 fixture: probe_unterminated_text_block.sketch.md
