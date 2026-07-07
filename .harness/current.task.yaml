@@ -1,11 +1,11 @@
 task:
-  id: POST-UI-PROJECTION-BUNDLE-READER-HARDEN-TRUST-DUPLICATE-FIELD-PROBES
-  title: Harden ProjectionBundle trust duplicate field probes
+  id: POST-UI-PROJECTION-BUNDLE-READER-HARDEN-TRUST-METADATA-REQUIRED-FIELD-PROBES
+  title: Harden ProjectionBundle trust metadata required field probes
   type: test
   mode: active
 
 intent:
-  summary: test(post-ui): harden ProjectionBundle trust duplicate field probes
+  summary: test(post-ui): harden ProjectionBundle trust metadata required field probes
 
 layer:
   name: tooling
@@ -58,4 +58,4 @@ verification:
     - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_projection_bundle_reader_probes.ps1
 
 report:
-  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-HARDEN-TRUST-DUPLICATE-FIELD-PROBES.md
+  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-HARDEN-TRUST-METADATA-REQUIRED-FIELD-PROBES.md
