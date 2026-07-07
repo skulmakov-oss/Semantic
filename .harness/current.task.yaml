@@ -1,11 +1,11 @@
 task:
-  id: POST-UI-PROJECTION-BUNDLE-READER-STRICT-UNKNOWN-REJECTION
-  title: Probe strict unknown item rejection
+  id: POST-UI-PROJECTION-BUNDLE-READER-TRUST-HASH-SHAPE-REJECTION
+  title: Probe trust hash shape rejection
   type: experiment
   mode: active
 
 intent:
-  summary: experiment(post-ui): probe strict unknown item rejection
+  summary: experiment(post-ui): probe trust hash shape rejection
 
 layer:
   name: tooling
@@ -57,4 +57,4 @@ verification:
     - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_projection_bundle_reader_probes.ps1
 
 report:
-  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-STRICT-UNKNOWN-REJECTION.md
+  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-TRUST-HASH-SHAPE-REJECTION.md
