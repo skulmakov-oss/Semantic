@@ -14,6 +14,16 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
+const EXPECTED_SECTIONS: &[&str] = &[
+    "projection_bundle/artifacts",
+    "projection_bundle/compatibility",
+    "projection_bundle/safety",
+    "projection_bundle/trust",
+    "projection_bundle/activation_policy",
+    "projection_bundle/update_policy",
+    "projection_bundle/diagnostics",
+];
+
 const EXPECTED_SCALARS: &[(&str, &str, &str)] = &[
     ("bundle id", "bundle_id", "bundle.example.minimal"),
     ("bundle version", "bundle_version", "0-sketch"),
@@ -1265,16 +1275,7 @@ fn validate_sketch_except_core(
         "allow_critical_update_during_quarantine",
     ];
 
-    let expected_sections = [
-        "projection_bundle/artifacts",
-        "projection_bundle/compatibility",
-        "projection_bundle/safety",
-        "projection_bundle/trust",
-        "projection_bundle/activation_policy",
-        "projection_bundle/update_policy",
-        "projection_bundle/diagnostics",
-    ];
-    require_no_duplicate_sections_core(core, &expected_sections).map_err(|err| err.message)?;
+    require_no_duplicate_sections_core(core, EXPECTED_SECTIONS).map_err(|err| err.message)?;
 
     require_no_duplicate_scalars_core(core, &expected_keys, skipped_key).map_err(|err| err.message)?;
     require_no_known_unknown_fields_except_core(core, allowed_unknown_fields)?;
@@ -1552,16 +1553,7 @@ fn validate_sketch_except(
         "allow_critical_update_during_quarantine",
     ];
 
-    let expected_sections = [
-        "projection_bundle/artifacts",
-        "projection_bundle/compatibility",
-        "projection_bundle/safety",
-        "projection_bundle/trust",
-        "projection_bundle/activation_policy",
-        "projection_bundle/update_policy",
-        "projection_bundle/diagnostics",
-    ];
-    require_no_duplicate_sections(content, &expected_sections)?;
+    require_no_duplicate_sections(content, EXPECTED_SECTIONS)?;
 
     require_no_duplicate_scalars(content, &expected_keys, skipped_key)?;
     require_no_known_unknown_fields_except(content, allowed_unknown_fields)?;

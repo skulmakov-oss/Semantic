@@ -1,11 +1,11 @@
 task:
-  id: POST-UI-PROJECTION-BUNDLE-READER-REJECT-DUPLICATE-SECTIONS
-  title: Reject duplicate ProjectionBundle sections
-  type: test
+  id: POST-UI-PROJECTION-BUNDLE-READER-CENTRALIZE-EXPECTED-SECTION-LIST
+  title: Centralize ProjectionBundle expected section list
+  type: refactor
   mode: active
 
 intent:
-  summary: test(post-ui): reject duplicate ProjectionBundle sections
+  summary: refactor(post-ui): centralize ProjectionBundle expected section list
 
 layer:
   name: tooling
@@ -42,9 +42,8 @@ actions:
     - level4_claim
 
 constraints:
-  - reader-draft validation behavior change only
-  - duplicate section rejection only
-  - duplicate scalar behavior unchanged
+  - refactor only
+  - no behavior changes
   - no docs changes
   - no Cargo changes
   - no loader claim
