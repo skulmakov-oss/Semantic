@@ -215,7 +215,7 @@ arrays: 3 total
 hash_shape: malformed
 unknown_items: none
 validation_result: rejected
-primary_error: field hash mismatch: expected "sha256:SKETCH-NOT-A-REAL-HASH", got "just-a-string-without-prefix"
+primary_error: malformed_hash_shape
 ---
 fixture: probe_trust_wrong_fixture_identity.sketch.md
 text_block: found

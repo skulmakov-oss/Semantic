@@ -1134,6 +1134,29 @@ fn require_no_known_unknown_fields_except_core(
     Ok(())
 }
 
+fn require_trust_hash_shape_core(
+    core: &SketchReaderCore,
+    skipped_key: Option<&str>,
+) -> Result<(), String> {
+    if skipped_key == Some("hash") {
+        return Ok(());
+    }
+
+    if let Some(hash_scalar) = find_scalar_core(core, "hash") {
+        let val = &hash_scalar.value;
+        let is_placeholder = val == "sha256:SKETCH-NOT-A-REAL-HASH";
+        let is_sha256_like = val.starts_with("sha256:")
+            && val.len() == 71
+            && val[7..].chars().all(|c| c.is_ascii_hexdigit());
+
+        if !is_placeholder && !is_sha256_like {
+            return Err("malformed_hash_shape".to_string());
+        }
+    }
+
+    Ok(())
+}
+
 fn validate_sketch_except_core(
     core: &SketchReaderCore,
     skipped_key: Option<&str>,
@@ -1145,6 +1168,8 @@ fn validate_sketch_except_core(
             return Err(format!("missing required anchor {}: {}", label, needle));
         }
     }
+
+    require_trust_hash_shape_core(core, skipped_key)?;
 
     for &(_label, key, expected) in EXPECTED_SCALARS {
         if skipped_key == Some(key) {
@@ -1207,6 +1232,8 @@ fn validate_sketch_without_order_core(
             return Err(format!("missing required anchor {}: {}", label, needle));
         }
     }
+
+    require_trust_hash_shape_core(core, skipped_key)?;
 
     for &(_label, key, expected) in EXPECTED_SCALARS {
         if skipped_key == Some(key) {
@@ -1401,6 +1428,9 @@ fn validate_sketch_except(
         require_contains(content, label, needle)?;
     }
 
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    require_trust_hash_shape_core(&core, skipped_key)?;
+
     for &(label, key, expected) in EXPECTED_SCALARS {
         if skipped_key == Some(key) {
             continue;
@@ -1463,6 +1493,9 @@ fn validate_sketch_without_order(
     for &(label, needle) in EXPECTED_CONTAINS {
         require_contains(content, label, needle)?;
     }
+
+    let core = parse_sketch_core(content).map_err(|err| err.message)?;
+    require_trust_hash_shape_core(&core, skipped_key)?;
 
     for &(label, key, expected) in EXPECTED_SCALARS {
         if skipped_key == Some(key) {
