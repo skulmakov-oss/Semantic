@@ -1157,6 +1157,29 @@ fn require_trust_hash_shape_core(
     Ok(())
 }
 
+fn require_trust_signature_shape_core(
+    core: &SketchReaderCore,
+    skipped_key: Option<&str>,
+) -> Result<(), String> {
+    if skipped_key == Some("signature") {
+        return Ok(());
+    }
+
+    if let Some(sig_scalar) = find_scalar_core(core, "signature") {
+        let val = &sig_scalar.value;
+        let is_placeholder = val == "signature:SKETCH-NOT-A-REAL-SIGNATURE";
+        let is_signature_like = val.starts_with("signature:")
+            && val.len() == 74
+            && val[10..].chars().all(|c| c.is_ascii_hexdigit());
+
+        if !is_placeholder && !is_signature_like {
+            return Err("malformed_signature_shape".to_string());
+        }
+    }
+
+    Ok(())
+}
+
 fn validate_sketch_except_core(
     core: &SketchReaderCore,
     skipped_key: Option<&str>,
@@ -1170,6 +1193,7 @@ fn validate_sketch_except_core(
     }
 
     require_trust_hash_shape_core(core, skipped_key)?;
+    require_trust_signature_shape_core(core, skipped_key)?;
 
     for &(_label, key, expected) in EXPECTED_SCALARS {
         if skipped_key == Some(key) {
@@ -1234,6 +1258,7 @@ fn validate_sketch_without_order_core(
     }
 
     require_trust_hash_shape_core(core, skipped_key)?;
+    require_trust_signature_shape_core(core, skipped_key)?;
 
     for &(_label, key, expected) in EXPECTED_SCALARS {
         if skipped_key == Some(key) {
@@ -1430,6 +1455,7 @@ fn validate_sketch_except(
 
     let core = parse_sketch_core(content).map_err(|err| err.message)?;
     require_trust_hash_shape_core(&core, skipped_key)?;
+    require_trust_signature_shape_core(&core, skipped_key)?;
 
     for &(label, key, expected) in EXPECTED_SCALARS {
         if skipped_key == Some(key) {
@@ -1496,6 +1522,7 @@ fn validate_sketch_without_order(
 
     let core = parse_sketch_core(content).map_err(|err| err.message)?;
     require_trust_hash_shape_core(&core, skipped_key)?;
+    require_trust_signature_shape_core(&core, skipped_key)?;
 
     for &(label, key, expected) in EXPECTED_SCALARS {
         if skipped_key == Some(key) {

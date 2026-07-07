@@ -264,7 +264,7 @@ hash_shape: placeholder
 signature_shape: malformed
 unknown_items: none
 validation_result: rejected
-primary_error: field signature mismatch: expected "signature:SKETCH-NOT-A-REAL-SIGNATURE", got "invalid-signature-shape"
+primary_error: malformed_signature_shape
 ---
 fixture: probe_trust_wrong_fixture_identity.sketch.md
 text_block: found
