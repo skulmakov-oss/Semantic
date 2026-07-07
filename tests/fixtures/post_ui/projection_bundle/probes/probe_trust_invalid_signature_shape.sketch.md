@@ -43,8 +43,8 @@ projection_bundle {
   }
 
   trust {
-    hash: "just-a-string-without-prefix"
-    signature: "signature:SKETCH-NOT-A-REAL-SIGNATURE"
+    hash: "sha256:SKETCH-NOT-A-REAL-HASH"
+    signature: "invalid-signature-shape"
     created_by: "semantic-projection-compiler.SKETCH"
     created_at: "not-a-real-timestamp"
     compiler_identity: "semantic-projection-compiler.0-sketch"
