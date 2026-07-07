@@ -344,7 +344,7 @@ arrays: 3 total
   [projection_bundle/safety] required_capabilities = [] (L26)
   [projection_bundle/diagnostics] expected = [] (L51)
 hash_shape: placeholder
-unknown_items: found_unknown_scalars
+unknown_items: found_unknown_fields
 validation_result: accepted
 ---
 fixture: probe_unterminated_text_block.sketch.md

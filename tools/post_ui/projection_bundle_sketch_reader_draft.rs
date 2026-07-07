@@ -2531,7 +2531,7 @@ fn run_probe(path: &str) -> Result<String, String> {
         let unknown_items = match (has_unknown_sections, has_unknown_fields) {
             (true, true) => "both",
             (true, false) => "found_unknown_sections",
-            (false, true) => "found_unknown_scalars",
+            (false, true) => "found_unknown_fields",
             (false, false) => "none",
         };
 
