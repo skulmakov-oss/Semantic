@@ -1068,14 +1068,69 @@ fn require_no_known_unknown_fields_except_core(
     core: &SketchReaderCore,
     allowed_unknown_fields: &[&str],
 ) -> Result<(), String> {
-    for key in ["unknown_future_field", "allow_unreviewed_activation"] {
-        if allowed_unknown_fields.contains(&key) {
-            continue;
-        }
-        if count_scalar_occurrences_core(core, key) > 0 {
-            return Err(format!("unknown_field: {}", key));
+    let known_sections = [
+        "projection_bundle",
+        "projection_bundle/artifacts",
+        "projection_bundle/compatibility",
+        "projection_bundle/safety",
+        "projection_bundle/trust",
+        "projection_bundle/activation_policy",
+        "projection_bundle/update_policy",
+        "projection_bundle/diagnostics",
+    ];
+
+    let known_fields = [
+        ("projection_bundle", "bundle_id"),
+        ("projection_bundle", "bundle_version"),
+        ("projection_bundle", "projection_id"),
+        ("projection_bundle", "source_refs"),
+        ("projection_bundle/artifacts", "ui_ir_ref"),
+        ("projection_bundle/artifacts", "binding_graph_ref"),
+        ("projection_bundle/artifacts", "action_ir_ref"),
+        ("projection_bundle/compatibility", "role_dictionary_version"),
+        ("projection_bundle/compatibility", "renderer_profile"),
+        ("projection_bundle/safety", "safety_class"),
+        ("projection_bundle/safety", "criticality"),
+        ("projection_bundle/safety", "freshness_policy"),
+        ("projection_bundle/safety", "required_capabilities"),
+        ("projection_bundle/trust", "hash"),
+        ("projection_bundle/trust", "signature"),
+        ("projection_bundle/trust", "created_by"),
+        ("projection_bundle/trust", "created_at"),
+        ("projection_bundle/trust", "compiler_identity"),
+        ("projection_bundle/activation_policy", "require_verification"),
+        ("projection_bundle/activation_policy", "allow_runtime_tree_streaming"),
+        ("projection_bundle/activation_policy", "allow_production_activation"),
+        ("projection_bundle/update_policy", "require_safe_update_boundary"),
+        ("projection_bundle/update_policy", "allow_critical_update_during_pending_unknown"),
+        ("projection_bundle/update_policy", "allow_critical_update_during_quarantine"),
+        ("projection_bundle/diagnostics", "expected"),
+    ];
+
+    for section in &core.sections {
+        if !known_sections.contains(&section.path.as_str()) {
+            return Err(format!("unknown_section: {}", section.path));
         }
     }
+
+    for scalar in &core.scalars {
+        if allowed_unknown_fields.contains(&scalar.key.as_str()) {
+            continue;
+        }
+        if !known_fields.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
+            return Err(format!("unknown_field: {}", scalar.key));
+        }
+    }
+
+    for array in &core.arrays {
+        if allowed_unknown_fields.contains(&array.key.as_str()) {
+            continue;
+        }
+        if !known_fields.contains(&(array.section.as_str(), array.key.as_str())) {
+            return Err(format!("unknown_field: {}", array.key));
+        }
+    }
+
     Ok(())
 }
 
@@ -1298,71 +1353,7 @@ fn require_no_known_unknown_fields_except(
     allowed_unknown_fields: &[&str],
 ) -> Result<(), String> {
     let core = parse_sketch_core(content).map_err(|err| err.message)?;
-
-    let known_sections = [
-        "projection_bundle",
-        "projection_bundle/artifacts",
-        "projection_bundle/compatibility",
-        "projection_bundle/safety",
-        "projection_bundle/trust",
-        "projection_bundle/activation_policy",
-        "projection_bundle/update_policy",
-        "projection_bundle/diagnostics",
-    ];
-
-    let known_fields = [
-        ("projection_bundle", "bundle_id"),
-        ("projection_bundle", "bundle_version"),
-        ("projection_bundle", "projection_id"),
-        ("projection_bundle", "source_refs"),
-        ("projection_bundle/artifacts", "ui_ir_ref"),
-        ("projection_bundle/artifacts", "binding_graph_ref"),
-        ("projection_bundle/artifacts", "action_ir_ref"),
-        ("projection_bundle/compatibility", "role_dictionary_version"),
-        ("projection_bundle/compatibility", "renderer_profile"),
-        ("projection_bundle/safety", "safety_class"),
-        ("projection_bundle/safety", "criticality"),
-        ("projection_bundle/safety", "freshness_policy"),
-        ("projection_bundle/safety", "required_capabilities"),
-        ("projection_bundle/trust", "hash"),
-        ("projection_bundle/trust", "signature"),
-        ("projection_bundle/trust", "created_by"),
-        ("projection_bundle/trust", "created_at"),
-        ("projection_bundle/trust", "compiler_identity"),
-        ("projection_bundle/activation_policy", "require_verification"),
-        ("projection_bundle/activation_policy", "allow_runtime_tree_streaming"),
-        ("projection_bundle/activation_policy", "allow_production_activation"),
-        ("projection_bundle/update_policy", "require_safe_update_boundary"),
-        ("projection_bundle/update_policy", "allow_critical_update_during_pending_unknown"),
-        ("projection_bundle/update_policy", "allow_critical_update_during_quarantine"),
-        ("projection_bundle/diagnostics", "expected"),
-    ];
-
-    for section in &core.sections {
-        if !known_sections.contains(&section.path.as_str()) {
-            return Err(format!("unknown_section: {}", section.path));
-        }
-    }
-
-    for scalar in &core.scalars {
-        if allowed_unknown_fields.contains(&scalar.key.as_str()) {
-            continue;
-        }
-        if !known_fields.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
-            return Err(format!("unknown_field: {}", scalar.key));
-        }
-    }
-
-    for array in &core.arrays {
-        if allowed_unknown_fields.contains(&array.key.as_str()) {
-            continue;
-        }
-        if !known_fields.contains(&(array.section.as_str(), array.key.as_str())) {
-            return Err(format!("unknown_field: {}", array.key));
-        }
-    }
-
-    Ok(())
+    require_no_known_unknown_fields_except_core(&core, allowed_unknown_fields)
 }
 
 fn require_field_order(
