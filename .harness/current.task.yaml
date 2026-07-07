@@ -42,7 +42,9 @@ actions:
     - level4_claim
 
 constraints:
-  - experiment only
+  - refactor only
+  - no behavior changes
+  - no snapshot changes
   - no docs changes
   - no Cargo changes
   - no loader claim
