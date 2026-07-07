@@ -1,11 +1,11 @@
 task:
-  id: POST-UI-PROJECTION-BUNDLE-READER-SIGNATURE-SHAPE-REJECTION
-  title: Probe trust signature shape rejection
-  type: experiment
+  id: POST-UI-PROJECTION-BUNDLE-READER-SHARE-TRUST-SHAPE-HELPERS
+  title: Share trust shape classification helpers
+  type: refactor
   mode: active
 
 intent:
-  summary: experiment(post-ui): probe trust signature shape rejection
+  summary: refactor(post-ui): share trust shape classification helpers in sketch reader probe
 
 layer:
   name: tooling
@@ -42,7 +42,9 @@ actions:
     - level4_claim
 
 constraints:
-  - experiment only
+  - refactor only
+  - no behavior changes
+  - no snapshot changes
   - no docs changes
   - no Cargo changes
   - no loader claim
@@ -57,4 +59,4 @@ verification:
     - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_projection_bundle_reader_probes.ps1
 
 report:
-  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-SIGNATURE-SHAPE-REJECTION.md
+  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-SHARE-TRUST-SHAPE-HELPERS.md

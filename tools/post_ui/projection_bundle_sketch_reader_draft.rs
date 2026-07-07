@@ -1134,6 +1134,32 @@ fn require_no_known_unknown_fields_except_core(
     Ok(())
 }
 
+fn classify_hash_shape(val: &str) -> &'static str {
+    if val == "sha256:SKETCH-NOT-A-REAL-HASH" {
+        "placeholder"
+    } else if val.starts_with("sha256:")
+        && val.len() == 71
+        && val[7..].chars().all(|c| c.is_ascii_hexdigit())
+    {
+        "sha256_like"
+    } else {
+        "malformed"
+    }
+}
+
+fn classify_signature_shape(val: &str) -> &'static str {
+    if val == "signature:SKETCH-NOT-A-REAL-SIGNATURE" {
+        "placeholder"
+    } else if val.starts_with("signature:")
+        && val.len() == 74
+        && val[10..].chars().all(|c| c.is_ascii_hexdigit())
+    {
+        "signature_like"
+    } else {
+        "malformed"
+    }
+}
+
 fn require_trust_hash_shape_core(
     core: &SketchReaderCore,
     skipped_key: Option<&str>,
@@ -1143,13 +1169,8 @@ fn require_trust_hash_shape_core(
     }
 
     if let Some(hash_scalar) = find_scalar_core(core, "hash") {
-        let val = &hash_scalar.value;
-        let is_placeholder = val == "sha256:SKETCH-NOT-A-REAL-HASH";
-        let is_sha256_like = val.starts_with("sha256:")
-            && val.len() == 71
-            && val[7..].chars().all(|c| c.is_ascii_hexdigit());
-
-        if !is_placeholder && !is_sha256_like {
+        let shape = classify_hash_shape(&hash_scalar.value);
+        if shape == "malformed" {
             return Err("malformed_hash_shape".to_string());
         }
     }
@@ -1166,13 +1187,8 @@ fn require_trust_signature_shape_core(
     }
 
     if let Some(sig_scalar) = find_scalar_core(core, "signature") {
-        let val = &sig_scalar.value;
-        let is_placeholder = val == "signature:SKETCH-NOT-A-REAL-SIGNATURE";
-        let is_signature_like = val.starts_with("signature:")
-            && val.len() == 74
-            && val[10..].chars().all(|c| c.is_ascii_hexdigit());
-
-        if !is_placeholder && !is_signature_like {
+        let shape = classify_signature_shape(&sig_scalar.value);
+        if shape == "malformed" {
             return Err("malformed_signature_shape".to_string());
         }
     }
@@ -2615,21 +2631,9 @@ fn run_probe(path: &str) -> Result<String, String> {
         for scalar in &core.scalars {
             if scalar.section == "projection_bundle/trust" {
                 if scalar.key == "hash" {
-                    if scalar.value == "sha256:SKETCH-NOT-A-REAL-HASH" {
-                        hash_shape = "placeholder";
-                    } else if scalar.value.starts_with("sha256:") && scalar.value.len() == 71 && scalar.value[7..].chars().all(|c| c.is_ascii_hexdigit()) {
-                        hash_shape = "sha256_like";
-                    } else {
-                        hash_shape = "malformed";
-                    }
+                    hash_shape = classify_hash_shape(&scalar.value);
                 } else if scalar.key == "signature" {
-                    if scalar.value == "signature:SKETCH-NOT-A-REAL-SIGNATURE" {
-                        signature_shape = "placeholder";
-                    } else if scalar.value.starts_with("signature:") && scalar.value.len() == 74 && scalar.value[10..].chars().all(|c| c.is_ascii_hexdigit()) {
-                        signature_shape = "signature_like";
-                    } else {
-                        signature_shape = "malformed";
-                    }
+                    signature_shape = classify_signature_shape(&scalar.value);
                 }
             }
             if !known_fields.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
