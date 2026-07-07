@@ -35,16 +35,21 @@ projection_bundle {
     renderer_profile: "semantic-shell.reference-sketch"
   }
 
-
-
-
-
   trust {
-    hash: "mock"
+    hash: "sha256:SKETCH-NOT-A-REAL-HASH"
+    signature: "signature:SKETCH-NOT-A-REAL-SIGNATURE"
+    created_by: "semantic-projection-compiler.SKETCH"
+    created_at: "not-a-real-timestamp"
+    compiler_identity: "semantic-projection-compiler.0-sketch"
   }
+
   safety {
-    safety_class: "mock"
+    safety_class: "VerifiedDynamic"
+    criticality: "NonCritical"
+    required_capabilities: []
+    freshness_policy: "FreshForControl"
   }
+
   activation_policy {
     require_verification: true
     allow_runtime_tree_streaming: false
@@ -73,4 +78,3 @@ A future reader may use this sketch only as fixture evidence after a separate ap
 A future loader must not treat this sketch as loadable.
 A future verifier must reject the placeholder hash and signature if verification is implemented.
 A future runtime must not activate this sketch.
-

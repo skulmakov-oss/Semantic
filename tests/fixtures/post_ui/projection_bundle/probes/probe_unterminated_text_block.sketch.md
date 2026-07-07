@@ -66,8 +66,6 @@ projection_bundle {
     expected: []
   }
 }
-```
-
 This sketch intentionally uses placeholder identity, hash, signature, compiler, and timestamp values.
 
 These placeholders must not pass future verification.

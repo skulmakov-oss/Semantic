@@ -170,15 +170,15 @@ primary_error: field hash mismatch: expected "sha256:SKETCH-NOT-A-REAL-HASH", go
 fixture: probe_reordered_sections.sketch.md
 text_block: found
 sections: 8 total
-  projection_bundle (L1 - L47)
+  projection_bundle (L1 - L52)
   projection_bundle/artifacts (L11 - L15)
   projection_bundle/compatibility (L17 - L20)
-  projection_bundle/trust (L26 - L28)
-  projection_bundle/safety (L29 - L31)
-  projection_bundle/activation_policy (L32 - L36)
-  projection_bundle/update_policy (L38 - L42)
-  projection_bundle/diagnostics (L44 - L46)
-scalars: 16 total
+  projection_bundle/trust (L22 - L28)
+  projection_bundle/safety (L30 - L35)
+  projection_bundle/activation_policy (L37 - L41)
+  projection_bundle/update_policy (L43 - L47)
+  projection_bundle/diagnostics (L49 - L51)
+scalars: 22 total
   [projection_bundle] bundle_id = bundle.example.minimal (L2)
   [projection_bundle] bundle_version = 0-sketch (L3)
   [projection_bundle] projection_id = ExampleMinimalProjection (L4)
@@ -187,19 +187,25 @@ scalars: 16 total
   [projection_bundle/artifacts] action_ir_ref = action_ir.example.minimal (L14)
   [projection_bundle/compatibility] role_dictionary_version = ui-roles.0-sketch (L18)
   [projection_bundle/compatibility] renderer_profile = semantic-shell.reference-sketch (L19)
-  [projection_bundle/trust] hash = mock (L27)
-  [projection_bundle/safety] safety_class = mock (L30)
-  [projection_bundle/activation_policy] require_verification = true (L33)
-  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L34)
-  [projection_bundle/activation_policy] allow_production_activation = false (L35)
-  [projection_bundle/update_policy] require_safe_update_boundary = true (L39)
-  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L40)
-  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L41)
-arrays: 2 total
+  [projection_bundle/trust] hash = sha256:SKETCH-NOT-A-REAL-HASH (L23)
+  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L24)
+  [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L25)
+  [projection_bundle/trust] created_at = not-a-real-timestamp (L26)
+  [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L27)
+  [projection_bundle/safety] safety_class = VerifiedDynamic (L31)
+  [projection_bundle/safety] criticality = NonCritical (L32)
+  [projection_bundle/safety] freshness_policy = FreshForControl (L34)
+  [projection_bundle/activation_policy] require_verification = true (L38)
+  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L39)
+  [projection_bundle/activation_policy] allow_production_activation = false (L40)
+  [projection_bundle/update_policy] require_safe_update_boundary = true (L44)
+  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L45)
+  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L46)
+arrays: 3 total
   [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
-  [projection_bundle/diagnostics] expected = [] (L45)
-validation_result: rejected
-primary_error: field safety_class mismatch: expected "VerifiedDynamic", got "mock"
+  [projection_bundle/safety] required_capabilities = [] (L33)
+  [projection_bundle/diagnostics] expected = [] (L50)
+validation_result: accepted
 ---
 fixture: probe_unknown_nested_section.sketch.md
 text_block: found
@@ -244,43 +250,7 @@ arrays: 3 total
 validation_result: accepted
 ---
 fixture: probe_unterminated_text_block.sketch.md
-text_block: found
-sections: 8 total
-  projection_bundle (L1 - L52)
-  projection_bundle/artifacts (L11 - L15)
-  projection_bundle/compatibility (L17 - L20)
-  projection_bundle/safety (L22 - L27)
-  projection_bundle/trust (L29 - L35)
-  projection_bundle/activation_policy (L37 - L41)
-  projection_bundle/update_policy (L43 - L47)
-  projection_bundle/diagnostics (L49 - L51)
-scalars: 22 total
-  [projection_bundle] bundle_id = bundle.example.minimal (L2)
-  [projection_bundle] bundle_version = 0-sketch (L3)
-  [projection_bundle] projection_id = ExampleMinimalProjection (L4)
-  [projection_bundle/artifacts] ui_ir_ref = ui_ir.example.minimal (L12)
-  [projection_bundle/artifacts] binding_graph_ref = binding_graph.example.minimal (L13)
-  [projection_bundle/artifacts] action_ir_ref = action_ir.example.minimal (L14)
-  [projection_bundle/compatibility] role_dictionary_version = ui-roles.0-sketch (L18)
-  [projection_bundle/compatibility] renderer_profile = semantic-shell.reference-sketch (L19)
-  [projection_bundle/safety] safety_class = VerifiedDynamic (L23)
-  [projection_bundle/safety] criticality = NonCritical (L24)
-  [projection_bundle/safety] freshness_policy = FreshForControl (L26)
-  [projection_bundle/trust] hash = sha256:SKETCH-NOT-A-REAL-HASH (L30)
-  [projection_bundle/trust] signature = signature:SKETCH-NOT-A-REAL-SIGNATURE (L31)
-  [projection_bundle/trust] created_by = semantic-projection-compiler.SKETCH (L32)
-  [projection_bundle/trust] created_at = not-a-real-timestamp (L33)
-  [projection_bundle/trust] compiler_identity = semantic-projection-compiler.0-sketch (L34)
-  [projection_bundle/activation_policy] require_verification = true (L38)
-  [projection_bundle/activation_policy] allow_runtime_tree_streaming = false (L39)
-  [projection_bundle/activation_policy] allow_production_activation = false (L40)
-  [projection_bundle/update_policy] require_safe_update_boundary = true (L44)
-  [projection_bundle/update_policy] allow_critical_update_during_pending_unknown = false (L45)
-  [projection_bundle/update_policy] allow_critical_update_during_quarantine = false (L46)
-arrays: 3 total
-  [projection_bundle] source_refs = [semantic.source.example, projection.source.example] (L6)
-  [projection_bundle/safety] required_capabilities = [] (L25)
-  [projection_bundle/diagnostics] expected = [] (L50)
-validation_result: accepted
+core_parse_error: unterminated text block
+validation_result: rejected
+primary_error: unterminated text block
 ---
-
