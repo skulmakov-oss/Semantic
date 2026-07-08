@@ -1,25 +1,27 @@
 task:
-  id: POST-UI-PROJECTION-BUNDLE-READER-VOCABULARY-SPLIT-AUDIT
-  title: Audit ProjectionBundle reader vocabulary split
-  type: audit
+  id: DOCS-ERROR-CODES-ENGLISH-TRANSLATION
+  title: Translate error codes reference to English
+  type: docs
   mode: active
 
 intent:
-  summary: audit(post-ui): record ProjectionBundle reader vocabulary split
+  summary: docs(error-codes): translate reference to English
 
 layer:
-  name: tooling
-  owner: post-ui
+  name: documentation
+  owner: language
 
 scope:
   allowed_paths:
+    - docs/ERROR_CODES.md
     - .harness/current.task.yaml
-    - .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-VOCABULARY-SPLIT-AUDIT.md
+    - .harness/reports/DOCS-ERROR-CODES-ENGLISH-TRANSLATION.md
 
   forbidden_paths:
-    - tools/post_ui/projection_bundle_sketch_reader_draft.rs
-    - tests/fixtures/**
-    - docs/**
+    - src/**
+    - crates/**
+    - tests/**
+    - tools/**
     - scripts/**
     - Cargo.toml
     - Cargo.lock
@@ -57,4 +59,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-VOCABULARY-SPLIT-AUDIT.md
+  output: .harness/reports/DOCS-ERROR-CODES-ENGLISH-TRANSLATION.md
