@@ -1,99 +1,99 @@
 # Semantic Roadmap v0.3
 
-Этот план переводит `EXO_DNA` в исполнимые задачи, привязанные к текущей кодовой базе.
+This plan turns `EXO_DNA` into executable tasks tied to the current codebase.
 
 ## Track A: Frontend & Parser
 
-Цель: завершить arena-first frontend и единообразную диагностику.
+Goal: complete the arena-first frontend and unified diagnostics.
 
-- [ ] Удалить остатки legacy-веток, где `Expr/Stmt` ещё интерпретируются как owned-деревья.
-  - Модуль: `src/frontend.rs`
-- [ ] Завершить переход на `ExprId/StmtId/SymbolId` во всех публичных API frontend.
-  - Модуль: `src/frontend.rs`
-- [ ] Ввести metadata/doc-comment узлы для `Law/Entity`.
-  - Модуль: `src/frontend.rs`
-- [ ] Унифицировать ошибки parser/type/lowering в rustc-style формат.
-  - Модули: `src/frontend.rs`, `src/semantics/mod.rs`
-- [ ] Подготовить REPL parser mode (single-input incremental parse).
-  - Модуль: `src/bin/smc.rs` (+ новый REPL модуль при необходимости)
+- [ ] Remove the remaining legacy branches where `Expr/Stmt` are still interpreted as owned trees.
+  - Module: `src/frontend.rs`
+- [ ] Complete the transition to `ExprId/StmtId/SymbolId` across all public frontend APIs.
+  - Module: `src/frontend.rs`
+- [ ] Introduce metadata/doc-comment nodes for `Law/Entity`.
+  - Module: `src/frontend.rs`
+- [ ] Unify parser/type/lowering errors into a rustc-style format.
+  - Modules: `src/frontend.rs`, `src/semantics/mod.rs`
+- [ ] Prepare REPL parser mode (single-input incremental parse).
+  - Module: `src/bin/smc.rs` (+ new REPL module if needed)
 
 Acceptance:
 
 - `cargo test` green;
-- diagnostics содержат `line:col`, context и caret во всех критических путях.
+- diagnostics include `line:col`, context, and caret in all critical paths.
 
 ## Track B: Semantics & Type System
 
-Цель: формализовать строгую семантику Logos + типовую политику.
+Goal: formalize strict Logos semantics and type policy.
 
-- [ ] Зафиксировать типовую решётку: `Int`, `Fx`, `QVec<N>`, `Mask`, `Str`, `Bool`, `Quad`, `Unit`.
-  - Модуль: `src/semantics/mod.rs`
-- [ ] Довести проверку совместимости `QVec<N>` по размерности (операции, присваивания, вызовы).
-  - Модуль: `src/semantics/mod.rs`
-- [ ] Формально отделить implicit/explicit cast policy (`Int -> Fx` only implicit).
-  - Модуль: `src/semantics/mod.rs`
-- [ ] Проверка уникальности `Law` в `Entity`, duplicate `Entity`, shadowing policy внутри `Law`.
-  - Модуль: `src/semantics/mod.rs`
-- [ ] Dead law branch detection (warning) и стабильный law scheduling по priority.
-  - Модуль: `src/semantics/mod.rs`
+- [ ] Define the type lattice: `Int`, `Fx`, `QVec<N>`, `Mask`, `Str`, `Bool`, `Quad`, `Unit`.
+  - Module: `src/semantics/mod.rs`
+- [ ] Complete `QVec<N>` dimensional compatibility checks (operations, assignments, calls).
+  - Module: `src/semantics/mod.rs`
+- [ ] Formally separate implicit/explicit cast policy (`Int -> Fx` only implicit).
+  - Module: `src/semantics/mod.rs`
+- [ ] Check `Law` uniqueness in `Entity`, duplicate `Entity`, and shadowing policy inside `Law`.
+  - Module: `src/semantics/mod.rs`
+- [ ] Add dead law branch detection (warning) and stable law scheduling by priority.
+  - Module: `src/semantics/mod.rs`
 
 Acceptance:
 
-- `smc check` даёт стабильный отчёт;
-- негативные тесты на mismatch/shadowing/duplicate покрыты.
+- `smc check` produces a stable report;
+- negative tests for mismatch/shadowing/duplicate cases are covered.
 
 ## Track C: IR, Bytecode, VM
 
-Цель: стабилизировать контракт выполнения и подготовить эволюцию формата.
+Goal: stabilize the execution contract and prepare format evolution.
 
-- [ ] Ввести capability/version таблицу в SemCode header.
-  - Модуль: `src/semcode_format.rs`
-- [ ] Зафиксировать immutable IR boundary после lowering.
-  - Модули: `src/frontend.rs`, `src/semantics/mod.rs`
-- [ ] Поддержка gate surface в pipeline (`GateRead/GateWrite/PulseEmit`) с явной политикой encode/decode.
-  - Модули: `src/frontend.rs`, `src/semcode_format.rs`, `src/semcode_vm.rs`
-- [ ] Расширить VM validation на новые секции формата.
-  - Модуль: `src/semcode_vm.rs`
-- [ ] Подготовить compatibility tests между версиями bytecode.
-  - Тесты: `tests/golden_semcode.rs` + новые golden-наборы по версиям.
+- [ ] Introduce a capability/version table in the SemCode header.
+  - Module: `src/semcode_format.rs`
+- [ ] Lock the immutable IR boundary after lowering.
+  - Modules: `src/frontend.rs`, `src/semantics/mod.rs`
+- [ ] Support gate surface in the pipeline (`GateRead/GateWrite/PulseEmit`) with explicit encode/decode policy.
+  - Modules: `src/frontend.rs`, `src/semcode_format.rs`, `src/semcode_vm.rs`
+- [ ] Extend VM validation for the new format sections.
+  - Module: `src/semcode_vm.rs`
+- [ ] Prepare compatibility tests across bytecode versions.
+  - Tests: `tests/golden_semcode.rs` + new golden sets by version.
 
 Acceptance:
 
-- golden tests стабильны;
-- разбор заголовка и версий детерминирован, с корректными ошибками.
+- golden tests are stable;
+- header and version parsing is deterministic, with correct errors.
 
 ## Track D: no_std Readiness
 
-Цель: снизить зависимости от std-контейнеров в критических местах.
+Goal: reduce dependence on std containers in critical areas.
 
-- [ ] Локализовать std-only код за feature gates.
-  - Модули: `src/lib.rs`, `src/frontend.rs`, `src/semantics/mod.rs`
-- [ ] Подготовить no_std-friendly коллекции/аллокаторы для frontend/semantics.
-  - Модули: `src/frontend.rs`, `src/semantics/mod.rs`
-- [ ] Отдельный CI профиль `--no-default-features` для smoke-check.
-  - Конфиг/CI
+- [ ] Localize std-only code behind feature gates.
+  - Modules: `src/lib.rs`, `src/frontend.rs`, `src/semantics/mod.rs`
+- [ ] Prepare no_std-friendly collections/allocators for frontend/semantics.
+  - Modules: `src/frontend.rs`, `src/semantics/mod.rs`
+- [ ] Add a separate CI profile for `--no-default-features` smoke-check.
+  - Config/CI
 
 Acceptance:
 
-- минимальная сборка no_std проходит для core слоёв;
-- std-only части чётко изолированы.
+- minimal no_std build passes for core layers;
+- std-only parts are clearly isolated.
 
 ## CLI Milestones
 
-- [x] `smc check <input.sm>` — семантический анализ без записи `.smc`.
-  - Модуль: `src/bin/smc.rs`
-- [ ] `smc repl` — интерактивный режим.
-- [ ] `smc explain <error-code>` — справка по диагностике.
+- [x] `smc check <input.sm>` — semantic analysis without writing `.smc`.
+  - Module: `src/bin/smc.rs`
+- [ ] `smc repl` — interactive mode.
+- [ ] `smc explain <error-code>` — diagnostic help.
 
-## Технический долг (приоритет высокий)
+## Technical Debt (High Priority)
 
-- [ ] Стандартизовать функцию вывода имён по `SymbolId` (одна точка преобразования).
-- [ ] Сократить дублирование между classic parser и Logos parser.
-- [ ] Выделить frontend arena/types в отдельный модуль (`src/frontend/ast.rs`) для читаемости.
+- [ ] Standardize the name-rendering function for `SymbolId` (single conversion point).
+- [ ] Reduce duplication between the classic parser and the Logos parser.
+- [ ] Extract frontend arena/types into a separate module (`src/frontend/ast.rs`) for readability.
 
-## Definition of Done для v0.3
+## Definition of Done for v0.3
 
-- `cargo check` и `cargo test` green.
-- golden-наборы обновлены и стабильны.
-- публичные API frontend/semantics согласованы на ID-модели.
-- документация (`EXO_DNA`, roadmap, diagnostics) синхронизирована с кодом.
+- `cargo check` and `cargo test` green.
+- Golden sets are updated and stable.
+- Public frontend/semantics APIs are aligned around the ID model.
+- Documentation (`EXO_DNA`, roadmap, diagnostics) is synchronized with the code.
