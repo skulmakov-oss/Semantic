@@ -3,7 +3,31 @@
 </p>
 
 # Semantic Language
+<p align="center">
+  <a href="docs/spec/index.md">
+    <img src="https://img.shields.io/badge/Semantic-Language-111827?style=for-the-badge" alt="Semantic Language" />
+  </a>
+  <a href="docs/spec/verifier.md">
+    <img src="https://img.shields.io/badge/Verifier--First-Admission-2563eb?style=for-the-badge" alt="Verifier First Admission" />
+  </a>
+  <a href="docs/spec/vm.md">
+    <img src="https://img.shields.io/badge/SemCode-VM-7c3aed?style=for-the-badge" alt="SemCode VM" />
+  </a>
+  <a href="docs/roadmap/public_status_model.md">
+    <img src="https://img.shields.io/badge/Status-Main--Only-f59e0b?style=for-the-badge" alt="Main Only Status" />
+  </a>
+</p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Quad_Logic-N%2FF%2FT%2FS-7c3aed?style=flat-square" alt="Quad Logic N/F/T/S" />
+  <img src="https://img.shields.io/badge/Determinism-Core_Invariant-16a34a?style=flat-square" alt="Determinism Core Invariant" />
+  <img src="https://img.shields.io/badge/Admission-Guarded-dc2626?style=flat-square" alt="Admission Guarded" />
+  <img src="https://img.shields.io/badge/UI-Not_Authority-6b7280?style=flat-square" alt="UI Not Authority" />
+  <img src="https://img.shields.io/badge/Runtime-Explicit_Boundary-334155?style=flat-square" alt="Runtime Explicit Boundary" />
+  <img src="https://img.shields.io/github/license/skulmakov-oss/Semantic?style=flat-square" alt="License" />
+  <img src="https://img.shields.io/github/last-commit/skulmakov-oss/Semantic?style=flat-square" alt="Last Commit" />
+  <img src="https://img.shields.io/github/stars/skulmakov-oss/Semantic?style=flat-square&logo=github" alt="GitHub Stars" />
+</p>
 Semantic lets reasoning programs be checked before they are allowed to run.
 
 It is a deterministic verified execution platform with native quad logic, SemCode VM, verifier-first admission, and controlled PROMETHEUS boundary integration.
