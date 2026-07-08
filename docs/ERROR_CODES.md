@@ -1,16 +1,16 @@
 # Semantic Error Codes
 
-Справочник диагностических кодов Semantic.  
-CLI-источник: `smc explain <code>` и `smc explain --list`.
+Semantic diagnostic codes reference.
+CLI source: `smc explain <code>` and `smc explain --list`.
 
-## Как использовать
+## How to use
 
-- Просмотр конкретного кода:
+- View a specific code:
   - `smc explain E0201`
-- Список всех кодов:
+- List all codes:
   - `smc explain --list`
 
-## Каталог
+## Catalog
 
 - `E0000`: Generic frontend parse/type error. See caret span for exact location.
 - `E0001`: Unexpected character in source input.
@@ -46,9 +46,9 @@ CLI-источник: `smc explain <code>` и `smc explain --list`.
 - `W0252`: Unused Entity field warning (`state/prop` not referenced).
 - `W0253`: Magic number warning (consider named constant).
 
-## Поддержка
+## Maintenance
 
-При добавлении новых кодов:
+When adding new codes:
 
-1. Обновить каталог в `src/bin/smc.rs` (`diagnostic_catalog`).
-2. Обновить этот документ.
+1. Update the catalog in `src/bin/smc.rs` (`diagnostic_catalog`).
+2. Update this document.
