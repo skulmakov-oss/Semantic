@@ -1,21 +1,20 @@
 task:
-  id: DOCS-README-ARCHITECTURE-RENDER-ALT-TEXT-ENGLISH
-  title: Translate README architecture render alt text to English
-  type: docs
+  id: DOCS-ENGLISH-ONLY-SURFACE-VERIFY
+  title: Verify English-only documentation surface
+  type: audit
   mode: active
 
 intent:
-  summary: docs(readme): translate architecture render alt text to English
+  summary: audit(docs): verify English-only documentation surface
 
 layer:
   name: documentation
-  owner: readme
+  owner: docs
 
 scope:
   allowed_paths:
-    - README.md
     - .harness/current.task.yaml
-    - .harness/reports/DOCS-README-ARCHITECTURE-RENDER-ALT-TEXT-ENGLISH.md
+    - .harness/reports/DOCS-ENGLISH-ONLY-SURFACE-VERIFY.md
 
   forbidden_paths:
     - src/**
@@ -24,6 +23,7 @@ scope:
     - tools/**
     - scripts/**
     - docs/**
+    - README.md
     - Cargo.toml
     - Cargo.lock
 
@@ -35,6 +35,7 @@ actions:
     - create_pr
 
   forbidden:
+    - modify_docs
     - modify_cargo_toml
     - modify_cargo_lock
     - loader_claim
@@ -43,9 +44,9 @@ actions:
     - level4_claim
 
 constraints:
-  - translation only
-  - no technical meaning changes
+  - refactor only
   - no behavior changes
+  - no docs changes
   - no Cargo changes
   - no loader claim
   - no runtime claim
@@ -59,4 +60,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/DOCS-README-ARCHITECTURE-RENDER-ALT-TEXT-ENGLISH.md
+  output: .harness/reports/DOCS-ENGLISH-ONLY-SURFACE-VERIFY.md
