@@ -1,20 +1,22 @@
 task:
-  id: DOCS-ENGLISH-ONLY-SURFACE-VERIFY
-  title: Verify English-only documentation surface
-  type: audit
+  id: CORE-QUAD-LOGIC-FRAME-V1-SPEC
+  title: Freeze Quad Logic Frame v1 spec
+  type: docs
   mode: active
 
 intent:
-  summary: audit(docs): verify English-only documentation surface
+  summary: docs(core-quad): freeze Quad Logic Frame v1 spec
+  issue: "#1405"
 
 layer:
-  name: documentation
-  owner: docs
+  name: core-quad
+  owner: semantic-core-quad
 
 scope:
   allowed_paths:
+    - docs/spec/quad_logic_frame_v1.md
     - .harness/current.task.yaml
-    - .harness/reports/DOCS-ENGLISH-ONLY-SURFACE-VERIFY.md
+    - .harness/reports/CORE-QUAD-LOGIC-FRAME-V1-SPEC.md
 
   forbidden_paths:
     - src/**
@@ -22,7 +24,6 @@ scope:
     - tests/**
     - tools/**
     - scripts/**
-    - docs/**
     - README.md
     - Cargo.toml
     - Cargo.lock
@@ -35,7 +36,6 @@ actions:
     - create_pr
 
   forbidden:
-    - modify_docs
     - modify_cargo_toml
     - modify_cargo_lock
     - loader_claim
@@ -44,9 +44,8 @@ actions:
     - level4_claim
 
 constraints:
-  - refactor only
+  - docs only
   - no behavior changes
-  - no docs changes
   - no Cargo changes
   - no loader claim
   - no runtime claim
@@ -60,4 +59,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/DOCS-ENGLISH-ONLY-SURFACE-VERIFY.md
+  output: .harness/reports/CORE-QUAD-LOGIC-FRAME-V1-SPEC.md
