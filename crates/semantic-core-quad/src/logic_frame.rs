@@ -70,9 +70,26 @@ const fn make_xor_lut() -> [[QuadState; 4]; 4] {
     lut
 }
 
+const fn make_implies_lut() -> [[QuadState; 4]; 4] {
+    let mut lut = [[QuadState::N; 4]; 4];
+    let mut i = 0;
+    while i < 4 {
+        let mut j = 0;
+        while j < 4 {
+            let b_state = QuadState::from_bits_unchecked(j as u8);
+            let not_a = NOT_LUT[i as usize];
+            lut[i as usize][j as usize] = not_a.join(b_state);
+            j += 1;
+        }
+        i += 1;
+    }
+    lut
+}
+
 pub const AND_LUT: [[QuadState; 4]; 4] = make_and_lut();
 pub const OR_LUT: [[QuadState; 4]; 4] = make_or_lut();
 pub const XOR_LUT: [[QuadState; 4]; 4] = make_xor_lut();
+pub const IMPLIES_LUT: [[QuadState; 4]; 4] = make_implies_lut();
 
 /// Primitive truth-table complement operation.
 #[inline]
@@ -93,6 +110,11 @@ pub fn or(a: QuadState, b: QuadState) -> QuadState {
 #[inline]
 pub fn xor(a: QuadState, b: QuadState) -> QuadState {
     XOR_LUT[a as usize][b as usize]
+}
+
+#[inline]
+pub fn implies(a: QuadState, b: QuadState) -> QuadState {
+    IMPLIES_LUT[a as usize][b as usize]
 }
 
 #[cfg(test)]
@@ -136,6 +158,33 @@ mod tests {
                 assert_eq!(xor(a, b), a.raw_xor(b), "XOR raw match mismatch");
             }
         }
+    }
+
+    #[test]
+    fn test_implies_table() {
+        for a in QuadState::ALL {
+            for b in QuadState::ALL {
+                assert_eq!(
+                    implies(a, b),
+                    not(a).join(b),
+                    "IMPLIES derived policy mismatch"
+                );
+            }
+        }
+
+        assert_ne!(
+            implies(QuadState::T, QuadState::F),
+            implies(QuadState::F, QuadState::T),
+            "Implication must be directional"
+        );
+
+        // Exact checks
+        assert_eq!(implies(QuadState::T, QuadState::F), QuadState::F);
+        assert_eq!(implies(QuadState::F, QuadState::T), QuadState::T);
+        assert_eq!(implies(QuadState::F, QuadState::N), QuadState::T);
+        assert_eq!(implies(QuadState::N, QuadState::F), QuadState::F);
+        assert_eq!(implies(QuadState::T, QuadState::T), QuadState::S);
+        assert_eq!(implies(QuadState::S, QuadState::N), QuadState::S);
     }
 
     #[test]
