@@ -27,6 +27,12 @@ No source, test, VM, runtime, loader, production, or cryptographic behavior was 
 - IMPLIES execution policy explicitly retains current semantics.
 - Mask evaluation mandates strict typing vs raw `u64`.
 
+## Fixup: CI failure and Guard Inventory
+
+- CI failure cause: `docs/spec/quad_logic_frame_v1.md` intentionally mentions `ton618-core`, triggering the `legacy_guards` failure since it was not in the expected inventory list.
+- Guard inventory updated: Added `./docs/spec/quad_logic_frame_v1.md` to `ton618_content_inventory_is_explicit`.
+- No behavior/source/runtime/VM changes were introduced in this fixup.
+
 ## Deferred items
 
 - LUT implementation

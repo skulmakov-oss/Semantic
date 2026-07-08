@@ -300,6 +300,7 @@ fn ton618_content_inventory_is_explicit() {
     }
 
     let expected: BTreeSet<String> = [
+        "./.harness/reports/CORE-QUAD-LOGIC-FRAME-V1-SPEC.md",
         "./Cargo.toml",
         "./README.md",
         "./crates/sm-front/Cargo.toml",
@@ -331,6 +332,7 @@ fn ton618_content_inventory_is_explicit() {
         "./docs/roadmap/roadmap_pulsar.md",
         "./docs/roadmap/m_tail_closeout.md",
         "./docs/roadmap/tail_t5_legacy_perimeter_check.md",
+        "./docs/spec/quad_logic_frame_v1.md",
         "./src/bin/ton618_core.rs",
         "./src/lib.rs",
         "./tests/legacy_guards.rs",

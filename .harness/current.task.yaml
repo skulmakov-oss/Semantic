@@ -15,13 +15,13 @@ layer:
 scope:
   allowed_paths:
     - docs/spec/quad_logic_frame_v1.md
+    - tests/legacy_guards.rs
     - .harness/current.task.yaml
     - .harness/reports/CORE-QUAD-LOGIC-FRAME-V1-SPEC.md
 
   forbidden_paths:
     - src/**
     - crates/**
-    - tests/**
     - tools/**
     - scripts/**
     - README.md
