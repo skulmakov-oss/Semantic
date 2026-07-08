@@ -1,7 +1,7 @@
 use crate::QuadState;
 
 /// Generated scalar LUT truth-table layer for the Quad Logic Frame v1.
-/// 
+///
 /// NOT operations:
 /// - NOT(N) = N
 /// - NOT(F) = T
@@ -15,7 +15,7 @@ pub const NOT_LUT: [QuadState; 4] = [
 ];
 
 /// Primitive truth-table complement operation.
-#[inline(always)]
+#[inline]
 pub fn not(state: QuadState) -> QuadState {
     NOT_LUT[state as usize]
 }

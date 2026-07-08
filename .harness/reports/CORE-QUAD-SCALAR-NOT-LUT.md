@@ -26,6 +26,13 @@ No behavior changes to VM, opcode execution, loader, or runtime boundaries. Mask
 - Implemented `NOT_LUT` using `QuadState` explicitly.
 - Added `tests` submodule ensuring `NOT` output correctly conforms to the Logic Frame v1 specification.
 
+## Fixup: Style Cleanup
+
+- `cargo fmt/clippy` cleanup: Removed trailing whitespace and replaced `#[inline(always)]` with `#[inline]`.
+- No behavior change.
+- No public API change.
+- No VM/opcode/runtime changes.
+
 ## Verification
 
 - `cargo test -p semantic-core-quad --quiet`
