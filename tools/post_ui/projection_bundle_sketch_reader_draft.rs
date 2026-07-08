@@ -49,6 +49,45 @@ const EXPECTED_SCALAR_KEYS: &[&str] = &[
     "allow_critical_update_during_quarantine",
 ];
 
+const KNOWN_SECTIONS: &[&str] = &[
+    "projection_bundle",
+    "projection_bundle/artifacts",
+    "projection_bundle/compatibility",
+    "projection_bundle/safety",
+    "projection_bundle/trust",
+    "projection_bundle/activation_policy",
+    "projection_bundle/update_policy",
+    "projection_bundle/diagnostics",
+];
+
+const KNOWN_FIELDS: &[(&str, &str)] = &[
+    ("projection_bundle", "bundle_id"),
+    ("projection_bundle", "bundle_version"),
+    ("projection_bundle", "projection_id"),
+    ("projection_bundle", "source_refs"),
+    ("projection_bundle/artifacts", "ui_ir_ref"),
+    ("projection_bundle/artifacts", "binding_graph_ref"),
+    ("projection_bundle/artifacts", "action_ir_ref"),
+    ("projection_bundle/compatibility", "role_dictionary_version"),
+    ("projection_bundle/compatibility", "renderer_profile"),
+    ("projection_bundle/safety", "safety_class"),
+    ("projection_bundle/safety", "criticality"),
+    ("projection_bundle/safety", "freshness_policy"),
+    ("projection_bundle/safety", "required_capabilities"),
+    ("projection_bundle/trust", "hash"),
+    ("projection_bundle/trust", "signature"),
+    ("projection_bundle/trust", "created_by"),
+    ("projection_bundle/trust", "created_at"),
+    ("projection_bundle/trust", "compiler_identity"),
+    ("projection_bundle/activation_policy", "require_verification"),
+    ("projection_bundle/activation_policy", "allow_runtime_tree_streaming"),
+    ("projection_bundle/activation_policy", "allow_production_activation"),
+    ("projection_bundle/update_policy", "require_safe_update_boundary"),
+    ("projection_bundle/update_policy", "allow_critical_update_during_pending_unknown"),
+    ("projection_bundle/update_policy", "allow_critical_update_during_quarantine"),
+    ("projection_bundle/diagnostics", "expected"),
+];
+
 const EXPECTED_SCALARS: &[(&str, &str, &str)] = &[
     ("bundle id", "bundle_id", "bundle.example.minimal"),
     ("bundle version", "bundle_version", "0-sketch"),
@@ -1125,47 +1164,8 @@ fn require_no_known_unknown_fields_except_core(
     core: &SketchReaderCore,
     allowed_unknown_fields: &[&str],
 ) -> Result<(), String> {
-    let known_sections = [
-        "projection_bundle",
-        "projection_bundle/artifacts",
-        "projection_bundle/compatibility",
-        "projection_bundle/safety",
-        "projection_bundle/trust",
-        "projection_bundle/activation_policy",
-        "projection_bundle/update_policy",
-        "projection_bundle/diagnostics",
-    ];
-
-    let known_fields = [
-        ("projection_bundle", "bundle_id"),
-        ("projection_bundle", "bundle_version"),
-        ("projection_bundle", "projection_id"),
-        ("projection_bundle", "source_refs"),
-        ("projection_bundle/artifacts", "ui_ir_ref"),
-        ("projection_bundle/artifacts", "binding_graph_ref"),
-        ("projection_bundle/artifacts", "action_ir_ref"),
-        ("projection_bundle/compatibility", "role_dictionary_version"),
-        ("projection_bundle/compatibility", "renderer_profile"),
-        ("projection_bundle/safety", "safety_class"),
-        ("projection_bundle/safety", "criticality"),
-        ("projection_bundle/safety", "freshness_policy"),
-        ("projection_bundle/safety", "required_capabilities"),
-        ("projection_bundle/trust", "hash"),
-        ("projection_bundle/trust", "signature"),
-        ("projection_bundle/trust", "created_by"),
-        ("projection_bundle/trust", "created_at"),
-        ("projection_bundle/trust", "compiler_identity"),
-        ("projection_bundle/activation_policy", "require_verification"),
-        ("projection_bundle/activation_policy", "allow_runtime_tree_streaming"),
-        ("projection_bundle/activation_policy", "allow_production_activation"),
-        ("projection_bundle/update_policy", "require_safe_update_boundary"),
-        ("projection_bundle/update_policy", "allow_critical_update_during_pending_unknown"),
-        ("projection_bundle/update_policy", "allow_critical_update_during_quarantine"),
-        ("projection_bundle/diagnostics", "expected"),
-    ];
-
     for section in &core.sections {
-        if !known_sections.contains(&section.path.as_str()) {
+        if !KNOWN_SECTIONS.contains(&section.path.as_str()) {
             return Err(format!("unknown_section: {}", section.path));
         }
     }
@@ -1174,7 +1174,8 @@ fn require_no_known_unknown_fields_except_core(
         if allowed_unknown_fields.contains(&scalar.key.as_str()) {
             continue;
         }
-        if !known_fields.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
+
+        if !KNOWN_FIELDS.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
             return Err(format!("unknown_field: {}", scalar.key));
         }
     }
@@ -1183,7 +1184,8 @@ fn require_no_known_unknown_fields_except_core(
         if allowed_unknown_fields.contains(&array.key.as_str()) {
             continue;
         }
-        if !known_fields.contains(&(array.section.as_str(), array.key.as_str())) {
+
+        if !KNOWN_FIELDS.contains(&(array.section.as_str(), array.key.as_str())) {
             return Err(format!("unknown_field: {}", array.key));
         }
     }
@@ -2605,47 +2607,8 @@ fn run_probe(path: &str) -> Result<String, String> {
         let mut has_unknown_sections = false;
         let mut has_unknown_fields = false;
 
-        let known_sections = [
-            "projection_bundle",
-            "projection_bundle/artifacts",
-            "projection_bundle/compatibility",
-            "projection_bundle/safety",
-            "projection_bundle/trust",
-            "projection_bundle/activation_policy",
-            "projection_bundle/update_policy",
-            "projection_bundle/diagnostics",
-        ];
-
-        let known_fields = [
-            ("projection_bundle", "bundle_id"),
-            ("projection_bundle", "bundle_version"),
-            ("projection_bundle", "projection_id"),
-            ("projection_bundle", "source_refs"),
-            ("projection_bundle/artifacts", "ui_ir_ref"),
-            ("projection_bundle/artifacts", "binding_graph_ref"),
-            ("projection_bundle/artifacts", "action_ir_ref"),
-            ("projection_bundle/compatibility", "role_dictionary_version"),
-            ("projection_bundle/compatibility", "renderer_profile"),
-            ("projection_bundle/safety", "safety_class"),
-            ("projection_bundle/safety", "criticality"),
-            ("projection_bundle/safety", "freshness_policy"),
-            ("projection_bundle/safety", "required_capabilities"),
-            ("projection_bundle/trust", "hash"),
-            ("projection_bundle/trust", "signature"),
-            ("projection_bundle/trust", "created_by"),
-            ("projection_bundle/trust", "created_at"),
-            ("projection_bundle/trust", "compiler_identity"),
-            ("projection_bundle/activation_policy", "require_verification"),
-            ("projection_bundle/activation_policy", "allow_runtime_tree_streaming"),
-            ("projection_bundle/activation_policy", "allow_production_activation"),
-            ("projection_bundle/update_policy", "require_safe_update_boundary"),
-            ("projection_bundle/update_policy", "allow_critical_update_during_pending_unknown"),
-            ("projection_bundle/update_policy", "allow_critical_update_during_quarantine"),
-            ("projection_bundle/diagnostics", "expected"),
-        ];
-
         for section in &core.sections {
-            if !known_sections.contains(&section.path.as_str()) {
+            if !KNOWN_SECTIONS.contains(&section.path.as_str()) {
                 has_unknown_sections = true;
             }
         }
@@ -2658,13 +2621,13 @@ fn run_probe(path: &str) -> Result<String, String> {
                     signature_shape = classify_signature_shape(&scalar.value);
                 }
             }
-            if !known_fields.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
+            if !KNOWN_FIELDS.contains(&(scalar.section.as_str(), scalar.key.as_str())) {
                 has_unknown_fields = true;
             }
         }
 
         for array in &core.arrays {
-            if !known_fields.contains(&(array.section.as_str(), array.key.as_str())) {
+            if !KNOWN_FIELDS.contains(&(array.section.as_str(), array.key.as_str())) {
                 has_unknown_fields = true;
             }
         }
