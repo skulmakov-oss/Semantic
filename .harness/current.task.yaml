@@ -1,21 +1,21 @@
 task:
-  id: DOCS-ERROR-CODES-ENGLISH-TRANSLATION
-  title: Translate error codes reference to English
+  id: DOCS-README-LOGO-ALT-TEXT-ENGLISH
+  title: Normalize README logo alt text to English
   type: docs
   mode: active
 
 intent:
-  summary: docs(error-codes): translate reference to English
+  summary: docs(readme): normalize project logo alt text to English
 
 layer:
   name: documentation
-  owner: language
+  owner: readme
 
 scope:
   allowed_paths:
-    - docs/ERROR_CODES.md
+    - README.md
     - .harness/current.task.yaml
-    - .harness/reports/DOCS-ERROR-CODES-ENGLISH-TRANSLATION.md
+    - .harness/reports/DOCS-README-LOGO-ALT-TEXT-ENGLISH.md
 
   forbidden_paths:
     - src/**
@@ -23,6 +23,7 @@ scope:
     - tests/**
     - tools/**
     - scripts/**
+    - docs/**
     - Cargo.toml
     - Cargo.lock
 
@@ -58,4 +59,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/DOCS-ERROR-CODES-ENGLISH-TRANSLATION.md
+  output: .harness/reports/DOCS-README-LOGO-ALT-TEXT-ENGLISH.md
