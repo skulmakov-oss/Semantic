@@ -1,11 +1,11 @@
 task:
-  id: POST-UI-PROJECTION-BUNDLE-READER-CENTRALIZE-KNOWN-ITEM-LISTS
-  title: Centralize ProjectionBundle known item lists
-  type: refactor
+  id: POST-UI-PROJECTION-BUNDLE-READER-VOCABULARY-SPLIT-AUDIT
+  title: Audit ProjectionBundle reader vocabulary split
+  type: audit
   mode: active
 
 intent:
-  summary: refactor(post-ui): centralize ProjectionBundle known item lists
+  summary: audit(post-ui): record ProjectionBundle reader vocabulary split
 
 layer:
   name: tooling
@@ -14,12 +14,11 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - tools/post_ui/projection_bundle_sketch_reader_draft.rs
-    - tools/post_ui/check_projection_bundle_reader_probes.ps1
-    - tests/fixtures/post_ui/projection_bundle/probes/**
-    - tests/fixtures/post_ui/projection_bundle/expected/probes.reader.out.txt
+    - .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-VOCABULARY-SPLIT-AUDIT.md
 
   forbidden_paths:
+    - tools/post_ui/projection_bundle_sketch_reader_draft.rs
+    - tests/fixtures/**
     - docs/**
     - scripts/**
     - Cargo.toml
@@ -55,7 +54,7 @@ verification:
   required:
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
-    - pwsh -NoProfile -ExecutionPolicy Bypass -File tools/post_ui/check_projection_bundle_reader_probes.ps1
+    - git status --short
 
 report:
-  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-CENTRALIZE-KNOWN-ITEM-LISTS.md
+  output: .harness/reports/POST-UI-PROJECTION-BUNDLE-READER-VOCABULARY-SPLIT-AUDIT.md
