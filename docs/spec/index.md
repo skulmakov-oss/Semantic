@@ -26,6 +26,7 @@ Current documents in this PR:
 - `state.md` - semantic state model and invariants
 - `rules.md` - deterministic rule and agenda contract
 - `audit.md` - audit trail and replay metadata contract
+- `tesseract_unit.md` - Tesseract Semantic Unit (`t¤`) meaning-first unit contract for future SRIS/SMFS-QE integration
 - `ui_contract_map.md` - POST-UI Semantic UI contract sketch and ownership map
 - `ui_abi_capability_admission.md` - POST-UI ABI/capability admission checklist for future UI operations
 - `ui_verifier_admission_metadata.md` - POST-UI verifier-visible metadata plan for future UI operation admission
