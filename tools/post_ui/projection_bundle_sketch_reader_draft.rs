@@ -24,6 +24,31 @@ const EXPECTED_SECTIONS: &[&str] = &[
     "projection_bundle/diagnostics",
 ];
 
+const EXPECTED_SCALAR_KEYS: &[&str] = &[
+    "bundle_id",
+    "bundle_version",
+    "projection_id",
+    "ui_ir_ref",
+    "binding_graph_ref",
+    "action_ir_ref",
+    "role_dictionary_version",
+    "renderer_profile",
+    "safety_class",
+    "criticality",
+    "freshness_policy",
+    "hash",
+    "signature",
+    "created_by",
+    "created_at",
+    "compiler_identity",
+    "require_verification",
+    "allow_runtime_tree_streaming",
+    "allow_production_activation",
+    "require_safe_update_boundary",
+    "allow_critical_update_during_pending_unknown",
+    "allow_critical_update_during_quarantine",
+];
+
 const EXPECTED_SCALARS: &[(&str, &str, &str)] = &[
     ("bundle id", "bundle_id", "bundle.example.minimal"),
     ("bundle version", "bundle_version", "0-sketch"),
@@ -1250,34 +1275,8 @@ fn validate_sketch_except_core(
         require_required_scalar_core(core, key, expected).map_err(|err| err.message)?;
     }
 
-    let expected_keys = [
-        "bundle_id",
-        "bundle_version",
-        "projection_id",
-        "ui_ir_ref",
-        "binding_graph_ref",
-        "action_ir_ref",
-        "role_dictionary_version",
-        "renderer_profile",
-        "safety_class",
-        "criticality",
-        "freshness_policy",
-        "hash",
-        "signature",
-        "created_by",
-        "created_at",
-        "compiler_identity",
-        "require_verification",
-        "allow_runtime_tree_streaming",
-        "allow_production_activation",
-        "require_safe_update_boundary",
-        "allow_critical_update_during_pending_unknown",
-        "allow_critical_update_during_quarantine",
-    ];
-
     require_no_duplicate_sections_core(core, EXPECTED_SECTIONS).map_err(|err| err.message)?;
-
-    require_no_duplicate_scalars_core(core, &expected_keys, skipped_key).map_err(|err| err.message)?;
+    require_no_duplicate_scalars_core(core, EXPECTED_SCALAR_KEYS, skipped_key).map_err(|err| err.message)?;
     require_no_known_unknown_fields_except_core(core, allowed_unknown_fields)?;
 
     if !skip_order_check {
@@ -1528,34 +1527,8 @@ fn validate_sketch_except(
         require_scalar(content, label, key, expected)?;
     }
 
-    let expected_keys = [
-        "bundle_id",
-        "bundle_version",
-        "projection_id",
-        "ui_ir_ref",
-        "binding_graph_ref",
-        "action_ir_ref",
-        "role_dictionary_version",
-        "renderer_profile",
-        "safety_class",
-        "criticality",
-        "freshness_policy",
-        "hash",
-        "signature",
-        "created_by",
-        "created_at",
-        "compiler_identity",
-        "require_verification",
-        "allow_runtime_tree_streaming",
-        "allow_production_activation",
-        "require_safe_update_boundary",
-        "allow_critical_update_during_pending_unknown",
-        "allow_critical_update_during_quarantine",
-    ];
-
     require_no_duplicate_sections(content, EXPECTED_SECTIONS)?;
-
-    require_no_duplicate_scalars(content, &expected_keys, skipped_key)?;
+    require_no_duplicate_scalars(content, EXPECTED_SCALAR_KEYS, skipped_key)?;
     require_no_known_unknown_fields_except(content, allowed_unknown_fields)?;
 
     if !skip_order_check {
