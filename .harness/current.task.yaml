@@ -1,12 +1,12 @@
 task:
-  id: CORE-QUAD-LOGIC-FRAME-V1-SPEC
-  title: Freeze Quad Logic Frame v1 spec
-  type: docs
+  id: CORE-QUAD-SCALAR-NOT-LUT
+  title: Add Quad Logic Frame scalar skeleton and NOT LUT
+  type: feat
   mode: active
 
 intent:
-  summary: docs(core-quad): freeze Quad Logic Frame v1 spec
-  issue: "#1405"
+  summary: feat(core-quad): add logic_frame module skeleton + NOT table + tests
+  issue: "#1406"
 
 layer:
   name: core-quad
@@ -14,14 +14,15 @@ layer:
 
 scope:
   allowed_paths:
-    - docs/spec/quad_logic_frame_v1.md
-    - tests/legacy_guards.rs
+    - crates/semantic-core-quad/src/logic_frame.rs
+    - crates/semantic-core-quad/src/lib.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-LOGIC-FRAME-V1-SPEC.md
+    - .harness/reports/CORE-QUAD-SCALAR-NOT-LUT.md
 
   forbidden_paths:
+    - crates/ton618-core/**
     - src/**
-    - crates/**
+    - tests/**
     - tools/**
     - scripts/**
     - README.md
@@ -44,19 +45,18 @@ actions:
     - level4_claim
 
 constraints:
-  - docs only
-  - no behavior changes
-  - no Cargo changes
-  - no loader claim
-  - no runtime claim
-  - no production UI claim
-  - no Level 4 claim
+  - semantic-core-quad only
+  - scalar LUT truth-table only (first slice: NOT)
+  - no VM/opcode changes
+  - no runtime changes
+  - no mask migration
 
 verification:
   required:
+    - cargo test -p semantic-core-quad --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-LOGIC-FRAME-V1-SPEC.md
+  output: .harness/reports/CORE-QUAD-SCALAR-NOT-LUT.md

@@ -1,6 +1,8 @@
 #![allow(clippy::new_without_default, clippy::zero_repeat_side_effects)]
 #![cfg_attr(not(feature = "std"), no_std)]
 
+pub mod logic_frame;
+
 use core::fmt;
 
 #[cfg(feature = "serde")]
