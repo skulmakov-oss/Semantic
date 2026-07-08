@@ -1,11 +1,11 @@
 task:
-  id: CORE-QUAD-SCALAR-NOT-LUT
-  title: Add Quad Logic Frame scalar skeleton and NOT LUT
+  id: CORE-QUAD-SCALAR-AND-OR-LUTS
+  title: Add scalar AND/OR truth tables
   type: feat
   mode: active
 
 intent:
-  summary: feat(core-quad): add logic_frame module skeleton + NOT table + tests
+  summary: feat(core-quad): add scalar AND/OR truth tables
   issue: "#1406"
 
 layer:
@@ -15,9 +15,8 @@ layer:
 scope:
   allowed_paths:
     - crates/semantic-core-quad/src/logic_frame.rs
-    - crates/semantic-core-quad/src/lib.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-SCALAR-NOT-LUT.md
+    - .harness/reports/CORE-QUAD-SCALAR-AND-OR-LUTS.md
 
   forbidden_paths:
     - crates/ton618-core/**
@@ -25,6 +24,7 @@ scope:
     - tests/**
     - tools/**
     - scripts/**
+    - docs/**
     - README.md
     - Cargo.toml
     - Cargo.lock
@@ -46,7 +46,9 @@ actions:
 
 constraints:
   - semantic-core-quad only
-  - scalar LUT truth-table only (first slice: NOT)
+  - scalar AND/OR only
+  - no XOR
+  - no IMPLIES/EQUIV/NAND/NOR
   - no VM/opcode changes
   - no runtime changes
   - no mask migration
@@ -59,4 +61,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-SCALAR-NOT-LUT.md
+  output: .harness/reports/CORE-QUAD-SCALAR-AND-OR-LUTS.md
