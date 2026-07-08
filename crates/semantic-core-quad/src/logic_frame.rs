@@ -54,8 +54,25 @@ const fn make_or_lut() -> [[QuadState; 4]; 4] {
     lut
 }
 
+const fn make_xor_lut() -> [[QuadState; 4]; 4] {
+    let mut lut = [[QuadState::N; 4]; 4];
+    let mut i = 0;
+    while i < 4 {
+        let mut j = 0;
+        while j < 4 {
+            let a_bits = i as u8;
+            let b_bits = j as u8;
+            lut[i as usize][j as usize] = QuadState::from_bits_unchecked(a_bits ^ b_bits);
+            j += 1;
+        }
+        i += 1;
+    }
+    lut
+}
+
 pub const AND_LUT: [[QuadState; 4]; 4] = make_and_lut();
 pub const OR_LUT: [[QuadState; 4]; 4] = make_or_lut();
+pub const XOR_LUT: [[QuadState; 4]; 4] = make_xor_lut();
 
 /// Primitive truth-table complement operation.
 #[inline]
@@ -71,6 +88,11 @@ pub fn and(a: QuadState, b: QuadState) -> QuadState {
 #[inline]
 pub fn or(a: QuadState, b: QuadState) -> QuadState {
     OR_LUT[a as usize][b as usize]
+}
+
+#[inline]
+pub fn xor(a: QuadState, b: QuadState) -> QuadState {
+    XOR_LUT[a as usize][b as usize]
 }
 
 #[cfg(test)]
@@ -108,11 +130,21 @@ mod tests {
     }
 
     #[test]
+    fn test_xor_table() {
+        for a in QuadState::ALL {
+            for b in QuadState::ALL {
+                assert_eq!(xor(a, b), a.raw_xor(b), "XOR raw match mismatch");
+            }
+        }
+    }
+
+    #[test]
     fn test_commutativity() {
         for a in QuadState::ALL {
             for b in QuadState::ALL {
                 assert_eq!(and(a, b), and(b, a), "AND must be commutative");
                 assert_eq!(or(a, b), or(b, a), "OR must be commutative");
+                assert_eq!(xor(a, b), xor(b, a), "XOR must be commutative");
             }
         }
     }
@@ -124,11 +156,19 @@ mod tests {
         for x in QuadState::ALL {
             assert_eq!(and(QuadState::T, x), x, "T AND x should be x");
             assert_eq!(or(QuadState::F, x), x, "F OR x should be x");
+            assert_eq!(xor(x, x), QuadState::N, "x XOR x should be N");
+            assert_eq!(xor(QuadState::N, x), x, "N XOR x should be x");
         }
 
         assert_eq!(and(QuadState::N, QuadState::T), QuadState::N);
         assert_eq!(or(QuadState::N, QuadState::F), QuadState::N);
         assert_eq!(and(QuadState::S, QuadState::T), QuadState::S);
         assert_eq!(or(QuadState::S, QuadState::F), QuadState::S);
+
+        // Exact checks for XOR
+        assert_eq!(xor(QuadState::F, QuadState::T), QuadState::S);
+        assert_eq!(xor(QuadState::T, QuadState::S), QuadState::F);
+        assert_eq!(xor(QuadState::F, QuadState::S), QuadState::T);
+        assert_eq!(xor(QuadState::N, QuadState::S), QuadState::S);
     }
 }

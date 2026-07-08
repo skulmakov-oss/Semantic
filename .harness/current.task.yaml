@@ -1,11 +1,11 @@
 task:
-  id: CORE-QUAD-SCALAR-AND-OR-LUTS
-  title: Add scalar AND/OR truth tables
+  id: CORE-QUAD-SCALAR-XOR-LUT
+  title: Add scalar XOR truth table
   type: feat
   mode: active
 
 intent:
-  summary: feat(core-quad): add scalar AND/OR truth tables
+  summary: feat(core-quad): add scalar XOR truth table
   issue: "#1406"
 
 layer:
@@ -16,7 +16,7 @@ scope:
   allowed_paths:
     - crates/semantic-core-quad/src/logic_frame.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-SCALAR-AND-OR-LUTS.md
+    - .harness/reports/CORE-QUAD-SCALAR-XOR-LUT.md
 
   forbidden_paths:
     - crates/ton618-core/**
@@ -46,8 +46,8 @@ actions:
 
 constraints:
   - semantic-core-quad only
-  - scalar AND/OR only
-  - no XOR
+  - scalar XOR only
+  - raw-code derived policy matching raw_xor
   - no IMPLIES/EQUIV/NAND/NOR
   - no VM/opcode changes
   - no runtime changes
@@ -61,4 +61,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-SCALAR-AND-OR-LUTS.md
+  output: .harness/reports/CORE-QUAD-SCALAR-XOR-LUT.md
