@@ -34,7 +34,6 @@ actions:
     - create_pr
 
   forbidden:
-    - modify_docs
     - modify_cargo_toml
     - modify_cargo_lock
     - loader_claim
@@ -43,9 +42,9 @@ actions:
     - level4_claim
 
 constraints:
-  - refactor only
+  - translation only
+  - no technical meaning changes
   - no behavior changes
-  - no docs changes
   - no Cargo changes
   - no loader claim
   - no runtime claim
