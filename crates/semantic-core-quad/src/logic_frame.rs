@@ -291,6 +291,9 @@ mod tests {
 
     #[test]
     fn test_equiv_policy_is_deferred() {
-        assert_eq!(EQUIV_POLICY, "deferred_or_separately_named", "EQUIV policy must remain deferred until explicitly standardized");
+        assert_eq!(
+            EQUIV_POLICY, "deferred_or_separately_named",
+            "EQUIV policy must remain deferred until explicitly standardized"
+        );
     }
 }
