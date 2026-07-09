@@ -1,26 +1,32 @@
 task:
-  id: CORE-QUAD-VM-LATTICE-TRUTH-OPCODE-CONTRACT
-  title: Define lattice vs truth-table opcode contract
-  type: docs
+  id: CORE-QUAD-LATTICE-ALIASES
+  title: Add explicit lattice aliases on QuadroReg32
+  type: feat
   mode: active
 
 intent:
-  summary: docs(core-quad/vm): define lattice vs truth-table opcode contract
-  issue: "#1442"
+  summary: feat(core-quad): add explicit lattice aliases
+  issue: "#1444"
 
 layer:
   name: core_quad
-  owner: sm-vm
+  owner: semantic-core-quad
 
 scope:
   allowed_paths:
-    - docs/roadmap/core_quad/lattice_truth_opcode_contract.md
+    - crates/semantic-core-quad/src/lib.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-VM-LATTICE-TRUTH-OPCODE-CONTRACT.md
+    - .harness/reports/CORE-QUAD-LATTICE-ALIASES.md
 
   forbidden_paths:
-    - crates/**
+    - crates/sm-vm/**
+    - crates/sm-format/**
+    - crates/sm-ir/**
+    - crates/sm-emit/**
+    - crates/sm-verify/**
+    - crates/ton618-core/**
     - src/**
+    - docs/**
     - tests/**
     - tools/**
     - README.md
@@ -35,14 +41,15 @@ actions:
     - create_pr
 
   forbidden:
-    - write_rust
-    - change_opcode_semantics
+    - change_opcodes
+    - modify_vm
 
 verification:
   required:
+    - cargo test -p semantic-core-quad --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-VM-LATTICE-TRUTH-OPCODE-CONTRACT.md
+  output: .harness/reports/CORE-QUAD-LATTICE-ALIASES.md

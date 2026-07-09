@@ -388,6 +388,21 @@ impl QuadroReg32 {
     pub const fn map_nor(self, other: Self) -> Self {
         self.map_nor_swar(other)
     }
+
+    // Explicit Lattice Aliases
+    // These methods provide the raw bitwise operations equivalent to lattice meet/join/inverse.
+
+    pub const fn lattice_meet(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
+    pub const fn lattice_join(self, other: Self) -> Self {
+        self.join(other)
+    }
+
+    pub const fn lattice_inverse(self) -> Self {
+        self.inverse()
+    }
 }
 
 impl fmt::Debug for QuadroReg32 {
@@ -1719,5 +1734,61 @@ mod tests {
                 assert_eq!(a.map_nor(b), a.map_nor_swar(b));
             }
         }
+    }
+
+    #[test]
+    fn lattice_meet_matches_raw_bitwise_and_samples() {
+        let a = reg_filled(QuadState::F);
+        let b = reg_filled(QuadState::T);
+        let res = a.lattice_meet(b);
+        let expected = reg_filled(QuadState::N);
+        assert_eq!(res, expected);
+
+        for a in RAW_SAMPLES {
+            for b in RAW_SAMPLES {
+                let r1 = QuadroReg32::from_raw(a);
+                let r2 = QuadroReg32::from_raw(b);
+                assert_eq!(r1.lattice_meet(r2), QuadroReg32::from_raw(a & b));
+            }
+        }
+    }
+
+    #[test]
+    fn lattice_join_matches_raw_bitwise_or_samples() {
+        let a = reg_filled(QuadState::F);
+        let b = reg_filled(QuadState::T);
+        let res = a.lattice_join(b);
+        let expected = reg_filled(QuadState::S);
+        assert_eq!(res, expected);
+
+        for a in RAW_SAMPLES {
+            for b in RAW_SAMPLES {
+                let r1 = QuadroReg32::from_raw(a);
+                let r2 = QuadroReg32::from_raw(b);
+                assert_eq!(r1.lattice_join(r2), QuadroReg32::from_raw(a | b));
+            }
+        }
+    }
+
+    #[test]
+    fn lattice_inverse_matches_inverse_samples() {
+        for a in RAW_SAMPLES {
+            let r = QuadroReg32::from_raw(a);
+            assert_eq!(r.lattice_inverse(), r.inverse());
+        }
+    }
+
+    #[test]
+    fn lattice_aliases_are_distinct_from_truth_maps_on_mismatch_examples() {
+        let f = reg_filled(QuadState::F);
+        let t = reg_filled(QuadState::T);
+
+        // F lattice_meet T = N, but F map_and T = F
+        assert_eq!(f.lattice_meet(t).get_unchecked(0), QuadState::N);
+        assert_eq!(f.map_and(t).get_unchecked(0), QuadState::F);
+
+        // F lattice_join T = S, but F map_or T = T
+        assert_eq!(f.lattice_join(t).get_unchecked(0), QuadState::S);
+        assert_eq!(f.map_or(t).get_unchecked(0), QuadState::T);
     }
 }
