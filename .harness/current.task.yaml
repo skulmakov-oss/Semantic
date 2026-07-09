@@ -1,27 +1,26 @@
 task:
-  id: FORMAT-QTRUTH-OPCODE-SLOTS
-  title: Add QTruth opcode enum slots
-  type: feat
+  id: VERIFY-VM-QTRUTH-UNSUPPORTED-BOUNDARY
+  title: lock unsupported QTruth opcode boundary
+  type: test
   mode: active
 
 intent:
-  summary: feat(format): add QTruth opcode enum slots
-  issue: "#1454"
+  summary: test(verify/vm): lock unsupported QTruth opcode boundary
+  issue: "#1456"
 
 layer:
   name: core_quad
-  owner: sm-format
+  owner: sm-verify
 
 scope:
   allowed_paths:
-    - crates/sm-format/src/local_format.rs
-    - crates/sm-format/src/lib.rs
     - crates/sm-verify/src/lib.rs
     - crates/sm-vm/src/semcode_vm.rs
     - .harness/current.task.yaml
-    - .harness/reports/FORMAT-QTRUTH-OPCODE-SLOTS.md
+    - .harness/reports/VERIFY-VM-QTRUTH-UNSUPPORTED-BOUNDARY.md
 
   forbidden_paths:
+    - crates/sm-format/**
     - crates/sm-ir/**
     - crates/sm-emit/**
     - crates/semantic-core-quad/**
@@ -43,17 +42,22 @@ actions:
 
   forbidden:
     - implement_qtruth_execution
-    - modify_ir
-    - modify_emit
+    - add_ir_instructions
+    - add_emitter_support
+    - modify_opcode_byte_values
     - modify_core_quad
-    - add_qtruth_lowering
+    - use_hidden_adapters
+    - route_qtruth_through_lattice_aliases
+    - add_equiv_nand_nor
 
 verification:
   required:
-    - cargo test -p sm-format --quiet
+    - cargo test -p sm-verify --quiet
+    - cargo test -p sm-vm --quiet
+    - cargo test -p sm-vm --features vm-profile --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/FORMAT-QTRUTH-OPCODE-SLOTS.md
+  output: .harness/reports/VERIFY-VM-QTRUTH-UNSUPPORTED-BOUNDARY.md

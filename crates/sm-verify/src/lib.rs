@@ -2350,4 +2350,57 @@ mod tests {
         assert_eq!(entry_token.bytes(), token.bytes());
         assert_eq!(entry_token.program(), token.program());
     }
+
+    #[test]
+    fn verifier_accepts_unsupported_qtruth_opcodes() {
+        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        let code_len_pos = 8 + 2 + 4;
+        let opcode_pos = code_len_pos + 4 + 2;
+
+        let mut new_code = Vec::new();
+        // QTruthAnd (0x17)
+        new_code.push(0x17);
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // lhs
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // rhs
+                                                         // QTruthOr (0x18)
+        new_code.push(0x18);
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // lhs
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // rhs
+                                                         // QTruthNot (0x19)
+        new_code.push(0x19);
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // src
+                                                         // QTruthImpl (0x1A)
+        new_code.push(0x1A);
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // lhs
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // rhs
+                                                         // Ret
+        new_code.push(Opcode::Ret as u8);
+        new_code.push(0);
+
+        bytes.splice(opcode_pos..opcode_pos + 2, new_code.iter().copied());
+
+        let new_code_len = 2 + new_code.len();
+        bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
+
+        let verified = verify_semcode(&bytes).expect("verify");
+        assert_eq!(verified.functions.len(), 1);
+    }
+
+    #[test]
+    fn verifier_rejects_truncated_qtruth_opcodes() {
+        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        let opcode_pos = 8 + 2 + 4 + 4 + 2;
+
+        bytes[opcode_pos] = 0x17; // QTruthAnd (requires 4 operands bytes, only 1 left)
+
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OperandOutOfBounds
+        );
+    }
 }

@@ -4733,6 +4733,30 @@ mod tests {
     }
 
     #[test]
+    fn vm_rejects_unsupported_qtruth_opcodes_on_load() {
+        for opcode in [0x17, 0x18, 0x19, 0x1A] {
+            let src = "fn main() { return; }";
+            let mut bytes = compile_program_to_semcode(src).expect("compile");
+            let opcode_pos = 8 + 2 + 4 + 4 + 2;
+            bytes[opcode_pos] = opcode;
+            let err = run_semcode(&bytes).expect_err("must fail");
+            assert!(matches!(err, RuntimeError::BadFormat(_)));
+        }
+    }
+
+    #[test]
+    fn vm_disassembler_rejects_unsupported_qtruth_opcodes() {
+        for opcode in [0x17, 0x18, 0x19, 0x1A] {
+            let src = "fn main() { return; }";
+            let mut bytes = compile_program_to_semcode(src).expect("compile");
+            let opcode_pos = 8 + 2 + 4 + 4 + 2;
+            bytes[opcode_pos] = opcode;
+            let err = disasm_semcode(&bytes).expect_err("must fail disasm");
+            assert!(matches!(err, RuntimeError::BadFormat(_)));
+        }
+    }
+
+    #[test]
     fn vm_rejects_unsupported_bytecode_version_with_hint() {
         let src = "fn main() { return; }";
         let mut bytes = compile_program_to_semcode(src).expect("compile");
