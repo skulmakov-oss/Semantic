@@ -1,11 +1,11 @@
 task:
-  id: CORE-QUAD-SCALAR-IMPLIES-LUT
-  title: Add derived scalar IMPLIES truth table
+  id: CORE-QUAD-SCALAR-NAND-NOR-LUTS
+  title: Add derived scalar NAND/NOR truth tables
   type: feat
   mode: active
 
 intent:
-  summary: feat(core-quad): add derived scalar IMPLIES truth table
+  summary: feat(core-quad): add derived scalar NAND NOR truth tables
   issue: "#1406"
 
 layer:
@@ -16,7 +16,7 @@ scope:
   allowed_paths:
     - crates/semantic-core-quad/src/logic_frame.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-SCALAR-IMPLIES-LUT.md
+    - .harness/reports/CORE-QUAD-SCALAR-NAND-NOR-LUTS.md
 
   forbidden_paths:
     - crates/ton618-core/**
@@ -46,10 +46,9 @@ actions:
 
 constraints:
   - semantic-core-quad only
-  - scalar IMPLIES only
-  - derived compatibility policy not(a).join(b)
-  - no primitive implication
-  - no EQUIV/NAND/NOR
+  - scalar NAND/NOR only
+  - derived from existing scalar LUTs
+  - no EQUIV
   - no VM/opcode changes
   - no runtime changes
   - no mask migration
@@ -62,4 +61,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-SCALAR-IMPLIES-LUT.md
+  output: .harness/reports/CORE-QUAD-SCALAR-NAND-NOR-LUTS.md
