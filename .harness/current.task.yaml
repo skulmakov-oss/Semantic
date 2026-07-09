@@ -1,11 +1,11 @@
 task:
-  id: CORE-QUAD-REG32-SWAR-NOT-XOR
-  title: Add SWAR NOT/XOR map methods
+  id: CORE-QUAD-REG32-SWAR-AND-OR
+  title: Add SWAR AND/OR map methods
   type: feat
   mode: active
 
 intent:
-  summary: feat(core-quad): add SWAR NOT XOR map methods
+  summary: feat(core-quad): add SWAR AND OR map methods
   issue: "#1407"
 
 layer:
@@ -16,7 +16,7 @@ scope:
   allowed_paths:
     - crates/semantic-core-quad/src/lib.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-REG32-SWAR-NOT-XOR.md
+    - .harness/reports/CORE-QUAD-REG32-SWAR-AND-OR.md
 
   forbidden_paths:
     - crates/ton618-core/**
@@ -46,9 +46,9 @@ actions:
 
 constraints:
   - semantic-core-quad only
-  - SWAR NOT/XOR map methods only (map_not_swar, map_xor_swar)
+  - SWAR AND/OR map methods only (map_and_swar, map_or_swar)
   - compare with scalar oracle
-  - no AND/OR/IMPLIES/NAND/NOR SWAR yet
+  - no IMPLIES/NAND/NOR SWAR yet
   - no EQUIV
   - no aliases
   - no VM/opcode changes
@@ -63,4 +63,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-REG32-SWAR-NOT-XOR.md
+  output: .harness/reports/CORE-QUAD-REG32-SWAR-AND-OR.md

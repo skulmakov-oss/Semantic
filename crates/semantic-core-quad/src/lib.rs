@@ -324,6 +324,26 @@ impl QuadroReg32 {
     pub const fn map_xor_swar(self, other: Self) -> Self {
         Self(self.0 ^ other.0)
     }
+
+    // SWAR AND computes truth-plane intersection and falsity-plane union.
+    pub const fn map_and_swar(self, other: Self) -> Self {
+        let af = self.0 & LSB_MASK_32;
+        let at = self.0 & MSB_MASK_32;
+        let bf = other.0 & LSB_MASK_32;
+        let bt = other.0 & MSB_MASK_32;
+
+        Self((at & bt) | (af | bf))
+    }
+
+    // SWAR OR computes truth-plane union and falsity-plane intersection.
+    pub const fn map_or_swar(self, other: Self) -> Self {
+        let af = self.0 & LSB_MASK_32;
+        let at = self.0 & MSB_MASK_32;
+        let bf = other.0 & LSB_MASK_32;
+        let bt = other.0 & MSB_MASK_32;
+
+        Self((at | bt) | (af & bf))
+    }
 }
 
 impl fmt::Debug for QuadroReg32 {
@@ -1469,6 +1489,49 @@ mod tests {
                 let a = reg_filled(a_state);
                 let b = reg_filled(b_state);
                 assert_eq!(a.map_xor_swar(b), a.map_xor_scalar(b));
+            }
+        }
+    }
+    #[test]
+    fn map_and_swar_matches_scalar_samples() {
+        for a_raw in RAW_SAMPLES {
+            for b_raw in RAW_SAMPLES {
+                let a = QuadroReg32::from_raw(a_raw);
+                let b = QuadroReg32::from_raw(b_raw);
+                assert_eq!(a.map_and_swar(b), a.map_and_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_or_swar_matches_scalar_samples() {
+        for a_raw in RAW_SAMPLES {
+            for b_raw in RAW_SAMPLES {
+                let a = QuadroReg32::from_raw(a_raw);
+                let b = QuadroReg32::from_raw(b_raw);
+                assert_eq!(a.map_or_swar(b), a.map_or_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_and_swar_matches_scalar_repeated_state_pairs() {
+        for a_state in QuadState::ALL {
+            for b_state in QuadState::ALL {
+                let a = reg_filled(a_state);
+                let b = reg_filled(b_state);
+                assert_eq!(a.map_and_swar(b), a.map_and_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_or_swar_matches_scalar_repeated_state_pairs() {
+        for a_state in QuadState::ALL {
+            for b_state in QuadState::ALL {
+                let a = reg_filled(a_state);
+                let b = reg_filled(b_state);
+                assert_eq!(a.map_or_swar(b), a.map_or_scalar(b));
             }
         }
     }
