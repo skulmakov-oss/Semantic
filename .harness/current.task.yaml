@@ -1,12 +1,12 @@
 task:
-  id: CORE-QUAD-EQUIV-POLICY-GUARD
-  title: Guard deferred EQUIV policy
-  type: test
+  id: CORE-QUAD-REG32-SCALAR-MAP-ORACLE
+  title: Add scalar QuadroReg32 truth-map oracle
+  type: feat
   mode: active
 
 intent:
-  summary: test(core-quad): guard deferred EQUIV policy
-  issue: "#1406"
+  summary: feat(core-quad): add scalar QuadroReg32 truth-map oracle
+  issue: "#1407"
 
 layer:
   name: core-quad
@@ -14,9 +14,9 @@ layer:
 
 scope:
   allowed_paths:
-    - crates/semantic-core-quad/src/logic_frame.rs
+    - crates/semantic-core-quad/src/lib.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-EQUIV-POLICY-GUARD.md
+    - .harness/reports/CORE-QUAD-REG32-SCALAR-MAP-ORACLE.md
 
   forbidden_paths:
     - crates/ton618-core/**
@@ -46,10 +46,10 @@ actions:
 
 constraints:
   - semantic-core-quad only
-  - EQUIV policy guard only
-  - no equiv public API
-  - no EQUIV_LUT
-  - policy is deferred/separately named
+  - scalar map methods only (map_not_scalar, map_and_scalar, etc.)
+  - iterate 32 lanes via logic_frame
+  - no SWAR methods yet
+  - no EQUIV map
   - no VM/opcode changes
   - no runtime changes
   - no mask migration
@@ -62,4 +62,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-EQUIV-POLICY-GUARD.md
+  output: .harness/reports/CORE-QUAD-REG32-SCALAR-MAP-ORACLE.md
