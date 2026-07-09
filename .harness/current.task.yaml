@@ -1,11 +1,11 @@
 task:
-  id: CORE-QUAD-SCALAR-NAND-NOR-LUTS
-  title: Add derived scalar NAND/NOR truth tables
-  type: feat
+  id: CORE-QUAD-EQUIV-POLICY-GUARD
+  title: Guard deferred EQUIV policy
+  type: test
   mode: active
 
 intent:
-  summary: feat(core-quad): add derived scalar NAND NOR truth tables
+  summary: test(core-quad): guard deferred EQUIV policy
   issue: "#1406"
 
 layer:
@@ -16,7 +16,7 @@ scope:
   allowed_paths:
     - crates/semantic-core-quad/src/logic_frame.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-SCALAR-NAND-NOR-LUTS.md
+    - .harness/reports/CORE-QUAD-EQUIV-POLICY-GUARD.md
 
   forbidden_paths:
     - crates/ton618-core/**
@@ -46,9 +46,10 @@ actions:
 
 constraints:
   - semantic-core-quad only
-  - scalar NAND/NOR only
-  - derived from existing scalar LUTs
-  - no EQUIV
+  - EQUIV policy guard only
+  - no equiv public API
+  - no EQUIV_LUT
+  - policy is deferred/separately named
   - no VM/opcode changes
   - no runtime changes
   - no mask migration
@@ -61,4 +62,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-SCALAR-NAND-NOR-LUTS.md
+  output: .harness/reports/CORE-QUAD-EQUIV-POLICY-GUARD.md

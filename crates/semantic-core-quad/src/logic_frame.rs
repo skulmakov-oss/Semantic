@@ -123,6 +123,11 @@ pub const IMPLIES_LUT: [[QuadState; 4]; 4] = make_implies_lut();
 pub const NAND_LUT: [[QuadState; 4]; 4] = make_nand_lut();
 pub const NOR_LUT: [[QuadState; 4]; 4] = make_nor_lut();
 
+// EQUIV is intentionally not exposed as `equiv`.
+// Quad Logic Frame v1 marks equivalence as deferred / separately named.
+// Do not add an unqualified `equiv(a, b)` API without a dedicated spec update.
+pub const EQUIV_POLICY: &str = "deferred_or_separately_named";
+
 /// Primitive truth-table complement operation.
 #[inline]
 pub fn not(state: QuadState) -> QuadState {
@@ -282,5 +287,13 @@ mod tests {
         assert_eq!(xor(QuadState::T, QuadState::S), QuadState::F);
         assert_eq!(xor(QuadState::F, QuadState::S), QuadState::T);
         assert_eq!(xor(QuadState::N, QuadState::S), QuadState::S);
+    }
+
+    #[test]
+    fn test_equiv_policy_is_deferred() {
+        assert_eq!(
+            EQUIV_POLICY, "deferred_or_separately_named",
+            "EQUIV policy must remain deferred until explicitly standardized"
+        );
     }
 }
