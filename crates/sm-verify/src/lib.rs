@@ -2354,34 +2354,39 @@ mod tests {
     #[test]
     fn verifier_accepts_unsupported_qtruth_opcodes() {
         let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        let (_, code_start, code_end) = function_code_span(&bytes, "main");
-
+        let code_len_pos = 8 + 2 + 4;
+        let opcode_pos = code_len_pos + 4 + 2;
+        
         let mut new_code = Vec::new();
         // QTruthAnd (0x17)
         new_code.push(0x17);
-        new_code.extend_from_slice(&0u16.to_le_bytes());
-        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // lhs
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // rhs
         // QTruthOr (0x18)
         new_code.push(0x18);
-        new_code.extend_from_slice(&0u16.to_le_bytes());
-        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // lhs
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // rhs
         // QTruthNot (0x19)
         new_code.push(0x19);
-        new_code.extend_from_slice(&0u16.to_le_bytes());
-        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // src
         // QTruthImpl (0x1A)
         new_code.push(0x1A);
-        new_code.extend_from_slice(&0u16.to_le_bytes());
-        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // lhs
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // rhs
         // Ret
         new_code.push(Opcode::Ret as u8);
         new_code.push(0);
-
-        bytes.splice(code_start..code_end, new_code.iter().copied());
-
-        let new_code_len = new_code.len();
-        bytes[code_start - 4..code_start].copy_from_slice(&(new_code_len as u32).to_le_bytes());
-
+        
+        bytes.splice(opcode_pos..opcode_pos + 2, new_code.iter().copied());
+        
+        let old_code_len = 4; // 2 bytes for string count + 2 bytes for instructions
+        let new_code_len = 2 + new_code.len();
+        bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
+        
         let verified = verify_semcode(&bytes).expect("verify");
         assert_eq!(verified.functions.len(), 1);
     }
@@ -2389,18 +2394,10 @@ mod tests {
     #[test]
     fn verifier_rejects_truncated_qtruth_opcodes() {
         let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        let (_, code_start, code_end) = function_code_span(&bytes, "main");
-
-        let mut new_code = Vec::new();
-        // QTruthAnd (0x17) with truncated src
-        new_code.push(0x17);
-        new_code.extend_from_slice(&0u16.to_le_bytes()); // dst
-
-        bytes.splice(code_start..code_end, new_code.iter().copied());
-
-        let new_code_len = new_code.len();
-        bytes[code_start - 4..code_start].copy_from_slice(&(new_code_len as u32).to_le_bytes());
-
+        let opcode_pos = 8 + 2 + 4 + 4 + 2;
+        
+        bytes[opcode_pos] = 0x17; // QTruthAnd (requires 4 operands bytes, only 1 left)
+        
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
