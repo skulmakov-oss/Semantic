@@ -314,6 +314,16 @@ impl QuadroReg32 {
         }
         self
     }
+
+    // SWAR NOT swaps the falsity and truth bit planes.
+    pub const fn map_not_swar(self) -> Self {
+        self.inverse()
+    }
+
+    // SWAR XOR is raw-code XOR across packed quadit lanes.
+    pub const fn map_xor_swar(self, other: Self) -> Self {
+        Self(self.0 ^ other.0)
+    }
 }
 
 impl fmt::Debug for QuadroReg32 {
@@ -1414,4 +1424,52 @@ mod tests {
     bank_tail_case!(bank_tail_len_127, 127);
     bank_tail_case!(bank_tail_len_128, 128);
     bank_tail_case!(bank_tail_len_129, 129);
+
+    const RAW_SAMPLES: [u64; 7] = [
+        0x0000_0000_0000_0000,
+        0xFFFF_FFFF_FFFF_FFFF,
+        0x5555_5555_5555_5555,
+        0xAAAA_AAAA_AAAA_AAAA,
+        0x0123_4567_89AB_CDEF,
+        0xE4E4_E4E4_E4E4_E4E4,
+        0xBADC_0FFE_DEAD_BEEF,
+    ];
+
+    #[test]
+    fn map_not_swar_matches_scalar_samples() {
+        for raw in RAW_SAMPLES {
+            let reg = QuadroReg32::from_raw(raw);
+            assert_eq!(reg.map_not_swar(), reg.map_not_scalar());
+        }
+    }
+
+    #[test]
+    fn map_xor_swar_matches_scalar_samples() {
+        for a_raw in RAW_SAMPLES {
+            for b_raw in RAW_SAMPLES {
+                let a = QuadroReg32::from_raw(a_raw);
+                let b = QuadroReg32::from_raw(b_raw);
+                assert_eq!(a.map_xor_swar(b), a.map_xor_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_not_swar_matches_scalar_repeated_states() {
+        for state in QuadState::ALL {
+            let reg = reg_filled(state);
+            assert_eq!(reg.map_not_swar(), reg.map_not_scalar());
+        }
+    }
+
+    #[test]
+    fn map_xor_swar_matches_scalar_repeated_state_pairs() {
+        for a_state in QuadState::ALL {
+            for b_state in QuadState::ALL {
+                let a = reg_filled(a_state);
+                let b = reg_filled(b_state);
+                assert_eq!(a.map_xor_swar(b), a.map_xor_scalar(b));
+            }
+        }
+    }
 }
