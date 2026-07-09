@@ -1,0 +1,9 @@
+
+Path                                                LineNumber Line
+----                                                ---------- ----
+C:\Users\said3\Desktop\EXOcode\Semantic\output.txt           2 строка:1 знак:1
+C:\Users\said3\Desktop\EXOcode\Semantic\output.txt           9 === Semantic UI Application Boundary тАФ Native Render D…
+C:\Users\said3\Desktop\EXOcode\Semantic\output2.txt          3 строка:1 знак:1
+C:\Users\said3\Desktop\EXOcode\Semantic\output2.txt         12 === Semantic UI Application Boundary тАФ Native Render D…
+C:\Users\said3\Desktop\EXOcode\Semantic\README.md           66 <img width="1693" height="929" alt="ChatGPT Image 29 мая…
+

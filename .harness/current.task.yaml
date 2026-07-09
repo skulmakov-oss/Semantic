@@ -1,29 +1,32 @@
 task:
-  id: CORE-QUAD-REG32-MAP-DEFAULT-ALIASES
-  title: Promote SWAR maps to default aliases
+  id: VM-QUAD-OPCODE-SEMANTIC-CORE-QUAD-BRIDGE
+  title: Route scalar quad opcodes through semantic-core-quad maps
   type: feat
   mode: active
 
 intent:
-  summary: feat(core-quad): promote SWAR maps to default aliases
-  issue: "#1436"
+  summary: feat(vm): route quad opcodes through semantic-core-quad maps
+  issue: "#1438"
 
 layer:
-  name: core-quad
-  owner: semantic-core-quad
+  name: vm
+  owner: sm-vm
 
 scope:
   allowed_paths:
-    - crates/semantic-core-quad/src/lib.rs
+    - crates/sm-vm/Cargo.toml
+    - crates/sm-vm/src/semcode_vm.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-REG32-MAP-DEFAULT-ALIASES.md
+    - .harness/reports/VM-QUAD-OPCODE-SEMANTIC-CORE-QUAD-BRIDGE.md
 
   forbidden_paths:
+    - crates/sm-format/**
+    - crates/sm-ir/**
+    - crates/sm-emit/**
+    - crates/sm-verify/**
+    - crates/semantic-core-quad/**
     - crates/ton618-core/**
     - src/**
-    - tests/**
-    - tools/**
-    - scripts/**
     - docs/**
     - README.md
     - Cargo.toml
@@ -37,27 +40,26 @@ actions:
     - create_pr
 
   forbidden:
-    - modify_cargo_toml
-    - modify_cargo_lock
     - loader_claim
     - runtime_claim
     - production_ui_claim
     - level4_claim
 
 constraints:
-  - semantic-core-quad only
-  - Add explicit default aliases on QuadroReg32
-  - No EQUIV API
-  - No VM/opcode changes
-  - No runtime changes
-  - No mask migration
+  - Add semantic-core-quad dependency
+  - Update quad_not, quad_and, quad_or, quad_implies
+  - Update Opcode::QImpl execution
+  - Add bridge matching tests
+  - Do not change opcode IDs or semantics
+  - Do not add EQUIV or NAND/NOR
 
 verification:
   required:
+    - cargo test -p sm-vm --quiet
     - cargo test -p semantic-core-quad --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-REG32-MAP-DEFAULT-ALIASES.md
+  output: .harness/reports/VM-QUAD-OPCODE-SEMANTIC-CORE-QUAD-BRIDGE.md

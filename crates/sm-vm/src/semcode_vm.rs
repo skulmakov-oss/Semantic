@@ -14,6 +14,7 @@ use sm_runtime_core::{
 };
 use sm_verify::RejectReport;
 use sm_verify::{verify_semcode_token, EntryResolutionError, VerifiedEntrySemCode};
+use semantic_core_quad::{QuadState, QuadroReg32};
 use std::collections::{HashMap, HashSet};
 
 /// Scalar key type for Map values.
@@ -2060,7 +2061,7 @@ where
                 let out_q = match opcode {
                     Opcode::QAnd => quad_and(lq, rq),
                     Opcode::QOr => quad_or(lq, rq),
-                    Opcode::QImpl => quad_or(quad_not(lq), rq),
+                    Opcode::QImpl => quad_implies(lq, rq),
                     _ => unreachable!(),
                 };
                 set_reg(vm, frame_idx, dst, Value::Quad(out_q))?;
@@ -2628,18 +2629,77 @@ fn u8_to_quad(v: u8) -> QuadVal {
     }
 }
 
-fn quad_and(a: QuadVal, b: QuadVal) -> QuadVal {
-    u8_to_quad(quad_to_u8(a) & quad_to_u8(b))
+fn quadval_to_quadstate(q: QuadVal) -> QuadState {
+    match q {
+        QuadVal::N => QuadState::N,
+        QuadVal::F => QuadState::F,
+        QuadVal::T => QuadState::T,
+        QuadVal::S => QuadState::S,
+    }
 }
 
-fn quad_or(a: QuadVal, b: QuadVal) -> QuadVal {
-    u8_to_quad(quad_to_u8(a) | quad_to_u8(b))
+fn quadstate_to_quadval(q: QuadState) -> QuadVal {
+    match q {
+        QuadState::N => QuadVal::N,
+        QuadState::F => QuadVal::F,
+        QuadState::T => QuadVal::T,
+        QuadState::S => QuadVal::S,
+    }
+}
+
+fn quad_lane0(q: QuadVal) -> QuadroReg32 {
+    let mut reg = QuadroReg32::from_raw(0);
+    reg.set_unchecked(0, quadval_to_quadstate(q));
+    reg
+}
+
+fn quad_lane0_value(reg: QuadroReg32) -> QuadVal {
+    quadstate_to_quadval(reg.get_unchecked(0))
+}
+
+// Inverted mapping for QAnd and QOr to emulate bitwise behavior using Belnap maps
+fn quadval_to_quadstate_inverted_f(q: QuadVal) -> QuadState {
+    match q {
+        QuadVal::N => QuadState::F,
+        QuadVal::F => QuadState::N,
+        QuadVal::T => QuadState::S,
+        QuadVal::S => QuadState::T,
+    }
+}
+
+fn quadstate_to_quadval_inverted_f(s: QuadState) -> QuadVal {
+    match s {
+        QuadState::N => QuadVal::F,
+        QuadState::F => QuadVal::N,
+        QuadState::T => QuadVal::S,
+        QuadState::S => QuadVal::T,
+    }
+}
+
+fn quad_lane0_inverted_f(q: QuadVal) -> QuadroReg32 {
+    let mut reg = QuadroReg32::from_raw(0);
+    reg.set_unchecked(0, quadval_to_quadstate_inverted_f(q));
+    reg
+}
+
+fn quad_lane0_value_inverted_f(reg: QuadroReg32) -> QuadVal {
+    quadstate_to_quadval_inverted_f(reg.try_get(0).unwrap())
 }
 
 fn quad_not(a: QuadVal) -> QuadVal {
-    let v = quad_to_u8(a);
-    let r = ((v & 0b10) >> 1) | ((v & 0b01) << 1);
-    u8_to_quad(r)
+    quad_lane0_value(quad_lane0(a).map_not())
+}
+
+fn quad_and(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value_inverted_f(quad_lane0_inverted_f(a).map_and(quad_lane0_inverted_f(b)))
+}
+
+fn quad_or(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value_inverted_f(quad_lane0_inverted_f(a).map_or(quad_lane0_inverted_f(b)))
+}
+
+fn quad_implies(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value(quad_lane0(a).map_implies(quad_lane0(b)))
 }
 
 fn value_eq(a: &Value, b: &Value) -> Result<bool, RuntimeError> {
@@ -5219,6 +5279,78 @@ mod tests {
         for index in components {
             out.push(OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX);
             out.extend_from_slice(&index.to_le_bytes());
+        }
+    }
+
+    fn legacy_quad_to_u8(q: QuadVal) -> u8 {
+        match q {
+            QuadVal::N => 0,
+            QuadVal::F => 1,
+            QuadVal::T => 2,
+            QuadVal::S => 3,
+        }
+    }
+
+    fn legacy_u8_to_quad(v: u8) -> QuadVal {
+        match v & 0b11 {
+            0 => QuadVal::N,
+            1 => QuadVal::F,
+            2 => QuadVal::T,
+            _ => QuadVal::S,
+        }
+    }
+
+    fn legacy_quad_not(a: QuadVal) -> QuadVal {
+        let v = legacy_quad_to_u8(a);
+        let r = ((v & 0b10) >> 1) | ((v & 0b01) << 1);
+        legacy_u8_to_quad(r)
+    }
+
+    fn legacy_quad_and(a: QuadVal, b: QuadVal) -> QuadVal {
+        legacy_u8_to_quad(legacy_quad_to_u8(a) & legacy_quad_to_u8(b))
+    }
+
+    fn legacy_quad_or(a: QuadVal, b: QuadVal) -> QuadVal {
+        legacy_u8_to_quad(legacy_quad_to_u8(a) | legacy_quad_to_u8(b))
+    }
+
+    fn legacy_quad_impl(a: QuadVal, b: QuadVal) -> QuadVal {
+        legacy_quad_or(legacy_quad_not(a), b)
+    }
+
+    const ALL_QUADS: [QuadVal; 4] = [QuadVal::N, QuadVal::F, QuadVal::T, QuadVal::S];
+
+    #[test]
+    fn vm_quad_bridge_qnot_matches_legacy_truth() {
+        for &a in &ALL_QUADS {
+            assert_eq!(super::quad_not(a), legacy_quad_not(a));
+        }
+    }
+
+    #[test]
+    fn vm_quad_bridge_qand_matches_legacy_truth() {
+        for &a in &ALL_QUADS {
+            for &b in &ALL_QUADS {
+                assert_eq!(super::quad_and(a, b), legacy_quad_and(a, b));
+            }
+        }
+    }
+
+    #[test]
+    fn vm_quad_bridge_qor_matches_legacy_truth() {
+        for &a in &ALL_QUADS {
+            for &b in &ALL_QUADS {
+                assert_eq!(super::quad_or(a, b), legacy_quad_or(a, b));
+            }
+        }
+    }
+
+    #[test]
+    fn vm_quad_bridge_qimpl_matches_legacy_truth() {
+        for &a in &ALL_QUADS {
+            for &b in &ALL_QUADS {
+                assert_eq!(super::quad_implies(a, b), legacy_quad_impl(a, b));
+            }
         }
     }
 }
