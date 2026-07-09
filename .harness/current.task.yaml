@@ -1,12 +1,12 @@
 task:
-  id: FORMAT-RESERVE-QTRUTH-SLOTS
-  title: Reserve explicit QTruth opcode slots
-  type: docs
+  id: FORMAT-QTRUTH-OPCODE-SLOTS
+  title: Add QTruth opcode enum slots
+  type: feat
   mode: active
 
 intent:
-  summary: docs(format): reserve explicit QTruth opcode slots
-  issue: "#1452"
+  summary: feat(format): add QTruth opcode enum slots
+  issue: "#1454"
 
 layer:
   name: core_quad
@@ -14,19 +14,20 @@ layer:
 
 scope:
   allowed_paths:
-    - docs/roadmap/core_quad/qtruth_opcode_reservation.md
+    - crates/sm-format/src/local_format.rs
+    - crates/sm-format/src/lib.rs
+    - crates/sm-verify/src/lib.rs
+    - crates/sm-vm/src/semcode_vm.rs
     - .harness/current.task.yaml
-    - .harness/reports/FORMAT-RESERVE-QTRUTH-SLOTS.md
+    - .harness/reports/FORMAT-QTRUTH-OPCODE-SLOTS.md
 
   forbidden_paths:
-    - crates/sm-format/**
     - crates/sm-ir/**
     - crates/sm-emit/**
-    - crates/sm-verify/**
-    - crates/sm-vm/**
     - crates/semantic-core-quad/**
     - crates/ton618-core/**
     - src/**
+    - docs/**
     - tests/**
     - tools/**
     - README.md
@@ -41,13 +42,18 @@ actions:
     - create_pr
 
   forbidden:
-    - modify_rust_code
+    - implement_qtruth_execution
+    - modify_ir
+    - modify_emit
+    - modify_core_quad
+    - add_qtruth_lowering
 
 verification:
   required:
+    - cargo test -p sm-format --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/FORMAT-RESERVE-QTRUTH-SLOTS.md
+  output: .harness/reports/FORMAT-QTRUTH-OPCODE-SLOTS.md

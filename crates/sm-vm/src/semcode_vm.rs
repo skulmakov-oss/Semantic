@@ -175,7 +175,7 @@ impl OpcodeProfileSink for NoopOpcodeProfile {
 }
 
 #[cfg(feature = "vm-profile")]
-const OPCODE_PROFILE_SLOT_COUNT: usize = 69;
+const OPCODE_PROFILE_SLOT_COUNT: usize = 73;
 
 #[cfg(feature = "vm-profile")]
 const OPCODE_PROFILE_OPCODES: [Opcode; OPCODE_PROFILE_SLOT_COUNT] = [
@@ -248,6 +248,10 @@ const OPCODE_PROFILE_OPCODES: [Opcode; OPCODE_PROFILE_SLOT_COUNT] = [
     Opcode::StateUpdate,
     Opcode::EventPost,
     Opcode::ClockRead,
+    Opcode::QTruthAnd,
+    Opcode::QTruthOr,
+    Opcode::QTruthNot,
+    Opcode::QTruthImpl,
 ];
 
 #[cfg(feature = "vm-profile")]
@@ -322,6 +326,10 @@ fn opcode_profile_index(opcode: Opcode) -> usize {
         Opcode::StateUpdate => 66,
         Opcode::EventPost => 67,
         Opcode::ClockRead => 68,
+        Opcode::QTruthAnd => 69,
+        Opcode::QTruthOr => 70,
+        Opcode::QTruthNot => 71,
+        Opcode::QTruthImpl => 72,
     }
 }
 
@@ -1313,6 +1321,11 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                 if has_src {
                     let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 }
+            }
+            Opcode::QTruthAnd | Opcode::QTruthOr | Opcode::QTruthNot | Opcode::QTruthImpl => {
+                return Err(RuntimeError::BadFormat(
+                    "QTruth opcodes not supported yet in pre-scan".to_string(),
+                ));
             }
         }
     }
@@ -2324,6 +2337,11 @@ where
                 }
                 continue;
             }
+            Opcode::QTruthAnd | Opcode::QTruthOr | Opcode::QTruthNot | Opcode::QTruthImpl => {
+                return Err(RuntimeError::BadFormat(
+                    "QTruth opcodes not supported yet in execution loop".to_string(),
+                ));
+            }
         }
 
         vm.callstack[frame_idx].pc = next_pc;
@@ -3267,6 +3285,11 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
             } else {
                 "RET".to_string()
             }
+        }
+        Opcode::QTruthAnd | Opcode::QTruthOr | Opcode::QTruthNot | Opcode::QTruthImpl => {
+            return Err(RuntimeError::BadFormat(
+                "QTruth opcodes not supported yet in disassembler".to_string(),
+            ));
         }
     };
     Ok((text, cur - f.instr_start))

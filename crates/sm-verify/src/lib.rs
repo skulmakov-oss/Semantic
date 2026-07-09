@@ -1001,7 +1001,7 @@ fn decode_operands(
             let src = read_u16_le(code, cursor).map_err(|_| invalid("truncated src register"))?;
             mark_reg(src);
         }
-        Opcode::QNot | Opcode::BoolNot => {
+        Opcode::QNot | Opcode::BoolNot | Opcode::QTruthNot => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             let src = read_u16_le(code, cursor).map_err(|_| invalid("truncated src register"))?;
             mark_reg(dst);
@@ -1013,6 +1013,9 @@ fn decode_operands(
         | Opcode::BoolAnd
         | Opcode::BoolOr
         | Opcode::CmpEq
+        | Opcode::QTruthAnd
+        | Opcode::QTruthOr
+        | Opcode::QTruthImpl
         | Opcode::CmpNe
         | Opcode::CmpI32Lt
         | Opcode::CmpI32Le
