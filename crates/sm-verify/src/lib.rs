@@ -2383,7 +2383,6 @@ mod tests {
 
         bytes.splice(opcode_pos..opcode_pos + 2, new_code.iter().copied());
 
-        let old_code_len = 4; // 2 bytes for string count + 2 bytes for instructions
         let new_code_len = 2 + new_code.len();
         bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
 
