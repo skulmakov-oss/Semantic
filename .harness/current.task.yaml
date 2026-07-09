@@ -1,12 +1,12 @@
 task:
-  id: VM-CORE-QUAD-SEMANTIC-MISMATCH-AUDIT
-  title: Audit quad opcode semantic mismatch
+  id: CORE-QUAD-VM-LATTICE-TRUTH-OPCODE-CONTRACT
+  title: Define lattice vs truth-table opcode contract
   type: docs
   mode: active
 
 intent:
-  summary: docs(vm/core-quad): audit quad opcode semantic mismatch
-  issue: "#1440"
+  summary: docs(core-quad/vm): define lattice vs truth-table opcode contract
+  issue: "#1442"
 
 layer:
   name: core_quad
@@ -14,9 +14,9 @@ layer:
 
 scope:
   allowed_paths:
-    - docs/roadmap/core_quad/vm_core_quad_semantic_mismatch_audit.md
+    - docs/roadmap/core_quad/lattice_truth_opcode_contract.md
     - .harness/current.task.yaml
-    - .harness/reports/VM-CORE-QUAD-SEMANTIC-MISMATCH-AUDIT.md
+    - .harness/reports/CORE-QUAD-VM-LATTICE-TRUTH-OPCODE-CONTRACT.md
 
   forbidden_paths:
     - crates/**
@@ -45,4 +45,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/VM-CORE-QUAD-SEMANTIC-MISMATCH-AUDIT.md
+  output: .harness/reports/CORE-QUAD-VM-LATTICE-TRUTH-OPCODE-CONTRACT.md
