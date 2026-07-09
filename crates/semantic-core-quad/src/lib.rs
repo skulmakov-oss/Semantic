@@ -238,6 +238,82 @@ impl QuadroReg32 {
     pub fn force_super(&mut self, mask: QuadMask32) {
         self.set_by_mask(mask, QuadState::S);
     }
+
+    pub fn map_not_scalar(mut self) -> Self {
+        let mut lane = 0;
+        while lane < Self::LANES {
+            let state = self.get_unchecked(lane);
+            self.set_unchecked(lane, logic_frame::not(state));
+            lane += 1;
+        }
+        self
+    }
+
+    pub fn map_and_scalar(mut self, other: Self) -> Self {
+        let mut lane = 0;
+        while lane < Self::LANES {
+            let a = self.get_unchecked(lane);
+            let b = other.get_unchecked(lane);
+            self.set_unchecked(lane, logic_frame::and(a, b));
+            lane += 1;
+        }
+        self
+    }
+
+    pub fn map_or_scalar(mut self, other: Self) -> Self {
+        let mut lane = 0;
+        while lane < Self::LANES {
+            let a = self.get_unchecked(lane);
+            let b = other.get_unchecked(lane);
+            self.set_unchecked(lane, logic_frame::or(a, b));
+            lane += 1;
+        }
+        self
+    }
+
+    pub fn map_xor_scalar(mut self, other: Self) -> Self {
+        let mut lane = 0;
+        while lane < Self::LANES {
+            let a = self.get_unchecked(lane);
+            let b = other.get_unchecked(lane);
+            self.set_unchecked(lane, logic_frame::xor(a, b));
+            lane += 1;
+        }
+        self
+    }
+
+    pub fn map_implies_scalar(mut self, other: Self) -> Self {
+        let mut lane = 0;
+        while lane < Self::LANES {
+            let a = self.get_unchecked(lane);
+            let b = other.get_unchecked(lane);
+            self.set_unchecked(lane, logic_frame::implies(a, b));
+            lane += 1;
+        }
+        self
+    }
+
+    pub fn map_nand_scalar(mut self, other: Self) -> Self {
+        let mut lane = 0;
+        while lane < Self::LANES {
+            let a = self.get_unchecked(lane);
+            let b = other.get_unchecked(lane);
+            self.set_unchecked(lane, logic_frame::nand(a, b));
+            lane += 1;
+        }
+        self
+    }
+
+    pub fn map_nor_scalar(mut self, other: Self) -> Self {
+        let mut lane = 0;
+        while lane < Self::LANES {
+            let a = self.get_unchecked(lane);
+            let b = other.get_unchecked(lane);
+            self.set_unchecked(lane, logic_frame::nor(a, b));
+            lane += 1;
+        }
+        self
+    }
 }
 
 impl fmt::Debug for QuadroReg32 {
