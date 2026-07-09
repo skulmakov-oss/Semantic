@@ -1,26 +1,26 @@
 task:
-  id: VERIFY-VM-QTRUTH-UNSUPPORTED-BOUNDARY
-  title: lock unsupported QTruth opcode boundary
-  type: test
+  id: VM-QTRUTH-EXECUTION
+  title: execute QTruth opcodes through semantic-core-quad truth maps
+  type: feat
   mode: active
 
 intent:
-  summary: test(verify/vm): lock unsupported QTruth opcode boundary
-  issue: "#1456"
+  summary: "feat(vm): execute QTruth opcodes through semantic-core-quad truth maps"
+  issue: "#1458"
 
 layer:
   name: core_quad
-  owner: sm-verify
+  owner: sm-vm
 
 scope:
   allowed_paths:
-    - crates/sm-verify/src/lib.rs
     - crates/sm-vm/src/semcode_vm.rs
     - .harness/current.task.yaml
-    - .harness/reports/VERIFY-VM-QTRUTH-UNSUPPORTED-BOUNDARY.md
+    - .harness/reports/VM-QTRUTH-EXECUTION.md
 
   forbidden_paths:
     - crates/sm-format/**
+    - crates/sm-verify/**
     - crates/sm-ir/**
     - crates/sm-emit/**
     - crates/semantic-core-quad/**
@@ -30,7 +30,7 @@ scope:
     - tests/**
     - tools/**
     - README.md
-    - root Cargo.toml
+    - Cargo.toml
     - Cargo.lock
 
 actions:
@@ -41,23 +41,25 @@ actions:
     - create_pr
 
   forbidden:
-    - implement_qtruth_execution
+    - modify_opcode_byte_values
+    - change_verifier_behavior
     - add_ir_instructions
     - add_emitter_support
-    - modify_opcode_byte_values
-    - modify_core_quad
-    - use_hidden_adapters
+    - touch_semantic_core_quad
     - route_qtruth_through_lattice_aliases
+    - use_hidden_adapters
+    - invert_falsity_planes
     - add_equiv_nand_nor
+    - change_legacy_lattice_behavior
 
 verification:
   required:
-    - cargo test -p sm-verify --quiet
     - cargo test -p sm-vm --quiet
     - cargo test -p sm-vm --features vm-profile --quiet
+    - cargo test -p sm-verify --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/VERIFY-VM-QTRUTH-UNSUPPORTED-BOUNDARY.md
+  output: .harness/reports/VM-QTRUTH-EXECUTION.md
