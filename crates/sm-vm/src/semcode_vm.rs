@@ -5,6 +5,7 @@ use crate::semcode_format::{
 use crate::QuadVal;
 use prom_abi::{AbiError, AbiValue, HostCallId, PrometheusHostAbi};
 use prom_cap::{CapabilityChecker, CapabilityDenied};
+use semantic_core_quad::{QuadState, QuadroReg32};
 use sm_runtime_core::hello_observation_sink::{
     HelloObservationClass, HelloObservationEvent, HelloObservationSequenceIndex,
 };
@@ -2060,7 +2061,7 @@ where
                 let out_q = match opcode {
                     Opcode::QAnd => quad_and(lq, rq),
                     Opcode::QOr => quad_or(lq, rq),
-                    Opcode::QImpl => quad_or(quad_not(lq), rq),
+                    Opcode::QImpl => quad_implies(lq, rq),
                     _ => unreachable!(),
                 };
                 set_reg(vm, frame_idx, dst, Value::Quad(out_q))?;
@@ -2628,18 +2629,48 @@ fn u8_to_quad(v: u8) -> QuadVal {
     }
 }
 
-fn quad_and(a: QuadVal, b: QuadVal) -> QuadVal {
-    u8_to_quad(quad_to_u8(a) & quad_to_u8(b))
+fn quadval_to_quadstate(q: QuadVal) -> QuadState {
+    match q {
+        QuadVal::N => QuadState::N,
+        QuadVal::F => QuadState::F,
+        QuadVal::T => QuadState::T,
+        QuadVal::S => QuadState::S,
+    }
 }
 
-fn quad_or(a: QuadVal, b: QuadVal) -> QuadVal {
-    u8_to_quad(quad_to_u8(a) | quad_to_u8(b))
+fn quadstate_to_quadval(s: QuadState) -> QuadVal {
+    match s {
+        QuadState::N => QuadVal::N,
+        QuadState::F => QuadVal::F,
+        QuadState::T => QuadVal::T,
+        QuadState::S => QuadVal::S,
+    }
+}
+
+fn quad_lane0(q: QuadVal) -> QuadroReg32 {
+    let mut reg = QuadroReg32::from_raw(0);
+    reg.set_unchecked(0, quadval_to_quadstate(q));
+    reg
+}
+
+fn quad_lane0_value(reg: QuadroReg32) -> QuadVal {
+    quadstate_to_quadval(reg.try_get(0).unwrap())
 }
 
 fn quad_not(a: QuadVal) -> QuadVal {
-    let v = quad_to_u8(a);
-    let r = ((v & 0b10) >> 1) | ((v & 0b01) << 1);
-    u8_to_quad(r)
+    quad_lane0_value(quad_lane0(a).lattice_inverse())
+}
+
+fn quad_and(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value(quad_lane0(a).lattice_meet(quad_lane0(b)))
+}
+
+fn quad_or(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value(quad_lane0(a).lattice_join(quad_lane0(b)))
+}
+
+fn quad_implies(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value(quad_lane0(a).lattice_inverse().lattice_join(quad_lane0(b)))
 }
 
 fn value_eq(a: &Value, b: &Value) -> Result<bool, RuntimeError> {
@@ -5219,6 +5250,60 @@ mod tests {
         for index in components {
             out.push(OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX);
             out.extend_from_slice(&index.to_le_bytes());
+        }
+    }
+
+    fn legacy_qnot(a: QuadVal) -> QuadVal {
+        let v = quad_to_u8(a);
+        let r = ((v & 0b10) >> 1) | ((v & 0b01) << 1);
+        u8_to_quad(r)
+    }
+
+    fn legacy_qand(a: QuadVal, b: QuadVal) -> QuadVal {
+        u8_to_quad(quad_to_u8(a) & quad_to_u8(b))
+    }
+
+    fn legacy_qor(a: QuadVal, b: QuadVal) -> QuadVal {
+        u8_to_quad(quad_to_u8(a) | quad_to_u8(b))
+    }
+
+    fn legacy_qimpl(a: QuadVal, b: QuadVal) -> QuadVal {
+        legacy_qor(legacy_qnot(a), b)
+    }
+
+    const ALL_QUADS: [QuadVal; 4] = [QuadVal::N, QuadVal::F, QuadVal::T, QuadVal::S];
+
+    #[test]
+    fn vm_quad_lattice_bridge_qnot_matches_legacy_truth() {
+        for a in ALL_QUADS {
+            assert_eq!(quad_not(a), legacy_qnot(a), "QNot mismatch for {:?}", a);
+        }
+    }
+
+    #[test]
+    fn vm_quad_lattice_bridge_qand_matches_legacy_truth() {
+        for a in ALL_QUADS {
+            for b in ALL_QUADS {
+                assert_eq!(quad_and(a, b), legacy_qand(a, b), "QAnd mismatch for {:?}, {:?}", a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn vm_quad_lattice_bridge_qor_matches_legacy_truth() {
+        for a in ALL_QUADS {
+            for b in ALL_QUADS {
+                assert_eq!(quad_or(a, b), legacy_qor(a, b), "QOr mismatch for {:?}, {:?}", a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn vm_quad_lattice_bridge_qimpl_matches_legacy_truth() {
+        for a in ALL_QUADS {
+            for b in ALL_QUADS {
+                assert_eq!(quad_implies(a, b), legacy_qimpl(a, b), "QImpl mismatch for {:?}, {:?}", a, b);
+            }
         }
     }
 }

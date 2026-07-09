@@ -1,36 +1,37 @@
 task:
-  id: CORE-QUAD-LATTICE-ALIASES
-  title: Add explicit lattice aliases on QuadroReg32
+  id: VM-QUAD-OPCODE-LATTICE-BRIDGE
+  title: Route quad opcodes through core-quad lattice aliases
   type: feat
   mode: active
 
 intent:
-  summary: feat(core-quad): add explicit lattice aliases
-  issue: "#1444"
+  summary: feat(vm): route quad opcodes through core-quad lattice aliases
+  issue: "#1446"
 
 layer:
   name: core_quad
-  owner: semantic-core-quad
+  owner: sm-vm
 
 scope:
   allowed_paths:
-    - crates/semantic-core-quad/src/lib.rs
+    - crates/sm-vm/Cargo.toml
+    - crates/sm-vm/src/semcode_vm.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-LATTICE-ALIASES.md
+    - .harness/reports/VM-QUAD-OPCODE-LATTICE-BRIDGE.md
 
   forbidden_paths:
-    - crates/sm-vm/**
     - crates/sm-format/**
     - crates/sm-ir/**
     - crates/sm-emit/**
     - crates/sm-verify/**
+    - crates/semantic-core-quad/**
     - crates/ton618-core/**
     - src/**
     - docs/**
     - tests/**
     - tools/**
     - README.md
-    - Cargo.toml
+    - root Cargo.toml
     - Cargo.lock
 
 actions:
@@ -42,14 +43,15 @@ actions:
 
   forbidden:
     - change_opcodes
-    - modify_vm
+    - modify_core_quad
 
 verification:
   required:
+    - cargo test -p sm-vm --quiet
     - cargo test -p semantic-core-quad --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-LATTICE-ALIASES.md
+  output: .harness/reports/VM-QUAD-OPCODE-LATTICE-BRIDGE.md

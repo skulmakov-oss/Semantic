@@ -18,6 +18,7 @@ sm-runtime-core = { path = "../sm-runtime-core", default-features = false, featu
 sm-verify = { path = "../sm-verify", default-features = false, features = ["std"] }
 prom-abi = { path = "../prom-abi", default-features = false, features = ["std"] }
 prom-cap = { path = "../prom-cap", default-features = false, features = ["std"] }
+semantic-core-quad = { path = "../semantic-core-quad", default-features = false, features = ["std"] }
 sm-format = { path = "../sm-format", default-features = false, features = ["std"] }
 
 [dev-dependencies]
