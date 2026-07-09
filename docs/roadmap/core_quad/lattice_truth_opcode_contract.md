@@ -47,3 +47,10 @@ Any migration of VM logic to use canonical `semantic-core-quad` behavior must in
 
 ## 8. Out of Scope
 This contract does not govern the actual implementation of the new opcodes, nor does it mandate immediate deprecation of the `sm-vm` legacy opcodes. It solely establishes the boundary and naming strategy moving forward.
+
+## 9. Resolution
+The migration of legacy VM bitwise operations to a unified core backend was successfully executed without violating this contract:
+- **#1440**: Audit confirmed the fundamental divergence between bitwise lattice behavior (used by the VM) and Belnap truth-table mappings (implemented in `semantic-core-quad`).
+- **#1442**: Established this explicit contract to permanently separate the two semantic layers.
+- **#1444**: Exposed strict, unambiguous lattice aliases (`lattice_meet`, `lattice_join`, `lattice_inverse`) on `QuadroReg32`, deliberately distinct from the `map_*` truth-table methods.
+- **#1446**: Routed the VM's `QAnd`/`QOr`/`QNot`/`QImpl` execution through the explicit lattice aliases, achieving a shared core backend for the VM while flawlessly preserving legacy bitwise lattice semantics. No truth-table substitutions or hidden inversions were used.
