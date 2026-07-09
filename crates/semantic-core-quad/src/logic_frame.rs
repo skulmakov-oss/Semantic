@@ -86,10 +86,42 @@ const fn make_implies_lut() -> [[QuadState; 4]; 4] {
     lut
 }
 
+const fn make_nand_lut() -> [[QuadState; 4]; 4] {
+    let mut lut = [[QuadState::N; 4]; 4];
+    let mut i = 0;
+    while i < 4 {
+        let mut j = 0;
+        while j < 4 {
+            let and_res = AND_LUT[i as usize][j as usize];
+            lut[i as usize][j as usize] = NOT_LUT[and_res as usize];
+            j += 1;
+        }
+        i += 1;
+    }
+    lut
+}
+
+const fn make_nor_lut() -> [[QuadState; 4]; 4] {
+    let mut lut = [[QuadState::N; 4]; 4];
+    let mut i = 0;
+    while i < 4 {
+        let mut j = 0;
+        while j < 4 {
+            let or_res = OR_LUT[i as usize][j as usize];
+            lut[i as usize][j as usize] = NOT_LUT[or_res as usize];
+            j += 1;
+        }
+        i += 1;
+    }
+    lut
+}
+
 pub const AND_LUT: [[QuadState; 4]; 4] = make_and_lut();
 pub const OR_LUT: [[QuadState; 4]; 4] = make_or_lut();
 pub const XOR_LUT: [[QuadState; 4]; 4] = make_xor_lut();
 pub const IMPLIES_LUT: [[QuadState; 4]; 4] = make_implies_lut();
+pub const NAND_LUT: [[QuadState; 4]; 4] = make_nand_lut();
+pub const NOR_LUT: [[QuadState; 4]; 4] = make_nor_lut();
 
 /// Primitive truth-table complement operation.
 #[inline]
@@ -115,6 +147,16 @@ pub fn xor(a: QuadState, b: QuadState) -> QuadState {
 #[inline]
 pub fn implies(a: QuadState, b: QuadState) -> QuadState {
     IMPLIES_LUT[a as usize][b as usize]
+}
+
+#[inline]
+pub fn nand(a: QuadState, b: QuadState) -> QuadState {
+    NAND_LUT[a as usize][b as usize]
+}
+
+#[inline]
+pub fn nor(a: QuadState, b: QuadState) -> QuadState {
+    NOR_LUT[a as usize][b as usize]
 }
 
 #[cfg(test)]
@@ -188,12 +230,33 @@ mod tests {
     }
 
     #[test]
+    fn test_nand_nor_table() {
+        for a in QuadState::ALL {
+            for b in QuadState::ALL {
+                assert_eq!(nand(a, b), not(and(a, b)), "NAND derived policy mismatch");
+                assert_eq!(nor(a, b), not(or(a, b)), "NOR derived policy mismatch");
+            }
+        }
+
+        // Exact checks
+        assert_eq!(nand(QuadState::T, QuadState::T), QuadState::F);
+        assert_eq!(nand(QuadState::F, QuadState::T), QuadState::T);
+        assert_eq!(nand(QuadState::N, QuadState::T), QuadState::N);
+
+        assert_eq!(nor(QuadState::F, QuadState::F), QuadState::T);
+        assert_eq!(nor(QuadState::T, QuadState::F), QuadState::F);
+        assert_eq!(nor(QuadState::N, QuadState::F), QuadState::N);
+    }
+
+    #[test]
     fn test_commutativity() {
         for a in QuadState::ALL {
             for b in QuadState::ALL {
                 assert_eq!(and(a, b), and(b, a), "AND must be commutative");
                 assert_eq!(or(a, b), or(b, a), "OR must be commutative");
                 assert_eq!(xor(a, b), xor(b, a), "XOR must be commutative");
+                assert_eq!(nand(a, b), nand(b, a), "NAND must be commutative");
+                assert_eq!(nor(a, b), nor(b, a), "NOR must be commutative");
             }
         }
     }
