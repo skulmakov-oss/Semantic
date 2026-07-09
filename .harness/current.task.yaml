@@ -1,30 +1,28 @@
 task:
-  id: CORE-QUAD-REG32-MAP-DEFAULT-ALIASES
-  title: Promote SWAR maps to default aliases
-  type: feat
+  id: VM-CORE-QUAD-SEMANTIC-MISMATCH-AUDIT
+  title: Audit quad opcode semantic mismatch
+  type: docs
   mode: active
 
 intent:
-  summary: feat(core-quad): promote SWAR maps to default aliases
-  issue: "#1436"
+  summary: docs(vm/core-quad): audit quad opcode semantic mismatch
+  issue: "#1440"
 
 layer:
-  name: core-quad
-  owner: semantic-core-quad
+  name: core_quad
+  owner: sm-vm
 
 scope:
   allowed_paths:
-    - crates/semantic-core-quad/src/lib.rs
+    - docs/roadmap/core_quad/vm_core_quad_semantic_mismatch_audit.md
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-REG32-MAP-DEFAULT-ALIASES.md
+    - .harness/reports/VM-CORE-QUAD-SEMANTIC-MISMATCH-AUDIT.md
 
   forbidden_paths:
-    - crates/ton618-core/**
+    - crates/**
     - src/**
     - tests/**
     - tools/**
-    - scripts/**
-    - docs/**
     - README.md
     - Cargo.toml
     - Cargo.lock
@@ -37,27 +35,14 @@ actions:
     - create_pr
 
   forbidden:
-    - modify_cargo_toml
-    - modify_cargo_lock
-    - loader_claim
-    - runtime_claim
-    - production_ui_claim
-    - level4_claim
-
-constraints:
-  - semantic-core-quad only
-  - Add explicit default aliases on QuadroReg32
-  - No EQUIV API
-  - No VM/opcode changes
-  - No runtime changes
-  - No mask migration
+    - write_rust
+    - change_opcode_semantics
 
 verification:
   required:
-    - cargo test -p semantic-core-quad --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-REG32-MAP-DEFAULT-ALIASES.md
+  output: .harness/reports/VM-CORE-QUAD-SEMANTIC-MISMATCH-AUDIT.md
