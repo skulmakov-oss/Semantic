@@ -1,27 +1,28 @@
 task:
-  id: VM-QTRUTH-EXECUTION
-  title: execute QTruth opcodes through semantic-core-quad truth maps
+  id: SM-IR-QTRUTH-REPRESENTATION
+  title: add explicit QTruth instruction representation
   type: feat
   mode: active
 
 intent:
-  summary: "feat(vm): execute QTruth opcodes through semantic-core-quad truth maps"
-  issue: "#1458"
+  summary: "feat(sm-ir): add explicit QTruth instruction representation"
+  issue: "#1460"
 
 layer:
   name: core_quad
-  owner: sm-vm
+  owner: sm-ir
 
 scope:
   allowed_paths:
-    - crates/sm-vm/src/semcode_vm.rs
+    - crates/sm-ir/src/legacy_lowering.rs
+    - crates/sm-ir/src/passes/crystalfold.rs
     - .harness/current.task.yaml
-    - .harness/reports/VM-QTRUTH-EXECUTION.md
+    - .harness/reports/SM-IR-QTRUTH-REPRESENTATION.md
 
   forbidden_paths:
     - crates/sm-format/**
     - crates/sm-verify/**
-    - crates/sm-ir/**
+    - crates/sm-vm/**
     - crates/sm-emit/**
     - crates/semantic-core-quad/**
     - crates/ton618-core/**
@@ -35,31 +36,32 @@ scope:
 
 actions:
   allowed:
-    - read
-    - edit_allowed_paths
-    - push
+    - inspect
+    - edit
+    - test
+    - commit
     - create_pr
 
   forbidden:
     - modify_opcode_byte_values
     - change_verifier_behavior
-    - add_ir_instructions
+    - change_vm_behavior
     - add_emitter_support
+    - add_lowering_support
     - touch_semantic_core_quad
     - route_qtruth_through_lattice_aliases
     - use_hidden_adapters
     - invert_falsity_planes
     - add_equiv_nand_nor
     - change_legacy_lattice_behavior
+    - fold_qtruth_constants
 
 verification:
   required:
-    - cargo test -p sm-vm --quiet
-    - cargo test -p sm-vm --features vm-profile --quiet
-    - cargo test -p sm-verify --quiet
+    - cargo test -p sm-ir --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/VM-QTRUTH-EXECUTION.md
+  output: .harness/reports/SM-IR-QTRUTH-REPRESENTATION.md

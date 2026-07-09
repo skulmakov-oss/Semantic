@@ -212,6 +212,25 @@ pub enum IrInstr {
         lhs: u16,
         rhs: u16,
     },
+    QTruthAnd {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    QTruthOr {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
+    QTruthNot {
+        dst: u16,
+        src: u16,
+    },
+    QTruthImpl {
+        dst: u16,
+        lhs: u16,
+        rhs: u16,
+    },
     BoolAnd {
         dst: u16,
         lhs: u16,
@@ -1310,6 +1329,9 @@ fn encoded_size(instr: &IrInstr) -> Option<usize> {
         IrInstr::QAnd { .. }
         | IrInstr::QOr { .. }
         | IrInstr::QImpl { .. }
+        | IrInstr::QTruthAnd { .. }
+        | IrInstr::QTruthOr { .. }
+        | IrInstr::QTruthImpl { .. }
         | IrInstr::BoolAnd { .. }
         | IrInstr::BoolOr { .. }
         | IrInstr::CmpEq { .. }
@@ -1329,7 +1351,7 @@ fn encoded_size(instr: &IrInstr) -> Option<usize> {
         | IrInstr::SubFx { .. }
         | IrInstr::MulFx { .. }
         | IrInstr::DivFx { .. } => 1 + 2 + 2 + 2,
-        IrInstr::QNot { .. } | IrInstr::BoolNot { .. } => 1 + 2 + 2,
+        IrInstr::QNot { .. } | IrInstr::QTruthNot { .. } | IrInstr::BoolNot { .. } => 1 + 2 + 2,
         IrInstr::Jmp { .. } => 1 + 4,
         IrInstr::JmpIf { .. } => 1 + 2 + 4,
         IrInstr::Assert { .. } => 1 + 2,
@@ -1620,6 +1642,15 @@ fn emit_instr(
         IrInstr::QOr { dst, lhs, rhs } => emit_3reg(Opcode::QOr, *dst, *lhs, *rhs, out),
         IrInstr::QNot { dst, src } => emit_2reg(Opcode::QNot, *dst, *src, out),
         IrInstr::QImpl { dst, lhs, rhs } => emit_3reg(Opcode::QImpl, *dst, *lhs, *rhs, out),
+        IrInstr::QTruthAnd { .. }
+        | IrInstr::QTruthOr { .. }
+        | IrInstr::QTruthNot { .. }
+        | IrInstr::QTruthImpl { .. } => {
+            return Err(FrontendError {
+                pos: 0,
+                message: "QTruth IR instructions are not encodable yet".to_string(),
+            });
+        }
         IrInstr::BoolAnd { dst, lhs, rhs } => emit_3reg(Opcode::BoolAnd, *dst, *lhs, *rhs, out),
         IrInstr::BoolOr { dst, lhs, rhs } => emit_3reg(Opcode::BoolOr, *dst, *lhs, *rhs, out),
         IrInstr::BoolNot { dst, src } => emit_2reg(Opcode::BoolNot, *dst, *src, out),
@@ -12152,5 +12183,49 @@ mod opt_tests {
             i,
             IrInstr::LoadF64 { dst: 5, val } if (*val - 5.0).abs() < f64::EPSILON
         )));
+    }
+
+    #[test]
+    fn qtruth_instructions_are_distinct_from_legacy_lattice_instructions() {
+        assert_ne!(
+            IrInstr::QTruthAnd {
+                dst: 0,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::QAnd {
+                dst: 0,
+                lhs: 1,
+                rhs: 2,
+            }
+        );
+        assert_ne!(
+            IrInstr::QTruthOr {
+                dst: 0,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::QOr {
+                dst: 0,
+                lhs: 1,
+                rhs: 2,
+            }
+        );
+        assert_ne!(
+            IrInstr::QTruthNot { dst: 0, src: 1 },
+            IrInstr::QNot { dst: 0, src: 1 }
+        );
+        assert_ne!(
+            IrInstr::QTruthImpl {
+                dst: 0,
+                lhs: 1,
+                rhs: 2,
+            },
+            IrInstr::QImpl {
+                dst: 0,
+                lhs: 1,
+                rhs: 2,
+            }
+        );
     }
 }

@@ -444,6 +444,22 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                     }
                 }
             }
+            IrInstr::QTruthAnd { dst, lhs, rhs } => {
+                cst.remove(&dst);
+                out.push(IrInstr::QTruthAnd { dst, lhs, rhs });
+            }
+            IrInstr::QTruthOr { dst, lhs, rhs } => {
+                cst.remove(&dst);
+                out.push(IrInstr::QTruthOr { dst, lhs, rhs });
+            }
+            IrInstr::QTruthNot { dst, src } => {
+                cst.remove(&dst);
+                out.push(IrInstr::QTruthNot { dst, src });
+            }
+            IrInstr::QTruthImpl { dst, lhs, rhs } => {
+                cst.remove(&dst);
+                out.push(IrInstr::QTruthImpl { dst, lhs, rhs });
+            }
             IrInstr::CmpEq { dst, lhs, rhs } => {
                 match (cst.get(&lhs).copied(), cst.get(&rhs).copied()) {
                     (Some(a), Some(b)) => {
