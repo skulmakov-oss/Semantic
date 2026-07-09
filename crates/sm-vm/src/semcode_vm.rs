@@ -1238,7 +1238,7 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
-            Opcode::QNot | Opcode::BoolNot => {
+            Opcode::QNot | Opcode::BoolNot | Opcode::QTruthNot => {
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             }
@@ -1254,6 +1254,9 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
             Opcode::QAnd
             | Opcode::QOr
             | Opcode::QImpl
+            | Opcode::QTruthAnd
+            | Opcode::QTruthOr
+            | Opcode::QTruthImpl
             | Opcode::BoolAnd
             | Opcode::BoolOr
             | Opcode::CmpEq
@@ -1321,11 +1324,6 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                 if has_src {
                     let _ = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 }
-            }
-            Opcode::QTruthAnd | Opcode::QTruthOr | Opcode::QTruthNot | Opcode::QTruthImpl => {
-                return Err(RuntimeError::BadFormat(
-                    "QTruth opcodes not supported yet in pre-scan".to_string(),
-                ));
             }
         }
     }
@@ -2065,7 +2063,12 @@ where
                 vm.callstack[frame_idx].locals.insert(symbol, val);
                 next_pc = cur - f.instr_start;
             }
-            Opcode::QAnd | Opcode::QOr | Opcode::QImpl => {
+            Opcode::QAnd
+            | Opcode::QOr
+            | Opcode::QImpl
+            | Opcode::QTruthAnd
+            | Opcode::QTruthOr
+            | Opcode::QTruthImpl => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let lhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let rhs = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -2075,16 +2078,24 @@ where
                     Opcode::QAnd => quad_and(lq, rq),
                     Opcode::QOr => quad_or(lq, rq),
                     Opcode::QImpl => quad_implies(lq, rq),
+                    Opcode::QTruthAnd => quad_truth_and(lq, rq),
+                    Opcode::QTruthOr => quad_truth_or(lq, rq),
+                    Opcode::QTruthImpl => quad_truth_implies(lq, rq),
                     _ => unreachable!(),
                 };
                 set_reg(vm, frame_idx, dst, Value::Quad(out_q))?;
                 next_pc = cur - f.instr_start;
             }
-            Opcode::QNot => {
+            Opcode::QNot | Opcode::QTruthNot => {
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let src = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                 let q = as_quad(get_reg(vm, frame_idx, src)?)?;
-                set_reg(vm, frame_idx, dst, Value::Quad(quad_not(q)))?;
+                let out_q = if opcode == Opcode::QNot {
+                    quad_not(q)
+                } else {
+                    quad_truth_not(q)
+                };
+                set_reg(vm, frame_idx, dst, Value::Quad(out_q))?;
                 next_pc = cur - f.instr_start;
             }
             Opcode::BoolAnd | Opcode::BoolOr => {
@@ -2336,11 +2347,6 @@ where
                     return Ok(());
                 }
                 continue;
-            }
-            Opcode::QTruthAnd | Opcode::QTruthOr | Opcode::QTruthNot | Opcode::QTruthImpl => {
-                return Err(RuntimeError::BadFormat(
-                    "QTruth opcodes not supported yet in execution loop".to_string(),
-                ));
             }
         }
 
@@ -2689,6 +2695,22 @@ fn quad_or(a: QuadVal, b: QuadVal) -> QuadVal {
 
 fn quad_implies(a: QuadVal, b: QuadVal) -> QuadVal {
     quad_lane0_value(quad_lane0(a).lattice_inverse().lattice_join(quad_lane0(b)))
+}
+
+fn quad_truth_not(a: QuadVal) -> QuadVal {
+    quad_lane0_value(quad_lane0(a).map_not())
+}
+
+fn quad_truth_and(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value(quad_lane0(a).map_and(quad_lane0(b)))
+}
+
+fn quad_truth_or(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value(quad_lane0(a).map_or(quad_lane0(b)))
+}
+
+fn quad_truth_implies(a: QuadVal, b: QuadVal) -> QuadVal {
+    quad_lane0_value(quad_lane0(a).map_implies(quad_lane0(b)))
 }
 
 fn value_eq(a: &Value, b: &Value) -> Result<bool, RuntimeError> {
@@ -3171,6 +3193,9 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
         Opcode::QAnd
         | Opcode::QOr
         | Opcode::QImpl
+        | Opcode::QTruthAnd
+        | Opcode::QTruthOr
+        | Opcode::QTruthImpl
         | Opcode::BoolAnd
         | Opcode::BoolOr
         | Opcode::CmpI32Lt
@@ -3188,6 +3213,9 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
                 Opcode::QAnd => "Q_AND",
                 Opcode::QOr => "Q_OR",
                 Opcode::QImpl => "Q_IMPL",
+                Opcode::QTruthAnd => "Q_TRUTH_AND",
+                Opcode::QTruthOr => "Q_TRUTH_OR",
+                Opcode::QTruthImpl => "Q_TRUTH_IMPL",
                 Opcode::BoolAnd => "BOOL_AND",
                 Opcode::BoolOr => "BOOL_OR",
                 Opcode::CmpI32Lt => "CMP_I32_LT",
@@ -3210,13 +3238,14 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
             };
             format!("{} r{}, r{}, r{}", op, d, l, r)
         }
-        Opcode::QNot | Opcode::BoolNot => {
+        Opcode::QNot | Opcode::BoolNot | Opcode::QTruthNot => {
             let d = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
             let s = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
-            let op = if opcode == Opcode::QNot {
-                "Q_NOT"
-            } else {
-                "BOOL_NOT"
+            let op = match opcode {
+                Opcode::QNot => "Q_NOT",
+                Opcode::QTruthNot => "Q_TRUTH_NOT",
+                Opcode::BoolNot => "BOOL_NOT",
+                _ => unreachable!(),
             };
             format!("{} r{}, r{}", op, d, s)
         }
@@ -3285,11 +3314,6 @@ fn disasm_one(f: &FunctionBytecode, pc: usize) -> Result<(String, usize), Runtim
             } else {
                 "RET".to_string()
             }
-        }
-        Opcode::QTruthAnd | Opcode::QTruthOr | Opcode::QTruthNot | Opcode::QTruthImpl => {
-            return Err(RuntimeError::BadFormat(
-                "QTruth opcodes not supported yet in disassembler".to_string(),
-            ));
         }
     };
     Ok((text, cur - f.instr_start))
@@ -4732,28 +4756,94 @@ mod tests {
         assert!(matches!(err, RuntimeError::BadFormat(_)));
     }
 
-    #[test]
-    fn vm_rejects_unsupported_qtruth_opcodes_on_load() {
-        for opcode in [0x17, 0x18, 0x19, 0x1A] {
-            let src = "fn main() { return; }";
-            let mut bytes = compile_program_to_semcode(src).expect("compile");
-            let opcode_pos = 8 + 2 + 4 + 4 + 2;
-            bytes[opcode_pos] = opcode;
-            let err = run_semcode(&bytes).expect_err("must fail");
-            assert!(matches!(err, RuntimeError::BadFormat(_)));
+    fn build_qtruth_test_program(opcode: u8) -> Vec<u8> {
+        use sm_emit::Opcode;
+        let src = "fn main() { return; }";
+        let mut bytes = compile_program_to_semcode(src).expect("compile");
+
+        let mut new_code = Vec::new();
+
+        // 0: LoadQ r0, T
+        new_code.push(Opcode::LoadQ as u8);
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.push(2); // T
+
+        // 4: LoadQ r1, F
+        new_code.push(Opcode::LoadQ as u8);
+        new_code.extend_from_slice(&1u16.to_le_bytes());
+        new_code.push(1); // F
+
+        // 8: Opcode r2, r0, r1 (or r0 for Not)
+        new_code.push(opcode);
+        new_code.extend_from_slice(&2u16.to_le_bytes()); // dst = 2
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // lhs/src = 0 (T)
+        if opcode != 0x19 {
+            // QTruthNot = 0x19
+            new_code.extend_from_slice(&1u16.to_le_bytes()); // rhs = 1 (F)
         }
+
+        // 21 or 19: Ret r2
+        new_code.push(Opcode::Ret as u8);
+        new_code.push(1); // has_src
+        new_code.extend_from_slice(&2u16.to_le_bytes());
+
+        let opcode_pos = 8 + 2 + 4 + 4 + 2;
+        bytes.splice(opcode_pos..opcode_pos + 2, new_code.iter().copied());
+
+        let new_code_len = 2 + new_code.len();
+        let code_len_pos = 8 + 2 + 4;
+        bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
+
+        bytes
     }
 
     #[test]
-    fn vm_disassembler_rejects_unsupported_qtruth_opcodes() {
-        for opcode in [0x17, 0x18, 0x19, 0x1A] {
-            let src = "fn main() { return; }";
-            let mut bytes = compile_program_to_semcode(src).expect("compile");
-            let opcode_pos = 8 + 2 + 4 + 4 + 2;
-            bytes[opcode_pos] = opcode;
-            let err = disasm_semcode(&bytes).expect_err("must fail disasm");
-            assert!(matches!(err, RuntimeError::BadFormat(_)));
-        }
+    fn vm_executes_qtruth_opcodes_correctly() {
+        vm_test_clear_terminal_observation();
+
+        // T map_and F == F
+        let bytes_and = build_qtruth_test_program(0x17);
+        run_semcode(&bytes_and).expect("must run");
+        assert_eq!(
+            vm_test_take_terminal_observation()
+                .unwrap()
+                .observable
+                .unwrap(),
+            "return=Quad(F); locals=[]"
+        );
+
+        // T map_or F == T
+        let bytes_or = build_qtruth_test_program(0x18);
+        run_semcode(&bytes_or).expect("must run");
+        assert_eq!(
+            vm_test_take_terminal_observation()
+                .unwrap()
+                .observable
+                .unwrap(),
+            "return=Quad(T); locals=[]"
+        );
+
+        // T map_implies F == F
+        let bytes_impl = build_qtruth_test_program(0x1A);
+        run_semcode(&bytes_impl).expect("must run");
+        assert_eq!(
+            vm_test_take_terminal_observation()
+                .unwrap()
+                .observable
+                .unwrap(),
+            "return=Quad(F); locals=[]"
+        );
+
+        // T map_not == F
+        let bytes_not = build_qtruth_test_program(0x19);
+        run_semcode(&bytes_not).expect("must run");
+        assert_eq!(
+            vm_test_take_terminal_observation()
+                .unwrap()
+                .observable
+                .unwrap(),
+            "return=Quad(F); locals=[]"
+        );
     }
 
     #[test]
