@@ -1,12 +1,12 @@
 task:
-  id: VM-QUAD-OPCODE-LATTICE-BRIDGE
-  title: Route quad opcodes through core-quad lattice aliases
-  type: feat
+  id: VM-FORMAT-INVENTORY-QTRUTH-OPCODES
+  title: Inventory requirements for explicit QTruth opcodes
+  type: docs
   mode: active
 
 intent:
-  summary: feat(vm): route quad opcodes through core-quad lattice aliases
-  issue: "#1446"
+  summary: docs(vm/format): inventory requirements for explicit QTruth opcodes
+  issue: "#1450"
 
 layer:
   name: core_quad
@@ -14,10 +14,9 @@ layer:
 
 scope:
   allowed_paths:
-    - crates/sm-vm/Cargo.toml
-    - crates/sm-vm/src/semcode_vm.rs
+    - docs/roadmap/core_quad/inventory_qtruth_opcodes.md
     - .harness/current.task.yaml
-    - .harness/reports/VM-QUAD-OPCODE-LATTICE-BRIDGE.md
+    - .harness/reports/VM-FORMAT-INVENTORY-QTRUTH-OPCODES.md
 
   forbidden_paths:
     - crates/sm-format/**
@@ -27,7 +26,6 @@ scope:
     - crates/semantic-core-quad/**
     - crates/ton618-core/**
     - src/**
-    - docs/**
     - tests/**
     - tools/**
     - README.md
@@ -43,15 +41,13 @@ actions:
 
   forbidden:
     - change_opcodes
-    - modify_core_quad
+    - modify_rust_code
 
 verification:
   required:
-    - cargo test -p sm-vm --quiet
-    - cargo test -p semantic-core-quad --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/VM-QUAD-OPCODE-LATTICE-BRIDGE.md
+  output: .harness/reports/VM-FORMAT-INVENTORY-QTRUTH-OPCODES.md
