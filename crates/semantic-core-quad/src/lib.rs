@@ -344,6 +344,22 @@ impl QuadroReg32 {
 
         Self((at | bt) | (af & bf))
     }
+
+    // SWAR IMPLIES uses the frozen derived compatibility policy:
+    // A -> B = NOT(A) join B.
+    pub const fn map_implies_swar(self, other: Self) -> Self {
+        self.map_not_swar().join(other)
+    }
+
+    // SWAR NAND is derived from existing SWAR AND followed by SWAR NOT.
+    pub const fn map_nand_swar(self, other: Self) -> Self {
+        self.map_and_swar(other).map_not_swar()
+    }
+
+    // SWAR NOR is derived from existing SWAR OR followed by SWAR NOT.
+    pub const fn map_nor_swar(self, other: Self) -> Self {
+        self.map_or_swar(other).map_not_swar()
+    }
 }
 
 impl fmt::Debug for QuadroReg32 {
@@ -1534,5 +1550,96 @@ mod tests {
                 assert_eq!(a.map_or_swar(b), a.map_or_scalar(b));
             }
         }
+    }
+    #[test]
+    fn map_implies_swar_matches_scalar_samples() {
+        for a_raw in RAW_SAMPLES {
+            for b_raw in RAW_SAMPLES {
+                let a = QuadroReg32::from_raw(a_raw);
+                let b = QuadroReg32::from_raw(b_raw);
+                assert_eq!(a.map_implies_swar(b), a.map_implies_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_nand_swar_matches_scalar_samples() {
+        for a_raw in RAW_SAMPLES {
+            for b_raw in RAW_SAMPLES {
+                let a = QuadroReg32::from_raw(a_raw);
+                let b = QuadroReg32::from_raw(b_raw);
+                assert_eq!(a.map_nand_swar(b), a.map_nand_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_nor_swar_matches_scalar_samples() {
+        for a_raw in RAW_SAMPLES {
+            for b_raw in RAW_SAMPLES {
+                let a = QuadroReg32::from_raw(a_raw);
+                let b = QuadroReg32::from_raw(b_raw);
+                assert_eq!(a.map_nor_swar(b), a.map_nor_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_implies_swar_matches_scalar_repeated_state_pairs() {
+        for a_state in QuadState::ALL {
+            for b_state in QuadState::ALL {
+                let a = reg_filled(a_state);
+                let b = reg_filled(b_state);
+                assert_eq!(a.map_implies_swar(b), a.map_implies_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_nand_swar_matches_scalar_repeated_state_pairs() {
+        for a_state in QuadState::ALL {
+            for b_state in QuadState::ALL {
+                let a = reg_filled(a_state);
+                let b = reg_filled(b_state);
+                assert_eq!(a.map_nand_swar(b), a.map_nand_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_nor_swar_matches_scalar_repeated_state_pairs() {
+        for a_state in QuadState::ALL {
+            for b_state in QuadState::ALL {
+                let a = reg_filled(a_state);
+                let b = reg_filled(b_state);
+                assert_eq!(a.map_nor_swar(b), a.map_nor_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_implies_nand_nor_exact_checks() {
+        let t = reg_filled(QuadState::T);
+        let f = reg_filled(QuadState::F);
+        let n = reg_filled(QuadState::N);
+        let s = reg_filled(QuadState::S);
+
+        // IMPLIES
+        assert_eq!(t.map_implies_swar(f), f);
+        assert_eq!(f.map_implies_swar(t), t);
+        assert_eq!(f.map_implies_swar(n), t);
+        assert_eq!(n.map_implies_swar(f), f);
+        assert_eq!(t.map_implies_swar(t), s);
+        assert_eq!(s.map_implies_swar(n), s);
+
+        // NAND
+        assert_eq!(t.map_nand_swar(t), f);
+        assert_eq!(f.map_nand_swar(t), t);
+        assert_eq!(n.map_nand_swar(t), n);
+
+        // NOR
+        assert_eq!(f.map_nor_swar(f), t);
+        assert_eq!(t.map_nor_swar(f), f);
+        assert_eq!(n.map_nor_swar(f), n);
     }
 }
