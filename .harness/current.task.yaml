@@ -1,28 +1,29 @@
 task:
-  id: VM-FORMAT-INVENTORY-QTRUTH-OPCODES
-  title: Inventory requirements for explicit QTruth opcodes
+  id: FORMAT-RESERVE-QTRUTH-SLOTS
+  title: Reserve explicit QTruth opcode slots
   type: docs
   mode: active
 
 intent:
-  summary: docs(vm/format): inventory requirements for explicit QTruth opcodes
-  issue: "#1450"
+  summary: docs(format): reserve explicit QTruth opcode slots
+  issue: "#1452"
 
 layer:
   name: core_quad
-  owner: sm-vm
+  owner: sm-format
 
 scope:
   allowed_paths:
-    - docs/roadmap/core_quad/inventory_qtruth_opcodes.md
+    - docs/roadmap/core_quad/qtruth_opcode_reservation.md
     - .harness/current.task.yaml
-    - .harness/reports/VM-FORMAT-INVENTORY-QTRUTH-OPCODES.md
+    - .harness/reports/FORMAT-RESERVE-QTRUTH-SLOTS.md
 
   forbidden_paths:
     - crates/sm-format/**
     - crates/sm-ir/**
     - crates/sm-emit/**
     - crates/sm-verify/**
+    - crates/sm-vm/**
     - crates/semantic-core-quad/**
     - crates/ton618-core/**
     - src/**
@@ -40,7 +41,6 @@ actions:
     - create_pr
 
   forbidden:
-    - change_opcodes
     - modify_rust_code
 
 verification:
@@ -50,4 +50,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/VM-FORMAT-INVENTORY-QTRUTH-OPCODES.md
+  output: .harness/reports/FORMAT-RESERVE-QTRUTH-SLOTS.md
