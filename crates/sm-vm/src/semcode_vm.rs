@@ -5284,7 +5284,13 @@ mod tests {
     fn vm_quad_lattice_bridge_qand_matches_legacy_truth() {
         for a in ALL_QUADS {
             for b in ALL_QUADS {
-                assert_eq!(quad_and(a, b), legacy_qand(a, b), "QAnd mismatch for {:?}, {:?}", a, b);
+                assert_eq!(
+                    quad_and(a, b),
+                    legacy_qand(a, b),
+                    "QAnd mismatch for {:?}, {:?}",
+                    a,
+                    b
+                );
             }
         }
     }
@@ -5293,7 +5299,13 @@ mod tests {
     fn vm_quad_lattice_bridge_qor_matches_legacy_truth() {
         for a in ALL_QUADS {
             for b in ALL_QUADS {
-                assert_eq!(quad_or(a, b), legacy_qor(a, b), "QOr mismatch for {:?}, {:?}", a, b);
+                assert_eq!(
+                    quad_or(a, b),
+                    legacy_qor(a, b),
+                    "QOr mismatch for {:?}, {:?}",
+                    a,
+                    b
+                );
             }
         }
     }
@@ -5302,7 +5314,13 @@ mod tests {
     fn vm_quad_lattice_bridge_qimpl_matches_legacy_truth() {
         for a in ALL_QUADS {
             for b in ALL_QUADS {
-                assert_eq!(quad_implies(a, b), legacy_qimpl(a, b), "QImpl mismatch for {:?}, {:?}", a, b);
+                assert_eq!(
+                    quad_implies(a, b),
+                    legacy_qimpl(a, b),
+                    "QImpl mismatch for {:?}, {:?}",
+                    a,
+                    b
+                );
             }
         }
     }
