@@ -360,6 +360,34 @@ impl QuadroReg32 {
     pub const fn map_nor_swar(self, other: Self) -> Self {
         self.map_or_swar(other).map_not_swar()
     }
+
+    pub const fn map_not(self) -> Self {
+        self.map_not_swar()
+    }
+
+    pub const fn map_xor(self, other: Self) -> Self {
+        self.map_xor_swar(other)
+    }
+
+    pub const fn map_and(self, other: Self) -> Self {
+        self.map_and_swar(other)
+    }
+
+    pub const fn map_or(self, other: Self) -> Self {
+        self.map_or_swar(other)
+    }
+
+    pub const fn map_implies(self, other: Self) -> Self {
+        self.map_implies_swar(other)
+    }
+
+    pub const fn map_nand(self, other: Self) -> Self {
+        self.map_nand_swar(other)
+    }
+
+    pub const fn map_nor(self, other: Self) -> Self {
+        self.map_nor_swar(other)
+    }
 }
 
 impl fmt::Debug for QuadroReg32 {
@@ -1641,5 +1669,55 @@ mod tests {
         assert_eq!(f.map_nor_swar(f), t);
         assert_eq!(t.map_nor_swar(f), f);
         assert_eq!(n.map_nor_swar(f), n);
+    }
+    #[test]
+    fn map_default_aliases_match_swar_samples() {
+        for a_raw in RAW_SAMPLES {
+            for b_raw in RAW_SAMPLES {
+                let a = QuadroReg32::from_raw(a_raw);
+                let b = QuadroReg32::from_raw(b_raw);
+                assert_eq!(a.map_not(), a.map_not_swar());
+                assert_eq!(a.map_xor(b), a.map_xor_swar(b));
+                assert_eq!(a.map_and(b), a.map_and_swar(b));
+                assert_eq!(a.map_or(b), a.map_or_swar(b));
+                assert_eq!(a.map_implies(b), a.map_implies_swar(b));
+                assert_eq!(a.map_nand(b), a.map_nand_swar(b));
+                assert_eq!(a.map_nor(b), a.map_nor_swar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_default_aliases_match_scalar_samples() {
+        for a_raw in RAW_SAMPLES {
+            for b_raw in RAW_SAMPLES {
+                let a = QuadroReg32::from_raw(a_raw);
+                let b = QuadroReg32::from_raw(b_raw);
+                assert_eq!(a.map_not(), a.map_not_scalar());
+                assert_eq!(a.map_xor(b), a.map_xor_scalar(b));
+                assert_eq!(a.map_and(b), a.map_and_scalar(b));
+                assert_eq!(a.map_or(b), a.map_or_scalar(b));
+                assert_eq!(a.map_implies(b), a.map_implies_scalar(b));
+                assert_eq!(a.map_nand(b), a.map_nand_scalar(b));
+                assert_eq!(a.map_nor(b), a.map_nor_scalar(b));
+            }
+        }
+    }
+
+    #[test]
+    fn map_default_aliases_match_swar_repeated_state_pairs() {
+        for a_state in QuadState::ALL {
+            for b_state in QuadState::ALL {
+                let a = reg_filled(a_state);
+                let b = reg_filled(b_state);
+                assert_eq!(a.map_not(), a.map_not_swar());
+                assert_eq!(a.map_xor(b), a.map_xor_swar(b));
+                assert_eq!(a.map_and(b), a.map_and_swar(b));
+                assert_eq!(a.map_or(b), a.map_or_swar(b));
+                assert_eq!(a.map_implies(b), a.map_implies_swar(b));
+                assert_eq!(a.map_nand(b), a.map_nand_swar(b));
+                assert_eq!(a.map_nor(b), a.map_nor_swar(b));
+            }
+        }
     }
 }

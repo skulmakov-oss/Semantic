@@ -1,12 +1,12 @@
 task:
-  id: CORE-QUAD-REG32-SWAR-IMPLIES-NAND-NOR
-  title: Add SWAR IMPLIES/NAND/NOR map methods
+  id: CORE-QUAD-REG32-MAP-DEFAULT-ALIASES
+  title: Promote SWAR maps to default aliases
   type: feat
   mode: active
 
 intent:
-  summary: feat(core-quad): add SWAR IMPLIES NAND NOR map methods
-  issue: "#1407"
+  summary: feat(core-quad): promote SWAR maps to default aliases
+  issue: "#1436"
 
 layer:
   name: core-quad
@@ -16,7 +16,7 @@ scope:
   allowed_paths:
     - crates/semantic-core-quad/src/lib.rs
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-REG32-SWAR-IMPLIES-NAND-NOR.md
+    - .harness/reports/CORE-QUAD-REG32-MAP-DEFAULT-ALIASES.md
 
   forbidden_paths:
     - crates/ton618-core/**
@@ -46,13 +46,11 @@ actions:
 
 constraints:
   - semantic-core-quad only
-  - SWAR IMPLIES/NAND/NOR map methods only
-  - compare with scalar oracle
-  - no EQUIV
-  - no aliases
-  - no VM/opcode changes
-  - no runtime changes
-  - no mask migration
+  - Add explicit default aliases on QuadroReg32
+  - No EQUIV API
+  - No VM/opcode changes
+  - No runtime changes
+  - No mask migration
 
 verification:
   required:
@@ -62,4 +60,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-REG32-SWAR-IMPLIES-NAND-NOR.md
+  output: .harness/reports/CORE-QUAD-REG32-MAP-DEFAULT-ALIASES.md
