@@ -1,12 +1,12 @@
 task:
-  id: SM-IR-QTRUTH-ENCODING
-  title: encode explicit QTruth IR instructions to QTruth opcodes
-  type: feat
+  id: SM-IR-QTRUTH-SEMCODE-ENVELOPE-GUARD
+  title: add SemCode envelope guard for QTruth IR encoding
+  type: test
   mode: active
 
 intent:
-  summary: "feat(sm-ir): encode explicit QTruth IR instructions to QTruth opcodes"
-  issue: "#1462"
+  summary: "test(sm-ir): add SemCode envelope guard for QTruth IR encoding"
+  issue: "#1464"
 
 layer:
   name: core_quad
@@ -16,7 +16,7 @@ scope:
   allowed_paths:
     - crates/sm-ir/src/legacy_lowering.rs
     - .harness/current.task.yaml
-    - .harness/reports/SM-IR-QTRUTH-ENCODING.md
+    - .harness/reports/SM-IR-QTRUTH-SEMCODE-ENVELOPE-GUARD.md
 
   forbidden_paths:
     - crates/sm-format/**
@@ -46,10 +46,12 @@ actions:
     - change_verifier_behavior
     - change_vm_behavior
     - touch_sm_format
+    - touch_sm_vm
     - touch_sm_emit
     - touch_semantic_core_quad
     - add_parser_syntax
     - add_frontend_syntax
+    - add_cargo_dependencies
     - fold_qtruth_constants
     - route_qtruth_through_lattice_aliases
     - use_hidden_adapters
@@ -65,4 +67,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/SM-IR-QTRUTH-ENCODING.md
+  output: .harness/reports/SM-IR-QTRUTH-SEMCODE-ENVELOPE-GUARD.md

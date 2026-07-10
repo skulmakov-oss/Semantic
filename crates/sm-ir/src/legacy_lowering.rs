@@ -12298,4 +12298,68 @@ mod opt_tests {
             vec![Opcode::QImpl.byte(), 1, 0, 2, 0, 3, 0]
         );
     }
+
+    #[test]
+    fn qtruth_instructions_survive_semcode_envelope_emission() {
+        fn assert_opcode_in_envelope(instr: IrInstr, expected_opcode: u8) {
+            let semcode = emit_ir_to_semcode(
+                &[IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadQ {
+                            dst: 0,
+                            val: QuadVal::N,
+                        },
+                        IrInstr::LoadQ {
+                            dst: 1,
+                            val: QuadVal::T,
+                        },
+                        instr,
+                        IrInstr::Ret { src: Some(2) },
+                    ],
+                    ownership_events: Vec::new(),
+                }],
+                false,
+            )
+            .expect("QTruth IR should emit through the SemCode envelope");
+
+            let (_, functions) =
+                decode_semcode_envelope(&semcode).expect("SemCode envelope should decode");
+            let main = functions
+                .iter()
+                .find(|function| function.name == "main")
+                .expect("main function should be present");
+            let instruction_stream = &main.code_slice[main.instr_start_offset..];
+            assert_eq!(instruction_stream[8], expected_opcode);
+        }
+
+        assert_opcode_in_envelope(
+            IrInstr::QTruthAnd {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+            Opcode::QTruthAnd.byte(),
+        );
+        assert_opcode_in_envelope(
+            IrInstr::QTruthOr {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+            Opcode::QTruthOr.byte(),
+        );
+        assert_opcode_in_envelope(
+            IrInstr::QTruthNot { dst: 2, src: 0 },
+            Opcode::QTruthNot.byte(),
+        );
+        assert_opcode_in_envelope(
+            IrInstr::QTruthImpl {
+                dst: 2,
+                lhs: 0,
+                rhs: 1,
+            },
+            Opcode::QTruthImpl.byte(),
+        );
+    }
 }
