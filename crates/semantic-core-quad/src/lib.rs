@@ -2585,27 +2585,17 @@ mod tests {
         assert_eq!(tile.get_unchecked(100), QuadState::S);
         assert_eq!(tile.get_unchecked(0), QuadState::N);
 
-        let t_mask = tile.truth_mask();
-        assert!(((t_mask.raw() >> 5) & 1) == 1);
-        assert!(((t_mask.raw() >> 100) & 1) == 1);
-        assert!(!((t_mask.raw() >> 70) & 1) == 1);
+        let truth_bits = (1u128 << 5) | (1u128 << 100);
+        let falsity_bits = (1u128 << 70) | (1u128 << 100);
+        let known_bits = (1u128 << 5) | (1u128 << 70);
+        let conflict_bits = 1u128 << 100;
+        let occupied_bits = (1u128 << 5) | (1u128 << 70) | (1u128 << 100);
+        let null_bits = !occupied_bits;
 
-        let f_mask = tile.falsity_mask();
-        assert!(((f_mask.raw() >> 70) & 1) == 1);
-        assert!(((f_mask.raw() >> 100) & 1) == 1);
-        assert!(!((f_mask.raw() >> 5) & 1) == 1);
-
-        let known = tile.known_mask();
-        assert!(((known.raw() >> 5) & 1) == 1);
-        assert!(((known.raw() >> 70) & 1) == 1);
-        assert!(((known.raw() >> 100) & 1) == 1);
-
-        let conflict = tile.conflict_mask();
-        assert!(((conflict.raw() >> 100) & 1) == 1);
-        assert!(!((conflict.raw() >> 5) & 1) == 1);
-
-        let null = tile.null_mask();
-        assert!(((null.raw() >> 0) & 1) == 1);
-        assert!(!((null.raw() >> 5) & 1) == 1);
+        assert_eq!(tile.true_mask().raw(), truth_bits);
+        assert_eq!(tile.false_mask().raw(), falsity_bits);
+        assert_eq!(tile.known_mask().raw(), known_bits);
+        assert_eq!(tile.conflict_mask().raw(), conflict_bits);
+        assert_eq!(tile.null_mask().raw(), null_bits);
     }
 }

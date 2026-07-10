@@ -5,7 +5,7 @@ task:
   mode: active
 
 intent:
-  summary: "refactor(core-quad): align QuadTile128 and qualify core layout"
+  summary: "test(core-quad): correct QuadTile128 qualification evidence"
   issue: "#1417"
 
 layer:

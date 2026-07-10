@@ -38,6 +38,12 @@
 * **Commit SHA:** Pending
 * **PR Number:** Pending
 
+## Verification Corrections
+* The first online CI run exposed invalid test API names.
+* The semantic oracle was corrected so S is conflict, not known.
+* The final verification commands were rerun fail-fast.
+* The accepted production layout code was not changed.
+
 ## Explicit Non-Changes
 * Did not change mask semantics, lane numbering, or state logic.
 * Did not add WGPU, WGSL, `GpuQuadTile128`, byte uploaders, or `bytemuck` support.
