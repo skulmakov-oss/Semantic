@@ -1,37 +1,44 @@
 task:
-  id: CORE-QUAD-V1-CI-INVENTORY-FIX
-  title: register core quad policy in legacy content inventory
-  type: test
+  id: CORE-QUAD-TILE128-LAYOUT
+  title: align and qualify QuadTile128 core layout
+  type: implementation
   mode: active
 
 intent:
-  summary: "test(boundaries): register core-quad compatibility policy reference"
-  issue: "#1408, #1409"
+  summary: "test(core-quad): correct QuadTile128 qualification evidence"
+  issue: "#1417"
 
 layer:
-  name: boundary_enforcement
-  owner: repository_governance
+  name: core_quad
+  owner: semantic-core-quad
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-V1-CI-INVENTORY-FIX.md
-    - tests/legacy_guards.rs
+    - .harness/reports/CORE-QUAD-TILE128-LAYOUT.md
+    - docs/roadmap/core_quad/quad_tile128_layout_boundary.md
+    - crates/semantic-core-quad/src/lib.rs
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - modify_tests
+    - modify_core_quad
+    - create_docs
     - test
     - commit
     - push
+    - create_pr
 
   forbidden:
-    - modify_core_quad
-    - modify_docs
     - modify_other_crates
+    - modify_docs_spec
+    - modify_visual
+    - modify_gpu_layout
+    - modify_tile_semantics
+    - modify_mask_api
+    - modify_delta_api
+    - modify_bank_api
     - add_dependency
     - force_push
-    - create_pr
     - merge
