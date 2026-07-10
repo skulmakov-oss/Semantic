@@ -10,11 +10,18 @@ path = "src/lib.rs"
 default = ["std"]
 std = ["prom-ui-runtime/std"]
 winit-backend = ["std", "dep:winit"]
-wgpu-backend = ["std", "dep:wgpu", "dep:pollster", "dep:bytemuck"]
+wgpu-backend = [
+    "std",
+    "dep:wgpu",
+    "dep:pollster",
+    "dep:bytemuck",
+    "dep:semantic-core-quad",
+]
 
 [dependencies]
 prom-ui = { path = "../prom-ui", default-features = false }
 prom-ui-runtime = { path = "../prom-ui-runtime", default-features = false }
+semantic-core-quad = { path = "../semantic-core-quad", optional = true, default-features = false }
 winit = { version = "0.30.13", optional = true, default-features = false, features = ["rwh_06", "x11"] }
 wgpu = { version = "0.20", optional = true, default-features = false, features = ["wgsl"] }
 pollster = { version = "0.3", optional = true }

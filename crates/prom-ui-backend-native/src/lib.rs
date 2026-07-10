@@ -25,9 +25,15 @@ pub mod frame_sink;
 pub mod interaction;
 pub mod session_hook;
 
+#[cfg(feature = "wgpu-backend")]
+pub mod quad_tile_upload;
+
 pub use action_translation::{DefaultNativeActionTranslator, NativeActionTranslator};
 pub use frame_sink::{UiBackendFrame, UiBackendFrameEntry, UiFrameSink};
 pub use interaction::RoutedInteraction;
+
+#[cfg(feature = "wgpu-backend")]
+pub use quad_tile_upload::{join_u128, split_u128, GpuQuadTile128};
 
 /// Raw button state representing physical input evidence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
