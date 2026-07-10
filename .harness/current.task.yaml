@@ -1,30 +1,28 @@
 task:
-  id: QTRUTH-SOURCE-INTRINSIC-ADMISSION
-  title: admit explicit QTruth source intrinsics
-  type: feat
+  id: VM-QTRUTH-SOURCE-INTRINSIC-E2E
+  title: guard source-level QTruth intrinsic execution
+  type: test
   mode: active
 
 intent:
-  summary: "feat(sm-front/sm-ir): admit explicit QTruth intrinsics"
-  issue: "#1470"
+  summary: "test(sm-vm): guard source-level QTruth intrinsic execution"
+  issue: "#1472"
 
 layer:
   name: core_quad
-  owner: sm-front/sm-ir
+  owner: sm-vm
 
 scope:
   allowed_paths:
-    - crates/sm-front/src/lib.rs
-    - crates/sm-ir/src/legacy_lowering.rs
+    - crates/sm-vm/src/semcode_vm.rs
     - .harness/current.task.yaml
-    - .harness/reports/QTRUTH-SOURCE-INTRINSIC-ADMISSION.md
+    - .harness/reports/VM-QTRUTH-SOURCE-INTRINSIC-E2E.md
 
   forbidden_paths:
-    - crates/sm-front/src/parser.rs
-    - crates/sm-front/src/lexer.rs
+    - crates/sm-front/**
+    - crates/sm-ir/**
     - crates/sm-format/**
     - crates/sm-verify/**
-    - crates/sm-vm/**
     - crates/sm-emit/**
     - crates/semantic-core-quad/**
     - crates/ton618-core/**
@@ -45,29 +43,30 @@ actions:
     - create_pr
 
   forbidden:
+    - change_vm_behavior
+    - change_verifier_behavior
+    - change_source_admission
     - add_parser_syntax
     - add_lexer_tokens
     - modify_opcode_byte_values
-    - change_verifier_behavior
-    - change_vm_behavior
     - touch_sm_format
+    - touch_sm_front
+    - touch_sm_ir
     - touch_sm_emit
     - touch_semantic_core_quad
-    - route_qtruth_through_lattice_aliases
     - route_qtruth_through_legacy_q_ops
+    - route_qtruth_through_lattice_aliases
     - use_hidden_adapters
     - invert_falsity_planes
     - add_equiv_nand_nor
     - change_legacy_lattice_behavior
-    - reinterpret_legacy_source_operators
 
 verification:
   required:
-    - cargo test -p sm-front --quiet
-    - cargo test -p sm-ir --quiet
+    - cargo test -p sm-vm --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/QTRUTH-SOURCE-INTRINSIC-ADMISSION.md
+  output: .harness/reports/VM-QTRUTH-SOURCE-INTRINSIC-E2E.md
