@@ -1170,6 +1170,76 @@ impl<const N: usize> QuadroBank<N> {
             *reg = reg.inverse();
         }
     }
+
+    /// Applies the `NOT` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation (e.g., `inverse_inplace`).
+    pub fn map_not_inplace(&mut self) {
+        for reg in &mut self.regs {
+            *reg = reg.map_not();
+        }
+    }
+
+    /// Applies the `XOR` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation.
+    pub fn map_xor_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.regs.iter_mut().zip(other.regs.iter().copied()) {
+            *dst = dst.map_xor(src);
+        }
+    }
+
+    /// Applies the `AND` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation (e.g., `meet_inplace`).
+    pub fn map_and_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.regs.iter_mut().zip(other.regs.iter().copied()) {
+            *dst = dst.map_and(src);
+        }
+    }
+
+    /// Applies the `OR` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation (e.g., `join_inplace`).
+    pub fn map_or_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.regs.iter_mut().zip(other.regs.iter().copied()) {
+            *dst = dst.map_or(src);
+        }
+    }
+
+    /// Applies the `IMPLIES` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation.
+    pub fn map_implies_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.regs.iter_mut().zip(other.regs.iter().copied()) {
+            *dst = dst.map_implies(src);
+        }
+    }
+
+    /// Applies the `NAND` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation.
+    pub fn map_nand_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.regs.iter_mut().zip(other.regs.iter().copied()) {
+            *dst = dst.map_nand(src);
+        }
+    }
+
+    /// Applies the `NOR` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation.
+    pub fn map_nor_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.regs.iter_mut().zip(other.regs.iter().copied()) {
+            *dst = dst.map_nor(src);
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1225,6 +1295,76 @@ impl<const N: usize> QuadTileBank<N> {
     pub fn inverse_inplace(&mut self) {
         for tile in &mut self.tiles {
             *tile = tile.inverse();
+        }
+    }
+
+    /// Applies the `NOT` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation (e.g., `inverse_inplace`).
+    pub fn map_not_inplace(&mut self) {
+        for tile in &mut self.tiles {
+            *tile = tile.map_not();
+        }
+    }
+
+    /// Applies the `XOR` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation.
+    pub fn map_xor_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.tiles.iter_mut().zip(other.tiles.iter().copied()) {
+            *dst = dst.map_xor(src);
+        }
+    }
+
+    /// Applies the `AND` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation (e.g., `meet_inplace`).
+    pub fn map_and_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.tiles.iter_mut().zip(other.tiles.iter().copied()) {
+            *dst = dst.map_and(src);
+        }
+    }
+
+    /// Applies the `OR` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation (e.g., `join_inplace`).
+    pub fn map_or_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.tiles.iter_mut().zip(other.tiles.iter().copied()) {
+            *dst = dst.map_or(src);
+        }
+    }
+
+    /// Applies the `IMPLIES` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation.
+    pub fn map_implies_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.tiles.iter_mut().zip(other.tiles.iter().copied()) {
+            *dst = dst.map_implies(src);
+        }
+    }
+
+    /// Applies the `NAND` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation.
+    pub fn map_nand_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.tiles.iter_mut().zip(other.tiles.iter().copied()) {
+            *dst = dst.map_nand(src);
+        }
+    }
+
+    /// Applies the `NOR` default truth map elementwise to this bank.
+    /// Bank element order is preserved. No allocation occurs.
+    /// Mutates only `self`. The corresponding `other` bank is read-only.
+    /// This helper is a truth-map operation and is not an alias for a lattice operation.
+    pub fn map_nor_inplace(&mut self, other: &Self) {
+        for (dst, src) in self.tiles.iter_mut().zip(other.tiles.iter().copied()) {
+            *dst = dst.map_nor(src);
         }
     }
 }
@@ -2861,5 +3001,247 @@ mod tests {
         let inv = lhs.inverse();
         assert_eq!(inv.true_plane(), 0b1100);
         assert_eq!(inv.false_plane(), 0b1010);
+    }
+
+    #[test]
+    fn bank_default_reg_not_matches_elementwise_oracle() {
+        let mut original = [QuadroReg32::new(); 4];
+        original[0].set_unchecked(0, QuadState::N);
+        original[1].set_unchecked(0, QuadState::F);
+        original[2].set_unchecked(0, QuadState::T);
+        original[3].set_unchecked(0, QuadState::S);
+
+        let mut bank = QuadroBank::from_array(original);
+        bank.map_not_inplace();
+
+        assert_eq!(
+            bank.as_array(),
+            &[
+                original[0].map_not(),
+                original[1].map_not(),
+                original[2].map_not(),
+                original[3].map_not(),
+            ]
+        );
+    }
+
+    #[test]
+    fn bank_default_reg_binary_maps_match_elementwise_oracle() {
+        let mut lhs_arr = [QuadroReg32::new(); 4];
+        let mut rhs_arr = [QuadroReg32::new(); 4];
+        lhs_arr[0].set_unchecked(0, QuadState::N);
+        lhs_arr[1].set_unchecked(0, QuadState::F);
+        lhs_arr[2].set_unchecked(0, QuadState::T);
+        lhs_arr[3].set_unchecked(0, QuadState::S);
+        rhs_arr[0].set_unchecked(0, QuadState::F);
+        rhs_arr[1].set_unchecked(0, QuadState::T);
+        rhs_arr[2].set_unchecked(0, QuadState::S);
+        rhs_arr[3].set_unchecked(0, QuadState::N);
+
+        let rhs_bank = QuadroBank::from_array(rhs_arr);
+
+        // xor
+        let mut bank = QuadroBank::from_array(lhs_arr);
+        bank.map_xor_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_xor(rhs_arr[i]));
+        }
+
+        // and
+        let mut bank = QuadroBank::from_array(lhs_arr);
+        bank.map_and_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_and(rhs_arr[i]));
+        }
+
+        // or
+        let mut bank = QuadroBank::from_array(lhs_arr);
+        bank.map_or_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_or(rhs_arr[i]));
+        }
+
+        // implies
+        let mut bank = QuadroBank::from_array(lhs_arr);
+        bank.map_implies_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_implies(rhs_arr[i]));
+        }
+
+        // nand
+        let mut bank = QuadroBank::from_array(lhs_arr);
+        bank.map_nand_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_nand(rhs_arr[i]));
+        }
+
+        // nor
+        let mut bank = QuadroBank::from_array(lhs_arr);
+        bank.map_nor_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_nor(rhs_arr[i]));
+        }
+    }
+
+    #[test]
+    fn bank_default_tile_not_matches_elementwise_oracle() {
+        let mut original = [QuadTile128::new(); 4];
+        original[0].set_unchecked(0, QuadState::N);
+        original[1].set_unchecked(0, QuadState::F);
+        original[2].set_unchecked(0, QuadState::T);
+        original[3].set_unchecked(0, QuadState::S);
+
+        let mut bank = QuadTileBank::from_array(original);
+        bank.map_not_inplace();
+
+        assert_eq!(
+            bank.as_array(),
+            &[
+                original[0].map_not(),
+                original[1].map_not(),
+                original[2].map_not(),
+                original[3].map_not(),
+            ]
+        );
+    }
+
+    #[test]
+    fn bank_default_tile_binary_maps_match_elementwise_oracle() {
+        let mut lhs_arr = [QuadTile128::new(); 4];
+        let mut rhs_arr = [QuadTile128::new(); 4];
+        lhs_arr[0].set_unchecked(0, QuadState::N);
+        lhs_arr[1].set_unchecked(0, QuadState::F);
+        lhs_arr[2].set_unchecked(0, QuadState::T);
+        lhs_arr[3].set_unchecked(0, QuadState::S);
+        rhs_arr[0].set_unchecked(0, QuadState::F);
+        rhs_arr[1].set_unchecked(0, QuadState::T);
+        rhs_arr[2].set_unchecked(0, QuadState::S);
+        rhs_arr[3].set_unchecked(0, QuadState::N);
+
+        let rhs_bank = QuadTileBank::from_array(rhs_arr);
+
+        // xor
+        let mut bank = QuadTileBank::from_array(lhs_arr);
+        bank.map_xor_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_xor(rhs_arr[i]));
+        }
+
+        // and
+        let mut bank = QuadTileBank::from_array(lhs_arr);
+        bank.map_and_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_and(rhs_arr[i]));
+        }
+
+        // or
+        let mut bank = QuadTileBank::from_array(lhs_arr);
+        bank.map_or_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_or(rhs_arr[i]));
+        }
+
+        // implies
+        let mut bank = QuadTileBank::from_array(lhs_arr);
+        bank.map_implies_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_implies(rhs_arr[i]));
+        }
+
+        // nand
+        let mut bank = QuadTileBank::from_array(lhs_arr);
+        bank.map_nand_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_nand(rhs_arr[i]));
+        }
+
+        // nor
+        let mut bank = QuadTileBank::from_array(lhs_arr);
+        bank.map_nor_inplace(&rhs_bank);
+        for i in 0..4 {
+            assert_eq!(bank.get(i).unwrap(), lhs_arr[i].map_nor(rhs_arr[i]));
+        }
+    }
+
+    #[test]
+    fn bank_default_repeated_state_matrix_matches_oracle() {
+        for lhs in QuadState::ALL {
+            for rhs in QuadState::ALL {
+                let lhs_reg = reg_filled(lhs);
+                let rhs_reg = reg_filled(rhs);
+
+                let mut bank = QuadroBank::from_array([lhs_reg; 2]);
+                let rhs_bank = QuadroBank::from_array([rhs_reg; 2]);
+
+                bank.map_and_inplace(&rhs_bank);
+                assert_eq!(bank.get(0).unwrap(), lhs_reg.map_and(rhs_reg));
+                assert_eq!(bank.get(1).unwrap(), lhs_reg.map_and(rhs_reg));
+
+                let lhs_tile = tile_filled(lhs);
+                let rhs_tile = tile_filled(rhs);
+                let mut tbank = QuadTileBank::from_array([lhs_tile; 2]);
+                let trhs_bank = QuadTileBank::from_array([rhs_tile; 2]);
+
+                tbank.map_or_inplace(&trhs_bank);
+                assert_eq!(tbank.get(0).unwrap(), lhs_tile.map_or(rhs_tile));
+            }
+        }
+    }
+
+    #[test]
+    fn bank_default_element_order_is_preserved() {
+        let mut lhs_arr = [QuadroReg32::new(); 4];
+        let mut rhs_arr = [QuadroReg32::new(); 4];
+        lhs_arr[0].set_unchecked(0, QuadState::N);
+        lhs_arr[1].set_unchecked(0, QuadState::F);
+        lhs_arr[2].set_unchecked(0, QuadState::T);
+        lhs_arr[3].set_unchecked(0, QuadState::S);
+        rhs_arr[0].set_unchecked(0, QuadState::F);
+        rhs_arr[1].set_unchecked(0, QuadState::T);
+        rhs_arr[2].set_unchecked(0, QuadState::S);
+        rhs_arr[3].set_unchecked(0, QuadState::N);
+
+        let mut bank = QuadroBank::from_array(lhs_arr);
+        let rhs_bank = QuadroBank::from_array(rhs_arr);
+
+        bank.map_and_inplace(&rhs_bank);
+
+        assert_eq!(bank.get(0).unwrap(), lhs_arr[0].map_and(rhs_arr[0]));
+        assert_eq!(bank.get(1).unwrap(), lhs_arr[1].map_and(rhs_arr[1]));
+        assert_eq!(bank.get(2).unwrap(), lhs_arr[2].map_and(rhs_arr[2]));
+        assert_eq!(bank.get(3).unwrap(), lhs_arr[3].map_and(rhs_arr[3]));
+
+        assert_eq!(rhs_bank.as_array(), &rhs_arr);
+    }
+
+    #[test]
+    fn bank_default_zero_length_helpers_are_noops() {
+        let mut reg_bank = QuadroBank::<0>::new();
+        let empty_reg_bank = QuadroBank::<0>::new();
+        reg_bank.map_not_inplace();
+        reg_bank.map_and_inplace(&empty_reg_bank);
+        assert_eq!(reg_bank.as_array().len(), 0);
+
+        let mut tile_bank = QuadTileBank::<0>::new();
+        let empty_tile_bank = QuadTileBank::<0>::new();
+        tile_bank.map_not_inplace();
+        tile_bank.map_and_inplace(&empty_tile_bank);
+        assert_eq!(tile_bank.as_array().len(), 0);
+    }
+
+    #[test]
+    fn bank_default_lattice_helpers_remain_distinct() {
+        let lhs = reg_filled(QuadState::N);
+        let rhs = reg_filled(QuadState::F);
+
+        let mut bank1 = QuadroBank::from_array([lhs]);
+        let bank2 = QuadroBank::from_array([rhs]);
+
+        bank1.map_and_inplace(&bank2);
+        assert_eq!(bank1.get(0).unwrap().try_get(0).unwrap(), QuadState::F);
+
+        let mut bank3 = QuadroBank::from_array([lhs]);
+        bank3.meet_inplace(&bank2);
+        assert_eq!(bank3.get(0).unwrap().try_get(0).unwrap(), QuadState::N);
     }
 }
