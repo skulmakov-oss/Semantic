@@ -1,30 +1,36 @@
 task:
-  id: CORE-QUAD-V1-BENCHMARK-CLOSEOUT
-  title: add relative v1 benchmarks and close qualification
-  type: benchmark
+  id: CORE-QUAD-GPU-TILE-TRANSPORT
+  title: add feature-gated GPU quad tile transport
+  type: implementation
   mode: active
 
 intent:
-  summary: "bench(core-quad): add v1 relative benchmark closeout"
-  issue: "#1412"
+  summary: "feat(visual): add GPU quad tile transport layout"
+  issue: "#1417"
 
 layer:
-  name: core_quad
-  owner: semantic-core-bench
+  name: visual_transport
+  owner: prom-ui-backend-native
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-V1-BENCHMARK-CLOSEOUT.md
-    - crates/semantic-core-bench/src/lib.rs
-    - docs/roadmap/core_quad/v1_benchmark_closeout.md
+    - .harness/reports/CORE-QUAD-GPU-TILE-TRANSPORT.md
+    - Cargo.lock
+    - crates/prom-ui-backend-native/Cargo.toml
+    - crates/prom-ui-backend-native/src/lib.rs
+    - crates/prom-ui-backend-native/src/quad_tile_upload.rs
+    - crates/prom-ui-backend-native/tests/gpu_quad_tile128_transport.rs
+    - docs/roadmap/core_quad/gpu_quad_tile128_transport.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - modify_benchmark
-    - modify_benchmark_tests
+    - modify_visual_transport
+    - modify_feature_wiring
+    - update_lockfile
+    - create_tests
     - create_docs
     - test
     - commit
@@ -33,13 +39,15 @@ actions:
 
   forbidden:
     - modify_core_quad
-    - modify_cargo
+    - modify_prom_ui_runtime
+    - modify_prom_ui
     - modify_specs
-    - modify_other_crates
-    - add_dependency
-    - add_equiv
-    - add_performance_threshold
-    - add_cpu_specific_requirement
-    - modify_visual
+    - add_external_dependency
+    - add_pod
+    - add_byte_cast
+    - add_wgsl
+    - add_shader
+    - add_gpu_buffer
+    - modify_vm
     - force_push
     - merge
