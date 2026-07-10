@@ -18,7 +18,7 @@ The following semantic properties are frozen and tested:
 - Lane numbering (0-127)
 - Plane meanings (`t` for truth, `f` for falsity)
 - Field ordering
-- Constructors (`new`, `from_planes`, `from_regs`) and accessors (`true_plane`, `false_plane`, `get`, `set`)
+- Constructors (`new`, `from_planes`, `from_regs`) and accessors (`to_regs`, `true_plane`, `false_plane`, `try_get`, `try_set`, `get_unchecked`, `set_unchecked`)
 
 ## Explicit ABI Classification
 - **In-Memory Layout**: The core CPU representation is now qualified strictly by static assertions.

@@ -2564,7 +2564,8 @@ mod tests {
         r1.set_unchecked(31, QuadState::S);
 
         let mut r2 = QuadroReg32::new();
-        r2.set_unchecked(16, QuadState::N);
+        r2.set_unchecked(7, QuadState::T);
+        r2.set_unchecked(16, QuadState::F);
 
         let mut r3 = QuadroReg32::new();
         r3.set_unchecked(15, QuadState::S);
