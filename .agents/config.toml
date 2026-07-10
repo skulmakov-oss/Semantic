@@ -1,3 +1,0 @@
-[mcp_servers.claude-flow]
-command = "npx"
-args = ["-y", "ruflo@latest", "mcp", "start"]
