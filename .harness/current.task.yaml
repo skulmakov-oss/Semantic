@@ -1,11 +1,11 @@
 task:
-  id: CORE-QUAD-TILE-TRUTH-MAPS
-  title: lift default truth maps to QuadTile128
+  id: CORE-QUAD-BANK-TRUTH-MAPS
+  title: add elementwise truth-map helpers to quad banks
   type: implementation
   mode: active
 
 intent:
-  summary: "feat(core-quad): lift v1 truth maps to QuadTile128"
+  summary: "feat(core-quad): add bank-level v1 truth-map helpers"
   issue: "#1411"
 
 layer:
@@ -15,15 +15,16 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-TILE-TRUTH-MAPS.md
+    - .harness/reports/CORE-QUAD-BANK-TRUTH-MAPS.md
     - crates/semantic-core-quad/src/lib.rs
-    - docs/roadmap/core_quad/tile_truth_map_lifting.md
+    - docs/roadmap/core_quad/bank_truth_map_helpers.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
     - modify_core_quad
+    - modify_banks
     - create_docs
     - test
     - commit
@@ -37,8 +38,9 @@ actions:
     - modify_mask_api
     - modify_delta_api
     - modify_reg_map_semantics
+    - modify_tile_map_semantics
+    - modify_lattice_semantics
     - add_equiv
-    - modify_banks
     - modify_visual
     - add_dependency
     - force_push
