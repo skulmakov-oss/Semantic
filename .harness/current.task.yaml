@@ -1,64 +1,37 @@
 task:
-  id: CORE-QUAD-EXACT-PLANE-DELTA-SPLIT
-  title: split exact-state and plane delta APIs
-  type: implementation
+  id: CORE-QUAD-V1-CI-INVENTORY-FIX
+  title: register core quad policy in legacy content inventory
+  type: test
   mode: active
 
 intent:
-  summary: "feat(core-quad): split exact-state and plane delta APIs"
-  issue: "#1409"
+  summary: "test(boundaries): register core-quad compatibility policy reference"
+  issue: "#1408, #1409"
 
 layer:
-  name: core_quad
-  owner: semantic-core-quad
+  name: boundary_enforcement
+  owner: repository_governance
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-EXACT-PLANE-DELTA-SPLIT.md
-    - docs/roadmap/core_quad/exact_plane_delta_split.md
-    - crates/semantic-core-quad/src/lib.rs
-
-  forbidden_paths:
-    - crates/semantic-core-quad/Cargo.toml
-    - crates/ton618-core/**
-    - docs/spec/**
+    - .harness/reports/CORE-QUAD-V1-CI-INVENTORY-FIX.md
+    - tests/legacy_guards.rs
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - modify_core_quad
-    - create_docs
+    - modify_tests
     - test
-  forbidden:
-    - modify_other_crates
-    - modify_docs_spec
-    - modify_mask_api
-    - modify_tile_api
-    - modify_tile_layout
-    - modify_bank_api
-    - modify_truth_semantics
-    - modify_lattice_semantics
-    - modify_parser
-    - modify_verifier
-    - modify_vm
-    - add_dependency
     - commit
     - push
+
+  forbidden:
+    - modify_core_quad
+    - modify_docs
+    - modify_other_crates
+    - add_dependency
+    - force_push
     - create_pr
     - merge
-
-verification:
-  required:
-    - cargo fmt -p semantic-core-quad -- --check
-    - cargo test -p semantic-core-quad --quiet
-    - cargo check -p semantic-core-quad --no-default-features
-    - cargo test -p semantic-core-quad --all-features --quiet
-    - cargo test -p semantic-core-capsule --quiet
-    - git diff --check
-    - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
-    - git status --short
-
-report:
-  output: .harness/reports/CORE-QUAD-EXACT-PLANE-DELTA-SPLIT.md
