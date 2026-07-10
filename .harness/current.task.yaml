@@ -1,63 +1,37 @@
 task:
-  id: LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT
-  title: close legacy lattice Q operator contour
-  type: audit
+  id: CORE-QUAD-V1-CI-INVENTORY-FIX
+  title: register core quad policy in legacy content inventory
+  type: test
   mode: active
 
 intent:
-  summary: "audit(core_quad): close legacy lattice Q operator contour"
-  issue: "#1476"
+  summary: "test(boundaries): register core-quad compatibility policy reference"
+  issue: "#1408, #1409"
 
 layer:
-  name: core_quad
-  owner: cross-layer-audit
+  name: boundary_enforcement
+  owner: repository_governance
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT.md
-
-  forbidden_paths:
-    - crates/**
-    - src/**
-    - docs/**
-    - tests/**
-    - tools/**
-    - README.md
-    - Cargo.toml
-    - Cargo.lock
+    - .harness/reports/CORE-QUAD-V1-CI-INVENTORY-FIX.md
+    - tests/legacy_guards.rs
 
 actions:
   allowed:
     - inspect
     - edit_harness
+    - modify_tests
     - test
     - commit
-    - create_pr
+    - push
 
   forbidden:
-    - modify_crates
+    - modify_core_quad
     - modify_docs
-    - add_parser_syntax
-    - add_source_behavior
-    - modify_opcode_byte_values
-    - change_verifier_behavior
-    - change_vm_behavior
-    - touch_semantic_core_quad
-    - touch_qtruth
-    - route_legacy_lattice_through_qtruth
-    - route_qtruth_through_legacy_lattice
-    - use_hidden_adapters
-    - invert_falsity_planes
-    - add_equiv_nand_nor
-    - change_legacy_lattice_behavior
-    - reinterpret_legacy_source_operators
-
-verification:
-  required:
-    - git diff --check
-    - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
-    - git status --short
-
-report:
-  output: .harness/reports/LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT.md
+    - modify_other_crates
+    - add_dependency
+    - force_push
+    - create_pr
+    - merge

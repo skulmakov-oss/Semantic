@@ -17,6 +17,29 @@ pub struct QuadBoundsError {
     lanes: usize,
 }
 
+/// Error indicating that a mask operation encountered an invalid representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuadMaskError {
+    /// Physical bits contained a `1` at an odd bit position.
+    InvalidPhysicalBits { bits: u64 },
+}
+
+impl core::fmt::Display for QuadMaskError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::InvalidPhysicalBits { bits } => {
+                write!(
+                    f,
+                    "Invalid physical mask bits: {bits:#018X} (odd positions must be 0)"
+                )
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for QuadMaskError {}
+
 impl QuadBoundsError {
     pub const fn new(index: usize, lanes: usize) -> Self {
         Self { index, lanes }
@@ -165,6 +188,38 @@ impl QuadroReg32 {
         self.0 ^ other.0
     }
 
+    /// Computes plane-based membership events (truth plane and falsity plane).
+    pub fn plane_delta(previous: Self, current: Self) -> PlaneDelta32 {
+        let prev_true = previous.mask_true();
+        let prev_false = previous.mask_false();
+        let curr_true = current.mask_true();
+        let curr_false = current.mask_false();
+
+        PlaneDelta32 {
+            entered_truth: curr_true.and(prev_true.not_valid()),
+            left_truth: prev_true.and(curr_true.not_valid()),
+            entered_falsity: curr_false.and(prev_false.not_valid()),
+            left_falsity: prev_false.and(curr_false.not_valid()),
+        }
+    }
+
+    /// Computes exact-state transition events for all four states (N, F, T, S).
+    pub fn exact_state_delta(previous: Self, current: Self) -> ExactStateDelta32 {
+        let prev_masks = previous.masks();
+        let curr_masks = current.masks();
+
+        ExactStateDelta32 {
+            entered_neither: curr_masks.n.and(prev_masks.n.not_valid()),
+            left_neither: prev_masks.n.and(curr_masks.n.not_valid()),
+            entered_strict_false: curr_masks.f.and(prev_masks.f.not_valid()),
+            left_strict_false: prev_masks.f.and(curr_masks.f.not_valid()),
+            entered_strict_true: curr_masks.t.and(prev_masks.t.not_valid()),
+            left_strict_true: prev_masks.t.and(curr_masks.t.not_valid()),
+            entered_super: curr_masks.s.and(prev_masks.s.not_valid()),
+            left_super: prev_masks.s.and(curr_masks.s.not_valid()),
+        }
+    }
+
     pub fn masks(self) -> QuadMasks32 {
         let mut n = 0u64;
         let mut f = 0u64;
@@ -225,6 +280,7 @@ impl QuadroReg32 {
         QuadMask32::new_unchecked(raw)
     }
 
+    /// Sets the state of lanes specified by a dense logical lane mask.
     pub fn set_by_mask(&mut self, mask: QuadMask32, state: QuadState) {
         for lane in mask.iter() {
             self.set_unchecked(lane, state);
@@ -421,13 +477,110 @@ impl fmt::Debug for QuadroReg32 {
     }
 }
 
+/// An additive compatibility alias representing a dense logical lane mask, where bit `i` selects logical lane `i`.
+pub type QuadLaneMask32 = QuadMask32;
+
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct QuadMask32(u64);
 
+/// A strictly validated physical packed mask, where bit `i * 2` selects packed lane `i`. Odd physical positions are invalid.
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct QuadPhysicalMask32(u64);
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for QuadPhysicalMask32 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = u64::deserialize(deserializer)?;
+        Self::try_from_bits(bits).map_err(serde::de::Error::custom)
+    }
+}
+
+impl QuadPhysicalMask32 {
+    /// Returns the raw validated physical mask bits.
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    /// Attempts to construct a physical mask from raw bits, returning an error if any odd bits are set.
+    pub const fn try_from_bits(bits: u64) -> Result<Self, QuadMaskError> {
+        if bits & !LSB_MASK_32 == 0 {
+            Ok(Self(bits))
+        } else {
+            Err(QuadMaskError::InvalidPhysicalBits { bits })
+        }
+    }
+
+    /// Converts this physical mask to a dense lane mask, returning an error if internal representation is invalid.
+    pub const fn try_to_lane(self) -> Result<QuadMask32, QuadMaskError> {
+        if self.0 & !LSB_MASK_32 != 0 {
+            return Err(QuadMaskError::InvalidPhysicalBits { bits: self.0 });
+        }
+        let mut out = 0u64;
+        let mut raw = self.0;
+        let mut lane = 0usize;
+        while lane < 32 {
+            if raw & 1 != 0 {
+                out |= 1 << lane;
+            }
+            raw >>= 2;
+            lane += 1;
+        }
+        Ok(QuadMask32::new_unchecked(out))
+    }
+}
+
+impl From<QuadMask32> for QuadPhysicalMask32 {
+    fn from(mask: QuadMask32) -> Self {
+        mask.to_physical()
+    }
+}
+
+impl TryFrom<QuadPhysicalMask32> for QuadMask32 {
+    type Error = QuadMaskError;
+
+    fn try_from(mask: QuadPhysicalMask32) -> Result<Self, Self::Error> {
+        mask.try_to_lane()
+    }
+}
+
+impl TryFrom<u64> for QuadPhysicalMask32 {
+    type Error = QuadMaskError;
+
+    fn try_from(bits: u64) -> Result<Self, Self::Error> {
+        Self::try_from_bits(bits)
+    }
+}
+
+impl From<QuadPhysicalMask32> for u64 {
+    fn from(mask: QuadPhysicalMask32) -> u64 {
+        mask.0
+    }
+}
+
 impl QuadMask32 {
     pub const VALID_MASK: u64 = 0xFFFF_FFFF;
+
+    /// Converts this dense lane mask to a physical mask where each bit `i` maps to bit `i * 2`.
+    pub const fn to_physical(self) -> QuadPhysicalMask32 {
+        let mut out = 0u64;
+        let mut raw = self.0;
+        let mut lane = 0usize;
+        while lane < 32 {
+            if raw & 1 != 0 {
+                out |= 1 << (lane * 2);
+            }
+            raw >>= 1;
+            lane += 1;
+        }
+        QuadPhysicalMask32(out)
+    }
 
     pub const fn try_new(raw: u64) -> Option<Self> {
         if raw & !Self::VALID_MASK == 0 {
@@ -723,6 +876,49 @@ impl Iterator for QuadMask128Iter {
     }
 }
 
+/// Describes changes in truth-plane and falsity-plane membership.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct PlaneDelta32 {
+    /// Lanes that entered truth-plane membership.
+    pub entered_truth: QuadMask32,
+    /// Lanes that left truth-plane membership.
+    pub left_truth: QuadMask32,
+    /// Lanes that entered falsity-plane membership.
+    pub entered_falsity: QuadMask32,
+    /// Lanes that left falsity-plane membership.
+    pub left_falsity: QuadMask32,
+}
+
+/// Describes entry into and exit from each exact Quad state.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct ExactStateDelta32 {
+    /// Lanes that transitioned exactly into state `N` (neither).
+    pub entered_neither: QuadMask32,
+    /// Lanes that transitioned exactly out of state `N` (neither).
+    pub left_neither: QuadMask32,
+    /// Lanes that transitioned exactly into state `F` (strict_false).
+    pub entered_strict_false: QuadMask32,
+    /// Lanes that transitioned exactly out of state `F` (strict_false).
+    pub left_strict_false: QuadMask32,
+    /// Lanes that transitioned exactly into state `T` (strict_true).
+    pub entered_strict_true: QuadMask32,
+    /// Lanes that transitioned exactly out of state `T` (strict_true).
+    pub left_strict_true: QuadMask32,
+    /// Lanes that transitioned exactly into state `S` (super).
+    pub entered_super: QuadMask32,
+    /// Lanes that transitioned exactly out of state `S` (super).
+    pub left_super: QuadMask32,
+}
+
+/// Compatibility type representing a legacy mixed compatibility structure containing:
+/// * truth/falsity plane events;
+/// * exact `S`/conflict events;
+/// * aggregate changed/known/unknown events.
+///
+/// NOTE:
+/// * `entered_true` / `left_true`: truth-plane membership, not exact T
+/// * `entered_false` / `left_false`: falsity-plane membership, not exact F
+/// * `entered_super` / `left_super`: entry into and exit from exact S
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StateDelta32 {
     pub entered_true: QuadMask32,
@@ -929,6 +1125,97 @@ mod tests {
     extern crate alloc;
     use alloc::format;
     use alloc::vec::Vec;
+
+    #[test]
+    fn mask_bridge_dense_preservation() {
+        let mask = QuadMask32::new_unchecked(0b1010);
+        assert_eq!(mask.raw(), 0b1010);
+
+        let mut reg = reg_filled(QuadState::F);
+        reg.set_by_mask(mask, QuadState::T);
+        assert_eq!(reg.get_unchecked(0), QuadState::F);
+        assert_eq!(reg.get_unchecked(1), QuadState::T);
+        assert_eq!(reg.get_unchecked(2), QuadState::F);
+        assert_eq!(reg.get_unchecked(3), QuadState::T);
+    }
+
+    #[test]
+    fn mask_bridge_valid_physical() {
+        assert!(QuadPhysicalMask32::try_from_bits(0).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits(1).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits(1 << 2).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits(1 << 62).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits(LSB_MASK_32).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits((1 << 2) | (1 << 8)).is_ok());
+    }
+
+    #[test]
+    fn mask_bridge_invalid_physical() {
+        assert!(QuadPhysicalMask32::try_from_bits(2).is_err());
+        assert!(QuadPhysicalMask32::try_from_bits(8).is_err());
+        assert!(QuadPhysicalMask32::try_from_bits(1 << 63).is_err());
+        assert!(QuadPhysicalMask32::try_from_bits((1 << 1) | (1 << 3)).is_err());
+        assert!(QuadPhysicalMask32::try_from_bits(3).is_err());
+
+        let invalid = QuadPhysicalMask32(1 << 1);
+        assert!(invalid.try_to_lane().is_err());
+    }
+
+    #[test]
+    fn mask_bridge_trait_conversions() {
+        assert!(QuadPhysicalMask32::try_from(2u64).is_err());
+
+        let phys = QuadPhysicalMask32::try_from_bits(1 << 2).unwrap();
+        let dense = QuadMask32::try_from(phys).unwrap();
+        assert_eq!(dense.raw(), 1 << 1);
+
+        let raw: u64 = phys.into();
+        assert_eq!(raw, 1 << 2);
+    }
+
+    #[test]
+    fn mask_bridge_conversion_each_lane() {
+        for lane in 0..32 {
+            let dense = QuadMask32::new_unchecked(1 << lane);
+            let phys = dense.to_physical();
+            assert_eq!(phys.bits(), 1 << (lane * 2));
+
+            let dense_back = phys.try_to_lane().unwrap();
+            assert_eq!(dense_back.raw(), 1 << lane);
+        }
+    }
+
+    #[test]
+    fn mask_bridge_roundtrip() {
+        let cases = [
+            0x0000_0000,
+            0x0000_0001,
+            0x8000_0000,
+            0xFFFF_FFFF,
+            0x5555_5555,
+            0xAAAA_AAAA,
+            0x8000_0001,
+        ];
+
+        for &raw in &cases {
+            let dense = QuadMask32::new_unchecked(raw);
+            let phys = dense.to_physical();
+            let dense_back = phys.try_to_lane().unwrap();
+            assert_eq!(dense.raw(), dense_back.raw());
+        }
+    }
+
+    #[test]
+    fn mask_bridge_type_distinctness() {
+        use core::any::TypeId;
+
+        assert_ne!(
+            TypeId::of::<QuadMask32>(),
+            TypeId::of::<QuadPhysicalMask32>()
+        );
+
+        assert_eq!(TypeId::of::<QuadMask32>(), TypeId::of::<QuadLaneMask32>());
+    }
 
     fn reg_filled(state: QuadState) -> QuadroReg32 {
         let mut reg = QuadroReg32::new();
@@ -1790,5 +2077,446 @@ mod tests {
         // F lattice_join T = S, but F map_or T = T
         assert_eq!(f.lattice_join(t).get_unchecked(0), QuadState::S);
         assert_eq!(f.map_or(t).get_unchecked(0), QuadState::T);
+    }
+
+    #[test]
+    fn delta32_plane_and_exact_state_transitions() {
+        let run_test = |prev_s,
+                        curr_s,
+                        e_neither,
+                        l_neither,
+                        e_f,
+                        l_f,
+                        e_t,
+                        l_t,
+                        e_s,
+                        l_s,
+                        p_e_t,
+                        p_l_t,
+                        p_e_f,
+                        p_l_f| {
+            let prev = reg_filled(prev_s);
+            let curr = reg_filled(curr_s);
+            let exact = QuadroReg32::exact_state_delta(prev, curr);
+            let plane = QuadroReg32::plane_delta(prev, curr);
+
+            assert_eq!(
+                exact.entered_neither.count() == 32,
+                e_neither,
+                "exact.entered_neither"
+            );
+            assert_eq!(
+                exact.left_neither.count() == 32,
+                l_neither,
+                "exact.left_neither"
+            );
+            assert_eq!(
+                exact.entered_strict_false.count() == 32,
+                e_f,
+                "exact.entered_strict_false"
+            );
+            assert_eq!(
+                exact.left_strict_false.count() == 32,
+                l_f,
+                "exact.left_strict_false"
+            );
+            assert_eq!(
+                exact.entered_strict_true.count() == 32,
+                e_t,
+                "exact.entered_strict_true"
+            );
+            assert_eq!(
+                exact.left_strict_true.count() == 32,
+                l_t,
+                "exact.left_strict_true"
+            );
+            assert_eq!(
+                exact.entered_super.count() == 32,
+                e_s,
+                "exact.entered_super"
+            );
+            assert_eq!(exact.left_super.count() == 32, l_s, "exact.left_super");
+
+            assert_eq!(
+                plane.entered_truth.count() == 32,
+                p_e_t,
+                "plane.entered_truth"
+            );
+            assert_eq!(plane.left_truth.count() == 32, p_l_t, "plane.left_truth");
+            assert_eq!(
+                plane.entered_falsity.count() == 32,
+                p_e_f,
+                "plane.entered_falsity"
+            );
+            assert_eq!(
+                plane.left_falsity.count() == 32,
+                p_l_f,
+                "plane.left_falsity"
+            );
+        };
+
+        // prev_s, curr_s, e_neither, l_neither, e_f, l_f, e_t, l_t, e_s, l_s, p_e_t, p_l_t, p_e_f, p_l_f
+        run_test(
+            QuadState::T,
+            QuadState::S,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            true,
+            false,
+            false,
+            false,
+            true,
+            false,
+        );
+        run_test(
+            QuadState::S,
+            QuadState::T,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            true,
+        );
+        run_test(
+            QuadState::F,
+            QuadState::S,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            true,
+            false,
+            true,
+            false,
+            false,
+            false,
+        );
+        run_test(
+            QuadState::S,
+            QuadState::F,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            true,
+            false,
+            false,
+        );
+        run_test(
+            QuadState::N,
+            QuadState::S,
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            true,
+            false,
+            true,
+            false,
+        );
+        run_test(
+            QuadState::S,
+            QuadState::N,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            true,
+            false,
+            true,
+        );
+        run_test(
+            QuadState::N,
+            QuadState::T,
+            false,
+            true,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+        );
+        run_test(
+            QuadState::T,
+            QuadState::N,
+            true,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+        );
+        run_test(
+            QuadState::N,
+            QuadState::F,
+            false,
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+        );
+        run_test(
+            QuadState::F,
+            QuadState::N,
+            true,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true,
+        );
+    }
+
+    fn scalar_truth_present(state: QuadState) -> bool {
+        matches!(state, QuadState::T | QuadState::S)
+    }
+
+    fn scalar_falsity_present(state: QuadState) -> bool {
+        matches!(state, QuadState::F | QuadState::S)
+    }
+
+    #[test]
+    fn delta32_exhaustive_4x4_matrix() {
+        for prev_state in QuadState::ALL {
+            for curr_state in QuadState::ALL {
+                let prev = reg_filled(prev_state);
+                let curr = reg_filled(curr_state);
+
+                let exact = QuadroReg32::exact_state_delta(prev, curr);
+                let plane = QuadroReg32::plane_delta(prev, curr);
+
+                for state in QuadState::ALL {
+                    let entered = prev_state != state && curr_state == state;
+                    let left = prev_state == state && curr_state != state;
+
+                    let (e_mask, l_mask) = match state {
+                        QuadState::N => (exact.entered_neither, exact.left_neither),
+                        QuadState::F => (exact.entered_strict_false, exact.left_strict_false),
+                        QuadState::T => (exact.entered_strict_true, exact.left_strict_true),
+                        QuadState::S => (exact.entered_super, exact.left_super),
+                    };
+
+                    if entered {
+                        assert_eq!(e_mask.count(), 32);
+                    } else {
+                        assert!(e_mask.is_empty());
+                    }
+                    if left {
+                        assert_eq!(l_mask.count(), 32);
+                    } else {
+                        assert!(l_mask.is_empty());
+                    }
+                }
+
+                let prev_t = scalar_truth_present(prev_state);
+                let curr_t = scalar_truth_present(curr_state);
+                let prev_f = scalar_falsity_present(prev_state);
+                let curr_f = scalar_falsity_present(curr_state);
+
+                let entered_t = !prev_t && curr_t;
+                let left_t = prev_t && !curr_t;
+                let entered_f = !prev_f && curr_f;
+                let left_f = prev_f && !curr_f;
+
+                if entered_t {
+                    assert_eq!(plane.entered_truth.count(), 32);
+                } else {
+                    assert!(plane.entered_truth.is_empty());
+                }
+                if left_t {
+                    assert_eq!(plane.left_truth.count(), 32);
+                } else {
+                    assert!(plane.left_truth.is_empty());
+                }
+                if entered_f {
+                    assert_eq!(plane.entered_falsity.count(), 32);
+                } else {
+                    assert!(plane.entered_falsity.is_empty());
+                }
+                if left_f {
+                    assert_eq!(plane.left_falsity.count(), 32);
+                } else {
+                    assert!(plane.left_falsity.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn delta32_plane_field_compatibility_matrix() {
+        for prev_state in QuadState::ALL {
+            for curr_state in QuadState::ALL {
+                let prev = reg_filled(prev_state);
+                let curr = reg_filled(curr_state);
+
+                let legacy = StateDelta32::from_regs(prev, curr);
+                let plane = QuadroReg32::plane_delta(prev, curr);
+
+                assert_eq!(legacy.entered_true, plane.entered_truth);
+                assert_eq!(legacy.left_true, plane.left_truth);
+                assert_eq!(legacy.entered_false, plane.entered_falsity);
+                assert_eq!(legacy.left_false, plane.left_falsity);
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_delta32_full_field_matrix_remains_stable() {
+        for prev_state in QuadState::ALL {
+            for curr_state in QuadState::ALL {
+                let prev = reg_filled(prev_state);
+                let curr = reg_filled(curr_state);
+                let legacy = StateDelta32::from_regs(prev, curr);
+
+                let prev_t = scalar_truth_present(prev_state);
+                let curr_t = scalar_truth_present(curr_state);
+                let prev_f = scalar_falsity_present(prev_state);
+                let curr_f = scalar_falsity_present(curr_state);
+
+                let entered_t = !prev_t && curr_t;
+                let left_t = prev_t && !curr_t;
+                let entered_f = !prev_f && curr_f;
+                let left_f = prev_f && !curr_f;
+
+                let entered_s = prev_state != QuadState::S && curr_state == QuadState::S;
+                let left_s = prev_state == QuadState::S && curr_state != QuadState::S;
+                let changed = prev_state != curr_state;
+                let became_known = !prev_state.is_known() && curr_state.is_known();
+                let became_unknown = prev_state.is_known() && !curr_state.is_known();
+
+                let became_conflicted = prev_state != QuadState::S && curr_state == QuadState::S;
+                let resolved_conflict = prev_state == QuadState::S && curr_state != QuadState::S;
+
+                let exp = |b| if b { 0xFFFF_FFFF } else { 0x0000_0000 };
+
+                assert_eq!(legacy.entered_true.raw(), exp(entered_t));
+                assert_eq!(legacy.left_true.raw(), exp(left_t));
+                assert_eq!(legacy.entered_false.raw(), exp(entered_f));
+                assert_eq!(legacy.left_false.raw(), exp(left_f));
+
+                assert_eq!(legacy.entered_super.raw(), exp(entered_s));
+                assert_eq!(legacy.left_super.raw(), exp(left_s));
+                assert_eq!(legacy.changed.raw(), exp(changed));
+                assert_eq!(legacy.became_known.raw(), exp(became_known));
+                assert_eq!(legacy.became_unknown.raw(), exp(became_unknown));
+                assert_eq!(legacy.became_conflicted.raw(), exp(became_conflicted));
+                assert_eq!(legacy.resolved_conflict.raw(), exp(resolved_conflict));
+            }
+        }
+    }
+
+    #[test]
+    fn delta32_identity_transitions() {
+        for state in QuadState::ALL {
+            let reg = reg_filled(state);
+            let exact = QuadroReg32::exact_state_delta(reg, reg);
+            let plane = QuadroReg32::plane_delta(reg, reg);
+
+            assert!(exact.entered_neither.is_empty());
+            assert!(exact.left_neither.is_empty());
+            assert!(exact.entered_strict_false.is_empty());
+            assert!(exact.left_strict_false.is_empty());
+            assert!(exact.entered_strict_true.is_empty());
+            assert!(exact.left_strict_true.is_empty());
+            assert!(exact.entered_super.is_empty());
+            assert!(exact.left_super.is_empty());
+
+            assert!(plane.entered_truth.is_empty());
+            assert!(plane.left_truth.is_empty());
+            assert!(plane.entered_falsity.is_empty());
+            assert!(plane.left_falsity.is_empty());
+        }
+    }
+
+    #[test]
+    fn delta32_mixed_lane_test() {
+        let mut prev = QuadroReg32::new();
+        let mut curr = QuadroReg32::new();
+
+        // lane 0: T -> S
+        prev.set_unchecked(0, QuadState::T);
+        curr.set_unchecked(0, QuadState::S);
+        // lane 1: S -> T
+        prev.set_unchecked(1, QuadState::S);
+        curr.set_unchecked(1, QuadState::T);
+        // lane 2: F -> N
+        prev.set_unchecked(2, QuadState::F);
+        curr.set_unchecked(2, QuadState::N);
+        // lane 3: N -> F
+        prev.set_unchecked(3, QuadState::N);
+        curr.set_unchecked(3, QuadState::F);
+
+        let exact = QuadroReg32::exact_state_delta(prev, curr);
+        let plane = QuadroReg32::plane_delta(prev, curr);
+
+        // Exact state assertions
+        assert_eq!(exact.left_strict_true.raw(), 1 << 0);
+        assert_eq!(exact.entered_super.raw(), 1 << 0);
+
+        assert_eq!(exact.left_super.raw(), 1 << 1);
+        assert_eq!(exact.entered_strict_true.raw(), 1 << 1);
+
+        assert_eq!(exact.left_strict_false.raw(), 1 << 2);
+        assert_eq!(exact.entered_neither.raw(), 1 << 2);
+
+        assert_eq!(exact.left_neither.raw(), 1 << 3);
+        assert_eq!(exact.entered_strict_false.raw(), 1 << 3);
+
+        // Plane assertions
+        assert_eq!(plane.entered_falsity.raw(), (1 << 0) | (1 << 3));
+        assert_eq!(plane.left_falsity.raw(), (1 << 1) | (1 << 2));
+        assert!(plane.entered_truth.is_empty());
+        assert!(plane.left_truth.is_empty());
     }
 }

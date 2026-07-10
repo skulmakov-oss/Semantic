@@ -324,6 +324,7 @@ fn ton618_content_inventory_is_explicit() {
         "./docs/architecture/dependency_boundary_rules.md",
         "./docs/architecture/module_ownership_map.md",
         "./docs/legacy-map.md",
+        "./docs/roadmap/core_quad/v1_compatibility_rollout.md",
         "./docs/roadmap/language_maturity/root_legacy_cleanup_full_scope.md",
         "./docs/roadmap/language_maturity/ton618_compatibility_perimeter_scope.md",
         "./docs/roadmap/pcc/ctf_no_std_qualification_audit.md",
