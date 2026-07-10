@@ -681,13 +681,29 @@ impl QuadMasks32 {
     }
 }
 
+/// Canonical CPU/core semantic tile.
+/// Stores 128 lanes as truth and falsity `u128` planes.
+///
+/// Layout properties:
+/// * size is 32 bytes
+/// * alignment is 16 bytes
+/// * this is not itself the GPU upload ABI
+/// * consumers must not infer Pod/byte-cast safety from `repr(C, align(16))`
+/// * the visual adapter owns any GPU transport representation
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct QuadTile128 {
     t: u128,
     f: u128,
 }
+
+const _: () = {
+    assert!(core::mem::size_of::<QuadTile128>() == 32);
+    assert!(core::mem::align_of::<QuadTile128>() == 16);
+    assert!(core::mem::offset_of!(QuadTile128, t) == 0);
+    assert!(core::mem::offset_of!(QuadTile128, f) == 16);
+};
 
 impl QuadTile128 {
     pub const LANES: usize = 128;
@@ -2518,5 +2534,78 @@ mod tests {
         assert_eq!(plane.left_falsity.raw(), (1 << 1) | (1 << 2));
         assert!(plane.entered_truth.is_empty());
         assert!(plane.left_truth.is_empty());
+    }
+    #[test]
+    fn tile128_layout_contracts() {
+        assert_eq!(core::mem::size_of::<QuadTile128>(), 32);
+        assert_eq!(core::mem::align_of::<QuadTile128>(), 16);
+        assert_eq!(core::mem::offset_of!(QuadTile128, t), 0);
+        assert_eq!(core::mem::offset_of!(QuadTile128, f), 16);
+        assert_eq!(core::mem::size_of::<[QuadTile128; 2]>(), 64);
+    }
+
+    #[test]
+    fn tile128_plane_preservation() {
+        let t = 0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210u128;
+        let f = 0xF0E1_D2C3_B4A5_9687_7869_5A4B_3C2D_1E0Fu128;
+        let tile = QuadTile128::from_planes(t, f);
+        assert_eq!(tile.true_plane(), t);
+        assert_eq!(tile.false_plane(), f);
+    }
+
+    #[test]
+    fn tile128_reg32_roundtrip_mixed() {
+        let mut r0 = QuadroReg32::new();
+        r0.set_unchecked(0, QuadState::N);
+        r0.set_unchecked(31, QuadState::F);
+
+        let mut r1 = QuadroReg32::new();
+        r1.set_unchecked(0, QuadState::T);
+        r1.set_unchecked(31, QuadState::S);
+
+        let mut r2 = QuadroReg32::new();
+        r2.set_unchecked(16, QuadState::N);
+
+        let mut r3 = QuadroReg32::new();
+        r3.set_unchecked(15, QuadState::S);
+
+        let regs = [r0, r1, r2, r3];
+        assert_eq!(QuadTile128::from_regs(regs).to_regs(), regs);
+    }
+
+    #[test]
+    fn tile128_semantic_stability() {
+        let mut tile = QuadTile128::new();
+        tile.set_unchecked(5, QuadState::T);
+        tile.set_unchecked(70, QuadState::F);
+        tile.set_unchecked(100, QuadState::S);
+
+        assert_eq!(tile.get_unchecked(5), QuadState::T);
+        assert_eq!(tile.get_unchecked(70), QuadState::F);
+        assert_eq!(tile.get_unchecked(100), QuadState::S);
+        assert_eq!(tile.get_unchecked(0), QuadState::N);
+
+        let t_mask = tile.truth_mask();
+        assert!(((t_mask.raw() >> 5) & 1) == 1);
+        assert!(((t_mask.raw() >> 100) & 1) == 1);
+        assert!(!((t_mask.raw() >> 70) & 1) == 1);
+
+        let f_mask = tile.falsity_mask();
+        assert!(((f_mask.raw() >> 70) & 1) == 1);
+        assert!(((f_mask.raw() >> 100) & 1) == 1);
+        assert!(!((f_mask.raw() >> 5) & 1) == 1);
+
+        let known = tile.known_mask();
+        assert!(((known.raw() >> 5) & 1) == 1);
+        assert!(((known.raw() >> 70) & 1) == 1);
+        assert!(((known.raw() >> 100) & 1) == 1);
+
+        let conflict = tile.conflict_mask();
+        assert!(((conflict.raw() >> 100) & 1) == 1);
+        assert!(!((conflict.raw() >> 5) & 1) == 1);
+
+        let null = tile.null_mask();
+        assert!(((null.raw() >> 0) & 1) == 1);
+        assert!(!((null.raw() >> 5) & 1) == 1);
     }
 }
