@@ -14,7 +14,7 @@ The starting `main` commit was `cbcbd19341f8aef37cba3b2f275e7528527f0db7`, the s
 
 ## Roadmap scope
 
-The v1 contour is owned by `semantic-core-quad`, with `semantic-core-capsule` as the downstream smoke consumer and `ton618-core` retained for compatibility only. The contour covers the frozen Quad Logic Frame, scalar truth-map oracle, SWAR equivalence, typed mask bridge, explicit delta split, additive compatibility policy, tile/bank lifting, qualification/relative benchmark evidence, and the separate visual transport boundary.
+The v1 contour is owned by `semantic-core-quad`, with `semantic-core-capsule` as the downstream smoke consumer and the legacy compatibility crate retained for compatibility only. The contour covers the frozen Quad Logic Frame, scalar truth-map oracle, SWAR equivalence, typed mask bridge, explicit delta split, additive compatibility policy, tile/bank lifting, qualification/relative benchmark evidence, and the separate visual transport boundary.
 
 Landed on `main` means implemented and evidenced. It does not widen serialized compatibility, GPU ABI guarantees, or a universal performance promise.
 
@@ -71,7 +71,7 @@ Known merged PRs for the v1 contour and its directly related follow-ups:
 
 ## Spec outcome
 
-`docs/spec/quad_logic_frame_v1.md` is frozen as the semantic frame reference: `N=00`, `F=01`, `T=10`, `S=11`; truth-table, knowledge-lattice, diagnostic, and event/delta families remain distinct. `semantic-core-quad` is canonical and `ton618-core` is compatibility-only.
+`docs/spec/quad_logic_frame_v1.md` is frozen as the semantic frame reference: `N=00`, `F=01`, `T=10`, `S=11`; truth-table, knowledge-lattice, diagnostic, and event/delta families remain distinct. `semantic-core-quad` is canonical and the legacy compatibility crate remains compatibility-only.
 
 ## Scalar oracle outcome
 
@@ -111,7 +111,7 @@ The v1 frame retains current derived IMPLIES semantics and does not silently map
 
 ## Compatibility and public API posture
 
-The qualified v1 public surface is additive and explicitly named. Core semantic ownership remains in `semantic-core-quad`; `ton618-core` remains compatibility-only; visual transport remains outside core. No public item is removed by this closeout.
+The qualified v1 public surface is additive and explicitly named. Core semantic ownership remains in `semantic-core-quad`; the legacy compatibility crate remains compatibility-only; visual transport remains outside core. No public item is removed by this closeout.
 
 ## Feature posture
 
@@ -140,7 +140,7 @@ This PR modifies no Rust code, tests, Cargo files, lockfile, specs, workflows, s
 | Exact-state and plane-delta tested | PASS | Explicit delta types and transition matrix evidence in #1478/#1483. |
 | `semantic-core-capsule` remains green | PASS | Required local capsule verification passes. |
 | No VM semantic changes without explicit decision | PASS | IMPLIES policy is explicit; QTruth/lattice changes were separately scoped and evidenced; this PR is docs-only. |
-| No ton618 ownership regression | PASS | `ton618-core` remains compatibility-only; canonical ownership stays in `semantic-core-quad`. |
+| No legacy compatibility ownership regression | PASS | The legacy compatibility crate remains compatibility-only; canonical ownership stays in `semantic-core-quad`. |
 | No UI/WGPU widening inside `semantic-core-quad` | PASS | GPU transport is visual/backend-owned; no core WGPU/bytemuck dependency was added. |
 
 This mapping is the reason this PR closes #1404: every original child is closed or explicitly policy-deferred, implementation and qualification evidence is landed, and the remaining contours are named rather than silently included.

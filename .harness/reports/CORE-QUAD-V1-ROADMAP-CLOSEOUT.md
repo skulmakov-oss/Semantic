@@ -44,14 +44,14 @@ The roadmap report records the merged PR ledger from #1425 through #1486, includ
 - Exact-state and plane-delta tested — PASS.
 - `semantic-core-capsule` remains green — PASS.
 - No VM semantic changes without explicit decision — PASS.
-- No ton618 ownership regression — PASS.
+- No legacy compatibility ownership regression — PASS.
 - No UI/WGPU widening inside `semantic-core-quad` — PASS.
 
 The closeout reason is explicit: all original children are closed, EQUIV is explicitly policy-deferred, and implementation/qualification evidence is landed without silently absorbing the extended VM/QTruth contour.
 
 ## Feature and boundary posture
 
-`semantic-core-quad` remains the canonical owner; `ton618-core` remains compatibility-only. The core `std`, `no_std`, `serde`, capsule, mask, delta, tile, bank, qualification, benchmark, and visual transport evidence is documented in the roadmap closeout. The GPU transport remains visual/backend-owned and no core WGPU/bytemuck dependency exists.
+`semantic-core-quad` remains the canonical owner; the legacy compatibility crate remains compatibility-only. The core `std`, `no_std`, `serde`, capsule, mask, delta, tile, bank, qualification, benchmark, and visual transport evidence is documented in the roadmap closeout. The GPU transport remains visual/backend-owned and no core WGPU/bytemuck dependency exists.
 
 The pre-existing native `prom-ui-backend-native --no-default-features` compile blocker is outside this PR and is not claimed as a pass. Core no-default posture and the separate dependency-boundary evidence remain distinct.
 
