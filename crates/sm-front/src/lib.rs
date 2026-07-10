@@ -885,6 +885,22 @@ pub fn builtin_sig(name: &str) -> Option<FnSig> {
             param_defaults: None,
             ret: Type::F64,
         }),
+        "qtruth_and" | "qtruth_or" | "qtruth_impl" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Quad, Type::Quad],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Quad,
+        }),
+        "qtruth_not" => Some(FnSig {
+            type_params: Vec::new(),
+            trait_bounds: Vec::new(),
+            params: vec![Type::Quad],
+            param_names: None,
+            param_defaults: None,
+            ret: Type::Quad,
+        }),
         _ => None,
     }
 }

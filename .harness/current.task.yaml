@@ -1,24 +1,33 @@
 task:
-  id: QTRUTH-SOURCE-INTRINSIC-CONTRACT
-  title: define explicit QTruth source intrinsic contract
-  type: spec
+  id: QTRUTH-SOURCE-INTRINSIC-ADMISSION
+  title: admit explicit QTruth source intrinsics
+  type: feat
   mode: active
 
 intent:
-  summary: "spec(core_quad): define explicit QTruth source intrinsic contract"
-  issue: "#1468"
+  summary: "feat(sm-front/sm-ir): admit explicit QTruth intrinsics"
+  issue: "#1470"
 
 layer:
   name: core_quad
-  owner: sm-ir
+  owner: sm-front/sm-ir
 
 scope:
   allowed_paths:
+    - crates/sm-front/src/lib.rs
+    - crates/sm-ir/src/legacy_lowering.rs
     - .harness/current.task.yaml
-    - .harness/reports/QTRUTH-SOURCE-INTRINSIC-CONTRACT.md
+    - .harness/reports/QTRUTH-SOURCE-INTRINSIC-ADMISSION.md
 
   forbidden_paths:
-    - crates/**
+    - crates/sm-front/src/parser.rs
+    - crates/sm-front/src/lexer.rs
+    - crates/sm-format/**
+    - crates/sm-verify/**
+    - crates/sm-vm/**
+    - crates/sm-emit/**
+    - crates/semantic-core-quad/**
+    - crates/ton618-core/**
     - src/**
     - docs/**
     - tests/**
@@ -30,33 +39,35 @@ scope:
 actions:
   allowed:
     - inspect
-    - edit_harness
+    - edit
     - test
     - commit
     - create_pr
 
   forbidden:
-    - modify_crates
-    - modify_docs
-    - add_source_syntax
-    - add_parser_behavior
-    - add_frontend_lowering
-    - add_typechecker_behavior
+    - add_parser_syntax
+    - add_lexer_tokens
     - modify_opcode_byte_values
     - change_verifier_behavior
     - change_vm_behavior
+    - touch_sm_format
+    - touch_sm_emit
     - touch_semantic_core_quad
     - route_qtruth_through_lattice_aliases
+    - route_qtruth_through_legacy_q_ops
     - use_hidden_adapters
     - invert_falsity_planes
     - add_equiv_nand_nor
     - change_legacy_lattice_behavior
+    - reinterpret_legacy_source_operators
 
 verification:
   required:
+    - cargo test -p sm-front --quiet
+    - cargo test -p sm-ir --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/QTRUTH-SOURCE-INTRINSIC-CONTRACT.md
+  output: .harness/reports/QTRUTH-SOURCE-INTRINSIC-ADMISSION.md
