@@ -1,31 +1,24 @@
 task:
-  id: VM-QTRUTH-SOURCE-INTRINSIC-E2E
-  title: guard source-level QTruth intrinsic execution
-  type: test
+  id: QTRUTH-SOURCE-CONTOUR-CLOSEOUT
+  title: close QTruth source-level execution contour
+  type: audit
   mode: active
 
 intent:
-  summary: "test(sm-vm): guard source-level QTruth intrinsic execution"
-  issue: "#1472"
+  summary: "audit(core_quad): close QTruth source-level execution contour"
+  issue: "#1474"
 
 layer:
   name: core_quad
-  owner: sm-vm
+  owner: cross-layer-audit
 
 scope:
   allowed_paths:
-    - crates/sm-vm/src/semcode_vm.rs
     - .harness/current.task.yaml
-    - .harness/reports/VM-QTRUTH-SOURCE-INTRINSIC-E2E.md
+    - .harness/reports/QTRUTH-SOURCE-CONTOUR-CLOSEOUT.md
 
   forbidden_paths:
-    - crates/sm-front/**
-    - crates/sm-ir/**
-    - crates/sm-format/**
-    - crates/sm-verify/**
-    - crates/sm-emit/**
-    - crates/semantic-core-quad/**
-    - crates/ton618-core/**
+    - crates/**
     - src/**
     - docs/**
     - tests/**
@@ -37,36 +30,32 @@ scope:
 actions:
   allowed:
     - inspect
-    - edit
+    - edit_harness
     - test
     - commit
     - create_pr
 
   forbidden:
-    - change_vm_behavior
-    - change_verifier_behavior
-    - change_source_admission
+    - modify_crates
+    - modify_docs
     - add_parser_syntax
-    - add_lexer_tokens
+    - add_source_behavior
     - modify_opcode_byte_values
-    - touch_sm_format
-    - touch_sm_front
-    - touch_sm_ir
-    - touch_sm_emit
+    - change_verifier_behavior
+    - change_vm_behavior
     - touch_semantic_core_quad
-    - route_qtruth_through_legacy_q_ops
     - route_qtruth_through_lattice_aliases
     - use_hidden_adapters
     - invert_falsity_planes
     - add_equiv_nand_nor
     - change_legacy_lattice_behavior
+    - reinterpret_legacy_source_operators
 
 verification:
   required:
-    - cargo test -p sm-vm --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/VM-QTRUTH-SOURCE-INTRINSIC-E2E.md
+  output: .harness/reports/QTRUTH-SOURCE-CONTOUR-CLOSEOUT.md
