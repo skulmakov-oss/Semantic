@@ -1,12 +1,12 @@
 task:
-  id: LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT
-  title: close legacy lattice Q operator contour
-  type: audit
+  id: CORE-QUAD-V1-COMPATIBILITY-ROLLOUT
+  title: define v1 compatibility rollout policy
+  type: docs
   mode: active
 
 intent:
-  summary: "audit(core_quad): close legacy lattice Q operator contour"
-  issue: "#1476"
+  summary: "docs(core-quad): define v1 compatibility rollout policy"
+  issue: "#1413"
 
 layer:
   name: core_quad
@@ -14,44 +14,29 @@ layer:
 
 scope:
   allowed_paths:
+    - docs/roadmap/core_quad/v1_compatibility_rollout.md
     - .harness/current.task.yaml
-    - .harness/reports/LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT.md
+    - .harness/reports/CORE-QUAD-V1-COMPATIBILITY-ROLLOUT.md
 
   forbidden_paths:
     - crates/**
     - src/**
-    - docs/**
     - tests/**
     - tools/**
-    - README.md
     - Cargo.toml
     - Cargo.lock
+    - README.md
+    - docs/spec/**
 
 actions:
   allowed:
     - inspect
     - edit_harness
+    - create_docs
     - test
-    - commit
-    - create_pr
-
   forbidden:
     - modify_crates
-    - modify_docs
-    - add_parser_syntax
-    - add_source_behavior
-    - modify_opcode_byte_values
-    - change_verifier_behavior
-    - change_vm_behavior
-    - touch_semantic_core_quad
-    - touch_qtruth
-    - route_legacy_lattice_through_qtruth
-    - route_qtruth_through_legacy_lattice
-    - use_hidden_adapters
-    - invert_falsity_planes
-    - add_equiv_nand_nor
-    - change_legacy_lattice_behavior
-    - reinterpret_legacy_source_operators
+    - modify_docs_spec
 
 verification:
   required:
@@ -60,4 +45,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT.md
+  output: .harness/reports/CORE-QUAD-V1-COMPATIBILITY-ROLLOUT.md
