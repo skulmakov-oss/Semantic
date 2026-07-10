@@ -1,30 +1,30 @@
 task:
-  id: CORE-QUAD-V1-QUALIFICATION-MATRIX
-  title: add public v1 qualification matrix
-  type: test
+  id: CORE-QUAD-V1-BENCHMARK-CLOSEOUT
+  title: add relative v1 benchmarks and close qualification
+  type: benchmark
   mode: active
 
 intent:
-  summary: "test(core-quad): add public v1 qualification matrix"
+  summary: "bench(core-quad): add v1 relative benchmark closeout"
   issue: "#1412"
 
 layer:
   name: core_quad
-  owner: semantic-core-quad
+  owner: semantic-core-bench
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-V1-QUALIFICATION-MATRIX.md
-    - crates/semantic-core-quad/tests/v1_qualification.rs
-    - docs/roadmap/core_quad/v1_qualification_matrix.md
+    - .harness/reports/CORE-QUAD-V1-BENCHMARK-CLOSEOUT.md
+    - crates/semantic-core-bench/src/lib.rs
+    - docs/roadmap/core_quad/v1_benchmark_closeout.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - create_tests
-    - modify_tests
+    - modify_benchmark
+    - modify_benchmark_tests
     - create_docs
     - test
     - commit
@@ -32,13 +32,14 @@ actions:
     - create_pr
 
   forbidden:
-    - modify_core_source
+    - modify_core_quad
     - modify_cargo
     - modify_specs
     - modify_other_crates
-    - add_equiv
-    - add_benchmarks
-    - modify_visual
     - add_dependency
+    - add_equiv
+    - add_performance_threshold
+    - add_cpu_specific_requirement
+    - modify_visual
     - force_push
     - merge
