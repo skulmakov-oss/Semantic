@@ -1,114 +1,169 @@
 # Quad Logic Engine v1 Compatibility & Rollout Policy
 
-## 1. Ownership Boundary
-* **canonical owner:** `semantic-core-quad`
-* **compatibility-only owner:** `ton618-core`
-* **qualification consumer:** `semantic-core-capsule`
+This document is the normative compatibility source of truth for the v1
+rollout. Landed on `main` means implemented and evidenced; it does not widen
+the stable or serialized-compatibility promise.
 
-## 2. Compatibility Dimensions
-The policy distinguishes the following compatibility dimensions. An item may be semantically and source-compatible while its ABI/layout remains unqualified.
-* **source/API compatibility:** The ability to compile against the public API without breakage.
-* **semantic compatibility:** The logical execution and behavior remaining correct according to specifications.
-* **binary ABI/layout compatibility:** The in-memory or on-disk byte representation of data structures.
-* **serialized-data compatibility:** The ability to correctly serialize/deserialize data across versions or environments (e.g. via `serde`).
+## 1. Ownership boundary
 
-## 3. Public API Registry
+- **Canonical owner:** `semantic-core-quad`
+- **Compatibility-only owner:** `ton618-core`
+- **Qualification consumer:** `semantic-core-capsule`
+- **GPU/visual transport owner:** tracked separately by #1417
+
+Compatibility dimensions remain distinct: source/API compatibility, semantic
+compatibility, binary ABI/layout compatibility, and serialized-data
+compatibility.
+
+## 2. Current v1 registry
 
 ### `QuadState`
-* **semantic contract:** stable
-* **binary ABI/layout:** numeric representation or ABI must only be claimed if already explicitly qualified elsewhere.
+
+- The public enum remains stable.
+- The encoding is frozen: `N = 00`, `F = 01`, `T = 10`, `S = 11`.
+- No encoding migration is authorized.
 
 ### `QuadroReg32`
-* **source/API and lane semantics:** stable
-* **binary ABI/layout:** not independently frozen by this policy unless backed by an explicit representation contract.
-* **forbidden silent change:** silent semantic reinterpretation remains forbidden.
 
-### `QuadMask32`
-* **status:** migration-candidate (ambiguous u64 mask)
-* **v1 guarantee:** strict isolation
-* **migration note:** will be split into physical vs logical mask types in upcoming PRs.
+- The public type and 32-lane packed representation remain stable.
+- Scalar operations remain the correctness oracle.
+- Default `map_*` APIs currently route through the qualified SWAR implementation.
+- Lattice APIs remain separate from truth-map APIs.
+- No EQUIV API is exposed.
+
+### Mask model
+
+The landed compatibility bridge is:
+
+```text
+QuadMask32 / QuadLaneMask32
+    dense logical lane mask compatibility surface
+
+QuadPhysicalMask32
+    validated packed physical mask
+```
+
+- `QuadMask32` remains available for compatibility.
+- `QuadLaneMask32` is an additive alias.
+- `QuadPhysicalMask32` rejects odd physical bits.
+- Conversion between dense and physical masks is explicit.
+- No legacy public item was removed.
+
+The same additive-first posture applies to the existing `QuadMask128`
+compatibility surface; its interpretation must not change silently.
+
+### Delta model
+
+The landed explicit types are:
+
+```text
+PlaneDelta32
+ExactStateDelta32
+StateDelta32
+StateDelta128
+```
+
+- `PlaneDelta32` owns truth-plane/falsity-plane membership transitions.
+- `ExactStateDelta32` owns exact N/F/T/S transitions.
+- `StateDelta32` remains a compatibility structure with documented mixed semantics.
+- `StateDelta128` remains a compatibility structure for 128-lane deltas.
+- Ambiguous legacy names are retained, not silently redefined.
+
+Names such as `entered_true`, `left_true`, and `raw_delta` remain compatibility
+surfaces until a dedicated semantic decision and migration are approved.
 
 ### `QuadTile128`
-* **semantic contract:** lane count and semantic behavior are stable.
-* **binary ABI/layout:** alignment and binary/GPU transport layout are under review in #1417.
-* **allowed change:** an explicit qualified layout change is permitted through #1417.
-* **forbidden silent change:** silent layout mutation remains forbidden.
 
-### `QuadMask128`
-* **status:** migration-candidate (ambiguous u128 mask)
-* **v1 guarantee:** strict isolation
-* **migration note:** will be split into physical vs logical mask types in upcoming PRs.
+The qualified core representation is:
 
-### `StateDelta32`
-* **status:** migration-candidate (diff of two 32-lane regs)
-* **migration note:** will split into exact-state and plane-delta types in upcoming PRs.
+```text
+#[repr(C, align(16))]
+size: 32 bytes
+alignment: 16 bytes
+truth-plane offset: 0
+falsity-plane offset: 16
+```
 
-### `StateDelta128`
-* **status:** migration-candidate (diff of two 128-lane regs)
-* **migration note:** will split into exact-state and plane-delta types in upcoming PRs.
+This is the canonical CPU/core semantic-storage layout. It is not the GPU
+upload ABI. No Pod, byte-cast, WGPU, WGSL, or serialized-layout guarantee
+follows from the core layout. GPU transport remains tracked separately by
+#1417.
 
-### `QuadroBank<N>` and `QuadTileBank<N>`
-* **semantic contract:** container and indexing semantics are preserved.
-* **binary ABI/layout:** not declared frozen by this policy.
-* **allowed change:** layout changes require explicit qualification and regression evidence.
+### Tile truth maps
 
-## 4. Additive-first rollout policy
-Early v1 changes are strictly bound to an additive-first approach. They may add:
-* typed mask wrappers
-* new exact-state delta types
-* new plane-delta types
-* new tile truth-map APIs
-* new bank helpers
-* qualification tests
+The landed default tile APIs are:
 
-They must not *initially* remove or silently redefine existing APIs. Removal or renaming of legacy APIs is only permitted through an explicit, qualified breaking-change process (see Section 9).
+```text
+map_not
+map_xor
+map_and
+map_or
+map_implies
+map_nand
+map_nor
+```
 
-## 5. Ambiguous-name policy
-* `QuadMask32`: Currently an ambiguous raw mask. Will migrate to separate dense lane masks and physical packed masks.
-* `StateDelta32`: Currently a raw diff mask. Will migrate to separate exact-state events and plane events.
-* `entered_true` / `left_true`: Currently vague exact/plane boundaries. Will migrate to explicit plane event APIs.
-* `raw_delta`: Currently raw bitwise XOR. Will be migrated or isolated to prevent ambiguous event semantics.
-* `map_*`: truth-table operations.
-* `join` / `meet` / `inverse`: knowledge-lattice operations.
-Do not mix truth-table outputs with knowledge-lattice outputs under the same API family.
+They currently use four-register decomposition as the deterministic reference
+lifting path.
 
-## 6. Feature guarantees
-* `std`: currently verified (default feature flag)
-* `no_std`: check-qualified for the current crate under `cargo check -p semantic-core-quad --no-default-features`; full target/runtime qualification is not claimed.
-* `serde`: feature compilation verified via `--all-features`, but full round-trip semantic compatibility is not yet formally qualified.
+### Bank truth maps
 
-## 7. Core capsule qualification path
-Minimum checks required after each `core-quad` rollout PR:
-* `cargo test -p semantic-core-quad --quiet`
-* `cargo check -p semantic-core-quad --no-default-features`
-* `cargo test -p semantic-core-quad --all-features --quiet`
-* `cargo test -p semantic-core-capsule --quiet`
+The landed in-place helpers for both `QuadroBank<N>` and `QuadTileBank<N>` are:
 
-*(Note: Passing `semantic-core-capsule` tests provides baseline downstream evidence, but does not prove total compatibility for all external consumers. It acts as an initial integration invariant.)*
+```text
+map_not_inplace
+map_xor_inplace
+map_and_inplace
+map_or_inplace
+map_implies_inplace
+map_nand_inplace
+map_nor_inplace
+```
 
-## 8. PR Sequence
-The controlled merge order:
-1. compatibility policy
-2. typed mask bridge
-3. delta split
-4. core tile layout decision
-5. tile truth maps
-6. bank helpers
-7. qualification and benches
-8. optional default-backend decision in a separate PR
+Operations are elementwise, preserve ordering, perform no allocation, and
+leave structures and indexing semantics unchanged.
 
-## 9. Breaking-change rule
-Any future change that modifies:
-* state encoding
-* mask interpretation
-* delta meaning
-* tile layout
-* truth-map output
-* legacy VM/source semantics
+## 3. EQUIV policy
 
-must require:
-* dedicated issue
-* explicit compatibility classification
-* migration note
-* golden/regression evidence
-* separate PR
+**EQUIV remains deferred and is not part of the qualified v1 public API.**
+
+No EQUIV truth table or API is implied here. Any future EQUIV API requires a
+dedicated semantic-policy decision, explicit naming, qualification vectors,
+and compatibility review.
+
+## 4. Additive-first and breaking-change rules
+
+The v1 rollout preserves existing public names and behavior while adding
+qualified mask, delta, tile-map, bank-helper, and qualification surfaces.
+Ambiguous names are documented compatibility names before any removal or
+renaming. A change to encoding, masks, delta meaning, tile layout, truth-map
+outputs, or compatibility names requires a dedicated issue, migration note,
+and regression evidence.
+
+## 5. Feature guarantees
+
+- `std`: tested.
+- `no_std`: check-qualified through `cargo check -p semantic-core-quad --no-default-features`.
+- `serde`: compile/test-qualified under `--all-features`.
+- Serialized cross-version compatibility is not claimed.
+
+## 6. Core capsule qualification path
+
+`semantic-core-capsule` remains the minimum downstream smoke consumer. Its
+passing tests provide baseline integration evidence, not proof of total
+external compatibility.
+
+Minimum rollout checks remain:
+
+```text
+cargo test -p semantic-core-quad --quiet
+cargo check -p semantic-core-quad --no-default-features
+cargo test -p semantic-core-quad --all-features --quiet
+cargo test -p semantic-core-capsule --quiet
+```
+
+## 7. Remaining rollout order
+
+Qualification tests and benchmark planning are tracked by #1412. GPU transport
+representation and visual adapter work remain tracked by #1417. Umbrella
+roadmap closeout remains tracked by #1404.

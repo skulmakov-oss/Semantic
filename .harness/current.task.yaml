@@ -1,12 +1,12 @@
 task:
-  id: CORE-QUAD-BANK-TRUTH-MAPS
-  title: add elementwise truth-map helpers to quad banks
-  type: implementation
+  id: CORE-QUAD-V1-COMPATIBILITY-CLOSEOUT
+  title: close out the Quad Logic Engine v1 compatibility policy
+  type: documentation
   mode: active
 
 intent:
-  summary: "feat(core-quad): add bank-level v1 truth-map helpers"
-  issue: "#1411"
+  summary: "docs(core-quad): close v1 compatibility rollout policy"
+  issue: "#1413"
 
 layer:
   name: core_quad
@@ -15,16 +15,15 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-BANK-TRUTH-MAPS.md
-    - crates/semantic-core-quad/src/lib.rs
-    - docs/roadmap/core_quad/bank_truth_map_helpers.md
+    - .harness/reports/CORE-QUAD-V1-COMPATIBILITY-CLOSEOUT.md
+    - docs/roadmap/core_quad/v1_compatibility_rollout.md
+    - docs/roadmap/core_quad/v1_compatibility_closeout.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - modify_core_quad
-    - modify_banks
+    - modify_docs
     - create_docs
     - test
     - commit
@@ -32,16 +31,13 @@ actions:
     - create_pr
 
   forbidden:
+    - modify_rust
+    - modify_tests
+    - modify_cargo
+    - modify_specs
     - modify_other_crates
-    - modify_docs_spec
-    - modify_tile_layout
-    - modify_mask_api
-    - modify_delta_api
-    - modify_reg_map_semantics
-    - modify_tile_map_semantics
-    - modify_lattice_semantics
-    - add_equiv
     - modify_visual
+    - add_equiv
     - add_dependency
     - force_push
     - merge
