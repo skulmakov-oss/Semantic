@@ -1,12 +1,12 @@
 task:
-  id: CORE-QUAD-DENSE-PHYSICAL-MASK-BRIDGE
-  title: define dense and physical mask bridge
+  id: CORE-QUAD-EXACT-PLANE-DELTA-SPLIT
+  title: split exact-state and plane delta APIs
   type: implementation
   mode: active
 
 intent:
-  summary: "refactor(core-quad): add explicit lane and physical mask bridge"
-  issue: "#1408"
+  summary: "feat(core-quad): split exact-state and plane delta APIs"
+  issue: "#1409"
 
 layer:
   name: core_quad
@@ -15,8 +15,8 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-DENSE-PHYSICAL-MASK-BRIDGE.md
-    - docs/roadmap/core_quad/dense_physical_mask_bridge.md
+    - .harness/reports/CORE-QUAD-EXACT-PLANE-DELTA-SPLIT.md
+    - docs/roadmap/core_quad/exact_plane_delta_split.md
     - crates/semantic-core-quad/src/lib.rs
 
   forbidden_paths:
@@ -34,7 +34,8 @@ actions:
   forbidden:
     - modify_other_crates
     - modify_docs_spec
-    - modify_delta_api
+    - modify_mask_api
+    - modify_tile_api
     - modify_tile_layout
     - modify_bank_api
     - modify_truth_semantics
@@ -60,4 +61,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-DENSE-PHYSICAL-MASK-BRIDGE.md
+  output: .harness/reports/CORE-QUAD-EXACT-PLANE-DELTA-SPLIT.md
