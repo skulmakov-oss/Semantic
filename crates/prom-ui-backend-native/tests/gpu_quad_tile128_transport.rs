@@ -1,5 +1,6 @@
 #![cfg(feature = "wgpu-backend")]
 
+use prom_ui_backend_native::quad_tile_upload::{gpu_quad_tiles_as_bytes, GPU_QUAD_TILE128_WGSL};
 use prom_ui_backend_native::{join_u128, split_u128, GpuQuadTile128};
 use semantic_core_quad::{QuadTile128, QuadroReg32};
 
@@ -91,4 +92,60 @@ fn gpu_quad_tile128_default_is_zero_transport() {
     assert_eq!(transport.t, [0; 4]);
     assert_eq!(transport.f, [0; 4]);
     assert_eq!(QuadTile128::from(transport), QuadTile128::new());
+}
+
+#[test]
+fn gpu_quad_tile128_is_pod_and_zeroable() {
+    fn assert_pod<T: bytemuck::Pod>() {}
+    fn assert_zeroable<T: bytemuck::Zeroable>() {}
+
+    assert_pod::<GpuQuadTile128>();
+    assert_zeroable::<GpuQuadTile128>();
+    assert_eq!(
+        <GpuQuadTile128 as bytemuck::Zeroable>::zeroed(),
+        GpuQuadTile128::default()
+    );
+}
+
+#[test]
+fn gpu_quad_tile128_byte_slice_has_expected_length() {
+    let tiles = [GpuQuadTile128::default(); 3];
+
+    assert_eq!(
+        gpu_quad_tiles_as_bytes(&tiles).len(),
+        3 * core::mem::size_of::<GpuQuadTile128>()
+    );
+    assert_eq!(gpu_quad_tiles_as_bytes(&[]).len(), 0);
+}
+
+#[test]
+fn gpu_quad_tile128_byte_slice_preserves_word_storage() {
+    let tile = GpuQuadTile128 {
+        t: [0x1122_3344, 0x5566_7788, 0x99AA_BBCC, 0xDDEE_FF00],
+        f: [0x0102_0304, 0x0506_0708, 0x090A_0B0C, 0x0D0E_0F10],
+    };
+
+    let bytes = gpu_quad_tiles_as_bytes(core::slice::from_ref(&tile));
+    let recovered: &[GpuQuadTile128] = bytemuck::cast_slice(bytes);
+    assert_eq!(recovered, &[tile]);
+}
+
+#[test]
+fn gpu_quad_tile128_wgsl_mirror_contract_is_present() {
+    assert!(GPU_QUAD_TILE128_WGSL.contains("struct GpuQuadTile128"));
+    assert!(GPU_QUAD_TILE128_WGSL.contains("t: vec4<u32>"));
+    assert!(GPU_QUAD_TILE128_WGSL.contains("f: vec4<u32>"));
+}
+
+#[test]
+fn gpu_quad_tile128_core_tile_is_not_upload_surface() {
+    let core = QuadTile128::from_planes(
+        0x0123_4567_89AB_CDEF_FEDC_BA98_7654_3210,
+        0xAAAA_AAAA_AAAA_AAAA_5555_5555_5555_5555,
+    );
+    let gpu = GpuQuadTile128::from(core);
+    let bytes = gpu_quad_tiles_as_bytes(core::slice::from_ref(&gpu));
+
+    assert_eq!(bytes.len(), core::mem::size_of::<GpuQuadTile128>());
+    assert_eq!(QuadTile128::from(gpu), core);
 }

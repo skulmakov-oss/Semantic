@@ -2,15 +2,17 @@
 //!
 //! `semantic_core_quad::QuadTile128` remains the canonical semantic storage.
 //! `GpuQuadTile128` is a transport representation only. Word order is the
-//! least-significant 32-bit word first. This module creates no WGPU object and
-//! does not authorize raw byte casting. Pod/Zeroable derivation and byte-slice
-//! upload helpers remain deferred to the final transport qualification slice.
+//! least-significant 32-bit word first. Under `wgpu-backend`, it is the sole
+//! byte-cast-qualified transport type in this boundary: `Pod`/`Zeroable`
+//! belongs to this visual/backend crate, not to core `QuadTile128`. The byte
+//! helper returns a read-only view and performs no GPU upload. The WGSL mirror
+//! is a layout contract only; renderer integration remains out of scope.
 
 use semantic_core_quad::QuadTile128;
 
 /// Portable word representation of a 128-lane quad tile's two planes.
 #[repr(C, align(16))]
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, bytemuck::Zeroable, bytemuck::Pod)]
 pub struct GpuQuadTile128 {
     /// Truth-plane words, least-significant word first.
     pub t: [u32; 4],
@@ -24,6 +26,20 @@ const _: () = {
     assert!(core::mem::offset_of!(GpuQuadTile128, t) == 0);
     assert!(core::mem::offset_of!(GpuQuadTile128, f) == 16);
 };
+
+/// WGSL layout mirror for the GPU transport type; this is not a shader module.
+pub const GPU_QUAD_TILE128_WGSL: &str = r#"struct GpuQuadTile128 {
+    t: vec4<u32>,
+    f: vec4<u32>,
+};"#;
+
+/// Returns a read-only byte view over already-converted GPU transport tiles.
+///
+/// This helper allocates nothing, creates no GPU buffer, submits no WGPU
+/// upload, and does not own the caller's transfer or use lifetime.
+pub fn gpu_quad_tiles_as_bytes(tiles: &[GpuQuadTile128]) -> &[u8] {
+    bytemuck::cast_slice(tiles)
+}
 
 /// Splits a `u128` into least-significant 32-bit words first.
 pub const fn split_u128(value: u128) -> [u32; 4] {
