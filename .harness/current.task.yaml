@@ -1,48 +1,45 @@
 task:
-  id: CORE-QUAD-GPU-TILE-UPLOAD-CLOSEOUT
-  title: qualify GPU quad tile byte upload boundary
-  type: implementation
+  id: CORE-QUAD-V1-ROADMAP-CLOSEOUT
+  title: close Quad Logic Engine v1 roadmap
+  type: documentation
   mode: active
 
 intent:
-  summary: "feat(visual): qualify GPU quad tile upload boundary"
-  issue: "#1417"
+  summary: "docs(core-quad): close Quad Logic Engine v1 roadmap"
+  issue: "#1404"
 
 layer:
-  name: visual_transport
-  owner: prom-ui-backend-native
+  name: core_quad
+  owner: semantic-core-quad
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-GPU-TILE-UPLOAD-CLOSEOUT.md
-    - crates/prom-ui-backend-native/src/quad_tile_upload.rs
-    - crates/prom-ui-backend-native/tests/gpu_quad_tile128_transport.rs
-    - docs/roadmap/core_quad/gpu_quad_tile128_upload_closeout.md
+    - .harness/reports/CORE-QUAD-V1-ROADMAP-CLOSEOUT.md
+    - docs/roadmap/core_quad/v1_roadmap_closeout.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - modify_visual_transport
-    - modify_tests
     - create_docs
+    - modify_docs
     - test
     - commit
     - push
     - create_pr
 
   forbidden:
-    - modify_core_quad
+    - modify_rust
+    - modify_tests
     - modify_cargo
     - modify_lockfile
-    - modify_prom_ui_runtime
-    - modify_prom_ui
     - modify_specs
-    - add_external_dependency
-    - add_gpu_buffer
-    - add_shader
-    - add_runtime_upload
+    - modify_workflows
+    - modify_scripts
     - modify_vm
+    - modify_visual
+    - create_issue
+    - reopen_issue
     - force_push
     - merge
