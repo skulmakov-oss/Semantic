@@ -3679,6 +3679,70 @@ fn lower_expr_with_expected(
                 });
                 return Ok((dst, Type::Text));
             }
+            let name_str = resolve_symbol_name(arena, *name)?;
+            if matches!(
+                name_str,
+                "qtruth_and" | "qtruth_or" | "qtruth_not" | "qtruth_impl"
+            ) {
+                let expected_arity = if name_str == "qtruth_not" { 1 } else { 2 };
+                if args.len() != expected_arity || args.iter().any(|arg| arg.name.is_some()) {
+                    return Err(FrontendError {
+                        pos: 0,
+                        message: format!(
+                            "builtin '{name_str}' takes exactly {expected_arity} positional argument{}",
+                            if expected_arity == 1 { "" } else { "s" }
+                        ),
+                    });
+                }
+                let mut regs = Vec::with_capacity(expected_arity);
+                for arg in args {
+                    let (reg, arg_ty) = lower_expr_with_expected(
+                        arg.value,
+                        arena,
+                        next,
+                        out,
+                        env,
+                        loop_stack,
+                        fn_table,
+                        record_table,
+                        adt_table,
+                        Some(Type::Quad),
+                        ret_ty.clone(),
+                        closure_state,
+                    )?;
+                    if arg_ty != Type::Quad {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "builtin '{name_str}' expects quad arguments, got {:?}",
+                                arg_ty
+                            ),
+                        });
+                    }
+                    regs.push(reg);
+                }
+                let dst = alloc(next);
+                match name_str {
+                    "qtruth_and" => out.push(IrInstr::QTruthAnd {
+                        dst,
+                        lhs: regs[0],
+                        rhs: regs[1],
+                    }),
+                    "qtruth_or" => out.push(IrInstr::QTruthOr {
+                        dst,
+                        lhs: regs[0],
+                        rhs: regs[1],
+                    }),
+                    "qtruth_not" => out.push(IrInstr::QTruthNot { dst, src: regs[0] }),
+                    "qtruth_impl" => out.push(IrInstr::QTruthImpl {
+                        dst,
+                        lhs: regs[0],
+                        rhs: regs[1],
+                    }),
+                    _ => unreachable!("qtruth intrinsic was checked above"),
+                }
+                return Ok((dst, Type::Quad));
+            }
             if resolve_symbol_name(arena, *name)? == "random_seed" {
                 if args.len() != 1 || args.iter().any(|a| a.name.is_some()) {
                     return Err(FrontendError {
@@ -12361,5 +12425,109 @@ mod opt_tests {
             },
             Opcode::QTruthImpl.byte(),
         );
+    }
+
+    #[test]
+    fn qtruth_intrinsics_lower_to_explicit_ir_variants() {
+        let src = r#"
+            fn main() {
+                let a: quad = qtruth_and(T, F);
+                let b: quad = qtruth_or(T, F);
+                let c: quad = qtruth_not(T);
+                let d: quad = qtruth_impl(T, F);
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("QTruth intrinsics should lower");
+        let main = ir
+            .iter()
+            .find(|function| function.name == "main")
+            .expect("main function should be present");
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::QTruthAnd { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::QTruthOr { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::QTruthNot { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::QTruthImpl { .. })));
+    }
+
+    #[test]
+    fn legacy_quad_operators_keep_legacy_ir_variants() {
+        let src = r#"
+            fn main() {
+                let a: quad = T && F;
+                let b: quad = T || F;
+                let c: quad = !T;
+                let d: quad = T -> F;
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("legacy quad operators should lower");
+        let main = ir
+            .iter()
+            .find(|function| function.name == "main")
+            .expect("main function should be present");
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::QAnd { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::QOr { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::QNot { .. })));
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::QImpl { .. })));
+        assert!(main.instrs.iter().all(|instr| {
+            !matches!(
+                instr,
+                IrInstr::QTruthAnd { .. }
+                    | IrInstr::QTruthOr { .. }
+                    | IrInstr::QTruthNot { .. }
+                    | IrInstr::QTruthImpl { .. }
+            )
+        }));
+    }
+
+    #[test]
+    fn qtruth_intrinsics_reject_invalid_arguments_arity_and_named_args() {
+        let non_quad = r#"
+            fn main() {
+                let x: quad = qtruth_and(true, T);
+                return;
+            }
+        "#;
+        assert!(compile_program_to_ir(non_quad).is_err());
+
+        let wrong_arity = r#"
+            fn main() {
+                let x: quad = qtruth_not(T, F);
+                return;
+            }
+        "#;
+        assert!(compile_program_to_ir(wrong_arity).is_err());
+
+        let named_args = r#"
+            fn main() {
+                let x: quad = qtruth_and(a: T, b: F);
+                return;
+            }
+        "#;
+        assert!(compile_program_to_ir(named_args).is_err());
     }
 }
