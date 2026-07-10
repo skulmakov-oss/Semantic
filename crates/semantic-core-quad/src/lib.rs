@@ -3169,37 +3169,76 @@ mod tests {
             for rhs in QuadState::ALL {
                 let lhs_reg = reg_filled(lhs);
                 let rhs_reg = reg_filled(rhs);
+                let rhs_bank = QuadroBank::from_array([rhs_reg; 2]);
+                let rhs_tbank = QuadTileBank::from_array([QuadTile128::from_regs([rhs_reg; 4]); 2]);
 
                 let mut bank = QuadroBank::from_array([lhs_reg; 2]);
-                let rhs_bank = QuadroBank::from_array([rhs_reg; 2]);
+                bank.map_xor_inplace(&rhs_bank);
+                assert_eq!(bank.get(0).unwrap(), lhs_reg.map_xor(rhs_reg));
 
+                let mut bank = QuadroBank::from_array([lhs_reg; 2]);
                 bank.map_and_inplace(&rhs_bank);
                 assert_eq!(bank.get(0).unwrap(), lhs_reg.map_and(rhs_reg));
-                assert_eq!(bank.get(1).unwrap(), lhs_reg.map_and(rhs_reg));
 
-                let lhs_tile = tile_filled(lhs);
-                let rhs_tile = tile_filled(rhs);
+                let mut bank = QuadroBank::from_array([lhs_reg; 2]);
+                bank.map_or_inplace(&rhs_bank);
+                assert_eq!(bank.get(0).unwrap(), lhs_reg.map_or(rhs_reg));
+
+                let mut bank = QuadroBank::from_array([lhs_reg; 2]);
+                bank.map_implies_inplace(&rhs_bank);
+                assert_eq!(bank.get(0).unwrap(), lhs_reg.map_implies(rhs_reg));
+
+                let mut bank = QuadroBank::from_array([lhs_reg; 2]);
+                bank.map_nand_inplace(&rhs_bank);
+                assert_eq!(bank.get(0).unwrap(), lhs_reg.map_nand(rhs_reg));
+
+                let mut bank = QuadroBank::from_array([lhs_reg; 2]);
+                bank.map_nor_inplace(&rhs_bank);
+                assert_eq!(bank.get(0).unwrap(), lhs_reg.map_nor(rhs_reg));
+
+                let lhs_tile = QuadTile128::from_regs([lhs_reg; 4]);
+                let rhs_tile = QuadTile128::from_regs([rhs_reg; 4]);
+
                 let mut tbank = QuadTileBank::from_array([lhs_tile; 2]);
-                let trhs_bank = QuadTileBank::from_array([rhs_tile; 2]);
+                tbank.map_xor_inplace(&rhs_tbank);
+                assert_eq!(tbank.get(0).unwrap(), lhs_tile.map_xor(rhs_tile));
 
-                tbank.map_or_inplace(&trhs_bank);
+                let mut tbank = QuadTileBank::from_array([lhs_tile; 2]);
+                tbank.map_and_inplace(&rhs_tbank);
+                assert_eq!(tbank.get(0).unwrap(), lhs_tile.map_and(rhs_tile));
+
+                let mut tbank = QuadTileBank::from_array([lhs_tile; 2]);
+                tbank.map_or_inplace(&rhs_tbank);
                 assert_eq!(tbank.get(0).unwrap(), lhs_tile.map_or(rhs_tile));
+
+                let mut tbank = QuadTileBank::from_array([lhs_tile; 2]);
+                tbank.map_implies_inplace(&rhs_tbank);
+                assert_eq!(tbank.get(0).unwrap(), lhs_tile.map_implies(rhs_tile));
+
+                let mut tbank = QuadTileBank::from_array([lhs_tile; 2]);
+                tbank.map_nand_inplace(&rhs_tbank);
+                assert_eq!(tbank.get(0).unwrap(), lhs_tile.map_nand(rhs_tile));
+
+                let mut tbank = QuadTileBank::from_array([lhs_tile; 2]);
+                tbank.map_nor_inplace(&rhs_tbank);
+                assert_eq!(tbank.get(0).unwrap(), lhs_tile.map_nor(rhs_tile));
             }
         }
     }
-
     #[test]
     fn bank_default_element_order_is_preserved() {
-        let mut lhs_arr = [QuadroReg32::new(); 4];
-        let mut rhs_arr = [QuadroReg32::new(); 4];
-        lhs_arr[0].set_unchecked(0, QuadState::N);
-        lhs_arr[1].set_unchecked(0, QuadState::F);
-        lhs_arr[2].set_unchecked(0, QuadState::T);
-        lhs_arr[3].set_unchecked(0, QuadState::S);
-        rhs_arr[0].set_unchecked(0, QuadState::F);
-        rhs_arr[1].set_unchecked(0, QuadState::T);
-        rhs_arr[2].set_unchecked(0, QuadState::S);
-        rhs_arr[3].set_unchecked(0, QuadState::N);
+        let lhs_arr = [
+            reg_filled(QuadState::N),
+            reg_filled(QuadState::F),
+            reg_filled(QuadState::T),
+            reg_filled(QuadState::S),
+        ];
+        let rhs_arr = [
+            reg_filled(QuadState::T),
+            reg_filled(QuadState::T),
+            reg_filled(QuadState::T),
+            reg_filled(QuadState::T),
+        ];
 
         let mut bank = QuadroBank::from_array(lhs_arr);
         let rhs_bank = QuadroBank::from_array(rhs_arr);
@@ -3212,23 +3251,56 @@ mod tests {
         assert_eq!(bank.get(3).unwrap(), lhs_arr[3].map_and(rhs_arr[3]));
 
         assert_eq!(rhs_bank.as_array(), &rhs_arr);
-    }
 
+        let lhs_tarr = [
+            QuadTile128::from_regs([lhs_arr[0]; 4]),
+            QuadTile128::from_regs([lhs_arr[1]; 4]),
+            QuadTile128::from_regs([lhs_arr[2]; 4]),
+            QuadTile128::from_regs([lhs_arr[3]; 4]),
+        ];
+        let rhs_tarr = [
+            QuadTile128::from_regs([rhs_arr[0]; 4]),
+            QuadTile128::from_regs([rhs_arr[1]; 4]),
+            QuadTile128::from_regs([rhs_arr[2]; 4]),
+            QuadTile128::from_regs([rhs_arr[3]; 4]),
+        ];
+
+        let mut tbank = QuadTileBank::from_array(lhs_tarr);
+        let rhs_tbank = QuadTileBank::from_array(rhs_tarr);
+
+        tbank.map_and_inplace(&rhs_tbank);
+
+        assert_eq!(tbank.get(0).unwrap(), lhs_tarr[0].map_and(rhs_tarr[0]));
+        assert_eq!(tbank.get(1).unwrap(), lhs_tarr[1].map_and(rhs_tarr[1]));
+        assert_eq!(tbank.get(2).unwrap(), lhs_tarr[2].map_and(rhs_tarr[2]));
+        assert_eq!(tbank.get(3).unwrap(), lhs_tarr[3].map_and(rhs_tarr[3]));
+
+        assert_eq!(rhs_tbank.as_array(), &rhs_tarr);
+    }
     #[test]
     fn bank_default_zero_length_helpers_are_noops() {
-        let mut reg_bank = QuadroBank::<0>::new();
-        let empty_reg_bank = QuadroBank::<0>::new();
-        reg_bank.map_not_inplace();
-        reg_bank.map_and_inplace(&empty_reg_bank);
-        assert_eq!(reg_bank.as_array().len(), 0);
+        let mut bank = QuadroBank::<0>::from_array([]);
+        let bank2 = QuadroBank::<0>::from_array([]);
+        bank.map_not_inplace();
+        bank.map_xor_inplace(&bank2);
+        bank.map_and_inplace(&bank2);
+        bank.map_or_inplace(&bank2);
+        bank.map_implies_inplace(&bank2);
+        bank.map_nand_inplace(&bank2);
+        bank.map_nor_inplace(&bank2);
+        assert_eq!(bank.as_array().len(), 0);
 
-        let mut tile_bank = QuadTileBank::<0>::new();
-        let empty_tile_bank = QuadTileBank::<0>::new();
-        tile_bank.map_not_inplace();
-        tile_bank.map_and_inplace(&empty_tile_bank);
-        assert_eq!(tile_bank.as_array().len(), 0);
+        let mut tbank = QuadTileBank::<0>::from_array([]);
+        let tbank2 = QuadTileBank::<0>::from_array([]);
+        tbank.map_not_inplace();
+        tbank.map_xor_inplace(&tbank2);
+        tbank.map_and_inplace(&tbank2);
+        tbank.map_or_inplace(&tbank2);
+        tbank.map_implies_inplace(&tbank2);
+        tbank.map_nand_inplace(&tbank2);
+        tbank.map_nor_inplace(&tbank2);
+        assert_eq!(tbank.as_array().len(), 0);
     }
-
     #[test]
     fn bank_default_lattice_helpers_remain_distinct() {
         let lhs = reg_filled(QuadState::N);

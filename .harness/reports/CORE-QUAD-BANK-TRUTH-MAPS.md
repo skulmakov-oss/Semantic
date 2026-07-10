@@ -28,15 +28,18 @@
 
 ## Implementation Strategy
 - Implemented as in-place methods (`&mut self` and optional `&Self` for binary maps).
-- Binary operations use `self.iter_mut().zip(other.iter().copied())` elementwise application.
-- Unary operations use `self.iter_mut()` and mutate each element in-place.
+- QuadroBank binary helpers: `self.regs.iter_mut().zip(other.regs.iter().copied())`
+- QuadTileBank binary helpers: `self.tiles.iter_mut().zip(other.tiles.iter().copied())`
+- Unary operations use similar `iter_mut()` over the inner storage array.
 
-## Contracts
-- **Element-order:** Index `i` is combined only with index `i`. No rotation, reversal, or cross-element contamination.
-- **Zero-length behavior:** Tested and verified as safe no-ops.
-- **Lattice separation:** Confirmed through matrix and boundary testing.
+## Contracts & Qualification
+- **Matrix coverage:** all six binary operations are covered across the complete 4x4 state matrix for both bank types.
+- **Zero-length coverage:** all seven helpers are exercised for zero-length banks.
+- **Element-order:** Element order and right-bank isolation are tested for both owner types. Index `i` is combined only with index `i`. No rotation, reversal, or cross-element contamination.
+- **Lattice separation:** AND/meet and OR/join differ behaviorally. NOT/inverse currently coincide extensionally but remain contractually separate.
 - **EQUIV deferral:** Explicitly omitted.
 - **no_std & serde:** Full compatibility retained. No allocation or `unsafe` code added.
+- **Accidental files:** the accidental 32-file publication was removed while preserving local untracked copies.
 
 ## Local Verification Commands
 - `cargo +1.93.1 fmt --all --check`

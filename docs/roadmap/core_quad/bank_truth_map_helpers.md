@@ -21,7 +21,10 @@ Both owner types (`QuadroBank<N>`, `QuadTileBank<N>`) now support the following 
 ## Semantics
 1. **Elementwise Ordering:** Operations are applied elementwise. Bank element order is fully preserved.
 2. **Resource Constraints:** No allocation is performed. Fully `no_std` compatible.
-3. **Lattice Separation:** These are explicitly distinct from lattice helpers (`join`, `meet`, `inverse`).
+3. **Lattice Separation:**
+   - AND and OR differ behaviorally from meet and join.
+   - NOT and inverse currently coincide extensionally for N/F/T/S, but they remain separate operation families and APIs.
+   - Future policy changes must not silently alias one implementation contract to the other.
 4. **EQUIV Deferral:** `map_equiv_inplace` remains explicitly deferred under the v1 compatibility policy.
 5. **Zero-length Behavior:** Operations on length-zero banks are no-ops and safely complete without panic.
 6. **Length Mismatch:** Not possible since both operands share the same const generic `N`.
