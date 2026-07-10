@@ -1,12 +1,12 @@
 task:
-  id: CORE-QUAD-V1-COMPATIBILITY-CLOSEOUT
-  title: close out the Quad Logic Engine v1 compatibility policy
-  type: documentation
+  id: CORE-QUAD-V1-QUALIFICATION-MATRIX
+  title: add public v1 qualification matrix
+  type: test
   mode: active
 
 intent:
-  summary: "docs(core-quad): close v1 compatibility rollout policy"
-  issue: "#1413"
+  summary: "test(core-quad): add public v1 qualification matrix"
+  issue: "#1412"
 
 layer:
   name: core_quad
@@ -15,15 +15,16 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-V1-COMPATIBILITY-CLOSEOUT.md
-    - docs/roadmap/core_quad/v1_compatibility_rollout.md
-    - docs/roadmap/core_quad/v1_compatibility_closeout.md
+    - .harness/reports/CORE-QUAD-V1-QUALIFICATION-MATRIX.md
+    - crates/semantic-core-quad/tests/v1_qualification.rs
+    - docs/roadmap/core_quad/v1_qualification_matrix.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - modify_docs
+    - create_tests
+    - modify_tests
     - create_docs
     - test
     - commit
@@ -31,13 +32,13 @@ actions:
     - create_pr
 
   forbidden:
-    - modify_rust
-    - modify_tests
+    - modify_core_source
     - modify_cargo
     - modify_specs
     - modify_other_crates
-    - modify_visual
     - add_equiv
+    - add_benchmarks
+    - modify_visual
     - add_dependency
     - force_push
     - merge
