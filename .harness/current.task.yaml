@@ -1,12 +1,12 @@
 task:
-  id: QTRUTH-SOURCE-CONTOUR-CLOSEOUT
-  title: close QTruth source-level execution contour
+  id: LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT
+  title: close legacy lattice Q operator contour
   type: audit
   mode: active
 
 intent:
-  summary: "audit(core_quad): close QTruth source-level execution contour"
-  issue: "#1474"
+  summary: "audit(core_quad): close legacy lattice Q operator contour"
+  issue: "#1476"
 
 layer:
   name: core_quad
@@ -15,7 +15,7 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/QTRUTH-SOURCE-CONTOUR-CLOSEOUT.md
+    - .harness/reports/LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT.md
 
   forbidden_paths:
     - crates/**
@@ -44,7 +44,9 @@ actions:
     - change_verifier_behavior
     - change_vm_behavior
     - touch_semantic_core_quad
-    - route_qtruth_through_lattice_aliases
+    - touch_qtruth
+    - route_legacy_lattice_through_qtruth
+    - route_qtruth_through_legacy_lattice
     - use_hidden_adapters
     - invert_falsity_planes
     - add_equiv_nand_nor
@@ -58,4 +60,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/QTRUTH-SOURCE-CONTOUR-CLOSEOUT.md
+  output: .harness/reports/LEGACY-LATTICE-Q-CONTOUR-CLOSEOUT.md
