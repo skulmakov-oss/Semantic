@@ -1,11 +1,11 @@
 task:
-  id: CORE-QUAD-GPU-TILE-TRANSPORT
-  title: add feature-gated GPU quad tile transport
+  id: CORE-QUAD-GPU-TILE-UPLOAD-CLOSEOUT
+  title: qualify GPU quad tile byte upload boundary
   type: implementation
   mode: active
 
 intent:
-  summary: "feat(visual): add GPU quad tile transport layout"
+  summary: "feat(visual): qualify GPU quad tile upload boundary"
   issue: "#1417"
 
 layer:
@@ -15,22 +15,17 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-GPU-TILE-TRANSPORT.md
-    - Cargo.lock
-    - crates/prom-ui-backend-native/Cargo.toml
-    - crates/prom-ui-backend-native/src/lib.rs
+    - .harness/reports/CORE-QUAD-GPU-TILE-UPLOAD-CLOSEOUT.md
     - crates/prom-ui-backend-native/src/quad_tile_upload.rs
     - crates/prom-ui-backend-native/tests/gpu_quad_tile128_transport.rs
-    - docs/roadmap/core_quad/gpu_quad_tile128_transport.md
+    - docs/roadmap/core_quad/gpu_quad_tile128_upload_closeout.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
     - modify_visual_transport
-    - modify_feature_wiring
-    - update_lockfile
-    - create_tests
+    - modify_tests
     - create_docs
     - test
     - commit
@@ -39,15 +34,15 @@ actions:
 
   forbidden:
     - modify_core_quad
+    - modify_cargo
+    - modify_lockfile
     - modify_prom_ui_runtime
     - modify_prom_ui
     - modify_specs
     - add_external_dependency
-    - add_pod
-    - add_byte_cast
-    - add_wgsl
-    - add_shader
     - add_gpu_buffer
+    - add_shader
+    - add_runtime_upload
     - modify_vm
     - force_push
     - merge
