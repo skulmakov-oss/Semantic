@@ -1,12 +1,12 @@
 task:
-  id: SM-IR-QTRUTH-SOURCE-ADMISSION-INVENTORY
-  title: inventory QTruth source admission path
-  type: audit
+  id: QTRUTH-SOURCE-INTRINSIC-CONTRACT
+  title: define explicit QTruth source intrinsic contract
+  type: spec
   mode: active
 
 intent:
-  summary: "audit(sm-ir): inventory QTruth source admission path"
-  issue: "#1466"
+  summary: "spec(core_quad): define explicit QTruth source intrinsic contract"
+  issue: "#1468"
 
 layer:
   name: core_quad
@@ -15,7 +15,7 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/SM-IR-QTRUTH-SOURCE-ADMISSION-INVENTORY.md
+    - .harness/reports/QTRUTH-SOURCE-INTRINSIC-CONTRACT.md
 
   forbidden_paths:
     - crates/**
@@ -37,9 +37,11 @@ actions:
 
   forbidden:
     - modify_crates
+    - modify_docs
     - add_source_syntax
     - add_parser_behavior
     - add_frontend_lowering
+    - add_typechecker_behavior
     - modify_opcode_byte_values
     - change_verifier_behavior
     - change_vm_behavior
@@ -57,4 +59,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/SM-IR-QTRUTH-SOURCE-ADMISSION-INVENTORY.md
+  output: .harness/reports/QTRUTH-SOURCE-INTRINSIC-CONTRACT.md
