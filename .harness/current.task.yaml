@@ -1,12 +1,12 @@
 task:
-  id: SM-IR-QTRUTH-REPRESENTATION
-  title: add explicit QTruth instruction representation
+  id: SM-IR-QTRUTH-ENCODING
+  title: encode explicit QTruth IR instructions to QTruth opcodes
   type: feat
   mode: active
 
 intent:
-  summary: "feat(sm-ir): add explicit QTruth instruction representation"
-  issue: "#1460"
+  summary: "feat(sm-ir): encode explicit QTruth IR instructions to QTruth opcodes"
+  issue: "#1462"
 
 layer:
   name: core_quad
@@ -15,9 +15,8 @@ layer:
 scope:
   allowed_paths:
     - crates/sm-ir/src/legacy_lowering.rs
-    - crates/sm-ir/src/passes/crystalfold.rs
     - .harness/current.task.yaml
-    - .harness/reports/SM-IR-QTRUTH-REPRESENTATION.md
+    - .harness/reports/SM-IR-QTRUTH-ENCODING.md
 
   forbidden_paths:
     - crates/sm-format/**
@@ -46,15 +45,17 @@ actions:
     - modify_opcode_byte_values
     - change_verifier_behavior
     - change_vm_behavior
-    - add_emitter_support
-    - add_lowering_support
+    - touch_sm_format
+    - touch_sm_emit
     - touch_semantic_core_quad
+    - add_parser_syntax
+    - add_frontend_syntax
+    - fold_qtruth_constants
     - route_qtruth_through_lattice_aliases
     - use_hidden_adapters
     - invert_falsity_planes
     - add_equiv_nand_nor
     - change_legacy_lattice_behavior
-    - fold_qtruth_constants
 
 verification:
   required:
@@ -64,4 +65,4 @@ verification:
     - git status --short
 
 report:
-  output: .harness/reports/SM-IR-QTRUTH-REPRESENTATION.md
+  output: .harness/reports/SM-IR-QTRUTH-ENCODING.md

@@ -1642,14 +1642,11 @@ fn emit_instr(
         IrInstr::QOr { dst, lhs, rhs } => emit_3reg(Opcode::QOr, *dst, *lhs, *rhs, out),
         IrInstr::QNot { dst, src } => emit_2reg(Opcode::QNot, *dst, *src, out),
         IrInstr::QImpl { dst, lhs, rhs } => emit_3reg(Opcode::QImpl, *dst, *lhs, *rhs, out),
-        IrInstr::QTruthAnd { .. }
-        | IrInstr::QTruthOr { .. }
-        | IrInstr::QTruthNot { .. }
-        | IrInstr::QTruthImpl { .. } => {
-            return Err(FrontendError {
-                pos: 0,
-                message: "QTruth IR instructions are not encodable yet".to_string(),
-            });
+        IrInstr::QTruthAnd { dst, lhs, rhs } => emit_3reg(Opcode::QTruthAnd, *dst, *lhs, *rhs, out),
+        IrInstr::QTruthOr { dst, lhs, rhs } => emit_3reg(Opcode::QTruthOr, *dst, *lhs, *rhs, out),
+        IrInstr::QTruthNot { dst, src } => emit_2reg(Opcode::QTruthNot, *dst, *src, out),
+        IrInstr::QTruthImpl { dst, lhs, rhs } => {
+            emit_3reg(Opcode::QTruthImpl, *dst, *lhs, *rhs, out)
         }
         IrInstr::BoolAnd { dst, lhs, rhs } => emit_3reg(Opcode::BoolAnd, *dst, *lhs, *rhs, out),
         IrInstr::BoolOr { dst, lhs, rhs } => emit_3reg(Opcode::BoolOr, *dst, *lhs, *rhs, out),
@@ -12226,6 +12223,79 @@ mod opt_tests {
                 lhs: 1,
                 rhs: 2,
             }
+        );
+    }
+
+    #[test]
+    fn qtruth_and_legacy_instructions_encode_to_distinct_opcode_bytes() {
+        fn encode(instr: IrInstr) -> Vec<u8> {
+            let mut out = Vec::new();
+            emit_instr(
+                &instr,
+                &HashMap::new(),
+                &StringInterner::default(),
+                &mut out,
+            )
+            .expect("instruction should encode");
+            out
+        }
+
+        assert_eq!(
+            encode(IrInstr::QTruthAnd {
+                dst: 1,
+                lhs: 2,
+                rhs: 3,
+            }),
+            vec![Opcode::QTruthAnd.byte(), 1, 0, 2, 0, 3, 0]
+        );
+        assert_eq!(
+            encode(IrInstr::QTruthOr {
+                dst: 1,
+                lhs: 2,
+                rhs: 3,
+            }),
+            vec![Opcode::QTruthOr.byte(), 1, 0, 2, 0, 3, 0]
+        );
+        assert_eq!(
+            encode(IrInstr::QTruthNot { dst: 1, src: 2 }),
+            vec![Opcode::QTruthNot.byte(), 1, 0, 2, 0]
+        );
+        assert_eq!(
+            encode(IrInstr::QTruthImpl {
+                dst: 1,
+                lhs: 2,
+                rhs: 3,
+            }),
+            vec![Opcode::QTruthImpl.byte(), 1, 0, 2, 0, 3, 0]
+        );
+
+        assert_eq!(
+            encode(IrInstr::QAnd {
+                dst: 1,
+                lhs: 2,
+                rhs: 3,
+            }),
+            vec![Opcode::QAnd.byte(), 1, 0, 2, 0, 3, 0]
+        );
+        assert_eq!(
+            encode(IrInstr::QOr {
+                dst: 1,
+                lhs: 2,
+                rhs: 3,
+            }),
+            vec![Opcode::QOr.byte(), 1, 0, 2, 0, 3, 0]
+        );
+        assert_eq!(
+            encode(IrInstr::QNot { dst: 1, src: 2 }),
+            vec![Opcode::QNot.byte(), 1, 0, 2, 0]
+        );
+        assert_eq!(
+            encode(IrInstr::QImpl {
+                dst: 1,
+                lhs: 2,
+                rhs: 3,
+            }),
+            vec![Opcode::QImpl.byte(), 1, 0, 2, 0, 3, 0]
         );
     }
 }
