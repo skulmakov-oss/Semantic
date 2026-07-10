@@ -3459,6 +3459,51 @@ mod tests {
             assert!(observable.contains("locals=[]"));
         }
 
+        #[test]
+        fn source_qtruth_intrinsics_compile_verify_and_execute() {
+            let cases = [
+                (
+                    "qtruth_and",
+                    "fn main() { let result: quad = qtruth_and(T, F); return; }",
+                    "return=Unit; locals=[result=Quad(F)]",
+                ),
+                (
+                    "qtruth_or",
+                    "fn main() { let result: quad = qtruth_or(T, F); return; }",
+                    "return=Unit; locals=[result=Quad(T)]",
+                ),
+                (
+                    "qtruth_not",
+                    "fn main() { let result: quad = qtruth_not(T); return; }",
+                    "return=Unit; locals=[result=Quad(F)]",
+                ),
+                (
+                    "qtruth_impl",
+                    "fn main() { let result: quad = qtruth_impl(T, F); return; }",
+                    "return=Unit; locals=[result=Quad(F)]",
+                ),
+            ];
+
+            for (name, source, expected) in cases {
+                let observation = observe_verified_entry_semcode(name, source);
+                assert_eq!(
+                    observation.status,
+                    VmTestStatus::Completed,
+                    "{name} did not complete"
+                );
+                assert!(
+                    observation.trap.is_none(),
+                    "{name} trapped: {:?}",
+                    observation.trap
+                );
+                assert_eq!(
+                    observation.observable.as_deref(),
+                    Some(expected),
+                    "{name} result"
+                );
+            }
+        }
+
         struct HelperBoundaryPair {
             name: &'static str,
             helper_fixture: &'static str,
