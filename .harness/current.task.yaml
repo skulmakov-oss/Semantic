@@ -1,12 +1,12 @@
 task:
-  id: CORE-QUAD-TILE128-LAYOUT
-  title: align and qualify QuadTile128 core layout
+  id: CORE-QUAD-TILE-TRUTH-MAPS
+  title: lift default truth maps to QuadTile128
   type: implementation
   mode: active
 
 intent:
-  summary: "test(core-quad): correct QuadTile128 qualification evidence"
-  issue: "#1417"
+  summary: "feat(core-quad): lift v1 truth maps to QuadTile128"
+  issue: "#1411"
 
 layer:
   name: core_quad
@@ -15,9 +15,9 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-TILE128-LAYOUT.md
-    - docs/roadmap/core_quad/quad_tile128_layout_boundary.md
+    - .harness/reports/CORE-QUAD-TILE-TRUTH-MAPS.md
     - crates/semantic-core-quad/src/lib.rs
+    - docs/roadmap/core_quad/tile_truth_map_lifting.md
 
 actions:
   allowed:
@@ -33,12 +33,13 @@ actions:
   forbidden:
     - modify_other_crates
     - modify_docs_spec
-    - modify_visual
-    - modify_gpu_layout
-    - modify_tile_semantics
+    - modify_tile_layout
     - modify_mask_api
     - modify_delta_api
-    - modify_bank_api
+    - modify_reg_map_semantics
+    - add_equiv
+    - modify_banks
+    - modify_visual
     - add_dependency
     - force_push
     - merge

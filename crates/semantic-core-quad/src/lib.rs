@@ -834,6 +834,100 @@ impl QuadTile128 {
         }
         regs
     }
+
+    /// Applies the `NOT` truth map independently across four 32-lane registers.
+    /// This lifts the default register map semantics to the 128-lane tile.
+    /// This is a truth-table operation and is not an alias for the knowledge-lattice `inverse`.
+    /// The implementation uses four-register decomposition as the deterministic reference path.
+    pub fn map_not(self) -> Self {
+        let [a0, a1, a2, a3] = self.to_regs();
+        Self::from_regs([a0.map_not(), a1.map_not(), a2.map_not(), a3.map_not()])
+    }
+
+    /// Applies the `XOR` truth map independently across four 32-lane registers.
+    /// This lifts the default register map semantics to the 128-lane tile.
+    /// This is a truth-table operation.
+    /// The implementation uses four-register decomposition as the deterministic reference path.
+    pub fn map_xor(self, other: Self) -> Self {
+        let [a0, a1, a2, a3] = self.to_regs();
+        let [b0, b1, b2, b3] = other.to_regs();
+        Self::from_regs([
+            a0.map_xor(b0),
+            a1.map_xor(b1),
+            a2.map_xor(b2),
+            a3.map_xor(b3),
+        ])
+    }
+
+    /// Applies the `AND` truth map independently across four 32-lane registers.
+    /// This lifts the default register map semantics to the 128-lane tile.
+    /// This is a truth-table operation and is not an alias for the knowledge-lattice `meet`.
+    /// The implementation uses four-register decomposition as the deterministic reference path.
+    pub fn map_and(self, other: Self) -> Self {
+        let [a0, a1, a2, a3] = self.to_regs();
+        let [b0, b1, b2, b3] = other.to_regs();
+        Self::from_regs([
+            a0.map_and(b0),
+            a1.map_and(b1),
+            a2.map_and(b2),
+            a3.map_and(b3),
+        ])
+    }
+
+    /// Applies the `OR` truth map independently across four 32-lane registers.
+    /// This lifts the default register map semantics to the 128-lane tile.
+    /// This is a truth-table operation and is not an alias for the knowledge-lattice `join`.
+    /// The implementation uses four-register decomposition as the deterministic reference path.
+    pub fn map_or(self, other: Self) -> Self {
+        let [a0, a1, a2, a3] = self.to_regs();
+        let [b0, b1, b2, b3] = other.to_regs();
+        Self::from_regs([a0.map_or(b0), a1.map_or(b1), a2.map_or(b2), a3.map_or(b3)])
+    }
+
+    /// Applies the `IMPLIES` truth map independently across four 32-lane registers.
+    /// This lifts the default register map semantics to the 128-lane tile.
+    /// This is a truth-table operation.
+    /// The implementation uses four-register decomposition as the deterministic reference path.
+    pub fn map_implies(self, other: Self) -> Self {
+        let [a0, a1, a2, a3] = self.to_regs();
+        let [b0, b1, b2, b3] = other.to_regs();
+        Self::from_regs([
+            a0.map_implies(b0),
+            a1.map_implies(b1),
+            a2.map_implies(b2),
+            a3.map_implies(b3),
+        ])
+    }
+
+    /// Applies the `NAND` truth map independently across four 32-lane registers.
+    /// This lifts the default register map semantics to the 128-lane tile.
+    /// This is a truth-table operation.
+    /// The implementation uses four-register decomposition as the deterministic reference path.
+    pub fn map_nand(self, other: Self) -> Self {
+        let [a0, a1, a2, a3] = self.to_regs();
+        let [b0, b1, b2, b3] = other.to_regs();
+        Self::from_regs([
+            a0.map_nand(b0),
+            a1.map_nand(b1),
+            a2.map_nand(b2),
+            a3.map_nand(b3),
+        ])
+    }
+
+    /// Applies the `NOR` truth map independently across four 32-lane registers.
+    /// This lifts the default register map semantics to the 128-lane tile.
+    /// This is a truth-table operation.
+    /// The implementation uses four-register decomposition as the deterministic reference path.
+    pub fn map_nor(self, other: Self) -> Self {
+        let [a0, a1, a2, a3] = self.to_regs();
+        let [b0, b1, b2, b3] = other.to_regs();
+        Self::from_regs([
+            a0.map_nor(b0),
+            a1.map_nor(b1),
+            a2.map_nor(b2),
+            a3.map_nor(b3),
+        ])
+    }
 }
 
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -2598,5 +2692,174 @@ mod tests {
         assert_eq!(tile.known_mask().raw(), known_bits);
         assert_eq!(tile.conflict_mask().raw(), conflict_bits);
         assert_eq!(tile.null_mask().raw(), null_bits);
+    }
+
+    #[test]
+    fn tile_default_unary_map_matches_reg_oracle() {
+        let mut r0 = QuadroReg32::new();
+        let mut r1 = QuadroReg32::new();
+        let mut r2 = QuadroReg32::new();
+        let mut r3 = QuadroReg32::new();
+        for lane in 0..32 {
+            r0.set_unchecked(lane, QuadState::ALL[lane % 4]);
+            r1.set_unchecked(lane, QuadState::ALL[(lane + 1) % 4]);
+            r2.set_unchecked(lane, QuadState::ALL[(lane + 2) % 4]);
+            r3.set_unchecked(lane, QuadState::ALL[(lane + 3) % 4]);
+        }
+        let tile = QuadTile128::from_regs([r0, r1, r2, r3]);
+
+        assert_eq!(
+            tile.map_not().to_regs(),
+            [r0.map_not(), r1.map_not(), r2.map_not(), r3.map_not()]
+        );
+    }
+
+    #[test]
+    fn tile_default_binary_maps_match_reg_oracle() {
+        let mut r0_a = QuadroReg32::new();
+        let mut r1_a = QuadroReg32::new();
+        let mut r2_a = QuadroReg32::new();
+        let mut r3_a = QuadroReg32::new();
+
+        let mut r0_b = QuadroReg32::new();
+        let mut r1_b = QuadroReg32::new();
+        let mut r2_b = QuadroReg32::new();
+        let mut r3_b = QuadroReg32::new();
+
+        for lane in 0..32 {
+            r0_a.set_unchecked(lane, QuadState::ALL[lane % 4]);
+            r1_a.set_unchecked(lane, QuadState::ALL[(lane + 1) % 4]);
+            r2_a.set_unchecked(lane, QuadState::ALL[(lane + 2) % 4]);
+            r3_a.set_unchecked(lane, QuadState::ALL[(lane + 3) % 4]);
+
+            r0_b.set_unchecked(lane, QuadState::ALL[(lane + 3) % 4]);
+            r1_b.set_unchecked(lane, QuadState::ALL[(lane + 2) % 4]);
+            r2_b.set_unchecked(lane, QuadState::ALL[(lane + 1) % 4]);
+            r3_b.set_unchecked(lane, QuadState::ALL[lane % 4]);
+        }
+
+        let tile_a = QuadTile128::from_regs([r0_a, r1_a, r2_a, r3_a]);
+        let tile_b = QuadTile128::from_regs([r0_b, r1_b, r2_b, r3_b]);
+
+        assert_eq!(
+            tile_a.map_xor(tile_b).to_regs(),
+            [
+                r0_a.map_xor(r0_b),
+                r1_a.map_xor(r1_b),
+                r2_a.map_xor(r2_b),
+                r3_a.map_xor(r3_b)
+            ]
+        );
+        assert_eq!(
+            tile_a.map_and(tile_b).to_regs(),
+            [
+                r0_a.map_and(r0_b),
+                r1_a.map_and(r1_b),
+                r2_a.map_and(r2_b),
+                r3_a.map_and(r3_b)
+            ]
+        );
+        assert_eq!(
+            tile_a.map_or(tile_b).to_regs(),
+            [
+                r0_a.map_or(r0_b),
+                r1_a.map_or(r1_b),
+                r2_a.map_or(r2_b),
+                r3_a.map_or(r3_b)
+            ]
+        );
+        assert_eq!(
+            tile_a.map_implies(tile_b).to_regs(),
+            [
+                r0_a.map_implies(r0_b),
+                r1_a.map_implies(r1_b),
+                r2_a.map_implies(r2_b),
+                r3_a.map_implies(r3_b)
+            ]
+        );
+        assert_eq!(
+            tile_a.map_nand(tile_b).to_regs(),
+            [
+                r0_a.map_nand(r0_b),
+                r1_a.map_nand(r1_b),
+                r2_a.map_nand(r2_b),
+                r3_a.map_nand(r3_b)
+            ]
+        );
+        assert_eq!(
+            tile_a.map_nor(tile_b).to_regs(),
+            [
+                r0_a.map_nor(r0_b),
+                r1_a.map_nor(r1_b),
+                r2_a.map_nor(r2_b),
+                r3_a.map_nor(r3_b)
+            ]
+        );
+    }
+
+    #[test]
+    fn tile_default_matrix_transitions() {
+        for lhs in QuadState::ALL {
+            for rhs in QuadState::ALL {
+                let tile_a = tile_filled(lhs);
+                let tile_b = tile_filled(rhs);
+
+                let reg_a = reg_filled(lhs);
+                let reg_b = reg_filled(rhs);
+
+                assert_eq!(tile_a.map_xor(tile_b).to_regs(), [reg_a.map_xor(reg_b); 4]);
+                assert_eq!(tile_a.map_and(tile_b).to_regs(), [reg_a.map_and(reg_b); 4]);
+                assert_eq!(tile_a.map_or(tile_b).to_regs(), [reg_a.map_or(reg_b); 4]);
+                assert_eq!(
+                    tile_a.map_implies(tile_b).to_regs(),
+                    [reg_a.map_implies(reg_b); 4]
+                );
+                assert_eq!(
+                    tile_a.map_nand(tile_b).to_regs(),
+                    [reg_a.map_nand(reg_b); 4]
+                );
+                assert_eq!(tile_a.map_nor(tile_b).to_regs(), [reg_a.map_nor(reg_b); 4]);
+            }
+        }
+    }
+
+    #[test]
+    fn tile_default_boundary_lanes() {
+        let mut tile_a = QuadTile128::new();
+        let mut tile_b = QuadTile128::new();
+
+        let lanes = [0, 31, 32, 63, 64, 95, 96, 127];
+        for (i, &lane) in lanes.iter().enumerate() {
+            tile_a.set_unchecked(lane, QuadState::ALL[i % 4]);
+            tile_b.set_unchecked(lane, QuadState::ALL[(i + 1) % 4]);
+        }
+
+        let regs_a = tile_a.to_regs();
+        let regs_b = tile_b.to_regs();
+
+        let res = tile_a.map_xor(tile_b);
+        let res_regs = res.to_regs();
+
+        for i in 0..4 {
+            assert_eq!(res_regs[i], regs_a[i].map_xor(regs_b[i]));
+        }
+    }
+
+    #[test]
+    fn tile128_lattice_stability() {
+        let lhs = QuadTile128::from_planes(0b1010, 0b1100);
+        let rhs = QuadTile128::from_planes(0b0110, 0b1010);
+
+        let joined = lhs.join(rhs);
+        assert_eq!(joined.true_plane(), 0b1110);
+        assert_eq!(joined.false_plane(), 0b1110);
+
+        let met = lhs.meet(rhs);
+        assert_eq!(met.true_plane(), 0b0010);
+        assert_eq!(met.false_plane(), 0b1000);
+
+        let inv = lhs.inverse();
+        assert_eq!(inv.true_plane(), 0b1100);
+        assert_eq!(inv.false_plane(), 0b1010);
     }
 }
