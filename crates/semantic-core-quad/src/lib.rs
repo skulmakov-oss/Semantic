@@ -17,6 +17,29 @@ pub struct QuadBoundsError {
     lanes: usize,
 }
 
+/// Error indicating that a mask operation encountered an invalid representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuadMaskError {
+    /// Physical bits contained a `1` at an odd bit position.
+    InvalidPhysicalBits { bits: u64 },
+}
+
+impl core::fmt::Display for QuadMaskError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::InvalidPhysicalBits { bits } => {
+                write!(
+                    f,
+                    "Invalid physical mask bits: {bits:#018X} (odd positions must be 0)"
+                )
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for QuadMaskError {}
+
 impl QuadBoundsError {
     pub const fn new(index: usize, lanes: usize) -> Self {
         Self { index, lanes }
@@ -225,6 +248,7 @@ impl QuadroReg32 {
         QuadMask32::new_unchecked(raw)
     }
 
+    /// Sets the state of lanes specified by a dense logical lane mask.
     pub fn set_by_mask(&mut self, mask: QuadMask32, state: QuadState) {
         for lane in mask.iter() {
             self.set_unchecked(lane, state);
@@ -421,13 +445,110 @@ impl fmt::Debug for QuadroReg32 {
     }
 }
 
+/// An additive compatibility alias representing a dense logical lane mask, where bit `i` selects logical lane `i`.
+pub type QuadLaneMask32 = QuadMask32;
+
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct QuadMask32(u64);
 
+/// A strictly validated physical packed mask, where bit `i * 2` selects packed lane `i`. Odd physical positions are invalid.
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct QuadPhysicalMask32(u64);
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for QuadPhysicalMask32 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bits = u64::deserialize(deserializer)?;
+        Self::try_from_bits(bits).map_err(serde::de::Error::custom)
+    }
+}
+
+impl QuadPhysicalMask32 {
+    /// Returns the raw validated physical mask bits.
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    /// Attempts to construct a physical mask from raw bits, returning an error if any odd bits are set.
+    pub const fn try_from_bits(bits: u64) -> Result<Self, QuadMaskError> {
+        if bits & !LSB_MASK_32 == 0 {
+            Ok(Self(bits))
+        } else {
+            Err(QuadMaskError::InvalidPhysicalBits { bits })
+        }
+    }
+
+    /// Converts this physical mask to a dense lane mask, returning an error if internal representation is invalid.
+    pub const fn try_to_lane(self) -> Result<QuadMask32, QuadMaskError> {
+        if self.0 & !LSB_MASK_32 != 0 {
+            return Err(QuadMaskError::InvalidPhysicalBits { bits: self.0 });
+        }
+        let mut out = 0u64;
+        let mut raw = self.0;
+        let mut lane = 0usize;
+        while lane < 32 {
+            if raw & 1 != 0 {
+                out |= 1 << lane;
+            }
+            raw >>= 2;
+            lane += 1;
+        }
+        Ok(QuadMask32::new_unchecked(out))
+    }
+}
+
+impl From<QuadMask32> for QuadPhysicalMask32 {
+    fn from(mask: QuadMask32) -> Self {
+        mask.to_physical()
+    }
+}
+
+impl TryFrom<QuadPhysicalMask32> for QuadMask32 {
+    type Error = QuadMaskError;
+
+    fn try_from(mask: QuadPhysicalMask32) -> Result<Self, Self::Error> {
+        mask.try_to_lane()
+    }
+}
+
+impl TryFrom<u64> for QuadPhysicalMask32 {
+    type Error = QuadMaskError;
+
+    fn try_from(bits: u64) -> Result<Self, Self::Error> {
+        Self::try_from_bits(bits)
+    }
+}
+
+impl From<QuadPhysicalMask32> for u64 {
+    fn from(mask: QuadPhysicalMask32) -> u64 {
+        mask.0
+    }
+}
+
 impl QuadMask32 {
     pub const VALID_MASK: u64 = 0xFFFF_FFFF;
+
+    /// Converts this dense lane mask to a physical mask where each bit `i` maps to bit `i * 2`.
+    pub const fn to_physical(self) -> QuadPhysicalMask32 {
+        let mut out = 0u64;
+        let mut raw = self.0;
+        let mut lane = 0usize;
+        while lane < 32 {
+            if raw & 1 != 0 {
+                out |= 1 << (lane * 2);
+            }
+            raw >>= 1;
+            lane += 1;
+        }
+        QuadPhysicalMask32(out)
+    }
 
     pub const fn try_new(raw: u64) -> Option<Self> {
         if raw & !Self::VALID_MASK == 0 {
@@ -929,6 +1050,97 @@ mod tests {
     extern crate alloc;
     use alloc::format;
     use alloc::vec::Vec;
+
+    #[test]
+    fn mask_bridge_dense_preservation() {
+        let mask = QuadMask32::new_unchecked(0b1010);
+        assert_eq!(mask.raw(), 0b1010);
+
+        let mut reg = reg_filled(QuadState::F);
+        reg.set_by_mask(mask, QuadState::T);
+        assert_eq!(reg.get_unchecked(0), QuadState::F);
+        assert_eq!(reg.get_unchecked(1), QuadState::T);
+        assert_eq!(reg.get_unchecked(2), QuadState::F);
+        assert_eq!(reg.get_unchecked(3), QuadState::T);
+    }
+
+    #[test]
+    fn mask_bridge_valid_physical() {
+        assert!(QuadPhysicalMask32::try_from_bits(0).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits(1).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits(1 << 2).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits(1 << 62).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits(LSB_MASK_32).is_ok());
+        assert!(QuadPhysicalMask32::try_from_bits((1 << 2) | (1 << 8)).is_ok());
+    }
+
+    #[test]
+    fn mask_bridge_invalid_physical() {
+        assert!(QuadPhysicalMask32::try_from_bits(2).is_err());
+        assert!(QuadPhysicalMask32::try_from_bits(8).is_err());
+        assert!(QuadPhysicalMask32::try_from_bits(1 << 63).is_err());
+        assert!(QuadPhysicalMask32::try_from_bits((1 << 1) | (1 << 3)).is_err());
+        assert!(QuadPhysicalMask32::try_from_bits(3).is_err());
+
+        let invalid = QuadPhysicalMask32(1 << 1);
+        assert!(invalid.try_to_lane().is_err());
+    }
+
+    #[test]
+    fn mask_bridge_trait_conversions() {
+        assert!(QuadPhysicalMask32::try_from(2u64).is_err());
+
+        let phys = QuadPhysicalMask32::try_from_bits(1 << 2).unwrap();
+        let dense = QuadMask32::try_from(phys).unwrap();
+        assert_eq!(dense.raw(), 1 << 1);
+
+        let raw: u64 = phys.into();
+        assert_eq!(raw, 1 << 2);
+    }
+
+    #[test]
+    fn mask_bridge_conversion_each_lane() {
+        for lane in 0..32 {
+            let dense = QuadMask32::new_unchecked(1 << lane);
+            let phys = dense.to_physical();
+            assert_eq!(phys.bits(), 1 << (lane * 2));
+
+            let dense_back = phys.try_to_lane().unwrap();
+            assert_eq!(dense_back.raw(), 1 << lane);
+        }
+    }
+
+    #[test]
+    fn mask_bridge_roundtrip() {
+        let cases = [
+            0x0000_0000,
+            0x0000_0001,
+            0x8000_0000,
+            0xFFFF_FFFF,
+            0x5555_5555,
+            0xAAAA_AAAA,
+            0x8000_0001,
+        ];
+
+        for &raw in &cases {
+            let dense = QuadMask32::new_unchecked(raw);
+            let phys = dense.to_physical();
+            let dense_back = phys.try_to_lane().unwrap();
+            assert_eq!(dense.raw(), dense_back.raw());
+        }
+    }
+
+    #[test]
+    fn mask_bridge_type_distinctness() {
+        use core::any::TypeId;
+
+        assert_ne!(
+            TypeId::of::<QuadMask32>(),
+            TypeId::of::<QuadPhysicalMask32>()
+        );
+
+        assert_eq!(TypeId::of::<QuadMask32>(), TypeId::of::<QuadLaneMask32>());
+    }
 
     fn reg_filled(state: QuadState) -> QuadroReg32 {
         let mut reg = QuadroReg32::new();

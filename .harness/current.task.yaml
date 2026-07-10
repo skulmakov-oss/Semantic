@@ -1,48 +1,63 @@
 task:
-  id: CORE-QUAD-V1-COMPATIBILITY-ROLLOUT
-  title: define v1 compatibility rollout policy
-  type: docs
+  id: CORE-QUAD-DENSE-PHYSICAL-MASK-BRIDGE
+  title: define dense and physical mask bridge
+  type: implementation
   mode: active
 
 intent:
-  summary: "docs(core-quad): define v1 compatibility rollout policy"
-  issue: "#1413"
+  summary: "refactor(core-quad): add explicit lane and physical mask bridge"
+  issue: "#1408"
 
 layer:
   name: core_quad
-  owner: cross-layer-audit
+  owner: semantic-core-quad
 
 scope:
   allowed_paths:
-    - docs/roadmap/core_quad/v1_compatibility_rollout.md
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-V1-COMPATIBILITY-ROLLOUT.md
+    - .harness/reports/CORE-QUAD-DENSE-PHYSICAL-MASK-BRIDGE.md
+    - docs/roadmap/core_quad/dense_physical_mask_bridge.md
+    - crates/semantic-core-quad/src/lib.rs
 
   forbidden_paths:
-    - crates/**
-    - src/**
-    - tests/**
-    - tools/**
-    - Cargo.toml
-    - Cargo.lock
-    - README.md
+    - crates/semantic-core-quad/Cargo.toml
+    - crates/ton618-core/**
     - docs/spec/**
 
 actions:
   allowed:
     - inspect
     - edit_harness
+    - modify_core_quad
     - create_docs
     - test
   forbidden:
-    - modify_crates
+    - modify_other_crates
     - modify_docs_spec
+    - modify_delta_api
+    - modify_tile_layout
+    - modify_bank_api
+    - modify_truth_semantics
+    - modify_lattice_semantics
+    - modify_parser
+    - modify_verifier
+    - modify_vm
+    - add_dependency
+    - commit
+    - push
+    - create_pr
+    - merge
 
 verification:
   required:
+    - cargo fmt -p semantic-core-quad -- --check
+    - cargo test -p semantic-core-quad --quiet
+    - cargo check -p semantic-core-quad --no-default-features
+    - cargo test -p semantic-core-quad --all-features --quiet
+    - cargo test -p semantic-core-capsule --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/CORE-QUAD-V1-COMPATIBILITY-ROLLOUT.md
+  output: .harness/reports/CORE-QUAD-DENSE-PHYSICAL-MASK-BRIDGE.md
