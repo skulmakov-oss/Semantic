@@ -1,12 +1,12 @@
 task:
-  id: SM-IR-QTRUTH-SEMCODE-ENVELOPE-GUARD
-  title: add SemCode envelope guard for QTruth IR encoding
-  type: test
+  id: SM-IR-QTRUTH-SOURCE-ADMISSION-INVENTORY
+  title: inventory QTruth source admission path
+  type: audit
   mode: active
 
 intent:
-  summary: "test(sm-ir): add SemCode envelope guard for QTruth IR encoding"
-  issue: "#1464"
+  summary: "audit(sm-ir): inventory QTruth source admission path"
+  issue: "#1466"
 
 layer:
   name: core_quad
@@ -14,17 +14,11 @@ layer:
 
 scope:
   allowed_paths:
-    - crates/sm-ir/src/legacy_lowering.rs
     - .harness/current.task.yaml
-    - .harness/reports/SM-IR-QTRUTH-SEMCODE-ENVELOPE-GUARD.md
+    - .harness/reports/SM-IR-QTRUTH-SOURCE-ADMISSION-INVENTORY.md
 
   forbidden_paths:
-    - crates/sm-format/**
-    - crates/sm-verify/**
-    - crates/sm-vm/**
-    - crates/sm-emit/**
-    - crates/semantic-core-quad/**
-    - crates/ton618-core/**
+    - crates/**
     - src/**
     - docs/**
     - tests/**
@@ -36,23 +30,20 @@ scope:
 actions:
   allowed:
     - inspect
-    - edit
+    - edit_harness
     - test
     - commit
     - create_pr
 
   forbidden:
+    - modify_crates
+    - add_source_syntax
+    - add_parser_behavior
+    - add_frontend_lowering
     - modify_opcode_byte_values
     - change_verifier_behavior
     - change_vm_behavior
-    - touch_sm_format
-    - touch_sm_vm
-    - touch_sm_emit
     - touch_semantic_core_quad
-    - add_parser_syntax
-    - add_frontend_syntax
-    - add_cargo_dependencies
-    - fold_qtruth_constants
     - route_qtruth_through_lattice_aliases
     - use_hidden_adapters
     - invert_falsity_planes
@@ -61,10 +52,9 @@ actions:
 
 verification:
   required:
-    - cargo test -p sm-ir --quiet
     - git diff --check
     - pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/harness-check.ps1
     - git status --short
 
 report:
-  output: .harness/reports/SM-IR-QTRUTH-SEMCODE-ENVELOPE-GUARD.md
+  output: .harness/reports/SM-IR-QTRUTH-SOURCE-ADMISSION-INVENTORY.md
