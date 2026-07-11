@@ -12,3 +12,4 @@ std = ["prom-abi/std"]
 
 [dependencies]
 prom-abi = { path = "../prom-abi", default-features = false }
+prom-refs = { path = "../prom-refs", default-features = false }
