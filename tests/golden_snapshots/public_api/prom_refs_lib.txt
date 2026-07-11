@@ -1,0 +1,13 @@
+source: crates/prom-refs/src/lib.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ReferenceToken {
+pub const fn new(issuer: u64, namespace: u32, generation: u32, value: u64) -> Self {
+pub const fn issuer(&self) -> u64 {
+pub const fn namespace(&self) -> u32 {
+pub const fn generation(&self) -> u32 {
+pub const fn value(&self) -> u64 {
+#[doc = $doc]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct $name {
+pub const fn new(token: ReferenceToken) -> Self {
+pub const fn token(&self) -> ReferenceToken {
