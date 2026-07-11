@@ -39,12 +39,12 @@ fn test_semantic_refs_width() {
     assert_eq!(core::mem::size_of::<SemanticValueRef>(), 8);
     assert_eq!(core::mem::size_of::<SemanticActionRef>(), 8);
     assert_eq!(core::mem::size_of::<SemanticEvidenceRef>(), 8);
-    assert_eq!(core::mem::size_of::<RevisionRef>(), 8);
-    assert_eq!(core::mem::size_of::<EpochRef>(), 8);
-    assert_eq!(core::mem::size_of::<ActorRef>(), 8);
-    assert_eq!(core::mem::size_of::<SessionRef>(), 8);
-    assert_eq!(core::mem::size_of::<ClientRef>(), 8);
-    assert_eq!(core::mem::size_of::<CapabilityRef>(), 8);
+    assert_eq!(core::mem::size_of::<RevisionRef>(), 24);
+    assert_eq!(core::mem::size_of::<EpochRef>(), 24);
+    assert_eq!(core::mem::size_of::<ActorRef>(), 24);
+    assert_eq!(core::mem::size_of::<SessionRef>(), 24);
+    assert_eq!(core::mem::size_of::<ClientRef>(), 24);
+    assert_eq!(core::mem::size_of::<CapabilityRef>(), 24);
 }
 
 #[test]
@@ -446,11 +446,11 @@ fn make_test_context() -> ActionInvocationContext {
     ActionInvocationContext {
         source_node: StaticNodeId::new(1).unwrap(),
         target_node: StaticNodeId::new(2).unwrap(),
-        actor: Some(ActorRef::new(1)),
-        session: Some(SessionRef::new(1)),
-        client: Some(ClientRef::new(1)),
-        observed_revision: Some(RevisionRef::new(1)),
-        observed_epoch: Some(EpochRef::new(1)),
+        actor: Some(ActorRef::new(ReferenceToken::new(1, 1, 1, 1))),
+        session: Some(SessionRef::new(ReferenceToken::new(2, 2, 2, 2))),
+        client: Some(ClientRef::new(ReferenceToken::new(3, 3, 3, 3))),
+        observed_revision: Some(RevisionRef::new(ReferenceToken::new(4, 4, 4, 4))),
+        observed_epoch: Some(EpochRef::new(ReferenceToken::new(5, 5, 5, 5))),
     }
 }
 
@@ -508,7 +508,7 @@ fn test_mapper_missing_client() {
 #[test]
 fn test_mapper_missing_revision() {
     let mut r = make_air_route(1, 1, 1);
-    r.context_reqs.required_revision = Some(RevisionRef::new(1));
+    r.context_reqs.required_revision = Some(RevisionRef::new(ReferenceToken::new(4, 4, 4, 4)));
     let mut ctx = make_test_context();
     ctx.observed_revision = None;
     let intent = map_action_intent(&r, &ctx);
@@ -522,7 +522,7 @@ fn test_mapper_missing_revision() {
 #[test]
 fn test_mapper_missing_epoch() {
     let mut r = make_air_route(1, 1, 1);
-    r.context_reqs.required_epoch = Some(EpochRef::new(1));
+    r.context_reqs.required_epoch = Some(EpochRef::new(ReferenceToken::new(5, 5, 5, 5)));
     let mut ctx = make_test_context();
     ctx.observed_epoch = None;
     let intent = map_action_intent(&r, &ctx);
