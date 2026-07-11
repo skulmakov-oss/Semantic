@@ -24,6 +24,7 @@ members = [
     "crates/sm-vm",
     "crates/smc-cli",
     "crates/prom-abi",
+    "crates/prom-refs",
     "crates/prom-cap",
     "crates/prom-gates",
     "crates/prom-runtime",
