@@ -386,11 +386,15 @@ beyond retained slice order.
 
 ## no_std and allocation posture
 
-`prom-cap` MUST retain its current `no_std` posture.
+D0D does not establish or qualify `no_std` support for `prom-cap`.
 
 The D0D lookup operation MUST require no allocation.
 
-This specification MUST NOT add a `std` requirement.
+A future D0D implementation MUST NOT silently widen the crate's `std`
+requirements relative to the accepted baseline.
+
+Any `no_std` qualification for `prom-cap` requires a separate qualification
+slice and is outside this contract.
 
 The future implementation MAY depend on `prom-refs`.
 
@@ -511,7 +515,7 @@ No `prom-refs` public API snapshot change should be required.
 | repeated lookup | identical result |
 | lookup does not grant | explicit policy check remains necessary |
 | allocation-free lookup | no allocation required by operation |
-| `no_std` check | no new `std` dependency |
+| `no_std` qualification check | required only when `prom-cap` no_std qualification is separately in scope |
 | public API guard | exact approved surface only |
 
 Revocation tests are deferred until revocation semantics exist.
@@ -530,7 +534,7 @@ Revocation tests are deferred until revocation semantics exist.
 | lookup error | `UnknownReference` |
 | build errors | duplicate and unsorted |
 | grant separation | explicit |
-| `no_std` posture | preserved |
+| `no_std` posture | no new qualification claim; no silent widening relative to the accepted baseline |
 | allocation posture | allocation-free lookup |
 | dependency direction | `prom-cap -> prom-refs` only |
 | public API posture | concrete API, no generic trait |
