@@ -1,5 +1,4 @@
 //! WP3 Contract Qualification Tests
-#![cfg(test)]
 #![allow(dead_code, unused_imports)]
 
 use crate::action_intent_map::*;
