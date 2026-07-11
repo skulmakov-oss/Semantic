@@ -37,6 +37,7 @@ Current documents in this PR:
 - `ui/ui_frame_lifecycle_contract.md` - canonical UI frame lifecycle contract
 - `ui/ui_draw_command_batch_contract.md` - canonical minimal draw command batch contract
 - `ui/ui_runtime_adapter_boundary.md` - canonical UI runtime adapter boundary contract
+- `ui/reference_value_contract.md` - canonical reference value contract and prom-refs boundary
 - `ui/ui_runtime_implementation_checkpoint.md` - UI runtime implementation checkpoint after I50-I63
 - `ui/local_runtime_skeleton_api_map.md` - local UI runtime skeleton API map for Workbench and future runtime orchestration
 - `ui/local_runtime_command_result_envelope.md` - local runtime command/result envelope for Workbench to runtime exchange
