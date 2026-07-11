@@ -2,6 +2,19 @@ source: crates/prom-cap/src/lib.rs
 pub mod hello_observation_capability;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityKind {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapabilityLookupEntry {
+pub const fn new(reference: CapabilityRef, kind: CapabilityKind) -> Self {
+pub const fn reference(&self) -> CapabilityRef {
+pub const fn kind(&self) -> CapabilityKind {
+#[derive(Debug, Clone, Copy)]
+pub struct CapabilityLookupView<'a> {
+pub fn try_new( entries: &'a [CapabilityLookupEntry], ) -> Result<Self, CapabilityLookupBuildError> {
+pub fn lookup( &self, reference: CapabilityRef, ) -> Result<&CapabilityLookupEntry, CapabilityLookupError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityLookupError {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityLookupBuildError {
 pub const fn required_capability_for_call(call: HostCallId) -> CapabilityKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilitySurfaceClass {

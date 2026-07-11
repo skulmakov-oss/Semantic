@@ -7,6 +7,7 @@ pub mod hello_observation_capability;
 use alloc::collections::BTreeSet;
 use alloc::string::String;
 use prom_abi::HostCallId;
+use prom_refs::CapabilityRef;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityKind {
@@ -18,6 +19,118 @@ pub enum CapabilityKind {
     StateUpdate,
     EventPost,
     ClockRead,
+}
+
+/// A non-authoritative lookup record for one exact capability reference.
+///
+/// Successful lookup of this entry does not grant authority and does not
+/// perform admission, dispatch, or effect execution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapabilityLookupEntry {
+    reference: CapabilityRef,
+    kind: CapabilityKind,
+}
+
+impl CapabilityLookupEntry {
+    /// Creates a non-authoritative capability lookup entry from an exact
+    /// reference and its taxonomy-only capability kind.
+    pub const fn new(reference: CapabilityRef, kind: CapabilityKind) -> Self {
+        Self { reference, kind }
+    }
+
+    /// Returns the exact stored capability reference.
+    pub const fn reference(&self) -> CapabilityRef {
+        self.reference
+    }
+
+    /// Returns the taxonomy-only capability kind associated with the reference.
+    pub const fn kind(&self) -> CapabilityKind {
+        self.kind
+    }
+}
+
+/// An immutable borrowed view over a validated, strictly sorted slice of
+/// non-authoritative capability lookup entries.
+///
+/// Construction rejects duplicate and descending adjacent full-reference keys.
+/// The operation itself is allocation-free and does not claim whole-crate
+/// `no_std` qualification.
+#[derive(Debug, Clone, Copy)]
+pub struct CapabilityLookupView<'a> {
+    entries: &'a [CapabilityLookupEntry],
+}
+
+impl<'a> CapabilityLookupView<'a> {
+    /// Borrows a validated, strictly sorted entry slice without copying,
+    /// mutating, or allocating.
+    pub fn try_new(
+        entries: &'a [CapabilityLookupEntry],
+    ) -> Result<Self, CapabilityLookupBuildError> {
+        validate_lookup_entries(entries)?;
+        Ok(Self { entries })
+    }
+
+    /// Performs exact full-reference matching and returns the borrowed stored
+    /// entry on success.
+    ///
+    /// Successful lookup does not grant authority. `UnknownReference` is a
+    /// lookup miss and is not `CapabilityDenied`.
+    pub fn lookup(
+        &self,
+        reference: CapabilityRef,
+    ) -> Result<&CapabilityLookupEntry, CapabilityLookupError> {
+        self.entries
+            .iter()
+            .find(|entry| entry.reference() == reference)
+            .ok_or(CapabilityLookupError::UnknownReference)
+    }
+}
+
+/// Public miss result for exact capability-reference lookup.
+///
+/// This error reports only that the supplied full reference was not present in
+/// the borrowed lookup view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityLookupError {
+    UnknownReference,
+}
+
+/// Public construction error for borrowed capability lookup views.
+///
+/// Validation is deterministic, adjacent-pair based, and allocation-free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityLookupBuildError {
+    DuplicateReference,
+    UnsortedEntries,
+}
+
+fn compare_capability_refs(left: CapabilityRef, right: CapabilityRef) -> core::cmp::Ordering {
+    let left = left.token();
+    let right = right.token();
+
+    left.issuer()
+        .cmp(&right.issuer())
+        .then_with(|| left.namespace().cmp(&right.namespace()))
+        .then_with(|| left.generation().cmp(&right.generation()))
+        .then_with(|| left.value().cmp(&right.value()))
+}
+
+fn validate_lookup_entries(
+    entries: &[CapabilityLookupEntry],
+) -> Result<(), CapabilityLookupBuildError> {
+    for pair in entries.windows(2) {
+        match compare_capability_refs(pair[0].reference(), pair[1].reference()) {
+            core::cmp::Ordering::Less => {}
+            core::cmp::Ordering::Equal => {
+                return Err(CapabilityLookupBuildError::DuplicateReference);
+            }
+            core::cmp::Ordering::Greater => {
+                return Err(CapabilityLookupBuildError::UnsortedEntries);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub const fn required_capability_for_call(call: HostCallId) -> CapabilityKind {

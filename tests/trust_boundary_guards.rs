@@ -25,12 +25,12 @@ fn prom_cap_dependency_boundaries() {
         "prom-cap MUST NOT depend on prom-ui"
     );
 
-    // prom-cap must depend only on prom-abi among prom-* crates unless explicitly allowed
+    // prom-cap may depend only on prom-abi and prom-refs among prom-* crates.
     for line in tree.lines() {
         if line.contains("prom-") && !line.contains("prom-cap") {
             assert!(
-                line.contains("prom-abi"),
-                "prom-cap is only allowed to depend on prom-abi among prom-* crates, but found: {}",
+                line.contains("prom-abi") || line.contains("prom-refs"),
+                "prom-cap is only allowed to depend on prom-abi and prom-refs among prom-* crates, but found: {}",
                 line
             );
         }
