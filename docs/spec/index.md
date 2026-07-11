@@ -21,6 +21,7 @@ Current documents in this PR:
 - `quotas.md` - runtime quota taxonomy and enforcement contract
 - `abi.md` - PROMETHEUS host ABI boundary contract
 - `capabilities.md` - capability manifest and denial contract
+- `capabilities/capability_reference_lookup_contract.md` - capability-reference exact-match lookup contract for `CapabilityRef`
 - `gates.md` - gate registry and binding contract
 - `runtime.md` - runtime orchestration session contract
 - `state.md` - semantic state model and invariants
