@@ -31,8 +31,12 @@ pub mod action_dispatch_record;
 pub mod action_dispatch_route;
 pub mod action_dispatch_summary;
 pub mod action_dispatch_trace;
+pub(crate) mod action_intent_map;
+pub(crate) mod action_ir;
 pub mod action_mapping;
+pub(crate) mod admission_contract;
 pub mod admitted_action;
+pub(crate) mod binding_graph;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
 pub mod committed_effect;
@@ -63,6 +67,7 @@ pub mod renderer;
 pub(crate) mod role_dictionary;
 pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
+pub(crate) mod semantic_refs;
 pub(crate) mod static_ir;
 pub mod trace;
 pub mod tree_bridge;
@@ -74,6 +79,8 @@ pub mod validation;
 
 #[cfg(test)]
 mod ui_dna2_wp2_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_wp3_qualification_tests;
 
 pub use action_admission::{
     describe_interaction_action_admission, InteractionActionAdmissionCapabilityRequirement,
