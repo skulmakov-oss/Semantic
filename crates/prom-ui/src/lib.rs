@@ -37,6 +37,7 @@ pub mod commit_boundary;
 pub mod commit_boundary_result;
 pub mod committed_effect;
 pub mod committed_effect_record;
+pub(crate) mod contract_primitives;
 pub mod effect_request;
 pub mod effect_request_summary;
 pub mod effect_request_trace;
@@ -55,10 +56,14 @@ pub mod model;
 pub mod prepared_effect;
 pub mod prepared_effect_result;
 pub mod projection;
+pub(crate) mod projection_compile;
+pub(crate) mod projection_source;
 pub mod raw_event;
 pub mod renderer;
+pub(crate) mod role_dictionary;
 pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
+pub(crate) mod static_ir;
 pub mod trace;
 pub mod tree_bridge;
 pub mod tree_slot_intent;
@@ -66,6 +71,9 @@ pub mod ui_capability_admission;
 pub mod ui_capability_admission_result;
 pub mod ui_capability_denial_trace;
 pub mod validation;
+
+#[cfg(test)]
+mod ui_dna2_wp2_qualification_tests;
 
 pub use action_admission::{
     describe_interaction_action_admission, InteractionActionAdmissionCapabilityRequirement,
