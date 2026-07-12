@@ -13,12 +13,18 @@ Related:
 - #1328
 - #1329
 - #1330
+- docs/spec/ui/projection_source_grammar_v0.md
 
 The projection source model describes presentation intent for Semantic-owned UI projection.
 
 It does not define semantic truth, verifier admission, VM behavior, runtime authority, renderer behavior, or production UI wiring.
 
-This document does not implement or finalize a parser grammar.
+The source model does not itself define parser grammar.
+
+The bounded structural grammar contract is specified separately in
+projection_source_grammar_v0.md.
+
+Parser implementation remains a separate, unauthorized slice.
 
 ## 1. Purpose
 
@@ -191,7 +197,8 @@ Denial is not the same as false.
 
 ## 10. Non-Normative Example
 
-Non-normative sketch — not parser syntax
+Non-normative sketch — not parser syntax.
+This sketch remains non-normative and may contain concepts outside grammar v0.
 
 ```text
 projection CalculatorView for CalculatorState {
