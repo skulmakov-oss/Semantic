@@ -645,9 +645,7 @@ fn sort_and_dedup_diagnostics(
     mut diagnostics: ProjectionPatchDiagnostics,
 ) -> ProjectionPatchDiagnostics {
     diagnostics.sort();
-    diagnostics.dedup_by(|right, left| {
-        right.coordinate().code().as_str() == left.coordinate().code().as_str()
-    });
+    diagnostics.dedup();
     diagnostics
 }
 

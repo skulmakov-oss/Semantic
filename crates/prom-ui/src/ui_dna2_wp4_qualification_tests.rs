@@ -989,6 +989,7 @@ fn ui_dna2_wp4_diagnostics_are_sorted_and_deduplicated() {
         codes,
         alloc::vec![
             "PP_COLLECTION_BEFORE_SELF",
+            "PP_COLLECTION_BEFORE_SELF",
             "PP_DUP_MUTATION_TARGET",
             "PP_NON_INCREASING_REVISION"
         ]
@@ -997,4 +998,36 @@ fn ui_dna2_wp4_diagnostics_are_sorted_and_deduplicated() {
         codes[0],
         DiagnosticCode::new("PP_COLLECTION_BEFORE_SELF").as_str()
     );
+}
+
+#[test]
+fn ui_dna2_wp4_same_code_diagnostics_with_distinct_coordinates_are_preserved() {
+    let patch_a = binding_update_patch(1, 0, 1);
+    let patch_b = ProjectionPatch::new(
+        envelope(2, 2, 1, Some(1), 1, 2, 1, 1),
+        alloc::vec![ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 1),
+            value: ProjectionPatchValue::Quad(ProjectionQuadState::T),
+        }],
+    )
+    .expect("patch b");
+    let patch_c = ProjectionPatch::new(
+        envelope(3, 3, 1, Some(1), 2, 3, 1, 2),
+        alloc::vec![ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 1),
+            value: ProjectionPatchValue::Quad(ProjectionQuadState::T),
+        }],
+    )
+    .expect("patch c");
+
+    let error = ProjectionPatchSet::new(alloc::vec![patch_a, patch_b, patch_c]).unwrap_err();
+
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_MIXED_STREAM", "PP_MIXED_STREAM"]
+    );
+    assert_eq!(error[0].coordinate().domain(), 2);
+    assert_eq!(error[0].coordinate().secondary(), 1);
+    assert_eq!(error[1].coordinate().domain(), 3);
+    assert_eq!(error[1].coordinate().secondary(), 2);
 }
