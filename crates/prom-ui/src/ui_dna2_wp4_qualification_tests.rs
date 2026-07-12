@@ -1031,3 +1031,309 @@ fn ui_dna2_wp4_same_code_diagnostics_with_distinct_coordinates_are_preserved() {
     assert_eq!(error[1].coordinate().domain(), 3);
     assert_eq!(error[1].coordinate().secondary(), 2);
 }
+
+#[test]
+fn ui_dna2_wp4b_single_patch_trace_preserves_operation_order() {
+    let patch = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::SetNodeAvailability {
+            node: node_id(10),
+            availability: ProjectionNodeAvailability::Available,
+        },
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 1),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+    ]);
+
+    let trace = patch.replay_trace().expect("trace");
+    assert_eq!(trace.steps().len(), 2);
+
+    let step0 = &trace.steps()[0];
+    assert_eq!(step0.coordinate().patch_ordinal(), 0);
+    assert_eq!(step0.coordinate().operation_ordinal(), 0);
+    assert!(matches!(
+        step0.operation(),
+        ProjectionPatchOperation::SetNodeAvailability { .. }
+    ));
+
+    let step1 = &trace.steps()[1];
+    assert_eq!(step1.coordinate().patch_ordinal(), 0);
+    assert_eq!(step1.coordinate().operation_ordinal(), 1);
+    assert!(matches!(
+        step1.operation(),
+        ProjectionPatchOperation::SetBindingValue { .. }
+    ));
+}
+
+#[test]
+fn ui_dna2_wp4b_patch_set_trace_preserves_nested_order() {
+    let first = patch_with_operation(ProjectionPatchOperation::SetBindingValue {
+        target: binding_target(10, 1),
+        value: ProjectionPatchValue::SignedScalar(1),
+    });
+    let second = ProjectionPatch::new(
+        envelope(2, 1, 1, Some(1), 1, 2, 1, 1),
+        alloc::vec![ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 2),
+            value: ProjectionPatchValue::SignedScalar(2),
+        }],
+    )
+    .expect("patch");
+
+    let set = ProjectionPatchSet::new(alloc::vec![first, second]).expect("set");
+    let trace = set.replay_trace().expect("trace");
+
+    assert_eq!(trace.steps().len(), 2);
+
+    assert_eq!(trace.steps()[0].coordinate().patch_ordinal(), 0);
+    assert_eq!(trace.steps()[0].coordinate().operation_ordinal(), 0);
+
+    assert_eq!(trace.steps()[1].coordinate().patch_ordinal(), 1);
+    assert_eq!(trace.steps()[1].coordinate().operation_ordinal(), 0);
+}
+
+#[test]
+fn ui_dna2_wp4b_same_input_produces_equal_trace() {
+    let patch = binding_update_patch(1, 0, 1);
+    let trace_a = patch.replay_trace().expect("trace");
+    let trace_b = patch.replay_trace().expect("trace");
+
+    assert_eq!(trace_a, trace_b);
+}
+
+#[test]
+fn ui_dna2_wp4b_single_patch_matches_singleton_set_trace() {
+    let patch = binding_update_patch(1, 0, 1);
+    let set = ProjectionPatchSet::new(alloc::vec![patch.clone()]).expect("set");
+
+    let trace_patch = patch.replay_trace().expect("trace");
+    let trace_set = set.replay_trace().expect("trace");
+
+    assert_eq!(trace_patch, trace_set);
+}
+
+#[test]
+fn ui_dna2_wp4b_reversed_operation_order_changes_trace() {
+    let patch_a = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::SetNodeAvailability {
+            node: node_id(10),
+            availability: ProjectionNodeAvailability::Available,
+        },
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 1),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+    ]);
+
+    let patch_b = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 1),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+        ProjectionPatchOperation::SetNodeAvailability {
+            node: node_id(10),
+            availability: ProjectionNodeAvailability::Available,
+        },
+    ]);
+
+    let trace_a = patch_a.replay_trace().expect("trace a");
+    let trace_b = patch_b.replay_trace().expect("trace b");
+
+    assert_ne!(trace_a, trace_b);
+}
+
+#[test]
+fn ui_dna2_wp4b_patch_order_remains_observable() {
+    let a_first = binding_update_patch(1, 0, 1);
+    let a_second = ProjectionPatch::new(
+        envelope(2, 1, 1, Some(1), 1, 2, 1, 1),
+        alloc::vec![ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 2),
+            value: ProjectionPatchValue::SignedScalar(2),
+        }],
+    )
+    .expect("patch");
+    let set_a = ProjectionPatchSet::new(alloc::vec![a_first, a_second]).expect("set a");
+
+    let b_first = binding_update_patch(2, 0, 1);
+    let b_second = ProjectionPatch::new(
+        envelope(1, 1, 1, Some(1), 1, 2, 1, 1),
+        alloc::vec![ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 2),
+            value: ProjectionPatchValue::SignedScalar(2),
+        }],
+    )
+    .expect("patch");
+    let set_b = ProjectionPatchSet::new(alloc::vec![b_first, b_second]).expect("set b");
+
+    let trace_a = set_a.replay_trace().expect("trace a");
+    let trace_b = set_b.replay_trace().expect("trace b");
+
+    assert_ne!(trace_a, trace_b);
+}
+
+#[test]
+fn ui_dna2_wp4b_cross_kind_same_key_order_is_preserved() {
+    let patch = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::CollectionInsert {
+            collection: node_id(20),
+            key: key(1),
+            before: Some(key(2)),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+        ProjectionPatchOperation::CollectionUpdate {
+            collection: node_id(20),
+            key: key(1),
+            value: ProjectionPatchValue::SignedScalar(2),
+        },
+        ProjectionPatchOperation::CollectionMove {
+            collection: node_id(20),
+            key: key(1),
+            before: Some(key(3)),
+        },
+        ProjectionPatchOperation::CollectionRemove {
+            collection: node_id(20),
+            key: key(1),
+        },
+    ]);
+
+    let trace = patch.replay_trace().expect("trace");
+    assert_eq!(trace.steps().len(), 4);
+
+    assert!(matches!(
+        trace.steps()[0].operation(),
+        ProjectionPatchOperation::CollectionInsert { .. }
+    ));
+    assert!(matches!(
+        trace.steps()[1].operation(),
+        ProjectionPatchOperation::CollectionUpdate { .. }
+    ));
+    assert!(matches!(
+        trace.steps()[2].operation(),
+        ProjectionPatchOperation::CollectionMove { .. }
+    ));
+    assert!(matches!(
+        trace.steps()[3].operation(),
+        ProjectionPatchOperation::CollectionRemove { .. }
+    ));
+}
+
+#[test]
+fn ui_dna2_wp4b_trace_borrows_exact_operations() {
+    let patch = binding_update_patch(1, 0, 1);
+    let trace = patch.replay_trace().expect("trace");
+
+    let borrowed_operation: *const ProjectionPatchOperation = trace.steps()[0].operation();
+    let original_operation: *const ProjectionPatchOperation = &patch.operations()[0];
+
+    assert_eq!(borrowed_operation, original_operation);
+}
+
+#[test]
+fn ui_dna2_wp4b_trace_preserves_envelope_coordinates() {
+    let patch = ProjectionPatch::new(
+        envelope(7, 8, 9, Some(10), 11, 12, 13, 14),
+        alloc::vec![ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 1),
+            value: ProjectionPatchValue::SignedScalar(42),
+        }],
+    )
+    .expect("patch");
+
+    let trace = patch.replay_trace().expect("trace");
+    let trace_envelope = trace.steps()[0].envelope();
+
+    assert_eq!(trace_envelope.patch_id().raw(), 7);
+    assert_eq!(trace_envelope.stream_id().raw(), 8);
+    assert_eq!(trace_envelope.document_id().raw(), 9);
+    assert_eq!(trace_envelope.surface_id().expect("surface").raw(), 10);
+    assert_eq!(trace_envelope.previous_projection_revision().raw(), 11);
+    assert_eq!(trace_envelope.projection_revision().raw(), 12);
+    assert_eq!(trace_envelope.epoch().raw(), 13);
+    assert_eq!(trace_envelope.sequence().raw(), 14);
+}
+
+#[test]
+fn ui_dna2_wp4b_trace_preserves_all_quad_states() {
+    let patch = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 1),
+            value: ProjectionPatchValue::Quad(ProjectionQuadState::N),
+        },
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 2),
+            value: ProjectionPatchValue::Quad(ProjectionQuadState::F),
+        },
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 3),
+            value: ProjectionPatchValue::Quad(ProjectionQuadState::T),
+        },
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 4),
+            value: ProjectionPatchValue::Quad(ProjectionQuadState::S),
+        },
+    ]);
+
+    let trace = patch.replay_trace().expect("trace");
+
+    let mut found_n = false;
+    let mut found_f = false;
+    let mut found_t = false;
+    let mut found_s = false;
+
+    for step in trace.steps() {
+        if let ProjectionPatchOperation::SetBindingValue {
+            value: ProjectionPatchValue::Quad(state),
+            ..
+        } = step.operation()
+        {
+            match state {
+                ProjectionQuadState::N => found_n = true,
+                ProjectionQuadState::F => found_f = true,
+                ProjectionQuadState::T => found_t = true,
+                ProjectionQuadState::S => found_s = true,
+            }
+        }
+    }
+
+    assert!(found_n && found_f && found_t && found_s);
+}
+
+#[test]
+fn ui_dna2_wp4b_trace_step_count_matches_operation_count() {
+    let first = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 1),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+        ProjectionPatchOperation::SetBindingValue {
+            target: binding_target(10, 2),
+            value: ProjectionPatchValue::SignedScalar(2),
+        },
+    ]);
+    let second = ProjectionPatch::new(
+        envelope(2, 1, 1, Some(1), 1, 2, 1, 1),
+        alloc::vec![
+            ProjectionPatchOperation::SetBindingValue {
+                target: binding_target(10, 3),
+                value: ProjectionPatchValue::SignedScalar(3),
+            },
+            ProjectionPatchOperation::SetBindingValue {
+                target: binding_target(10, 4),
+                value: ProjectionPatchValue::SignedScalar(4),
+            },
+            ProjectionPatchOperation::SetBindingValue {
+                target: binding_target(10, 5),
+                value: ProjectionPatchValue::SignedScalar(5),
+            },
+        ],
+    )
+    .expect("patch");
+
+    let sum_operations = first.operations().len() + second.operations().len();
+
+    let set = ProjectionPatchSet::new(alloc::vec![first, second]).expect("set");
+    let trace = set.replay_trace().expect("trace");
+
+    assert_eq!(trace.steps().len(), sum_operations);
+}

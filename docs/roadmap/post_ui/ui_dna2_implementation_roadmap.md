@@ -1,28 +1,56 @@
 # UI-DNA2 implementation roadmap
 
-Status: ACTIVE EXECUTION ROADMAP
+Status: DIRECTIONAL RESEARCH ROADMAP
 Repository baseline: `f28d8d37417301c04058bd13909a9b18b7460c2a`
 Live tracker: `#1489`
 
-This document is the durable repository mirror of issue `#1489`.
+## Document role
 
-Issue `#1489` is the live execution ledger.
+This document is a directional research roadmap for UI DNA v2.
 
-`ui_dna2_implementation_roadmap.md` is the durable repository mirror.
+It is not a canonical source of repository truth, architectural authority,
+implementation authorization, release posture, or production readiness.
 
-Neither replaces the other.
+It records the current research direction, working phase decomposition,
+landed evidence, unresolved hypotheses, and likely sequencing.
 
-This document records landed evidence and remaining gated execution contours.
+Because UI DNA v2 is partly an exploratory engineering programme, this
+roadmap may be revised, reordered, split, collapsed, or rewritten when
+implementation and qualification evidence changes the model.
 
-It does not authorize implementation by itself.
+Canonical ownership and forbidden-boundary decisions remain in the accepted
+ownership and compatibility documents.
 
-## 1. Current execution baseline
+Actual implementation evidence is established by landed code, tests,
+qualification artifacts, and merged pull requests.
 
-Current main baseline:
+The active issue ledger records current coordination state, but roadmap
+position alone never authorizes a task.
 
 ```text
-f28d8d37417301c04058bd13909a9b18b7460c2a
-feat(ui): add projection patch contract foundation (#1497)
+roadmap direction != canonical truth
+roadmap phase != automatic authorization
+roadmap ordering != immutable architecture
+implementation evidence != production promotion
+landed code != stable promise
+qualification != shell integration
+```
+
+Issue #1489 is the active coordination ledger.
+
+This roadmap is the durable directional research map.
+
+The issue and roadmap may be synchronized for clarity, but neither overrides
+accepted ownership boundaries, landed code, qualification evidence, or
+explicit promotion decisions.
+
+## 1. WP4B observation baseline
+
+WP4B accepted starting baseline:
+
+```text
+5f9549690505968743f111851a7ae3b087433e9e
+docs(ui): add UI DNA v2 implementation roadmap (#1498)
 ```
 
 Current governing rule:
@@ -80,6 +108,7 @@ Renderer owns pixels.
 | #1495 | `56df8ab37ae4bea23ced24bced6c28555319f7cf` | Exact capability-reference lookup specification owned by `prom-cap` |
 | #1496 | `5bbda87455f0bdc65cd6f6013df8cbad799eae15` | Immutable borrowed exact capability-reference lookup implementation and qualification |
 | #1497 | `f28d8d37417301c04058bd13909a9b18b7460c2a` | Crate-internal Projection Patch contract foundation, deterministic validation, exact diagnostic coordinate preservation, WP4A qualification |
+| #1498 | `5f9549690505968743f111851a7ae3b087433e9e` | Directional UI DNA v2 implementation roadmap, WP4B ownership-boundary correction, Gate D closure preserved |
 
 ## 4. Current landed contract state
 
@@ -147,7 +176,10 @@ Workbench or Semantic Studio work
 production promotion
 ```
 
-## 5. Rebaselined phase matrix
+## 5. Current research checkpoint matrix
+
+This matrix is a working decomposition, not an immutable architecture.
+Future evidence may split, combine, reorder, or retire phases.
 
 | Phase | Current status | Landed evidence | Remaining closure work |
 | --- | --- | --- | --- |
@@ -157,7 +189,7 @@ production promotion
 | UI-DNA2-3 — Canonical Static UI IR | **FOUNDATION LANDED** | versioned wrapper, stable structure, semantic child ordering, lowering, qualification bytes, #1490 | Final canonical artifact/serialization policy, compatibility surface and full invalid-artifact matrix |
 | UI-DNA2-4 — Binding Graph | **CONTRACT FOUNDATION LANDED** | deterministic declarations, cycle validation, diagnostics, #1491 | Approved Semantic source adapters, revision/epoch observation rules, dirty-propagation integration and Quad preservation evidence |
 | UI-DNA2-5 — Action IR integration | **CONTRACT FOUNDATION LANDED** | static routes, `ActionIntent`, invocation context, structural mapper, #1491 | Explicit adapter to existing admission boundary, accepted/denied traces, stale revision, idempotency and capability evidence; Gate D required |
-| UI-DNA2-6 — Projection patch model and runtime | **WP4A CONTRACT FOUNDATION LANDED** | `#1497`, crate-internal Projection Patch contract foundation and qualification | WP4B deterministic replay-order model and qualification; actual patch application remains deferred to the separately gated UI-DNA2-9 shell-player contour |
+| UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
 | UI-DNA2-7 — Denial, recovery, task and freshness projection | **NOT STARTED** | specifications only | Bounded contracts and evidence after deterministic patch replay-order qualification |
 | UI-DNA2-8 — ProjectionBundle qualification | **NOT STARTED** | fixture and draft-tool evidence only | Parser, validators, verifier, inert loader and activation separation |
 | UI-DNA2-9 — Shell player integration | **NOT STARTED** | experimental `ui-shell-kit` evidence only | Separate promotion audit and bounded shell-player implementation |
@@ -199,30 +231,42 @@ other reference-domain resolution
 UI wiring
 ```
 
-## 7. Next proposed execution slice
+## 7. Latest bounded research checkpoint
 
 ### UI-DNA2-WP4B — deterministic patch replay-order model and qualification
 
-This is the next proposed slice. This document does not authorize it by itself; it requires a separate bounded implementation issue and explicit activation.
+WP4B REPLAY-ORDER CHECKPOINT —
+IMPLEMENTED AND QUALIFIED IN #1499
+NOT PROMOTED
 
 Current state:
 
 ```text
 WP4A contract foundation = LANDED
-WP4B deterministic patch replay-order model and qualification = PROPOSED, NOT AUTHORIZED
-Gate D = CLOSED
-production promotion = NOT AUTHORIZED
+
+WP4B deterministic replay-order model =
+IMPLEMENTED AND QUALIFIED IN #1499
+
+WP4B scope =
+crate-internal replay-order evidence only
+
+patch application =
+NOT IMPLEMENTED
+
+shell-player integration =
+NOT AUTHORIZED
+
+Gate D =
+CLOSED
+
+production promotion =
+NOT AUTHORIZED
 ```
 
-#### Proposed narrow scope
+No next implementation slice is authorized by this roadmap.
 
-```text
-owner: crates/prom-ui::projection_patch
-input: validated ProjectionPatch / ProjectionPatchSet
-output: deterministic replay-order model,
-ordered replay trace,
-and qualification evidence
-```
+The next bounded task must be chosen separately using current evidence,
+ownership boundaries, and explicit authorization.
 
 #### Required invariants
 
@@ -243,13 +287,28 @@ no host effects
 Ownership boundary:
 
 ```text
-prom-ui::projection_patch owns patch vocabulary and replay order.
+prom-ui::projection_patch owns:
+- patch vocabulary;
+- structural validation;
+- declared replay order;
+- inert replay trace evidence.
 
-prom-ui-runtime::shell_player owns patch application when separately
-authorized under the shell-player integration phase.
+prom-ui-runtime::shell_player owns:
+- actual patch application;
+- shell-local realization;
+- focus;
+- hit testing;
+- accessibility realization;
+- draw-command production.
+
+replay order != application
+trace != execution
+step != command
+borrowed operation != applied operation
+prom-ui model evidence != prom-ui-runtime shell mutation
+```
 
 WP4B does not implement shell application.
-```
 
 #### Explicitly forbidden in WP4B
 
@@ -269,26 +328,38 @@ public API expansion without separate review
 
 ## 8. Dependency order after rebaseline
 
+EVIDENCE LANDED OR CARRIED BY THE CURRENT CHANGE:
+
 ```text
-COMPLETE:
-0 → 1 → WP2 foundation → WP3 foundation → D0B → D0C → D0D → D0E → WP4A
-
-NEXT PROPOSED:
-WP4B deterministic patch replay-order model and qualification
-
-REMAINING:
-2 parser qualification
-3 final artifact qualification
-4 source/dirty integration
-5 admission integration behind Gate D
-7 denial/task/freshness
-8 bundle qualification
-9 shell player
-10 reference slice
-11 promotion decision
+0 → 1 → WP2 foundation → WP3 foundation
+→ D0B → D0C → D0D → D0E
+→ WP4A → WP4B replay-order checkpoint
 ```
 
-No later phase may be used to bypass an unfinished earlier authority or determinism requirement.
+CURRENTLY UNAUTHORIZED FUTURE CONTOURS:
+
+```text
+parser qualification
+final Static UI IR artifact qualification
+Binding Graph source/dirty integration
+admission integration behind Gate D
+denial/recovery/task/freshness projection
+ProjectionBundle qualification
+shell-player implementation
+end-to-end reference slice
+production-promotion decision
+```
+
+This order is directional rather than immutable.
+
+Research evidence may justify:
+- reordering;
+- splitting a phase;
+- merging phases;
+- adding a prerequisite;
+- removing an obsolete contour.
+
+No roadmap movement may bypass an accepted ownership or authority boundary.
 
 ## 9. Governance boundaries
 
@@ -337,7 +408,7 @@ reference slice != production promotion
 - [ ] Static UI IR artifact/serialization qualification is complete.
 - [ ] Binding Graph source and dirty-propagation integration is qualified.
 - [ ] Action IR admission integration is separately approved and qualified.
-- [ ] Projection Patch replay-order model and qualification are complete.
+- [x] Projection Patch replay-order model and qualification are complete in the bounded WP4B contour.
 - [ ] Patch application is separately qualified in the `prom-ui-runtime::shell_player` contour.
 - [ ] Denial/recovery/task/freshness projection is qualified.
 - [ ] ProjectionBundle parser/validator/verifier/loader sequence is qualified.
@@ -346,6 +417,17 @@ reference slice != production promotion
 - [ ] Production promotion decision is explicit.
 
 ## 11. Definition of Done
+
+This roadmap does not independently declare UI DNA v2 complete.
+
+Completion or promotion decisions require explicit evidence and governance
+outside roadmap progression, including:
+
+- landed implementation evidence;
+- qualification results;
+- accepted ownership compliance;
+- integration evidence where applicable;
+- explicit release or promotion decisions.
 
 This umbrella issue may close only when:
 
@@ -358,7 +440,6 @@ This umbrella issue may close only when:
 Until then:
 
 ```text
-Issue #1489 = OPEN ACTIVE EXECUTION UMBRELLA
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
 ```
