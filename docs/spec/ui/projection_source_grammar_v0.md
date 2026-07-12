@@ -141,11 +141,77 @@ empty node bodies are valid.
 
 ## 5. Lexical Rules
 
-### 5.1 Encoding
-UTF-8 input
-no byte-order mark in v0
-source spans use UTF-8 byte offsets
-spans are half-open: [start, end)
+### 5.1 Encoding and line endings
+LF occupies one byte.
+
+CRLF occupies two bytes.
+
+Bare CR is rejected as PSP_UNEXPECTED_CHAR.
+
+UTF-8 BOM is rejected at byte offset 0 as PSP_UNEXPECTED_CHAR.
+
+Non-ASCII UTF-8 is allowed only inside line-comment text.
+
+Outside comments, non-ASCII input is rejected as PSP_UNEXPECTED_CHAR.
+
+## 5.5 Source span construction
+
+All SourceSpan values use UTF-8 byte offsets.
+
+All spans are half-open:
+[start, end)
+
+Leading and trailing trivia are excluded from declaration spans unless the
+trivia occurs inside the declaration's own delimiters.
+
+### Surface declaration span
+
+For:
+```text
+surface 1 root 10 key 1;
+```
+
+define:
+start = first byte of the `surface` keyword
+end = byte immediately after the terminating semicolon
+
+Therefore:
+the terminating semicolon is included;
+leading whitespace and comments are excluded;
+whitespace and comments following the semicolon are excluded.
+
+### Node declaration span
+
+For:
+```text
+node 10 role root key 10 {
+    child 11 order 0;
+}
+```
+
+define:
+start = first byte of the `node` keyword
+end = byte immediately after the matching closing brace
+
+Therefore:
+the opening brace is included;
+the closing brace is included;
+whitespace and comments inside the braces are included;
+leading trivia before `node` is excluded;
+trailing trivia after the closing brace is excluded.
+
+### Token spans
+
+When token-level spans are produced:
+start = first byte of the token
+end = byte immediately after the final token byte
+
+Surrounding trivia is excluded.
+
+### Child provenance
+
+ProjectionSourceChild has no SourceRef field.
+The parser must not fabricate child-level provenance fields.
 
 ### 5.2 Keywords
 Keywords are ASCII lowercase and case-sensitive:
@@ -203,9 +269,20 @@ Comments are trivia and do not enter the AST.
 
 ## 6. Ordering Semantics
 
-revision must appear exactly once;
-epoch must appear exactly once;
-revision precedes epoch;
+## 6. Ordering Semantics
+
+revision must be the first non-trivia declaration;
+epoch must be the second non-trivia declaration;
+each must appear exactly once.
+
+Failures:
+wrong token where revision is expected -> PSP_UNEXPECTED_TOKEN
+EOF where revision is expected -> PSP_UNEXPECTED_EOF
+wrong token where epoch is expected -> PSP_UNEXPECTED_TOKEN
+EOF where epoch is expected -> PSP_UNEXPECTED_EOF
+later revision declaration -> PSP_DUP_REVISION
+later epoch declaration -> PSP_DUP_EPOCH
+
 surface and node declarations may otherwise be interleaved;
 source declaration order is not canonical structure order;
 child order is explicit through the `order` field;
@@ -218,6 +295,54 @@ ChildOrder = semantic child position
 normalized storage order = deterministic AST normalization
 
 The parser must not invent child order from declaration position.
+
+After the matching closing brace of the projection document, only trivia is
+allowed until EOF.
+
+Any additional token produces PSP_UNEXPECTED_TOKEN.
+
+A second `projection` block is therefore rejected.
+
+Empty input produces PSP_UNEXPECTED_EOF at [0, 0).
+
+Normalization establishes deterministic structural ordering.
+
+Inputs that differ only in declaration storage order may produce the same
+provenance-independent structural inventory.
+
+They do not necessarily produce equal ProjectionSourceDocument values.
+
+They do not necessarily produce equal StaticUiDocument values or equal
+canonical bytes when provenance is retained.
+
+A provenance-independent structural inventory includes only:
+revision;
+epoch;
+surface IDs;
+surface roots;
+surface keys;
+node IDs;
+node roles;
+node keys;
+child IDs;
+ChildOrder values;
+normalized surface ordering;
+normalized node ordering;
+normalized child ordering.
+
+It explicitly excludes:
+SourceId;
+SourceSpan;
+SourceRef;
+source byte offsets;
+comments;
+whitespace;
+textual declaration position.
+
+Required equations:
+same structure != same provenance
+normalization != provenance erasure
+structural equivalence != PartialEq
 
 ## 7. Parse versus Semantic Validation
 
@@ -281,16 +406,86 @@ PSP_DUP_EPOCH
 PSP_UNSUPPORTED_VERSION
 PSP_UNKNOWN_CLAUSE
 
-Diagnostic ordering:
-primary source byte offset ascending;
-then diagnostic code;
-then deterministic secondary coordinate.
+Projection Source parser v0 is fail-fast.
 
-For v0, prefer:
-deterministic bounded recovery at declaration boundaries;
-no speculative reinterpretation;
-no silent token skipping;
-no “best effort” AST returned on failure.
+For parser-invalid input it returns exactly one deterministic PSP diagnostic.
+
+Parsing proceeds from left to right in UTF-8 byte order.
+
+The parser stops at the first parser-owned failure.
+
+It performs no recovery.
+
+It performs no synchronization.
+
+It performs no speculative reinterpretation.
+
+It skips no unexpected tokens.
+
+It returns no partial ProjectionSourceDocument.
+
+Projection Source semantic validation runs only after the complete document
+parses successfully.
+
+Required equations:
+parse failure -> exactly one PSP diagnostic
+parse failure -> no AST
+parse failure -> no PS validation
+
+parse success -> AST
+parse success -> PS validation may still fail
+
+Every parser diagnostic must contain:
+diagnostic code;
+caller-supplied SourceId;
+SourceSpan identifying the failure.
+
+### Diagnostic span rules
+
+#### Offending character or token
+For:
+PSP_UNEXPECTED_CHAR
+PSP_UNEXPECTED_TOKEN
+PSP_INVALID_IDENTIFIER
+PSP_INVALID_NUMBER
+PSP_NUMBER_OVERFLOW
+PSP_ZERO_ID
+PSP_UNSUPPORTED_VERSION
+PSP_UNKNOWN_CLAUSE
+
+the diagnostic span is the exact offending character or token span.
+
+For `PSP_UNEXPECTED_CHAR`:
+an invalid ASCII character spans one byte;
+a forbidden non-ASCII scalar spans all UTF-8 bytes of that scalar.
+
+Raw invalid UTF-8 is outside the future `&str` parser contract and is not represented as a parser diagnostic.
+
+#### Duplicate revision or epoch
+For:
+PSP_DUP_REVISION
+PSP_DUP_EPOCH
+
+the diagnostic span is the keyword token of the second declaration.
+
+#### Missing token before another token
+For a missing token detected before an actual next token:
+span = [next_token_start, next_token_start)
+
+Use `PSP_MISSING_SEMICOLON` for a missing semicolon.
+Use `PSP_UNEXPECTED_TOKEN` for another missing required token when the next token is incompatible.
+
+#### Unexpected end of input
+For `PSP_UNEXPECTED_EOF`:
+span = [input_byte_length, input_byte_length)
+
+#### Leading-zero numbers
+Classify:
+00
+01
+00042
+
+as `PSP_INVALID_NUMBER`. The span covers the complete numeric token.
 
 ## 9. Source Reference Mapping
 
@@ -417,12 +612,18 @@ projection v0 {
     }
 }
 ```
-This is semantically equal to a document with nodes declared in order `10` then `11`.
+This yields the same provenance-independent normalized structural inventory as a document with nodes declared in order `10` then `11`.
 AST inventory: revision: 0, epoch: 0, surface IDs: 1, node IDs: 10, 11, roles: root, text, keys: 1, 10, 11, child IDs: 11, ChildOrder values: 0.
 
 ## 13. Invalid Normative Examples
 
 ### Lexical & Parser Diagnostics (Rejected by Parser)
+
+For all parser-invalid examples:
+diagnostics returned: exactly one PSP diagnostic
+AST returned: no
+semantic validation reached: no
+
 1. unsupported version: `projection v1 { ... }` -> `PSP_UNSUPPORTED_VERSION`
 2. missing revision: `projection v0 { epoch 0; }` -> `PSP_UNEXPECTED_TOKEN`
 3. duplicate revision: `projection v0 { revision 0; revision 1; ... }` -> `PSP_DUP_REVISION`
@@ -443,6 +644,11 @@ AST inventory: revision: 0, epoch: 0, surface IDs: 1, node IDs: 10, 11, roles: r
 18. renderer/layout property: `node 1 role text key 1 { width 100; }` -> `PSP_UNKNOWN_CLAUSE`
 
 ### Semantic Diagnostics (Parsed OK, Rejected by Validation)
+
+For all semantically invalid examples:
+parse result: success
+semantic validation: one or more existing PS diagnostics
+
 1. unknown role: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role button key 1 {} }` -> `PS_UNKNOWN_ROLE`
 2. missing child node: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 { child 2 order 0; } }` -> `PS_UNRESOLVED_CHILD`
 3. cycle: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 { child 1 order 0; } }` -> `PS_CYCLE_DETECTED`
