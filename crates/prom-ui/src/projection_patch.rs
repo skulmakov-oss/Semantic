@@ -413,9 +413,18 @@ enum MutationTarget {
         node: StaticNodeId,
     },
     CollectionItem {
+        kind: CollectionOperationKind,
         collection: StaticNodeId,
         key: CollectionKey,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum CollectionOperationKind {
+    Insert,
+    Update,
+    Remove,
+    Move,
 }
 
 fn validate_patch(
@@ -606,14 +615,29 @@ fn mutation_target(operation: &ProjectionPatchOperation) -> Option<MutationTarge
         }
         ProjectionPatchOperation::CollectionInsert {
             collection, key, ..
-        }
-        | ProjectionPatchOperation::CollectionUpdate {
-            collection, key, ..
-        }
-        | ProjectionPatchOperation::CollectionRemove { collection, key }
-        | ProjectionPatchOperation::CollectionMove {
+        } => Some(MutationTarget::CollectionItem {
+            kind: CollectionOperationKind::Insert,
+            collection: *collection,
+            key: *key,
+        }),
+        ProjectionPatchOperation::CollectionUpdate {
             collection, key, ..
         } => Some(MutationTarget::CollectionItem {
+            kind: CollectionOperationKind::Update,
+            collection: *collection,
+            key: *key,
+        }),
+        ProjectionPatchOperation::CollectionRemove { collection, key } => Some(
+            MutationTarget::CollectionItem {
+                kind: CollectionOperationKind::Remove,
+                collection: *collection,
+                key: *key,
+            },
+        ),
+        ProjectionPatchOperation::CollectionMove {
+            collection, key, ..
+        } => Some(MutationTarget::CollectionItem {
+            kind: CollectionOperationKind::Move,
             collection: *collection,
             key: *key,
         }),

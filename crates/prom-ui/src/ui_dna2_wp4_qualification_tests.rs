@@ -97,6 +97,10 @@ fn patch_with_operation(operation: ProjectionPatchOperation) -> ProjectionPatch 
     .expect("valid patch")
 }
 
+fn patch_with_operations(operations: Vec<ProjectionPatchOperation>) -> ProjectionPatch {
+    ProjectionPatch::new(envelope(1, 1, 1, Some(1), 0, 1, 1, 0), operations).expect("valid patch")
+}
+
 fn diagnostic_codes(diagnostics: &[crate::projection_patch::ProjectionPatchDiagnostic]) -> Vec<&'static str> {
     diagnostics
         .iter()
@@ -572,6 +576,257 @@ fn ui_dna2_wp4_reject_ambiguous_duplicate_mutation_target() {
     )
     .unwrap_err();
     assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+}
+
+#[test]
+fn ui_dna2_wp4_accept_same_key_insert_then_update() {
+    let patch = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::CollectionInsert {
+            collection: node_id(20),
+            key: key(1),
+            before: Some(key(2)),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+        ProjectionPatchOperation::CollectionUpdate {
+            collection: node_id(20),
+            key: key(1),
+            value: ProjectionPatchValue::SignedScalar(2),
+        },
+    ]);
+
+    assert!(matches!(
+        &patch.operations()[0],
+        ProjectionPatchOperation::CollectionInsert { .. }
+    ));
+    assert!(matches!(
+        &patch.operations()[1],
+        ProjectionPatchOperation::CollectionUpdate { .. }
+    ));
+}
+
+#[test]
+fn ui_dna2_wp4_accept_same_key_insert_then_move() {
+    let patch = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::CollectionInsert {
+            collection: node_id(20),
+            key: key(1),
+            before: Some(key(2)),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+        ProjectionPatchOperation::CollectionMove {
+            collection: node_id(20),
+            key: key(1),
+            before: Some(key(3)),
+        },
+    ]);
+
+    assert_eq!(patch.operations().len(), 2);
+}
+
+#[test]
+fn ui_dna2_wp4_accept_same_key_update_then_remove() {
+    let patch = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::CollectionUpdate {
+            collection: node_id(20),
+            key: key(1),
+            value: ProjectionPatchValue::SignedScalar(2),
+        },
+        ProjectionPatchOperation::CollectionRemove {
+            collection: node_id(20),
+            key: key(1),
+        },
+    ]);
+
+    assert_eq!(patch.operations().len(), 2);
+}
+
+#[test]
+fn ui_dna2_wp4_reject_same_key_insert_then_insert() {
+    let error = ProjectionPatch::new(
+        envelope(1, 1, 1, Some(1), 0, 1, 1, 0),
+        alloc::vec![
+            ProjectionPatchOperation::CollectionInsert {
+                collection: node_id(20),
+                key: key(1),
+                before: Some(key(2)),
+                value: ProjectionPatchValue::SignedScalar(1),
+            },
+            ProjectionPatchOperation::CollectionInsert {
+                collection: node_id(20),
+                key: key(1),
+                before: Some(key(3)),
+                value: ProjectionPatchValue::SignedScalar(2),
+            },
+        ],
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+}
+
+#[test]
+fn ui_dna2_wp4_reject_same_key_update_then_update() {
+    let error = ProjectionPatch::new(
+        envelope(1, 1, 1, Some(1), 0, 1, 1, 0),
+        alloc::vec![
+            ProjectionPatchOperation::CollectionUpdate {
+                collection: node_id(20),
+                key: key(1),
+                value: ProjectionPatchValue::SignedScalar(1),
+            },
+            ProjectionPatchOperation::CollectionUpdate {
+                collection: node_id(20),
+                key: key(1),
+                value: ProjectionPatchValue::SignedScalar(2),
+            },
+        ],
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+}
+
+#[test]
+fn ui_dna2_wp4_reject_same_key_remove_then_remove() {
+    let error = ProjectionPatch::new(
+        envelope(1, 1, 1, Some(1), 0, 1, 1, 0),
+        alloc::vec![
+            ProjectionPatchOperation::CollectionRemove {
+                collection: node_id(20),
+                key: key(1),
+            },
+            ProjectionPatchOperation::CollectionRemove {
+                collection: node_id(20),
+                key: key(1),
+            },
+        ],
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+}
+
+#[test]
+fn ui_dna2_wp4_reject_same_key_move_then_move() {
+    let error = ProjectionPatch::new(
+        envelope(1, 1, 1, Some(1), 0, 1, 1, 0),
+        alloc::vec![
+            ProjectionPatchOperation::CollectionMove {
+                collection: node_id(20),
+                key: key(1),
+                before: Some(key(2)),
+            },
+            ProjectionPatchOperation::CollectionMove {
+                collection: node_id(20),
+                key: key(1),
+                before: Some(key(3)),
+            },
+        ],
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+}
+
+#[test]
+fn ui_dna2_wp4_reject_duplicate_node_availability_target() {
+    let error = ProjectionPatch::new(
+        envelope(1, 1, 1, Some(1), 0, 1, 1, 0),
+        alloc::vec![
+            ProjectionPatchOperation::SetNodeAvailability {
+                node: node_id(10),
+                availability: ProjectionNodeAvailability::Pending,
+            },
+            ProjectionPatchOperation::SetNodeAvailability {
+                node: node_id(10),
+                availability: ProjectionNodeAvailability::Available,
+            },
+        ],
+    )
+    .unwrap_err();
+
+    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+}
+
+#[test]
+fn ui_dna2_wp4_accept_same_kind_collection_ops_for_distinct_keys() {
+    let patch = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::CollectionUpdate {
+            collection: node_id(20),
+            key: key(1),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+        ProjectionPatchOperation::CollectionUpdate {
+            collection: node_id(20),
+            key: key(2),
+            value: ProjectionPatchValue::SignedScalar(2),
+        },
+    ]);
+
+    assert_eq!(patch.operations().len(), 2);
+}
+
+#[test]
+fn ui_dna2_wp4_same_key_cross_kind_order_remains_observable_in_bytes() {
+    let insert_then_update = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::CollectionInsert {
+            collection: node_id(20),
+            key: key(1),
+            before: Some(key(2)),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+        ProjectionPatchOperation::CollectionUpdate {
+            collection: node_id(20),
+            key: key(1),
+            value: ProjectionPatchValue::SignedScalar(2),
+        },
+    ]);
+    let update_then_insert = patch_with_operations(alloc::vec![
+        ProjectionPatchOperation::CollectionUpdate {
+            collection: node_id(20),
+            key: key(1),
+            value: ProjectionPatchValue::SignedScalar(2),
+        },
+        ProjectionPatchOperation::CollectionInsert {
+            collection: node_id(20),
+            key: key(1),
+            before: Some(key(2)),
+            value: ProjectionPatchValue::SignedScalar(1),
+        },
+    ]);
+
+    let bytes_a = ProjectionPatchSet::new(alloc::vec![insert_then_update])
+        .expect("set a")
+        .canonical_bytes()
+        .expect("bytes a");
+    let bytes_b = ProjectionPatchSet::new(alloc::vec![update_then_insert])
+        .expect("set b")
+        .canonical_bytes()
+        .expect("bytes b");
+
+    assert_ne!(bytes_a, bytes_b);
+}
+
+#[test]
+fn ui_dna2_wp4_same_kind_duplicate_diagnostics_are_deterministic() {
+    let invalid = || {
+        ProjectionPatch::new(
+            envelope(1, 1, 1, Some(1), 0, 1, 1, 0),
+            alloc::vec![
+                ProjectionPatchOperation::CollectionRemove {
+                    collection: node_id(20),
+                    key: key(1),
+                },
+                ProjectionPatchOperation::CollectionRemove {
+                    collection: node_id(20),
+                    key: key(1),
+                },
+            ],
+        )
+        .unwrap_err()
+    };
+
+    assert_eq!(invalid(), invalid());
 }
 
 #[test]
