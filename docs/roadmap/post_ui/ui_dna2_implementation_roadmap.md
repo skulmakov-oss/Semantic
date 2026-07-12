@@ -157,8 +157,8 @@ production promotion
 | UI-DNA2-3 — Canonical Static UI IR | **FOUNDATION LANDED** | versioned wrapper, stable structure, semantic child ordering, lowering, qualification bytes, #1490 | Final canonical artifact/serialization policy, compatibility surface and full invalid-artifact matrix |
 | UI-DNA2-4 — Binding Graph | **CONTRACT FOUNDATION LANDED** | deterministic declarations, cycle validation, diagnostics, #1491 | Approved Semantic source adapters, revision/epoch observation rules, dirty-propagation integration and Quad preservation evidence |
 | UI-DNA2-5 — Action IR integration | **CONTRACT FOUNDATION LANDED** | static routes, `ActionIntent`, invocation context, structural mapper, #1491 | Explicit adapter to existing admission boundary, accepted/denied traces, stale revision, idempotency and capability evidence; Gate D required |
-| UI-DNA2-6 — Projection patch model and runtime | **WP4A CONTRACT FOUNDATION LANDED** | `#1497`, crate-internal Projection Patch contract foundation and qualification | WP4B inert patch application / replay state, then later denial/task/freshness/runtime contours behind separate gates |
-| UI-DNA2-7 — Denial, recovery, task and freshness projection | **NOT STARTED** | specifications only | Bounded contracts and evidence after patch application foundation |
+| UI-DNA2-6 — Projection patch model and runtime | **WP4A CONTRACT FOUNDATION LANDED** | `#1497`, crate-internal Projection Patch contract foundation and qualification | WP4B deterministic replay-order model and qualification; actual patch application remains deferred to the separately gated UI-DNA2-9 shell-player contour |
+| UI-DNA2-7 — Denial, recovery, task and freshness projection | **NOT STARTED** | specifications only | Bounded contracts and evidence after deterministic patch replay-order qualification |
 | UI-DNA2-8 — ProjectionBundle qualification | **NOT STARTED** | fixture and draft-tool evidence only | Parser, validators, verifier, inert loader and activation separation |
 | UI-DNA2-9 — Shell player integration | **NOT STARTED** | experimental `ui-shell-kit` evidence only | Separate promotion audit and bounded shell-player implementation |
 | UI-DNA2-10 — End-to-end reference slice | **NOT STARTED** | no complete pipeline | One deterministic non-critical reference application |
@@ -201,7 +201,7 @@ UI wiring
 
 ## 7. Next proposed execution slice
 
-### UI-DNA2-WP4B — inert patch application / replay state
+### UI-DNA2-WP4B — deterministic patch replay-order model and qualification
 
 This is the next proposed slice. This document does not authorize it by itself; it requires a separate bounded implementation issue and explicit activation.
 
@@ -209,7 +209,7 @@ Current state:
 
 ```text
 WP4A contract foundation = LANDED
-WP4B inert patch application / replay state = PROPOSED, NOT AUTHORIZED
+WP4B deterministic patch replay-order model and qualification = PROPOSED, NOT AUTHORIZED
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
 ```
@@ -217,21 +217,38 @@ production promotion = NOT AUTHORIZED
 #### Proposed narrow scope
 
 ```text
-owner: crate-internal prom-ui patch replay/application state
+owner: crates/prom-ui::projection_patch
 input: validated ProjectionPatch / ProjectionPatchSet
-output: deterministic inert replay/application state transitions
+output: deterministic replay-order model,
+ordered replay trace,
+and qualification evidence
 ```
 
 #### Required invariants
 
 ```text
-application order remains explicit
-same validated patch input produces the same replay state
+declared patch order remains explicit
+declared operation order remains explicit
+same validated input produces the same replay-order evidence
+no patch application
+no projected UI state mutation
+no shell-local state
 no shell mutation
 no renderer commands
 no runtime queue ownership
 no admission or capability authority
 no host effects
+```
+
+Ownership boundary:
+
+```text
+prom-ui::projection_patch owns patch vocabulary and replay order.
+
+prom-ui-runtime::shell_player owns patch application when separately
+authorized under the shell-player integration phase.
+
+WP4B does not implement shell application.
 ```
 
 #### Explicitly forbidden in WP4B
@@ -257,7 +274,7 @@ COMPLETE:
 0 → 1 → WP2 foundation → WP3 foundation → D0B → D0C → D0D → D0E → WP4A
 
 NEXT PROPOSED:
-WP4B inert patch application / replay state
+WP4B deterministic patch replay-order model and qualification
 
 REMAINING:
 2 parser qualification
@@ -320,7 +337,8 @@ reference slice != production promotion
 - [ ] Static UI IR artifact/serialization qualification is complete.
 - [ ] Binding Graph source and dirty-propagation integration is qualified.
 - [ ] Action IR admission integration is separately approved and qualified.
-- [ ] Projection Patch application/runtime is qualified beyond the contract foundation.
+- [ ] Projection Patch replay-order model and qualification are complete.
+- [ ] Patch application is separately qualified in the `prom-ui-runtime::shell_player` contour.
 - [ ] Denial/recovery/task/freshness projection is qualified.
 - [ ] ProjectionBundle parser/validator/verifier/loader sequence is qualified.
 - [ ] Shell player is qualified without authority transfer.
