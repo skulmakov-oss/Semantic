@@ -478,12 +478,8 @@ fn validate_patch(
         }
 
         match operation {
-            ProjectionPatchOperation::CollectionInsert {
-                key, before, ..
-            }
-            | ProjectionPatchOperation::CollectionMove {
-                key, before, ..
-            } => {
+            ProjectionPatchOperation::CollectionInsert { key, before, .. }
+            | ProjectionPatchOperation::CollectionMove { key, before, .. } => {
                 if before == &Some(*key) {
                     diagnostics.push(ProjectionPatchDiagnostic::new(
                         ProjectionPatchDiagnosticKind::CollectionBeforeSelf,
@@ -562,18 +558,18 @@ fn validate_patch_set(patches: &[ProjectionPatch]) -> ProjectionPatchDiagnostics
                 {
                     core::cmp::Ordering::Equal => {
                         diagnostics.push(ProjectionPatchDiagnostic::new(
-                    ProjectionPatchDiagnosticKind::DuplicateSequence,
-                    current.envelope().patch_id().raw(),
-                    current.envelope().sequence().raw(),
-                ));
+                            ProjectionPatchDiagnosticKind::DuplicateSequence,
+                            current.envelope().patch_id().raw(),
+                            current.envelope().sequence().raw(),
+                        ));
                         sequence_chain_valid = false;
                     }
                     core::cmp::Ordering::Less => {
                         diagnostics.push(ProjectionPatchDiagnostic::new(
-                    ProjectionPatchDiagnosticKind::OutOfOrderSequence,
-                    current.envelope().patch_id().raw(),
-                    current.envelope().sequence().raw(),
-                ));
+                            ProjectionPatchDiagnosticKind::OutOfOrderSequence,
+                            current.envelope().patch_id().raw(),
+                            current.envelope().sequence().raw(),
+                        ));
                         sequence_chain_valid = false;
                     }
                     core::cmp::Ordering::Greater if current.envelope().sequence() != expected => {
@@ -627,13 +623,13 @@ fn mutation_target(operation: &ProjectionPatchOperation) -> Option<MutationTarge
             collection: *collection,
             key: *key,
         }),
-        ProjectionPatchOperation::CollectionRemove { collection, key } => Some(
-            MutationTarget::CollectionItem {
+        ProjectionPatchOperation::CollectionRemove { collection, key } => {
+            Some(MutationTarget::CollectionItem {
                 kind: CollectionOperationKind::Remove,
                 collection: *collection,
                 key: *key,
-            },
-        ),
+            })
+        }
         ProjectionPatchOperation::CollectionMove {
             collection, key, ..
         } => Some(MutationTarget::CollectionItem {

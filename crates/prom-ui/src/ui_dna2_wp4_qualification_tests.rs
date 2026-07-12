@@ -5,13 +5,12 @@ use alloc::vec::Vec;
 
 use crate::binding_graph::{BindingSlot, BindingTarget};
 use crate::contract_primitives::{
-    CollectionKey, DiagnosticCode, Epoch, Revision, StaticDocumentId, StaticNodeId,
-    StaticSurfaceId,
+    CollectionKey, DiagnosticCode, Epoch, Revision, StaticDocumentId, StaticNodeId, StaticSurfaceId,
 };
 use crate::projection_patch::{
-    ProjectionNodeAvailability, ProjectionPatch, ProjectionPatchEnvelope,
-    ProjectionPatchId, ProjectionPatchOperation, ProjectionPatchSequence, ProjectionPatchSet,
-    ProjectionPatchStreamId, ProjectionPatchValue, ProjectionQuadState,
+    ProjectionNodeAvailability, ProjectionPatch, ProjectionPatchEnvelope, ProjectionPatchId,
+    ProjectionPatchOperation, ProjectionPatchSequence, ProjectionPatchSet, ProjectionPatchStreamId,
+    ProjectionPatchValue, ProjectionQuadState,
 };
 
 fn patch_id(raw: u64) -> ProjectionPatchId {
@@ -69,7 +68,16 @@ fn binding_target(node: u64, slot: u32) -> BindingTarget {
 
 fn binding_update_patch(patch: u64, sequence: u64, revision: u64) -> ProjectionPatch {
     ProjectionPatch::new(
-        envelope(patch, 1, 1, Some(1), revision.saturating_sub(1), revision, 1, sequence),
+        envelope(
+            patch,
+            1,
+            1,
+            Some(1),
+            revision.saturating_sub(1),
+            revision,
+            1,
+            sequence,
+        ),
         alloc::vec![ProjectionPatchOperation::SetBindingValue {
             target: binding_target(10, 1),
             value: ProjectionPatchValue::Quad(ProjectionQuadState::T),
@@ -101,7 +109,9 @@ fn patch_with_operations(operations: Vec<ProjectionPatchOperation>) -> Projectio
     ProjectionPatch::new(envelope(1, 1, 1, Some(1), 0, 1, 1, 0), operations).expect("valid patch")
 }
 
-fn diagnostic_codes(diagnostics: &[crate::projection_patch::ProjectionPatchDiagnostic]) -> Vec<&'static str> {
+fn diagnostic_codes(
+    diagnostics: &[crate::projection_patch::ProjectionPatchDiagnostic],
+) -> Vec<&'static str> {
     diagnostics
         .iter()
         .map(|diagnostic| diagnostic.coordinate().code().as_str())
@@ -150,10 +160,22 @@ fn ui_dna2_wp4_patch_and_stream_identity_are_nominally_distinct() {
 fn ui_dna2_wp4_quad_states_remain_four_distinct_values() {
     use core::mem::discriminant;
 
-    assert_ne!(discriminant(&ProjectionQuadState::N), discriminant(&ProjectionQuadState::F));
-    assert_ne!(discriminant(&ProjectionQuadState::F), discriminant(&ProjectionQuadState::T));
-    assert_ne!(discriminant(&ProjectionQuadState::T), discriminant(&ProjectionQuadState::S));
-    assert_ne!(discriminant(&ProjectionQuadState::N), discriminant(&ProjectionQuadState::S));
+    assert_ne!(
+        discriminant(&ProjectionQuadState::N),
+        discriminant(&ProjectionQuadState::F)
+    );
+    assert_ne!(
+        discriminant(&ProjectionQuadState::F),
+        discriminant(&ProjectionQuadState::T)
+    );
+    assert_ne!(
+        discriminant(&ProjectionQuadState::T),
+        discriminant(&ProjectionQuadState::S)
+    );
+    assert_ne!(
+        discriminant(&ProjectionQuadState::N),
+        discriminant(&ProjectionQuadState::S)
+    );
 }
 
 #[test]
@@ -291,7 +313,10 @@ fn ui_dna2_wp4_reject_non_increasing_revision() {
     )
     .unwrap_err();
 
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_NON_INCREASING_REVISION"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_NON_INCREASING_REVISION"]
+    );
 }
 
 #[test]
@@ -307,7 +332,10 @@ fn ui_dna2_wp4_reject_broken_adjacent_revision_chain() {
     .expect("patch");
 
     let error = ProjectionPatchSet::new(alloc::vec![first, second]).unwrap_err();
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_BROKEN_REVISION_CHAIN"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_BROKEN_REVISION_CHAIN"]
+    );
 }
 
 #[test]
@@ -337,7 +365,10 @@ fn ui_dna2_wp4_reject_descending_sequence() {
     )
     .expect("patch");
     let error = ProjectionPatchSet::new(alloc::vec![first, second]).unwrap_err();
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_OUT_OF_ORDER_SEQUENCE"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_OUT_OF_ORDER_SEQUENCE"]
+    );
 }
 
 #[test]
@@ -352,7 +383,10 @@ fn ui_dna2_wp4_reject_sequence_gaps() {
     )
     .expect("patch");
     let error = ProjectionPatchSet::new(alloc::vec![first, second]).unwrap_err();
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_OUT_OF_ORDER_SEQUENCE"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_OUT_OF_ORDER_SEQUENCE"]
+    );
 }
 
 #[test]
@@ -367,7 +401,10 @@ fn ui_dna2_wp4_reject_sequence_overflow_where_applicable() {
     )
     .expect("patch");
     let error = ProjectionPatchSet::new(alloc::vec![first, second]).unwrap_err();
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_SEQUENCE_OVERFLOW"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_SEQUENCE_OVERFLOW"]
+    );
 }
 
 #[test]
@@ -449,8 +486,8 @@ fn ui_dna2_wp4_report_duplicate_patch_id_deterministically() {
 
 #[test]
 fn ui_dna2_wp4_reject_empty_operation_list() {
-    let error = ProjectionPatch::new(envelope(1, 1, 1, Some(1), 0, 1, 1, 0), Vec::new())
-        .unwrap_err();
+    let error =
+        ProjectionPatch::new(envelope(1, 1, 1, Some(1), 0, 1, 1, 0), Vec::new()).unwrap_err();
     assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_EMPTY_OPERATIONS"]);
 }
 
@@ -541,7 +578,10 @@ fn ui_dna2_wp4_reject_move_before_self() {
         }],
     )
     .unwrap_err();
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_COLLECTION_BEFORE_SELF"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_COLLECTION_BEFORE_SELF"]
+    );
 }
 
 #[test]
@@ -556,7 +596,10 @@ fn ui_dna2_wp4_reject_insert_before_self() {
         }],
     )
     .unwrap_err();
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_COLLECTION_BEFORE_SELF"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_COLLECTION_BEFORE_SELF"]
+    );
 }
 
 #[test]
@@ -575,7 +618,10 @@ fn ui_dna2_wp4_reject_ambiguous_duplicate_mutation_target() {
         ],
     )
     .unwrap_err();
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_DUP_MUTATION_TARGET"]
+    );
 }
 
 #[test]
@@ -661,7 +707,10 @@ fn ui_dna2_wp4_reject_same_key_insert_then_insert() {
     )
     .unwrap_err();
 
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_DUP_MUTATION_TARGET"]
+    );
 }
 
 #[test]
@@ -683,7 +732,10 @@ fn ui_dna2_wp4_reject_same_key_update_then_update() {
     )
     .unwrap_err();
 
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_DUP_MUTATION_TARGET"]
+    );
 }
 
 #[test]
@@ -703,7 +755,10 @@ fn ui_dna2_wp4_reject_same_key_remove_then_remove() {
     )
     .unwrap_err();
 
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_DUP_MUTATION_TARGET"]
+    );
 }
 
 #[test]
@@ -725,7 +780,10 @@ fn ui_dna2_wp4_reject_same_key_move_then_move() {
     )
     .unwrap_err();
 
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_DUP_MUTATION_TARGET"]
+    );
 }
 
 #[test]
@@ -745,7 +803,10 @@ fn ui_dna2_wp4_reject_duplicate_node_availability_target() {
     )
     .unwrap_err();
 
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_DUP_MUTATION_TARGET"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_DUP_MUTATION_TARGET"]
+    );
 }
 
 #[test]
@@ -842,13 +903,8 @@ fn ui_dna2_wp4_same_valid_input_produces_identical_canonical_bytes() {
 
 #[test]
 fn ui_dna2_wp4_same_invalid_input_produces_identical_ordered_diagnostics() {
-    let invalid = || {
-        ProjectionPatch::new(
-            envelope(1, 1, 1, Some(1), 0, 0, 1, 0),
-            alloc::vec![],
-        )
-        .unwrap_err()
-    };
+    let invalid =
+        || ProjectionPatch::new(envelope(1, 1, 1, Some(1), 0, 0, 1, 0), alloc::vec![]).unwrap_err();
 
     assert_eq!(invalid(), invalid());
 }
@@ -902,7 +958,10 @@ fn ui_dna2_wp4_out_of_order_patches_are_rejected_rather_than_silently_sorted() {
     let earlier = binding_update_patch(1, 0, 1);
 
     let error = ProjectionPatchSet::new(alloc::vec![later, earlier]).unwrap_err();
-    assert_eq!(diagnostic_codes(&error), alloc::vec!["PP_OUT_OF_ORDER_SEQUENCE"]);
+    assert_eq!(
+        diagnostic_codes(&error),
+        alloc::vec!["PP_OUT_OF_ORDER_SEQUENCE"]
+    );
 }
 
 #[test]
@@ -933,5 +992,8 @@ fn ui_dna2_wp4_diagnostics_are_sorted_and_deduplicated() {
             "PP_NON_INCREASING_REVISION"
         ]
     );
-    assert_eq!(codes[0], DiagnosticCode::new("PP_COLLECTION_BEFORE_SELF").as_str());
+    assert_eq!(
+        codes[0],
+        DiagnosticCode::new("PP_COLLECTION_BEFORE_SELF").as_str()
+    );
 }
