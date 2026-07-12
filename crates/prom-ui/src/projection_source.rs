@@ -5,7 +5,7 @@
 //! the legacy `UiAst` substrate.
 #![allow(dead_code)]
 
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 
 use crate::contract_primitives::{
     ChildOrder, CollectionKey, DiagnosticCode, DiagnosticCoordinate, Epoch, ProjectionSourceNodeId,
@@ -19,6 +19,19 @@ pub(crate) enum ProjectionSourceTokenKind {
     Node,
     Role,
     Key,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct ProjectionSourceRoleName(Box<str>);
+
+impl ProjectionSourceRoleName {
+    pub(crate) fn new(raw: &str) -> Self {
+        Self(raw.into())
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -84,7 +97,7 @@ impl ProjectionSourceSurface {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ProjectionSourceNode {
     id: ProjectionSourceNodeId,
-    role: RoleId,
+    role: ProjectionSourceRoleName,
     key: CollectionKey,
     source: SourceRef,
     children: Vec<ProjectionSourceChild>,
@@ -113,7 +126,7 @@ impl ProjectionSourceChild {
 impl ProjectionSourceNode {
     pub(crate) fn new(
         id: ProjectionSourceNodeId,
-        role: RoleId,
+        role: ProjectionSourceRoleName,
         key: CollectionKey,
         source: SourceRef,
     ) -> Self {
@@ -130,8 +143,22 @@ impl ProjectionSourceNode {
         self.id
     }
 
-    pub(crate) const fn role(&self) -> RoleId {
-        self.role
+    pub(crate) fn role(&self) -> &ProjectionSourceRoleName {
+        &self.role
+    }
+
+    pub(crate) fn resolved_role(
+        &self,
+        dictionary: RoleDictionary,
+    ) -> Result<RoleId, ProjectionSourceDiagnostic> {
+        dictionary.resolve_name(self.role.as_str()).ok_or_else(|| {
+            ProjectionSourceDiagnostic::new(
+                Some(self.source),
+                ProjectionSourceDiagnosticKind::UnknownRole,
+                self.key.raw(),
+                0,
+            )
+        })
     }
 
     pub(crate) const fn key(&self) -> CollectionKey {
@@ -319,6 +346,10 @@ pub(crate) struct ProjectionSourceDiagnostics {
 }
 
 impl ProjectionSourceDiagnostics {
+    pub(crate) fn single(diagnostic: ProjectionSourceDiagnostic) -> Self {
+        Self::new(Vec::from([diagnostic]))
+    }
+
     fn new(mut diagnostics: Vec<ProjectionSourceDiagnostic>) -> Self {
         diagnostics.sort();
         diagnostics.dedup();
@@ -396,13 +427,8 @@ fn validate_source(
                 0,
             ));
         }
-        if dictionary.validate(node.role).is_err() {
-            diagnostics.push(ProjectionSourceDiagnostic::new(
-                Some(node.source),
-                ProjectionSourceDiagnosticKind::UnknownRole,
-                node.key.raw(),
-                0,
-            ));
+        if let Err(diagnostic) = node.resolved_role(dictionary) {
+            diagnostics.push(diagnostic);
         }
         for (child_index, child) in node.children.iter().enumerate() {
             if !document
@@ -624,6 +650,7 @@ mod tests {
     use super::*;
     use crate::contract_primitives::{ChildOrder, CollectionKey, SourceSpan};
     use crate::model::UiAst;
+    use alloc::string::String;
 
     fn source_ref(start: u32, end: u32) -> SourceRef {
         SourceRef::new(
@@ -652,7 +679,7 @@ mod tests {
         );
         document.push_node(ProjectionSourceNode::new(
             node_id(10),
-            RoleId::new("root"),
+            ProjectionSourceRoleName::new("root"),
             key(10),
             source_ref(0, 4),
         ));
@@ -671,8 +698,12 @@ mod tests {
             Revision::new(0),
             Epoch::new(0),
         );
-        let mut root =
-            ProjectionSourceNode::new(node_id(10), RoleId::new("root"), key(10), source_ref(0, 4));
+        let mut root = ProjectionSourceNode::new(
+            node_id(10),
+            ProjectionSourceRoleName::new("root"),
+            key(10),
+            source_ref(0, 4),
+        );
         root.push_child(ProjectionSourceChild::new(
             node_id(20),
             ChildOrder::new(order_a),
@@ -684,13 +715,13 @@ mod tests {
         document.push_node(root);
         document.push_node(ProjectionSourceNode::new(
             node_id(20),
-            RoleId::new("text"),
+            ProjectionSourceRoleName::new("text"),
             key(20),
             source_ref(10, 11),
         ));
         document.push_node(ProjectionSourceNode::new(
             node_id(30),
-            RoleId::new("text"),
+            ProjectionSourceRoleName::new("text"),
             key(30),
             source_ref(12, 13),
         ));
@@ -709,11 +740,29 @@ mod tests {
     }
 
     #[test]
+    fn projection_source_role_name_owns_input_text() {
+        let role = {
+            let temporary = String::from("renderer_button");
+            ProjectionSourceRoleName::new(&temporary)
+        };
+
+        assert_eq!(role.as_str(), "renderer_button");
+    }
+
+    #[test]
+    fn projection_source_role_name_compares_by_text() {
+        assert_eq!(
+            ProjectionSourceRoleName::new("root"),
+            ProjectionSourceRoleName::new("root")
+        );
+    }
+
+    #[test]
     fn projection_source_rejects_unknown_role() {
         let mut document = minimal_source();
         document.push_node(ProjectionSourceNode::new(
             node_id(11),
-            RoleId::new("renderer_button"),
+            ProjectionSourceRoleName::new("renderer_button"),
             key(11),
             source_ref(5, 9),
         ));
@@ -725,6 +774,16 @@ mod tests {
         assert_eq!(
             diagnostics.diagnostics()[0].kind(),
             ProjectionSourceDiagnosticKind::UnknownRole
+        );
+        let coordinate = diagnostics.diagnostics()[0].coordinate();
+        assert_eq!(coordinate.code(), DiagnosticCode::new("PS_UNKNOWN_ROLE"));
+        assert_eq!(coordinate.source().expect("source").span().start(), 5);
+        assert_eq!(coordinate.source().expect("source").span().end(), 9);
+        assert_eq!(coordinate.domain(), 11);
+        assert_eq!(coordinate.secondary(), 0);
+        assert_eq!(
+            document.validate(RoleDictionary::current()),
+            Err(diagnostics)
         );
     }
 
@@ -739,7 +798,7 @@ mod tests {
             .push_child(ProjectionSourceChild::new(node_id(20), ChildOrder::new(0)));
         first.push_node(ProjectionSourceNode::new(
             node_id(20),
-            RoleId::new("text"),
+            ProjectionSourceRoleName::new("text"),
             key(20),
             source_ref(10, 11),
         ));
@@ -751,13 +810,13 @@ mod tests {
         );
         second.push_node(ProjectionSourceNode::new(
             node_id(20),
-            RoleId::new("text"),
+            ProjectionSourceRoleName::new("text"),
             key(20),
             source_ref(10, 11),
         ));
         second.push_node(ProjectionSourceNode::new(
             node_id(10),
-            RoleId::new("root"),
+            ProjectionSourceRoleName::new("root"),
             key(10),
             source_ref(0, 4),
         ));
@@ -792,18 +851,22 @@ mod tests {
         );
         second.push_node(ProjectionSourceNode::new(
             node_id(30),
-            RoleId::new("text"),
+            ProjectionSourceRoleName::new("text"),
             key(30),
             source_ref(12, 13),
         ));
-        let mut root =
-            ProjectionSourceNode::new(node_id(10), RoleId::new("root"), key(10), source_ref(0, 4));
+        let mut root = ProjectionSourceNode::new(
+            node_id(10),
+            ProjectionSourceRoleName::new("root"),
+            key(10),
+            source_ref(0, 4),
+        );
         root.push_child(ProjectionSourceChild::new(node_id(30), ChildOrder::new(1)));
         root.push_child(ProjectionSourceChild::new(node_id(20), ChildOrder::new(0)));
         second.push_node(root);
         second.push_node(ProjectionSourceNode::new(
             node_id(20),
-            RoleId::new("text"),
+            ProjectionSourceRoleName::new("text"),
             key(20),
             source_ref(10, 11),
         ));
@@ -879,7 +942,7 @@ mod tests {
         let mut orphan = minimal_source();
         orphan.push_node(ProjectionSourceNode::new(
             node_id(40),
-            RoleId::new("text"),
+            ProjectionSourceRoleName::new("text"),
             key(40),
             source_ref(20, 21),
         ));
@@ -947,9 +1010,9 @@ mod tests {
             let mut node = ProjectionSourceNode::new(
                 node_id(raw),
                 if raw == 1 {
-                    RoleId::new("root")
+                    ProjectionSourceRoleName::new("root")
                 } else {
-                    RoleId::new("text")
+                    ProjectionSourceRoleName::new("text")
                 },
                 key(raw),
                 source_ref(raw as u32, raw as u32 + 1),
@@ -984,9 +1047,9 @@ mod tests {
             let mut node = ProjectionSourceNode::new(
                 node_id(raw),
                 if raw == 1 {
-                    RoleId::new("root")
+                    ProjectionSourceRoleName::new("root")
                 } else {
-                    RoleId::new("text")
+                    ProjectionSourceRoleName::new("text")
                 },
                 key(raw),
                 source_ref(raw as u32, raw as u32 + 1),

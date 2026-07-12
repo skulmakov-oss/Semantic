@@ -26,6 +26,28 @@ projection_source_grammar_v0.md.
 
 Parser implementation remains a separate, unauthorized slice.
 
+## Source Role Representation Boundary
+
+Projection Source AST stores authored role identifiers as owned source text.
+
+RoleDictionary retains canonical static `RoleId` values.
+
+Owned source text is resolved through RoleDictionary during Projection Source
+semantic validation and lowering.
+
+A syntactically valid unknown role remains representable in the source AST and
+fails through `PS_UNKNOWN_ROLE`.
+
+Source-role storage does not grant role validity, authority, runtime behavior,
+renderer ownership, or admission.
+
+```text
+source role name != canonical RoleId
+source storage != semantic acceptance
+unknown source role != parser failure
+known role resolution != authority
+```
+
 ## 1. Purpose
 
 The projection source model exists to prevent the bad workflow:

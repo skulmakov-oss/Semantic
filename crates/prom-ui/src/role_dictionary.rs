@@ -85,6 +85,13 @@ impl RoleDictionary {
         self.roles
     }
 
+    pub(crate) fn resolve_name(self, raw: &str) -> Option<RoleId> {
+        self.roles
+            .iter()
+            .map(|built_in| built_in.id())
+            .find(|role| role.as_str() == raw)
+    }
+
     pub(crate) fn validate(self, role: RoleId) -> Result<BuiltInRole, RoleDictionaryError> {
         for built_in in self.roles {
             if built_in.id() == role {
@@ -129,6 +136,22 @@ mod tests {
                 "renderer_button"
             )))
         );
+    }
+
+    #[test]
+    fn role_dictionary_resolves_borrowed_names_without_allocation() {
+        let dictionary = RoleDictionary::current();
+
+        assert_eq!(
+            dictionary.resolve_name("root"),
+            Some(BuiltInRole::Root.id())
+        );
+        assert_eq!(
+            dictionary.resolve_name("numeric_readout"),
+            Some(BuiltInRole::NumericReadout.id())
+        );
+        assert_eq!(dictionary.resolve_name("renderer_button"), None);
+        assert_eq!(dictionary.resolve_name("Root"), None);
     }
 
     #[test]

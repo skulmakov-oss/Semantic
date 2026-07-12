@@ -27,9 +27,16 @@ pub(crate) fn compile_projection_source_to_static_ir(
     let mut document = StaticUiDocument::new(document_id, source.revision(), source.epoch());
 
     for source_node in normalized.nodes() {
+        let role = source_node
+            .resolved_role(dictionary)
+            .map_err(|diagnostic| {
+                ProjectionCompileDiagnostics::from_source(ProjectionSourceDiagnostics::single(
+                    diagnostic,
+                ))
+            })?;
         let mut static_node = StaticUiNode::new(
             static_node_id(source_node.id().raw())?,
-            source_node.role(),
+            role,
             source_node.key(),
             Some(source_node.source()),
         );
@@ -197,9 +204,10 @@ mod tests {
         Revision, SourceId, SourceRef, SourceSpan,
     };
     use crate::projection_source::{
-        ProjectionSourceChild, ProjectionSourceNode, ProjectionSourceSurface,
+        ProjectionSourceChild, ProjectionSourceNode, ProjectionSourceRoleName,
+        ProjectionSourceSurface,
     };
-    use crate::role_dictionary::RoleId;
+    use alloc::string::String;
 
     fn source_ref(start: u32, end: u32) -> SourceRef {
         SourceRef::new(
@@ -232,7 +240,28 @@ mod tests {
         );
         source.push_node(ProjectionSourceNode::new(
             source_node_id(10),
-            RoleId::new("root"),
+            ProjectionSourceRoleName::new("root"),
+            key(10),
+            source_ref(0, 1),
+        ));
+        source.push_surface(ProjectionSourceSurface::new(
+            source_surface_id(1),
+            source_node_id(10),
+            key(1),
+            source_ref(0, 1),
+        ));
+        source
+    }
+
+    fn source_with_role(role: &str) -> ProjectionSourceDocument {
+        let mut source = ProjectionSourceDocument::new(
+            SourceId::new(1).expect("source id"),
+            Revision::new(0),
+            Epoch::new(0),
+        );
+        source.push_node(ProjectionSourceNode::new(
+            source_node_id(10),
+            ProjectionSourceRoleName::new(role),
             key(10),
             source_ref(0, 1),
         ));
@@ -287,6 +316,40 @@ mod tests {
     }
 
     #[test]
+    fn projection_compile_owned_role_buffers_have_stable_output() {
+        let first_role = String::from("root");
+        let first_source = source_with_role(&first_role);
+        drop(first_role);
+
+        let second_role = String::from("root");
+        let second_source = source_with_role(&second_role);
+        drop(second_role);
+
+        let first = compile_projection_source_to_static_ir(
+            static_doc_id(1),
+            &first_source,
+            RoleDictionary::current(),
+        )
+        .expect("first");
+        let second = compile_projection_source_to_static_ir(
+            static_doc_id(1),
+            &second_source,
+            RoleDictionary::current(),
+        )
+        .expect("second");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            first
+                .canonical_bytes(RoleDictionary::current())
+                .expect("first bytes"),
+            second
+                .canonical_bytes(RoleDictionary::current())
+                .expect("second bytes")
+        );
+    }
+
+    #[test]
     fn projection_compile_reports_source_diagnostics() {
         let mut source = ProjectionSourceDocument::new(
             SourceId::new(1).expect("source id"),
@@ -295,7 +358,7 @@ mod tests {
         );
         let mut root = ProjectionSourceNode::new(
             source_node_id(10),
-            RoleId::new("root"),
+            ProjectionSourceRoleName::new("root"),
             key(10),
             source_ref(0, 1),
         );
@@ -306,7 +369,7 @@ mod tests {
         source.push_node(root);
         source.push_node(ProjectionSourceNode::new(
             source_node_id(11),
-            RoleId::new("renderer_button"),
+            ProjectionSourceRoleName::new("renderer_button"),
             key(11),
             source_ref(2, 3),
         ));
@@ -442,7 +505,7 @@ mod tests {
         );
         source.push_node(ProjectionSourceNode::new(
             source_node_id(10),
-            RoleId::new("renderer_button"),
+            ProjectionSourceRoleName::new("renderer_button"),
             key(10),
             source_ref(10, 11),
         ));
