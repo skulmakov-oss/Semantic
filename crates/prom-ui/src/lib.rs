@@ -61,6 +61,7 @@ pub mod prepared_effect;
 pub mod prepared_effect_result;
 pub mod projection;
 pub(crate) mod projection_compile;
+pub(crate) mod projection_patch;
 pub(crate) mod projection_source;
 pub mod raw_event;
 pub mod renderer;
@@ -81,6 +82,8 @@ pub mod validation;
 mod ui_dna2_wp2_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp3_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_wp4_qualification_tests;
 
 pub use action_admission::{
     describe_interaction_action_admission, InteractionActionAdmissionCapabilityRequirement,
