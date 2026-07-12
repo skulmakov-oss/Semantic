@@ -228,6 +228,25 @@ impl ProjectionPatch {
     pub(crate) fn operations(&self) -> &[ProjectionPatchOperation] {
         &self.operations
     }
+
+    pub(crate) fn replay_trace(
+        &self,
+    ) -> Result<ProjectionPatchReplayTrace<'_>, ProjectionPatchReplayError> {
+        let mut steps = Vec::new();
+        for (op_idx, operation) in self.operations().iter().enumerate() {
+            let operation_ordinal =
+                u64::try_from(op_idx).map_err(|_| ProjectionPatchReplayError::IndexOverflow)?;
+            steps.push(ProjectionPatchReplayStep {
+                coordinate: ProjectionPatchReplayCoordinate {
+                    patch_ordinal: 0,
+                    operation_ordinal,
+                },
+                envelope: self.envelope(),
+                operation,
+            });
+        }
+        Ok(ProjectionPatchReplayTrace { steps })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,6 +266,29 @@ impl ProjectionPatchSet {
 
     pub(crate) fn patches(&self) -> &[ProjectionPatch] {
         &self.patches
+    }
+
+    pub(crate) fn replay_trace(
+        &self,
+    ) -> Result<ProjectionPatchReplayTrace<'_>, ProjectionPatchReplayError> {
+        let mut steps = Vec::new();
+        for (patch_idx, patch) in self.patches().iter().enumerate() {
+            let patch_ordinal =
+                u64::try_from(patch_idx).map_err(|_| ProjectionPatchReplayError::IndexOverflow)?;
+            for (op_idx, operation) in patch.operations().iter().enumerate() {
+                let operation_ordinal =
+                    u64::try_from(op_idx).map_err(|_| ProjectionPatchReplayError::IndexOverflow)?;
+                steps.push(ProjectionPatchReplayStep {
+                    coordinate: ProjectionPatchReplayCoordinate {
+                        patch_ordinal,
+                        operation_ordinal,
+                    },
+                    envelope: patch.envelope(),
+                    operation,
+                });
+            }
+        }
+        Ok(ProjectionPatchReplayTrace { steps })
     }
 
     /// Internal deterministic qualification encoding only.
@@ -731,4 +773,57 @@ fn push_u64(bytes: &mut Vec<u8>, value: u64) {
 
 fn push_i64(bytes: &mut Vec<u8>, value: i64) {
     bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct ProjectionPatchReplayCoordinate {
+    patch_ordinal: u64,
+    operation_ordinal: u64,
+}
+
+impl ProjectionPatchReplayCoordinate {
+    pub(crate) const fn patch_ordinal(&self) -> u64 {
+        self.patch_ordinal
+    }
+
+    pub(crate) const fn operation_ordinal(&self) -> u64 {
+        self.operation_ordinal
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectionPatchReplayStep<'a> {
+    coordinate: ProjectionPatchReplayCoordinate,
+    envelope: ProjectionPatchEnvelope,
+    operation: &'a ProjectionPatchOperation,
+}
+
+impl<'a> ProjectionPatchReplayStep<'a> {
+    pub(crate) const fn coordinate(&self) -> ProjectionPatchReplayCoordinate {
+        self.coordinate
+    }
+
+    pub(crate) const fn envelope(&self) -> ProjectionPatchEnvelope {
+        self.envelope
+    }
+
+    pub(crate) const fn operation(&self) -> &'a ProjectionPatchOperation {
+        self.operation
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectionPatchReplayTrace<'a> {
+    steps: Vec<ProjectionPatchReplayStep<'a>>,
+}
+
+impl<'a> ProjectionPatchReplayTrace<'a> {
+    pub(crate) fn steps(&self) -> &[ProjectionPatchReplayStep<'a>] {
+        &self.steps
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectionPatchReplayError {
+    IndexOverflow,
 }
