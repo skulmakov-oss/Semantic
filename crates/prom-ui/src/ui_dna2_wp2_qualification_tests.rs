@@ -1,13 +1,16 @@
+use alloc::string::String;
+
 use crate::contract_primitives::{
-    CollectionKey, Epoch, ProjectionSourceNodeId, ProjectionSourceSurfaceId, Revision, SourceId,
-    SourceRef, SourceSpan, StaticDocumentId, StaticSurfaceId,
+    ChildOrder, CollectionKey, Epoch, ProjectionSourceNodeId, ProjectionSourceSurfaceId, Revision,
+    SourceId, SourceRef, SourceSpan, StaticDocumentId, StaticSurfaceId,
 };
 use crate::model::{UiAstNodeId, UiIr, UiIrNode, UiIrNodeId, UiIrNodeKind};
 use crate::projection_compile::compile_projection_source_to_static_ir;
 use crate::projection_source::{
-    ProjectionSourceDocument, ProjectionSourceNode, ProjectionSourceSurface,
+    ProjectionSourceChild, ProjectionSourceDocument, ProjectionSourceNode,
+    ProjectionSourceRoleName, ProjectionSourceSurface,
 };
-use crate::role_dictionary::{RoleDictionary, RoleId};
+use crate::role_dictionary::RoleDictionary;
 use crate::static_ir::{LegacyUiIrAdapterContext, StaticUiDocument};
 
 fn source_ref(start: u32, end: u32) -> SourceRef {
@@ -57,7 +60,7 @@ fn minimal_source() -> ProjectionSourceDocument {
     );
     source.push_node(ProjectionSourceNode::new(
         source_node_id(10),
-        RoleId::new("root"),
+        ProjectionSourceRoleName::new("root"),
         key(10),
         source_ref(0, 1),
     ));
@@ -78,9 +81,9 @@ fn multi_surface_source(order: &[u64]) -> ProjectionSourceDocument {
     );
     for raw in order {
         let role = if *raw == 10 {
-            RoleId::new("root")
+            ProjectionSourceRoleName::new("root")
         } else {
-            RoleId::new("text")
+            ProjectionSourceRoleName::new("text")
         };
         source.push_node(ProjectionSourceNode::new(
             source_node_id(*raw),
@@ -157,7 +160,7 @@ fn ui_dna2_wp2_invalid_projection_diagnostics_are_stable() {
     let mut source = minimal_source();
     source.push_node(ProjectionSourceNode::new(
         source_node_id(20),
-        RoleId::new("renderer_button"),
+        ProjectionSourceRoleName::new("renderer_button"),
         key(20),
         source_ref(20, 21),
     ));
@@ -176,6 +179,54 @@ fn ui_dna2_wp2_invalid_projection_diagnostics_are_stable() {
     .expect_err("second diagnostics");
 
     assert_eq!(first, second);
+}
+
+#[test]
+fn ui_dna2_wp2_owned_unknown_role_survives_source_drop() {
+    let role = String::from("renderer_button");
+    let mut source = ProjectionSourceDocument::new(
+        SourceId::new(1).expect("source id"),
+        Revision::new(0),
+        Epoch::new(0),
+    );
+    let mut root = ProjectionSourceNode::new(
+        source_node_id(10),
+        ProjectionSourceRoleName::new("root"),
+        key(10),
+        source_ref(0, 1),
+    );
+    root.push_child(ProjectionSourceChild::new(
+        source_node_id(20),
+        ChildOrder::new(0),
+    ));
+    source.push_node(root);
+    source.push_node(ProjectionSourceNode::new(
+        source_node_id(20),
+        ProjectionSourceRoleName::new(&role),
+        key(20),
+        source_ref(20, 21),
+    ));
+    source.push_surface(ProjectionSourceSurface::new(
+        source_surface_id(1),
+        source_node_id(10),
+        key(1),
+        source_ref(0, 1),
+    ));
+    drop(role);
+
+    let diagnostics = compile_projection_source_to_static_ir(
+        static_doc_id(1),
+        &source,
+        RoleDictionary::current(),
+    )
+    .expect_err("unknown role must fail semantic validation");
+
+    assert_eq!(
+        diagnostics.diagnostics()[0].kind(),
+        crate::projection_compile::ProjectionCompileDiagnosticKind::Source(
+            crate::projection_source::ProjectionSourceDiagnosticKind::UnknownRole
+        )
+    );
 }
 
 #[test]
