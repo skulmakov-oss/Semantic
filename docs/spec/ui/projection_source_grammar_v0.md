@@ -604,7 +604,7 @@ projection v0 {
     epoch 0;
 
     surface 1 root 10 key 1;
-    
+
     // Nodes out of ID order
     node 11 role text key 11 {}
     node 10 role root key 10 {
@@ -650,9 +650,9 @@ parse result: success
 semantic validation: one or more existing PS diagnostics
 
 1. unknown role: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role button key 1 {} }` -> `PS_UNKNOWN_ROLE`
-2. missing child node: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 { child 2 order 0; } }` -> `PS_UNRESOLVED_CHILD`
-3. cycle: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 { child 1 order 0; } }` -> `PS_CYCLE_DETECTED`
-4. duplicate child order: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 { child 2 order 0; child 3 order 0; } node 2 role text key 2 {} node 3 role text key 3 {} }` -> `PS_DUPLICATE_CHILD_ORDER`
+2. missing child node: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 { child 2 order 0; } }` -> `PS_MISSING_CHILD`
+3. cycle: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 { child 1 order 0; } }` -> `PS_CYCLE`
+4. duplicate child order: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 { child 2 order 0; child 3 order 0; } node 2 role text key 2 {} node 3 role text key 3 {} }` -> `PS_DUP_CHILD_ORDER`
 
 ## 14. Forward Compatibility
 
