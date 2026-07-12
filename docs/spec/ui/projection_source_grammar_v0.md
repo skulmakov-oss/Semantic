@@ -154,6 +154,65 @@ Non-ASCII UTF-8 is allowed only inside line-comment text.
 
 Outside comments, non-ASCII input is rejected as PSP_UNEXPECTED_CHAR.
 
+### 5.1.1 Source-size representability
+
+The normative maximum accepted Projection Source input length is:
+
+```text
+MAX_PROJECTION_SOURCE_BYTES = u32::MAX = 4_294_967_295 bytes
+```
+
+This is a SourceSpan representability ceiling, not a recommended operational
+file size. The input length is the UTF-8 encoded byte length of the caller's
+`&str`, not a character, scalar, grapheme or line count.
+
+The boundary is inclusive:
+
+```text
+len = 0
+            -> representable
+len = u32::MAX
+            -> representable and accepted for lexical processing
+len = u32::MAX + 1
+            -> rejected before lexical processing
+```
+
+An oversized input is any input for which `source_text.len() > u32::MAX`.
+The future API classifies this input-domain failure as
+`ProjectionSourceInputError::SourceTooLarge`, carrying the caller-supplied
+`SourceId`, the actual UTF-8 byte length, and the maximum accepted length
+`4_294_967_295`. This task specifies the classification but does not
+implement the Rust type.
+
+`SourceTooLarge` is not a `DiagnosticCode`, is not a `PSP_` diagnostic, is not
+a `PS_` diagnostic, and is not a syntax or semantic-validation failure.
+Every PSP diagnostic requires a representable `SourceSpan`; an oversized
+input has no representable complete input domain or EOF position. Therefore
+oversized rejection produces no SourceSpan, tokens, AST or PS validation.
+
+The source-size check is performed before inspection of BOM, bare CR, invalid
+ASCII, forbidden non-ASCII input, identifier shape, number shape, version,
+clauses or EOF. Thus an oversized malformed source returns `SourceTooLarge`,
+not a PSP diagnostic. Parser left-to-right first-failure semantics begin only
+after this source-input preflight succeeds.
+
+Once preflight succeeds, every derived parser offset must use checked
+conversion equivalent to `u32::try_from(offset)`. Offset arithmetic for token
+lengths, UTF-8 widths, delimiters, CRLF, semicolons, braces and EOF must be
+checked; wrapping, saturating, clamping, truncating or lossy fallback is
+forbidden. A correct scanner must never derive an offset beyond the accepted
+input length.
+
+For a source of exactly `u32::MAX` bytes, the first byte index is `0`, the
+last byte index is `u32::MAX - 1`, and the EOF byte position is `u32::MAX`.
+Therefore an EOF span is `[u32::MAX, u32::MAX)`, and a token ending at EOF may
+use `[start, u32::MAX)`.
+
+An operational host or loader may impose a smaller limit for memory, quota,
+transport or sandbox reasons. Such a host resource rejection is outside this
+grammar contract and is distinct from syntax failure, PS validation failure,
+and SourceSpan representability.
+
 ## 5.5 Source span construction
 
 All SourceSpan values use UTF-8 byte offsets.
@@ -347,6 +406,12 @@ structural equivalence != PartialEq
 ## 7. Parse versus Semantic Validation
 
 ### Parser-owned failures
+
+Before parser-owned failures are considered, the future parser performs the
+source-size representability preflight defined in section 5.1.1. An oversized
+input returns the source-input error `SourceTooLarge` with no SourceSpan and
+does not enter PSP diagnostic ordering.
+
 The future parser owns:
 invalid UTF-8 input contract;
 unexpected character;

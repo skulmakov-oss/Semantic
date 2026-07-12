@@ -48,6 +48,43 @@ unknown source role != parser failure
 known role resolution != authority
 ```
 
+## Source Size and Provenance Representability
+
+Projection Source provenance uses UTF-8 byte offsets represented by the landed
+`SourceSpan` `u32` fields. The normative representability limit is
+`u32::MAX = 4_294_967_295` source bytes. This model does not widen `SourceSpan`
+to `u64`, `usize`, character offsets or line/column coordinates.
+
+For a future parser receiving `&str`, source-size preflight occurs before
+parser ownership. A source longer than `u32::MAX` bytes is classified as the
+future input-domain error `ProjectionSourceInputError::SourceTooLarge`; it
+produces no SourceSpan, PSP diagnostic, tokenization, AST or PS validation.
+The conceptual error carries the caller-supplied `SourceId`, actual UTF-8 byte
+length and maximum accepted byte length. The concrete API is not implemented
+by this model correction.
+
+The limit is a representability ceiling, not a recommended operational file
+size. A future host or loader may impose a smaller memory, quota, transport or
+sandbox limit, but that host resource rejection remains outside Grammar v0.
+
+```text
+source byte length != character count
+source-size acceptance != parse success
+parse success != semantic validation success
+input rejection != parser diagnostic
+input rejection != runtime admission
+provenance representability != authority
+```
+
+Source-size policy specified != parser implementation
+source-size policy specified != parser qualification
+source-size policy specified != runtime source loading
+source-size policy specified != WP2C completion
+
+No source-size check grants capability, performs admission, loads files,
+allocates runtime buffers, activates a ProjectionBundle, mutates shell state,
+selects a renderer, opens Gate D or claims production readiness.
+
 ## 1. Purpose
 
 The projection source model exists to prevent the bad workflow:
