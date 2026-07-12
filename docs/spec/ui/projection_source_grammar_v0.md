@@ -177,6 +177,20 @@ len = u32::MAX + 1
             -> rejected before lexical processing
 ```
 
+`len <= u32::MAX` means only that the input byte domain and its EOF position
+can be represented by `SourceSpan` and may proceed to lexical processing. It
+does not mean that the source conforms to Grammar v0, that parsing will
+succeed, that the resulting AST will pass PS validation, or that the document
+may be loaded or executed.
+
+```text
+source-size acceptance != syntax validity
+source-size acceptance != parse success
+source-size acceptance != semantic validity
+parse success != semantic-validation success
+semantic-validation success != runtime activation
+```
+
 An oversized input is any input for which `source_text.len() > u32::MAX`.
 The future API classifies this input-domain failure as
 `ProjectionSourceInputError::SourceTooLarge`, carrying the caller-supplied
@@ -208,10 +222,70 @@ last byte index is `u32::MAX - 1`, and the EOF byte position is `u32::MAX`.
 Therefore an EOF span is `[u32::MAX, u32::MAX)`, and a token ending at EOF may
 use `[start, u32::MAX)`.
 
+After source-size preflight succeeds, every valid parser position from zero
+through `input_byte_length` inclusive is representable as `u32`. This covers
+surface declaration starts and ends, node declaration starts and ends, token
+starts and ends, zero-width missing-token positions, duplicate-declaration
+keyword spans, offending-character and offending-token spans, the EOF
+position, and `PSP_UNEXPECTED_EOF` spans.
+
+```text
+accepted source
+    -> every parser position is in 0..=input_byte_length
+accepted source
+    -> every parser position is in 0..=u32::MAX
+accepted source
+    -> every parser-produced `SourceSpan` endpoint is representable as u32
+```
+
+Representable does not mean automatically valid, and it does not permit
+unchecked casts. Checked offset conversion and checked arithmetic remain
+required. Existing span shapes remain unchanged: surface declarations include
+their terminating semicolon, node declarations include their matching closing
+brace, token spans exclude surrounding trivia, missing-token spans may be
+zero-width, and EOF uses `[input_byte_length, input_byte_length)`.
+
 An operational host or loader may impose a smaller limit for memory, quota,
 transport or sandbox reasons. Such a host resource rejection is outside this
 grammar contract and is distinct from syntax failure, PS validation failure,
 and SourceSpan representability.
+
+### 5.1.2 Architecture portability
+
+The normative representability ceiling is `u32::MAX` bytes on every target.
+On platforms where `usize` can represent values greater than `u32::MAX`, an
+`&str` whose byte length exceeds `u32::MAX` must be rejected as
+`ProjectionSourceInputError::SourceTooLarge` before lexical processing. On platforms where `usize` cannot represent values greater than `u32::MAX`, every
+constructible `&str` is within the `SourceSpan` representability ceiling.
+The grammar limit does not change with pointer width or platform `usize` width.
+This is a representability rule; it does not claim that a 32-bit target can
+practically allocate an input of exactly `u32::MAX` bytes.
+
+```text
+normative maximum != usize::MAX
+normative maximum != platform-dependent maximum
+32-bit platform behavior != different grammar contract
+64-bit platform capability != wider SourceSpan
+```
+
+### 5.1.3 Qualification and authorization posture
+
+This documentation defines only the P1 normative source-size contract. The
+contract does not self-authorize publication. P1 requires strict review and a
+separately authorized publication task before it can be treated as landed
+evidence.
+
+```text
+P1 contract definition != P1 review completion
+P1 review completion != publication authorization
+P1 publication != P2 authorization
+P1 publication != P3 authorization
+P1 publication != parser authorization
+```
+
+WP2C-P2 is unresolved and unauthorized. WP2C-P3 is unresolved and
+unauthorized. The Projection Source parser and lexer are not implemented and unauthorized. Issue #1489 remains the coordination ledger for these decisions;
+this contract does not mark `NEXT AUTHORIZED`.
 
 ## 5.5 Source span construction
 
