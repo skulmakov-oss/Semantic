@@ -37,6 +37,7 @@ fn key(raw: u64) -> CollectionKey {
     CollectionKey::new(raw).expect("key")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn envelope(
     patch: u64,
     stream: u64,

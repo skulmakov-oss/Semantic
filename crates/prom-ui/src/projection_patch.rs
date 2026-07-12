@@ -87,6 +87,7 @@ pub(crate) struct ProjectionPatchEnvelope {
 }
 
 impl ProjectionPatchEnvelope {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) const fn new(
         patch_id: ProjectionPatchId,
         stream_id: ProjectionPatchStreamId,
