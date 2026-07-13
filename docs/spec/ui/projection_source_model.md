@@ -48,6 +48,77 @@ unknown source role != parser failure
 known role resolution != authority
 ```
 
+## Source Size and Provenance Representability
+
+Projection Source provenance uses UTF-8 byte offsets represented by the landed
+`SourceSpan` `u32` fields. The normative representability limit is
+`u32::MAX = 4_294_967_295` source bytes. This model does not widen `SourceSpan`
+to `u64`, `usize`, character offsets or line/column coordinates.
+
+For a future parser receiving `&str`, source-size preflight occurs before
+parser ownership. A source longer than `u32::MAX` bytes is classified as the
+future input-domain error `ProjectionSourceInputError::SourceTooLarge`; it
+produces no SourceSpan, PSP diagnostic, tokenization, AST or PS validation.
+The conceptual error carries the caller-supplied `SourceId`, actual UTF-8 byte
+length and maximum accepted byte length. The concrete API is not implemented
+by this model correction.
+
+The limit is a representability ceiling, not a recommended operational file
+size. A future host or loader may impose a smaller memory, quota, transport or
+sandbox limit, but that host resource rejection remains outside Grammar v0.
+
+The normative representability ceiling is `u32::MAX` bytes on every platform.
+On platforms where `usize` can represent values greater than `u32::MAX`, an
+`&str` longer than `u32::MAX` bytes is rejected as `SourceTooLarge` before
+lexical processing. On platforms where `usize` cannot represent a value
+greater than `u32::MAX`, every constructible `&str` is within the
+representability ceiling. The grammar contract does not vary with pointer
+width; practical allocation capacity on a 32-bit platform is a separate
+matter.
+
+```text
+normative maximum != usize::MAX
+normative maximum != platform-dependent maximum
+32-bit platform behavior != different grammar contract
+64-bit platform capability != wider SourceSpan
+```
+
+After preflight succeeds, every parser position is in
+`0..=input_byte_length` and therefore in `0..=u32::MAX`. Surface and node
+declaration endpoints, token endpoints, zero-width missing-token positions,
+duplicate-declaration keyword spans, offending-character or offending-token
+spans, the EOF position and `PSP_UNEXPECTED_EOF` all use representable
+`SourceSpan` endpoints. Representability is not validity and does not permit
+unchecked conversion. Existing half-open span shapes remain unchanged.
+
+```text
+source byte length != character count
+source-size acceptance != syntax validity
+source-size acceptance != parse success
+source-size acceptance != semantic validity
+parse success != semantic validation success
+semantic-validation success != runtime activation
+input rejection != parser diagnostic
+input rejection != runtime admission
+provenance representability != authority
+```
+
+Source-size policy specified != parser implementation
+source-size policy specified != parser qualification
+source-size policy specified != runtime source loading
+source-size policy specified != WP2C completion
+
+The source-size contract does not itself authorize parser implementation,
+publication, WP2C-P2, WP2C-P3, runtime loading or activation. P1 contract
+definition is not P1 review completion, review completion is not publication
+authorization, and P1 publication does not authorize P2, P3 or the parser.
+WP2C-P2 and WP2C-P3 remain unresolved and unauthorized; the Projection Source
+parser and lexer remain not implemented and unauthorized.
+
+No source-size check grants capability, performs admission, loads files,
+allocates runtime buffers, activates a ProjectionBundle, mutates shell state,
+selects a renderer, opens Gate D or claims production readiness.
+
 ## 1. Purpose
 
 The projection source model exists to prevent the bad workflow:
