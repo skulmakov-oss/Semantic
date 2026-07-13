@@ -110,10 +110,13 @@ source-size policy specified != WP2C completion
 
 The P1 source-size contract is landed; it did not itself authorize WP2C-P2.
 Grammar v0 separately defines the normative
-WP2C-P2 clause-context diagnostic contract. Specification of that contract is
-not parser or lexer implementation, does not resolve WP2C-P3, and does not
-authorize runtime loading or activation. The P2 contract is not treated as
-landed-main evidence until merge and ledger rebaseline.
+WP2C-P2 clause-context diagnostic contract. When that contract is merged into `main`,
+the merge commit and resulting Git tree establish repository landed evidence.
+A later issue #1489 rebaseline records that evidence and the current
+authorization posture; it does not create or override repository truth.
+
+Specification and merge of P2 do not implement the parser or lexer, do not
+resolve WP2C-P3, and do not authorize runtime loading or activation.
 
 WP2C-P3 remains unresolved and unauthorized.
 The Projection Source parser and lexer remain unimplemented and unauthorized.

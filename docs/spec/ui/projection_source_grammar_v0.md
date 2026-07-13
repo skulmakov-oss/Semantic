@@ -271,26 +271,34 @@ normative maximum != platform-dependent maximum
 ### 5.1.3 Qualification and authorization posture
 
 This document contains the landed P1 source-size representability contract and
-the normative P2 clause-context diagnostic contract. The presence of normative
-contract text does not by itself establish review, publication, merge,
-landed-main evidence, ledger rebaseline or implementation authorization.
+the normative P2 clause-context diagnostic contract. The normative P2 contract
+is defined independently from its review, publication and merge history.
 
 ```text
 P2 contract definition != P2 review completion
 P2 review completion != P2 publication
 P2 publication != P2 merge
+P2 merge into main -> repository landed evidence
 P2 merge != ledger rebaseline
+ledger rebaseline -> coordination record of landed evidence
+ledger rebaseline != repository truth
+issue state != Git tree state
 P2 merge != P3 authorization
 P2 merge != parser authorization
 P2 diagnostic specification != diagnostic implementation
 ```
 
-The P2 contract is specified here but is not treated as landed-main evidence
-until merge and ledger rebaseline. WP2C-P3 remains unresolved and unauthorized.
+A merge of this contract into `main` establishes repository landed evidence.
+Issue #1489 may subsequently be rebaselined to record that merged evidence and
+the current next-step authorization posture. The ledger records repository
+truth; it does not create or override repository truth.
+
+WP2C-P3 remains unresolved and unauthorized.
 The Projection Source parser and lexer remain unimplemented and unauthorized.
 
 Issue #1489 remains the coordination ledger for landed checkpoints and
-explicit next-step authorization. This specification does not mark
+explicit next-step authorization. It grants no architectural authority and
+does not create landed repository evidence. This specification does not mark
 `NEXT AUTHORIZED`.
 
 ## 5.5 Source span construction
