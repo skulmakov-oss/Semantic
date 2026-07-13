@@ -108,12 +108,15 @@ source-size policy specified != parser qualification
 source-size policy specified != runtime source loading
 source-size policy specified != WP2C completion
 
-The source-size contract does not itself authorize parser implementation,
-publication, WP2C-P2, WP2C-P3, runtime loading or activation. P1 contract
-definition is not P1 review completion, review completion is not publication
-authorization, and P1 publication does not authorize P2, P3 or the parser.
-WP2C-P2 and WP2C-P3 remain unresolved and unauthorized; the Projection Source
-parser and lexer remain not implemented and unauthorized.
+The P1 source-size contract is landed; it did not itself authorize WP2C-P2.
+Grammar v0 separately defines the normative
+WP2C-P2 clause-context diagnostic contract. Specification of that contract is
+not parser or lexer implementation, does not resolve WP2C-P3, and does not
+authorize runtime loading or activation. The P2 contract is not treated as
+landed-main evidence until merge and ledger rebaseline.
+
+WP2C-P3 remains unresolved and unauthorized.
+The Projection Source parser and lexer remain unimplemented and unauthorized.
 
 No source-size check grants capability, performs admission, loads files,
 allocates runtime buffers, activates a ProjectionBundle, mutates shell state,

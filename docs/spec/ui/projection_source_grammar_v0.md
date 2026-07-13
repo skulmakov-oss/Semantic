@@ -2,7 +2,7 @@
 
 Status: PROPOSED NORMATIVE GRAMMAR CONTRACT
 Track: UI DNA v2
-Phase: UI-DNA2-WP2B
+Phase coverage: UI-DNA2-WP2B + WP2C-P1 + WP2C-P2
 File posture: `.proj.sm`
 Implementation status: NOT IMPLEMENTED
 Parser authorization: NOT INCLUDED
@@ -270,22 +270,28 @@ normative maximum != platform-dependent maximum
 
 ### 5.1.3 Qualification and authorization posture
 
-This documentation defines only the P1 normative source-size contract. The
-contract does not self-authorize publication. P1 requires strict review and a
-separately authorized publication task before it can be treated as landed
-evidence.
+This document contains the landed P1 source-size representability contract and
+the normative P2 clause-context diagnostic contract. The presence of normative
+contract text does not by itself establish review, publication, merge,
+landed-main evidence, ledger rebaseline or implementation authorization.
 
 ```text
-P1 contract definition != P1 review completion
-P1 review completion != publication authorization
-P1 publication != P2 authorization
-P1 publication != P3 authorization
-P1 publication != parser authorization
+P2 contract definition != P2 review completion
+P2 review completion != P2 publication
+P2 publication != P2 merge
+P2 merge != ledger rebaseline
+P2 merge != P3 authorization
+P2 merge != parser authorization
+P2 diagnostic specification != diagnostic implementation
 ```
 
-WP2C-P2 is unresolved and unauthorized. WP2C-P3 is unresolved and
-unauthorized. The Projection Source parser and lexer are not implemented and unauthorized. Issue #1489 remains the coordination ledger for these decisions;
-this contract does not mark `NEXT AUTHORIZED`.
+The P2 contract is specified here but is not treated as landed-main evidence
+until merge and ledger rebaseline. WP2C-P3 remains unresolved and unauthorized.
+The Projection Source parser and lexer remain unimplemented and unauthorized.
+
+Issue #1489 remains the coordination ledger for landed checkpoints and
+explicit next-step authorization. This specification does not mark
+`NEXT AUTHORIZED`.
 
 ## 5.5 Source span construction
 
