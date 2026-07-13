@@ -2,7 +2,7 @@
 
 Status: PROPOSED NORMATIVE GRAMMAR CONTRACT
 Track: UI DNA v2
-Phase coverage: UI-DNA2-WP2B + WP2C-P1 + WP2C-P2
+Phase coverage: UI-DNA2-WP2B + WP2C-P1 + WP2C-P2 + WP2C-P3
 File posture: `.proj.sm`
 Implementation status: NOT IMPLEMENTED
 Parser authorization: NOT INCLUDED
@@ -270,30 +270,31 @@ normative maximum != platform-dependent maximum
 
 ### 5.1.3 Qualification and authorization posture
 
-This document contains the landed P1 source-size representability contract and
-the normative P2 clause-context diagnostic contract. The normative P2 contract
-is defined independently from its review, publication and merge history.
+This document contains the landed P1 source-size representability contract,
+the landed P2 clause-context diagnostic contract, and the normative P3
+identifier-tokenization contract. Defining the P3 contract does not establish
+its review, publication, merge or implementation status.
 
 ```text
-P2 contract definition != P2 review completion
-P2 review completion != P2 publication
-P2 publication != P2 merge
-P2 merge into main -> repository landed evidence
-P2 merge != ledger rebaseline
+P3 contract definition != P3 review completion
+P3 review completion != P3 publication
+P3 publication != P3 merge
+P3 merge into main -> repository landed evidence
+P3 merge != parser authorization
+P3 merge != lexer authorization
+P3 specification != diagnostic implementation
+P3 specification != public API
 ledger rebaseline -> coordination record of landed evidence
 ledger rebaseline != repository truth
 issue state != Git tree state
-P2 merge != P3 authorization
-P2 merge != parser authorization
-P2 diagnostic specification != diagnostic implementation
 ```
 
-A merge of this contract into `main` establishes repository landed evidence.
-Issue #1489 may subsequently be rebaselined to record that merged evidence and
-the current next-step authorization posture. The ledger records repository
-truth; it does not create or override repository truth.
+A future merge of the P3 contract into `main` establishes repository landed
+evidence. Issue #1489 may subsequently be rebaselined to record that merged
+evidence and the current next-step authorization posture. The ledger records
+repository truth; it does not create or override repository truth.
 
-WP2C-P3 remains unresolved and unauthorized.
+P3 diagnostic implementation is absent.
 The Projection Source parser and lexer remain unimplemented and unauthorized.
 
 Issue #1489 remains the coordination ledger for landed checkpoints and
@@ -379,6 +380,17 @@ Reject: Projection, V0, NODE, Root, etc.
 ### 5.3 Identifiers
 Role identifiers: `[a-z][a-z0-9_]*`
 Role identifiers are resolved against `RoleDictionary`.
+
+The identifier shape is ASCII-only. A role identifier starts with one
+lowercase ASCII letter and continues with lowercase ASCII letters, digits or
+underscore. Reserved keyword spelling does not globally invalidate this
+shape: at a `role_identifier` position, `root`, `surface`, `node` and `v0`
+remain syntactically valid identifiers. `RoleDictionary`, not tokenization,
+determines whether a syntactically valid role is known.
+
+```text
+reserved keyword spelling != invalid role identifier shape
+```
 
 The grammar does not permit:
 quoted role names;
@@ -750,11 +762,12 @@ unknown clause classification does not produce partial AST
 unknown clause classification does not enter PS validation
 ```
 
-This P2 rule applies only after lexical processing has produced either a
-recognized keyword token or a complete valid unreserved identifier-shaped
-word token. Identifier tokenization and malformed identifier diagnostic
-classification for forms such as `root-name`, `root.name`, `root::name`,
-`Root` and `9root` remain WP2C-P3, unresolved and unauthorized.
+This P2 rule applies only after identifier-candidate classification has
+produced either a recognized keyword or a complete valid unreserved
+identifier-shaped word. Malformed identifier candidates are classified by the
+P3 contract below. When the parser context owns identifier classification,
+the dedicated `PSP_INVALID_IDENTIFIER` diagnostic outranks P2 generic
+classification. P2 does not reclassify a P3 failure.
 
 ```text
 P2 clause-context disambiguation != P3 identifier tokenization
@@ -764,12 +777,12 @@ The P1 source-size preflight remains earlier than lexical classification and
 this P2 choice. An oversized source returns `SourceTooLarge`, performs no
 lexical scan and produces no PSP diagnostic.
 
-P2 specification is not parser or lexer implementation, public API, P3
-completion or parser authorization. Diagnostic classification is not
-Semantic validation, capability, admission or runtime activation. WP2C-P3
-remains unresolved and unauthorized; the Projection Source parser and lexer
-remain unimplemented and unauthorized. Gate D remains closed, and production
-promotion remains unauthorized.
+P2 specification is not parser or lexer implementation, public API or parser
+authorization. The P3 identifier-tokenization contract defined below is not
+lexer, parser or diagnostic implementation. Diagnostic classification is not
+Semantic validation, capability, admission or runtime activation. The
+Projection Source parser and lexer remain unimplemented and unauthorized.
+Gate D remains closed, and production promotion remains unauthorized.
 
 ### Diagnostic span rules
 
@@ -817,6 +830,232 @@ Classify:
 00042
 
 as `PSP_INVALID_NUMBER`. The span covers the complete numeric token.
+
+### Identifier tokenization and malformed identifier diagnostics
+
+This section defines the normative WP2C-P3 diagnostic boundary. It defines
+candidate coordinates and context-sensitive diagnostic selection, not a
+public token type or a concrete scanner implementation.
+
+#### Identifier vocabulary and candidate boundary
+
+A valid identifier remains exactly:
+
+```text
+valid_identifier = [a-z][a-z0-9_]*
+```
+
+An unquoted identifier candidate is the maximal ASCII sequence described by:
+
+```text
+candidate_start = [A-Za-z0-9_]
+candidate_continue = [A-Za-z0-9_.:-]
+unquoted_identifier_candidate = [A-Za-z0-9_][A-Za-z0-9_.:-]*
+```
+
+The candidate ends before space, horizontal tab, LF, CRLF, `{`, `}`, `;`, the
+`//` comment opener, EOF, or a byte not included in `candidate_continue`.
+Candidate scanning is maximal: `root-name`, `root.name`, `root::name`, `Root`,
+`9root`, `_root` and `root-` are each one candidate. They are not split into
+smaller parser-level tokens to choose a diagnostic.
+
+```text
+malformed identifier punctuation != token recovery boundary
+```
+
+A valid identifier starts with one lowercase ASCII letter, continues only
+with lowercase ASCII letters, digits or underscore, and contains no hyphen,
+dot, colon, namespace separator, uppercase ASCII or non-ASCII scalar. Reserved
+keyword spelling remains valid identifier shape at a `role_identifier`
+position.
+
+The remaining vocabulary is context-sensitive:
+
+- a quoted role candidate is defined only at a `role_identifier` position;
+- a numeric candidate is an unquoted candidate interpreted at a numeric
+  grammar position;
+- a recognized keyword is an exact keyword from section 5.2;
+- `{`, `}` and `;` are structural delimiters;
+- `//` opens line-comment trivia;
+- any other character is governed by the existing unexpected-character
+  boundary.
+
+#### Quoted role candidate
+
+At a `role_identifier` position only, an ASCII `"` starts a malformed quoted
+role candidate. It extends through the next `"` on the same logical line, has
+no escape syntax, and is always invalid in Grammar v0. A closed candidate such
+as `"root"` reports `PSP_INVALID_IDENTIFIER` over both quotes and all enclosed
+bytes.
+
+If no closing quote occurs on the same logical line, the candidate extends
+from the opening quote to the first byte of the line ending, excluding that
+line ending, or to EOF. It reports `PSP_INVALID_IDENTIFIER` over that complete
+malformed candidate. This rule introduces no string syntax, escape processing
+or string token. Outside a `role_identifier` position, `"` remains governed by
+the existing unexpected-character or unexpected-token rules. If a forbidden
+non-ASCII scalar occurs inside a quoted role candidate, lexical
+`PSP_UNEXPECTED_CHAR` precedence still reports that scalar rather than folding
+it into `PSP_INVALID_IDENTIFIER`.
+
+#### Context-sensitive classification
+
+At `node <id> role <role_identifier> key <key> { ... }`, a candidate matching
+`[a-z][a-z0-9_]*` is syntactically valid. A known valid identifier is later
+accepted by `RoleDictionary`; an unknown valid identifier such as `button`
+parses successfully and later reports `PS_UNKNOWN_ROLE`. A malformed unquoted
+candidate or quoted role candidate reports `PSP_INVALID_IDENTIFIER` over the
+complete candidate. A forbidden non-ASCII scalar reports
+`PSP_UNEXPECTED_CHAR` over that scalar.
+
+At either landed P2 clause-list entry, classification is ordered as follows:
+
+1. a legal recognized keyword parses the declaration or closes the list;
+2. a recognized keyword illegal in that list reports `PSP_UNEXPECTED_TOKEN`,
+   unless a dedicated duplicate diagnostic applies;
+3. a valid unreserved identifier-shaped word reports `PSP_UNKNOWN_CLAUSE`;
+4. a malformed unquoted identifier candidate reports
+   `PSP_INVALID_IDENTIFIER`;
+5. a decimal-only numeric candidate reports `PSP_UNEXPECTED_TOKEN` because it
+   is neither an identifier-shaped word nor a malformed identifier candidate.
+
+```text
+P2 unknown clause requires a valid complete identifier-shaped word
+malformed identifier candidate != unknown clause
+PSP_INVALID_IDENTIFIER outranks P2 generic classification when applicable
+```
+
+Thus `background blue;` at a clause-list entry reports
+`PSP_UNKNOWN_CLAUSE` on `background`, while `Background blue;`,
+`_background blue;`, `9background blue;`, `background-color blue;`,
+`background.color blue;` and `background::color blue;` each report
+`PSP_INVALID_IDENTIFIER` on the complete first candidate. The landed P2 rules
+for wrong-context keywords remain unchanged: `child` at a document
+declaration-list entry and `surface` at a node child-list entry report
+`PSP_UNEXPECTED_TOKEN`.
+
+At a position requiring a specific keyword (`projection`, `revision`, `epoch`,
+`surface`, `root`, `key`, `node`, `role`, `child` or `order`), a complete ASCII
+candidate that is not that exact keyword reports `PSP_UNEXPECTED_TOKEN`.
+Consequently, `Projection v0 {}` reports `PSP_UNEXPECTED_TOKEN` on
+`Projection`, and `projec-tion v0 {}` reports `PSP_UNEXPECTED_TOKEN` on
+`projec-tion`.
+
+```text
+identifier-shape diagnostic depends on an identifier-owning parser context
+wrong fixed keyword -> PSP_UNEXPECTED_TOKEN
+```
+
+At a numeric position, classification remains numeric. A digit-start candidate
+containing any non-decimal candidate character reports `PSP_INVALID_NUMBER`
+over the complete candidate. This includes `9root`, `1_000`, `1.0`, `1e3` and
+`0x10`. Decimal overflow remains `PSP_NUMBER_OVERFLOW`; zero in a non-zero
+identity position remains `PSP_ZERO_ID`; and a leading zero other than literal
+`0` remains `PSP_INVALID_NUMBER`. An ASCII candidate beginning with a letter
+or underscore where a number is required reports `PSP_UNEXPECTED_TOKEN`, not
+`PSP_INVALID_IDENTIFIER`.
+
+After the complete projection document, every non-trivia candidate reports
+`PSP_UNEXPECTED_TOKEN`, including `Background`, `root-name` and `9root`, unless
+lexical processing first encounters a character owned by
+`PSP_UNEXPECTED_CHAR`. Other fixed production positions likewise use an
+applicable dedicated diagnostic or `PSP_UNEXPECTED_TOKEN`, unless that position
+specifically owns an identifier or numeric token class.
+
+The normative decision table is:
+
+| Parser context | Candidate | Result |
+| --- | --- | --- |
+| role identifier | valid `[a-z][a-z0-9_]*` | accept syntactically |
+| role identifier | malformed unquoted candidate | `PSP_INVALID_IDENTIFIER` |
+| role identifier | quoted role candidate | `PSP_INVALID_IDENTIFIER` |
+| role identifier | forbidden non-ASCII scalar | `PSP_UNEXPECTED_CHAR` |
+| clause-list entry | valid unreserved identifier | `PSP_UNKNOWN_CLAUSE` |
+| clause-list entry | recognized keyword | landed P2 legal/wrong-context rule |
+| clause-list entry | malformed identifier candidate | `PSP_INVALID_IDENTIFIER` |
+| clause-list entry | decimal-only numeric candidate | `PSP_UNEXPECTED_TOKEN` |
+| fixed keyword position | non-matching candidate | `PSP_UNEXPECTED_TOKEN` |
+| numeric position | digit-start candidate with non-decimal content | `PSP_INVALID_NUMBER` |
+| numeric position | ASCII word candidate beginning with letter or underscore | `PSP_UNEXPECTED_TOKEN` |
+| after complete document | any candidate | `PSP_UNEXPECTED_TOKEN` |
+| any context | forbidden non-ASCII scalar | `PSP_UNEXPECTED_CHAR` |
+
+The same candidate may receive a different diagnostic because the current
+parser position owns a different token class:
+
+```text
+9root at role_identifier -> PSP_INVALID_IDENTIFIER
+9root at numeric position -> PSP_INVALID_NUMBER
+9root at clause-list entry -> PSP_INVALID_IDENTIFIER
+9root after complete document -> PSP_UNEXPECTED_TOKEN
+```
+
+#### Unexpected-character and precedence boundary
+
+`PSP_UNEXPECTED_CHAR` retains ownership of a UTF-8 BOM at byte zero, bare CR,
+forbidden non-ASCII scalars outside comments, and ASCII characters not
+recognized as part of the current candidate, delimiter, comment or existing
+token boundary. An invalid ASCII character spans one byte; a forbidden
+non-ASCII scalar spans all UTF-8 bytes of that scalar. A forbidden scalar is
+never folded into `PSP_INVALID_IDENTIFIER`.
+
+P3 does not redefine ASCII punctuation already classified through an existing
+token boundary. In particular, the landed invalid-expression example `1+1`
+remains `PSP_UNEXPECTED_TOKEN`; this identifier-candidate contract neither
+promotes `+` into candidate content nor changes that existing outcome.
+
+For `node 1 role røot key 1 {}`, lexical processing reports
+`PSP_UNEXPECTED_CHAR` on the exact UTF-8 bytes of `ø`. It does not accept `r`
+as a complete role and continue.
+
+Effective precedence is:
+
+1. `SourceTooLarge` input preflight;
+2. lexical `PSP_UNEXPECTED_CHAR` conditions;
+3. parser-state dedicated diagnostics: `PSP_UNEXPECTED_EOF`,
+   `PSP_MISSING_SEMICOLON`, `PSP_DUP_REVISION`, `PSP_DUP_EPOCH`,
+   `PSP_UNSUPPORTED_VERSION`, `PSP_INVALID_NUMBER`, `PSP_NUMBER_OVERFLOW`,
+   `PSP_ZERO_ID`, and `PSP_INVALID_IDENTIFIER`;
+4. landed P2 clause-context selection between `PSP_UNKNOWN_CLAUSE` and
+   `PSP_UNEXPECTED_TOKEN`;
+5. semantic `PS_` validation after a complete parse.
+
+When a semicolon is still required, the next candidate does not begin a new
+clause-list entry. For
+`surface 1 root 1 key 1 Background blue;`, the parser reports
+`PSP_MISSING_SEMICOLON` with zero-width span
+`[Background_start, Background_start)`, not `PSP_INVALID_IDENTIFIER`,
+`PSP_UNKNOWN_CLAUSE` or `PSP_UNEXPECTED_TOKEN`.
+
+```text
+unfinished production != clause-list entry
+```
+
+#### Identifier diagnostic spans and fail-fast behavior
+
+For `PSP_INVALID_IDENTIFIER`, an unquoted candidate spans the complete maximal
+candidate. A closed quoted role candidate spans from its opening quote through
+its closing quote. An unterminated quoted role candidate spans from its opening
+quote to the line-ending position or EOF. Surrounding trivia is excluded.
+
+Every span retains the caller-supplied `SourceId`, half-open UTF-8 byte offsets
+and representable `u32` endpoints. No diagnostic fabricates line/column
+positions, character indices or partial-AST provenance.
+
+P3 preserves fail-fast parsing. The first parser-owned failure produces
+exactly one PSP diagnostic, no AST and no PS validation. The parser performs no
+recovery, synchronization, token skipping, malformed-candidate
+reinterpretation, later-semicolon scan or multiple-diagnostic emission. A
+malformed identifier candidate is diagnosed as one maximal candidate; it is
+not split and parsing does not continue.
+
+#### P3 non-goals and authority boundary
+
+P3 specification is not lexer implementation, parser implementation,
+diagnostic Rust implementation or public API. It creates no token enum, string
+syntax, escape processing, role authority, capability, admission, runtime
+loading or activation. Tokenization does not grant authority. Gate D remains
+closed and production promotion remains unauthorized.
 
 ## 9. Source Reference Mapping
 
@@ -979,6 +1218,19 @@ semantic validation reached: no
 22. unknown word after complete document: `projection v0 { revision 0; epoch 0; } background blue;` -> `PSP_UNEXPECTED_TOKEN` on the exact `background` token
 23. missing semicolon before unknown word: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1 background blue; }` -> `PSP_MISSING_SEMICOLON` with zero-width span `[background_start, background_start)`
 24. known keyword where `root` is required: `projection v0 { revision 0; epoch 0; surface 1 revision 2 key 1; }` -> `PSP_UNEXPECTED_TOKEN` on the exact `revision` token, not `PSP_DUP_REVISION`
+25. uppercase role identifier: `projection v0 { revision 0; epoch 0; node 1 role Root key 1 {} }` -> `PSP_INVALID_IDENTIFIER` on the exact `Root` candidate
+26. leading-digit role identifier: `projection v0 { revision 0; epoch 0; node 1 role 9root key 1 {} }` -> `PSP_INVALID_IDENTIFIER` on the exact `9root` candidate
+27. leading-underscore role identifier: `projection v0 { revision 0; epoch 0; node 1 role _root key 1 {} }` -> `PSP_INVALID_IDENTIFIER` on the exact `_root` candidate
+28. hyphenated role identifier: `projection v0 { revision 0; epoch 0; node 1 role root-name key 1 {} }` -> `PSP_INVALID_IDENTIFIER` on the exact `root-name` candidate
+29. dotted role identifier: `projection v0 { revision 0; epoch 0; node 1 role root.name key 1 {} }` -> `PSP_INVALID_IDENTIFIER` on the exact `root.name` candidate
+30. namespace-separated role identifier: `projection v0 { revision 0; epoch 0; node 1 role root::name key 1 {} }` -> `PSP_INVALID_IDENTIFIER` on the exact `root::name` candidate
+31. quoted role identifier: `projection v0 { revision 0; epoch 0; node 1 role "root" key 1 {} }` -> `PSP_INVALID_IDENTIFIER` on the complete `"root"` candidate
+32. malformed top-level clause candidate: `projection v0 { revision 0; epoch 0; Background blue; }` -> `PSP_INVALID_IDENTIFIER` on the exact `Background` candidate
+33. malformed node-body clause candidate: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { width-size 100; } }` -> `PSP_INVALID_IDENTIFIER` on the exact `width-size` candidate
+34. malformed numeric candidate: `projection v0 { revision 0; epoch 0; surface 9root root 1 key 1; }` -> `PSP_INVALID_NUMBER` on the exact `9root` candidate
+35. uppercase initial keyword: `Projection v0 {}` -> `PSP_UNEXPECTED_TOKEN` on the exact `Projection` candidate
+36. malformed post-document candidate: `projection v0 { revision 0; epoch 0; } Root` -> `PSP_UNEXPECTED_TOKEN` on the exact `Root` candidate
+37. missing semicolon before malformed candidate: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1 Background blue; }` -> `PSP_MISSING_SEMICOLON` at `[Background_start, Background_start)`
 
 ### Semantic Diagnostics (Parsed OK, Rejected by Validation)
 

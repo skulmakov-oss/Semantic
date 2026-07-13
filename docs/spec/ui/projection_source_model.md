@@ -48,6 +48,31 @@ unknown source role != parser failure
 known role resolution != authority
 ```
 
+## Identifier Candidate and Role Resolution Boundary
+
+Grammar v0 owns identifier candidate boundaries and parser diagnostic
+selection. `RoleDictionary` owns known-role resolution after a complete parse.
+A syntactically valid unknown role identifier such as `button` enters the AST
+and later reports `PS_UNKNOWN_ROLE`. A malformed ASCII identifier candidate is
+parser-owned and reports `PSP_INVALID_IDENTIFIER`; a forbidden non-ASCII scalar
+reports `PSP_UNEXPECTED_CHAR` over that scalar.
+
+```text
+identifier candidate != accepted role
+valid identifier != known role
+malformed identifier != unknown role
+PSP_INVALID_IDENTIFIER != PS_UNKNOWN_ROLE
+parser diagnostic != semantic validation
+tokenization != authority
+```
+
+The normative WP2C-P3 candidate, context, precedence and span rules remain in
+Grammar v0 and are not duplicated here. P3 specification does not implement a
+lexer, parser or diagnostic API. P3 merge does not authorize parser or lexer
+implementation and grants no runtime, capability, admission or activation
+authority.
+The Projection Source parser and lexer remain unimplemented and unauthorized.
+
 ## Source Size and Provenance Representability
 
 Projection Source provenance uses UTF-8 byte offsets represented by the landed
@@ -108,17 +133,20 @@ source-size policy specified != parser qualification
 source-size policy specified != runtime source loading
 source-size policy specified != WP2C completion
 
-The P1 source-size contract is landed; it did not itself authorize WP2C-P2.
-Grammar v0 separately defines the normative
-WP2C-P2 clause-context diagnostic contract. When that contract is merged into `main`,
-the merge commit and resulting Git tree establish repository landed evidence.
-A later issue #1489 rebaseline records that evidence and the current
-authorization posture; it does not create or override repository truth.
+The P1 source-size contract and P2 clause-context diagnostic contract are
+landed. Grammar v0 separately defines the normative WP2C-P3 identifier
+candidate and malformed-identifier diagnostic contract. Definition of that
+contract is separate from review, publication, merge and implementation.
 
-Specification and merge of P2 do not implement the parser or lexer, do not
-resolve WP2C-P3, and do not authorize runtime loading or activation.
+A future merge of P3 into `main` establishes repository landed evidence through
+the merge commit and resulting Git tree. A later issue #1489 rebaseline records
+that evidence and the current authorization posture; it does not create or
+override repository truth. Issue state does not create Git tree state and the
+ledger grants no architectural authority.
 
-WP2C-P3 remains unresolved and unauthorized.
+P3 specification and any future merge do not implement or authorize the
+Projection Source parser or lexer and do not authorize runtime loading or
+activation.
 The Projection Source parser and lexer remain unimplemented and unauthorized.
 
 No source-size check grants capability, performs admission, loads files,
