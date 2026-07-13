@@ -353,6 +353,16 @@ High-level ownership:
 | **UI / application** | operator-facing display and application shell; never execution authority |
 | **Core capsule / laboratories** | low-level execution-core and quad substrate qualification without creating a second language surface |
 
+### Compatibility perimeter
+
+The repository intentionally retains a narrow compatibility perimeter:
+
+- `crates/ton618-core` — compatibility-named low-level primitives;
+- `src/bin/ton618_core.rs` — retained compatibility launcher;
+- `ton618_legacy/` — historical source archive.
+
+These paths are not second owners of Semantic architecture. New language, execution, and integration work belongs in the canonical `sm-*`, `semantic-core-*`, or `prom-*` owners.
+
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for the short architecture map and [docs/architecture/blueprint.md](docs/architecture/blueprint.md) for the detailed design.
 
 ## UI and Workbench
