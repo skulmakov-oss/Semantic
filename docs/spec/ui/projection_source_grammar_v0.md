@@ -579,6 +579,184 @@ diagnostic code;
 caller-supplied SourceId;
 SourceSpan identifying the failure.
 
+### Unknown clause versus unexpected token
+
+This section defines the deterministic choice between
+`PSP_UNKNOWN_CLAUSE` and `PSP_UNEXPECTED_TOKEN`. Classification depends only
+on the current grammar position and the first failing token. It does not
+depend on parser implementation strategy, later tokens, semantic intent,
+future grammar extensions or renderer interpretation.
+
+For this rule, a recognized keyword is one of the exact reserved words in
+section 5.2. A valid unreserved identifier-shaped word is a complete token
+matching `[a-z][a-z0-9_]*` that is not a recognized keyword.
+
+A clause-list entry position is exactly one of these two contexts:
+
+1. **Document declaration-list entry.** This position occurs after the
+   mandatory revision and epoch declarations, after a completed surface or
+   node declaration, and before the document closing brace. Legal next tokens
+   are `surface`, `node` and `}`. A repeated top-level `revision` or `epoch`
+   starter uses its dedicated duplicate diagnostic when applicable.
+2. **Node child-list entry.** This position occurs after the node opening
+   brace, after a completed child declaration, and before the node closing
+   brace. Legal next tokens are `child` and `}`.
+
+No other parser position is a clause-list entry position in Grammar v0.
+
+```text
+unknown clause classification
+    requires a clause-list entry position
+```
+
+At a clause-list entry position, if the next complete token is a valid
+unreserved identifier-shaped word, the parser reports
+`PSP_UNKNOWN_CLAUSE`. Its span is the exact first unknown clause-name token,
+excluding trivia, following arguments, the semicolon and the rest of the
+source.
+
+Consequently, `background;`, `background blue;` and
+`background blue red;` all fail on the same `background` token with
+`PSP_UNKNOWN_CLAUSE`. The parser does not need to establish whether the
+remainder resembles a complete clause.
+
+Normative clause-list examples are:
+
+- `projection v0 { revision 0; epoch 0; background blue; }` reports
+  `PSP_UNKNOWN_CLAUSE` on the exact `background` token;
+- `projection v0 { revision 0; epoch 0; layout grid; }` reports
+  `PSP_UNKNOWN_CLAUSE` on the exact `layout` token;
+- `projection v0 { revision 0; epoch 0; node 1 role text key 1 { width 100; } }`
+  reports `PSP_UNKNOWN_CLAUSE` on the exact `width` token;
+- `projection v0 { revision 0; epoch 0; node 1 role text key 1 { bind state; } }`
+  reports `PSP_UNKNOWN_CLAUSE` on the exact `bind` token.
+
+```text
+unknown clause name != known grammar keyword
+unknown clause detection != future feature recognition
+unknown clause detection != semantic interpretation
+unknown clause detection != parser recovery
+```
+
+`PSP_UNEXPECTED_TOKEN` applies when the current grammar position requires a
+specific token or token class and the actual token cannot legally satisfy
+that position, unless a more specific existing diagnostic applies. This
+includes every non-clause-list position, a recognized keyword that is illegal
+at a clause-list entry, any non-trivia token after the complete projection
+document, and any token that does not qualify for `PSP_UNKNOWN_CLAUSE`.
+
+```text
+recognized keyword in wrong context
+    -> PSP_UNEXPECTED_TOKEN
+```
+
+The exception is an applicable dedicated diagnostic. A more specific existing
+PSP diagnostic takes precedence over both `PSP_UNKNOWN_CLAUSE` and generic
+`PSP_UNEXPECTED_TOKEN`, including:
+
+- unsupported version -> `PSP_UNSUPPORTED_VERSION`;
+- invalid number -> `PSP_INVALID_NUMBER`;
+- number overflow -> `PSP_NUMBER_OVERFLOW`;
+- zero identity -> `PSP_ZERO_ID`;
+- missing semicolon -> `PSP_MISSING_SEMICOLON`;
+- unexpected EOF -> `PSP_UNEXPECTED_EOF`;
+- duplicate revision declaration -> `PSP_DUP_REVISION`;
+- duplicate epoch declaration -> `PSP_DUP_EPOCH`.
+
+Normative fixed-position and wrong-context examples are:
+
+- `background v0 {}` reports `PSP_UNEXPECTED_TOKEN` on `background` because
+  `projection` is required;
+- `projection v0 { background 0; }` reports `PSP_UNEXPECTED_TOKEN` on
+  `background` because `revision` is required;
+- `projection v0 { revision 0; epoch 0; surface 1 background 10 key 1; }`
+  reports `PSP_UNEXPECTED_TOKEN` on `background` because `root` is required;
+- `projection v0 { revision 0; epoch 0; node 1 role text bind val key 1 {} }`
+  reports `PSP_UNEXPECTED_TOKEN` on `bind` because `key` is required;
+- `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 width 0; } }`
+  reports `PSP_UNEXPECTED_TOKEN` on `width` because `order` is required;
+- `projection v0 { revision 0; epoch 0; } background blue;` reports
+  `PSP_UNEXPECTED_TOKEN` on `background` because only trivia and EOF are
+  legal after the document;
+- `projection v0 { revision 0; epoch 0; child 2 order 0; }` reports
+  `PSP_UNEXPECTED_TOKEN` on the wrong-context recognized keyword `child`;
+- `projection v0 { revision 0; epoch 0; node 1 role text key 1 { surface 2 root 2 key 2; } }`
+  reports `PSP_UNEXPECTED_TOKEN` on the wrong-context recognized keyword
+  `surface`;
+- `projection v0 { revision 0; epoch 0; node 1 role text key 1 { revision 2; } }`
+  reports `PSP_UNEXPECTED_TOKEN` on the wrong-context recognized keyword
+  `revision`.
+
+After a revision declaration has already been accepted, another top-level
+revision declaration starter reports `PSP_DUP_REVISION`. After an epoch
+declaration has already been accepted, another top-level epoch declaration
+starter reports `PSP_DUP_EPOCH`. These duplicate diagnostics apply only in
+the top-level declaration sequence. For example, `revision` where `root` is
+required inside `surface_decl` is `PSP_UNEXPECTED_TOKEN`, not
+`PSP_DUP_REVISION`.
+
+When a complete declaration requires a semicolon and the next token begins
+before that semicolon, `PSP_MISSING_SEMICOLON` takes precedence. Its span is
+the zero-width range at the next token start.
+
+```text
+unfinished current production
+    != next clause-list entry
+```
+
+At a valid clause-list entry, `}` closes the current list. EOF before the
+required closing brace reports `PSP_UNEXPECTED_EOF`; EOF and a missing closing
+brace are never `PSP_UNKNOWN_CLAUSE`.
+
+The normative decision table is:
+
+| Parser position | Actual token | Result |
+| --- | --- | --- |
+| document declaration-list entry | `surface` or `node` | parse the legal declaration |
+| document declaration-list entry | `}` | close the document |
+| document declaration-list entry | valid unreserved identifier-shaped word | `PSP_UNKNOWN_CLAUSE` |
+| document declaration-list entry | recognized keyword illegal in this context | `PSP_UNEXPECTED_TOKEN`, unless a dedicated duplicate diagnostic applies |
+| node child-list entry | `child` | parse the legal child declaration |
+| node child-list entry | `}` | close the node |
+| node child-list entry | valid unreserved identifier-shaped word | `PSP_UNKNOWN_CLAUSE` |
+| node child-list entry | recognized keyword illegal in this context | `PSP_UNEXPECTED_TOKEN` |
+| fixed production position | any incompatible token | specific diagnostic or `PSP_UNEXPECTED_TOKEN` |
+| after complete document | any non-trivia token | `PSP_UNEXPECTED_TOKEN` |
+| any position before a required closing brace | EOF | `PSP_UNEXPECTED_EOF` |
+
+Classification is determined from the current parser state and the first
+failing token only. The parser does not scan to a later semicolon, inspect a
+future clause version, guess intended syntax, skip or consume the failing
+clause, recover, or emit multiple diagnostics.
+
+```text
+first failing token determines diagnostic coordinate
+unknown clause classification does not consume the clause
+unknown clause classification does not produce partial AST
+unknown clause classification does not enter PS validation
+```
+
+This P2 rule applies only after lexical processing has produced either a
+recognized keyword token or a complete valid unreserved identifier-shaped
+word token. Identifier tokenization and malformed identifier diagnostic
+classification for forms such as `root-name`, `root.name`, `root::name`,
+`Root` and `9root` remain WP2C-P3, unresolved and unauthorized.
+
+```text
+P2 clause-context disambiguation != P3 identifier tokenization
+```
+
+The P1 source-size preflight remains earlier than lexical classification and
+this P2 choice. An oversized source returns `SourceTooLarge`, performs no
+lexical scan and produces no PSP diagnostic.
+
+P2 specification is not parser or lexer implementation, public API, P3
+completion or parser authorization. Diagnostic classification is not
+Semantic validation, capability, admission or runtime activation. WP2C-P3
+remains unresolved and unauthorized; the Projection Source parser and lexer
+remain unimplemented and unauthorized. Gate D remains closed, and production
+promotion remains unauthorized.
+
 ### Diagnostic span rules
 
 #### Offending character or token
@@ -777,10 +955,16 @@ semantic validation reached: no
 12. invalid role identifier shape: `node 1 role "root" key 1 {}` -> `PSP_INVALID_IDENTIFIER`
 13. missing semicolon: `projection v0 { revision 0 epoch 0; ... }` -> `PSP_MISSING_SEMICOLON`
 14. missing closing brace: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 {` -> `PSP_UNEXPECTED_EOF`
-15. unknown clause: `projection v0 { revision 0; epoch 0; background blue; ... }` -> `PSP_UNKNOWN_CLAUSE`
+15. unknown top-level clause: `projection v0 { revision 0; epoch 0; background blue; }` -> `PSP_UNKNOWN_CLAUSE` on the exact `background` token
 16. forbidden expression: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order 1+1; } }` -> `PSP_UNEXPECTED_TOKEN`
-17. inline binding syntax: `node 1 role text bind val key 1 {}` -> `PSP_UNEXPECTED_TOKEN`
-18. renderer/layout property: `node 1 role text key 1 { width 100; }` -> `PSP_UNKNOWN_CLAUSE`
+17. unknown node-body clause: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { width 100; } }` -> `PSP_UNKNOWN_CLAUSE` on the exact `width` token
+18. unknown word in fixed node header: `projection v0 { revision 0; epoch 0; node 1 role text bind val key 1 {} }` -> `PSP_UNEXPECTED_TOKEN` on the exact `bind` token because `key` is required
+19. known keyword at top-level declaration-list entry: `projection v0 { revision 0; epoch 0; child 2 order 0; }` -> `PSP_UNEXPECTED_TOKEN` on the exact `child` token
+20. known keyword at node child-list entry: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { surface 2 root 2 key 2; } }` -> `PSP_UNEXPECTED_TOKEN` on the exact `surface` token
+21. unknown word where `root` is required: `projection v0 { revision 0; epoch 0; surface 1 background 2 key 1; }` -> `PSP_UNEXPECTED_TOKEN` on the exact `background` token
+22. unknown word after complete document: `projection v0 { revision 0; epoch 0; } background blue;` -> `PSP_UNEXPECTED_TOKEN` on the exact `background` token
+23. missing semicolon before unknown word: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1 background blue; }` -> `PSP_MISSING_SEMICOLON` with zero-width span `[background_start, background_start)`
+24. known keyword where `root` is required: `projection v0 { revision 0; epoch 0; surface 1 revision 2 key 1; }` -> `PSP_UNEXPECTED_TOKEN` on the exact `revision` token, not `PSP_DUP_REVISION`
 
 ### Semantic Diagnostics (Parsed OK, Rejected by Validation)
 
