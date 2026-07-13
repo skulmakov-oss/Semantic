@@ -1037,45 +1037,129 @@ or underscore where a number is required reports `PSP_UNEXPECTED_TOKEN`, not
 signed numeric candidate reports `PSP_INVALID_NUMBER` over its complete
 sign-plus-candidate span.
 
-If `+` immediately follows a completed unsigned numeric token without trivia,
-the number ends before `+`. The adjacent plus is the next one-byte incompatible
-punctuation token in the numeric production. For example:
+After an unsigned numeric field is accepted, the next expected grammar symbol
+determines ownership of following input. Adjacent-plus classification applies
+only after a numeric field whose next required grammar symbol is not `;`.
+Adjacent-minus classification has the same limitation.
+
+#### Semicolon-required parser state
+
+The conceptual parser state
+`semicolon_required_after_complete_declaration` begins when all mandatory
+fields of a semicolon-terminated Grammar v0 declaration have been accepted but
+the terminating `;` has not yet been consumed. The semicolon-terminated
+declarations are exactly:
 
 ```text
-child 2 order 1+1;
+revision_decl
+epoch_decl
+surface_decl
+child_decl
 ```
 
-is classified as follows:
+Their terminal forms are:
 
 ```text
-1
-    -> complete valid decimal token
-+
-    -> next one-byte incompatible punctuation token
-parser state after 1
-    -> requires semicolon
-result
-    -> PSP_UNEXPECTED_TOKEN
-span
-    -> [plus_start, plus_start + 1)
-
-1+1 != one malformed numeric candidate
-1+1 != PSP_UNEXPECTED_CHAR
-1+1 != PSP_INVALID_NUMBER
-1+1 -> PSP_UNEXPECTED_TOKEN on +
+revision <revision_value> ;
+epoch <epoch_value> ;
+surface <surface_id> root <root_id> key <surface_key> ;
+child <child_id> order <child_order> ;
 ```
 
-The parser stops at `+` and does not inspect the trailing `1`. The same
-one-byte `PSP_UNEXPECTED_TOKEN` rule applies to `revision 1+1;`, `epoch 0+1;`,
-`surface 1+1 root 1 key 1;`, `child 2 order +;`, and
-`child 2 order 1+;`. In contrast, `child 2 order +1;` begins a signed numeric
-candidate and reports `PSP_INVALID_NUMBER` over complete `+1`.
+This state does not apply before the final field is parsed, inside a numeric or
+identifier candidate, to a node declaration ending with `}`, or while another
+keyword or delimiter other than `;` is required.
 
-ASCII minus remains asymmetric with plus. `child 2 order -1;` reports
-`PSP_INVALID_NUMBER` over complete `-1`; `child 2 order -;` reports
-`PSP_UNEXPECTED_CHAR` on the one-byte `-`; and `child 2 order 1-1;` first
-completes numeric token `1`, then reports `PSP_UNEXPECTED_CHAR` on the
-one-byte `-` without examining the trailing `1`.
+Once the parser enters `semicolon_required_after_complete_declaration`, it
+inspects the next non-trivia source coordinate before assigning a lexical or
+token class to the following source unit:
+
+```text
+next non-trivia source unit is ;
+    -> consume ;
+    -> complete declaration
+
+next non-trivia source unit is not ;
+    -> PSP_MISSING_SEMICOLON
+    -> [next_non_trivia_start, next_non_trivia_start)
+
+complete declaration awaiting ; owns the next coordinate
+semicolon-required state precedes classification of the following source unit
+```
+
+The missing-semicolon span is always zero-width at the first byte of the next
+non-trivia source unit. It retains the caller-supplied `SourceId`, half-open
+UTF-8 byte offsets and `u32` endpoints. Trivia is excluded, and the following
+unit is neither consumed nor classified. EOF preserves the existing Grammar v0
+EOF rule; this state-specific missing-semicolon decision applies when actual
+following non-trivia input exists.
+
+The final numeric fields that enter this state are the revision value, epoch
+value, surface key and child order. Therefore the no-whitespace forms below all
+accept their first number and then report `PSP_MISSING_SEMICOLON`:
+
+| Input | Result | Exact span |
+| --- | --- | --- |
+| `revision 1+1;` | `PSP_MISSING_SEMICOLON` | `[plus_start, plus_start)` |
+| `epoch 0+1;` | `PSP_MISSING_SEMICOLON` | `[plus_start, plus_start)` |
+| `surface 1 root 1 key 1+1;` | `PSP_MISSING_SEMICOLON` | `[plus_start, plus_start)` |
+| `child 2 order 1+1;` | `PSP_MISSING_SEMICOLON` | `[plus_start, plus_start)` |
+| `revision 1-1;` | `PSP_MISSING_SEMICOLON` | `[minus_start, minus_start)` |
+| `epoch 0-1;` | `PSP_MISSING_SEMICOLON` | `[minus_start, minus_start)` |
+| `surface 1 root 1 key 1-1;` | `PSP_MISSING_SEMICOLON` | `[minus_start, minus_start)` |
+| `child 2 order 1-1;` | `PSP_MISSING_SEMICOLON` | `[minus_start, minus_start)` |
+
+Whitespace does not change ownership. `surface 1 root 1 key 1 +1;` and
+`surface 1 root 1 key 1 -1;` report at the zero-width start of `+` and `-`,
+respectively. `surface 1 root 1 key 1 1+1;` reports at
+`[second_number_start, second_number_start)`, not at the internal `+`, because
+the parser stops before classifying `1+1`. `surface 1 root 1 key 1 Root;`
+likewise reports at `[Root_start, Root_start)`.
+
+When the numeric field has not yet been accepted, numeric diagnostics remain
+authoritative. Thus `revision +1;`, `revision -1;`, `epoch +1;`,
+`surface 1 root 1 key +1;` and `child 2 order -1;` report
+`PSP_INVALID_NUMBER` over the complete signed candidate. In contrast, after a
+terminal field has been accepted, the parser is no longer in a new numeric
+position:
+
+```text
+sign at start of required numeric field
+    -> signed numeric candidate
+    -> PSP_INVALID_NUMBER
+
+sign after accepted final numeric field
+    -> semicolon required
+    -> PSP_MISSING_SEMICOLON
+```
+
+Completed non-terminal numeric fields retain the adjacent sign behavior. The
+numeric-field ownership matrix is:
+
+| Numeric field | Next required symbol after accepted value | `1+1` result |
+| --- | --- | --- |
+| revision value | `;` | `PSP_MISSING_SEMICOLON` at zero-width `+` start |
+| epoch value | `;` | `PSP_MISSING_SEMICOLON` at zero-width `+` start |
+| surface ID | `root` | `PSP_UNEXPECTED_TOKEN` on one-byte `+` |
+| surface root ID | `key` | `PSP_UNEXPECTED_TOKEN` on one-byte `+` |
+| surface key | `;` | `PSP_MISSING_SEMICOLON` at zero-width `+` start |
+| node ID | `role` | `PSP_UNEXPECTED_TOKEN` on one-byte `+` |
+| node key | `{` | `PSP_UNEXPECTED_TOKEN` on one-byte `+` |
+| child ID | `order` | `PSP_UNEXPECTED_TOKEN` on one-byte `+` |
+| child order | `;` | `PSP_MISSING_SEMICOLON` at zero-width `+` start |
+
+For minus forms in the same positions, a semicolon-terminal field reports
+`PSP_MISSING_SEMICOLON`, while a non-terminal field reports
+`PSP_UNEXPECTED_CHAR` on the one-byte `-`. For example,
+`surface 1+1 root 10 key 1;`, `surface 1 root 10+1 key 1;`,
+`node 1+1 role root key 1 {}`, `node 1 role root key 1+1 {}` and
+`child 2+1 order 0;` report `PSP_UNEXPECTED_TOKEN` on `+`. Their minus
+counterparts report `PSP_UNEXPECTED_CHAR` on `-`.
+
+The parser stops at that first failure and does not inspect trailing digits.
+At a field start, `child 2 order +;` still reports `PSP_UNEXPECTED_TOKEN` on
+the one-byte `+`, and `child 2 order -;` still reports
+`PSP_UNEXPECTED_CHAR` on the one-byte `-`.
 
 After the complete projection document, every non-trivia candidate reports
 `PSP_UNEXPECTED_TOKEN`, including `Background`, `root-name` and `9root`, unless
@@ -1124,14 +1208,14 @@ token boundary. An invalid ASCII character spans one byte; a forbidden
 non-ASCII scalar spans all UTF-8 bytes of that scalar. A forbidden scalar is
 never folded into `PSP_INVALID_IDENTIFIER`.
 
-The numeric-context signed-candidate rule groups an eligible sign before
-standalone sign classification. Recognition does not make the signed form
-valid: it deterministically selects `PSP_INVALID_NUMBER`. Outside that rule,
-standalone `+` is the one-byte incompatible punctuation token defined above,
-while standalone `-` remains a one-byte `PSP_UNEXPECTED_CHAR`. In particular,
-the landed invalid-expression example `1+1` reports `PSP_UNEXPECTED_TOKEN` on
-the exact one-byte `+`; it is neither `PSP_UNEXPECTED_CHAR` nor
-`PSP_INVALID_NUMBER`.
+Where a numeric field is currently required, the numeric-context
+signed-candidate rule groups an eligible sign before standalone sign
+classification. Recognition does not make the signed form valid: it
+deterministically selects `PSP_INVALID_NUMBER`. After a non-terminal numeric
+field is accepted, standalone `+` is the one-byte incompatible punctuation
+token defined above, while standalone `-` remains a one-byte
+`PSP_UNEXPECTED_CHAR`. After a semicolon-terminal field is accepted, neither
+sign is classified because the semicolon-required state owns its coordinate.
 
 For `node 1 role røot key 1 {}`, lexical processing reports
 `PSP_UNEXPECTED_CHAR` on the exact UTF-8 bytes of `ø`. It does not accept `r`
@@ -1140,35 +1224,46 @@ as a complete role and continue.
 Effective precedence is:
 
 1. `SourceTooLarge` input preflight;
-2. lexical boundaries and `PSP_UNEXPECTED_CHAR` conditions, including the
-   determination that a sign not eligible for numeric-context grouping is a
-   standalone character;
-3. numeric-context signed-candidate recognition, which selects
-   `PSP_INVALID_NUMBER` rather than accepting signed syntax;
-4. parser-state dedicated diagnostics: `PSP_UNEXPECTED_EOF`,
-   `PSP_MISSING_SEMICOLON`, `PSP_DUP_REVISION`, `PSP_DUP_EPOCH`,
-   `PSP_UNSUPPORTED_VERSION`, `PSP_INVALID_NUMBER`, `PSP_NUMBER_OVERFLOW`,
-   `PSP_ZERO_ID`, and `PSP_INVALID_IDENTIFIER`;
-5. landed P2 clause-context selection between `PSP_UNKNOWN_CLAUSE` and
+2. the current parser-state structural obligation: when a completed
+   semicolon-terminated declaration awaits `;`, test the next non-trivia source
+   unit for `;` before assigning that unit a class; actual non-`;` input selects
+   `PSP_MISSING_SEMICOLON`;
+3. lexical boundaries and `PSP_UNEXPECTED_CHAR` conditions at coordinates not
+   already owned by the semicolon-required state;
+4. numeric-context signed-candidate recognition where a numeric field is
+   currently required, selecting `PSP_INVALID_NUMBER` rather than accepting
+   signed syntax;
+5. other parser-state dedicated diagnostics: `PSP_UNEXPECTED_EOF`,
+   `PSP_DUP_REVISION`, `PSP_DUP_EPOCH`, `PSP_UNSUPPORTED_VERSION`,
+   `PSP_INVALID_NUMBER`, `PSP_NUMBER_OVERFLOW`, `PSP_ZERO_ID`, and
+   `PSP_INVALID_IDENTIFIER`;
+6. landed P2 clause-context selection between `PSP_UNKNOWN_CLAUSE` and
    `PSP_UNEXPECTED_TOKEN`;
-6. semantic `PS_` validation after a complete parse.
+7. semantic `PS_` validation after a complete parse.
+
+```text
+parser-state structural obligation may precede lexical classification
+```
+
+This is specific to the completed-declaration semicolon obligation. It does not
+globally make parser diagnostics precede every lexical error.
 
 Signed candidate recognition is diagnostic grouping, not acceptance. A
 recognized signed candidate always reaches the dedicated
 `PSP_INVALID_NUMBER` branch before overflow or zero-ID interpretation.
 
-When a semicolon is still required, the next candidate does not begin a new
-clause-list entry. For
+When a semicolon is still required, the next source unit does not begin a new
+clause-list entry or token-classification context. For
 `surface 1 root 1 key 1 Background blue;`, the parser reports
 `PSP_MISSING_SEMICOLON` with zero-width span
 `[Background_start, Background_start)`, not `PSP_INVALID_IDENTIFIER`,
 `PSP_UNKNOWN_CLAUSE` or `PSP_UNEXPECTED_TOKEN`.
 
-The same precedence applies to
-`surface 1 root 1 key 1 +1;`: the surface fields are complete and the parser
-requires their semicolon, so it reports `PSP_MISSING_SEMICOLON` at
-`[plus_start, plus_start)`. The `+1` text does not begin a new numeric position
-and is therefore not classified as a signed numeric candidate.
+The same precedence applies to `surface 1 root 1 key 1 +1;`,
+`surface 1 root 1 key 1 -1;` and `surface 1 root 1 key 1 1+1;`. The surface
+fields are complete, so the parser reports `PSP_MISSING_SEMICOLON` at the
+zero-width start of `+`, `-` or the second `1`, respectively. None of those
+following units begins a new numeric position.
 
 ```text
 unfinished production != clause-list entry
@@ -1359,7 +1454,7 @@ semantic validation reached: no
 13. missing semicolon: `projection v0 { revision 0 epoch 0; ... }` -> `PSP_MISSING_SEMICOLON`
 14. missing closing brace: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 {` -> `PSP_UNEXPECTED_EOF`
 15. unknown top-level clause: `projection v0 { revision 0; epoch 0; background blue; }` -> `PSP_UNKNOWN_CLAUSE` on the exact `background` token
-16. forbidden expression: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order 1+1; } }` -> `PSP_UNEXPECTED_TOKEN` on the exact one-byte `+` span `[plus_start, plus_start + 1)`
+16. missing semicolon before adjacent plus: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order 1+1; } }` -> `PSP_MISSING_SEMICOLON` with zero-width span `[plus_start, plus_start)` because `order` is the final field of `child_decl`
 16a. signed negative decimal: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order -1; } }` -> `PSP_INVALID_NUMBER` on complete `-1`
 16b. signed positive decimal: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order +1; } }` -> `PSP_INVALID_NUMBER` on complete `+1`
 17. unknown node-body clause: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { width 100; } }` -> `PSP_UNKNOWN_CLAUSE` on the exact `width` token
