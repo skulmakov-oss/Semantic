@@ -194,8 +194,15 @@ The repository contains more than a parser prototype. The following paths are im
 - persistent `Sequence(T)` helpers and functional `Map(K, V)` operations;
 - deterministic seeded pseudo-random helpers;
 - narrow capability-controlled `print(text)` observation;
-- bounded project-root command routes;
-- first-wave closures, schemas, generics, UI, and additional module work in explicitly limited forms.
+- bounded project-root command routes.
+
+### Additional landed work on current `main`, not yet qualified
+
+- schema and boundary-core work;
+- package-baseline widening beyond the bounded project-root contour;
+- first-wave closures and generics;
+- first-wave UI/application boundary work;
+- broader module, iterable, and language-surface work beyond the admitted limited-release slice.
 
 For the detailed and continuously maintained classification, use the [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md).
 
