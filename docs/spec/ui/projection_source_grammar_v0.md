@@ -415,6 +415,12 @@ child order is u32 and may be zero.
 
 Leading zeroes are forbidden except for the literal `0`.
 
+At a numeric-owning parser position, a leading ASCII `+` or `-` immediately
+followed by an ASCII decimal digit begins the signed numeric diagnostic
+candidate defined in section 8. Signed forms remain invalid Grammar v0
+numbers and report `PSP_INVALID_NUMBER`; this grouping does not admit signed
+decimal syntax.
+
 ### 5.5 Whitespace
 Allow: space, horizontal tab, LF, CRLF.
 Whitespace is insignificant between tokens.
@@ -898,6 +904,80 @@ non-ASCII scalar occurs inside a quoted role candidate, lexical
 `PSP_UNEXPECTED_CHAR` precedence still reports that scalar rather than folding
 it into `PSP_INVALID_IDENTIFIER`.
 
+#### Signed numeric, standalone plus and standalone minus boundaries
+
+Only when the current parser position requires a decimal number, an ASCII `+`
+or `-` immediately followed by an ASCII decimal digit begins a conceptual
+signed numeric candidate:
+
+```text
+signed_numeric_candidate
+    = sign + maximal unsigned digit-start numeric candidate
+
+sign
+    = + or -
+```
+
+The underlying unsigned digit-start numeric candidate begins with an ASCII
+digit and consumes the maximal number-like ASCII sequence used by the existing
+invalid-number rules. It includes ASCII letters, digits, underscore, dot and
+colon, but ends before `+` or `-`. This numeric diagnostic boundary is distinct
+from the unquoted identifier-candidate boundary: `root-name` remains one
+identifier candidate, while `1-1` contains a complete numeric token `1`
+followed by `-`.
+
+A signed numeric candidate ends before space, horizontal tab, LF, CRLF, `{`,
+`}`, `;`, the exact `//` comment opener, EOF, `+`, `-`, or another byte outside
+the underlying digit-start number-like candidate boundary. It reports
+`PSP_INVALID_NUMBER`. Its span includes the sign and the complete following
+maximal digit-start numeric candidate, excluding surrounding trivia and the
+terminating delimiter.
+
+Thus `-1;` groups complete `-1`, and `+1 // comment` groups complete `+1`
+before the delimiter or comment trivia. In `-1+1`, the signed candidate is
+complete `-1`; it immediately reports `PSP_INVALID_NUMBER`, and fail-fast
+parsing does not inspect the trailing `+1`.
+
+Normative signed candidates include:
+
+| Input at a numeric position | Result | Exact span |
+| --- | --- | --- |
+| `-1` | `PSP_INVALID_NUMBER` | complete `-1` |
+| `+1` | `PSP_INVALID_NUMBER` | complete `+1` |
+| `-0` | `PSP_INVALID_NUMBER` | complete `-0` |
+| `+0` | `PSP_INVALID_NUMBER` | complete `+0` |
+| `-01` | `PSP_INVALID_NUMBER` | complete `-01` |
+| `+01` | `PSP_INVALID_NUMBER` | complete `+01` |
+| `-1.0` | `PSP_INVALID_NUMBER` | complete `-1.0` |
+| `+1_000` | `PSP_INVALID_NUMBER` | complete `+1_000` |
+| `-1e3` | `PSP_INVALID_NUMBER` | complete `-1e3` |
+| `+0x10` | `PSP_INVALID_NUMBER` | complete `+0x10` |
+
+Signed form classification precedes overflow, leading-zero and non-zero-ID
+interpretation. Signed zero is therefore not `PSP_ZERO_ID`, and signed
+overflow text is not `PSP_NUMBER_OVERFLOW`; every recognized signed numeric
+candidate reports `PSP_INVALID_NUMBER`.
+
+The signed-candidate grouping is owned by a numeric parser context and does
+not create a general signed token. Outside a numeric-owning position, `-root`
+starts with `PSP_UNEXPECTED_CHAR` on the one-byte `-`. A sign followed by
+digits after the complete document does not become a signed numeric candidate.
+
+When it is not consumed by the numeric-context signed-candidate rule, ASCII
+`+` is a conceptual one-byte incompatible punctuation token for deterministic
+diagnostic selection. It is not an addition operator, expression syntax,
+public token enum or lexer API. Its exact span is:
+
+```text
+[plus_start, plus_start + 1)
+```
+
+At a parser position where `+` is incompatible and no dedicated diagnostic
+takes precedence, it reports `PSP_UNEXPECTED_TOKEN`. ASCII `-` does not gain
+this standalone punctuation boundary. Unless it is internal to an identifier
+candidate or begins a signed numeric candidate at a numeric-owning position,
+`-` remains `PSP_UNEXPECTED_CHAR` over its one-byte span.
+
 #### Context-sensitive classification
 
 At `node <id> role <role_identifier> key <key> { ... }`, a candidate matching
@@ -953,7 +1033,49 @@ over the complete candidate. This includes `9root`, `1_000`, `1.0`, `1e3` and
 identity position remains `PSP_ZERO_ID`; and a leading zero other than literal
 `0` remains `PSP_INVALID_NUMBER`. An ASCII candidate beginning with a letter
 or underscore where a number is required reports `PSP_UNEXPECTED_TOKEN`, not
-`PSP_INVALID_IDENTIFIER`.
+`PSP_INVALID_IDENTIFIER`. Before those unsigned interpretations, an eligible
+signed numeric candidate reports `PSP_INVALID_NUMBER` over its complete
+sign-plus-candidate span.
+
+If `+` immediately follows a completed unsigned numeric token without trivia,
+the number ends before `+`. The adjacent plus is the next one-byte incompatible
+punctuation token in the numeric production. For example:
+
+```text
+child 2 order 1+1;
+```
+
+is classified as follows:
+
+```text
+1
+    -> complete valid decimal token
++
+    -> next one-byte incompatible punctuation token
+parser state after 1
+    -> requires semicolon
+result
+    -> PSP_UNEXPECTED_TOKEN
+span
+    -> [plus_start, plus_start + 1)
+
+1+1 != one malformed numeric candidate
+1+1 != PSP_UNEXPECTED_CHAR
+1+1 != PSP_INVALID_NUMBER
+1+1 -> PSP_UNEXPECTED_TOKEN on +
+```
+
+The parser stops at `+` and does not inspect the trailing `1`. The same
+one-byte `PSP_UNEXPECTED_TOKEN` rule applies to `revision 1+1;`, `epoch 0+1;`,
+`surface 1+1 root 1 key 1;`, `child 2 order +;`, and
+`child 2 order 1+;`. In contrast, `child 2 order +1;` begins a signed numeric
+candidate and reports `PSP_INVALID_NUMBER` over complete `+1`.
+
+ASCII minus remains asymmetric with plus. `child 2 order -1;` reports
+`PSP_INVALID_NUMBER` over complete `-1`; `child 2 order -;` reports
+`PSP_UNEXPECTED_CHAR` on the one-byte `-`; and `child 2 order 1-1;` first
+completes numeric token `1`, then reports `PSP_UNEXPECTED_CHAR` on the
+one-byte `-` without examining the trailing `1`.
 
 After the complete projection document, every non-trivia candidate reports
 `PSP_UNEXPECTED_TOKEN`, including `Background`, `root-name` and `9root`, unless
@@ -975,8 +1097,11 @@ The normative decision table is:
 | clause-list entry | malformed identifier candidate | `PSP_INVALID_IDENTIFIER` |
 | clause-list entry | decimal-only numeric candidate | `PSP_UNEXPECTED_TOKEN` |
 | fixed keyword position | non-matching candidate | `PSP_UNEXPECTED_TOKEN` |
+| numeric position | sign immediately followed by ASCII digit | `PSP_INVALID_NUMBER` over the complete signed numeric candidate |
 | numeric position | digit-start candidate with non-decimal content | `PSP_INVALID_NUMBER` |
 | numeric position | ASCII word candidate beginning with letter or underscore | `PSP_UNEXPECTED_TOKEN` |
+| numeric position | standalone `+` | `PSP_UNEXPECTED_TOKEN` over the one-byte plus token |
+| numeric position | standalone `-` | `PSP_UNEXPECTED_CHAR` over the one-byte minus character |
 | after complete document | any candidate | `PSP_UNEXPECTED_TOKEN` |
 | any context | forbidden non-ASCII scalar | `PSP_UNEXPECTED_CHAR` |
 
@@ -999,10 +1124,14 @@ token boundary. An invalid ASCII character spans one byte; a forbidden
 non-ASCII scalar spans all UTF-8 bytes of that scalar. A forbidden scalar is
 never folded into `PSP_INVALID_IDENTIFIER`.
 
-P3 does not redefine ASCII punctuation already classified through an existing
-token boundary. In particular, the landed invalid-expression example `1+1`
-remains `PSP_UNEXPECTED_TOKEN`; this identifier-candidate contract neither
-promotes `+` into candidate content nor changes that existing outcome.
+The numeric-context signed-candidate rule groups an eligible sign before
+standalone sign classification. Recognition does not make the signed form
+valid: it deterministically selects `PSP_INVALID_NUMBER`. Outside that rule,
+standalone `+` is the one-byte incompatible punctuation token defined above,
+while standalone `-` remains a one-byte `PSP_UNEXPECTED_CHAR`. In particular,
+the landed invalid-expression example `1+1` reports `PSP_UNEXPECTED_TOKEN` on
+the exact one-byte `+`; it is neither `PSP_UNEXPECTED_CHAR` nor
+`PSP_INVALID_NUMBER`.
 
 For `node 1 role røot key 1 {}`, lexical processing reports
 `PSP_UNEXPECTED_CHAR` on the exact UTF-8 bytes of `ø`. It does not accept `r`
@@ -1011,14 +1140,22 @@ as a complete role and continue.
 Effective precedence is:
 
 1. `SourceTooLarge` input preflight;
-2. lexical `PSP_UNEXPECTED_CHAR` conditions;
-3. parser-state dedicated diagnostics: `PSP_UNEXPECTED_EOF`,
+2. lexical boundaries and `PSP_UNEXPECTED_CHAR` conditions, including the
+   determination that a sign not eligible for numeric-context grouping is a
+   standalone character;
+3. numeric-context signed-candidate recognition, which selects
+   `PSP_INVALID_NUMBER` rather than accepting signed syntax;
+4. parser-state dedicated diagnostics: `PSP_UNEXPECTED_EOF`,
    `PSP_MISSING_SEMICOLON`, `PSP_DUP_REVISION`, `PSP_DUP_EPOCH`,
    `PSP_UNSUPPORTED_VERSION`, `PSP_INVALID_NUMBER`, `PSP_NUMBER_OVERFLOW`,
    `PSP_ZERO_ID`, and `PSP_INVALID_IDENTIFIER`;
-4. landed P2 clause-context selection between `PSP_UNKNOWN_CLAUSE` and
+5. landed P2 clause-context selection between `PSP_UNKNOWN_CLAUSE` and
    `PSP_UNEXPECTED_TOKEN`;
-5. semantic `PS_` validation after a complete parse.
+6. semantic `PS_` validation after a complete parse.
+
+Signed candidate recognition is diagnostic grouping, not acceptance. A
+recognized signed candidate always reaches the dedicated
+`PSP_INVALID_NUMBER` branch before overflow or zero-ID interpretation.
 
 When a semicolon is still required, the next candidate does not begin a new
 clause-list entry. For
@@ -1026,6 +1163,12 @@ clause-list entry. For
 `PSP_MISSING_SEMICOLON` with zero-width span
 `[Background_start, Background_start)`, not `PSP_INVALID_IDENTIFIER`,
 `PSP_UNKNOWN_CLAUSE` or `PSP_UNEXPECTED_TOKEN`.
+
+The same precedence applies to
+`surface 1 root 1 key 1 +1;`: the surface fields are complete and the parser
+requires their semicolon, so it reports `PSP_MISSING_SEMICOLON` at
+`[plus_start, plus_start)`. The `+1` text does not begin a new numeric position
+and is therefore not classified as a signed numeric candidate.
 
 ```text
 unfinished production != clause-list entry
@@ -1037,6 +1180,13 @@ For `PSP_INVALID_IDENTIFIER`, an unquoted candidate spans the complete maximal
 candidate. A closed quoted role candidate spans from its opening quote through
 its closing quote. An unterminated quoted role candidate spans from its opening
 quote to the line-ending position or EOF. Surrounding trivia is excluded.
+
+For `PSP_INVALID_NUMBER` on a signed numeric candidate, the span covers the
+sign byte and the complete following maximal digit-start numeric candidate.
+For `PSP_UNEXPECTED_TOKEN` on standalone `+`, the span is the exact one-byte
+range `[plus_start, plus_start + 1)`. For `PSP_UNEXPECTED_CHAR` on standalone
+`-`, the span is the exact one-byte range
+`[minus_start, minus_start + 1)`.
 
 Every span retains the caller-supplied `SourceId`, half-open UTF-8 byte offsets
 and representable `u32` endpoints. No diagnostic fabricates line/column
@@ -1209,7 +1359,9 @@ semantic validation reached: no
 13. missing semicolon: `projection v0 { revision 0 epoch 0; ... }` -> `PSP_MISSING_SEMICOLON`
 14. missing closing brace: `projection v0 { revision 0; epoch 0; surface 1 root 1 key 1; node 1 role root key 1 {` -> `PSP_UNEXPECTED_EOF`
 15. unknown top-level clause: `projection v0 { revision 0; epoch 0; background blue; }` -> `PSP_UNKNOWN_CLAUSE` on the exact `background` token
-16. forbidden expression: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order 1+1; } }` -> `PSP_UNEXPECTED_TOKEN`
+16. forbidden expression: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order 1+1; } }` -> `PSP_UNEXPECTED_TOKEN` on the exact one-byte `+` span `[plus_start, plus_start + 1)`
+16a. signed negative decimal: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order -1; } }` -> `PSP_INVALID_NUMBER` on complete `-1`
+16b. signed positive decimal: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { child 2 order +1; } }` -> `PSP_INVALID_NUMBER` on complete `+1`
 17. unknown node-body clause: `projection v0 { revision 0; epoch 0; node 1 role text key 1 { width 100; } }` -> `PSP_UNKNOWN_CLAUSE` on the exact `width` token
 18. unknown word in fixed node header: `projection v0 { revision 0; epoch 0; node 1 role text bind val key 1 {} }` -> `PSP_UNEXPECTED_TOKEN` on the exact `bind` token because `key` is required
 19. known keyword at top-level declaration-list entry: `projection v0 { revision 0; epoch 0; child 2 order 0; }` -> `PSP_UNEXPECTED_TOKEN` on the exact `child` token
