@@ -1,826 +1,474 @@
 <p align="center">
-  <img src="assets/brand/semantic-logo.png" alt="Semantic Logo" width="860">
+  <img src="assets/brand/semantic-logo.png" alt="Semantic Language" width="860">
 </p>
 
 # Semantic Language
+
 <p align="center">
-  <a href="docs/spec/index.md">
-    <img src="https://img.shields.io/badge/Semantic-Language-111827?style=for-the-badge" alt="Semantic Language" />
-  </a>
-  <a href="docs/spec/verifier.md">
-    <img src="https://img.shields.io/badge/Verifier--First-Admission-2563eb?style=for-the-badge" alt="Verifier First Admission" />
-  </a>
-  <a href="docs/spec/vm.md">
-    <img src="https://img.shields.io/badge/SemCode-VM-7c3aed?style=for-the-badge" alt="SemCode VM" />
-  </a>
-  <a href="docs/roadmap/public_status_model.md">
-    <img src="https://img.shields.io/badge/Status-Main--Only-f59e0b?style=for-the-badge" alt="Main Only Status" />
-  </a>
+  <strong>A deterministic, verifier-first language platform for reasoning programs and explicit four-state logic.</strong>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Quad_Logic-N%2FF%2FT%2FS-7c3aed?style=flat-square" alt="Quad Logic N/F/T/S" />
-  <img src="https://img.shields.io/badge/Determinism-Core_Invariant-16a34a?style=flat-square" alt="Determinism Core Invariant" />
-  <img src="https://img.shields.io/badge/Admission-Guarded-dc2626?style=flat-square" alt="Admission Guarded" />
-  <img src="https://img.shields.io/badge/UI-Not_Authority-6b7280?style=flat-square" alt="UI Not Authority" />
-  <img src="https://img.shields.io/badge/Runtime-Explicit_Boundary-334155?style=flat-square" alt="Runtime Explicit Boundary" />
-  <img src="https://img.shields.io/github/license/skulmakov-oss/Semantic?style=flat-square" alt="License" />
-  <img src="https://img.shields.io/github/last-commit/skulmakov-oss/Semantic?style=flat-square" alt="Last Commit" />
-  <img src="https://img.shields.io/github/stars/skulmakov-oss/Semantic?style=flat-square&logo=github" alt="GitHub Stars" />
+  <a href="docs/getting_started.md"><img src="https://img.shields.io/badge/Start-Quickstart-2563eb?style=for-the-badge" alt="Quickstart"></a>
+  <a href="docs/spec/index.md"><img src="https://img.shields.io/badge/Read-Specification-7c3aed?style=for-the-badge" alt="Specification"></a>
+  <a href="docs/roadmap/v1_readiness.md"><img src="https://img.shields.io/badge/Status-Limited_Release-f59e0b?style=for-the-badge" alt="Limited release status"></a>
 </p>
-Semantic lets reasoning programs be checked before they are allowed to run.
 
-It is a deterministic verified execution platform with native quad logic, SemCode VM, verifier-first admission, and controlled PROMETHEUS boundary integration.
+<p align="center">
+  <img src="https://img.shields.io/badge/Quad_Logic-N%2FF%2FT%2FS-7c3aed?style=flat-square" alt="Quad logic N/F/T/S">
+  <img src="https://img.shields.io/badge/Execution-Verifier_First-2563eb?style=flat-square" alt="Verifier-first execution">
+  <img src="https://img.shields.io/badge/Runtime-Deterministic-16a34a?style=flat-square" alt="Deterministic runtime">
+  <img src="https://img.shields.io/github/license/skulmakov-oss/Semantic?style=flat-square" alt="License">
+  <img src="https://img.shields.io/github/last-commit/skulmakov-oss/Semantic?style=flat-square" alt="Last commit">
+</p>
+
+Semantic compiles `.sm` source into a versioned `.smc` **SemCode** artifact, checks that artifact at a dedicated verifier boundary, and executes admitted code in a deterministic virtual machine.
 
 ```text
-source
-  -> semantic analysis
-  -> IR
-  -> SemCode
-  -> verifier admission
-  -> deterministic VM
-  -> controlled boundary
+.sm source
+   -> frontend and semantic analysis
+   -> deterministic IR
+   -> SemCode (.smc)
+   -> verifier admission
+   -> deterministic VM
+   -> optional capability-controlled host boundary
 ```
 
-## Start Here
+> [!IMPORTANT]
+> Semantic is an active R&D platform, not a finished general-purpose language product. The published stable line is `v1.1.1`; a narrow practical contour is qualified for limited release; current `main` contains additional landed and benchmark-qualified work that is not yet part of the stable promise.
 
-- New to the project: read `docs/roadmap/public_maturity_snapshot.md`.
-- Want to try the pipeline: run the zero-effect verifier smoke path in `Quickstart`.
-- Want the contract: start with `docs/spec/index.md`, `docs/spec/semcode.md`, `docs/spec/verifier.md`, and `docs/spec/vm.md`.
-- Want the language principles: read `docs/language/semantic_language_principles.md`.
-- Want the active development track: read `docs/language/semantic_hello_*`.
-- [Semantic VM Verified Execution Core](docs/architecture/svm_verified_execution_core.md) — current scalar `sm-vm` verified execution path, admission gate, local evidence/profiling paths, and current Pulsar/P5-A status.
+## Why Semantic?
 
-## Minimal Smoke Example
+Most languages model a proposition as either `true` or `false`. Real systems often need two additional states: **not enough evidence** and **conflicting evidence**.
+
+Semantic makes that distinction explicit with the native `quad` type:
+
+| Value | Meaning |
+|---|---|
+| `N` | unknown / no sufficient evidence |
+| `F` | false |
+| `T` | true |
+| `S` | conflict / incompatible evidence |
+
+A `quad` is not an unusual spelling of `bool`. Branching remains explicit:
 
 ```sm
-fn main() {
-    return;
+if state == T {
+    // confirmed true
+}
+
+if state == S {
+    // conflict must be handled deliberately
 }
 ```
 
-This is a zero-effect program. It is useful for checking the core path without claiming general stdout, formatting, file I/O, network I/O, or broad host effects.
+This is useful for:
 
-## Visual Architecture Render
+- rule and decision systems;
+- semantic state machines;
+- safety and admission policies;
+- evidence-aware computation;
+- deterministic programs that must expose uncertainty instead of hiding it.
 
-<img width="1693" height="929" alt="Semantic Visual Architecture Render" src="https://github.com/user-attachments/assets/d8fd9017-062e-45a2-b0cf-695dc320ae24" />
+## Try Semantic
 
-> Visual prototype for rendering execution pipelines, verifier gates, capability boundaries, runtime-state overlays, and architecture graphs.
+### Prerequisites
 
-## What Semantic Is
+- a current Rust toolchain;
+- Git;
+- Windows, Linux, or macOS.
 
-A Semantic program is compiled into SemCode, admitted by a verifier, and then executed by a deterministic VM under explicit runtime limits and capability boundaries.
+### 1. Clone and build
 
-The canonical public language name is `Semantic Language`. `Semantic` is the short form used throughout the repository prose and tooling references.
-
-The core execution path is:
-
-```text
-source
-  -> frontend / semantic analysis
-  -> IR / deterministic passes
-  -> SemCode
-  -> verifier admission
-  -> deterministic VM
-  -> optional PROMETHEUS boundary
+```bash
+git clone https://github.com/skulmakov-oss/Semantic.git
+cd Semantic
+cargo build --bin smc --bin svm
 ```
 
-Semantic is designed for:
+The repository currently builds the CLI from source. A polished end-user installer or package-manager distribution is not yet the primary onboarding route.
 
-- reasoning rules;
-- semantic state transitions;
-- native `quad` logic: `N / F / T / S`;
-- deterministic execution;
-- verifier-first admission;
-- bounded runtime behavior;
-- controlled host effects through explicit capabilities.
+### 2. Run a canonical example
 
-The repository `main` may contain work that is newer than the currently published stable line. Public claims should therefore be read through the canonical status model in `docs/roadmap/public_status_model.md`.
+```bash
+cargo run --bin smc -- run examples/canonical/rule_state_decision/src/main.sm
+```
 
-The public contract is centered in `docs/spec/*`. Historical roadmap notes and legacy compatibility shims remain in the repository, but they are not the primary source of truth for the current toolchain surface.
+This example demonstrates records, `quad`, explicit branch decisions, `Result`, verifier-first execution, and a deterministic assertion.
 
-## Semantic Language canonical samples
+### 3. Inspect the full source-to-artifact path
 
-Semantic Language is the programming language in this repository. In the public surface:
+```bash
+cargo run --bin smc -- check examples/canonical/rule_state_decision/src/main.sm
+cargo run --bin smc -- compile examples/canonical/rule_state_decision/src/main.sm -o decision.smc
+cargo run --bin smc -- verify decision.smc
+cargo run --bin smc -- run-smc decision.smc
+cargo run --bin svm -- disasm decision.smc
+```
 
-- `.sm` is the primary Semantic Language source extension;
-- `.smc` is the compiled SemCode artifact generated from source;
-- `smc` is the command-line toolchain owner.
+Expected flow:
 
-These samples are intended as the canonical public sample surface for Semantic Language. They are backed by [`tests/canonical_examples.rs`](tests/canonical_examples.rs) and kept distinct from qualification fixtures, benchmark programs, readiness drafts, and internal or experimental examples.
+```text
+check source
+  -> compile SemCode
+  -> verify artifact
+  -> run admitted artifact
+  -> inspect disassembly
+```
 
-| Sample | Path | Demonstrates | Toolchain depth |
-|---|---|---|---|
-| Rule State Decision | [`examples/canonical/rule_state_decision/src/main.sm`](examples/canonical/rule_state_decision/src/main.sm) | quad-state branching and deterministic rule-like decisions | check / run / compile / verify |
-| Data Audit Record Iterable | [`examples/canonical/data_audit_record_iterable/src/main.sm`](examples/canonical/data_audit_record_iterable/src/main.sm) | records, traits, iteration, and copy-with over an admitted summary flow | check / run / compile / verify |
-| CLI Batch Core | [`examples/canonical/cli_batch_core/src/main.sm`](examples/canonical/cli_batch_core/src/main.sm) | control-flow over sequences, assertions, and CLI-like batch classification | check / run / compile / verify |
-| Positive Selected Import | [`examples/canonical/positive_selected_import/src/main.sm`](examples/canonical/positive_selected_import/src/main.sm) | selected local import and helper-call composition | check / run / compile / verify |
-| Wave2 Local Helper Import | [`examples/canonical/wave2_local_helper_import/src/main.sm`](examples/canonical/wave2_local_helper_import/src/main.sm) | bare local helper import and direct callable surface | check / run / compile / verify |
+## Your First Semantic Program
 
-For contract details, see:
+Save this as `decision.sm`:
 
-- [`docs/spec/index.md`](docs/spec/index.md)
-- [`docs/spec/syntax.md`](docs/spec/syntax.md)
-- [`docs/spec/cli.md`](docs/spec/cli.md)
+```sm
+fn decide(sensor: quad, ready: bool) -> quad {
+    if sensor == N {
+        return N;
+    }
 
-## Design Invariants
+    if sensor == S {
+        return S;
+    }
 
-Semantic is governed by invariants that are stronger than individual features. A feature can be experimental, limited, or out of scope; these rules define the shape of the platform.
+    if ready == true {
+        return T;
+    }
 
-| Invariant | Meaning |
+    return F;
+}
+
+fn main() {
+    let verdict: quad = decide(T, true);
+    assert(verdict == T);
+}
+```
+
+Check and run it:
+
+```bash
+cargo run --bin smc -- check decision.sm
+cargo run --bin smc -- run decision.sm
+```
+
+Compile and verify it explicitly:
+
+```bash
+cargo run --bin smc -- compile decision.sm -o decision.smc
+cargo run --bin smc -- verify decision.smc
+cargo run --bin smc -- run-smc decision.smc
+```
+
+### Visible output on current `main`
+
+Current `main` also contains a narrow, capability-controlled `print(text)` path:
+
+```sm
+fn main() {
+    print("Hello, Semantic");
+}
+```
+
+This path is benchmark-qualified on current `main`, but it is deliberately **not** a claim of unrestricted stdout, formatting, file I/O, stdin, networking, or a broad host ABI.
+
+## What Works Today
+
+The repository contains more than a parser prototype. The following paths are implemented and covered by current specs, examples, or qualification evidence.
+
+### Qualified practical contour
+
+- functions, locals, `if / else`, `return`, and explicit `match`;
+- native `quad`, `bool`, `i32`, `u32`, and `unit` families in the admitted contour;
+- records and rule/state-oriented programs;
+- explicit `Option` and `Result` control flow;
+- built-in `Sequence(T)` iteration;
+- direct-record user-defined `Iterable` dispatch;
+- direct local helper imports in the admitted bare and selected forms;
+- source -> semantic analysis -> IR -> SemCode -> verifier -> VM execution.
+
+### Landed and benchmark-qualified on current `main`, not yet promised as stable
+
+- same-family `i32` arithmetic and comparisons;
+- mutable locals and reassignment;
+- `while`, `loop`, `break`, and `continue`;
+- bounded `text`, concatenation, and explicit `to_text`;
+- persistent `Sequence(T)` helpers and functional `Map(K, V)` operations;
+- deterministic seeded pseudo-random helpers;
+- narrow capability-controlled `print(text)` observation;
+- bounded project-root command routes.
+
+### Additional landed work on current `main`, not yet qualified
+
+- schema and boundary-core work;
+- package-baseline widening beyond the bounded project-root contour;
+- first-wave closures and generics;
+- first-wave UI/application boundary work;
+- broader module, iterable, and language-surface work beyond the admitted limited-release slice.
+
+For the detailed and continuously maintained classification, use the [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md).
+
+## Status: Stable, Qualified, and Current-Main Are Different
+
+Semantic uses explicit status vocabulary so that implemented work is not silently advertised as a stable promise.
+
+| Status | Meaning |
 |---|---|
-| Verifier-first admission | A program is not trusted merely because it parsed or compiled. |
-| Deterministic execution | The same admitted artifact, runtime config, capability context, and input boundary must produce the same behavior. |
-| SemCode artifact boundary | Source constructs lower into SemCode; SemCode is admitted before public execution. |
-| Native quad logic | `N / F / T / S` are first-class semantic states, not comments or ad-hoc flags. |
-| Explicit branch control | Quad values carry uncertainty/conflict, while branch control remains explicit. |
-| Capability-gated effects | Host interaction must cross an explicit capability boundary. |
-| Audit for controlled effects | Controlled effects should be observable, attributable, and replay-oriented where the runtime path supports it. |
-| UI is not authority | Workbench, Studio, and UI crates may request and display; they must not own verifier, VM, or runtime truth. |
-| Main is not automatically stable | Landing on `main` does not widen the public stable contract by itself. |
+| **Published stable** | Promised by the published stable line, currently `v1.1.1`. |
+| **Qualified limited release** | Proven in a bounded practical contour by qualification evidence. |
+| **Landed on current `main`, not yet promised** | Implemented or benchmark-qualified, but not promoted into the stable or qualified release promise. |
+| **Out of scope** | Deliberately excluded from the current release contour. |
 
-The compact rule is:
+Current top-level posture:
+
+- Semantic is **not** presented as production-ready;
+- Semantic is **not** yet a broad general-purpose ecosystem;
+- current `main` is wider than the published stable line;
+- UI and Workbench do not own compiler, verifier, VM, or runtime truth;
+- stable promotion requires an explicit release decision, matching specs, and evidence.
+
+Read the authoritative documents when status precision matters:
+
+- [Semantic v1 Readiness](docs/roadmap/v1_readiness.md)
+- [Public Status Model](docs/roadmap/public_status_model.md)
+- [Public Maturity Snapshot](docs/roadmap/public_maturity_snapshot.md)
+- [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md)
+
+## How Execution Is Controlled
+
+Semantic separates construction, admission, execution, and external effects.
 
 ```text
-source describes
-compiler lowers
-verifier admits
-VM executes
-PROMETHEUS boundary controls effects
-audit records
-UI displays
+source describes intent
+  -> compiler lowers it
+  -> emitter creates SemCode
+  -> verifier admits or rejects the artifact
+  -> VM executes under quotas and deterministic rules
+  -> capability boundary controls optional host effects
+  -> audit layer records controlled effects where supported
 ```
 
-If a change weakens one of these invariants, it should be treated as an architecture change, not as a routine feature patch.
+### The compiler does not execute source directly
 
-## Current Status
+Source is parsed, checked, lowered, and emitted as SemCode. This keeps source semantics separate from runtime execution.
 
-Semantic is in an active PCC / Core Trust Freeze preparation phase. The
-current main branch contains a qualified practical-core baseline and
-conservative trust-boundary work, but Core Trust Freeze and stable release
-readiness are not declared complete.
+### The verifier is a real boundary
 
-Semantic already has the core staged architecture in place:
+Persisted `.smc` execution must not bypass verification. Malformed bytecode, invalid control flow, unsupported capabilities, incompatible metadata, and resource-bound violations belong at the admission boundary.
 
-```text
-source
-  -> frontend / semantic analysis
-  -> IR / deterministic passes
-  -> SemCode
-  -> verifier admission
-  -> deterministic VM
-  -> optional PROMETHEUS boundary
-```
+### The VM is deterministic and bounded
 
-Current `main` should be read as an active development line, not as a blanket stable-release promise. The rule remains:
+Given the same admitted SemCode, runtime configuration, capability context, and input boundary, execution is expected to produce the same result, trap class, and observable behavior.
 
-```text
-landed on main != published stable
-```
+### Host effects are explicit
 
-The stable public contract lives in `docs/spec/*` and the release/status language is governed by `docs/roadmap/public_status_model.md`.
+The VM does not receive unrestricted authority over the host. Effects cross the PROMETHEUS integration layer through explicit ABI and capability contracts.
 
-### Current active focus
+<p align="center">
+  <img width="1693" height="929" alt="Semantic execution architecture" src="https://github.com/user-attachments/assets/d8fd9017-062e-45a2-b0cf-695dc320ae24">
+</p>
 
-The current active hardening focus is **project-root CLI hardening and status reconciliation**.
+## CLI Cheat Sheet
 
-```text
-source (file / project-root)
-  -> check
-  -> compile
-  -> verify
-  -> run
-  -> controlled observation / output
-```
+`smc` is the canonical user-facing toolchain command. `svm` is the lower-level VM-oriented entrypoint.
 
-Recent work has moved the CLI pipeline to support a bounded project-root baseline:
+| Command | Purpose |
+|---|---|
+| `smc check <file.sm|project-root>` | Parse and semantically check source. |
+| `smc run <file.sm|project-root>` | Compile and execute from source through the standard route. |
+| `smc compile <input> -o app.smc` | Produce a SemCode artifact. |
+| `smc verify app.smc` | Admit or reject the artifact without running it. |
+| `smc run-smc app.smc` | Execute a persisted artifact through the verified route. |
+| `smc disasm app.smc` | Inspect SemCode instructions. |
+| `smc dump-ast <input>` | Inspect the parsed source model. |
+| `smc dump-ir <input>` | Inspect lowered IR. |
+| `smc lint <file.sm>` | Run lint-oriented checks. |
+| `smc fmt <path>` | Format Semantic source. |
+| `smc explain <code>` | Explain a diagnostic code. |
+| `smc repl` | Start the interactive check-oriented REPL. |
+| `smc 7hell <file.sm> [--json]` | Run the diagnostic/readiness qualification path. |
+| `svm run app.smc` | Run SemCode through the lower-level VM entrypoint. |
+| `svm disasm app.smc` | Disassemble SemCode through the VM entrypoint. |
 
-- Manifest loading and resolution of `semantic.toml` entrypoints.
-- Root-relative execution and analysis routes.
-- Deterministic compiler artifact chains and stale artifact protections.
-- Integrated local CI validation gates.
+The complete current command contract is in [docs/spec/cli.md](docs/spec/cli.md).
 
-#### Project-root readiness path
+## Project-Root Workflow
 
-The existing Project Model v0 readiness path is:
+Current `main` supports a bounded project-root baseline using the existing `semantic.toml` or `Semantic.package` layouts represented by repository fixtures and tests.
 
-```text
-cd <semantic-project-root>
+From a supported project root:
+
+```bash
 smc check .
 smc run .
+smc compile . -o app.smc
 ```
 
-The acceptance coverage already exercises both supported project-root shapes:
+This is not yet a complete package ecosystem. It does not claim a public registry, dependency solver, multi-package workspace manager, or `smc new` scaffolding.
 
-- `semantic.toml` project roots;
-- `Semantic.package` package-baseline roots.
+When running from this repository without installing the binaries, prefix commands with:
 
-That coverage also includes the explicit project-root argument form (`smc check <project-root>` / `smc run <project-root>`), alongside the `.` form from inside the root.
+```bash
+cargo run --bin smc --
+```
 
-This is readiness documentation only. GitHub CI is not the admission gate; local Admission Guard remains authoritative.
+## Examples
 
-#### Package-baseline identity
+Start with the curated examples under `examples/canonical/`.
 
-`Semantic.package` is the current package-baseline identity surface.
+| Example | Demonstrates | First command |
+|---|---|---|
+| [rule_state_decision](examples/canonical/rule_state_decision/) | `quad`, records, `Result`, explicit decisions | `smc run examples/canonical/rule_state_decision/src/main.sm` |
+| [text_core](examples/canonical/text_core/) | bounded text, concatenation, `to_text`, controlled output | `smc run examples/canonical/text_core/src/main.sm` |
+| [loop_control_flow](examples/canonical/loop_control_flow/) | `while`, `loop`, `break`, `continue` | `smc run examples/canonical/loop_control_flow/src/main.sm` |
+| [collections_core](examples/canonical/collections_core/) | practical collection operations | `smc run examples/canonical/collections_core/src/main.sm` |
+| [option_result_control_flow](examples/canonical/option_result_control_flow/) | explicit absence and failure paths | `smc run examples/canonical/option_result_control_flow/src/main.sm` |
+| [cli_batch_core](examples/canonical/cli_batch_core/) | sequence-driven batch classification | `smc run examples/canonical/cli_batch_core/src/main.sm` |
 
-In the current readiness model, that identity is bounded by the package manifest file and the fields already represented in the existing fixtures and tests:
+The benchmark suite also includes a deterministic headless Snake program:
 
-- package name, when present in the manifest;
-- `manifest_dir`;
-- `module_root`;
-- resolved entrypoint behavior used by `smc check` and `smc run`.
+```bash
+cargo run --bin smc -- run examples/benchmarks/snake_core.sm
+```
 
-This is package-baseline readiness, not a broader package registry or version-resolution system. The current behavior is already represented by the existing acceptance and diagnostic coverage for `Semantic.package`.
+See the [Examples Index](docs/examples_index.md) for the complete curated list and the intentional boundary example.
 
-### Current guarantees / design posture
+## Repository Map
 
-Semantic currently prioritizes:
-
-- verifier-first execution;
-- deterministic VM state transitions;
-- SemCode version/header discipline;
-- native quad logic: `N / F / T / S`;
-- explicit boolean branch control for quad values;
-- runtime quotas / bounded execution;
-- capability-gated PROMETHEUS boundary;
-- auditability for controlled effects;
-- source-to-artifact pipeline separation;
-- no silent stable-claim widening.
-
-The runtime ownership slice remains intentionally narrow and frozen around:
-
-- tuple access paths;
-- direct record-field access paths;
-- frame-local borrow lifetime;
-- runtime write rejection on overlapping active borrow paths.
-
-Unsupported in that slice:
-
-- ADT payload paths;
-- schema paths;
-- partial borrow release before frame exit;
-- advanced alias/region reasoning;
-- inter-frame borrow persistence;
-- indirect field selection.
-
-### UI / application boundary
-
-The repository contains UI/application crates and Workbench-related surfaces, but UI is not the owner of compiler, verifier, VM, SemCode, capability, audit, or runtime semantics.
-
-Current position:
+Semantic is a Rust workspace with narrow ownership boundaries.
 
 ```text
-UI / Workbench / Studio = operator and application layer
-Semantic Core           = language, SemCode, verifier, VM contracts
-PROMETHEUS boundary     = capability, host effects, runtime/audit integration
+Semantic/
+├── crates/sm-*                 language construction, SemCode, verifier, VM, CLI
+├── crates/prom-*               capability, ABI, state, rules, audit, UI boundary
+├── crates/semantic-core-*      low-level core capsule and execution substrate
+├── crates/core-lab             isolated core experimentation and qualification
+├── examples/                   canonical programs, benchmarks, boundary examples
+├── docs/spec/                  canonical public contracts
+├── docs/architecture/          system and ownership design
+├── docs/roadmap/               maturity, readiness, and release control
+├── tests/                      integration and public-contract evidence
+├── reports/                    qualification and gate evidence
+└── assets/                     branding and repository assets
 ```
 
-`Semantic Studio` is tracked as a future unified control environment. It must use canonical pipeline APIs and must not bypass verifier admission.
+High-level ownership:
 
-### Native UI demo milestone
+| Layer | Responsibility |
+|---|---|
+| **Language construction** | lexer, parser, semantic analysis, IR, deterministic passes, SemCode emission |
+| **Execution** | SemCode verification, runtime quotas and traps, deterministic VM execution |
+| **PROMETHEUS integration** | host ABI, capabilities, gates, state, rules, orchestration, audit |
+| **UI / application** | operator-facing display and application shell; never execution authority |
+| **Core capsule / laboratories** | low-level execution-core and quad substrate qualification without creating a second language surface |
 
-`prom-ui-demo` now has a first visible native WGPU demo slice on the active development line.
+### Compatibility perimeter
 
-The current demo path opens a native window, presents a WGPU-backed frame, renders deterministic physical-placement output, and keeps the UI path in the operator/application layer:
+The repository intentionally retains a narrow compatibility perimeter:
 
-```text
-prom-ui-demo
-  -> winit native window
-  -> WGPU presentation
-  -> physical placement
-  -> draw frame
-  -> interactive demo loop
-```
+- `crates/ton618-core` — compatibility-named low-level primitives;
+- `src/bin/ton618_core.rs` — retained compatibility launcher;
+- `ton618_legacy/` — historical source archive.
 
-Run the demo with:
+These paths are not second owners of Semantic architecture. New language, execution, and integration work belongs in the canonical `sm-*`, `semantic-core-*`, or `prom-*` owners.
+
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for the short architecture map and [docs/architecture/blueprint.md](docs/architecture/blueprint.md) for the detailed design.
+
+## UI and Workbench
+
+The repository contains native UI and Workbench-related development, including a WGPU demo path.
 
 ```bash
 cargo run -p prom-ui-demo
 ```
 
-This is a development milestone, not a stable public UI contract. The UI layer remains a display/operator surface and must not become the owner of compiler, verifier, VM, SemCode, capability, audit, or runtime semantics.
+<p align="center">
+  <img src="assets/readme/semantic-ui-demo-wgpu-native.png" alt="Semantic native WGPU UI demo" width="900">
+</p>
 
-![Semantic UI Demo - WGPU Native](assets/readme/semantic-ui-demo-wgpu-native.png)
+This is a current-main development surface, not a stable public UI contract. The UI may request operations and display results, but it must not bypass verifier admission or become the owner of language/runtime semantics.
 
-### Current non-goals
+## Current Explicit Limits
 
-The current status does not claim:
+Do not infer support for the following from adjacent features:
 
-- general stdout;
-- formatted printing;
-- implicit scalar-to-text conversion;
-- file / stdin / network I/O;
-- broad Host ABI widening;
-- UI-owned execution semantics;
-- stable release promotion for every feature landed on `main`.
+- unrestricted stdout or general formatting;
+- arbitrary file, stdin, process, or network I/O;
+- broad host ABI access;
+- a complete standard library;
+- a public package registry or dependency solver;
+- a frozen runtime ABI or binary ISA;
+- full-workspace `no_std`;
+- production-ready deployment;
+- stable promotion of every feature on `main`.
 
-### Engineering rule
+The current runtime ownership contract is also intentionally narrow: tuple and direct record-field access paths, frame-local borrow lifetime, and overlap rejection. Advanced region reasoning, ADT payload paths, schema paths, and inter-frame borrows are outside that frozen slice.
 
-The repository discipline is:
+## Documentation Path
+
+Choose the path that matches what you need:
+
+| Goal | Start here |
+|---|---|
+| Run the toolchain | [Getting Started](docs/getting_started.md) |
+| Browse working programs | [Examples Index](docs/examples_index.md) |
+| Learn the language philosophy | [Semantic Language Principles](docs/language/semantic_language_principles.md) |
+| Learn quad syntax | [Semantic Quad Surface](docs/language/semantic_quad_surface.md) |
+| Read the public contract | [Specification Index](docs/spec/index.md) |
+| Understand the architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Check feature maturity | [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md) |
+| Check release posture | [Semantic v1 Readiness](docs/roadmap/v1_readiness.md) |
+| Check `no_std` boundaries | [no_std Support Matrix](docs/NO_STD.md) |
+
+## Development and Validation
+
+For a normal change, start with:
+
+```bash
+cargo fmt --check
+cargo test --workspace
+```
+
+Useful public-contract checks:
+
+```bash
+cargo test --test public_api_contracts
+cargo test --test canonical_examples
+cargo test --test runtime_ownership_e2e
+```
+
+Repository rule:
 
 ```text
 one logical change
   -> one PR
-  -> tests where behavior changes
-  -> docs/spec sync where contract changes
-  -> no silent release claim widening
+  -> tests when behavior changes
+  -> spec/docs sync when a contract changes
+  -> no silent widening of release claims
 ```
 
-If a cleanup or UI task starts requiring new language/runtime behavior, it must move into the appropriate feature track instead of widening scope silently.
+Tests are treated as contract evidence, not only as regression checks.
 
-## Primary References
+## Contributing
 
-### Status and release posture
-- `docs/roadmap/public_status_model.md` - canonical status vocabulary: stable, limited, main-only, out of scope
-- `docs/roadmap/v1_readiness.md` - readiness posture and v1-oriented status model
-- `reports/g1_execution_integrity.md` - execution-integrity gate report
+Contributions are most useful when they preserve ownership boundaries and keep public claims aligned with implementation, specs, and tests.
 
-### Canonical specification bundle
-- `docs/spec/index.md` - spec bundle entrypoint
-- `docs/spec/syntax.md` - source syntax contract
-- `docs/spec/types.md` - source type contract
-- `docs/spec/source_semantics.md` - source execution and binding semantics
-- `docs/spec/semcode.md` - SemCode contract and version policy
-- `docs/spec/verifier.md` - admission verifier contract
-- `docs/spec/vm.md` - VM execution contract
-- `docs/spec/runtime_ownership.md` - frozen tuple + direct record-field runtime ownership contract
-- `docs/spec/cli.md` - public CLI surface
+Before opening a PR:
 
-### Current M-Hello / controlled observation track
-- `docs/language/semantic_hello_controlled_observation_encoding.md` - controlled observation encoding decision
-- `docs/language/semantic_hello_observation_admission_runtime_path.md` - admission/runtime path map
-- `docs/language/semantic_hello_observation_admission_shape.md` - verifier-facing observation shape
-- `docs/language/semantic_hello_vm_observation_execution_route.md` - VM observation execution route
-- `docs/language/semantic_hello_observation_capability_gate.md` - controlled observation capability gate
-- `docs/language/semantic_hello_observation_audit_policy.md` - audit policy for controlled observation
-- `docs/language/semantic_hello_cli_smoke_path.md` - CLI smoke path for controlled observation
+1. keep the patch focused on one logical change;
+2. update the owning spec when public behavior changes;
+3. add or update tests for visible behavior;
+4. avoid adding new architecture to compatibility paths;
+5. state whether the result is stable, qualified, current-main only, or out of scope.
 
-### Onboarding and project orientation
-- `docs/getting_started.md` - first practical onboarding path
-- `docs/examples_index.md` - examples index
-- `docs/LANGUAGE.md` - language overview and design intent
-- `docs/NAMING.md` - naming rules and short forms
-- `docs/NO_STD.md` - `no_std` / `alloc` / `std` support boundaries
+For architecture-sensitive work, read:
 
-### Architecture and compatibility perimeter
-- `ARCHITECTURE.md` - repository-level architecture overview
-- `docs/legacy-map.md` - retained compatibility and legacy perimeter inventory
-- `docs/release_artifact_model.md` - release artifact model
-
-## What Is In The Repository
-
-The repository is organized as a layered workspace. No single crate owns the whole system; each layer has a narrow responsibility.
-
-### Language construction layer
-
-This layer turns `.sm` source into checked intermediate forms.
-
-- `crates/sm-front` — lexer, parser, AST-facing source model, source-surface typing helpers
-- `crates/sm-profile` — parser/profile policy, feature gates, compatibility profile surface
-- `crates/sm-sema` — semantic analysis, diagnostics, imports/exports, symbol/type policy
-- `crates/sm-ir` — IR model, lowering, deterministic passes, IR validation
-- `crates/sm-emit` — producer-facing SemCode emission facade
-
-### Execution layer
-
-This layer owns admission, execution vocabulary, and verified VM behavior.
-
-- `crates/sm-verify` — SemCode admission verifier
-- `crates/sm-runtime-core` — runtime-safe shared vocabulary: quotas, traps, execution config, runtime IDs
-- `crates/sm-vm` — deterministic SemCode VM and disassembly/runtime execution path
-
-### PROMETHEUS boundary layer
-
-This layer owns controlled interaction with host state, capabilities, gates, audit, and runtime integration.
-
-- `crates/prom-abi` — host-call ABI vocabulary
-- `crates/prom-cap` — capability policy and capability-denial model
-- `crates/prom-gates` — gate descriptors and gate binding layer
-- `crates/prom-runtime` — runtime session orchestration
-- `crates/prom-state` — semantic state store
-- `crates/prom-rules` — deterministic rule agenda and rule evaluation
-- `crates/prom-audit` — audit, trace, and replay-oriented records
-
-### Tooling layer
-
-This layer is the user/operator-facing command surface. It may orchestrate many crates, but it does not own their internal semantics.
-
-- `crates/smc-cli` — canonical public CLI owner for `check`, `compile`, `verify`, `run`, `run-smc`, `disasm`, diagnostics, snapshots, and related tooling
-- root binary shims — public entrypoints such as `smc`, `svm`, and retained compatibility launchers
-
-### UI / application layer
-
-This layer is an operator/application shell. It must use canonical pipeline APIs and must not bypass verifier admission.
-
-- `crates/prom-ui` — UI-facing model surface
-- `crates/prom-ui-runtime` — UI/runtime bridge layer
-- `crates/prom-ui-demo` — demo surface for UI/runtime integration
-- `apps/workbench` — Workbench / future Studio-facing application shell
-
-### Docs, tests, assets, and reports
-
-These paths carry the public contract, active design records, regression coverage, and project assets.
-
-- `docs/spec/*` — canonical public contract bundle
-- `docs/language/*` — language-track and active feature-track design records
-- `docs/roadmap/*` — status, readiness, and roadmap control documents
-- `reports/*` — gate reports and release/readiness evidence
-- `tests/*` — integration, contract, fixture, and regression tests
-- `assets/*` — brand and retained non-core assets
-
-### Compatibility perimeter
-
-The repository intentionally retains a narrow compatibility perimeter. It is not a second owner of the Semantic platform contracts.
-
-- `crates/ton618-core` — compatibility-named low-level primitive crate
-- `src/bin/ton618_core.rs` — retained compatibility launcher
-- `docs/legacy-map.md` — authoritative inventory for retained legacy/compatibility paths
-
-New architecture must land in the appropriate owner crate, not in compatibility paths.
-
-## CLI Quickstart
-
-This quickstart is the recommended first pass for a new user. It is a **zero-effect verifier smoke path** that proves the core pipeline:
-
-```text
-source -> check -> compile -> verify -> run -> disasm
-```
-
-It does not demonstrate general stdout, formatting, file I/O, network I/O, or the M-Hello controlled observation track.
-
-### 1. Build the public entrypoints
-
-```powershell
-cargo build --bin smc --bin svm
-```
-
-### 2. Create a minimal Semantic source file
-
-```powershell
-@'
-fn main() {
-    return;
-}
-'@ | Set-Content smoke_zero.sm
-```
-
-This program has no host effects. It is intentionally minimal.
-
-### 3. Check source
-
-```powershell
-cargo run --bin smc -- check smoke_zero.sm
-```
-
-This validates the source through the frontend / semantic-analysis route.
-
-### 4. Compile source to SemCode
-
-```powershell
-cargo run --bin smc -- compile smoke_zero.sm -o smoke_zero.smc
-```
-
-This emits a SemCode artifact from the checked source path.
-
-### 5. Verify the SemCode artifact
-
-```powershell
-cargo run --bin smc -- verify smoke_zero.smc
-```
-
-This is the admission gate. Public `.smc` execution is verifier-first.
-
-### 6. Run from source
-
-```powershell
-cargo run --bin smc -- run smoke_zero.sm
-```
-
-This exercises the source-run route.
-
-### 7. Run the verified artifact route
-
-```powershell
-cargo run --bin smc -- run-smc smoke_zero.smc
-```
-
-This exercises the precompiled SemCode route.
-
-### 8. Disassemble SemCode
-
-```powershell
-cargo run --bin svm -- disasm smoke_zero.smc
-```
-
-This confirms the artifact can be inspected through the VM tooling route.
-
-### Expected result
-
-The smoke path should:
-
-- accept the minimal source file;
-- emit `smoke_zero.smc`;
-- admit the SemCode artifact through `smc verify`;
-- run both source and `.smc` routes without host effects;
-- produce disassembly containing the compiled `main` function.
-
-For controlled text observation / Hello World work, follow the active M-Hello documents under `docs/language/semantic_hello_*`.
-
-For the full CLI contract and command semantics, see `docs/spec/cli.md`.
-
-The current `smc 7hell <file.sm> [--json]` path exists as a diagnostic/readiness route. It is useful for qualification and report review, but it is not the normal beginner onboarding flow.
-
-For a fuller onboarding path, see:
-
-- `docs/getting_started.md`
-- `docs/examples_index.md`
-
-## Current CLI Surface
-
-`smc` is the canonical public CLI for the Semantic toolchain. It is the preferred route for source checks, SemCode emission, verifier admission, and public execution flows.
-
-### Core pipeline commands
-
-These commands represent the standard source-to-execution path.
-
-| Command | Role |
-|---|---|
-| `smc check <file.sm>` | Parse and semantically check source without emitting an artifact. |
-| `smc compile <file.sm> -o <file.smc>` | Compile source into a SemCode artifact. |
-| `smc verify <file.smc>` | Admit or reject a SemCode artifact before execution. |
-| `smc run <file.sm>` | Run from source through the standard CLI route. |
-| `smc run-smc <file.smc>` | Run a precompiled SemCode artifact through the standard CLI route. |
-
-### Inspection and artifact commands
-
-These commands expose intermediate artifacts and stable inspection surfaces.
-
-| Command | Role |
-|---|---|
-| `smc dump-ast <file.sm>` | Show the parsed source structure. |
-| `smc dump-ir <file.sm>` | Show the lowered IR path. |
-| `smc dump-bytecode <file.sm>` | Show emitted bytecode-oriented information. |
-| `smc disasm <file.smc>` | Disassemble a SemCode artifact through the CLI route. |
-| `smc hash-ast <file.sm>` | Produce a stable AST-oriented hash. |
-| `smc hash-ir <file.sm>` | Produce a stable IR-oriented hash. |
-| `smc hash-smc <file.smc>` | Produce a stable SemCode artifact hash. |
-| `smc snapshots ...` | Work with snapshot-oriented regression artifacts. |
-
-### Diagnostics and developer tooling
-
-These commands support editing, diagnostics, and toolchain discovery.
-
-| Command | Role |
-|---|---|
-| `smc lint <file.sm>` | Run lint-style checks. |
-| `smc fmt <path>` | Format source files or check formatting. |
-| `smc explain <code>` | Explain a diagnostic or toolchain code. |
-| `smc features` | Show exposed feature/profile information. |
-| `smc watch ...` | Watch files and rerun selected checks. |
-| `smc repl` | Start the interactive Semantic REPL route. |
-
-### Low-level VM entrypoint
-
-`svm` is the lower-level VM-oriented entrypoint. It is useful for VM-focused inspection, but `smc` remains the canonical public toolchain route.
-
-| Command | Role |
-|---|---|
-| `svm run <file.smc>` | Run a SemCode artifact through the VM entrypoint. |
-| `svm disasm <file.smc>` | Disassemble a SemCode artifact through the VM entrypoint. |
-
-### CLI boundary rule
-
-The CLI must not become a second execution semantics owner.
-
-```text
-smc orchestrates
-verifier admits or rejects
-VM executes
-PROMETHEUS boundary controls effects
-```
-
-Public `.smc` execution remains verifier-first. Controlled observation / Hello World output is tracked separately in the active M-Hello path and must not be read as general stdout support.
-
-## Current SemCode And Runtime Notes
-
-SemCode is the executable artifact boundary of Semantic. It is not source syntax and it is not the host runtime. A `.smc` artifact must be structurally valid, admitted by the verifier, and executed under the runtime contract.
-
-### SemCode ownership
-
-Current repository ownership is split deliberately:
-
-| Area | Owner |
-|---|---|
-| Source syntax and source semantics | `sm-front`, `sm-sema` |
-| IR and lowering path | `sm-ir` |
-| Producer-facing SemCode emission facade | `sm-emit` |
-| SemCode admission / rejection | `sm-verify` |
-| Runtime vocabulary: quotas, traps, execution config | `sm-runtime-core` |
-| Deterministic execution and disassembly | `sm-vm` |
-| Host effects, capabilities, gates, audit | `prom-*` boundary crates |
-
-The important rule is simple:
-
-```text
-source constructs do not execute directly
-SemCode does not bypass admission
-VM execution does not own host authority
-```
-
-### Verifier-first execution
-
-Public `.smc` execution is verifier-first.
-
-```text
-SemCode bytes
-  -> structural / capability / resource admission
-  -> verified program
-  -> deterministic VM execution
-```
-
-The VM is not expected to be the only safety boundary. Invalid opcodes, malformed function envelopes, unsupported capability use, bad jump targets, resource-budget violations, and incompatible SemCode metadata belong at the admission boundary before public execution.
-
-### Runtime model
-
-The runtime is treated as a deterministic state transition system.
-
-```text
-state[k + 1] = step(state[k], instruction[pc])
-```
-
-The runtime state includes, at minimum:
-
-- program counter and current instruction;
-- frame / call-stack state;
-- runtime values and registers;
-- quotas / bounded execution limits;
-- traps and stop reasons;
-- active ownership paths;
-- capability context;
-- optional PROMETHEUS host-boundary state.
-
-Given the same admitted SemCode, runtime configuration, capability context, and input boundary, execution must remain deterministic.
-
-### Runtime ownership slice
-
-The currently documented ownership slice is intentionally narrow and frozen.
-
-Supported:
-
-- tuple access paths;
-- direct record-field access paths;
-- frame-local borrow lifetime;
-- exact overlap rejection;
-- parent-child overlap rejection;
-- child-parent overlap rejection;
-- sibling writes allowed when paths do not overlap.
-
-Unsupported in the current slice:
-
-- ADT payload paths;
-- schema paths;
-- partial borrow release before frame exit;
-- advanced alias / region reasoning;
-- inter-frame borrow persistence;
-- indirect projections;
-- smart path normalization.
-
-This is deliberate: the current runtime ownership model prefers a small verified contract over broad but ambiguous alias semantics.
-
-### Controlled observation note
-
-The active M-Hello work adds a narrow controlled text observation route. It must not be read as general stdout.
-
-The intended controlled observation path is:
-
-```text
-verified SemCode
-  -> VM controlled observation event
-  -> ControlledObservationSink capability gate
-  -> audit decision
-  -> CLI rendering envelope
-```
-
-Out of scope for this route:
-
-- general stdout;
-- formatted printing;
-- implicit scalar-to-text conversion;
-- file / stdin / network I/O;
-- broad host ABI widening.
-
-### Stability rule
-
-SemCode/runtime behavior must not be promoted from `main` to public stable language without matching spec, verifier, VM, CLI, and test coverage.
-
-```text
-implementation landed
-  != public contract widened
-```
-
-## Testing
-
-Tests are treated as contract evidence, not only as regression checks. A behavior should not be promoted in README, examples, or specs unless the corresponding tests cover the pipeline stage that owns it.
-
-### Minimal pre-PR gate
-
-Run this before any normal code or docs PR:
-
-```powershell
-cargo fmt --check
-cargo test -q
-```
-
-### Public contract gates
-
-Run these when a change touches public API, CLI behavior, runtime ownership, SemCode, verifier admission, or README/spec language:
-
-```powershell
-cargo test -q --test public_api_contracts
-cargo test -q --test runtime_ownership_e2e
-```
-
-### Layer-focused checks
-
-Use focused package tests when working inside a specific owner layer:
-
-```powershell
-cargo test -q -p sm-verify
-cargo test -q -p sm-vm
-cargo test -q -p smc-cli
-cargo test -q -p prom-cap
-cargo test -q -p prom-audit
-```
-
-Run only the relevant subset when the change is isolated. Run the broader workspace test when the change crosses ownership boundaries.
-
-### M-Hello / controlled observation checks
-
-For the active controlled-observation track, use the focused tests that cover the source route, verifier route, VM observation route, capability gate, audit policy, and CLI envelope:
-
-```powershell
-cargo test -q --test hello_cli_observation_envelope
-cargo test -q --test hello_cli_smoke_pipeline_harness
-cargo test -q --test hello_real_semcode_admission
-cargo test -q --test hello_real_semcode_negative_encodings
-cargo test -q --test hello_observation_capability_skeleton
-cargo test -q --test public_api_contracts
-```
-
-These tests are for the narrow controlled text observation path. Passing them does not imply general stdout, formatting, file I/O, stdin, network I/O, or broad host ABI support.
-
-### Test selection rule
-
-```text
-changed layer
-  -> run that layer's focused tests
-  -> run public contract tests if behavior is visible
-  -> run full cargo test if ownership boundaries are crossed
-```
-
-No PR should widen a public claim without matching tests and documentation updates.
-
-## no_std Smoke Check
-
-The `no_std` smoke check protects the core library boundary. It does not claim that the entire workspace, CLI, UI, PROMETHEUS integration layer, or application crates are `no_std`.
-
-Use it when a change touches core library code, feature flags, dependency boundaries, or shared types intended to remain usable without `std`.
-
-```powershell
-cargo check --no-default-features
-```
-
-Expected result:
-
-- core library code compiles without default `std` features;
-- accidental `std` imports are rejected in the no-default-features path;
-- feature-gated `alloc` / `std` usage remains explicit;
-- CLI, UI, host-boundary, and integration surfaces remain outside this smoke unless separately documented.
-
-Boundary rule:
-
-```text
-no_std core support
-  != no_std full workspace
-  != no_std CLI
-  != no_std PROMETHEUS boundary
-  != no_std UI/application layer
-```
-
-Reference:
-
-- `docs/NO_STD.md`
+- [Module Ownership Map](docs/architecture/module_ownership_map.md)
+- [Dependency and Boundary Rules](docs/architecture/dependency_boundary_rules.md)
+- [Public Status Model](docs/roadmap/public_status_model.md)
 
 ## License
 
-Semantic is licensed under the Apache License 2.0.
-
-The repository license covers the project source code, documentation, examples, tests, reports, and associated repository files unless a file states otherwise.
-
-Third-party dependencies, external tools, and external assets remain under their own licenses.
-
-The license does not widen the public Semantic contract. Public behavior claims are governed by `docs/spec/*`, `docs/roadmap/public_status_model.md`, and the corresponding tests.
+Semantic is licensed under the [Apache License 2.0](LICENSE).
 
 Copyright 2026 Said Kulmakov.
 
-See `LICENSE` for the full license text and `NOTICE` for attribution and project-scope notes.
+Third-party dependencies and external assets remain under their respective licenses. See [NOTICE](NOTICE) for attribution and project-scope notes.
