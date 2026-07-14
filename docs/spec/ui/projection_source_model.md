@@ -67,11 +67,18 @@ tokenization != authority
 ```
 
 The normative WP2C-P3 candidate, context, precedence and span rules remain in
-Grammar v0 and are not duplicated here. P3 specification does not implement a
-lexer, parser or diagnostic API. P3 merge does not authorize parser or lexer
-implementation and grants no runtime, capability, admission or activation
+Grammar v0 and are not duplicated here. A crate-private implementation
+candidate now exists in `prom-ui`; Grammar v0 owns its detailed tokenization
+and diagnostic selection. The implementation candidate does not publish a
+parser or token API and grants no runtime, capability, admission or activation
 authority.
-The Projection Source parser and lexer remain unimplemented and unauthorized.
+
+```text
+implementation candidate != publication
+implementation != runtime loading
+parse success != semantic validation
+parser implementation != Gate D activation
+```
 
 ## Source Size and Provenance Representability
 
@@ -85,8 +92,8 @@ parser ownership. A source longer than `u32::MAX` bytes is classified as the
 future input-domain error `ProjectionSourceInputError::SourceTooLarge`; it
 produces no SourceSpan, PSP diagnostic, tokenization, AST or PS validation.
 The conceptual error carries the caller-supplied `SourceId`, actual UTF-8 byte
-length and maximum accepted byte length. The concrete API is not implemented
-by this model correction.
+length and maximum accepted byte length. The crate-private implementation
+candidate enforces this preflight without widening the public API.
 
 The limit is a representability ceiling, not a recommended operational file
 size. A future host or loader may impose a smaller memory, quota, transport or
@@ -144,10 +151,10 @@ that evidence and the current authorization posture; it does not create or
 override repository truth. Issue state does not create Git tree state and the
 ledger grants no architectural authority.
 
-P3 specification and any future merge do not implement or authorize the
-Projection Source parser or lexer and do not authorize runtime loading or
-activation.
-The Projection Source parser and lexer remain unimplemented and unauthorized.
+P3 specification and merge did not themselves authorize implementation. The
+separately bounded WP2C-P4 task now provides a crate-private parser/scanner
+implementation candidate; publication, runtime loading and activation remain
+unauthorized.
 
 No source-size check grants capability, performs admission, loads files,
 allocates runtime buffers, activates a ProjectionBundle, mutates shell state,

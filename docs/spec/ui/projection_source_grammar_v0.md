@@ -4,8 +4,8 @@ Status: PROPOSED NORMATIVE GRAMMAR CONTRACT
 Track: UI DNA v2
 Phase coverage: UI-DNA2-WP2B + WP2C-P1 + WP2C-P2 + WP2C-P3
 File posture: `.proj.sm`
-Implementation status: NOT IMPLEMENTED
-Parser authorization: NOT INCLUDED
+Implementation status: CRATE-PRIVATE PARSER IMPLEMENTATION CANDIDATE
+Parser authorization: BOUNDED WP2C-P4 IMPLEMENTATION SLICE
 Runtime activation: NOT AUTHORIZED
 
 ## 1. Ownership and Boundaries
@@ -294,8 +294,9 @@ evidence. Issue #1489 may subsequently be rebaselined to record that merged
 evidence and the current next-step authorization posture. The ledger records
 repository truth; it does not create or override repository truth.
 
-P3 diagnostic implementation is absent.
-The Projection Source parser and lexer remain unimplemented and unauthorized.
+A crate-private Grammar v0 parser/scanner implementation candidate now exists
+in `prom-ui`. It remains unpublished and does not create a public parser API,
+runtime loading, semantic admission or activation authority.
 
 Issue #1489 remains the coordination ledger for landed checkpoints and
 explicit next-step authorization. It grants no architectural authority and
@@ -784,11 +785,11 @@ this P2 choice. An oversized source returns `SourceTooLarge`, performs no
 lexical scan and produces no PSP diagnostic.
 
 P2 specification is not parser or lexer implementation, public API or parser
-authorization. The P3 identifier-tokenization contract defined below is not
-lexer, parser or diagnostic implementation. Diagnostic classification is not
-Semantic validation, capability, admission or runtime activation. The
-Projection Source parser and lexer remain unimplemented and unauthorized.
-Gate D remains closed, and production promotion remains unauthorized.
+authorization. The crate-private WP2C-P4 implementation candidate implements
+the landed P3 identifier-tokenization contract without publishing a parser or
+token API. Diagnostic classification is not Semantic validation, capability,
+admission or runtime activation. Implementation candidate does not mean
+publication, runtime loading or production promotion. Gate D remains closed.
 
 ### Diagnostic span rules
 
