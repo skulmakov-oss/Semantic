@@ -18,6 +18,24 @@ use super::static_ir_artifact::{
 const MINIMAL: &[u8] = include_bytes!("../tests/vectors/static_ui_ir_v1/minimal.bin");
 const STRUCTURED: &[u8] = include_bytes!("../tests/vectors/static_ui_ir_v1/structured.bin");
 
+const MAGIC_OFFSET: usize = 4;
+const SCHEMA_VERSION_OFFSET: usize = 24;
+const CONTRACT_VERSION_OFFSET: usize = 28;
+const DOCUMENT_ID_OFFSET: usize = 32;
+const MINIMAL_SURFACE_KEY_OFFSET: usize = 76;
+const MINIMAL_SURFACE_SOURCE_TAG_OFFSET: usize = 84;
+const MINIMAL_ROLE_OFFSET: usize = 101;
+const MINIMAL_ACCESSIBILITY_TAG_OFFSET: usize = 118;
+const STRUCTURED_SURFACE_SPAN_START_OFFSET: usize = 93;
+const STRUCTURED_FIRST_ROLE_OFFSET: usize = 117;
+const STRUCTURED_FIRST_NODE_OFFSET: usize = 105;
+const STRUCTURED_SECOND_NODE_OFFSET: usize = 151;
+const STRUCTURED_ROOT_NODE_OFFSET: usize = 208;
+const STRUCTURED_FIRST_CHILD_OFFSET: usize = 253;
+const STRUCTURED_SECOND_CHILD_OFFSET: usize = 265;
+const STRUCTURED_ACCESSIBILITY_TAG_OFFSET: usize = 277;
+const STRUCTURED_ACCESSIBILITY_ID_OFFSET: usize = 278;
+
 #[derive(Clone)]
 struct SurfaceSpec {
     id: u64,
@@ -154,28 +172,41 @@ fn assert_kind(
     bytes: &[u8],
     stage: StaticUiArtifactV1Stage,
     kind: StaticUiArtifactV1ErrorKind,
+    byte_offset: Option<usize>,
 ) -> StaticUiArtifactV1Error {
     let error = error(bytes, limits());
     assert_eq!(error.stage(), stage);
     assert_eq!(error.kind(), &kind);
+    assert_eq!(error.byte_offset(), byte_offset);
     error
 }
 
-fn static_ir_kinds(error: &StaticUiArtifactV1Error) -> Vec<StaticUiIrDiagnosticKind> {
+type DiagnosticTuple = (StaticUiIrDiagnosticKind, Option<SourceRef>, u64, u64);
+
+fn static_ir_diagnostics(error: &StaticUiArtifactV1Error) -> Vec<DiagnosticTuple> {
     match error.kind() {
         StaticUiArtifactV1ErrorKind::StaticIr(diagnostics) => diagnostics
             .diagnostics()
             .iter()
-            .map(|diagnostic| diagnostic.kind())
+            .map(|diagnostic| {
+                let coordinate = diagnostic.coordinate();
+                (
+                    diagnostic.kind(),
+                    coordinate.source(),
+                    coordinate.domain(),
+                    coordinate.secondary(),
+                )
+            })
             .collect(),
         other => panic!("expected Static IR diagnostics, got {other:?}"),
     }
 }
 
-fn assert_static_ir(bytes: &[u8], expected: StaticUiIrDiagnosticKind) {
+fn assert_static_ir(bytes: &[u8], expected: &[DiagnosticTuple]) {
     let error = error(bytes, limits());
     assert_eq!(error.stage(), StaticUiArtifactV1Stage::StaticIr);
-    assert!(static_ir_kinds(&error).contains(&expected));
+    assert_eq!(error.byte_offset(), None);
+    assert_eq!(static_ir_diagnostics(&error), expected);
 }
 
 fn id<T>(result: Result<T, super::contract_primitives::ContractPrimitiveError>) -> T {
@@ -314,6 +345,29 @@ fn ui_dna2_wp3b_artifact_golden_vectors_match_independent_layout_encoding() {
     assert_eq!(encode(73, 7, 9, &surfaces, &nodes), STRUCTURED);
 }
 
+// Normative invalid-artifact matrix:
+//  1 truncated primitive -> rejects_malformed_header_and_byte_domain_rows
+//  2 truncated byte string -> rejects_malformed_header_and_byte_domain_rows
+//  3 trailing bytes -> named_mutations_are_guaranteed_rejections
+//  4 wrong magic -> named_mutations_are_guaranteed_rejections
+//  5 unsupported schema -> named_mutations_are_guaranteed_rejections
+//  6 unsupported contract -> named_mutations_are_guaranteed_rejections
+//  7 arithmetic overflow -> rejects_malformed_header_and_byte_domain_rows
+//  8 resource limits -> enforces_each_caller_supplied_resource_limit
+//  9 invalid UTF-8 -> named_mutations_are_guaranteed_rejections
+// 10 invalid option tag -> named_mutations_are_guaranteed_rejections (source/accessibility)
+// 11 invalid SourceSpan -> named_mutations_are_guaranteed_rejections
+// 12 zero identifier/key -> named_mutations_are_guaranteed_rejections
+// 13 unknown role -> preserves_unknown_role_identity_and_offset
+// 14 duplicate IDs/keys -> preserves_duplicate_id_and_key_diagnostics (surface/node)
+// 15 missing root/child -> preserves_missing_and_duplicate_child_diagnostics
+// 16 duplicate child/order -> preserves_missing_and_duplicate_child_diagnostics
+// 17 cycle -> preserves_forest_diagnostics
+// 18 multiple parents/shared ownership -> preserves_forest_diagnostics
+// 19 unreachable node -> preserves_forest_diagnostics
+// 20 noncanonical surface/node order -> rejects_each_noncanonical_order_and_reencoding_mismatch
+// 21 noncanonical child order -> rejects_each_noncanonical_order_and_reencoding_mismatch
+// 22 canonical mismatch -> named_mutations_are_guaranteed_rejections (node/child records)
 #[test]
 fn ui_dna2_wp3b_artifact_rejects_malformed_header_and_byte_domain_rows() {
     let truncated_primitive = &MINIMAL[..3];
@@ -321,6 +375,7 @@ fn ui_dna2_wp3b_artifact_rejects_malformed_header_and_byte_domain_rows() {
         truncated_primitive,
         StaticUiArtifactV1Stage::Decode,
         StaticUiArtifactV1ErrorKind::TruncatedPrimitive,
+        Some(0),
     );
     assert_eq!(e.byte_offset(), Some(0));
 
@@ -328,6 +383,7 @@ fn ui_dna2_wp3b_artifact_rejects_malformed_header_and_byte_domain_rows() {
         &MINIMAL[..10],
         StaticUiArtifactV1Stage::Decode,
         StaticUiArtifactV1ErrorKind::TruncatedByteString,
+        Some(4),
     );
     let mut trailing = MINIMAL.to_vec();
     trailing.push(0);
@@ -335,27 +391,40 @@ fn ui_dna2_wp3b_artifact_rejects_malformed_header_and_byte_domain_rows() {
         &trailing,
         StaticUiArtifactV1Stage::CompleteConsumption,
         StaticUiArtifactV1ErrorKind::TrailingBytes,
+        Some(MINIMAL.len()),
     );
     let mut wrong_magic = MINIMAL.to_vec();
-    wrong_magic[4] ^= 1;
+    assert_eq!(wrong_magic[MAGIC_OFFSET], b'U');
+    wrong_magic[MAGIC_OFFSET] ^= 1;
     assert_kind(
         &wrong_magic,
         StaticUiArtifactV1Stage::Header,
         StaticUiArtifactV1ErrorKind::InvalidMagic,
+        Some(4),
     );
     let mut schema = MINIMAL.to_vec();
-    replace_u32(&mut schema, 24, 2);
+    assert_eq!(
+        &schema[SCHEMA_VERSION_OFFSET..SCHEMA_VERSION_OFFSET + 4],
+        &1_u32.to_le_bytes()
+    );
+    replace_u32(&mut schema, SCHEMA_VERSION_OFFSET, 2);
     assert_kind(
         &schema,
         StaticUiArtifactV1Stage::Header,
         StaticUiArtifactV1ErrorKind::UnsupportedSchemaVersion,
+        Some(24),
     );
     let mut contract = MINIMAL.to_vec();
-    replace_u32(&mut contract, 28, 2);
+    assert_eq!(
+        &contract[CONTRACT_VERSION_OFFSET..CONTRACT_VERSION_OFFSET + 4],
+        &1_u32.to_le_bytes()
+    );
+    replace_u32(&mut contract, CONTRACT_VERSION_OFFSET, 2);
     assert_kind(
         &contract,
         StaticUiArtifactV1Stage::Header,
         StaticUiArtifactV1ErrorKind::UnsupportedContractVersion,
+        Some(28),
     );
     let overflow = qualify_checked_cursor_overflow();
     assert_eq!(overflow.stage(), StaticUiArtifactV1Stage::Decode);
@@ -363,22 +432,23 @@ fn ui_dna2_wp3b_artifact_rejects_malformed_header_and_byte_domain_rows() {
         overflow.kind(),
         &StaticUiArtifactV1ErrorKind::ArithmeticOverflow
     );
+    assert_eq!(overflow.byte_offset(), Some(1));
 }
 
 #[test]
 fn ui_dna2_wp3b_artifact_enforces_each_caller_supplied_resource_limit() {
     let mut configured = limits();
     configured.max_input_bytes = MINIMAL.len() - 1;
-    assert_eq!(
-        error(MINIMAL, configured).stage(),
-        StaticUiArtifactV1Stage::Resource
-    );
+    let actual = error(MINIMAL, configured);
+    assert_eq!(actual.stage(), StaticUiArtifactV1Stage::Resource);
+    assert_eq!(actual.kind(), &StaticUiArtifactV1ErrorKind::InputTooLarge);
+    assert_eq!(actual.byte_offset(), None);
 
-    for (field, expected) in [
-        (0, StaticUiArtifactV1ErrorKind::SurfaceLimitExceeded),
-        (1, StaticUiArtifactV1ErrorKind::NodeLimitExceeded),
-        (2, StaticUiArtifactV1ErrorKind::ChildLimitExceeded),
-        (3, StaticUiArtifactV1ErrorKind::RoleLengthLimitExceeded),
+    for (field, expected, expected_offset) in [
+        (0, StaticUiArtifactV1ErrorKind::SurfaceLimitExceeded, 56),
+        (1, StaticUiArtifactV1ErrorKind::NodeLimitExceeded, 85),
+        (2, StaticUiArtifactV1ErrorKind::ChildLimitExceeded, 249),
+        (3, StaticUiArtifactV1ErrorKind::RoleLengthLimitExceeded, 97),
     ] {
         let mut configured = limits();
         match field {
@@ -391,59 +461,85 @@ fn ui_dna2_wp3b_artifact_enforces_each_caller_supplied_resource_limit() {
         let actual = error(bytes, configured);
         assert_eq!(actual.stage(), StaticUiArtifactV1Stage::Resource);
         assert_eq!(actual.kind(), &expected);
+        assert_eq!(actual.byte_offset(), Some(expected_offset));
     }
 }
 
 #[test]
 fn ui_dna2_wp3b_artifact_rejects_utf8_option_span_and_zero_representation_rows() {
     let mut utf8 = MINIMAL.to_vec();
-    utf8[101] = 0xff;
+    assert_eq!(utf8[MINIMAL_ROLE_OFFSET], b'r');
+    utf8[MINIMAL_ROLE_OFFSET] = 0xff;
     assert_kind(
         &utf8,
         StaticUiArtifactV1Stage::Decode,
         StaticUiArtifactV1ErrorKind::InvalidUtf8,
+        Some(101),
     );
     let mut option = MINIMAL.to_vec();
-    option[84] = 2;
+    assert_eq!(option[MINIMAL_SURFACE_SOURCE_TAG_OFFSET], 0);
+    option[MINIMAL_SURFACE_SOURCE_TAG_OFFSET] = 2;
     assert_kind(
         &option,
         StaticUiArtifactV1Stage::Decode,
         StaticUiArtifactV1ErrorKind::InvalidOptionTag,
+        Some(84),
     );
     let mut accessibility_option = MINIMAL.to_vec();
-    accessibility_option[MINIMAL.len() - 1] = 2;
+    assert_eq!(accessibility_option[MINIMAL_ACCESSIBILITY_TAG_OFFSET], 0);
+    accessibility_option[MINIMAL_ACCESSIBILITY_TAG_OFFSET] = 2;
     assert_kind(
         &accessibility_option,
         StaticUiArtifactV1Stage::Decode,
         StaticUiArtifactV1ErrorKind::InvalidOptionTag,
+        Some(118),
     );
     let mut span = STRUCTURED.to_vec();
-    replace_u32(&mut span, 93, 29);
+    assert_eq!(
+        &span[STRUCTURED_SURFACE_SPAN_START_OFFSET..STRUCTURED_SURFACE_SPAN_START_OFFSET + 4],
+        &0_u32.to_le_bytes()
+    );
+    replace_u32(&mut span, STRUCTURED_SURFACE_SPAN_START_OFFSET, 29);
     assert_kind(
         &span,
         StaticUiArtifactV1Stage::Representation,
         StaticUiArtifactV1ErrorKind::InvalidSourceSpan,
+        Some(93),
     );
     let mut zero_id = MINIMAL.to_vec();
-    replace_u64(&mut zero_id, 32, 0);
+    assert_eq!(
+        &zero_id[DOCUMENT_ID_OFFSET..DOCUMENT_ID_OFFSET + 8],
+        &1_u64.to_le_bytes()
+    );
+    replace_u64(&mut zero_id, DOCUMENT_ID_OFFSET, 0);
     assert_kind(
         &zero_id,
         StaticUiArtifactV1Stage::Representation,
         StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::DocumentId),
+        Some(32),
     );
     let mut zero_key = MINIMAL.to_vec();
-    replace_u64(&mut zero_key, 76, 0);
+    assert_eq!(
+        &zero_key[MINIMAL_SURFACE_KEY_OFFSET..MINIMAL_SURFACE_KEY_OFFSET + 8],
+        &1_u64.to_le_bytes()
+    );
+    replace_u64(&mut zero_key, MINIMAL_SURFACE_KEY_OFFSET, 0);
     assert_kind(
         &zero_key,
         StaticUiArtifactV1Stage::Representation,
         StaticUiArtifactV1ErrorKind::ZeroCollectionKey,
+        Some(76),
     );
 }
 
 #[test]
 fn ui_dna2_wp3b_artifact_preserves_unknown_role_identity_and_offset() {
     let mut unknown = MINIMAL.to_vec();
-    unknown[101..105].copy_from_slice(b"nope");
+    assert_eq!(
+        &unknown[MINIMAL_ROLE_OFFSET..MINIMAL_ROLE_OFFSET + 4],
+        b"root"
+    );
+    unknown[MINIMAL_ROLE_OFFSET..MINIMAL_ROLE_OFFSET + 4].copy_from_slice(b"nope");
     let error = error(&unknown, limits());
     assert_eq!(error.stage(), StaticUiArtifactV1Stage::Role);
     assert_eq!(error.byte_offset(), Some(101));
@@ -469,7 +565,11 @@ fn ui_dna2_wp3b_artifact_preserves_duplicate_id_and_key_diagnostics() {
     ];
     assert_static_ir(
         &encode(1, 0, 0, &duplicate_surface_id, &nodes),
-        StaticUiIrDiagnosticKind::DuplicateSurfaceId,
+        &[
+            (StaticUiIrDiagnosticKind::DuplicateSurfaceId, None, 1, 0),
+            (StaticUiIrDiagnosticKind::DuplicateSurfaceRoot, None, 10, 1),
+            (StaticUiIrDiagnosticKind::SharedAcrossSurfaces, None, 10, 1),
+        ],
     );
     let duplicate_surface_key = vec![
         surfaces[0].clone(),
@@ -480,7 +580,11 @@ fn ui_dna2_wp3b_artifact_preserves_duplicate_id_and_key_diagnostics() {
     ];
     assert_static_ir(
         &encode(1, 0, 0, &duplicate_surface_key, &nodes),
-        StaticUiIrDiagnosticKind::DuplicateSurfaceKey,
+        &[
+            (StaticUiIrDiagnosticKind::DuplicateSurfaceKey, None, 1, 0),
+            (StaticUiIrDiagnosticKind::DuplicateSurfaceRoot, None, 10, 2),
+            (StaticUiIrDiagnosticKind::SharedAcrossSurfaces, None, 10, 1),
+        ],
     );
     let duplicate_node_id = vec![
         nodes[0].clone(),
@@ -491,7 +595,10 @@ fn ui_dna2_wp3b_artifact_preserves_duplicate_id_and_key_diagnostics() {
     ];
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &duplicate_node_id),
-        StaticUiIrDiagnosticKind::DuplicateNodeId,
+        &[
+            (StaticUiIrDiagnosticKind::DuplicateNodeId, None, 10, 0),
+            (StaticUiIrDiagnosticKind::UnreachableNode, None, 10, 0),
+        ],
     );
     let duplicate_node_key = vec![
         nodes[0].clone(),
@@ -502,7 +609,10 @@ fn ui_dna2_wp3b_artifact_preserves_duplicate_id_and_key_diagnostics() {
     ];
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &duplicate_node_key),
-        StaticUiIrDiagnosticKind::DuplicateNodeKey,
+        &[
+            (StaticUiIrDiagnosticKind::DuplicateNodeKey, None, 10, 0),
+            (StaticUiIrDiagnosticKind::UnreachableNode, None, 11, 0),
+        ],
     );
 }
 
@@ -512,13 +622,16 @@ fn ui_dna2_wp3b_artifact_preserves_missing_and_duplicate_child_diagnostics() {
     surfaces[0].root = 99;
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &nodes),
-        StaticUiIrDiagnosticKind::MissingRoot,
+        &[
+            (StaticUiIrDiagnosticKind::MissingRoot, None, 99, 0),
+            (StaticUiIrDiagnosticKind::UnreachableNode, None, 10, 0),
+        ],
     );
     let (surfaces, _) = minimal_specs();
     nodes[0].children = vec![(1, 99)];
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &nodes),
-        StaticUiIrDiagnosticKind::MissingChild,
+        &[(StaticUiIrDiagnosticKind::MissingChild, None, 10, 99)],
     );
 
     let child = NodeSpec {
@@ -534,7 +647,10 @@ fn ui_dna2_wp3b_artifact_preserves_missing_and_duplicate_child_diagnostics() {
     duplicate_child_nodes.push(child.clone());
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &duplicate_child_nodes),
-        StaticUiIrDiagnosticKind::DuplicateChild,
+        &[
+            (StaticUiIrDiagnosticKind::DuplicateChild, None, 10, 11),
+            (StaticUiIrDiagnosticKind::MultipleParents, None, 11, 2),
+        ],
     );
     let mut duplicate_order_nodes = nodes;
     duplicate_order_nodes[0].children = vec![(1, 11), (1, 12)];
@@ -549,7 +665,22 @@ fn ui_dna2_wp3b_artifact_preserves_missing_and_duplicate_child_diagnostics() {
     });
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &duplicate_order_nodes),
-        StaticUiIrDiagnosticKind::DuplicateChildOrder,
+        &[(StaticUiIrDiagnosticKind::DuplicateChildOrder, None, 10, 1)],
+    );
+}
+
+#[test]
+fn ui_dna2_wp3b_artifact_preserves_invalid_accessibility_diagnostic() {
+    let (surfaces, mut nodes) = minimal_specs();
+    nodes[0].accessibility_ref = Some(99);
+    assert_static_ir(
+        &encode(1, 0, 0, &surfaces, &nodes),
+        &[(
+            StaticUiIrDiagnosticKind::InvalidAccessibilityReference,
+            None,
+            10,
+            99,
+        )],
     );
 }
 
@@ -581,7 +712,10 @@ fn ui_dna2_wp3b_artifact_preserves_forest_diagnostics() {
     ];
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &cycle_nodes),
-        StaticUiIrDiagnosticKind::Cycle,
+        &[
+            (StaticUiIrDiagnosticKind::Cycle, None, 10, 0),
+            (StaticUiIrDiagnosticKind::RootUsedAsChild, None, 10, 0),
+        ],
     );
 
     let multiple_parent_nodes = vec![
@@ -612,7 +746,7 @@ fn ui_dna2_wp3b_artifact_preserves_forest_diagnostics() {
     ];
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &multiple_parent_nodes),
-        StaticUiIrDiagnosticKind::MultipleParents,
+        &[(StaticUiIrDiagnosticKind::MultipleParents, None, 12, 2)],
     );
 
     let shared_surfaces = vec![
@@ -652,7 +786,10 @@ fn ui_dna2_wp3b_artifact_preserves_forest_diagnostics() {
     ];
     assert_static_ir(
         &encode(1, 0, 0, &shared_surfaces, &shared_nodes),
-        StaticUiIrDiagnosticKind::SharedAcrossSurfaces,
+        &[
+            (StaticUiIrDiagnosticKind::MultipleParents, None, 12, 2),
+            (StaticUiIrDiagnosticKind::SharedAcrossSurfaces, None, 12, 1),
+        ],
     );
 
     let unreachable_nodes = vec![
@@ -675,7 +812,7 @@ fn ui_dna2_wp3b_artifact_preserves_forest_diagnostics() {
     ];
     assert_static_ir(
         &encode(1, 0, 0, &surfaces, &unreachable_nodes),
-        StaticUiIrDiagnosticKind::UnreachableNode,
+        &[(StaticUiIrDiagnosticKind::UnreachableNode, None, 11, 0)],
     );
 }
 
@@ -717,6 +854,7 @@ fn ui_dna2_wp3b_artifact_rejects_each_noncanonical_order_and_reencoding_mismatch
         &encode(1, 0, 0, &surfaces, &canonical_nodes),
         StaticUiArtifactV1Stage::Canonical,
         StaticUiArtifactV1ErrorKind::CanonicalMismatch,
+        Some(60),
     );
 
     let canonical_surfaces = vec![surfaces[1].clone(), surfaces[0].clone()];
@@ -725,6 +863,7 @@ fn ui_dna2_wp3b_artifact_rejects_each_noncanonical_order_and_reencoding_mismatch
         &encode(1, 0, 0, &canonical_surfaces, &reversed_nodes),
         StaticUiArtifactV1Stage::Canonical,
         StaticUiArtifactV1ErrorKind::CanonicalMismatch,
+        Some(114),
     );
 
     let child_nodes = vec![
@@ -768,6 +907,7 @@ fn ui_dna2_wp3b_artifact_rejects_each_noncanonical_order_and_reencoding_mismatch
         ),
         StaticUiArtifactV1Stage::Canonical,
         StaticUiArtifactV1ErrorKind::CanonicalMismatch,
+        Some(178),
     );
 
     let all_reordered = vec![canonical_nodes[1].clone(), canonical_nodes[0].clone()];
@@ -775,13 +915,15 @@ fn ui_dna2_wp3b_artifact_rejects_each_noncanonical_order_and_reencoding_mismatch
         &encode(1, 0, 0, &surfaces, &all_reordered),
         StaticUiArtifactV1Stage::Canonical,
         StaticUiArtifactV1ErrorKind::CanonicalMismatch,
+        Some(60),
     );
 }
 
 #[test]
 fn ui_dna2_wp3b_artifact_failure_precedence_is_fail_closed() {
     let mut oversized_bad_magic = MINIMAL.to_vec();
-    oversized_bad_magic[4] ^= 1;
+    assert_eq!(oversized_bad_magic[MAGIC_OFFSET], b'U');
+    oversized_bad_magic[MAGIC_OFFSET] ^= 1;
     let mut configured = limits();
     configured.max_input_bytes = MINIMAL.len() - 1;
     assert_eq!(
@@ -790,7 +932,8 @@ fn ui_dna2_wp3b_artifact_failure_precedence_is_fail_closed() {
     );
 
     let mut wrong_magic_trailing = MINIMAL.to_vec();
-    wrong_magic_trailing[4] ^= 1;
+    assert_eq!(wrong_magic_trailing[MAGIC_OFFSET], b'U');
+    wrong_magic_trailing[MAGIC_OFFSET] ^= 1;
     wrong_magic_trailing.push(0);
     assert_eq!(
         error(&wrong_magic_trailing, limits()).stage(),
@@ -798,7 +941,8 @@ fn ui_dna2_wp3b_artifact_failure_precedence_is_fail_closed() {
     );
 
     let mut wrong_magic_truncated = MINIMAL[..MINIMAL.len() - 1].to_vec();
-    wrong_magic_truncated[4] ^= 1;
+    assert_eq!(wrong_magic_truncated[MAGIC_OFFSET], b'U');
+    wrong_magic_truncated[MAGIC_OFFSET] ^= 1;
     assert_eq!(
         error(&wrong_magic_truncated, limits()).stage(),
         StaticUiArtifactV1Stage::Decode
@@ -815,16 +959,30 @@ fn ui_dna2_wp3b_artifact_failure_precedence_is_fail_closed() {
 
     let mut structural_unknown = nodes;
     structural_unknown[0].role = "unknown";
+    let structural_error = error(&encode(1, 0, 0, &surfaces, &structural_unknown), limits());
+    assert_eq!(structural_error.stage(), StaticUiArtifactV1Stage::StaticIr);
+    assert_ne!(structural_error.stage(), StaticUiArtifactV1Stage::Role);
+    assert_eq!(structural_error.byte_offset(), None);
     assert_eq!(
-        error(&encode(1, 0, 0, &surfaces, &structural_unknown), limits()).stage(),
-        StaticUiArtifactV1Stage::StaticIr
+        static_ir_diagnostics(&structural_error),
+        [
+            (StaticUiIrDiagnosticKind::MissingRoot, None, 99, 0),
+            (StaticUiIrDiagnosticKind::UnreachableNode, None, 10, 0),
+        ]
     );
 
     let (valid_surfaces, mut unknown_nodes) = minimal_specs();
     unknown_nodes[0].role = "unknown";
+    let role_error = error(&encode(1, 0, 0, &valid_surfaces, &unknown_nodes), limits());
+    assert_eq!(role_error.stage(), StaticUiArtifactV1Stage::Role);
+    assert_eq!(role_error.byte_offset(), Some(101));
     assert_eq!(
-        error(&encode(1, 0, 0, &valid_surfaces, &unknown_nodes), limits()).stage(),
-        StaticUiArtifactV1Stage::Role
+        role_error.kind(),
+        &StaticUiArtifactV1ErrorKind::UnknownRole {
+            node_id: 10,
+            authored_role: String::from("unknown"),
+            role_byte_offset: 101,
+        }
     );
 }
 
@@ -844,11 +1002,246 @@ fn ui_dna2_wp3b_artifact_all_prefixes_and_bounded_mutations_are_panic_free() {
         assert_eq!(first, second);
         assert_eq!(first.is_ok(), length == MINIMAL.len());
     }
-    for position in (0..STRUCTURED.len()).step_by(7) {
-        let mut mutated = STRUCTURED.to_vec();
-        mutated[position] ^= 0x5a;
-        let first = verify_static_ui_ir_artifact_v1(&mutated, RoleDictionary::current(), limits());
-        let second = verify_static_ui_ir_artifact_v1(&mutated, RoleDictionary::current(), limits());
-        assert_eq!(first, second);
-    }
+}
+
+#[test]
+fn ui_dna2_wp3b_artifact_named_mutations_are_guaranteed_rejections() {
+    let mut magic = STRUCTURED.to_vec();
+    assert_eq!(magic[MAGIC_OFFSET], b'U');
+    magic[MAGIC_OFFSET] ^= 1;
+    assert_kind(
+        &magic,
+        StaticUiArtifactV1Stage::Header,
+        StaticUiArtifactV1ErrorKind::InvalidMagic,
+        Some(MAGIC_OFFSET),
+    );
+
+    let mut schema = STRUCTURED.to_vec();
+    assert_eq!(
+        &schema[SCHEMA_VERSION_OFFSET..SCHEMA_VERSION_OFFSET + 4],
+        &1_u32.to_le_bytes()
+    );
+    replace_u32(&mut schema, SCHEMA_VERSION_OFFSET, 2);
+    assert_kind(
+        &schema,
+        StaticUiArtifactV1Stage::Header,
+        StaticUiArtifactV1ErrorKind::UnsupportedSchemaVersion,
+        Some(SCHEMA_VERSION_OFFSET),
+    );
+
+    let mut contract = STRUCTURED.to_vec();
+    assert_eq!(
+        &contract[CONTRACT_VERSION_OFFSET..CONTRACT_VERSION_OFFSET + 4],
+        &1_u32.to_le_bytes()
+    );
+    replace_u32(&mut contract, CONTRACT_VERSION_OFFSET, 2);
+    assert_kind(
+        &contract,
+        StaticUiArtifactV1Stage::Header,
+        StaticUiArtifactV1ErrorKind::UnsupportedContractVersion,
+        Some(CONTRACT_VERSION_OFFSET),
+    );
+
+    let mut invalid_role = STRUCTURED.to_vec();
+    assert_eq!(invalid_role[STRUCTURED_FIRST_ROLE_OFFSET], b't');
+    invalid_role[STRUCTURED_FIRST_ROLE_OFFSET] = 0xff;
+    assert_kind(
+        &invalid_role,
+        StaticUiArtifactV1Stage::Decode,
+        StaticUiArtifactV1ErrorKind::InvalidUtf8,
+        Some(STRUCTURED_FIRST_ROLE_OFFSET),
+    );
+
+    let mut surface_option = STRUCTURED.to_vec();
+    assert_eq!(surface_option[MINIMAL_SURFACE_SOURCE_TAG_OFFSET], 1);
+    surface_option[MINIMAL_SURFACE_SOURCE_TAG_OFFSET] = 2;
+    assert_kind(
+        &surface_option,
+        StaticUiArtifactV1Stage::Decode,
+        StaticUiArtifactV1ErrorKind::InvalidOptionTag,
+        Some(MINIMAL_SURFACE_SOURCE_TAG_OFFSET),
+    );
+
+    let mut node_option = STRUCTURED.to_vec();
+    assert_eq!(node_option[129], 1);
+    node_option[129] = 2;
+    assert_kind(
+        &node_option,
+        StaticUiArtifactV1Stage::Decode,
+        StaticUiArtifactV1ErrorKind::InvalidOptionTag,
+        Some(129),
+    );
+
+    let mut accessibility_option = STRUCTURED.to_vec();
+    assert_eq!(accessibility_option[STRUCTURED_ACCESSIBILITY_TAG_OFFSET], 1);
+    accessibility_option[STRUCTURED_ACCESSIBILITY_TAG_OFFSET] = 2;
+    assert_kind(
+        &accessibility_option,
+        StaticUiArtifactV1Stage::Decode,
+        StaticUiArtifactV1ErrorKind::InvalidOptionTag,
+        Some(STRUCTURED_ACCESSIBILITY_TAG_OFFSET),
+    );
+
+    let mut document_id = STRUCTURED.to_vec();
+    assert_eq!(
+        &document_id[DOCUMENT_ID_OFFSET..DOCUMENT_ID_OFFSET + 8],
+        &73_u64.to_le_bytes()
+    );
+    replace_u64(&mut document_id, DOCUMENT_ID_OFFSET, 0);
+    assert_kind(
+        &document_id,
+        StaticUiArtifactV1Stage::Representation,
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::DocumentId),
+        Some(DOCUMENT_ID_OFFSET),
+    );
+
+    let mut surface_id = STRUCTURED.to_vec();
+    assert_eq!(&surface_id[60..68], &2_u64.to_le_bytes());
+    replace_u64(&mut surface_id, 60, 0);
+    assert_kind(
+        &surface_id,
+        StaticUiArtifactV1Stage::Representation,
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::SurfaceId),
+        Some(60),
+    );
+
+    let mut surface_key = STRUCTURED.to_vec();
+    assert_eq!(
+        &surface_key[MINIMAL_SURFACE_KEY_OFFSET..MINIMAL_SURFACE_KEY_OFFSET + 8],
+        &200_u64.to_le_bytes()
+    );
+    replace_u64(&mut surface_key, MINIMAL_SURFACE_KEY_OFFSET, 0);
+    assert_kind(
+        &surface_key,
+        StaticUiArtifactV1Stage::Representation,
+        StaticUiArtifactV1ErrorKind::ZeroCollectionKey,
+        Some(MINIMAL_SURFACE_KEY_OFFSET),
+    );
+
+    let mut node_id = STRUCTURED.to_vec();
+    assert_eq!(
+        &node_id[STRUCTURED_FIRST_NODE_OFFSET..STRUCTURED_FIRST_NODE_OFFSET + 8],
+        &21_u64.to_le_bytes()
+    );
+    replace_u64(&mut node_id, STRUCTURED_FIRST_NODE_OFFSET, 0);
+    assert_kind(
+        &node_id,
+        StaticUiArtifactV1Stage::Representation,
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::NodeId),
+        Some(STRUCTURED_FIRST_NODE_OFFSET),
+    );
+
+    let mut source_id = STRUCTURED.to_vec();
+    assert_eq!(&source_id[85..93], &41_u64.to_le_bytes());
+    replace_u64(&mut source_id, 85, 0);
+    assert_kind(
+        &source_id,
+        StaticUiArtifactV1Stage::Representation,
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::SourceId),
+        Some(85),
+    );
+
+    let mut span = STRUCTURED.to_vec();
+    assert_eq!(
+        &span[STRUCTURED_SURFACE_SPAN_START_OFFSET..STRUCTURED_SURFACE_SPAN_START_OFFSET + 4],
+        &0_u32.to_le_bytes()
+    );
+    replace_u32(&mut span, STRUCTURED_SURFACE_SPAN_START_OFFSET, 29);
+    assert_kind(
+        &span,
+        StaticUiArtifactV1Stage::Representation,
+        StaticUiArtifactV1ErrorKind::InvalidSourceSpan,
+        Some(STRUCTURED_SURFACE_SPAN_START_OFFSET),
+    );
+
+    let mut child_id = STRUCTURED.to_vec();
+    assert_eq!(&child_id[257..265], &21_u64.to_le_bytes());
+    replace_u64(&mut child_id, 257, 0);
+    assert_kind(
+        &child_id,
+        StaticUiArtifactV1Stage::Representation,
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::ChildNodeId),
+        Some(257),
+    );
+
+    let mut accessibility_id = STRUCTURED.to_vec();
+    assert_eq!(
+        &accessibility_id
+            [STRUCTURED_ACCESSIBILITY_ID_OFFSET..STRUCTURED_ACCESSIBILITY_ID_OFFSET + 8],
+        &22_u64.to_le_bytes()
+    );
+    replace_u64(&mut accessibility_id, STRUCTURED_ACCESSIBILITY_ID_OFFSET, 0);
+    assert_kind(
+        &accessibility_id,
+        StaticUiArtifactV1Stage::Representation,
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::AccessibilityNodeId),
+        Some(STRUCTURED_ACCESSIBILITY_ID_OFFSET),
+    );
+
+    let mut trailing = STRUCTURED.to_vec();
+    trailing.push(0);
+    assert_kind(
+        &trailing,
+        StaticUiArtifactV1Stage::CompleteConsumption,
+        StaticUiArtifactV1ErrorKind::TrailingBytes,
+        Some(STRUCTURED.len()),
+    );
+
+    assert_eq!(
+        &STRUCTURED[STRUCTURED_ACCESSIBILITY_ID_OFFSET..STRUCTURED_ACCESSIBILITY_ID_OFFSET + 8],
+        &22_u64.to_le_bytes()
+    );
+    assert_kind(
+        &STRUCTURED[..STRUCTURED.len() - 1],
+        StaticUiArtifactV1Stage::Decode,
+        StaticUiArtifactV1ErrorKind::TruncatedPrimitive,
+        Some(STRUCTURED_ACCESSIBILITY_ID_OFFSET),
+    );
+
+    assert_eq!(
+        &STRUCTURED[STRUCTURED_FIRST_NODE_OFFSET..STRUCTURED_FIRST_NODE_OFFSET + 8],
+        &21_u64.to_le_bytes()
+    );
+    assert_eq!(
+        &STRUCTURED[STRUCTURED_SECOND_NODE_OFFSET..STRUCTURED_SECOND_NODE_OFFSET + 8],
+        &22_u64.to_le_bytes()
+    );
+    let mut swapped_nodes = Vec::new();
+    swapped_nodes.extend_from_slice(&STRUCTURED[..STRUCTURED_FIRST_NODE_OFFSET]);
+    swapped_nodes
+        .extend_from_slice(&STRUCTURED[STRUCTURED_SECOND_NODE_OFFSET..STRUCTURED_ROOT_NODE_OFFSET]);
+    swapped_nodes.extend_from_slice(
+        &STRUCTURED[STRUCTURED_FIRST_NODE_OFFSET..STRUCTURED_SECOND_NODE_OFFSET],
+    );
+    swapped_nodes.extend_from_slice(&STRUCTURED[STRUCTURED_ROOT_NODE_OFFSET..]);
+    assert_kind(
+        &swapped_nodes,
+        StaticUiArtifactV1Stage::Canonical,
+        StaticUiArtifactV1ErrorKind::CanonicalMismatch,
+        Some(STRUCTURED_FIRST_NODE_OFFSET),
+    );
+
+    assert_eq!(
+        &STRUCTURED[STRUCTURED_FIRST_CHILD_OFFSET..STRUCTURED_FIRST_CHILD_OFFSET + 4],
+        &1_u32.to_le_bytes()
+    );
+    assert_eq!(
+        &STRUCTURED[STRUCTURED_SECOND_CHILD_OFFSET..STRUCTURED_SECOND_CHILD_OFFSET + 4],
+        &4_u32.to_le_bytes()
+    );
+    let mut swapped_children = STRUCTURED.to_vec();
+    let first_child =
+        STRUCTURED[STRUCTURED_FIRST_CHILD_OFFSET..STRUCTURED_SECOND_CHILD_OFFSET].to_vec();
+    let second_child =
+        STRUCTURED[STRUCTURED_SECOND_CHILD_OFFSET..STRUCTURED_ACCESSIBILITY_TAG_OFFSET].to_vec();
+    swapped_children[STRUCTURED_FIRST_CHILD_OFFSET..STRUCTURED_SECOND_CHILD_OFFSET]
+        .copy_from_slice(&second_child);
+    swapped_children[STRUCTURED_SECOND_CHILD_OFFSET..STRUCTURED_ACCESSIBILITY_TAG_OFFSET]
+        .copy_from_slice(&first_child);
+    assert_kind(
+        &swapped_children,
+        StaticUiArtifactV1Stage::Canonical,
+        StaticUiArtifactV1ErrorKind::CanonicalMismatch,
+        Some(STRUCTURED_FIRST_CHILD_OFFSET),
+    );
 }
