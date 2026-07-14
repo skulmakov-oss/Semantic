@@ -110,7 +110,7 @@ pub(crate) fn preflight_source_len(
     source_id: SourceId,
     actual_len: usize,
 ) -> Result<(), ProjectionSourceInputError> {
-    if actual_len > MAX_PROJECTION_SOURCE_BYTES as usize {
+    if u32::try_from(actual_len).is_err() {
         Err(ProjectionSourceInputError::SourceTooLarge {
             source_id,
             actual_len,
@@ -181,7 +181,7 @@ impl<'a> Parser<'a> {
                 return Err(self.eof_error());
             }
             if self.peek_byte() == Some(b'}') {
-                self.pos += 1;
+                self.advance_checked(1);
                 break;
             }
 
@@ -275,7 +275,7 @@ impl<'a> Parser<'a> {
                 return Err(self.eof_error());
             }
             if self.peek_byte() == Some(b'}') {
-                self.pos += 1;
+                self.advance_checked(1);
                 break;
             }
 
@@ -304,7 +304,7 @@ impl<'a> Parser<'a> {
     fn parse_child(&mut self) -> Result<ProjectionSourceChild, ProjectionSourceParseError> {
         let child = self.parse_number(u64::MAX, true)?;
         self.expect_keyword("order")?;
-        let order = self.parse_number(u32::MAX as u64, false)?;
+        let order = self.parse_number(u64::from(u32::MAX), false)?;
         self.expect_semicolon()?;
         Ok(ProjectionSourceChild::new(
             ProjectionSourceNodeId::new(child).expect("non-zero child id"),
@@ -352,10 +352,10 @@ impl<'a> Parser<'a> {
             let sign = self.peek_byte().expect("sign was matched");
             if self
                 .bytes
-                .get(self.pos + 1)
+                .get(self.checked_position_after(self.pos, 1))
                 .is_some_and(|byte| byte.is_ascii_digit())
             {
-                self.pos += 1;
+                self.advance_checked(1);
                 self.scan_number_like();
                 return Err(self.error(
                     ProjectionSourceParserDiagnosticKind::InvalidNumber,
@@ -367,13 +367,13 @@ impl<'a> Parser<'a> {
                 self.error(
                     ProjectionSourceParserDiagnosticKind::UnexpectedToken,
                     start,
-                    start + 1,
+                    self.checked_position_after(start, 1),
                 )
             } else {
                 self.error(
                     ProjectionSourceParserDiagnosticKind::UnexpectedChar,
                     start,
-                    start + 1,
+                    self.checked_position_after(start, 1),
                 )
             });
         }
@@ -442,7 +442,7 @@ impl<'a> Parser<'a> {
             return Err(self.eof_error());
         }
         if self.peek_byte() == Some(expected) {
-            self.pos += 1;
+            self.advance_checked(1);
             Ok(self.pos)
         } else {
             Err(self.current_unexpected())
@@ -455,7 +455,7 @@ impl<'a> Parser<'a> {
             return Err(self.eof_error());
         }
         if self.peek_byte() == Some(b';') {
-            self.pos += 1;
+            self.advance_checked(1);
             Ok(self.pos)
         } else {
             Err(self.error(
@@ -469,28 +469,40 @@ impl<'a> Parser<'a> {
     fn skip_trivia(&mut self) -> Result<(), ProjectionSourceParseError> {
         loop {
             match self.peek_byte() {
-                Some(b' ' | b'\t' | b'\n') => self.pos += 1,
-                Some(b'\r') if self.bytes.get(self.pos + 1) == Some(&b'\n') => self.pos += 2,
-                Some(b'/') if self.bytes.get(self.pos + 1) == Some(&b'/') => {
-                    self.pos += 2;
+                Some(b' ' | b'\t' | b'\n') => self.advance_checked(1),
+                Some(b'\r')
+                    if self.bytes.get(self.checked_position_after(self.pos, 1)) == Some(&b'\n') =>
+                {
+                    self.advance_checked(2);
+                }
+                Some(b'/')
+                    if self.bytes.get(self.checked_position_after(self.pos, 1)) == Some(&b'/') =>
+                {
+                    self.advance_checked(2);
                     while !self.at_end() {
                         match self.peek_byte() {
                             Some(b'\n') => {
-                                self.pos += 1;
+                                self.advance_checked(1);
                                 break;
                             }
-                            Some(b'\r') if self.bytes.get(self.pos + 1) == Some(&b'\n') => {
-                                self.pos += 2;
+                            Some(b'\r')
+                                if self.bytes.get(self.checked_position_after(self.pos, 1))
+                                    == Some(&b'\n') =>
+                            {
+                                self.advance_checked(2);
                                 break;
                             }
                             Some(b'\r') => {
                                 return Err(self.error(
                                     ProjectionSourceParserDiagnosticKind::UnexpectedChar,
                                     self.pos,
-                                    self.pos + 1,
+                                    self.checked_position_after(self.pos, 1),
                                 ));
                             }
-                            Some(_) => self.pos += self.scalar_width(),
+                            Some(_) => {
+                                let width = self.scalar_width();
+                                self.advance_checked(width);
+                            }
                             None => break,
                         }
                     }
@@ -506,10 +518,10 @@ impl<'a> Parser<'a> {
             return None;
         }
         let start = self.pos;
-        self.pos += 1;
+        self.advance_checked(1);
         while let Some(byte) = self.peek_byte() {
             if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':' | b'-') {
-                self.pos += 1;
+                self.advance_checked(1);
             } else {
                 break;
             }
@@ -524,7 +536,7 @@ impl<'a> Parser<'a> {
     fn scan_number_like(&mut self) {
         while let Some(byte) = self.peek_byte() {
             if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b':') {
-                self.pos += 1;
+                self.advance_checked(1);
             } else {
                 break;
             }
@@ -533,11 +545,11 @@ impl<'a> Parser<'a> {
 
     fn scan_quoted_role_error(&mut self) -> ProjectionSourceParseError {
         let start = self.pos;
-        self.pos += 1;
+        self.advance_checked(1);
         while !self.at_end() {
             match self.peek_byte() {
                 Some(b'"') => {
-                    self.pos += 1;
+                    self.advance_checked(1);
                     return self.error(
                         ProjectionSourceParserDiagnosticKind::InvalidIdentifier,
                         start,
@@ -551,10 +563,11 @@ impl<'a> Parser<'a> {
                         self.pos,
                     );
                 }
-                Some(byte) if byte.is_ascii() => self.pos += 1,
+                Some(byte) if byte.is_ascii() => self.advance_checked(1),
                 Some(_) => {
                     let scalar_start = self.pos;
-                    self.pos += self.scalar_width();
+                    let width = self.scalar_width();
+                    self.advance_checked(width);
                     return self.error(
                         ProjectionSourceParserDiagnosticKind::UnexpectedChar,
                         scalar_start,
@@ -597,7 +610,7 @@ impl<'a> Parser<'a> {
         }
         let byte = self.peek_byte().expect("not at EOF");
         if byte == b'+' {
-            self.pos += 1;
+            self.advance_checked(1);
             return self.error(
                 ProjectionSourceParserDiagnosticKind::UnexpectedToken,
                 start,
@@ -605,14 +618,15 @@ impl<'a> Parser<'a> {
             );
         }
         if matches!(byte, b'{' | b'}' | b';') {
-            self.pos += 1;
+            self.advance_checked(1);
             return self.error(
                 ProjectionSourceParserDiagnosticKind::UnexpectedToken,
                 start,
                 self.pos,
             );
         }
-        self.pos += self.scalar_width();
+        let width = self.scalar_width();
+        self.advance_checked(width);
         self.error(
             ProjectionSourceParserDiagnosticKind::UnexpectedChar,
             start,
@@ -674,6 +688,21 @@ impl<'a> Parser<'a> {
             .next()
             .expect("not at EOF")
             .len_utf8()
+    }
+
+    fn checked_position_after(&self, position: usize, width: usize) -> usize {
+        let next = position
+            .checked_add(width)
+            .expect("parser cursor arithmetic must not overflow");
+        assert!(
+            next <= self.bytes.len(),
+            "parser cursor must remain within accepted source"
+        );
+        next
+    }
+
+    fn advance_checked(&mut self, width: usize) {
+        self.pos = self.checked_position_after(self.pos, width);
     }
 
     fn peek_byte(&self) -> Option<u8> {

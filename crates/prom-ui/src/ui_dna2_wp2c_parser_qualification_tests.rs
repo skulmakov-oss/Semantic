@@ -23,26 +23,42 @@ fn assert_diagnostic(source: &str, kind: Kind, start: usize, end: usize) {
     assert_eq!(diagnostic.kind(), kind);
     assert_eq!(diagnostic.code(), kind.code());
     assert_eq!(diagnostic.source_id(), source_id());
-    assert_eq!(diagnostic.span().start(), start as u32);
-    assert_eq!(diagnostic.span().end(), end as u32);
+    assert_eq!(
+        diagnostic.span().start(),
+        u32::try_from(start).expect("test span start is representable")
+    );
+    assert_eq!(
+        diagnostic.span().end(),
+        u32::try_from(end).expect("test span end is representable")
+    );
     let coordinate = diagnostic.coordinate();
     assert_eq!(coordinate.code(), kind.code());
     assert_eq!(
         coordinate.source().expect("source coordinate").source(),
         source_id()
     );
-    assert_eq!(coordinate.domain(), start as u64);
-    assert_eq!(coordinate.secondary(), end as u64);
+    assert_eq!(
+        coordinate.domain(),
+        u64::try_from(start).expect("test coordinate start is representable")
+    );
+    assert_eq!(
+        coordinate.secondary(),
+        u64::try_from(end).expect("test coordinate end is representable")
+    );
 }
 
 fn assert_at(source: &str, kind: Kind, needle: &str) {
     let start = source.find(needle).expect("diagnostic needle");
-    assert_diagnostic(source, kind, start, start + needle.len());
+    assert_diagnostic(source, kind, start, checked_test_add(start, needle.len()));
 }
 
 fn assert_zero_width_at(source: &str, needle: &str) {
     let start = source.find(needle).expect("diagnostic needle");
     assert_diagnostic(source, Kind::MissingSemicolon, start, start);
+}
+
+fn checked_test_add(position: usize, width: usize) -> usize {
+    position.checked_add(width).expect("test offset arithmetic")
 }
 
 #[test]
@@ -106,17 +122,32 @@ fn ui_dna2_wp2c_parser_constructs_exact_declaration_spans() {
     let surface_text = "surface 1 root 10 key 11;";
     let surface_start = source.find(surface_text).unwrap();
     let surface_span = document.surfaces()[0].source().span();
-    assert_eq!(surface_span.start(), surface_start as u32);
+    assert_eq!(
+        surface_span.start(),
+        u32::try_from(surface_start).expect("surface start is representable")
+    );
+    let surface_end = surface_start
+        .checked_add(surface_text.len())
+        .expect("surface end arithmetic");
     assert_eq!(
         surface_span.end(),
-        (surface_start + surface_text.len()) as u32
+        u32::try_from(surface_end).expect("surface end is representable")
     );
 
     let node_text = "node 10 role root key 12 { child 11 order 0; }";
     let node_start = source.find(node_text).unwrap();
     let node_span = document.nodes()[0].source().span();
-    assert_eq!(node_span.start(), node_start as u32);
-    assert_eq!(node_span.end(), (node_start + node_text.len()) as u32);
+    assert_eq!(
+        node_span.start(),
+        u32::try_from(node_start).expect("node start is representable")
+    );
+    let node_end = node_start
+        .checked_add(node_text.len())
+        .expect("node end arithmetic");
+    assert_eq!(
+        node_span.end(),
+        u32::try_from(node_end).expect("node end is representable")
+    );
 }
 
 #[test]
@@ -183,11 +214,11 @@ fn ui_dna2_wp2c_parser_covers_every_diagnostic_kind() {
             assert_zero_width_at(source, needle);
         } else if kind == Kind::ZeroId {
             let start = source.find(needle).unwrap();
-            assert_diagnostic(source, kind, start, start + 1);
+            assert_diagnostic(source, kind, start, checked_test_add(start, 1));
         } else if matches!(kind, Kind::DuplicateRevision | Kind::DuplicateEpoch) {
             let start = source.find(needle).unwrap();
             let token_len = needle.split_once(' ').unwrap().0.len();
-            assert_diagnostic(source, kind, start, start + token_len);
+            assert_diagnostic(source, kind, start, checked_test_add(start, token_len));
         } else {
             assert_at(source, kind, needle);
         }
@@ -341,7 +372,7 @@ fn ui_dna2_wp2c_parser_preserves_terminal_semicolon_precedence() {
     }
 
     let separated = "projection v0 { revision 0; epoch 0; surface 1 root 10 key 1 1+1; }";
-    let first = separated.find("1 1+1").unwrap() + 2;
+    let first = checked_test_add(separated.find("1 1+1").unwrap(), 2);
     assert_diagnostic(separated, Kind::MissingSemicolon, first, first);
 }
 
@@ -364,7 +395,22 @@ fn ui_dna2_wp2c_parser_preserves_nonterminal_plus_minus_boundaries() {
             "+",
         ),
         (
+            "projection v0 { revision 0; epoch 0; surface 1 root 10-1 key 1; }",
+            Kind::UnexpectedChar,
+            "-",
+        ),
+        (
             "projection v0 { revision 0; epoch 0; node 1+1 role root key 1 {} }",
+            Kind::UnexpectedToken,
+            "+",
+        ),
+        (
+            "projection v0 { revision 0; epoch 0; node 1-1 role root key 1 {} }",
+            Kind::UnexpectedChar,
+            "-",
+        ),
+        (
+            "projection v0 { revision 0; epoch 0; node 1 role root key 1+1 {} }",
             Kind::UnexpectedToken,
             "+",
         ),
@@ -377,6 +423,11 @@ fn ui_dna2_wp2c_parser_preserves_nonterminal_plus_minus_boundaries() {
             "projection v0 { revision 0; epoch 0; node 1 role root key 1 { child 2+1 order 0; } }",
             Kind::UnexpectedToken,
             "+",
+        ),
+        (
+            "projection v0 { revision 0; epoch 0; node 1 role root key 1 { child 2-1 order 0; } }",
+            Kind::UnexpectedChar,
+            "-",
         ),
     ];
     for (source, kind, needle) in cases {
@@ -395,18 +446,48 @@ fn ui_dna2_wp2c_parser_handles_post_document_and_fail_fast_boundaries() {
         ("-1", Kind::UnexpectedChar, 1),
     ] {
         let source = format!("{complete}{tail}");
-        assert_diagnostic(&source, kind, complete.len(), complete.len() + width);
+        assert_diagnostic(
+            &source,
+            kind,
+            complete.len(),
+            checked_test_add(complete.len(), width),
+        );
     }
+}
+
+#[test]
+fn ui_dna2_wp2c_parser_checks_cursor_advancement_boundaries() {
+    let ascii = "projection v0 { revision 0; epoch 0; }+";
+    assert_at(ascii, Kind::UnexpectedToken, "+");
+
+    let crlf = "projection v0 {\r\nrevision 0; epoch 0; background blue; }";
+    assert_at(crlf, Kind::UnknownClause, "background");
+
+    let multibyte_comment =
+        "projection v0 { // Привет 根\r\nrevision 0; epoch 0; background blue; }";
+    assert_at(multibyte_comment, Kind::UnknownClause, "background");
+
+    let token_at_eof = "Projection";
+    assert_diagnostic(token_at_eof, Kind::UnexpectedToken, 0, token_at_eof.len());
+
+    let eof = "projection v0 { revision 0; epoch 0;";
+    assert_diagnostic(eof, Kind::UnexpectedEof, eof.len(), eof.len());
 }
 
 #[test]
 fn ui_dna2_wp2c_parser_preflights_source_size_without_allocating_input() {
     assert_eq!(
-        preflight_source_len(source_id(), MAX_PROJECTION_SOURCE_BYTES as usize),
+        preflight_source_len(
+            source_id(),
+            usize::try_from(MAX_PROJECTION_SOURCE_BYTES).expect("u32 fits supported usize"),
+        ),
         Ok(())
     );
     if usize::BITS > 32 {
-        let actual_len = MAX_PROJECTION_SOURCE_BYTES as usize + 1;
+        let actual_len = usize::try_from(MAX_PROJECTION_SOURCE_BYTES)
+            .expect("u32 fits supported usize")
+            .checked_add(1)
+            .expect("64-bit usize represents u32 max plus one");
         assert_eq!(
             preflight_source_len(source_id(), actual_len),
             Err(ProjectionSourceInputError::SourceTooLarge {
