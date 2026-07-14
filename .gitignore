@@ -8,6 +8,7 @@
 !tests/golden/*.smc
 Cargo.lock
 /.semantic-cache/
+/.ccl/
 /.codebase-memory/
 /.claude/
 /scratch/
