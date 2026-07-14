@@ -72,6 +72,7 @@ pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
 pub(crate) mod semantic_refs;
 pub(crate) mod static_ir;
+pub(crate) mod static_ir_artifact;
 pub mod trace;
 pub mod tree_bridge;
 pub mod tree_slot_intent;
@@ -88,6 +89,8 @@ mod ui_dna2_wp2c_frontend_qualification_tests;
 mod ui_dna2_wp2c_parser_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp3_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_wp3b_artifact_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp4_qualification_tests;
 

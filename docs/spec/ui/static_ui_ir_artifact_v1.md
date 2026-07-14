@@ -1,9 +1,9 @@
 # Static UI IR Artifact V1
 
-Status: normative format contract; implementation qualification pending
-Track: UI DNA v2 / UI-DNA2-3A
+Status: normative format contract; UI-DNA2-3B implementation candidate under local qualification
+Track: UI DNA v2 / UI-DNA2-3A and UI-DNA2-3B candidate
 Scope: canonical in-memory artifact bytes only
-Implementation status: existing internal qualification encoding; no conforming decoder or loader claimed
+Implementation status: crate-private in-memory encoder/verifier candidate with two golden vectors and executable invalid-artifact qualification; merge and landed conformance evidence pending; no loader or public codec API claimed
 
 ## 1. Purpose and authority boundary
 
@@ -15,7 +15,7 @@ validated StaticUiDocument
   -> Static UI IR Artifact V1 bytes
 ```
 
-The landed crate-private `StaticUiDocument::canonical_bytes()` implementation is internal qualification evidence for the byte layout described here. This specification freezes the normative intended contract. Merging this documentation does not establish implementation conformance. A separately authorized UI-DNA2-3B implementation qualification is required before a conforming artifact implementation may be claimed complete.
+The landed crate-private `StaticUiDocument::canonical_bytes()` implementation is internal qualification evidence for the byte layout described here. This specification freezes the normative intended contract. The UI-DNA2-3B candidate adds a crate-private in-memory verifier, two golden vectors, and executable invalid-artifact qualification. That candidate requires review and merge before it becomes landed conformance evidence; this branch does not claim a public artifact implementation, loader, runtime activation, Gate D activation, or completion of UI-DNA2-3.
 
 The authority boundaries are strict:
 
@@ -291,7 +291,7 @@ The following are outside UI-DNA2-3A and Artifact V1:
 - Gate D activation;
 - production promotion.
 
-UI-DNA2-3A does not authorize UI-DNA2-3B implementation or qualification.
+UI-DNA2-3B is limited to the crate-private in-memory verifier and executable qualification candidate described above. It does not authorize a filesystem or runtime loader, public codec API, activation, Gate D, or production promotion.
 
 ## 11. Acceptance criteria
 
@@ -305,5 +305,5 @@ This contract is complete only when:
 6. malformed, structurally or semantically invalid, resource-rejected, and noncanonical artifacts are distinguished;
 7. verification is separated from loading and activation;
 8. Role Dictionary ownership and explicit context selection are stated;
-9. the existing crate-private `canonical_bytes()` is not claimed as a qualified public artifact implementation;
-10. UI-DNA2-3B implementation and qualification remain separately unauthorized.
+9. the existing crate-private `canonical_bytes()` and the candidate verifier are not claimed as a public artifact API;
+10. UI-DNA2-3 completion, loading, activation, Gate D, and production promotion remain separately unauthorized.
