@@ -63,6 +63,7 @@ pub mod projection;
 pub(crate) mod projection_compile;
 pub(crate) mod projection_patch;
 pub(crate) mod projection_source;
+pub(crate) mod projection_source_frontend;
 pub(crate) mod projection_source_parser;
 pub mod raw_event;
 pub mod renderer;
@@ -81,6 +82,8 @@ pub mod validation;
 
 #[cfg(test)]
 mod ui_dna2_wp2_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_wp2c_frontend_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp2c_parser_qualification_tests;
 #[cfg(test)]
