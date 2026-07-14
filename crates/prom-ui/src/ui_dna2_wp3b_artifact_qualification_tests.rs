@@ -35,6 +35,9 @@ const STRUCTURED_FIRST_CHILD_OFFSET: usize = 253;
 const STRUCTURED_SECOND_CHILD_OFFSET: usize = 265;
 const STRUCTURED_ACCESSIBILITY_TAG_OFFSET: usize = 277;
 const STRUCTURED_ACCESSIBILITY_ID_OFFSET: usize = 278;
+const TWO_SURFACE_FIRST_RECORD_OFFSET: usize = 60;
+const TWO_SURFACE_SECOND_RECORD_OFFSET: usize = 85;
+const TWO_SURFACE_NODE_COUNT_OFFSET: usize = 110;
 
 #[derive(Clone)]
 struct SurfaceSpec {
@@ -926,35 +929,44 @@ fn ui_dna2_wp3b_artifact_failure_precedence_is_fail_closed() {
     oversized_bad_magic[MAGIC_OFFSET] ^= 1;
     let mut configured = limits();
     configured.max_input_bytes = MINIMAL.len() - 1;
+    let oversized_error = error(&oversized_bad_magic, configured);
+    assert_eq!(oversized_error.stage(), StaticUiArtifactV1Stage::Resource);
     assert_eq!(
-        error(&oversized_bad_magic, configured).stage(),
-        StaticUiArtifactV1Stage::Resource
+        oversized_error.kind(),
+        &StaticUiArtifactV1ErrorKind::InputTooLarge
     );
+    assert_eq!(oversized_error.byte_offset(), None);
 
     let mut wrong_magic_trailing = MINIMAL.to_vec();
     assert_eq!(wrong_magic_trailing[MAGIC_OFFSET], b'U');
     wrong_magic_trailing[MAGIC_OFFSET] ^= 1;
     wrong_magic_trailing.push(0);
-    assert_eq!(
-        error(&wrong_magic_trailing, limits()).stage(),
-        StaticUiArtifactV1Stage::Header
+    assert_kind(
+        &wrong_magic_trailing,
+        StaticUiArtifactV1Stage::Header,
+        StaticUiArtifactV1ErrorKind::InvalidMagic,
+        Some(MAGIC_OFFSET),
     );
 
     let mut wrong_magic_truncated = MINIMAL[..MINIMAL.len() - 1].to_vec();
     assert_eq!(wrong_magic_truncated[MAGIC_OFFSET], b'U');
     wrong_magic_truncated[MAGIC_OFFSET] ^= 1;
-    assert_eq!(
-        error(&wrong_magic_truncated, limits()).stage(),
-        StaticUiArtifactV1Stage::Decode
+    assert_kind(
+        &wrong_magic_truncated,
+        StaticUiArtifactV1Stage::Decode,
+        StaticUiArtifactV1ErrorKind::TruncatedPrimitive,
+        Some(MINIMAL_ACCESSIBILITY_TAG_OFFSET),
     );
 
     let (mut surfaces, nodes) = minimal_specs();
     surfaces[0].root = 99;
     let mut trailing_structural = encode(1, 0, 0, &surfaces, &nodes);
     trailing_structural.push(0);
-    assert_eq!(
-        error(&trailing_structural, limits()).stage(),
-        StaticUiArtifactV1Stage::CompleteConsumption
+    assert_kind(
+        &trailing_structural,
+        StaticUiArtifactV1Stage::CompleteConsumption,
+        StaticUiArtifactV1ErrorKind::TrailingBytes,
+        Some(MINIMAL.len()),
     );
 
     let mut structural_unknown = nodes;
@@ -1196,6 +1208,73 @@ fn ui_dna2_wp3b_artifact_named_mutations_are_guaranteed_rejections() {
         StaticUiArtifactV1Stage::Decode,
         StaticUiArtifactV1ErrorKind::TruncatedPrimitive,
         Some(STRUCTURED_ACCESSIBILITY_ID_OFFSET),
+    );
+
+    let surface_specs = [
+        SurfaceSpec {
+            id: 1,
+            root: 10,
+            key: 1,
+            source: None,
+        },
+        SurfaceSpec {
+            id: 2,
+            root: 20,
+            key: 2,
+            source: None,
+        },
+    ];
+    let surface_nodes = [
+        NodeSpec {
+            id: 10,
+            role: "root",
+            key: 10,
+            source: None,
+            children: Vec::new(),
+            accessibility_ref: None,
+        },
+        NodeSpec {
+            id: 20,
+            role: "root",
+            key: 20,
+            source: None,
+            children: Vec::new(),
+            accessibility_ref: None,
+        },
+    ];
+    let mut surface_order = encode(1, 0, 0, &surface_specs, &surface_nodes);
+    assert_eq!(
+        &surface_order[TWO_SURFACE_FIRST_RECORD_OFFSET..TWO_SURFACE_FIRST_RECORD_OFFSET + 8],
+        &1_u64.to_le_bytes()
+    );
+    assert_eq!(
+        &surface_order[TWO_SURFACE_SECOND_RECORD_OFFSET..TWO_SURFACE_SECOND_RECORD_OFFSET + 8],
+        &2_u64.to_le_bytes()
+    );
+    assert_eq!(
+        &surface_order[TWO_SURFACE_FIRST_RECORD_OFFSET + 16..TWO_SURFACE_FIRST_RECORD_OFFSET + 24],
+        &1_u64.to_le_bytes()
+    );
+    assert_eq!(
+        &surface_order
+            [TWO_SURFACE_SECOND_RECORD_OFFSET + 16..TWO_SURFACE_SECOND_RECORD_OFFSET + 24],
+        &2_u64.to_le_bytes()
+    );
+    assert_eq!(surface_order[TWO_SURFACE_SECOND_RECORD_OFFSET - 1], 0);
+    assert_eq!(surface_order[TWO_SURFACE_NODE_COUNT_OFFSET - 1], 0);
+    let first_surface =
+        surface_order[TWO_SURFACE_FIRST_RECORD_OFFSET..TWO_SURFACE_SECOND_RECORD_OFFSET].to_vec();
+    let second_surface =
+        surface_order[TWO_SURFACE_SECOND_RECORD_OFFSET..TWO_SURFACE_NODE_COUNT_OFFSET].to_vec();
+    surface_order[TWO_SURFACE_FIRST_RECORD_OFFSET..TWO_SURFACE_SECOND_RECORD_OFFSET]
+        .copy_from_slice(&second_surface);
+    surface_order[TWO_SURFACE_SECOND_RECORD_OFFSET..TWO_SURFACE_NODE_COUNT_OFFSET]
+        .copy_from_slice(&first_surface);
+    assert_kind(
+        &surface_order,
+        StaticUiArtifactV1Stage::Canonical,
+        StaticUiArtifactV1ErrorKind::CanonicalMismatch,
+        Some(TWO_SURFACE_FIRST_RECORD_OFFSET),
     );
 
     assert_eq!(
