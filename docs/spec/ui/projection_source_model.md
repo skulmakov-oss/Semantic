@@ -24,7 +24,9 @@ The source model does not itself define parser grammar.
 The bounded structural grammar contract is specified separately in
 projection_source_grammar_v0.md.
 
-Parser implementation remains a separate, unauthorized slice.
+The WP2C-P4 Grammar v0 parser/scanner is landed and remains crate-private.
+WP2C-P5 adds only a crate-private, pure in-memory composition from source text
+through that parser and the existing semantic compiler to Static UI IR.
 
 ## Source Role Representation Boundary
 
@@ -67,17 +69,20 @@ tokenization != authority
 ```
 
 The normative WP2C-P3 candidate, context, precedence and span rules remain in
-Grammar v0 and are not duplicated here. A crate-private implementation
-candidate now exists in `prom-ui`; Grammar v0 owns its detailed tokenization
-and diagnostic selection. The implementation candidate does not publish a
-parser or token API and grants no runtime, capability, admission or activation
-authority.
+Grammar v0 and are not duplicated here. The landed crate-private P4
+parser/scanner owns its detailed tokenization and diagnostic selection. P5
+composes that parser with the existing crate-private compiler without
+publishing a parser or token API. Parse success remains distinct from semantic
+validity.
 
 ```text
-implementation candidate != publication
-implementation != runtime loading
+parser/scanner landed != public parser or token API
+composition != file loading
+composition != runtime loading
 parse success != semantic validation
-parser implementation != Gate D activation
+composition != activation or admission
+composition != capability authority or shell mutation
+composition != Gate D activation or production promotion
 ```
 
 ## Source Size and Provenance Representability
@@ -87,13 +92,13 @@ Projection Source provenance uses UTF-8 byte offsets represented by the landed
 `u32::MAX = 4_294_967_295` source bytes. This model does not widen `SourceSpan`
 to `u64`, `usize`, character offsets or line/column coordinates.
 
-For a future parser receiving `&str`, source-size preflight occurs before
-parser ownership. A source longer than `u32::MAX` bytes is classified as the
-future input-domain error `ProjectionSourceInputError::SourceTooLarge`; it
+For the crate-private parser receiving `&str`, source-size preflight occurs
+before parser ownership. A source longer than `u32::MAX` bytes is classified as
+the input-domain error `ProjectionSourceInputError::SourceTooLarge`; it
 produces no SourceSpan, PSP diagnostic, tokenization, AST or PS validation.
 The conceptual error carries the caller-supplied `SourceId`, actual UTF-8 byte
-length and maximum accepted byte length. The crate-private implementation
-candidate enforces this preflight without widening the public API.
+length and maximum accepted byte length. The landed crate-private
+implementation enforces this preflight without widening the public API.
 
 The limit is a representability ceiling, not a recommended operational file
 size. A future host or loader may impose a smaller memory, quota, transport or
@@ -140,21 +145,11 @@ source-size policy specified != parser qualification
 source-size policy specified != runtime source loading
 source-size policy specified != WP2C completion
 
-The P1 source-size contract and P2 clause-context diagnostic contract are
-landed. Grammar v0 separately defines the normative WP2C-P3 identifier
-candidate and malformed-identifier diagnostic contract. Definition of that
-contract is separate from review, publication, merge and implementation.
-
-A future merge of P3 into `main` establishes repository landed evidence through
-the merge commit and resulting Git tree. A later issue #1489 rebaseline records
-that evidence and the current authorization posture; it does not create or
-override repository truth. Issue state does not create Git tree state and the
-ledger grants no architectural authority.
-
-P3 specification and merge did not themselves authorize implementation. The
-separately bounded WP2C-P4 task now provides a crate-private parser/scanner
-implementation candidate; publication, runtime loading and activation remain
-unauthorized.
+The P1 source-size, P2 clause-context and P3 identifier-candidate diagnostic
+contracts are landed and unchanged. The P4 parser/scanner implementation is
+also landed and crate-private. P5 supplies only the pure in-memory composition
+to the existing Static UI IR compiler. Repository state and ledger state grant
+no runtime, activation, admission, capability or production authority.
 
 No source-size check grants capability, performs admission, loads files,
 allocates runtime buffers, activates a ProjectionBundle, mutates shell state,
