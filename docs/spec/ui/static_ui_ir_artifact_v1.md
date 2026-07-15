@@ -193,18 +193,17 @@ A future compatibility bridge requires a separate approved contract. It cannot b
 The landed crate-private verifier performs these normative stages in order:
 
 1. input and resource preflight;
-2. exact bounded byte decoding;
+2. exact bounded byte-domain decoding, including bounded field extraction, primitive representation checks, and UTF-8 validation in wire order;
 3. exact magic and version checks;
-4. primitive and UTF-8 validation;
-5. complete-consumption check;
-6. construction of a candidate `StaticUiDocument`;
-7. Static UI IR structural validation;
-8. role validation using the explicitly selected `RoleDictionary` context;
-9. canonical re-encoding;
-10. exact byte-for-byte equality with the original input;
-11. production of a verified-artifact result.
+4. complete-consumption check;
+5. construction of a candidate `StaticUiDocument`;
+6. Static UI IR structural validation;
+7. role validation using the explicitly selected `RoleDictionary` context;
+8. canonical re-encoding;
+9. exact byte-for-byte equality with the original input;
+10. production of a verified-artifact result.
 
-Stages may share implementation machinery, but they must preserve the failure-class distinctions and deterministic precedence specified below. A decoder must never create identifiers, defaults, missing payload, or partial documents from absent bytes.
+Byte-domain decoding precedes header/version classification. Within byte-domain decoding, fields are processed in wire order and the first byte-domain failure wins deterministically. Header/version checks occur only after successful bounded decoding. Stages may share implementation machinery, but they must preserve the failure-class distinctions and deterministic precedence specified below. A decoder must never create identifiers, defaults, missing payload, or partial documents from absent bytes.
 
 Incoming noncanonical bytes are rejected. A verifier must not silently normalize them and accept semantic equivalence.
 
