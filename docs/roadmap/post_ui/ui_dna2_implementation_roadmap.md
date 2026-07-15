@@ -193,7 +193,7 @@ Future evidence may split, combine, reorder, or retire phases.
 | UI-DNA2-1 — Ownership and contract freeze | **COMPLETE** | ownership/compatibility freeze, D01-D11, #1490 | Changes require a separate owner decision |
 | UI-DNA2-2 — Projection source front-end | **GRAMMAR V0 PARSER AND FRONTEND QUALIFICATION LANDED; PUBLIC API AND LOADING NOT AUTHORIZED** | programmatic Projection Source AST, source normalization and diagnostics in #1490; normative Grammar v0 contract in #1500; crate-private parser/scanner with all 12 `PSP_*` diagnostics, exact UTF-8 spans, source-size preflight and fail-fast precedence qualified in #1507; crate-private pure in-memory semantic-validation and Static UI IR composition qualified in #1508 | Public parser/frontend APIs and filesystem/runtime loaders remain absent; runtime loading, Gate D and production promotion remain unauthorized |
 | UI-DNA2-3 — Canonical Static UI IR | **CRATE-PRIVATE ARTIFACT V1 QUALIFICATION LANDED; LOADING AND ACTIVATION NOT AUTHORIZED** | versioned wrapper, stable structure, semantic child ordering, lowering and qualification bytes in #1490; normative Artifact V1 contract in #1510; crate-private pure in-memory verifier, two committed golden vectors, all 22 normative invalid-artifact rows, deterministic rejection mutations, exhaustive minimal-vector truncation and exact canonical re-encoding equality in #1511 (`ddf28436c1c4ab0a961c007e89c757deae87dcfe`); exact-head and post-merge CI succeeded | Public codec API and filesystem/runtime loaders remain absent; runtime loading, Gate D and production promotion remain unauthorized; no next implementation slice is authorized |
-| UI-DNA2-4 — Binding Graph | **CONTRACT FOUNDATION LANDED** | deterministic declarations, cycle validation, diagnostics, #1491 | Approved Semantic source adapters, revision/epoch observation rules, dirty-propagation integration and Quad preservation evidence |
+| UI-DNA2-4 — Binding Graph | **CONTRACT FOUNDATION LANDED; OBSERVATION/DIRTY V0 CONTRACT FROZEN; ENGINE NOT AUTHORIZED** | deterministic declarations, cycle validation and diagnostics in #1491; normative observation comparison, temporal classification, dirty derivation, propagation, Quad preservation and resource-limit contract in `docs/spec/ui/binding_graph_observation_dirty_v0.md` | Engine implementation and qualification require future separate authorization; Semantic source adapters remain future work; runtime consumption and Projection Patch application remain behind Gate D |
 | UI-DNA2-5 — Action IR integration | **CONTRACT FOUNDATION LANDED** | static routes, `ActionIntent`, invocation context, structural mapper, #1491 | Explicit adapter to existing admission boundary, accepted/denied traces, stale revision, idempotency and capability evidence; Gate D required |
 | UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
 | UI-DNA2-7 — Denial, recovery, task and freshness projection | **NOT STARTED** | specifications only | Bounded contracts and evidence after deterministic patch replay-order qualification |
@@ -342,12 +342,15 @@ EVIDENCE LANDED OR CARRIED BY THE CURRENT CHANGE:
 → WP4A → WP4B replay-order checkpoint
 → UI-DNA2-3A Artifact V1 contract
 → UI-DNA2-3B crate-private Artifact V1 qualification
+→ UI-DNA2-2 Grammar v0 parser/frontend qualification reconciliation
+→ Binding Graph observation/dirty v0 normative contract freeze
 ```
 
 CURRENTLY UNAUTHORIZED FUTURE CONTOURS:
 
 ```text
-Binding Graph source/dirty integration
+Binding Graph observation/dirty engine implementation and qualification
+Semantic source adapters for Binding Graph observations
 admission integration behind Gate D
 denial/recovery/task/freshness projection
 ProjectionBundle qualification
@@ -412,7 +415,9 @@ reference slice != production promotion
 - [x] Gate D activation/integration remains closed.
 - [x] Projection source textual parser/grammar and pure in-memory parser-to-compiler frontend are qualified through #1507 and #1508; both remain crate-private, with no public API or filesystem/runtime loading authorization.
 - [x] Static UI IR Artifact V1 qualification is landed at the crate-private pure in-memory boundary through #1511; public codec API and filesystem/runtime loaders remain absent, runtime loading remains unauthorized, Gate D remains closed, and production promotion remains unauthorized.
-- [ ] Binding Graph source and dirty-propagation integration is qualified.
+- [x] Binding Graph observation comparison and dirty-propagation v0 contract is normatively frozen without implementation authorization.
+- [ ] Binding Graph observation/dirty engine implementation and qualification are separately authorized and landed.
+- [ ] Semantic source adapters for Binding Graph observations are separately specified, authorized and qualified.
 - [ ] Action IR admission integration is separately approved and qualified.
 - [x] Projection Patch replay-order model and qualification are complete in the bounded WP4B contour.
 - [ ] Patch application is separately qualified in the `prom-ui-runtime::shell_player` contour.
@@ -448,4 +453,5 @@ Until then:
 ```text
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
+NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
 ```
