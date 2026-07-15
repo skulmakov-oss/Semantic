@@ -674,10 +674,99 @@ fn validate_static_ir(
     document: &StaticUiDocument,
     dictionary: RoleDictionary,
 ) -> StaticUiIrDiagnostics {
+    let structural_nodes: Vec<_> = document
+        .nodes
+        .iter()
+        .map(StaticUiStructureNode::from)
+        .collect();
+    let mut diagnostics =
+        validate_static_ir_structure(document.id, &document.surfaces, &structural_nodes)
+            .diagnostics;
+
+    for node in &document.nodes {
+        if dictionary.validate(node.role).is_err() {
+            diagnostics.push(StaticUiIrDiagnostic::new(
+                node.source,
+                StaticUiIrDiagnosticKind::UnknownRole,
+                node.key.raw(),
+                0,
+            ));
+        }
+    }
+
+    StaticUiIrDiagnostics::new(diagnostics)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct StaticUiStructureNode {
+    id: StaticNodeId,
+    key: CollectionKey,
+    source: Option<SourceRef>,
+    children: Vec<StaticUiChild>,
+    accessibility_ref: Option<StaticNodeId>,
+}
+
+impl StaticUiStructureNode {
+    pub(crate) fn new(
+        id: StaticNodeId,
+        key: CollectionKey,
+        source: Option<SourceRef>,
+        children: Vec<StaticUiChild>,
+        accessibility_ref: Option<StaticNodeId>,
+    ) -> Self {
+        Self {
+            id,
+            key,
+            source,
+            children,
+            accessibility_ref,
+        }
+    }
+
+    pub(crate) const fn id(&self) -> StaticNodeId {
+        self.id
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        StaticNodeId,
+        CollectionKey,
+        Option<SourceRef>,
+        Vec<StaticUiChild>,
+        Option<StaticNodeId>,
+    ) {
+        (
+            self.id,
+            self.key,
+            self.source,
+            self.children,
+            self.accessibility_ref,
+        )
+    }
+}
+
+impl From<&StaticUiNode> for StaticUiStructureNode {
+    fn from(node: &StaticUiNode) -> Self {
+        Self::new(
+            node.id,
+            node.key,
+            node.source,
+            node.children.clone(),
+            node.accessibility_ref,
+        )
+    }
+}
+
+pub(crate) fn validate_static_ir_structure(
+    document_id: StaticDocumentId,
+    surfaces: &[StaticUiSurface],
+    nodes: &[StaticUiStructureNode],
+) -> StaticUiIrDiagnostics {
     let mut diagnostics = Vec::new();
 
-    for (index, surface) in document.surfaces.iter().enumerate() {
-        if document.surfaces[..index]
+    for (index, surface) in surfaces.iter().enumerate() {
+        if surfaces[..index]
             .iter()
             .any(|previous| previous.id == surface.id)
         {
@@ -688,7 +777,7 @@ fn validate_static_ir(
                 0,
             ));
         }
-        if document.surfaces[..index]
+        if surfaces[..index]
             .iter()
             .any(|previous| previous.key == surface.key)
         {
@@ -699,7 +788,7 @@ fn validate_static_ir(
                 0,
             ));
         }
-        if !document.nodes.iter().any(|node| node.id == surface.root) {
+        if !nodes.iter().any(|node| node.id == surface.root) {
             diagnostics.push(StaticUiIrDiagnostic::new(
                 surface.source,
                 StaticUiIrDiagnosticKind::MissingRoot,
@@ -709,11 +798,8 @@ fn validate_static_ir(
         }
     }
 
-    for (index, node) in document.nodes.iter().enumerate() {
-        if document.nodes[..index]
-            .iter()
-            .any(|previous| previous.id == node.id)
-        {
+    for (index, node) in nodes.iter().enumerate() {
+        if nodes[..index].iter().any(|previous| previous.id == node.id) {
             diagnostics.push(StaticUiIrDiagnostic::new(
                 node.source,
                 StaticUiIrDiagnosticKind::DuplicateNodeId,
@@ -721,7 +807,7 @@ fn validate_static_ir(
                 0,
             ));
         }
-        if document.nodes[..index]
+        if nodes[..index]
             .iter()
             .any(|previous| previous.key == node.key)
         {
@@ -732,21 +818,8 @@ fn validate_static_ir(
                 0,
             ));
         }
-        if dictionary.validate(node.role).is_err() {
-            diagnostics.push(StaticUiIrDiagnostic::new(
-                node.source,
-                StaticUiIrDiagnosticKind::UnknownRole,
-                node.key.raw(),
-                0,
-            ));
-        }
         if let Some(target) = node.accessibility_ref {
-            if target == node.id
-                || !document
-                    .nodes
-                    .iter()
-                    .any(|candidate| candidate.id == target)
-            {
+            if target == node.id || !nodes.iter().any(|candidate| candidate.id == target) {
                 diagnostics.push(StaticUiIrDiagnostic::new(
                     node.source,
                     StaticUiIrDiagnosticKind::InvalidAccessibilityReference,
@@ -756,11 +829,7 @@ fn validate_static_ir(
             }
         }
         for (child_index, child) in node.children.iter().enumerate() {
-            if !document
-                .nodes
-                .iter()
-                .any(|candidate| candidate.id == child.child)
-            {
+            if !nodes.iter().any(|candidate| candidate.id == child.child) {
                 diagnostics.push(StaticUiIrDiagnostic::new(
                     node.source,
                     StaticUiIrDiagnosticKind::MissingChild,
@@ -793,28 +862,30 @@ fn validate_static_ir(
         }
     }
 
-    validate_static_forest(document, &mut diagnostics);
+    validate_static_forest(document_id, surfaces, nodes, &mut diagnostics);
 
     StaticUiIrDiagnostics::new(diagnostics)
 }
 
 fn validate_static_forest(
-    document: &StaticUiDocument,
+    document_id: StaticDocumentId,
+    surfaces: &[StaticUiSurface],
+    nodes: &[StaticUiStructureNode],
     diagnostics: &mut Vec<StaticUiIrDiagnostic>,
 ) {
-    if document.surfaces.is_empty() {
+    if surfaces.is_empty() {
         diagnostics.push(StaticUiIrDiagnostic::new(
             None,
             StaticUiIrDiagnosticKind::MissingRoot,
-            document.id.raw(),
+            document_id.raw(),
             0,
         ));
         return;
     }
 
     let mut root_indices = Vec::new();
-    for surface in &document.surfaces {
-        let Some(root_index) = static_node_index(document, surface.root) else {
+    for surface in surfaces {
+        let Some(root_index) = static_node_index(nodes, surface.root) else {
             continue;
         };
         if root_indices.contains(&root_index) {
@@ -828,15 +899,15 @@ fn validate_static_forest(
         root_indices.push(root_index);
     }
 
-    let mut owner: Vec<Option<usize>> = alloc::vec![None; document.nodes.len()];
-    let mut parent_count: Vec<u32> = alloc::vec![0; document.nodes.len()];
-    let mut visiting: Vec<bool> = alloc::vec![false; document.nodes.len()];
-    let mut complete: Vec<bool> = alloc::vec![false; document.nodes.len()];
+    let mut owner: Vec<Option<usize>> = alloc::vec![None; nodes.len()];
+    let mut parent_count: Vec<u32> = alloc::vec![0; nodes.len()];
+    let mut visiting: Vec<bool> = alloc::vec![false; nodes.len()];
+    let mut complete: Vec<bool> = alloc::vec![false; nodes.len()];
 
-    for (surface_index, surface) in document.surfaces.iter().enumerate() {
-        if let Some(root_index) = static_node_index(document, surface.root) {
+    for (surface_index, surface) in surfaces.iter().enumerate() {
+        if let Some(root_index) = static_node_index(nodes, surface.root) {
             walk_static_forest(
-                document,
+                nodes,
                 surface_index,
                 root_index,
                 &mut owner,
@@ -848,7 +919,7 @@ fn validate_static_forest(
         }
     }
 
-    for (index, node) in document.nodes.iter().enumerate() {
+    for (index, node) in nodes.iter().enumerate() {
         let is_root = root_indices.contains(&index);
         if is_root && parent_count[index] != 0 {
             diagnostics.push(StaticUiIrDiagnostic::new(
@@ -886,7 +957,7 @@ struct StaticTraversalFrame {
 
 #[allow(clippy::too_many_arguments)]
 fn walk_static_forest(
-    document: &StaticUiDocument,
+    nodes: &[StaticUiStructureNode],
     surface_index: usize,
     root_index: usize,
     owner: &mut [Option<usize>],
@@ -906,7 +977,7 @@ fn walk_static_forest(
         let node_index = frame.node_index;
         if !frame.entered {
             frame.entered = true;
-            let node = &document.nodes[node_index];
+            let node = &nodes[node_index];
             if frame.parent.is_some() {
                 parent_count[node_index] = parent_count[node_index].saturating_add(1);
             }
@@ -940,11 +1011,11 @@ fn walk_static_forest(
         }
 
         let next_child = frame.next_child;
-        let next = document.nodes[node_index].children.get(next_child).copied();
+        let next = nodes[node_index].children.get(next_child).copied();
         if let Some(child) = next {
             frame.next_child += 1;
             stack.push(frame);
-            if let Some(child_index) = static_node_index(document, child.child) {
+            if let Some(child_index) = static_node_index(nodes, child.child) {
                 stack.push(StaticTraversalFrame {
                     node_index: child_index,
                     parent: Some(node_index),
@@ -959,8 +1030,8 @@ fn walk_static_forest(
     }
 }
 
-fn static_node_index(document: &StaticUiDocument, id: StaticNodeId) -> Option<usize> {
-    document.nodes.iter().position(|node| node.id == id)
+fn static_node_index(nodes: &[StaticUiStructureNode], id: StaticNodeId) -> Option<usize> {
+    nodes.iter().position(|node| node.id == id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
