@@ -1,11 +1,11 @@
 task:
-  id: UI-DNA2-BG-SEMANTIC-OBSERVATION-ADAPTER-V0
-  title: implement and qualify Binding Graph semantic observation adapter v0
+  id: UI-DNA2-DENIAL-RECOVERY-FRESHNESS-V0
+  title: implement and qualify denial recovery and freshness projection v0
   type: implementation
   mode: active
 
 intent:
-  summary: "feat(ui): implement Binding Graph semantic observation adapter v0"
+  summary: "feat(ui): implement denial recovery and freshness projection v0"
   issue: "#1489"
 
 layer:
@@ -15,13 +15,12 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-ui/src/binding_graph_semantic_adapter.rs
-    - crates/prom-ui/src/ui_dna2_binding_semantic_adapter_qualification_tests.rs
-    - crates/prom-ui/src/binding_graph_observation.rs
-    - crates/prom-ui/src/semantic_refs.rs
+    - crates/prom-ui/src/denial_recovery.rs
+    - crates/prom-ui/src/connectivity_projection.rs
+    - crates/prom-ui/src/ui_dna2_denial_recovery_qualification_tests.rs
     - crates/prom-ui/src/lib.rs
-    - docs/spec/ui/binding_graph_semantic_adapter_v0.md
-    - docs/spec/ui/binding_graph_observation_dirty_v0.md
+    - docs/spec/ui/denial_recovery_freshness_v0.md
+    - docs/spec/ui/denial_recovery_projection.md
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
     - docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md
 
@@ -44,11 +43,11 @@ actions:
     - modify_lockfile
     - modify_workflows
     - modify_scripts
-    - modify_vm
     - modify_runtime
+    - modify_admission
     - modify_public_api
     - modify_issue
-    - force_push
     - merge
+    - force_push
     - open_gate
     - production_promotion

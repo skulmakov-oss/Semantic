@@ -1,6 +1,6 @@
 # Denial, Partial Batch, and Recovery Projection
 
-Status: draft spec
+Status: historical broad design background
 Track: POST-UI / Intent-Driven Projection
 Scope type: documentation only
 Depends on:
@@ -25,7 +25,12 @@ Denial, partial batch, and recovery projection define how refusal and recovery s
 
 They do not define Semantic truth, verifier rules, admission policy, VM behavior, runtime authority, recovery implementation, renderer behavior, host effects, or production UI wiring.
 
-This document does not implement denial handling, recovery handling, batch execution, runtime queues, shell behavior, Rust types, compiler behavior, or renderer backend behavior.
+The focused normative v0 contract and current crate-private implementation
+mapping are defined in
+[`denial_recovery_freshness_v0.md`](denial_recovery_freshness_v0.md).
+This historical document still describes broader future ideas; it does not
+supersede that bounded contract or authorize runtime queues, shell behavior,
+patch application, admission execution, task projection or renderer behavior.
 
 ## 1. Purpose
 
