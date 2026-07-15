@@ -1,11 +1,11 @@
 task:
-  id: UI-DNA2-3C-DOC-REBASELINE
-  title: rebaseline Static UI IR Artifact V1 after UI-DNA2-3B merge
+  id: UI-DNA2-WP2-RECONCILE-BG-OBSERVATION-CONTRACT
+  title: reconcile Projection Source qualification and freeze Binding Graph observation contract
   type: documentation
   mode: active
 
 intent:
-  summary: "docs(ui): rebaseline Static UI IR artifact v1 status"
+  summary: "docs(ui): reconcile Projection Source and freeze Binding Graph observation contract"
   issue: "#1489"
 
 layer:
@@ -15,8 +15,11 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - docs/spec/ui/static_ui_ir_artifact_v1.md
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
+    - docs/spec/ui/projection_source_grammar_v0.md
+    - docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md
+    - docs/spec/ui/binding_graph_observation_dirty_v0.md
+    - docs/spec/ui/projection_patch_model.md
 
 actions:
   allowed:
@@ -24,7 +27,11 @@ actions:
     - edit_harness
     - modify_docs
     - modify_specs
+    - create_docs
     - test
+    - commit
+    - push
+    - create_pr
 
   forbidden:
     - modify_rust
@@ -35,10 +42,10 @@ actions:
     - modify_scripts
     - modify_vm
     - modify_visual
-    - commit
-    - push
-    - create_pr
+    - modify_issue
     - create_issue
     - reopen_issue
     - force_push
     - merge
+    - open_gate
+    - production_promotion

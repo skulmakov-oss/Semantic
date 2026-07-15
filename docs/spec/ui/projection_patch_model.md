@@ -360,6 +360,20 @@ Dirty propagation must be deterministic and evidence-friendly.
 
 Dirty propagation is the update scheduler for projection dependencies.
 
+The normative v0 contract for observation comparison and dirty Binding
+derivation is `binding_graph_observation_dirty_v0.md`. That contract produces
+canonical dirty Binding evidence only.
+
+```text
+Binding Graph dirty derivation != Projection Patch construction
+Binding Graph dirty derivation != Projection Patch application
+dirty Binding evidence != permission to mutate UI
+```
+
+Projection Patch construction remains a separate contract boundary. Projection
+Patch application remains owned by the separately gated runtime shell-player
+contour and is not authorized by dirty derivation.
+
 ## 16. Revisions and Epochs
 
 Patch streams are revision-aware.
