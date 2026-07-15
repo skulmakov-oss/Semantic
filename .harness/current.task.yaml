@@ -1,11 +1,11 @@
 task:
-  id: UI-DNA2-WP2-RECONCILE-BG-OBSERVATION-CONTRACT
-  title: reconcile Projection Source qualification and freeze Binding Graph observation contract
-  type: documentation
+  id: UI-DNA2-BG-OBSERVATION-DIRTY-ENGINE-V0
+  title: implement and qualify Binding Graph observation dirty engine v0
+  type: implementation
   mode: active
 
 intent:
-  summary: "docs(ui): reconcile Projection Source and freeze Binding Graph observation contract"
+  summary: "feat(ui): implement Binding Graph observation dirty engine v0"
   issue: "#1489"
 
 layer:
@@ -15,36 +15,37 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
+    - crates/prom-ui/src/binding_graph.rs
+    - crates/prom-ui/src/binding_graph_observation.rs
+    - crates/prom-ui/src/ui_dna2_binding_observation_qualification_tests.rs
+    - crates/prom-ui/src/lib.rs
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
-    - docs/spec/ui/projection_source_grammar_v0.md
     - docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md
     - docs/spec/ui/binding_graph_observation_dirty_v0.md
-    - docs/spec/ui/projection_patch_model.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
+    - modify_rust
+    - modify_tests
     - modify_docs
     - modify_specs
-    - create_docs
+    - create_files
     - test
     - commit
     - push
     - create_pr
 
   forbidden:
-    - modify_rust
-    - modify_tests
     - modify_cargo
     - modify_lockfile
     - modify_workflows
     - modify_scripts
     - modify_vm
-    - modify_visual
+    - modify_runtime
+    - modify_public_api
     - modify_issue
-    - create_issue
-    - reopen_issue
     - force_push
     - merge
     - open_gate
