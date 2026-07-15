@@ -1,44 +1,43 @@
 task:
-  id: CORE-QUAD-V1-ROADMAP-CLOSEOUT
-  title: close Quad Logic Engine v1 roadmap
+  id: UI-DNA2-3C-DOC-REBASELINE
+  title: rebaseline Static UI IR Artifact V1 after UI-DNA2-3B merge
   type: documentation
   mode: active
 
 intent:
-  summary: "docs(core-quad): close Quad Logic Engine v1 roadmap"
-  issue: "#1404"
+  summary: "docs(ui): rebaseline Static UI IR artifact v1 status"
+  issue: "#1489"
 
 layer:
-  name: core_quad
-  owner: semantic-core-quad
+  name: ui
+  owner: prom-ui
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/CORE-QUAD-V1-ROADMAP-CLOSEOUT.md
-    - docs/roadmap/core_quad/v1_roadmap_closeout.md
+    - docs/spec/ui/static_ui_ir_artifact_v1.md
+    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - create_docs
     - modify_docs
+    - modify_specs
     - test
-    - commit
-    - push
-    - create_pr
 
   forbidden:
     - modify_rust
     - modify_tests
     - modify_cargo
     - modify_lockfile
-    - modify_specs
     - modify_workflows
     - modify_scripts
     - modify_vm
     - modify_visual
+    - commit
+    - push
+    - create_pr
     - create_issue
     - reopen_issue
     - force_push
