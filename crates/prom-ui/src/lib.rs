@@ -83,6 +83,8 @@ pub mod ui_capability_denial_trace;
 pub mod validation;
 
 #[cfg(test)]
+mod ui_dna2_binding_observation_qualification_tests;
+#[cfg(test)]
 mod ui_dna2_wp2_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp2c_frontend_qualification_tests;
