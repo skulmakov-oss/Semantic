@@ -37,6 +37,7 @@ pub mod action_mapping;
 pub(crate) mod admission_contract;
 pub mod admitted_action;
 pub(crate) mod binding_graph;
+pub(crate) mod binding_graph_observation;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
 pub mod committed_effect;
@@ -81,6 +82,8 @@ pub mod ui_capability_admission_result;
 pub mod ui_capability_denial_trace;
 pub mod validation;
 
+#[cfg(test)]
+mod ui_dna2_binding_observation_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp2_qualification_tests;
 #[cfg(test)]

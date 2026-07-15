@@ -1,6 +1,6 @@
 # Binding Graph Observation and Dirty Propagation V0
 
-Status: NORMATIVE CONTRACT FREEZE; IMPLEMENTATION NOT YET AUTHORIZED
+Status: NORMATIVE CONTRACT FROZEN; CRATE-PRIVATE ENGINE IMPLEMENTATION AND QUALIFICATION CARRIED BY THIS CHANGE
 Track: UI DNA v2
 Owner: `prom-ui::binding_graph`
 Runtime activation: NOT AUTHORIZED
@@ -27,9 +27,10 @@ validated BindingGraphDocument
 → canonical dirty result
 ```
 
-This is a contract freeze, not a Rust implementation or public API. It defines
-observable behavior that a future separately authorized implementation must
-qualify without selecting its internal data structures or traversal algorithm.
+This frozen contract now maps to the crate-private implementation and
+executable qualification carried by this bounded change. It remains a contract
+definition rather than a public API claim and does not select a public data
+model or a required internal traversal algorithm.
 
 ## 2. Ownership and authority
 
@@ -459,11 +460,25 @@ These derivation-time capacity errors are evaluated only after structural,
 domain and temporal validation has succeeded, so they cannot mask an earlier
 content error.
 
-## 13. Explicit non-goals and final posture
+## 13. Implementation mapping
 
-This contract does not authorize:
+The bounded crate-private implementation and qualification map is:
 
-- Rust implementation;
+| Contract role | Repository file |
+| --- | --- |
+| existing validated Binding Graph foundation | `crates/prom-ui/src/binding_graph.rs` |
+| observation, validation, temporal classification, dirty derivation and propagation engine | `crates/prom-ui/src/binding_graph_observation.rs` |
+| executable contract qualification | `crates/prom-ui/src/ui_dna2_binding_observation_qualification_tests.rs` |
+| crate-private module and test registration | `crates/prom-ui/src/lib.rs` |
+
+The implementation remains pure and in-memory. It obtains no Semantic values,
+produces no runtime command and exposes no public Binding Graph observation
+surface.
+
+## 14. Explicit non-goals and final posture
+
+This bounded implementation change does not authorize:
+
 - Semantic source adapters;
 - live Semantic reads;
 - Action IR admission;
@@ -482,14 +497,18 @@ Final posture:
 
 ```text
 Binding Graph observation contract = FROZEN
-Binding Graph dirty engine implementation = NOT YET AUTHORIZED
+crate-private Binding Graph dirty engine implementation and qualification = INCLUDED IN THIS BOUNDED CHANGE
 public Binding Graph observation API = ABSENT
+Semantic source adapters = ABSENT
 runtime consumption = NOT AUTHORIZED
 Projection Patch application = NOT AUTHORIZED
+AUTHORIZED SLICE CONSUMED BY THIS CHANGE:
+Binding Graph observation/dirty engine implementation and qualification
+FOLLOW-ON AUTHORIZED IMPLEMENTATION SLICE = NONE
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
-NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
 ```
 
-This contract is a prerequisite for a future bounded implementation proposal.
-It is not that proposal and grants no implementation permission.
+The implementation and qualification consume only the explicit authorization
+for this bounded change. Contract freeze and implementation evidence do not
+authorize Semantic adapters, runtime integration or another slice.
