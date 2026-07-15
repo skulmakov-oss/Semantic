@@ -475,11 +475,17 @@ The implementation remains pure and in-memory. It obtains no Semantic values,
 produces no runtime command and exposes no public Binding Graph observation
 surface.
 
+The separately specified crate-private Semantic observation adapter may
+supply canonical `BindingObservationScope` and `BindingObservationSet` inputs
+from caller-supplied `SemanticValueRef` evidence. Adapter mapping does not
+alter this contract's temporal validation, dirty derivation, propagation,
+ordering or resource semantics, and the adapter performs no live Semantic
+read.
+
 ## 14. Explicit non-goals and final posture
 
 This bounded implementation change does not authorize:
 
-- Semantic source adapters;
 - live Semantic reads;
 - Action IR admission;
 - ActionIntent dispatch;
@@ -499,7 +505,8 @@ Final posture:
 Binding Graph observation contract = FROZEN
 crate-private Binding Graph dirty engine implementation and qualification = INCLUDED IN THIS BOUNDED CHANGE
 public Binding Graph observation API = ABSENT
-Semantic source adapters = ABSENT
+crate-private caller-supplied Semantic observation adapter = INCLUDED IN THIS BOUNDED CHANGE
+live Semantic reads = ABSENT
 runtime consumption = NOT AUTHORIZED
 Projection Patch application = NOT AUTHORIZED
 AUTHORIZED SLICE CONSUMED BY THIS CHANGE:
@@ -509,6 +516,7 @@ Gate D = CLOSED
 production promotion = NOT AUTHORIZED
 ```
 
-The implementation and qualification consume only the explicit authorization
-for this bounded change. Contract freeze and implementation evidence do not
-authorize Semantic adapters, runtime integration or another slice.
+The dirty-engine implementation and qualification consumed only their
+explicit bounded authorization. The separately authorized crate-private
+caller-supplied evidence adapter does not authorize live Semantic reads,
+runtime integration or another slice.
