@@ -186,7 +186,7 @@ Future evidence may split, combine, reorder, or retire phases.
 | UI-DNA2-0 — Reconciliation | **COMPLETE** | #1488, reconciliation document, #1490 | None; preserve as evidence baseline |
 | UI-DNA2-1 — Ownership and contract freeze | **COMPLETE** | ownership/compatibility freeze, D01-D11, #1490 | Changes require a separate owner decision |
 | UI-DNA2-2 — Projection source front-end | **FOUNDATION LANDED** | programmatic Projection Source AST, source normalization, diagnostics, #1490 | Approved textual grammar/parser, parser goldens, invalid syntax and forbidden-content qualification |
-| UI-DNA2-3 — Canonical Static UI IR | **FOUNDATION LANDED** | versioned wrapper, stable structure, semantic child ordering, lowering, qualification bytes, #1490 | Final canonical artifact/serialization policy, compatibility surface and full invalid-artifact matrix |
+| UI-DNA2-3 — Canonical Static UI IR | **CRATE-PRIVATE ARTIFACT V1 QUALIFICATION LANDED; LOADING AND ACTIVATION NOT AUTHORIZED** | versioned wrapper, stable structure, semantic child ordering, lowering and qualification bytes in #1490; normative Artifact V1 contract in #1510; crate-private pure in-memory verifier, two committed golden vectors, all 22 normative invalid-artifact rows, deterministic rejection mutations, exhaustive minimal-vector truncation and exact canonical re-encoding equality in #1511 (`ddf28436c1c4ab0a961c007e89c757deae87dcfe`); exact-head and post-merge CI succeeded | Public codec API and filesystem/runtime loaders remain absent; runtime loading, Gate D and production promotion remain unauthorized; no next implementation slice is authorized |
 | UI-DNA2-4 — Binding Graph | **CONTRACT FOUNDATION LANDED** | deterministic declarations, cycle validation, diagnostics, #1491 | Approved Semantic source adapters, revision/epoch observation rules, dirty-propagation integration and Quad preservation evidence |
 | UI-DNA2-5 — Action IR integration | **CONTRACT FOUNDATION LANDED** | static routes, `ActionIntent`, invocation context, structural mapper, #1491 | Explicit adapter to existing admission boundary, accepted/denied traces, stale revision, idempotency and capability evidence; Gate D required |
 | UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
@@ -334,13 +334,14 @@ EVIDENCE LANDED OR CARRIED BY THE CURRENT CHANGE:
 0 → 1 → WP2 foundation → WP3 foundation
 → D0B → D0C → D0D → D0E
 → WP4A → WP4B replay-order checkpoint
+→ UI-DNA2-3A Artifact V1 contract
+→ UI-DNA2-3B crate-private Artifact V1 qualification
 ```
 
 CURRENTLY UNAUTHORIZED FUTURE CONTOURS:
 
 ```text
 parser qualification
-final Static UI IR artifact qualification
 Binding Graph source/dirty integration
 admission integration behind Gate D
 denial/recovery/task/freshness projection
@@ -405,7 +406,7 @@ reference slice != production promotion
 - [x] `ui-shell-kit` remains experimental.
 - [x] Gate D activation/integration remains closed.
 - [ ] Projection source textual parser/grammar is qualified.
-- [ ] Static UI IR artifact/serialization qualification is complete.
+- [x] Static UI IR Artifact V1 qualification is landed at the crate-private pure in-memory boundary through #1511; public codec API and filesystem/runtime loaders remain absent, runtime loading remains unauthorized, Gate D remains closed, and production promotion remains unauthorized.
 - [ ] Binding Graph source and dirty-propagation integration is qualified.
 - [ ] Action IR admission integration is separately approved and qualified.
 - [x] Projection Patch replay-order model and qualification are complete in the bounded WP4B contour.
