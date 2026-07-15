@@ -772,6 +772,23 @@ fn validate_batch(
         return Ok(None);
     };
 
+    if batch.items.is_empty() {
+        let kind = match batch.mode {
+            BatchMode::Atomic => DenialRecoveryProjectionDiagnosticKind::InvalidAtomicBatch,
+            BatchMode::OrderedPartial => {
+                DenialRecoveryProjectionDiagnosticKind::InvalidOrderedPartialBatch
+            }
+        };
+        return Err(diagnostics_failure(vec![
+            DenialRecoveryProjectionDiagnostic::content(
+                DenialRecoveryProjectionStage::BatchValidation,
+                kind,
+                0,
+                0,
+            ),
+        ]));
+    }
+
     batch.items.sort_by_key(|item| (item.order, item.key));
     let mut diagnostics = duplicate_batch_diagnostics(&batch.items);
     if diagnostics.is_empty() {

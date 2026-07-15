@@ -858,3 +858,49 @@ fn ui_dna2_denial_recovery_all_stable_diagnostic_codes_are_frozen() {
     assert_eq!(cfp.len(), 4);
     assert!(cfp.iter().all(|kind| kind.code().starts_with("CFP_")));
 }
+
+#[test]
+fn ui_dna2_denial_recovery_accepted_empty_atomic_batch_is_invalid() {
+    let mut supplied = evidence(ProjectionResultCategory::Accepted, FreshnessState::Fresh);
+    supplied.batch = Some(BatchProjection::new(BatchMode::Atomic, None, vec![]));
+    let errors = diagnostics(project_denial_recovery(&route(), &supplied, limits()));
+    assert_eq!(errors[0].code(), "DRP_INVALID_ATOMIC_BATCH");
+    assert_eq!(
+        errors[0].stage(),
+        DenialRecoveryProjectionStage::BatchValidation
+    );
+}
+
+#[test]
+fn ui_dna2_denial_recovery_partial_denied_empty_atomic_batch_is_invalid() {
+    let mut supplied = evidence(
+        ProjectionResultCategory::PartialDenied,
+        FreshnessState::Fresh,
+    );
+    supplied.batch = Some(BatchProjection::new(BatchMode::Atomic, None, vec![]));
+    let errors = diagnostics(project_denial_recovery(&route(), &supplied, limits()));
+    assert_eq!(errors[0].code(), "DRP_INVALID_ATOMIC_BATCH");
+    assert_eq!(
+        errors[0].stage(),
+        DenialRecoveryProjectionStage::BatchValidation
+    );
+}
+
+#[test]
+fn ui_dna2_denial_recovery_partial_denied_empty_ordered_partial_batch_is_invalid() {
+    let mut supplied = evidence(
+        ProjectionResultCategory::PartialDenied,
+        FreshnessState::Fresh,
+    );
+    supplied.batch = Some(BatchProjection::new(
+        BatchMode::OrderedPartial,
+        None,
+        vec![],
+    ));
+    let errors = diagnostics(project_denial_recovery(&route(), &supplied, limits()));
+    assert_eq!(errors[0].code(), "DRP_INVALID_ORDERED_PARTIAL_BATCH");
+    assert_eq!(
+        errors[0].stage(),
+        DenialRecoveryProjectionStage::BatchValidation
+    );
+}

@@ -179,6 +179,8 @@ reference possession != authority
 
 ## 7. Batch projection
 
+An empty BatchProjection is not batch evidence.
+
 Each batch item contains `order: u32`, `CollectionKey` and exact result
 category. Items are canonicalized by `(order, CollectionKey)` and emitted as
 `CollectionInsert` operations.
@@ -187,8 +189,8 @@ category. Items are canonicalized by `(order, CollectionKey)` and emitted as
 
 Valid atomic evidence is either:
 
-- all items `Accepted`; or
-- no item `Accepted`, with one or more denial-like or `NotApplied` outcomes.
+- one or more items, all Accepted; or
+- one or more items, no Accepted item, with every item denial-like or NotApplied.
 
 Atomic evidence MUST NOT claim an accepted prefix after a denial.
 
