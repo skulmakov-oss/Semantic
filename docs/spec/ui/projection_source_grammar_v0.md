@@ -1,11 +1,11 @@
 # Projection Source Grammar v0
 
-Status: PROPOSED NORMATIVE GRAMMAR CONTRACT
+Status: NORMATIVE GRAMMAR V0; PARSER AND FRONTEND QUALIFICATION LANDED
 Track: UI DNA v2
-Phase coverage: UI-DNA2-WP2B + WP2C-P1 + WP2C-P2 + WP2C-P3
+Phase coverage: UI-DNA2-WP2B + WP2C-P1 + WP2C-P2 + WP2C-P3 + WP2C-P4 + WP2C-P5
 File posture: `.proj.sm`
-Implementation status: CRATE-PRIVATE PARSER IMPLEMENTATION CANDIDATE
-Parser authorization: BOUNDED WP2C-P4 IMPLEMENTATION SLICE
+Implementation status: CRATE-PRIVATE PARSER AND PURE IN-MEMORY FRONTEND LANDED
+Public parser/frontend APIs and filesystem/runtime loaders: ABSENT
 Runtime activation: NOT AUTHORIZED
 
 ## 1. Ownership and Boundaries
@@ -271,32 +271,29 @@ normative maximum != platform-dependent maximum
 ### 5.1.3 Qualification and authorization posture
 
 This document contains the landed P1 source-size representability contract,
-the landed P2 clause-context diagnostic contract, and the normative P3
-identifier-tokenization contract. Defining the P3 contract does not establish
-its review, publication, merge or implementation status.
+the landed P2 clause-context diagnostic contract, and the landed P3
+identifier-tokenization contract. The Grammar v0 normative contract landed in
+#1500, its P1-P3 refinements landed through #1502, #1503 and #1506, the
+crate-private parser/scanner and qualification landed in #1507, and the
+crate-private pure in-memory parser-to-compiler frontend and qualification
+landed in #1508.
 
 ```text
-P3 contract definition != P3 review completion
-P3 review completion != P3 publication
-P3 publication != P3 merge
-P3 merge into main -> repository landed evidence
-P3 merge != parser authorization
-P3 merge != lexer authorization
-P3 specification != diagnostic implementation
-P3 specification != public API
+grammar specification != parser implementation
+parser implementation != public parser API
+frontend composition != public frontend API
+pure in-memory compilation != filesystem loading
+filesystem loading != runtime loading
+runtime loading != activation
 ledger rebaseline -> coordination record of landed evidence
 ledger rebaseline != repository truth
 issue state != Git tree state
 ```
 
-A future merge of the P3 contract into `main` establishes repository landed
-evidence. Issue #1489 may subsequently be rebaselined to record that merged
-evidence and the current next-step authorization posture. The ledger records
-repository truth; it does not create or override repository truth.
-
-A crate-private Grammar v0 parser/scanner implementation candidate now exists
-in `prom-ui`. It remains unpublished and does not create a public parser API,
-runtime loading, semantic admission or activation authority.
+The landed parser/scanner remains crate-private. The landed frontend is also
+crate-private and operates only on caller-supplied in-memory source text. This
+evidence creates no public parser or frontend API, filesystem loader, runtime
+loader, semantic admission, activation or production-promotion authority.
 
 Issue #1489 remains the coordination ledger for landed checkpoints and
 explicit next-step authorization. It grants no architectural authority and
@@ -784,12 +781,14 @@ The P1 source-size preflight remains earlier than lexical classification and
 this P2 choice. An oversized source returns `SourceTooLarge`, performs no
 lexical scan and produces no PSP diagnostic.
 
-P2 specification is not parser or lexer implementation, public API or parser
-authorization. The crate-private WP2C-P4 implementation candidate implements
-the landed P3 identifier-tokenization contract without publishing a parser or
-token API. Diagnostic classification is not Semantic validation, capability,
-admission or runtime activation. Implementation candidate does not mean
-publication, runtime loading or production promotion. Gate D remains closed.
+P2 specification alone was not parser or lexer implementation, public API or
+parser authorization. The crate-private parser/scanner landed in #1507 and
+implements the P1-P3 contracts without publishing a parser or token API. The
+crate-private pure in-memory frontend landed in #1508 and composes parsing with
+the existing Semantic validation and Static UI IR compilation boundary.
+Diagnostic classification is not Semantic validation, capability, admission
+or runtime activation. Landed qualification does not mean publication, runtime
+loading or production promotion. Gate D remains closed.
 
 ### Diagnostic span rules
 
@@ -1509,8 +1508,14 @@ Projection Source grammar version
 
 ## 15. Non-goals
 
-no parser implementation;
-no lexer implementation;
+The original #1500 contract slice had these implementation non-goals:
+
+no parser implementation in the #1500 contract slice;
+no lexer implementation in the #1500 contract slice.
+
+Those historical slice boundaries do not describe the current repository
+state after #1507 and #1508. The following non-goals remain current:
+
 no formatter;
 no language server;
 no syntax highlighting;
