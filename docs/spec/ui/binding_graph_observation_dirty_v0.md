@@ -1,6 +1,6 @@
 # Binding Graph Observation and Dirty Propagation V0
 
-Status: NORMATIVE CONTRACT FROZEN; CRATE-PRIVATE ENGINE IMPLEMENTATION AND QUALIFICATION CARRIED BY THIS CHANGE
+Status: NORMATIVE CONTRACT FROZEN IN #1513; CRATE-PRIVATE ENGINE IMPLEMENTATION AND QUALIFICATION LANDED IN #1514
 Track: UI DNA v2
 Owner: `prom-ui::binding_graph`
 Runtime activation: NOT AUTHORIZED
@@ -27,10 +27,10 @@ validated BindingGraphDocument
 → canonical dirty result
 ```
 
-This frozen contract now maps to the crate-private implementation and
-executable qualification carried by this bounded change. It remains a contract
-definition rather than a public API claim and does not select a public data
-model or a required internal traversal algorithm.
+This frozen contract maps to the crate-private implementation and executable
+qualification landed in #1514. It remains a contract definition rather than a
+public API claim and does not select a public data model or a required internal
+traversal algorithm.
 
 ## 2. Ownership and authority
 
@@ -475,11 +475,18 @@ The implementation remains pure and in-memory. It obtains no Semantic values,
 produces no runtime command and exposes no public Binding Graph observation
 surface.
 
+The separately specified crate-private Semantic observation adapter may
+supply canonical `BindingObservationScope` and `BindingObservationSet` inputs
+from caller-supplied `SemanticValueRef` evidence. Adapter mapping does not
+alter this contract's temporal validation, dirty derivation, propagation,
+ordering or resource semantics, and the adapter performs no live Semantic
+read.
+
 ## 14. Explicit non-goals and final posture
 
-This bounded implementation change does not authorize:
+Neither the landed #1514 dirty-engine slice nor the current #1515 adapter slice
+authorizes:
 
-- Semantic source adapters;
 - live Semantic reads;
 - Action IR admission;
 - ActionIntent dispatch;
@@ -496,19 +503,38 @@ This bounded implementation change does not authorize:
 Final posture:
 
 ```text
-Binding Graph observation contract = FROZEN
-crate-private Binding Graph dirty engine implementation and qualification = INCLUDED IN THIS BOUNDED CHANGE
-public Binding Graph observation API = ABSENT
-Semantic source adapters = ABSENT
-runtime consumption = NOT AUTHORIZED
-Projection Patch application = NOT AUTHORIZED
-AUTHORIZED SLICE CONSUMED BY THIS CHANGE:
-Binding Graph observation/dirty engine implementation and qualification
-FOLLOW-ON AUTHORIZED IMPLEMENTATION SLICE = NONE
-Gate D = CLOSED
-production promotion = NOT AUTHORIZED
+Binding Graph observation/dirty v0 contract
+= FROZEN IN #1513
+
+crate-private Binding Graph dirty engine implementation and qualification
+= LANDED IN #1514
+
+crate-private caller-supplied Semantic observation adapter v0
+= CARRIED BY THE CURRENT #1515 CHANGE
+
+public Binding Graph observation API
+= ABSENT
+
+live Semantic reads
+= ABSENT
+
+runtime consumption
+= NOT AUTHORIZED
+
+Projection Patch application
+= NOT AUTHORIZED
+
+FOLLOW-ON AUTHORIZED IMPLEMENTATION SLICE
+= NONE
+
+Gate D
+= CLOSED
+
+production promotion
+= NOT AUTHORIZED
 ```
 
-The implementation and qualification consume only the explicit authorization
-for this bounded change. Contract freeze and implementation evidence do not
-authorize Semantic adapters, runtime integration or another slice.
+#1514 consumed the dirty-engine implementation authorization. #1515 consumes
+only the separately authorized caller-supplied Semantic observation adapter
+slice. Neither slice authorizes live Semantic reads, public API, runtime
+integration, Projection Patch application or another slice.

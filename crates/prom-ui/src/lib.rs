@@ -38,6 +38,7 @@ pub(crate) mod admission_contract;
 pub mod admitted_action;
 pub(crate) mod binding_graph;
 pub(crate) mod binding_graph_observation;
+pub(crate) mod binding_graph_semantic_adapter;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
 pub mod committed_effect;
@@ -84,6 +85,8 @@ pub mod validation;
 
 #[cfg(test)]
 mod ui_dna2_binding_observation_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_binding_semantic_adapter_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp2_qualification_tests;
 #[cfg(test)]
