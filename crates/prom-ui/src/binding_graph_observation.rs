@@ -403,101 +403,17 @@ pub(crate) fn derive_dirty_bindings(
         .into_iter()
         .map(|observation| (observation.binding_id, observation))
         .collect();
-    let mut seed_reasons = BTreeMap::<BindingId, Vec<DirtyReason>>::new();
-
-    for binding_id in scoped_set.iter().copied() {
-        let previous = previous_by_id.get(&binding_id).copied();
-        let current = current_by_id.get(&binding_id).copied();
-        match (previous, current) {
-            (None, None) => {}
-            (None, Some(current)) => {
-                seed_reasons.insert(
-                    binding_id,
-                    alloc::vec![DirtyReason::new(
-                        DirtyReasonKind::Added,
-                        binding_id,
-                        None,
-                        current.quad_state,
-                    )],
-                );
-            }
-            (Some(previous), None) => {
-                seed_reasons.insert(
-                    binding_id,
-                    alloc::vec![DirtyReason::new(
-                        DirtyReasonKind::Removed,
-                        binding_id,
-                        previous.quad_state,
-                        None,
-                    )],
-                );
-            }
-            (Some(previous), Some(current)) => {
-                let previous_tuple = (previous.epoch, previous.revision);
-                let current_tuple = (current.epoch, current.revision);
-                if current_tuple < previous_tuple {
-                    errors.push(BindingObservationError::content(
-                        BindingObservationStage::TemporalValidation,
-                        BindingObservationErrorKind::StaleObservation,
-                        binding_id,
-                    ));
-                } else if current_tuple == previous_tuple {
-                    if current.quad_state != previous.quad_state {
-                        errors.push(BindingObservationError::content(
-                            BindingObservationStage::TemporalValidation,
-                            BindingObservationErrorKind::ConflictingReplay,
-                            binding_id,
-                        ));
-                    }
-                } else {
-                    let mut reasons = Vec::new();
-                    if current.revision != previous.revision {
-                        reasons.push(DirtyReason::new(
-                            DirtyReasonKind::RevisionChanged,
-                            binding_id,
-                            previous.quad_state,
-                            current.quad_state,
-                        ));
-                    }
-                    if current.epoch != previous.epoch {
-                        reasons.push(DirtyReason::new(
-                            DirtyReasonKind::EpochChanged,
-                            binding_id,
-                            previous.quad_state,
-                            current.quad_state,
-                        ));
-                    }
-                    if current.quad_state != previous.quad_state {
-                        reasons.push(DirtyReason::new(
-                            DirtyReasonKind::QuadValueChanged,
-                            binding_id,
-                            previous.quad_state,
-                            current.quad_state,
-                        ));
-                    }
-                    reasons.sort();
-                    reasons.dedup();
-                    if !reasons.is_empty() {
-                        seed_reasons.insert(binding_id, reasons);
-                    }
-                }
-            }
-        }
-    }
+    errors = validate_temporal_scope(&scoped_set, &previous_by_id, &current_by_id);
     if !errors.is_empty() {
         return Err(canonical_errors(errors));
     }
 
-    if seed_reasons.len() > limits.max_dirty_bindings {
-        return Err(alloc::vec![BindingObservationError::limit(
-            BindingObservationStage::DirtySeedDerivation,
-            BindingObservationErrorKind::DirtyResultLimitExceeded,
-            seed_reasons.keys().nth(limits.max_dirty_bindings).copied(),
-            BindingObservationLimitKind::DirtyBindings,
-            seed_reasons.len(),
-            limits.max_dirty_bindings,
-        )]);
-    }
+    let seed_reasons = derive_direct_seed_reasons(
+        &scoped_set,
+        &previous_by_id,
+        &current_by_id,
+        limits.max_dirty_bindings,
+    )?;
 
     let mut dirty_ids: BTreeSet<_> = seed_reasons.keys().copied().collect();
     let mut retained_reason_count = 0usize;
@@ -529,7 +445,6 @@ pub(crate) fn derive_dirty_bindings(
     }
 
     let mut propagation_work = 0usize;
-    let mut propagation_work_overflow = false;
     for (origin, reasons) in &seed_reasons {
         let mut visited = BTreeSet::new();
         let mut queue = VecDeque::new();
@@ -539,16 +454,13 @@ pub(crate) fn derive_dirty_bindings(
         while let Some(binding_id) = queue.pop_front() {
             if let Some(dependents) = reverse_dependencies.get(&binding_id) {
                 for dependent in dependents.iter().copied() {
-                    propagation_work = propagation_work.checked_add(1).unwrap_or(usize::MAX);
-                    if propagation_work > limits.max_propagation_work {
-                        propagation_work_overflow = true;
-                    }
-
-                    if visited.insert(dependent) {
-                        if !dirty_ids.contains(&dependent)
-                            && dirty_ids.len() >= limits.max_dirty_bindings
-                        {
-                            let actual = dirty_ids.len().checked_add(1).unwrap_or(usize::MAX);
+                    let adds_dirty_binding = !dirty_ids.contains(&dependent);
+                    if adds_dirty_binding {
+                        let actual = match dirty_ids.len().checked_add(1) {
+                            Some(actual) => actual,
+                            None => usize::MAX,
+                        };
+                        if actual > limits.max_dirty_bindings {
                             return Err(alloc::vec![BindingObservationError::limit(
                                 BindingObservationStage::DependencyPropagation,
                                 BindingObservationErrorKind::DirtyResultLimitExceeded,
@@ -558,6 +470,25 @@ pub(crate) fn derive_dirty_bindings(
                                 limits.max_dirty_bindings,
                             )]);
                         }
+                    }
+
+                    let next_work = match propagation_work.checked_add(1) {
+                        Some(actual) => actual,
+                        None => usize::MAX,
+                    };
+                    if next_work > limits.max_propagation_work {
+                        return Err(alloc::vec![BindingObservationError::limit(
+                            BindingObservationStage::DependencyPropagation,
+                            BindingObservationErrorKind::PropagationWorkLimitExceeded,
+                            None,
+                            BindingObservationLimitKind::PropagationWork,
+                            next_work,
+                            limits.max_propagation_work,
+                        )]);
+                    }
+                    propagation_work = next_work;
+
+                    if visited.insert(dependent) {
                         dirty_ids.insert(dependent);
                         queue.push_back(dependent);
                         retain_reasons(
@@ -572,17 +503,6 @@ pub(crate) fn derive_dirty_bindings(
                 }
             }
         }
-    }
-
-    if propagation_work_overflow {
-        return Err(alloc::vec![BindingObservationError::limit(
-            BindingObservationStage::DependencyPropagation,
-            BindingObservationErrorKind::PropagationWorkLimitExceeded,
-            None,
-            BindingObservationLimitKind::PropagationWork,
-            propagation_work,
-            limits.max_propagation_work,
-        )]);
     }
 
     if retained_reason_overflow {
@@ -612,6 +532,126 @@ pub(crate) fn derive_dirty_bindings(
         dirty_bindings,
         propagation_work,
     })
+}
+
+fn validate_temporal_scope(
+    scoped_ids: &BTreeSet<BindingId>,
+    previous_by_id: &BTreeMap<BindingId, BindingObservation>,
+    current_by_id: &BTreeMap<BindingId, BindingObservation>,
+) -> Vec<BindingObservationError> {
+    let mut errors = Vec::new();
+    for binding_id in scoped_ids.iter().copied() {
+        let (Some(previous), Some(current)) = (
+            previous_by_id.get(&binding_id),
+            current_by_id.get(&binding_id),
+        ) else {
+            continue;
+        };
+        let previous_tuple = (previous.epoch, previous.revision);
+        let current_tuple = (current.epoch, current.revision);
+        if current_tuple < previous_tuple {
+            errors.push(BindingObservationError::content(
+                BindingObservationStage::TemporalValidation,
+                BindingObservationErrorKind::StaleObservation,
+                binding_id,
+            ));
+        } else if current_tuple == previous_tuple && current.quad_state != previous.quad_state {
+            errors.push(BindingObservationError::content(
+                BindingObservationStage::TemporalValidation,
+                BindingObservationErrorKind::ConflictingReplay,
+                binding_id,
+            ));
+        }
+    }
+    canonical_errors(errors)
+}
+
+fn derive_direct_seed_reasons(
+    scoped_ids: &BTreeSet<BindingId>,
+    previous_by_id: &BTreeMap<BindingId, BindingObservation>,
+    current_by_id: &BTreeMap<BindingId, BindingObservation>,
+    maximum_dirty_bindings: usize,
+) -> Result<BTreeMap<BindingId, Vec<DirtyReason>>, Vec<BindingObservationError>> {
+    let mut seed_reasons = BTreeMap::new();
+    for binding_id in scoped_ids.iter().copied() {
+        let previous = previous_by_id.get(&binding_id).copied();
+        let current = current_by_id.get(&binding_id).copied();
+        let mut reasons = match (previous, current) {
+            (None, None) => Vec::new(),
+            (None, Some(current)) => alloc::vec![DirtyReason::new(
+                DirtyReasonKind::Added,
+                binding_id,
+                None,
+                current.quad_state,
+            )],
+            (Some(previous), None) => alloc::vec![DirtyReason::new(
+                DirtyReasonKind::Removed,
+                binding_id,
+                previous.quad_state,
+                None,
+            )],
+            (Some(previous), Some(current)) => direct_change_reasons(binding_id, previous, current),
+        };
+        reasons.sort();
+        reasons.dedup();
+        if reasons.is_empty() {
+            continue;
+        }
+
+        let actual = match seed_reasons.len().checked_add(1) {
+            Some(actual) => actual,
+            None => usize::MAX,
+        };
+        if actual > maximum_dirty_bindings {
+            return Err(alloc::vec![BindingObservationError::limit(
+                BindingObservationStage::DirtySeedDerivation,
+                BindingObservationErrorKind::DirtyResultLimitExceeded,
+                Some(binding_id),
+                BindingObservationLimitKind::DirtyBindings,
+                actual,
+                maximum_dirty_bindings,
+            )]);
+        }
+        seed_reasons.insert(binding_id, reasons);
+    }
+    Ok(seed_reasons)
+}
+
+fn direct_change_reasons(
+    binding_id: BindingId,
+    previous: BindingObservation,
+    current: BindingObservation,
+) -> Vec<DirtyReason> {
+    if (current.epoch, current.revision) <= (previous.epoch, previous.revision) {
+        return Vec::new();
+    }
+
+    let mut reasons = Vec::new();
+    if current.revision != previous.revision {
+        reasons.push(DirtyReason::new(
+            DirtyReasonKind::RevisionChanged,
+            binding_id,
+            previous.quad_state,
+            current.quad_state,
+        ));
+    }
+    if current.epoch != previous.epoch {
+        reasons.push(DirtyReason::new(
+            DirtyReasonKind::EpochChanged,
+            binding_id,
+            previous.quad_state,
+            current.quad_state,
+        ));
+    }
+    if current.quad_state != previous.quad_state {
+        reasons.push(DirtyReason::new(
+            DirtyReasonKind::QuadValueChanged,
+            binding_id,
+            previous.quad_state,
+            current.quad_state,
+        ));
+    }
+    reasons
 }
 
 fn resource_preflight(
@@ -760,7 +800,18 @@ fn retain_reasons(
     overflow: &mut bool,
     reasons_by_binding: &mut BTreeMap<BindingId, BTreeSet<DirtyReason>>,
 ) {
-    *actual = actual.checked_add(reasons.len()).unwrap_or(usize::MAX);
+    if *overflow {
+        return;
+    }
+    let retained = reasons_by_binding.get(&binding_id);
+    let additional = reasons
+        .iter()
+        .filter(|reason| retained.is_none_or(|values| !values.contains(reason)))
+        .count();
+    *actual = match actual.checked_add(additional) {
+        Some(actual) => actual,
+        None => usize::MAX,
+    };
     if *actual > maximum {
         *overflow = true;
         return;

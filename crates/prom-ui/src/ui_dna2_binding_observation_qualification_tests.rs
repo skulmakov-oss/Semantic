@@ -320,6 +320,39 @@ fn ui_dna2_binding_observation_stale_revision_and_epoch_reject_canonically() {
 }
 
 #[test]
+fn ui_dna2_binding_observation_temporal_validation_completes_before_seed_limits() {
+    let graph = graph(&[
+        (1, BindingValueDomain::Scalar, &[]),
+        (2, BindingValueDomain::Scalar, &[]),
+        (3, BindingValueDomain::Quad, &[]),
+    ]);
+    let errors = derive_dirty_bindings(
+        &graph,
+        scope(&[3, 1, 2]),
+        observations(alloc::vec![
+            observation(2, 1, 2, None),
+            observation(3, 1, 1, Some(BindingQuadState::N)),
+        ]),
+        observations(alloc::vec![
+            observation(1, 1, 1, None),
+            observation(2, 1, 1, None),
+            observation(3, 1, 1, Some(BindingQuadState::S)),
+        ]),
+        BindingObservationLimits::new(3, 3, 0, 0, 0),
+    )
+    .expect_err("temporal errors must precede direct seed capacity");
+
+    assert_eq!(errors.len(), 2);
+    assert!(errors
+        .iter()
+        .all(|error| error.stage() == BindingObservationStage::TemporalValidation));
+    assert_eq!(errors[0].binding_id(), Some(BindingId(2)));
+    assert_eq!(errors[0].code(), "BGOD_STALE_OBSERVATION");
+    assert_eq!(errors[1].binding_id(), Some(BindingId(3)));
+    assert_eq!(errors[1].code(), "BGOD_CONFLICTING_REPLAY");
+}
+
+#[test]
 fn ui_dna2_binding_observation_equal_tuple_quad_replay_and_conflict_are_exhaustive() {
     let graph = graph(&[(1, BindingValueDomain::Quad, &[])]);
     for previous_state in QUAD_STATES {
@@ -507,19 +540,43 @@ fn ui_dna2_binding_observation_direct_and_propagated_dirty_limits_are_distinct()
         (1, BindingValueDomain::Scalar, &[]),
         (2, BindingValueDomain::Scalar, &[]),
     ]);
-    let direct = only_error(derive_dirty_bindings(
+    let first_direct = only_error(derive_dirty_bindings(
+        &independent,
+        scope(&[2, 1]),
+        observations(alloc::vec![]),
+        observations(alloc::vec![
+            observation(2, 1, 1, None),
+            observation(1, 1, 1, None)
+        ]),
+        BindingObservationLimits::new(2, 2, 0, 0, 0),
+    ));
+    assert_eq!(
+        first_direct.stage(),
+        BindingObservationStage::DirtySeedDerivation
+    );
+    assert_eq!(first_direct.code(), "BGOD_DIRTY_RESULT_LIMIT_EXCEEDED");
+    assert_eq!(first_direct.binding_id(), Some(BindingId(1)));
+    assert_eq!(first_direct.actual(), Some(1));
+    assert_eq!(first_direct.maximum(), Some(0));
+
+    let second_direct = only_error(derive_dirty_bindings(
         &independent,
         scope(&[1, 2]),
         observations(alloc::vec![]),
         observations(alloc::vec![
-            observation(1, 1, 1, None),
             observation(2, 1, 1, None),
+            observation(1, 1, 1, None),
         ]),
         BindingObservationLimits::new(2, 2, 1, 0, 0),
     ));
-    assert_eq!(direct.stage(), BindingObservationStage::DirtySeedDerivation);
-    assert_eq!(direct.code(), "BGOD_DIRTY_RESULT_LIMIT_EXCEEDED");
-    assert_eq!(direct.actual(), Some(2));
+    assert_eq!(
+        second_direct.stage(),
+        BindingObservationStage::DirtySeedDerivation
+    );
+    assert_eq!(second_direct.code(), "BGOD_DIRTY_RESULT_LIMIT_EXCEEDED");
+    assert_eq!(second_direct.binding_id(), Some(BindingId(2)));
+    assert_eq!(second_direct.actual(), Some(2));
+    assert_eq!(second_direct.maximum(), Some(1));
 
     let chain = graph(&[
         (1, BindingValueDomain::Scalar, &[]),
@@ -542,22 +599,23 @@ fn ui_dna2_binding_observation_direct_and_propagated_dirty_limits_are_distinct()
 
 #[test]
 fn ui_dna2_binding_observation_work_and_retained_reason_limits_are_stage_owned() {
-    let diamond = graph(&[
+    let chain = graph(&[
         (1, BindingValueDomain::Scalar, &[]),
         (2, BindingValueDomain::Scalar, &[1]),
-        (3, BindingValueDomain::Scalar, &[1]),
-        (4, BindingValueDomain::Scalar, &[2, 3]),
+        (3, BindingValueDomain::Scalar, &[2]),
+        (4, BindingValueDomain::Scalar, &[3]),
+        (5, BindingValueDomain::Scalar, &[4]),
     ]);
     let work = only_error(derive_dirty_bindings(
-        &diamond,
-        scope(&[1, 2, 3, 4]),
+        &chain,
+        scope(&[1, 2, 3, 4, 5]),
         observations(alloc::vec![observation(1, 1, 1, None)]),
         observations(alloc::vec![observation(1, 1, 2, None)]),
-        BindingObservationLimits::new(4, 1, 4, 3, 100),
+        BindingObservationLimits::new(5, 1, 5, 1, 100),
     ));
     assert_eq!(work.code(), "BGOD_PROPAGATION_WORK_LIMIT_EXCEEDED");
-    assert_eq!(work.actual(), Some(4));
-    assert_eq!(work.maximum(), Some(3));
+    assert_eq!(work.actual(), Some(2));
+    assert_eq!(work.maximum(), Some(1));
 
     let quad = graph(&[(1, BindingValueDomain::Quad, &[])]);
     let retained = only_error(derive_dirty_bindings(
@@ -624,6 +682,13 @@ fn ui_dna2_binding_observation_error_precedence_matches_the_frozen_stages() {
         BindingObservationLimits::new(2, 1, 1, 0, 0),
     ));
     assert_eq!(dirty.code(), "BGOD_DIRTY_RESULT_LIMIT_EXCEEDED");
+    assert_eq!(
+        dirty.stage(),
+        BindingObservationStage::DependencyPropagation
+    );
+    assert_eq!(dirty.binding_id(), Some(BindingId(2)));
+    assert_eq!(dirty.actual(), Some(2));
+    assert_eq!(dirty.maximum(), Some(1));
 
     let work = only_error(derive_dirty_bindings(
         &scalar_chain,
