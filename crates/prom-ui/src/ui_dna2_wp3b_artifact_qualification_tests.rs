@@ -11,7 +11,7 @@ use super::static_ir::{
 };
 use super::static_ir_artifact::{
     qualify_checked_cursor_overflow, verify_static_ui_ir_artifact_v1, StaticUiArtifactV1Error,
-    StaticUiArtifactV1ErrorKind, StaticUiArtifactV1Field, StaticUiArtifactV1Limits,
+    StaticUiArtifactV1ErrorKind, StaticUiArtifactV1IdentifierField, StaticUiArtifactV1Limits,
     StaticUiArtifactV1Stage, STATIC_UI_IR_ARTIFACT_V1_MAGIC,
 };
 
@@ -518,7 +518,7 @@ fn ui_dna2_wp3b_artifact_rejects_utf8_option_span_and_zero_representation_rows()
     assert_kind(
         &zero_id,
         StaticUiArtifactV1Stage::Representation,
-        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::DocumentId),
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1IdentifierField::Document),
         Some(32),
     );
     let mut zero_key = MINIMAL.to_vec();
@@ -1103,7 +1103,7 @@ fn ui_dna2_wp3b_artifact_named_mutations_are_guaranteed_rejections() {
     assert_kind(
         &document_id,
         StaticUiArtifactV1Stage::Representation,
-        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::DocumentId),
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1IdentifierField::Document),
         Some(DOCUMENT_ID_OFFSET),
     );
 
@@ -1113,7 +1113,7 @@ fn ui_dna2_wp3b_artifact_named_mutations_are_guaranteed_rejections() {
     assert_kind(
         &surface_id,
         StaticUiArtifactV1Stage::Representation,
-        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::SurfaceId),
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1IdentifierField::Surface),
         Some(60),
     );
 
@@ -1139,7 +1139,7 @@ fn ui_dna2_wp3b_artifact_named_mutations_are_guaranteed_rejections() {
     assert_kind(
         &node_id,
         StaticUiArtifactV1Stage::Representation,
-        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::NodeId),
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1IdentifierField::Node),
         Some(STRUCTURED_FIRST_NODE_OFFSET),
     );
 
@@ -1149,7 +1149,7 @@ fn ui_dna2_wp3b_artifact_named_mutations_are_guaranteed_rejections() {
     assert_kind(
         &source_id,
         StaticUiArtifactV1Stage::Representation,
-        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::SourceId),
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1IdentifierField::Source),
         Some(85),
     );
 
@@ -1172,7 +1172,7 @@ fn ui_dna2_wp3b_artifact_named_mutations_are_guaranteed_rejections() {
     assert_kind(
         &child_id,
         StaticUiArtifactV1Stage::Representation,
-        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::ChildNodeId),
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1IdentifierField::ChildNode),
         Some(257),
     );
 
@@ -1186,7 +1186,9 @@ fn ui_dna2_wp3b_artifact_named_mutations_are_guaranteed_rejections() {
     assert_kind(
         &accessibility_id,
         StaticUiArtifactV1Stage::Representation,
-        StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::AccessibilityNodeId),
+        StaticUiArtifactV1ErrorKind::ZeroIdentifier(
+            StaticUiArtifactV1IdentifierField::AccessibilityNode,
+        ),
         Some(STRUCTURED_ACCESSIBILITY_ID_OFFSET),
     );
 

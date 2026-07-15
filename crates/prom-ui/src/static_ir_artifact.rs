@@ -49,14 +49,14 @@ pub(crate) enum StaticUiArtifactV1Stage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum StaticUiArtifactV1Field {
-    DocumentId,
-    SurfaceId,
-    RootNodeId,
-    SourceId,
-    NodeId,
-    ChildNodeId,
-    AccessibilityNodeId,
+pub(crate) enum StaticUiArtifactV1IdentifierField {
+    Document,
+    Surface,
+    RootNode,
+    Source,
+    Node,
+    ChildNode,
+    AccessibilityNode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,7 +75,7 @@ pub(crate) enum StaticUiArtifactV1ErrorKind {
     UnsupportedSchemaVersion,
     UnsupportedContractVersion,
     TrailingBytes,
-    ZeroIdentifier(StaticUiArtifactV1Field),
+    ZeroIdentifier(StaticUiArtifactV1IdentifierField),
     ZeroCollectionKey,
     InvalidSourceSpan,
     StaticIr(StaticUiIrDiagnostics),
@@ -516,26 +516,28 @@ impl RawDocument {
         for surface in self.surfaces {
             surfaces.push(StaticUiSurface::new(
                 nonzero_surface_id(surface.id)?,
-                nonzero_node_id(surface.root, StaticUiArtifactV1Field::RootNodeId)?,
+                nonzero_node_id(surface.root, StaticUiArtifactV1IdentifierField::RootNode)?,
                 nonzero_key(surface.key)?,
                 source_ref(surface.source)?,
             ));
         }
         let mut nodes = Vec::new();
         for node in self.nodes {
-            let id = nonzero_node_id(node.id, StaticUiArtifactV1Field::NodeId)?;
+            let id = nonzero_node_id(node.id, StaticUiArtifactV1IdentifierField::Node)?;
             let key = nonzero_key(node.key)?;
             let source = source_ref(node.source)?;
             let mut children = Vec::new();
             for child in node.children {
                 children.push(StaticUiChild::new(
-                    nonzero_node_id(child.child, StaticUiArtifactV1Field::ChildNodeId)?,
+                    nonzero_node_id(child.child, StaticUiArtifactV1IdentifierField::ChildNode)?,
                     ChildOrder::new(child.order),
                 ));
             }
             let accessibility_ref = node
                 .accessibility_ref
-                .map(|raw| nonzero_node_id(raw, StaticUiArtifactV1Field::AccessibilityNodeId))
+                .map(|raw| {
+                    nonzero_node_id(raw, StaticUiArtifactV1IdentifierField::AccessibilityNode)
+                })
                 .transpose()?;
             nodes.push(CandidateNode {
                 structure: StaticUiStructureNode::new(id, key, source, children, accessibility_ref),
@@ -591,7 +593,9 @@ impl CandidateDocument {
 fn nonzero_document_id(raw: (u64, usize)) -> Result<StaticDocumentId, StaticUiArtifactV1Error> {
     StaticDocumentId::new(raw.0).map_err(|_| {
         StaticUiArtifactV1Error::at(
-            StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::DocumentId),
+            StaticUiArtifactV1ErrorKind::ZeroIdentifier(
+                StaticUiArtifactV1IdentifierField::Document,
+            ),
             raw.1,
         )
     })
@@ -600,7 +604,7 @@ fn nonzero_document_id(raw: (u64, usize)) -> Result<StaticDocumentId, StaticUiAr
 fn nonzero_surface_id(raw: (u64, usize)) -> Result<StaticSurfaceId, StaticUiArtifactV1Error> {
     StaticSurfaceId::new(raw.0).map_err(|_| {
         StaticUiArtifactV1Error::at(
-            StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::SurfaceId),
+            StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1IdentifierField::Surface),
             raw.1,
         )
     })
@@ -608,7 +612,7 @@ fn nonzero_surface_id(raw: (u64, usize)) -> Result<StaticSurfaceId, StaticUiArti
 
 fn nonzero_node_id(
     raw: (u64, usize),
-    field: StaticUiArtifactV1Field,
+    field: StaticUiArtifactV1IdentifierField,
 ) -> Result<StaticNodeId, StaticUiArtifactV1Error> {
     StaticNodeId::new(raw.0).map_err(|_| {
         StaticUiArtifactV1Error::at(StaticUiArtifactV1ErrorKind::ZeroIdentifier(field), raw.1)
@@ -627,7 +631,7 @@ fn source_ref(raw: Option<RawSourceRef>) -> Result<Option<SourceRef>, StaticUiAr
     };
     let source = SourceId::new(raw.source.0).map_err(|_| {
         StaticUiArtifactV1Error::at(
-            StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1Field::SourceId),
+            StaticUiArtifactV1ErrorKind::ZeroIdentifier(StaticUiArtifactV1IdentifierField::Source),
             raw.source.1,
         )
     })?;
