@@ -43,7 +43,9 @@ pub mod commit_boundary;
 pub mod commit_boundary_result;
 pub mod committed_effect;
 pub mod committed_effect_record;
+pub(crate) mod connectivity_projection;
 pub(crate) mod contract_primitives;
+pub(crate) mod denial_recovery;
 pub mod effect_request;
 pub mod effect_request_summary;
 pub mod effect_request_trace;
@@ -87,6 +89,8 @@ pub mod validation;
 mod ui_dna2_binding_observation_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_binding_semantic_adapter_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_denial_recovery_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp2_qualification_tests;
 #[cfg(test)]
