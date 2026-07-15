@@ -192,11 +192,10 @@ semantic-validation success != runtime activation
 ```
 
 An oversized input is any input for which `source_text.len() > u32::MAX`.
-The future API classifies this input-domain failure as
+The landed crate-private input contract classifies this input-domain failure as
 `ProjectionSourceInputError::SourceTooLarge`, carrying the caller-supplied
 `SourceId`, the actual UTF-8 byte length, and the maximum accepted length
-`4_294_967_295`. This task specifies the classification but does not
-implement the Rust type.
+`4_294_967_295`.
 
 `SourceTooLarge` is not a `DiagnosticCode`, is not a `PSP_` diagnostic, is not
 a `PS_` diagnostic, and is not a syntax or semantic-validation failure.
@@ -432,8 +431,6 @@ Comments are trivia and do not enter the AST.
 
 ## 6. Ordering Semantics
 
-## 6. Ordering Semantics
-
 revision must be the first non-trivia declaration;
 epoch must be the second non-trivia declaration;
 each must appear exactly once.
@@ -511,12 +508,12 @@ structural equivalence != PartialEq
 
 ### Parser-owned failures
 
-Before parser-owned failures are considered, the future parser performs the
-source-size representability preflight defined in section 5.1.1. An oversized
-input returns the source-input error `SourceTooLarge` with no SourceSpan and
-does not enter PSP diagnostic ordering.
+Before parser-owned failures are considered, the landed crate-private parser
+performs the source-size representability preflight defined in section 5.1.1.
+An oversized input returns the source-input error `SourceTooLarge` with no
+SourceSpan and does not enter PSP diagnostic ordering.
 
-The future parser owns:
+The landed crate-private parser owns:
 invalid UTF-8 input contract;
 unexpected character;
 unexpected token;
@@ -809,7 +806,8 @@ For `PSP_UNEXPECTED_CHAR`:
 an invalid ASCII character spans one byte;
 a forbidden non-ASCII scalar spans all UTF-8 bytes of that scalar.
 
-Raw invalid UTF-8 is outside the future `&str` parser contract and is not represented as a parser diagnostic.
+Raw invalid UTF-8 is outside the landed crate-private `&str` input contract and
+is not represented as a parser diagnostic.
 
 #### Duplicate revision or epoch
 For:
