@@ -1,9 +1,15 @@
 //! Crate-private Task Projection v0 contract execution.
 //!
-//! Evaluates task projection boundaries, freshness integration, and limits
-//! before generating deterministic inert operations to apply.
-#![allow(dead_code)]
+//! This module validates caller-supplied task presentation evidence and
+//! constructs one inert `ProjectionPatch`. It does not read Semantic state,
+//! admit or execute actions, apply patches, mutate shell state, or own task
+//! truth.
+#![allow(
+    dead_code,
+    reason = "crate-private qualification contour is intentionally not runtime-wired before Gate D"
+)]
 
+use alloc::collections::BTreeSet;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -14,10 +20,12 @@ use crate::connectivity_projection::{
 };
 use crate::contract_primitives::{CollectionKey, Revision, StaticNodeId};
 use crate::projection_patch::{
-    ProjectionNodeAvailability, ProjectionPatch, ProjectionPatchEnvelope, ProjectionPatchOperation,
-    ProjectionPatchValue,
+    ProjectionNodeAvailability, ProjectionPatch, ProjectionPatchDiagnostics,
+    ProjectionPatchEnvelope, ProjectionPatchOperation, ProjectionPatchValue,
 };
-use crate::semantic_refs::{SemanticActionRef, SemanticEvidenceRef, TaskRecordRef};
+use crate::semantic_refs::{
+    ReferenceToken, SemanticActionRef, SemanticEvidenceRef, TaskRecordRef,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum TaskProjectionState {
@@ -53,7 +61,7 @@ impl TaskProjectionState {
         }
     }
 
-    const fn is_terminal_or_uncertain(self) -> bool {
+    const fn requires_task_evidence(self) -> bool {
         matches!(
             self,
             Self::Completed
@@ -65,8 +73,15 @@ impl TaskProjectionState {
         )
     }
 
-    const fn requires_evidence(self) -> bool {
-        self.is_terminal_or_uncertain()
+    const fn requires_active_phase(self) -> bool {
+        matches!(
+            self,
+            Self::Started
+                | Self::Running
+                | Self::AwaitingInput
+                | Self::Paused
+                | Self::Completing
+        )
     }
 }
 
@@ -135,19 +150,36 @@ pub(crate) struct TaskControlOffer {
     pub(crate) key: CollectionKey,
     pub(crate) kind: TaskControlKind,
     pub(crate) action: SemanticActionRef,
-    pub(crate) resume_token: Option<crate::semantic_refs::ReferenceToken>,
+    pub(crate) resume_token: Option<ReferenceToken>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskScopeLock {
     pub(crate) order: u64,
     pub(crate) key: CollectionKey,
-    pub(crate) reference: crate::semantic_refs::ReferenceToken,
+    pub(crate) reference: ReferenceToken,
     pub(crate) explanation: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskProjectionEvidence {
+    pub(crate) task_ref: TaskRecordRef,
+    pub(crate) previous_revision: Revision,
+    pub(crate) new_revision: Revision,
+    pub(crate) state: TaskProjectionState,
+    pub(crate) phases: Vec<TaskPhase>,
+    pub(crate) current_progress: TaskProgress,
+    pub(crate) previous_progress: Option<TaskProgress>,
+    pub(crate) regression_evidence: Option<SemanticEvidenceRef>,
+    pub(crate) awaiting_input: Option<String>,
+    pub(crate) task_evidence: Option<SemanticEvidenceRef>,
+    pub(crate) freshness: FreshnessState,
+    pub(crate) controls: Vec<TaskControlOffer>,
+    pub(crate) locks: Vec<TaskScopeLock>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CanonicalTaskProjection {
     pub(crate) task_ref: TaskRecordRef,
     pub(crate) previous_revision: Revision,
     pub(crate) new_revision: Revision,
@@ -246,7 +278,9 @@ impl TaskProjectionDiagnosticKind {
             Self::DuplicatePhaseKey => "TPP_DUPLICATE_PHASE_KEY",
             Self::InvalidPhaseSet => "TPP_INVALID_PHASE_SET",
             Self::InvalidProgress => "TPP_INVALID_PROGRESS",
-            Self::ProgressRegressionWithoutEvidence => "TPP_PROGRESS_REGRESSION_WITHOUT_EVIDENCE",
+            Self::ProgressRegressionWithoutEvidence => {
+                "TPP_PROGRESS_REGRESSION_WITHOUT_EVIDENCE"
+            }
             Self::DuplicateControlOrder => "TPP_DUPLICATE_CONTROL_ORDER",
             Self::DuplicateControlKey => "TPP_DUPLICATE_CONTROL_KEY",
             Self::ControlActionRefMissing => "TPP_CONTROL_ACTION_REF_MISSING",
@@ -265,13 +299,6 @@ impl TaskProjectionDiagnosticKind {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum TaskProjectionError {
-    Task(TaskProjectionDiagnostic),
-    Freshness(Vec<FreshnessProjectionDiagnostic>),
-    Patch(crate::projection_patch::ProjectionPatchDiagnostics),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TaskProjectionDiagnostic {
     pub(crate) stage: ValidationStage,
@@ -279,14 +306,62 @@ pub(crate) struct TaskProjectionDiagnostic {
 }
 
 impl TaskProjectionDiagnostic {
-    pub(crate) const fn new(stage: ValidationStage, kind: TaskProjectionDiagnosticKind) -> Self {
+    const fn new(stage: ValidationStage, kind: TaskProjectionDiagnosticKind) -> Self {
         Self { stage, kind }
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum TaskProjectionError {
+    Task(TaskProjectionDiagnostic),
+    Freshness(Vec<FreshnessProjectionDiagnostic>),
+    Patch(ProjectionPatchDiagnostics),
+}
+
 #[derive(Debug)]
 pub(crate) struct TaskProjectionArtifact {
+    pub(crate) canonical: CanonicalTaskProjection,
     pub(crate) patch: ProjectionPatch,
+}
+
+fn task_error(
+    stage: ValidationStage,
+    kind: TaskProjectionDiagnosticKind,
+) -> TaskProjectionError {
+    TaskProjectionError::Task(TaskProjectionDiagnostic::new(stage, kind))
+}
+
+fn checked_text_add(total: usize, value: usize) -> Result<usize, TaskProjectionError> {
+    total.checked_add(value).ok_or_else(|| {
+        task_error(
+            ValidationStage::ResourcePreflight,
+            TaskProjectionDiagnosticKind::ResourceLimitExceeded,
+        )
+    })
+}
+
+fn checked_operation_add(total: usize, value: usize) -> Result<usize, TaskProjectionError> {
+    total.checked_add(value).ok_or_else(|| {
+        task_error(
+            ValidationStage::OperationConstruction,
+            TaskProjectionDiagnosticKind::OperationLimitExceeded,
+        )
+    })
+}
+
+fn control_value(control: &TaskControlOffer) -> String {
+    match control.resume_token {
+        Some(token) => alloc::format!(
+            "{}:{}:{}:{}:{}:{}",
+            control.kind.token(),
+            control.action.raw(),
+            token.issuer(),
+            token.namespace(),
+            token.generation(),
+            token.value()
+        ),
+        None => alloc::format!("{}:{}", control.kind.token(), control.action.raw()),
+    }
 }
 
 pub(crate) fn project_task_state(
@@ -295,349 +370,380 @@ pub(crate) fn project_task_state(
     routes: TaskProjectionRoutes,
     limits: TaskProjectionLimits,
 ) -> Result<TaskProjectionArtifact, TaskProjectionError> {
-    // 1. ResourcePreflight
-    let mut total_text_bytes = 0;
-    if evidence.phases.len() > limits.phase_count {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+    if evidence.phases.len() > limits.phase_count
+        || evidence.controls.len() > limits.control_count
+        || evidence.locks.len() > limits.scope_lock_count
+    {
+        return Err(task_error(
             ValidationStage::ResourcePreflight,
             TaskProjectionDiagnosticKind::ResourceLimitExceeded,
-        )));
+        ));
     }
-    if evidence.controls.len() > limits.control_count {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-            ValidationStage::ResourcePreflight,
-            TaskProjectionDiagnosticKind::ResourceLimitExceeded,
-        )));
-    }
-    if evidence.locks.len() > limits.scope_lock_count {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-            ValidationStage::ResourcePreflight,
-            TaskProjectionDiagnosticKind::ResourceLimitExceeded,
-        )));
-    }
+
+    let mut total_text_bytes = 0usize;
     for phase in &evidence.phases {
-        total_text_bytes += phase.label.len();
         if phase.label.len() > limits.phase_label_bytes {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+            return Err(task_error(
                 ValidationStage::ResourcePreflight,
                 TaskProjectionDiagnosticKind::ResourceLimitExceeded,
-            )));
+            ));
         }
+        total_text_bytes = checked_text_add(total_text_bytes, phase.label.len())?;
     }
-    if let Some(aw_in) = &evidence.awaiting_input {
-        total_text_bytes += aw_in.len();
-        if aw_in.len() > limits.awaiting_input_bytes {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+    if let Some(awaiting_input) = &evidence.awaiting_input {
+        if awaiting_input.len() > limits.awaiting_input_bytes {
+            return Err(task_error(
                 ValidationStage::ResourcePreflight,
                 TaskProjectionDiagnosticKind::ResourceLimitExceeded,
-            )));
+            ));
         }
+        total_text_bytes = checked_text_add(total_text_bytes, awaiting_input.len())?;
     }
     for lock in &evidence.locks {
-        total_text_bytes += lock.explanation.len();
         if lock.explanation.len() > limits.lock_explanation_bytes {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+            return Err(task_error(
                 ValidationStage::ResourcePreflight,
                 TaskProjectionDiagnosticKind::ResourceLimitExceeded,
-            )));
+            ));
         }
+        total_text_bytes = checked_text_add(total_text_bytes, lock.explanation.len())?;
     }
     if total_text_bytes > limits.total_projected_text_bytes {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+        return Err(task_error(
             ValidationStage::ResourcePreflight,
             TaskProjectionDiagnosticKind::ResourceLimitExceeded,
-        )));
+        ));
     }
 
-    // 2. RouteValidation
-    let phase_collection = match routes.phase_collection {
-        Some(col) => col,
-        None => {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::RouteValidation,
-                TaskProjectionDiagnosticKind::MissingPhaseRoute,
-            )));
-        }
-    };
-    let control_collection = match routes.control_collection {
-        Some(col) => col,
-        None => {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::RouteValidation,
-                TaskProjectionDiagnosticKind::MissingControlRoute,
-            )));
-        }
-    };
-    let scope_lock_collection = match routes.scope_lock_collection {
-        Some(col) => col,
-        None => {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::RouteValidation,
-                TaskProjectionDiagnosticKind::MissingLockRoute,
-            )));
-        }
-    };
-    let awaiting_input_route = match routes.awaiting_input_route {
-        Some(route) => route,
-        None => {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::RouteValidation,
-                TaskProjectionDiagnosticKind::MissingAwaitingInputRoute,
-            )));
-        }
-    };
+    let phase_collection = routes.phase_collection.ok_or_else(|| {
+        task_error(
+            ValidationStage::RouteValidation,
+            TaskProjectionDiagnosticKind::MissingPhaseRoute,
+        )
+    })?;
+    let control_collection = routes.control_collection.ok_or_else(|| {
+        task_error(
+            ValidationStage::RouteValidation,
+            TaskProjectionDiagnosticKind::MissingControlRoute,
+        )
+    })?;
+    let scope_lock_collection = routes.scope_lock_collection.ok_or_else(|| {
+        task_error(
+            ValidationStage::RouteValidation,
+            TaskProjectionDiagnosticKind::MissingLockRoute,
+        )
+    })?;
+    if evidence.state == TaskProjectionState::AwaitingInput
+        && routes.awaiting_input_route.is_none()
+    {
+        return Err(task_error(
+            ValidationStage::RouteValidation,
+            TaskProjectionDiagnosticKind::MissingAwaitingInputRoute,
+        ));
+    }
 
-    // 3. IdentityRevisionValidation
     if evidence.task_ref.raw() == 0 {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+        return Err(task_error(
             ValidationStage::IdentityRevisionValidation,
             TaskProjectionDiagnosticKind::MissingTaskRef,
-        )));
+        ));
     }
     if evidence.new_revision.raw() <= evidence.previous_revision.raw() {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+        return Err(task_error(
             ValidationStage::IdentityRevisionValidation,
             TaskProjectionDiagnosticKind::NonIncreasingTaskRevision,
-        )));
+        ));
     }
 
-    // 4. StateValidation
-    if evidence.state.requires_evidence() && evidence.task_evidence.map_or(0, |e| e.raw()) == 0 {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+    if evidence.state.requires_task_evidence()
+        && evidence.task_evidence.map_or(0, SemanticEvidenceRef::raw) == 0
+    {
+        return Err(task_error(
             ValidationStage::StateValidation,
             TaskProjectionDiagnosticKind::MissingEvidenceRef,
-        )));
+        ));
     }
-    if evidence.state == TaskProjectionState::AwaitingInput && evidence.awaiting_input.is_none() {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-            ValidationStage::StateValidation,
-            TaskProjectionDiagnosticKind::MissingAwaitingInput,
-        )));
-    }
-    if evidence.state != TaskProjectionState::AwaitingInput && evidence.awaiting_input.is_some() {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-            ValidationStage::StateValidation,
-            TaskProjectionDiagnosticKind::UnexpectedAwaitingInput,
-        )));
-    }
-    if evidence.state == TaskProjectionState::Completed {
-        if let TaskProgress::Determinate { completed, total } = evidence.current_progress {
-            if completed != total {
-                return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                    ValidationStage::StateValidation,
-                    TaskProjectionDiagnosticKind::InvalidStateDetail,
-                )));
-            }
+    match (&evidence.state, &evidence.awaiting_input) {
+        (TaskProjectionState::AwaitingInput, Some(text)) if !text.trim().is_empty() => {}
+        (TaskProjectionState::AwaitingInput, _) => {
+            return Err(task_error(
+                ValidationStage::StateValidation,
+                TaskProjectionDiagnosticKind::MissingAwaitingInput,
+            ));
         }
+        (_, Some(_)) => {
+            return Err(task_error(
+                ValidationStage::StateValidation,
+                TaskProjectionDiagnosticKind::UnexpectedAwaitingInput,
+            ));
+        }
+        (_, None) => {}
+    }
+    if evidence.state == TaskProjectionState::Completed
+        && !matches!(
+            evidence.current_progress,
+            TaskProgress::Determinate { completed, total }
+                if total > 0 && completed == total
+        )
+    {
+        return Err(task_error(
+            ValidationStage::StateValidation,
+            TaskProjectionDiagnosticKind::InvalidStateDetail,
+        ));
     }
 
-    // 5. PhaseValidation
-    let mut phase_orders = Vec::new();
-    let mut phase_keys = Vec::new();
-    let mut active_count = 0;
+    let mut phase_orders = BTreeSet::new();
+    let mut phase_keys = BTreeSet::new();
+    let mut duplicate_order = false;
+    let mut duplicate_key = false;
+    let mut active_count = 0usize;
     for phase in &evidence.phases {
         if phase.id == 0 {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+            return Err(task_error(
                 ValidationStage::PhaseValidation,
                 TaskProjectionDiagnosticKind::InvalidPhaseSet,
-            )));
+            ));
         }
-        if phase_orders.contains(&phase.order) {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::PhaseValidation,
-                TaskProjectionDiagnosticKind::DuplicatePhaseOrder,
-            )));
-        }
-        phase_orders.push(phase.order);
-
-        if phase_keys.contains(&phase.key) {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::PhaseValidation,
-                TaskProjectionDiagnosticKind::DuplicatePhaseKey,
-            )));
-        }
-        phase_keys.push(phase.key);
-
+        duplicate_order |= !phase_orders.insert(phase.order);
+        duplicate_key |= !phase_keys.insert(phase.key);
         if phase.status == TaskPhaseStatus::Active {
-            active_count += 1;
+            active_count = active_count.checked_add(1).ok_or_else(|| {
+                task_error(
+                    ValidationStage::PhaseValidation,
+                    TaskProjectionDiagnosticKind::InvalidPhaseSet,
+                )
+            })?;
         }
     }
-    if active_count > 1 {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+    if duplicate_order {
+        return Err(task_error(
             ValidationStage::PhaseValidation,
-            TaskProjectionDiagnosticKind::InvalidPhaseSet,
-        )));
+            TaskProjectionDiagnosticKind::DuplicatePhaseOrder,
+        ));
     }
-    if evidence.state.is_terminal_or_uncertain() && active_count > 0 {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+    if duplicate_key {
+        return Err(task_error(
             ValidationStage::PhaseValidation,
-            TaskProjectionDiagnosticKind::InvalidPhaseSet,
-        )));
+            TaskProjectionDiagnosticKind::DuplicatePhaseKey,
+        ));
     }
-    if matches!(
-        evidence.state,
-        TaskProjectionState::Started
-            | TaskProjectionState::Running
-            | TaskProjectionState::AwaitingInput
-            | TaskProjectionState::Paused
-            | TaskProjectionState::Completing
-    ) && active_count != 1
-    {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+    let valid_active_count = if evidence.state.requires_active_phase() {
+        active_count == 1
+    } else {
+        active_count == 0
+    };
+    if !valid_active_count {
+        return Err(task_error(
             ValidationStage::PhaseValidation,
             TaskProjectionDiagnosticKind::InvalidPhaseSet,
-        )));
+        ));
     }
 
-    // 6. ProgressValidation
     if let TaskProgress::Determinate { completed, total } = evidence.current_progress {
         if total == 0 || completed > total {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+            return Err(task_error(
                 ValidationStage::ProgressValidation,
                 TaskProjectionDiagnosticKind::InvalidProgress,
-            )));
+            ));
         }
-        if let Some(TaskProgress::Determinate {
-            completed: prev_comp,
+    }
+    if let (
+        Some(TaskProgress::Determinate {
+            completed: previous,
             ..
-        }) = evidence.previous_progress
+        }),
+        TaskProgress::Determinate {
+            completed: current,
+            ..
+        },
+    ) = (evidence.previous_progress, evidence.current_progress)
+    {
+        if current < previous
+            && evidence
+                .regression_evidence
+                .map_or(0, SemanticEvidenceRef::raw)
+                == 0
         {
-            if completed < prev_comp && evidence.regression_evidence.is_none() {
-                return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                    ValidationStage::ProgressValidation,
-                    TaskProjectionDiagnosticKind::ProgressRegressionWithoutEvidence,
-                )));
-            }
+            return Err(task_error(
+                ValidationStage::ProgressValidation,
+                TaskProjectionDiagnosticKind::ProgressRegressionWithoutEvidence,
+            ));
         }
     }
 
-    // 7. ControlValidation
-    let mut control_orders = Vec::new();
-    let mut control_keys = Vec::new();
-    let restricts_controls = matches!(
-        evidence.freshness,
-        FreshnessState::Stale | FreshnessState::Offline | FreshnessState::Resyncing
-    );
-    if restricts_controls && !evidence.controls.is_empty() {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+    let mut control_orders = BTreeSet::new();
+    let mut control_keys = BTreeSet::new();
+    let mut duplicate_control_order = false;
+    let mut duplicate_control_key = false;
+    for control in &evidence.controls {
+        duplicate_control_order |= !control_orders.insert(control.order);
+        duplicate_control_key |= !control_keys.insert(control.key);
+    }
+    if duplicate_control_order {
+        return Err(task_error(
             ValidationStage::ControlValidation,
-            TaskProjectionDiagnosticKind::StaleControlOffer,
-        )));
+            TaskProjectionDiagnosticKind::DuplicateControlOrder,
+        ));
+    }
+    if duplicate_control_key {
+        return Err(task_error(
+            ValidationStage::ControlValidation,
+            TaskProjectionDiagnosticKind::DuplicateControlKey,
+        ));
     }
     for control in &evidence.controls {
-        if control_orders.contains(&control.order) {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::ControlValidation,
-                TaskProjectionDiagnosticKind::DuplicateControlOrder,
-            )));
-        }
-        control_orders.push(control.order);
-
-        if control_keys.contains(&control.key) {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::ControlValidation,
-                TaskProjectionDiagnosticKind::DuplicateControlKey,
-            )));
-        }
-        control_keys.push(control.key);
-
         if control.action.raw() == 0 {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+            return Err(task_error(
                 ValidationStage::ControlValidation,
                 TaskProjectionDiagnosticKind::ControlActionRefMissing,
-            )));
+            ));
         }
-
         if control.kind == TaskControlKind::Resume && control.resume_token.is_none() {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
+            return Err(task_error(
                 ValidationStage::ControlValidation,
                 TaskProjectionDiagnosticKind::ResumeTokenMissing,
-            )));
+            ));
         }
     }
+    if evidence.freshness.restricts_critical_controls() && !evidence.controls.is_empty() {
+        return Err(task_error(
+            ValidationStage::ControlValidation,
+            TaskProjectionDiagnosticKind::StaleControlOffer,
+        ));
+    }
 
-    // 8. ScopeLockValidation
-    let mut lock_orders = Vec::new();
-    let mut lock_keys = Vec::new();
+    let mut lock_orders = BTreeSet::new();
+    let mut lock_keys = BTreeSet::new();
+    let mut duplicate_lock_order = false;
+    let mut duplicate_lock_key = false;
     for lock in &evidence.locks {
-        if lock_orders.contains(&lock.order) {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::ScopeLockValidation,
-                TaskProjectionDiagnosticKind::DuplicateLockOrder,
-            )));
-        }
-        lock_orders.push(lock.order);
-
-        if lock_keys.contains(&lock.key) {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::ScopeLockValidation,
-                TaskProjectionDiagnosticKind::DuplicateLockKey,
-            )));
-        }
-        lock_keys.push(lock.key);
-
-        if lock.explanation.is_empty() {
-            return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-                ValidationStage::ScopeLockValidation,
-                TaskProjectionDiagnosticKind::EmptyLockExplanation,
-            )));
-        }
+        duplicate_lock_order |= !lock_orders.insert(lock.order);
+        duplicate_lock_key |= !lock_keys.insert(lock.key);
+    }
+    if duplicate_lock_order {
+        return Err(task_error(
+            ValidationStage::ScopeLockValidation,
+            TaskProjectionDiagnosticKind::DuplicateLockOrder,
+        ));
+    }
+    if duplicate_lock_key {
+        return Err(task_error(
+            ValidationStage::ScopeLockValidation,
+            TaskProjectionDiagnosticKind::DuplicateLockKey,
+        ));
+    }
+    if evidence
+        .locks
+        .iter()
+        .any(|lock| lock.explanation.trim().is_empty())
+    {
+        return Err(task_error(
+            ValidationStage::ScopeLockValidation,
+            TaskProjectionDiagnosticKind::EmptyLockExplanation,
+        ));
     }
 
-    // 9. OperationConstruction
-    let freshness_frag = match project_freshness_fragment(
-        evidence.freshness,
+    let mut canonical = CanonicalTaskProjection {
+        task_ref: evidence.task_ref,
+        previous_revision: evidence.previous_revision,
+        new_revision: evidence.new_revision,
+        state: evidence.state,
+        phases: evidence.phases,
+        current_progress: evidence.current_progress,
+        previous_progress: evidence.previous_progress,
+        regression_evidence: evidence.regression_evidence,
+        awaiting_input: evidence.awaiting_input,
+        task_evidence: evidence.task_evidence,
+        freshness: evidence.freshness,
+        controls: evidence.controls,
+        locks: evidence.locks,
+    };
+    canonical.phases.sort_by(|left, right| {
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.key.cmp(&right.key))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    canonical.controls.sort_by(|left, right| {
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+    canonical.locks.sort_by(|left, right| {
+        left.order
+            .cmp(&right.order)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+
+    let freshness_fragment = project_freshness_fragment(
+        canonical.freshness,
         &routes.freshness_route,
         limits.freshness_limits,
+    )
+    .map_err(TaskProjectionError::Freshness)?;
+
+    let awaiting_operation_count = match (
+        canonical.state == TaskProjectionState::AwaitingInput,
+        routes.awaiting_input_route.is_some(),
     ) {
-        Ok(frag) => frag,
-        Err(diags) => {
-            return Err(TaskProjectionError::Freshness(diags));
-        }
+        (true, true) => 2,
+        (false, true) => 1,
+        (_, false) => 0,
     };
-
-    let mut ops = Vec::new();
-
-    // Identity, state, progress
-    ops.push(ProjectionPatchOperation::SetBindingValue {
-        target: routes.identity_route,
-        value: ProjectionPatchValue::SignedScalar(evidence.task_ref.raw() as i64),
-    });
-    ops.push(ProjectionPatchOperation::SetBindingValue {
-        target: routes.state_route,
-        value: ProjectionPatchValue::Text(String::from(evidence.state.token())),
-    });
-
-    let progress_val = match evidence.current_progress {
-        TaskProgress::Indeterminate => String::from("indeterminate"),
-        TaskProgress::Determinate { completed, total } => {
-            alloc::format!("{}/{}", completed, total)
-        }
-    };
-    ops.push(ProjectionPatchOperation::SetBindingValue {
-        target: routes.progress_route,
-        value: ProjectionPatchValue::Text(progress_val),
-    });
-
-    if let Some(aw_in) = evidence.awaiting_input {
-        ops.push(ProjectionPatchOperation::SetBindingValue {
-            target: awaiting_input_route.clone(),
-            value: ProjectionPatchValue::Text(aw_in),
-        });
-        ops.push(ProjectionPatchOperation::SetNodeAvailability {
-            node: awaiting_input_route.node,
-            availability: ProjectionNodeAvailability::Available,
-        });
-    } else {
-        ops.push(ProjectionPatchOperation::SetNodeAvailability {
-            node: awaiting_input_route.node,
-            availability: ProjectionNodeAvailability::Hidden,
-        });
+    let mut operation_count = 3usize;
+    operation_count = checked_operation_add(operation_count, awaiting_operation_count)?;
+    operation_count = checked_operation_add(operation_count, canonical.phases.len())?;
+    operation_count = checked_operation_add(operation_count, canonical.controls.len())?;
+    operation_count = checked_operation_add(operation_count, canonical.locks.len())?;
+    operation_count =
+        checked_operation_add(operation_count, freshness_fragment.operations().len())?;
+    if operation_count > limits.total_operations {
+        return Err(task_error(
+            ValidationStage::OperationConstruction,
+            TaskProjectionDiagnosticKind::OperationLimitExceeded,
+        ));
     }
 
-    // Phases
-    for phase in evidence.phases {
-        ops.push(ProjectionPatchOperation::CollectionInsert {
+    let mut operations = Vec::with_capacity(operation_count);
+    operations.push(ProjectionPatchOperation::SetBindingValue {
+        target: routes.identity_route,
+        value: ProjectionPatchValue::SignedScalar(canonical.task_ref.raw() as i64),
+    });
+    operations.push(ProjectionPatchOperation::SetBindingValue {
+        target: routes.state_route,
+        value: ProjectionPatchValue::Text(String::from(canonical.state.token())),
+    });
+    let progress = match canonical.current_progress {
+        TaskProgress::Indeterminate => String::from("indeterminate"),
+        TaskProgress::Determinate { completed, total } => {
+            alloc::format!("{completed}/{total}")
+        }
+    };
+    operations.push(ProjectionPatchOperation::SetBindingValue {
+        target: routes.progress_route,
+        value: ProjectionPatchValue::Text(progress),
+    });
+
+    if let Some(route) = routes.awaiting_input_route {
+        if let Some(text) = &canonical.awaiting_input {
+            operations.push(ProjectionPatchOperation::SetBindingValue {
+                target: route.clone(),
+                value: ProjectionPatchValue::Text(text.clone()),
+            });
+            operations.push(ProjectionPatchOperation::SetNodeAvailability {
+                node: route.node,
+                availability: ProjectionNodeAvailability::Available,
+            });
+        } else {
+            operations.push(ProjectionPatchOperation::SetNodeAvailability {
+                node: route.node,
+                availability: ProjectionNodeAvailability::Hidden,
+            });
+        }
+    }
+
+    for phase in &canonical.phases {
+        operations.push(ProjectionPatchOperation::CollectionInsert {
             collection: phase_collection,
             key: phase.key,
             before: None,
@@ -649,24 +755,16 @@ pub(crate) fn project_task_state(
             )),
         });
     }
-
-    // Controls
-    for control in evidence.controls {
-        ops.push(ProjectionPatchOperation::CollectionInsert {
+    for control in &canonical.controls {
+        operations.push(ProjectionPatchOperation::CollectionInsert {
             collection: control_collection,
             key: control.key,
             before: None,
-            value: ProjectionPatchValue::Text(alloc::format!(
-                "{}:{}",
-                control.kind.token(),
-                control.action.raw()
-            )),
+            value: ProjectionPatchValue::Text(control_value(control)),
         });
     }
-
-    // Scope locks
-    for lock in evidence.locks {
-        ops.push(ProjectionPatchOperation::CollectionInsert {
+    for lock in &canonical.locks {
+        operations.push(ProjectionPatchOperation::CollectionInsert {
             collection: scope_lock_collection,
             key: lock.key,
             before: None,
@@ -680,20 +778,9 @@ pub(crate) fn project_task_state(
             )),
         });
     }
+    operations.extend(freshness_fragment.into_operations());
+    debug_assert_eq!(operations.len(), operation_count);
 
-    // Compose freshness operations
-    ops.extend(freshness_frag.into_operations());
-
-    if ops.len() > limits.total_operations {
-        return Err(TaskProjectionError::Task(TaskProjectionDiagnostic::new(
-            ValidationStage::OperationConstruction,
-            TaskProjectionDiagnosticKind::OperationLimitExceeded,
-        )));
-    }
-
-    // 10. PatchValidation
-    match ProjectionPatch::new(envelope, ops) {
-        Ok(patch) => Ok(TaskProjectionArtifact { patch }),
-        Err(diags) => Err(TaskProjectionError::Patch(diags)),
-    }
+    let patch = ProjectionPatch::new(envelope, operations).map_err(TaskProjectionError::Patch)?;
+    Ok(TaskProjectionArtifact { canonical, patch })
 }
