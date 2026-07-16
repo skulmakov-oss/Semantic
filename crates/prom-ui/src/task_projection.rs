@@ -424,7 +424,8 @@ pub(crate) fn project_task_state(
             TaskProjectionDiagnosticKind::MissingLockRoute,
         )
     })?;
-    if evidence.state == TaskProjectionState::AwaitingInput && routes.awaiting_input_route.is_none() {
+    if evidence.state == TaskProjectionState::AwaitingInput && routes.awaiting_input_route.is_none()
+    {
         return Err(task_error(
             ValidationStage::RouteValidation,
             TaskProjectionDiagnosticKind::MissingAwaitingInputRoute,
@@ -447,7 +448,7 @@ pub(crate) fn project_task_state(
 
     // 4. StateValidation
     if evidence.state.requires_task_evidence()
-        && evidence.task_evidence.map_or(0, SemanticEvidenceRef::raw) == 0
+        && evidence.task_evidence.is_none_or(|reference| reference.raw() == 0)
     {
         return Err(task_error(
             ValidationStage::StateValidation,
@@ -553,8 +554,7 @@ pub(crate) fn project_task_state(
         if current < previous
             && evidence
                 .regression_evidence
-                .map_or(0, SemanticEvidenceRef::raw)
-                == 0
+                .is_none_or(|reference| reference.raw() == 0)
         {
             return Err(task_error(
                 ValidationStage::ProgressValidation,
