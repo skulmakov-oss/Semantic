@@ -1,78 +1,206 @@
-# UI DNA v2 Task Projection v0 Normative Specification
+# UI DNA v2 Task Projection v0
 
-Status: accepted
+Status: candidate in PR #1517
 Track: UI DNA v2
-Implements: Task Projection Model (from `docs/spec/ui/task_projection_model.md`)
+Authority: crate-private presentation projection only
 
-This normative specification defines the explicit, deterministic contract for UI DNA v2 Task Projection v0. It implements the Task Projection Model by providing the concrete taxonomy, validation stages, and diagnostics for projecting a Semantic-owned `TaskRecord` to inert `ProjectionPatch` mutations.
+This specification defines the bounded Task Projection v0 contract for projecting caller-supplied task evidence into a canonical validated representation and exactly one inert `ProjectionPatch`.
 
-This specification remains subject to the Non-Authority Rule: it does not grant runtime authority, shell mutation capability, or execute the underlying task.
+It does not read Semantic state, own task truth, admit or execute controls, apply patches, mutate shell state, dispatch runtime work, open Gate D, or authorize production promotion.
 
-## 1. Task Projection Taxonomy
+## State taxonomy
 
-The task projection state taxonomy must exactly match the following 12 mutually exclusive states:
+The state taxonomy is exactly:
 
-- `Pending`: Task is admitted but execution has not started.
-- `Started`: Task execution has begun but meaningful progress is not yet reportable.
-- `Running`: Task is actively executing and advancing.
-- `AwaitingInput`: Task execution is paused waiting for mandatory structured input.
-- `Paused`: Task execution is paused without awaiting input (e.g., via operator control).
-- `Completing`: Task is finalizing and assembling completion evidence.
-- `Completed`: Task finished successfully with authority evidence.
-- `Failed`: Task execution resulted in an error (requires diagnosis, not quarantine).
-- `Denied`: A task proposal or control invocation was refused by admission or policy.
-- `Quarantined`: Task is blocked by a guarded authority state requiring explicit resolution.
-- `Cancelled`: Task was explicitly aborted before completion.
-- `PendingUnknown`: Task result is uncertain due to connection loss or broken causal chain.
+```text
+Pending
+Started
+Running
+AwaitingInput
+Paused
+Completing
+Completed
+Failed
+Denied
+Quarantined
+Cancelled
+PendingUnknown
+```
 
-## 2. Validation Precedence and Stages
+Stable tokens are:
 
-Task projection operates as a pure, deterministic validation pipeline. The validation stages evaluate evidence and enforce explicit invariants. The stages must be applied in the following precedence order:
+```text
+pending
+started
+running
+awaiting_input
+paused
+completing
+completed
+failed
+denied
+quarantined
+cancelled
+pending_unknown
+```
 
-1. `ResourcePreflight`: Asserts strict bounded limits on projected collection counts and payload bytes to prevent unbounded allocations.
-2. `RouteValidation`: Validates presence of required binding targets and collections (`phase_collection`, `control_collection`, `scope_lock_collection`, and conditionally `awaiting_input_route`).
-3. `IdentityRevisionValidation`: Asserts valid Semantic references and strictly increasing revision counters (`new_revision > previous_revision`).
-4. `StateValidation`: Asserts invariants specific to the current task state (e.g., `AwaitingInput` demands input description; `Completed` cannot project active phases).
-5. `PhaseValidation`: Validates structural integrity and monotonic ordering of active and completed phases.
-6. `ProgressValidation`: Prevents unevidenced regression in determinate progress (e.g., progress value cannot decrease between revisions unless explicitly regressed).
-7. `FreshnessValidation`: Projects `FreshnessState` to conditionally disable or limit projection if evidence is stale or offline.
-8. `ControlValidation`: Validates operator task controls (`ActionOffers`) and enforces freshness restrictions (e.g., `StaleControlOffer`).
-9. `ScopeLockValidation`: Validates locking constraints, ensuring explanations and semantic references are well-formed.
-10. `PatchValidation`: The final phase wrapping generated `ProjectionPatchOperation` vectors into an inert `ProjectionPatchEnvelope` for shell application.
+Task evidence is required only for `Completed`, `Failed`, `Denied`, `Quarantined`, `Cancelled`, and `PendingUnknown`. A zero-valued evidence reference does not satisfy the requirement.
 
-## 3. Normative Diagnostics
+## Phases
 
-Failure to satisfy any validation stage produces an exact coordinate via `TaskProjectionDiagnosticKind`. Task projection must not silently recover from these errors.
+A phase contains a nonzero id, collection key, order, label, and one of:
 
-The 26 authorized diagnostic codes are:
+```text
+Pending
+Active
+Completed
+Blocked
+Failed
+```
 
-- `TPP_RESOURCE_LIMIT_EXCEEDED`
-- `TPP_MISSING_PHASE_ROUTE`
-- `TPP_MISSING_CONTROL_ROUTE`
-- `TPP_MISSING_LOCK_ROUTE`
-- `TPP_MISSING_AWAITING_INPUT_ROUTE`
-- `TPP_MISSING_TASK_IDENTITY`
-- `TPP_NON_INCREASING_REVISION`
-- `TPP_MISSING_AWAITING_INPUT_EVIDENCE`
-- `TPP_UNEXPECTED_AWAITING_INPUT_EVIDENCE`
-- `TPP_INVALID_STATE_DETAIL`
-- `TPP_DUPLICATE_PHASE_ORDER`
-- `TPP_DUPLICATE_PHASE_ID`
-- `TPP_PROGRESS_REGRESSION_WITHOUT_EVIDENCE`
-- `TPP_INVALID_PROGRESS_BOUNDS`
-- `TPP_MISSING_FRESHNESS_EVIDENCE`
-- `TPP_STALE_CONTROL_OFFER`
-- `TPP_DUPLICATE_CONTROL_ORDER`
-- `TPP_MISSING_CONTROL_ACTION`
-- `TPP_INVALID_CONTROL_KIND`
-- `TPP_EMPTY_LOCK_EXPLANATION`
-- `TPP_DUPLICATE_LOCK_ORDER`
-- `TPP_MISSING_LOCK_REFERENCE`
-- `TPP_INVALID_LOCK_TARGET`
-- `TPP_PROJECTION_PATCH_ERROR`
-- `TPP_INVALID_ROUTE_TARGET`
-- `TPP_UNEXPECTED_RESUME_TOKEN`
+Phase order and collection key are unique. `Started`, `Running`, `AwaitingInput`, `Paused`, and `Completing` require exactly one active phase. All other states forbid active phases.
 
-## 4. Contract Output
+## Progress
 
-Upon successful validation, task projection outputs a collection of `ProjectionPatchOperation` instances. These describe the explicit structural and value modifications required to reflect task evidence in the Canonical Static UI IR. They do not trigger shell layout, rendering, or dispatch execution directly.
+Progress is exactly:
+
+```text
+Indeterminate
+Determinate { completed, total }
+```
+
+For determinate progress, `total > 0` and `completed <= total`. `Completed` requires determinate full progress. A regression requires a present nonzero evidence reference.
+
+## Controls
+
+Control kinds are exactly:
+
+```text
+Pause
+Resume
+Cancel
+Retry
+Acknowledge
+ProvideInput
+```
+
+Each control carries order, collection key, a nonzero `SemanticActionRef`, and an optional existing `ReferenceToken`. `Resume` requires a token. Controls are allowed under `Fresh` and `Degraded`; `Stale`, `Offline`, and `Resyncing` require an empty control collection.
+
+A projected control retains its action reference and token data. A control offer is presentation evidence, not execution authority.
+
+## Scope locks
+
+A scope-lock item carries order, collection key, opaque `ReferenceToken`, and a nonempty explanation. Order and collection key are unique. Projection of a lock does not create a runtime lock.
+
+## AwaitingInput route
+
+`AwaitingInput` requires nonempty input text and an AwaitingInput route. Other states forbid AwaitingInput text. When a non-AwaitingInput projection has no AwaitingInput route, projection succeeds and emits no AwaitingInput operation.
+
+## Validation stages
+
+Validation stage precedence is exactly:
+
+```text
+1. ResourcePreflight
+2. RouteValidation
+3. IdentityRevisionValidation
+4. StateValidation
+5. PhaseValidation
+6. ProgressValidation
+7. ControlValidation
+8. ScopeLockValidation
+9. OperationConstruction
+10. PatchValidation
+```
+
+Freshness validation remains owned by the existing CFP diagnostic domain; it is not a Task Projection-owned stage.
+
+## TPP diagnostics
+
+The Task Projection taxonomy contains exactly:
+
+```text
+TPP_RESOURCE_LIMIT_EXCEEDED
+TPP_MISSING_TASK_REF
+TPP_NON_INCREASING_TASK_REVISION
+TPP_MISSING_EVIDENCE_REF
+TPP_INVALID_STATE_DETAIL
+TPP_MISSING_AWAITING_INPUT
+TPP_UNEXPECTED_AWAITING_INPUT
+TPP_DUPLICATE_PHASE_ORDER
+TPP_DUPLICATE_PHASE_KEY
+TPP_INVALID_PHASE_SET
+TPP_INVALID_PROGRESS
+TPP_PROGRESS_REGRESSION_WITHOUT_EVIDENCE
+TPP_DUPLICATE_CONTROL_ORDER
+TPP_DUPLICATE_CONTROL_KEY
+TPP_CONTROL_ACTION_REF_MISSING
+TPP_RESUME_TOKEN_MISSING
+TPP_STALE_CONTROL_OFFER
+TPP_DUPLICATE_LOCK_ORDER
+TPP_DUPLICATE_LOCK_KEY
+TPP_EMPTY_LOCK_EXPLANATION
+TPP_MISSING_PHASE_ROUTE
+TPP_MISSING_CONTROL_ROUTE
+TPP_MISSING_LOCK_ROUTE
+TPP_MISSING_AWAITING_INPUT_ROUTE
+TPP_OPERATION_LIMIT_EXCEEDED
+TPP_PATCH_REJECTED
+```
+
+`TPP_PATCH_REJECTED` is reserved. A downstream ProjectionPatch validator failure is returned as exact `ProjectionPatchDiagnostics`, not translated into TPP.
+
+## Error ownership
+
+```text
+Task Projection-owned failure
+    -> TaskProjectionError::Task(exact earliest-stage TPP diagnostic)
+
+Freshness projector failure
+    -> TaskProjectionError::Freshness(exact CFP diagnostic vector)
+
+ProjectionPatch validator failure
+    -> TaskProjectionError::Patch(exact ProjectionPatchDiagnostics)
+```
+
+## Limits
+
+All limits are caller-supplied. There is no hidden default. Limits cover phase count, control count, scope-lock count, phase-label bytes, AwaitingInput bytes, lock-explanation bytes, total projected text bytes, total operations, and nested freshness limits.
+
+Aggregate accounting uses checked arithmetic. Operation count is determined and rejected before the proportional Task Projection operation vector is constructed.
+
+## Canonical output
+
+Success returns:
+
+1. a canonical validated Task Projection representation retaining task identity, revisions, state, canonical phases, progress, evidence references, freshness, canonical controls, and canonical scope locks;
+2. exactly one populated inert `ProjectionPatch`.
+
+Canonical collection order is:
+
+```text
+phases: order, key, id
+controls: order, key
+scope locks: order, key
+```
+
+Input permutation must not change the canonical representation or patch operation order.
+
+## Non-authority boundary
+
+```text
+TaskRecordRef != task truth
+task evidence != admission
+task control offer != execution
+ReferenceToken != authority
+scope-lock projection != runtime locking
+freshness carrier != connection truth
+ProjectionPatch construction != patch application
+projector success != UI mutation
+implementation != public API
+implementation != runtime integration
+Gate D = CLOSED
+production promotion = NOT AUTHORIZED
+```
+
+This slice does not authorize a follow-on implementation slice. Any follow-on work requires a separate task authorization.
