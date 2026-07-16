@@ -20,7 +20,8 @@ use crate::semantic_refs::{ReferenceToken, SemanticActionRef, SemanticEvidenceRe
 use crate::task_projection::{
     project_task_state, TaskControlKind, TaskControlOffer, TaskPhase, TaskPhaseStatus,
     TaskProgress, TaskProjectionDiagnosticKind, TaskProjectionError, TaskProjectionEvidence,
-    TaskProjectionLimits, TaskProjectionRoutes, TaskProjectionState, TaskScopeLock, ValidationStage,
+    TaskProjectionLimits, TaskProjectionRoutes, TaskProjectionState, TaskScopeLock,
+    ValidationStage,
 };
 
 fn node(raw: u64) -> StaticNodeId {
@@ -722,12 +723,9 @@ fn freshness_diagnostics_are_preserved_exactly() {
     );
     let freshness_route = FreshnessProjectionRoute::new(target(5), vec![duplicate, duplicate]);
     let freshness_limits = FreshnessProjectionLimits::new(8, 16);
-    let expected = project_freshness_fragment(
-        FreshnessState::Fresh,
-        &freshness_route,
-        freshness_limits,
-    )
-    .unwrap_err();
+    let expected =
+        project_freshness_fragment(FreshnessState::Fresh, &freshness_route, freshness_limits)
+            .unwrap_err();
 
     let mut routes = routes();
     routes.freshness_route = freshness_route;
