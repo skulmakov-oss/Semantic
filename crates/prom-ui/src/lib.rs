@@ -16,7 +16,6 @@
 //! - a forked graphics stack or shader-language ownership
 //! - that UI support is already part of the published `v1.1.1` line
 #![allow(clippy::manual_is_multiple_of)]
-#![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
@@ -427,3 +426,6 @@ pub use projection_slot_render_intent::{
     UiProjectionSlotRenderIntentModelId, UiProjectionSlotRenderIntentResult,
     UiProjectionSlotRenderIntentState,
 };
+
+pub mod task_projection;
+pub mod ui_dna2_task_projection_qualification_tests;

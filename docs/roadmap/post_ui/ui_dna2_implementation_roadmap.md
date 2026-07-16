@@ -202,7 +202,7 @@ Future evidence may split, combine, reorder, or retire phases.
 | UI-DNA2-4 — Binding Graph | **FOUNDATION, OBSERVATION/DIRTY V0 ENGINE AND CALLER-SUPPLIED SEMANTIC OBSERVATION ADAPTER QUALIFICATION LANDED** | deterministic declarations, cycle validation and diagnostics in #1491; normative observation/dirty contract frozen in #1513; crate-private pure in-memory dirty engine and executable qualification landed in #1514; caller-supplied evidence adapter contract, crate-private implementation and executable composition qualification landed in #1515 | live Semantic reads and subscriptions remain absent; runtime consumption and Projection Patch application remain unauthorized behind Gate D; UI-DNA2-4 is not complete |
 | UI-DNA2-5 — Action IR integration | **CONTRACT FOUNDATION LANDED** | static routes, `ActionIntent`, invocation context, structural mapper, #1491 | Explicit adapter to existing admission boundary, accepted/denied traces, stale revision, idempotency and capability evidence; Gate D required |
 | UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
-| UI-DNA2-7 — Denial, recovery, task and freshness projection | **UI-DNA2-7A DENIAL/RECOVERY/FRESHNESS V0 CARRIED BY THIS CHANGE; TASK PROJECTION NOT AUTHORIZED** | focused normative denial/recovery/freshness v0 contract, crate-private projection implementation, inert ProjectionPatch construction and executable qualification carried by this change | Task Projection remains absent and unauthorized; patch application, admission execution, runtime integration, Gate D and production promotion remain unauthorized |
+| UI-DNA2-7 — Denial, recovery, task and freshness projection | **UI-DNA2-7B TASK PROJECTION V0 QUALIFICATION CARRIED BY THIS CHANGE** | focused normative denial/recovery/freshness v0 contract, crate-private projection implementation, inert ProjectionPatch construction and executable qualification carried by this change; task projection v0 contract, implementation and qualification also carried by this change | Task Projection application, admission execution, runtime integration, Gate D and production promotion remain unauthorized |
 | UI-DNA2-8 — ProjectionBundle qualification | **NOT STARTED** | fixture and draft-tool evidence only | Parser, validators, verifier, inert loader and activation separation |
 | UI-DNA2-9 — Shell player integration | **NOT STARTED** | experimental `ui-shell-kit` evidence only | Separate promotion audit and bounded shell-player implementation |
 | UI-DNA2-10 — End-to-end reference slice | **NOT STARTED** | no complete pipeline | One deterministic non-critical reference application |
@@ -245,23 +245,23 @@ UI wiring
 
 ## 7. Latest bounded research checkpoint
 
-### UI-DNA2 denial, recovery and freshness projection v0
+### UI-DNA2 task projection v0
 
 AUTHORIZED BOUNDED CHANGE —
-CRATE-PRIVATE DENIAL/RECOVERY/FRESHNESS PROJECTION, INERT PATCH CONSTRUCTION
+CRATE-PRIVATE TASK PROJECTION V0, INERT PATCH CONSTRUCTION
 AND EXECUTABLE QUALIFICATION CARRIED HERE; NOT ACTIVATED OR PROMOTED
 
 Current state:
 
 ```text
 Binding Graph Semantic observation adapter v0 = LANDED IN #1515
-denial/recovery/freshness v0 contract = FROZEN BY THIS CHANGE
+denial/recovery/freshness v0 contract = LANDED IN #1516
+task projection v0 contract = FROZEN BY THIS CHANGE
 crate-private pure in-memory projection and qualification = CARRIED BY THIS CHANGE
 caller-supplied outcome and freshness = PRESENTATION EVIDENCE ONLY
 ProjectionPatch construction = INCLUDED
 ProjectionPatch application = NOT AUTHORIZED
 admission and recovery execution = NOT AUTHORIZED
-Task Projection = NOT AUTHORIZED
 runtime integration = NOT AUTHORIZED
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
@@ -282,7 +282,7 @@ implementation != runtime integration
 ```
 
 The current authorization is consumed by the crate-private projection,
-qualification and inert patch construction. Task Projection, patch application,
+qualification and inert patch construction for task projection v0. Patch application,
 admission/runtime integration or any later contour requires a new explicit
 bounded authorization.
 
