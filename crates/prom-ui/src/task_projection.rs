@@ -23,9 +23,7 @@ use crate::projection_patch::{
     ProjectionNodeAvailability, ProjectionPatch, ProjectionPatchDiagnostics,
     ProjectionPatchEnvelope, ProjectionPatchOperation, ProjectionPatchValue,
 };
-use crate::semantic_refs::{
-    ReferenceToken, SemanticActionRef, SemanticEvidenceRef, TaskRecordRef,
-};
+use crate::semantic_refs::{ReferenceToken, SemanticActionRef, SemanticEvidenceRef, TaskRecordRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum TaskProjectionState {
@@ -76,11 +74,7 @@ impl TaskProjectionState {
     const fn requires_active_phase(self) -> bool {
         matches!(
             self,
-            Self::Started
-                | Self::Running
-                | Self::AwaitingInput
-                | Self::Paused
-                | Self::Completing
+            Self::Started | Self::Running | Self::AwaitingInput | Self::Paused | Self::Completing
         )
     }
 }
@@ -278,9 +272,7 @@ impl TaskProjectionDiagnosticKind {
             Self::DuplicatePhaseKey => "TPP_DUPLICATE_PHASE_KEY",
             Self::InvalidPhaseSet => "TPP_INVALID_PHASE_SET",
             Self::InvalidProgress => "TPP_INVALID_PROGRESS",
-            Self::ProgressRegressionWithoutEvidence => {
-                "TPP_PROGRESS_REGRESSION_WITHOUT_EVIDENCE"
-            }
+            Self::ProgressRegressionWithoutEvidence => "TPP_PROGRESS_REGRESSION_WITHOUT_EVIDENCE",
             Self::DuplicateControlOrder => "TPP_DUPLICATE_CONTROL_ORDER",
             Self::DuplicateControlKey => "TPP_DUPLICATE_CONTROL_KEY",
             Self::ControlActionRefMissing => "TPP_CONTROL_ACTION_REF_MISSING",
@@ -324,10 +316,7 @@ pub(crate) struct TaskProjectionArtifact {
     pub(crate) patch: ProjectionPatch,
 }
 
-fn task_error(
-    stage: ValidationStage,
-    kind: TaskProjectionDiagnosticKind,
-) -> TaskProjectionError {
+fn task_error(stage: ValidationStage, kind: TaskProjectionDiagnosticKind) -> TaskProjectionError {
     TaskProjectionError::Task(TaskProjectionDiagnostic::new(stage, kind))
 }
 
@@ -370,6 +359,7 @@ pub(crate) fn project_task_state(
     routes: TaskProjectionRoutes,
     limits: TaskProjectionLimits,
 ) -> Result<TaskProjectionArtifact, TaskProjectionError> {
+    // 1. ResourcePreflight
     if evidence.phases.len() > limits.phase_count
         || evidence.controls.len() > limits.control_count
         || evidence.locks.len() > limits.scope_lock_count
@@ -415,6 +405,7 @@ pub(crate) fn project_task_state(
         ));
     }
 
+    // 2. RouteValidation
     let phase_collection = routes.phase_collection.ok_or_else(|| {
         task_error(
             ValidationStage::RouteValidation,
@@ -433,15 +424,14 @@ pub(crate) fn project_task_state(
             TaskProjectionDiagnosticKind::MissingLockRoute,
         )
     })?;
-    if evidence.state == TaskProjectionState::AwaitingInput
-        && routes.awaiting_input_route.is_none()
-    {
+    if evidence.state == TaskProjectionState::AwaitingInput && routes.awaiting_input_route.is_none() {
         return Err(task_error(
             ValidationStage::RouteValidation,
             TaskProjectionDiagnosticKind::MissingAwaitingInputRoute,
         ));
     }
 
+    // 3. IdentityRevisionValidation
     if evidence.task_ref.raw() == 0 {
         return Err(task_error(
             ValidationStage::IdentityRevisionValidation,
@@ -455,6 +445,7 @@ pub(crate) fn project_task_state(
         ));
     }
 
+    // 4. StateValidation
     if evidence.state.requires_task_evidence()
         && evidence.task_evidence.map_or(0, SemanticEvidenceRef::raw) == 0
     {
@@ -492,6 +483,7 @@ pub(crate) fn project_task_state(
         ));
     }
 
+    // 5. PhaseValidation
     let mut phase_orders = BTreeSet::new();
     let mut phase_keys = BTreeSet::new();
     let mut duplicate_order = false;
@@ -539,6 +531,7 @@ pub(crate) fn project_task_state(
         ));
     }
 
+    // 6. ProgressValidation
     if let TaskProgress::Determinate { completed, total } = evidence.current_progress {
         if total == 0 || completed > total {
             return Err(task_error(
@@ -553,8 +546,7 @@ pub(crate) fn project_task_state(
             ..
         }),
         TaskProgress::Determinate {
-            completed: current,
-            ..
+            completed: current, ..
         },
     ) = (evidence.previous_progress, evidence.current_progress)
     {
@@ -571,6 +563,7 @@ pub(crate) fn project_task_state(
         }
     }
 
+    // 7. ControlValidation
     let mut control_orders = BTreeSet::new();
     let mut control_keys = BTreeSet::new();
     let mut duplicate_control_order = false;
@@ -612,6 +605,7 @@ pub(crate) fn project_task_state(
         ));
     }
 
+    // 8. ScopeLockValidation
     let mut lock_orders = BTreeSet::new();
     let mut lock_keys = BTreeSet::new();
     let mut duplicate_lock_order = false;
@@ -675,6 +669,7 @@ pub(crate) fn project_task_state(
             .then_with(|| left.key.cmp(&right.key))
     });
 
+    // 9. OperationConstruction
     let freshness_fragment = project_freshness_fragment(
         canonical.freshness,
         &routes.freshness_route,
@@ -781,6 +776,7 @@ pub(crate) fn project_task_state(
     operations.extend(freshness_fragment.into_operations());
     debug_assert_eq!(operations.len(), operation_count);
 
+    // 10. PatchValidation
     let patch = ProjectionPatch::new(envelope, operations).map_err(TaskProjectionError::Patch)?;
     Ok(TaskProjectionArtifact { canonical, patch })
 }
