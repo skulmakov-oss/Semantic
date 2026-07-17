@@ -448,7 +448,9 @@ pub(crate) fn project_task_state(
 
     // 4. StateValidation
     if evidence.state.requires_task_evidence()
-        && evidence.task_evidence.is_none_or(|reference| reference.raw() == 0)
+        && evidence
+            .task_evidence
+            .is_none_or(|reference| reference.raw() == 0)
     {
         return Err(task_error(
             ValidationStage::StateValidation,
