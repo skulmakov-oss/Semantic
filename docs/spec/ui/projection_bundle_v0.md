@@ -264,10 +264,17 @@ Required precedence is:
 6. trust verification;
 7. inert-load validation.
 
-`ERROR_CODES.md` is absent from the authorized baseline. UI-DNA2-8A therefore
-does not freeze final error codes or propose a dedicated namespace. A later
-error namespace requires an explicit collision audit against the then-current
-repository registry before implementation.
+`docs/ERROR_CODES.md` exists and was inspected. It records the current
+Semantic diagnostic catalog and instructs maintainers to synchronize additions
+with the source catalog named `diagnostic_catalog` in `src/bin/smc.rs`.
+
+The current catalog does not define a ProjectionBundle-specific diagnostic
+namespace. UI-DNA2-8A therefore does not add, allocate, reserve, or freeze
+ProjectionBundle error codes.
+
+Any future ProjectionBundle diagnostic namespace requires a separate owner
+decision and an explicit collision audit against both `docs/ERROR_CODES.md`
+and the then-current source diagnostic registry before implementation.
 
 ## 10. Resource-bound model
 
