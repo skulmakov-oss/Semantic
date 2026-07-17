@@ -692,7 +692,7 @@ fn sort_and_dedup_diagnostics(
     diagnostics
 }
 
-fn push_value(
+pub(crate) fn push_value(
     bytes: &mut Vec<u8>,
     value: &ProjectionPatchValue,
 ) -> Result<(), ProjectionPatchEncodingError> {
