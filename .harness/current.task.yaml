@@ -1,11 +1,11 @@
 task:
-  id: UI-DNA2-DENIAL-RECOVERY-FRESHNESS-V0
-  title: implement and qualify denial recovery and freshness projection v0
+  id: UI-DNA2-7B-TASK-PROJECTION-V0
+  title: implement and qualify task projection v0
   type: implementation
   mode: active
 
 intent:
-  summary: "feat(ui): implement denial recovery and freshness projection v0"
+  summary: "feat(ui): implement task projection v0"
   issue: "#1489"
 
 layer:
@@ -15,12 +15,12 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-ui/src/denial_recovery.rs
-    - crates/prom-ui/src/connectivity_projection.rs
-    - crates/prom-ui/src/ui_dna2_denial_recovery_qualification_tests.rs
+    - crates/prom-ui/src/task_projection.rs
+    - crates/prom-ui/src/ui_dna2_task_projection_qualification_tests.rs
+    - crates/prom-ui/src/semantic_refs.rs
     - crates/prom-ui/src/lib.rs
-    - docs/spec/ui/denial_recovery_freshness_v0.md
-    - docs/spec/ui/denial_recovery_projection.md
+    - docs/spec/ui/task_projection_v0.md
+    - docs/spec/ui/task_projection_model.md
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
     - docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md
 
@@ -51,3 +51,4 @@ actions:
     - force_push
     - open_gate
     - production_promotion
+    - authorize_follow_on

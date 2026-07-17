@@ -77,6 +77,7 @@ pub mod runtime_capability_mapping_result;
 pub(crate) mod semantic_refs;
 pub(crate) mod static_ir;
 pub(crate) mod static_ir_artifact;
+pub(crate) mod task_projection;
 pub mod trace;
 pub mod tree_bridge;
 pub mod tree_slot_intent;
@@ -91,6 +92,8 @@ mod ui_dna2_binding_observation_qualification_tests;
 mod ui_dna2_binding_semantic_adapter_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_denial_recovery_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_task_projection_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_wp2_qualification_tests;
 #[cfg(test)]

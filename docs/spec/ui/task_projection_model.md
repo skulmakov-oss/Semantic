@@ -1,6 +1,7 @@
 # Long-Running Task Projection Model
 
-Status: draft spec
+Status: HISTORICAL / DIRECTIONAL ONLY
+Note: This document provides directional context. The normative specification is now [Task Projection v0](task_projection_v0.md).
 Track: POST-UI / Intent-Driven Projection
 Scope type: documentation only
 Depends on:
@@ -512,3 +513,4 @@ The spec is acceptable when:
 - it does not implement task execution;
 - it does not implement task projection runtime;
 - it does not claim production readiness.
+

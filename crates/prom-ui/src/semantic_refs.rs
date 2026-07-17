@@ -40,3 +40,15 @@ impl SemanticEvidenceRef {
         self.0
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct TaskRecordRef(u64);
+
+impl TaskRecordRef {
+    pub(crate) const fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+    pub(crate) const fn raw(self) -> u64 {
+        self.0
+    }
+}
