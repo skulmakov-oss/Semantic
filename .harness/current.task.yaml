@@ -1,54 +1,106 @@
 task:
-  id: UI-DNA2-7B-TASK-PROJECTION-V0
-  title: implement and qualify task projection v0
-  type: implementation
+  id: UI-DNA2-8A-PROJECTION-BUNDLE-CONTRACT-FREEZE
+  title: freeze ProjectionBundle v0 logical contract
+  type: documentation
   mode: active
 
 intent:
-  summary: "feat(ui): implement task projection v0"
+  summary: "docs(ui): freeze ProjectionBundle v0 contract"
   issue: "#1489"
+  predecessor: "UI-DNA2-7B-TASK-PROJECTION-V0"
+
+evidence_baseline:
+  main_sha: "547e00c98c24079f2a01f02ead9088c333cbb8da"
+  predecessor_pr: "#1517"
+  corrective_pr: "#1518"
+  predecessor_merge_sha: "a056f220dcfc73c1d4731b315138f8b148cfe1bd"
+  corrective_squash_sha: "547e00c98c24079f2a01f02ead9088c333cbb8da"
 
 layer:
-  name: ui
+  name: ui-projection-contract
   owner: prom-ui
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-ui/src/task_projection.rs
-    - crates/prom-ui/src/ui_dna2_task_projection_qualification_tests.rs
-    - crates/prom-ui/src/semantic_refs.rs
-    - crates/prom-ui/src/lib.rs
-    - docs/spec/ui/task_projection_v0.md
-    - docs/spec/ui/task_projection_model.md
+    - .harness/reports/UI-DNA2-7B-TASK-PROJECTION-V0-CLOSEOUT.md
+    - docs/spec/ui/projection_bundle_v0.md
+    - docs/roadmap/post_ui/projection_bundle_level4_evidence_matrix.md
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
-    - docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md
+
+  forbidden_paths:
+    - crates/**
+    - tests/**
+    - benches/**
+    - examples/**
+    - tools/**
+    - scripts/**
+    - .github/**
+    - Cargo.toml
+    - Cargo.lock
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - modify_rust
-    - modify_tests
     - modify_docs
     - modify_specs
     - create_files
     - test
+    - create_branch
     - commit
     - push
     - create_pr
 
   forbidden:
+    - modify_rust
+    - modify_tests
+    - modify_fixtures
     - modify_cargo
     - modify_lockfile
     - modify_workflows
     - modify_scripts
+    - modify_tools
     - modify_runtime
     - modify_admission
     - modify_public_api
     - modify_issue
+    - mark_ready
+    - approve
     - merge
+    - rebase
+    - amend
     - force_push
+    - delete_branch
+    - modify_repository_settings
+    - modify_rulesets
+    - modify_branch_protection
+    - admin_bypass
+    - enable_auto_merge
     - open_gate
     - production_promotion
     - authorize_follow_on
+
+authorization:
+  contract_freeze: true
+  documentation_only: true
+  implementation: false
+  parser: false
+  validator: false
+  verifier: false
+  loader: false
+  activation: false
+  runtime_integration: false
+  public_api: false
+  gate_d: closed
+  production_promotion: false
+  follow_on_implementation: false
+
+constraints:
+  fail_closed: true
+  preserve_authority_boundaries: true
+  preserve_historical_evidence: true
+  no_claim_level_widening: true
+  no_final_serialization_without_evidence: true
+  no_numeric_limit_defaults_without_evidence: true
+  no_follow_on_work: true
