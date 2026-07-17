@@ -481,7 +481,7 @@ fn rewrite_selected_function_source(
         }
     }
 
-    replacements.sort_by_key(|b| core::cmp::Reverse(b.0));
+    replacements.sort_by(|a, b| b.0.cmp(&a.0));
     let mut out = source.to_string();
     for (start, end, replacement) in replacements {
         out.replace_range(start..end, &replacement);
