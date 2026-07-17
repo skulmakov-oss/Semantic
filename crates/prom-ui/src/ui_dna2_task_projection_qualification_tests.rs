@@ -809,10 +809,10 @@ fn projected_text_bytes_resource_limits_are_exact() {
     evidence.previous_progress = None;
     evidence.state = TaskProjectionState::Pending; // "pending" = 7
     evidence.freshness = FreshnessState::Fresh; // "fresh" = 5
-    // exact text bytes = "started".len() + "indeterminate".len() + "fresh".len() = 7 + 13 + 5 = 25.
-    
+                                                // exact text bytes = "pending".len() + "indeterminate".len() + "fresh".len() = 7 + 13 + 5 = 25.
+
     let exact_total = 25;
-    
+
     let mut failing_limits = limits();
     failing_limits.total_projected_text_bytes = exact_total - 1;
     assert_task_error(
@@ -820,7 +820,7 @@ fn projected_text_bytes_resource_limits_are_exact() {
         ValidationStage::ResourcePreflight,
         TaskProjectionDiagnosticKind::ResourceLimitExceeded,
     );
-    
+
     let mut passing_limits = limits();
     passing_limits.total_projected_text_bytes = exact_total;
     assert!(project_task_state(envelope(), evidence, routes(), passing_limits).is_ok());
@@ -831,10 +831,10 @@ fn unsigned_scalar_canonical_bytes_are_deterministic() {
     let val = ProjectionPatchValue::UnsignedScalar(42);
     let mut bytes = alloc::vec::Vec::new();
     crate::projection_patch::push_value(&mut bytes, &val).unwrap();
-    
+
     let mut expected = alloc::vec::Vec::new();
     expected.push(4); // Tag for UnsignedScalar
     expected.extend_from_slice(&42u64.to_le_bytes());
-    
+
     assert_eq!(bytes, expected);
 }
