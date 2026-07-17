@@ -155,6 +155,7 @@ pub(crate) enum ProjectionQuadState {
 pub(crate) enum ProjectionPatchValue {
     Quad(ProjectionQuadState),
     SignedScalar(i64),
+    UnsignedScalar(u64),
     Text(String),
 }
 
@@ -707,6 +708,10 @@ fn push_value(
         ProjectionPatchValue::Text(value) => {
             push_u8(bytes, 3);
             push_string(bytes, value)?;
+        }
+        ProjectionPatchValue::UnsignedScalar(value) => {
+            push_u8(bytes, 4);
+            push_u64(bytes, *value);
         }
     }
     Ok(())
