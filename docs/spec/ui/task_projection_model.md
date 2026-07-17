@@ -1,6 +1,7 @@
 # Long-Running Task Projection Model
 
-Status: draft spec
+Status: HISTORICAL / DIRECTIONAL ONLY
+Note: This document provides directional context. The normative specification is now [task_projection_v0.md](file:///C:/Users/said3/Desktop/EXOcode/Semantic_ui_dna2_3b_artifact_v1/docs/spec/ui/task_projection_v0.md).
 Track: POST-UI / Intent-Driven Projection
 Scope type: documentation only
 Depends on:
@@ -512,4 +513,4 @@ The spec is acceptable when:
 - it does not implement task execution;
 - it does not implement task projection runtime;
 - it does not claim production readiness.
-<!-- sync -->
+

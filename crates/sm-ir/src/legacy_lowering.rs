@@ -569,7 +569,7 @@ fn is_builtin_assert_name(
 
 pub fn lower_logos_laws_to_ir(program: &LogosProgram) -> Vec<LogosIrLaw> {
     let mut laws = program.laws.clone();
-    laws.sort_by(|a, b| b.priority.cmp(&a.priority));
+    laws.sort_by_key(|b| core::cmp::Reverse(b.priority));
     laws.into_iter()
         .map(|law| LogosIrLaw {
             name: law.name,
@@ -1021,13 +1021,13 @@ pub fn validate_ir(f: &IrFunction) -> Result<(), FrontendError> {
 
     for (idx, instr) in f.instrs.iter().enumerate() {
         match instr {
-            IrInstr::Jmp { label } | IrInstr::JmpIf { label, .. } => {
-                if !labels.contains_key(label) {
-                    return Err(FrontendError {
-                        pos: idx,
-                        message: format!("jump to unknown label '{}' in '{}'", label, f.name),
-                    });
-                }
+            IrInstr::Jmp { label } | IrInstr::JmpIf { label, .. }
+                if !labels.contains_key(label) =>
+            {
+                return Err(FrontendError {
+                    pos: idx,
+                    message: format!("jump to unknown label '{}' in '{}'", label, f.name),
+                });
             }
             _ => {}
         }
