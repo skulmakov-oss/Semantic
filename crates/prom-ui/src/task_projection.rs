@@ -338,6 +338,33 @@ fn checked_operation_add(total: usize, value: usize) -> Result<usize, TaskProjec
     })
 }
 
+const fn u64_text_len(mut val: u64) -> usize {
+    if val == 0 {
+        return 1;
+    }
+    let mut len = 0;
+    while val > 0 {
+        len += 1;
+        val /= 10;
+    }
+    len
+}
+
+fn control_value_len(control: &TaskControlOffer) -> usize {
+    let mut len = control.kind.token().len() + 1 + u64_text_len(control.action.raw());
+    if let Some(token) = &control.resume_token {
+        len += 1
+            + u64_text_len(token.issuer())
+            + 1
+            + u64_text_len(token.namespace() as u64)
+            + 1
+            + u64_text_len(token.generation() as u64)
+            + 1
+            + u64_text_len(token.value());
+    }
+    len
+}
+
 fn control_value(control: &TaskControlOffer) -> String {
     match control.resume_token {
         Some(token) => alloc::format!(
@@ -371,6 +398,16 @@ pub(crate) fn project_task_state(
     }
 
     let mut total_text_bytes = 0usize;
+    total_text_bytes = checked_text_add(total_text_bytes, evidence.state.token().len())?;
+    total_text_bytes = checked_text_add(total_text_bytes, evidence.freshness.token().len())?;
+    let progress_len = match evidence.current_progress {
+        TaskProgress::Indeterminate => 13,
+        TaskProgress::Determinate { completed, total } => {
+            u64_text_len(completed) + 1 + u64_text_len(total)
+        }
+    };
+    total_text_bytes = checked_text_add(total_text_bytes, progress_len)?;
+
     for phase in &evidence.phases {
         if phase.label.len() > limits.phase_label_bytes {
             return Err(task_error(
@@ -378,7 +415,12 @@ pub(crate) fn project_task_state(
                 TaskProjectionDiagnosticKind::ResourceLimitExceeded,
             ));
         }
-        total_text_bytes = checked_text_add(total_text_bytes, phase.label.len())?;
+        let phase_len =
+            u64_text_len(phase.id) + 1 + phase.status.token().len() + 1 + phase.label.len();
+        total_text_bytes = checked_text_add(total_text_bytes, phase_len)?;
+    }
+    for control in &evidence.controls {
+        total_text_bytes = checked_text_add(total_text_bytes, control_value_len(control))?;
     }
     if let Some(awaiting_input) = &evidence.awaiting_input {
         if awaiting_input.len() > limits.awaiting_input_bytes {
@@ -396,7 +438,16 @@ pub(crate) fn project_task_state(
                 TaskProjectionDiagnosticKind::ResourceLimitExceeded,
             ));
         }
-        total_text_bytes = checked_text_add(total_text_bytes, lock.explanation.len())?;
+        let lock_len = u64_text_len(lock.reference.issuer())
+            + 1
+            + u64_text_len(lock.reference.namespace() as u64)
+            + 1
+            + u64_text_len(lock.reference.generation() as u64)
+            + 1
+            + u64_text_len(lock.reference.value())
+            + 1
+            + lock.explanation.len();
+        total_text_bytes = checked_text_add(total_text_bytes, lock_len)?;
     }
     if total_text_bytes > limits.total_projected_text_bytes {
         return Err(task_error(
@@ -704,7 +755,7 @@ pub(crate) fn project_task_state(
     let mut operations = Vec::with_capacity(operation_count);
     operations.push(ProjectionPatchOperation::SetBindingValue {
         target: routes.identity_route,
-        value: ProjectionPatchValue::SignedScalar(canonical.task_ref.raw() as i64),
+        value: ProjectionPatchValue::UnsignedScalar(canonical.task_ref.raw()),
     });
     operations.push(ProjectionPatchOperation::SetBindingValue {
         target: routes.state_route,

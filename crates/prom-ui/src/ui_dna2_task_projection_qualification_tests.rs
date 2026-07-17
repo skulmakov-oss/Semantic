@@ -784,3 +784,57 @@ fn awaiting_input_projection_sets_value_and_availability() {
         } if *target_node == node(4)
     )));
 }
+
+#[test]
+fn task_record_ref_uses_unsigned_scalar() {
+    let mut evidence = running_evidence();
+    evidence.task_ref = TaskRecordRef::new(u64::MAX);
+    let artifact = project_task_state(envelope(), evidence, routes(), limits()).unwrap();
+    assert!(artifact.patch.operations().iter().any(|operation| matches!(
+        operation,
+        ProjectionPatchOperation::SetBindingValue {
+            target: _,
+            value: ProjectionPatchValue::UnsignedScalar(u64::MAX),
+        }
+    )));
+}
+
+#[test]
+fn projected_text_bytes_resource_limits_are_exact() {
+    let mut evidence = running_evidence();
+    evidence.phases.clear();
+    evidence.controls.clear();
+    evidence.locks.clear();
+    evidence.current_progress = TaskProgress::Indeterminate;
+    evidence.previous_progress = None;
+    evidence.state = TaskProjectionState::Pending; // "pending" = 7
+    evidence.freshness = FreshnessState::Fresh; // "fresh" = 5
+                                                // exact text bytes = "pending".len() + "indeterminate".len() + "fresh".len() = 7 + 13 + 5 = 25.
+
+    let exact_total = 25;
+
+    let mut failing_limits = limits();
+    failing_limits.total_projected_text_bytes = exact_total - 1;
+    assert_task_error(
+        project_task_state(envelope(), evidence.clone(), routes(), failing_limits),
+        ValidationStage::ResourcePreflight,
+        TaskProjectionDiagnosticKind::ResourceLimitExceeded,
+    );
+
+    let mut passing_limits = limits();
+    passing_limits.total_projected_text_bytes = exact_total;
+    assert!(project_task_state(envelope(), evidence, routes(), passing_limits).is_ok());
+}
+
+#[test]
+fn unsigned_scalar_canonical_bytes_are_deterministic() {
+    let val = ProjectionPatchValue::UnsignedScalar(42);
+    let mut bytes = alloc::vec::Vec::new();
+    crate::projection_patch::push_value(&mut bytes, &val).unwrap();
+
+    let mut expected = alloc::vec::Vec::new();
+    expected.push(4); // Tag for UnsignedScalar
+    expected.extend_from_slice(&42u64.to_le_bytes());
+
+    assert_eq!(bytes, expected);
+}
