@@ -21,6 +21,74 @@ Status: COMPLETE
 | Exact-head PR CI | `29635396064` — 8/8 PASS |
 | Post-merge CI | `29636264299` — 8/8 PASS |
 
+## Project #2 ledger metadata
+
+| Field | Verified value |
+| --- | --- |
+| Project owner | `skulmakov-oss` |
+| Project number | `2` |
+| Project title | `Semantic UI Foundation Roadmap` |
+| Project item ID | `PVTI_lAHOD49aK84BRzo5zgzRCvs` |
+| Content type | `PullRequest` |
+| Content URL | `https://github.com/skulmakov-oss/Semantic/pull/1521` |
+| Status | `Todo` |
+| Track | `UNSET` |
+| Wave | `UNSET` |
+| Type | `UNSET` |
+| Risk | `UNSET` |
+| Boundary | `UNSET` |
+| Gate | `UNSET` |
+| Evidence | `UNSET` |
+| Depends on | `UNSET` |
+| Total Project items before registration | `247` |
+| Total Project items after registration | `248` |
+| Exact item count | `1` |
+| Duplicate count | `0` |
+
+PR #1521 is registered exactly once in Project #2 as a content-backed
+pull-request item.
+
+No custom Project field was modified. Project membership is coordination
+metadata only and grants no implementation, admission, activation, release,
+or production authority.
+
+## Validation commands
+
+| Command | Result |
+| --- | --- |
+| `pwsh -File scripts/harness-check.ps1` | `PASS` |
+| `pwsh -File tools/post_ui/check_projection_bundle_claim_boundaries.ps1` | `PASS` |
+| `pwsh -File tools/post_ui/check_post_ui_fixtures.ps1` | `PASS` |
+| `pwsh -File tools/7hell/run_ci.ps1` | `PASS` |
+| `cargo +1.93.1 fmt --all --check` | `PASS` |
+| `git diff --check` | `PASS` |
+| exact tracked `pr_body` baseline check | `PASS — 2 historical files` |
+| PR `pr_body` delta check | `PASS — 0 files` |
+| `git status --short --branch` | `PASS — expected branch and state` |
+
+## Repository cleanliness
+
+| Check | Verified result |
+| --- | --- |
+| Branch | `ui-dna2/shell-player-boundary-closeout` |
+| Starting head | `50882b175699cb545917f047ad54a164fd60d48a` |
+| Pre-edit working tree | `CLEAN` |
+| Authorized correction paths | `3` |
+| Unrelated modified paths | `0` |
+| Untracked repository files | `0` |
+| Historical tracked `pr_body` baseline | `2` |
+| `pr_body` artifacts introduced by PR #1521 | `0` |
+| `pr_body` artifacts modified by PR #1521 | `0` |
+| `pr_body` artifacts removed by PR #1521 | `0` |
+| Historical cleanup performed | `NO — separate scope required` |
+| `git diff --check` | `PASS` |
+
+The repository contains two historical tracked PR-body artifacts that predate
+this closeout. They are recorded as an existing baseline exception.
+
+PR #1521 neither introduces nor modifies those artifacts. Removing them would
+be unrelated cleanup and is not authorized by this closeout task.
+
 Review closeout:
 
 ```text

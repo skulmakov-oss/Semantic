@@ -53,6 +53,8 @@ actions:
     - edit_harness
     - create_closeout_report
     - create_durable_post_ui_closeout_mirror
+    - record_project_2_ledger_evidence
+    - record_historical_pr_body_baseline
     - rebaseline_roadmap
     - rebaseline_issue_1489_body
     - validate
@@ -120,6 +122,25 @@ authorization:
   gate_d: closed
   production_promotion: false
   follow_on_implementation: false
+
+project_2_evidence:
+  owner: skulmakov-oss
+  number: 2
+  target_content_url: https://github.com/skulmakov-oss/Semantic/pull/1521
+  expected_item_id: PVTI_lAHOD49aK84BRzo5zgzRCvs
+  read_metadata: true
+  add_item: false
+  edit_custom_fields: false
+  delete_items: false
+  modify_other_items: false
+
+repository_baseline:
+  tracked_pr_body_files:
+    - pr_body_action_mapping.md
+    - pr_body_intent_admission_boundary.md
+  expected_count: 2
+  cleanup_authorized: false
+  require_zero_pr_body_delta: true
 
 constraints:
   fail_closed: true
