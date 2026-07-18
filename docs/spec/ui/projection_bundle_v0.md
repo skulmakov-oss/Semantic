@@ -83,8 +83,8 @@ The conceptual stage boundaries are:
 | Bounded input | Caller-supplied bytes and caller-supplied limits | A bounded input view or a deterministic resource rejection |
 | Framing / preflight | Bounded input view | Framing facts sufficient for parsing, without allocating beyond limits |
 | Parsing | Successfully framed input | An in-memory syntactic representation carrying fields and trust metadata |
-| Structural validation | Parsed representation | A structurally valid logical bundle representation |
-| Cross-artifact validation | Structurally valid representation | Artifacts whose identities, references, required presence, and internal links agree |
+| Structural validation | Parsed representation | A structurally valid logical bundle representation with every required artifact class present |
+| Cross-artifact validation | Structurally valid representation | Present artifacts whose identities, references, and internal links agree |
 | Compatibility validation | Cross-artifact-valid representation plus supported compatibility context | A compatibility-valid representation |
 | Trust verification | Compatibility-valid representation plus caller-selected trust context | A representation with evaluated trust evidence |
 | Inert loading | Successfully parsed, validated, and verified in-memory representation | An inert ProjectionBundle representation with no effects |
@@ -323,16 +323,28 @@ implicit host default.
 
 ## 11. Trust-verification boundary
 
-A future verifier may evaluate:
+A future trust verifier may evaluate:
 
 - exact artifact digests;
 - a bundle digest;
-- signature metadata;
-- compiler identity evidence;
-- role dictionary compatibility;
-- renderer profile compatibility;
-- cross-artifact references;
-- safety classification constraints.
+- signatures and signature metadata;
+- compiler-identity trust evidence;
+- other explicitly trust-owned evidence selected by a separately authorized
+  trust policy.
+
+Compatibility validation, not trust verification, owns supported contract and
+bundle versions, Role Dictionary identity/version compatibility, renderer
+profile compatibility, and other compatibility-policy checks.
+
+Cross-artifact validation, not trust verification, owns agreement of artifact
+identities, references, and internal links.
+
+Structural validation owns presence of required artifact classes.
+
+A separately owned safety-classification policy must assign each check to
+exactly one stage. The same condition must not be evaluated as both a
+compatibility rejection and a trust-verification rejection for the same
+input.
 
 The parser transports trust metadata.
 The validator checks structure.
