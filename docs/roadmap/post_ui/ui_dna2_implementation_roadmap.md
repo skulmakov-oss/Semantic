@@ -83,7 +83,7 @@ Authority remains:
 Semantic owns meaning.
 Projection owns presentation intent.
 UI IR owns structure.
-Shell owns rendering.
+Shell owns local projection playback and rendering preparation.
 Renderer owns pixels.
 ```
 
