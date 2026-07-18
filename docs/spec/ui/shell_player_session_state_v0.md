@@ -186,7 +186,9 @@ Every transition is evaluated in this deterministic order:
 7. calculate the candidate next state and candidate outputs without committing;
 8. validate candidate invariants and all candidate-state/output resource bounds;
 9. commit the complete candidate state or preserve the previous state;
-10. publish the disposition, bounded outputs, and deterministic diagnostics.
+10. publish the disposition and already validated bounded outputs, then apply
+    the immutable diagnostic emission cap to the stable logical diagnostic
+    sequence.
 
 No partial local-state commit is permitted.
 
@@ -212,6 +214,13 @@ candidate outputs:
 No candidate state is committed until stage 8 succeeds. Failure at either
 resource-validation stage produces `Rejected` and preserves the complete
 previous state.
+
+Before stage 10 emission, the transition has determined its disposition and
+complete logical diagnostic sequence in stable diagnostic order. Stage 10
+applies maximum diagnostics per transition to that ordered sequence.
+Diagnostic emission bounding is output shaping only. It is not transition
+validation, state authorization, or a reason to commit a candidate after
+another resource bound failed.
 
 This contract does not define `Atomic` versus `OrderedPartial` semantics inside
 a `ProjectionPatch` batch. Patch-batch transaction and rollback semantics
@@ -280,14 +289,24 @@ Normative rules:
 - limits grant no authority;
 - limits are immutable for the lifetime of the activated session;
 - Shell Player does not invent or widen limits;
-- limits are checked before state commit;
-- limit exhaustion yields `Rejected`;
-- limit exhaustion never causes partial commit;
+- all stimulus, input-side, candidate-state, and candidate-output limits are
+  checked before the stage 9 state commit;
+- exhaustion of an input-side, candidate-state, or candidate-output limit
+  yields `Rejected` and preserves the previous state;
+- state and candidate resource-limit exhaustion never causes partial commit;
 - limit-exhaustion diagnostics are deterministic.
 
-Diagnostic production is deterministically bounded by maximum diagnostics per
-transition. Diagnostic bounding does not permit state commit after any other
-resource bound has failed.
+Maximum diagnostics per transition is a deterministic diagnostic emission cap
+applied at stage 10. It does not affect `Applied`, `NoChange`, or `Rejected`,
+cannot convert a rejected transition into a committed transition, and cannot
+cause rollback after a valid candidate state has been committed. A zero cap
+emits no diagnostics. If the logical diagnostic count exceeds the cap, only
+the stable prefix up to the cap is emitted. Truncation does not generate
+another diagnostic and therefore cannot recurse.
+
+Resource accounting may conceptually distinguish the logical diagnostic count
+from the emitted diagnostic count. This contract does not define Rust fields
+or serialization for those counts.
 
 ## 11. Diagnostic namespace
 

@@ -36,6 +36,25 @@ Resolution:
 - candidate-state/output validation: stage 8;
 - state commit: only after both phases pass.
 
+### Correction review
+
+- Correction review: BLOCKED
+- Residual P2 findings: `1`
+
+### P2-3
+
+Maximum diagnostics per transition had no defined validation or emission phase
+and conflicted with the generic limit-exhaustion rejection rule.
+
+Resolution:
+
+- diagnostic limit role: deterministic emission cap;
+- application stage: stage 10;
+- state/disposition effect: none;
+- overflow behavior: stable prefix truncation;
+- zero cap: emit none;
+- recursive overflow diagnostic: forbidden.
+
 ## Changed paths
 
 - `.harness/current.task.yaml`
@@ -55,6 +74,8 @@ Resolution:
   6 and candidate-state/output validation at stage 8;
 - `Applied / NoChange / Rejected` dispositions;
 - caller-supplied resource-limit categories;
+- deterministic stage 10 diagnostic emission cap without disposition or state
+  effect;
 - `SPV0_` diagnostic namespace;
 - complete-state commit or deterministic rejection.
 
