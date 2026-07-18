@@ -26,6 +26,7 @@ scope:
   allowed_paths:
     - .harness/current.task.yaml
     - .harness/reports/UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT-CLOSEOUT.md
+    - docs/roadmap/post_ui/ui_dna2_9a1_shell_player_boundary_contract_closeout.md
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
 
   forbidden_paths:
@@ -51,6 +52,7 @@ actions:
     - inspect
     - edit_harness
     - create_closeout_report
+    - create_durable_post_ui_closeout_mirror
     - rebaseline_roadmap
     - rebaseline_issue_1489_body
     - validate
