@@ -1,89 +1,92 @@
 task:
-  id: UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT-CLOSEOUT
-  title: close out landed Shell Player v0 boundary contract
-  type: documentation
+  id: MAINT-RUST-1.97.1-HARNESS-SCOPE-CONFLICT
+  title: resolve exact harness allow/forbidden conflict
+  type: maintenance
   mode: active
 
 intent:
-  summary: "docs(ui): close out Shell Player boundary contract"
-  issue: "#1489"
-  predecessor: "UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT"
+  summary: "build(ci): qualify Rust 1.97.1 toolchain baseline"
+  predecessor: "MAINT-RUST-1.97.1-TOOLCHAIN-BASELINE"
 
 evidence_baseline:
-  main_sha: "b514c51455c086ba624fbfe173e510b61ebd9946"
-  predecessor_pr: "#1520"
-  predecessor_initial_head: "6cbafc3379d59cdffa1b0c5c67a41e88c2ba09e2"
-  predecessor_reviewed_head: "f3cfb9d9cd4b51af05fbf83c5f6263228dc6bb43"
-  predecessor_push_ci: "29635394874"
-  predecessor_pr_ci: "29635396064"
-  predecessor_post_merge_ci: "29636264299"
+  main_sha: "c71242d04c1f6962c9bc816b535b9136e9113d23"
+  predecessor_pr: "#1521"
+  predecessor_squash_sha: "c71242d04c1f6962c9bc816b535b9136e9113d23"
+  predecessor_post_merge_ci: "29640056524"
 
 layer:
-  name: ui-shell-runtime-contract
-  owner: prom-ui-runtime::shell_player
+  name: repository-toolchain
+  owner: repository-maintenance
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT-CLOSEOUT.md
-    - docs/roadmap/post_ui/ui_dna2_9a1_shell_player_boundary_contract_closeout.md
-    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
+    - rust-toolchain.toml
+    - .github/workflows/ci.yml
+    - .github/workflows/7hell-full.yml
+    - .harness/reports/MAINT-RUST-1.97.1-TOOLCHAIN-BASELINE.md
+    - crates/sm-front/src/parser.rs
+    - crates/sm-front/src/typecheck.rs
+    - crates/sm-sema/src/alloc_core.rs
+    - crates/sm-ir/src/legacy_lowering.rs
+    - crates/smc-cli/src/executable_bundle.rs
+    - tests/support/executable_bundle_support.rs
 
   forbidden_paths:
-    - crates/**
-    - experiments/**
-    - tests/**
-    - benches/**
-    - examples/**
-    - tools/**
-    - scripts/**
-    - .github/**
     - Cargo.toml
     - Cargo.lock
+    - apps/workbench/src-tauri/Cargo.toml
+    - src/**
+    - benches/**
+    - examples/**
+    - experiments/**
+    - scripts/**
+    - tools/**
+    - docs/spec/**
     - docs/dna/**
-    - docs/ERROR_CODES.md
-    - docs/spec/ui/shell_player_boundary_v0.md
-    - docs/spec/ui/projection_bundle_v0.md
-    - docs/roadmap/post_ui/shell_player_evidence_inventory.md
-    - docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md
+    - docs/roadmap/**
+    - docs/wiki/**
+    - README.md
+    - CHANGELOG.md
+    - pr_body_action_mapping.md
+    - pr_body_intent_admission_boundary.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - create_closeout_report
-    - create_durable_post_ui_closeout_mirror
-    - record_project_2_ledger_evidence
-    - record_historical_pr_body_baseline
-    - rebaseline_roadmap
-    - rebaseline_issue_1489_body
+    - create_toolchain_file
+    - modify_ci_workflows
+    - create_qualification_report
     - validate
     - create_branch
     - commit
     - push
     - create_draft_pr
+    - dispatch_7hell_full_workflow
+    - apply_exact_clippy_compatibility_fixes
+    - validate_sm_front
+    - apply_exact_workspace_clippy_compatibility_fixes
+    - validate_sm_sema
+    - validate_sm_ir
 
   forbidden:
-    - modify_rust
+    - modify_additional_rust
     - modify_tests
     - modify_fixtures
-    - modify_cargo
+    - modify_manifests
     - modify_lockfile
-    - modify_workflows
+    - modify_dependencies
+    - change_msrv
     - modify_scripts
     - modify_tools
+    - modify_specs
+    - modify_dna
+    - modify_roadmap
+    - modify_issue
+    - modify_project
     - modify_public_api
     - modify_runtime
-    - apply_projection_patch
-    - implement_bundle_parser
-    - implement_bundle_validator
-    - implement_bundle_verifier
-    - implement_bundle_loader
-    - activate_bundle
-    - admit_action_intent
-    - dispatch_action_intent
-    - integrate_renderer
-    - integrate_backend
     - open_gate
     - production_promotion
     - authorize_implementation
@@ -102,54 +105,108 @@ actions:
     - modify_branch_protection
 
 authorization:
-  closeout_only: true
-  documentation_only: true
-  issue_1489_body_rebaseline: true
+  maintenance_only: true
+  toolchain_pin: true
+  workflow_toolchain_unification: true
+  qualification_report: true
 
-  implementation: false
-  public_api: false
-  runtime: false
-  patch_application: false
-  bundle_parser: false
-  bundle_validator: false
-  bundle_verifier: false
-  bundle_loader: false
-  bundle_activation: false
-  action_intent_admission: false
-  action_intent_dispatch: false
-  renderer_integration: false
-  backend_integration: false
+  source_changes: false
+  test_changes: false
+  dependency_changes: false
+  manifest_changes: false
+  msrv_changes: false
+  architecture_changes: false
+  runtime_changes: false
+  public_api_changes: false
   gate_d: closed
   production_promotion: false
   follow_on_implementation: false
 
-project_2_evidence:
-  owner: skulmakov-oss
-  number: 2
-  target_content_url: https://github.com/skulmakov-oss/Semantic/pull/1521
-  expected_item_id: PVTI_lAHOD49aK84BRzo5zgzRCvs
-  read_metadata: true
-  add_item: false
-  edit_custom_fields: false
-  delete_items: false
-  modify_other_items: false
+source_compatibility:
+  authorized: true
+  reason: rust_1_97_1_clippy_qualification
+  allowed_paths:
+    - crates/sm-front/src/parser.rs
+    - crates/sm-front/src/typecheck.rs
+    - crates/sm-sema/src/alloc_core.rs
+    - crates/sm-ir/src/legacy_lowering.rs
+    - crates/smc-cli/src/executable_bundle.rs
+  allowed_diagnostics:
+    - clippy::unnecessary-sort-by
+    - clippy::useless-conversion
+    - clippy::question-mark
+    - clippy::collapsible-match
+  initial_correction_count: 2
+  previously_authorized_correction_count: 5
+  newly_authorized_path:
+    - crates/smc-cli/src/executable_bundle.rs
+  newly_authorized_diagnostic:
+    - clippy::unnecessary-sort-by
+  newly_authorized_correction_count: 1
+  total_clippy_correction_count: 6
+  behavior_changes: false
+  public_api_changes: false
+  test_changes: false
+  additional_source_fixes: false
 
-repository_baseline:
-  tracked_pr_body_files:
-    - pr_body_action_mapping.md
-    - pr_body_intent_admission_boundary.md
-  expected_count: 2
-  cleanup_authorized: false
-  require_zero_pr_body_delta: true
+test_support_compatibility:
+  authorized: true
+  allowed_path: tests/support/executable_bundle_support.rs
+  diagnostic: clippy::unnecessary-sort-by
+  correction_count: 1
+  test_assertion_changes: false
+  test_behavior_changes: false
+  fixture_changes: false
+  production_changes: false
+
+test_scope:
+  exact_allowed_path:
+    - "tests/support/executable_bundle_support.rs"
+  broad_test_changes_authorized: false
+  test_cases_authorized: false
+  assertions_authorized: false
+  fixtures_authorized: false
+
+aggregate_compatibility:
+  total_clippy_correction_count: 7
+  production_rust_source_files_changed: 5
+  test_support_rust_files_changed: 1
+  test_case_files_changed: 0
+
+edition_compatibility:
+  authorized: true
+  path: crates/sm-ir/src/legacy_lowering.rs
+  rejected_form: rust_2024_let_chain
+  replacement_form: rust_2021_match_guard
+  formatting_only_or_structural: structural_equivalence
+  behavior_change: false
+  public_api_change: false
+  edition_change: false
+  additional_clippy_fix: false
+
+toolchain:
+  channel: "1.97.1"
+  profile: minimal
+  components:
+    - rustfmt
+    - clippy
 
 constraints:
   fail_closed: true
+  exact_base_required: true
+  deterministic_toolchain: true
+  no_floating_stable: true
+  no_source_fixes_without_separate_authorization: true
+  preserve_existing_ci_commands: true
+  preserve_msrv_declarations: true
   preserve_authority_boundaries: true
-  preserve_experimental_boundary: true
-  preserve_issue_title_state_labels_milestone_assignees_comments: true
-  no_semantic_truth_in_shell: true
-  no_admission_authority_in_shell: true
-  no_renderer_pixel_authority_in_shell: true
-  no_backend_event_loop_in_shell: true
-  ui_dna2_9_complete: false
+  exact_new_source_fix_count: 1
+  exact_total_source_fix_count: 6
+  no_semantic_behavior_change: true
+  no_public_api_change: true
+  no_test_change: true
+  no_lint_suppression: true
+  no_allow_attributes: true
+  no_additional_source_cleanup: true
+  stop_on_next_compatibility_failure: true
   next_authorized_implementation_slice: none

@@ -1278,7 +1278,7 @@ fn check_stmt(
                     ),
                 });
             }
-            for (item, item_ty) in items.iter().zip(item_tys.into_iter()) {
+            for (item, item_ty) in items.iter().zip(item_tys) {
                 let Some(name) = item else {
                     continue;
                 };

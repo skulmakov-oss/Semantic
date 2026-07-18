@@ -438,10 +438,8 @@ pub fn fold_fx_const_call_core(effect: &str) -> Option<String> {
         ("sub", x)
     } else if let Some(x) = e.strip_prefix("fx.mul(") {
         ("mul", x)
-    } else if let Some(x) = e.strip_prefix("fx.div(") {
-        ("div", x)
     } else {
-        return None;
+        ("div", e.strip_prefix("fx.div(")?)
     };
     let inner = rest.strip_suffix(')')?;
     let mut parts = inner.split(',');
