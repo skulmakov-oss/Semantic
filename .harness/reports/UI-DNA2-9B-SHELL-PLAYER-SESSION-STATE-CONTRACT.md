@@ -11,6 +11,31 @@ Status: PASS
 - Predecessor PR: `#1520`
 - Predecessor closeout PR: `#1521`
 
+## Independent review
+
+- Initial independent review: BLOCKED
+- P2 findings: `2`
+
+### P2-1
+
+Duplicate resource-limit source between the activated context and transition
+input.
+
+Resolution:
+
+- resource-limit authority: `ActivatedShellSessionContext` only;
+- resource-limit mutability: immutable for the activated session lifetime.
+
+### P2-2
+
+Candidate-dependent resource limits were ordered before candidate calculation.
+
+Resolution:
+
+- input-side resource validation: stage 6;
+- candidate-state/output validation: stage 8;
+- state commit: only after both phases pass.
+
 ## Changed paths
 
 - `.harness/current.task.yaml`
@@ -20,12 +45,14 @@ Status: PASS
 
 ## Contract decisions frozen
 
-- caller-supplied read-only activated session input;
+- caller-supplied read-only activated session input as the sole immutable
+  resource-limit authority;
 - `Created / Active / Suspended / Closed` lifecycle;
 - session-scoped, reconstructible and non-authoritative local-state domains;
 - stable identity sources and forbidden ambient identity sources;
 - one-stimulus deterministic transition envelope;
-- deterministic ten-stage evaluation order;
+- deterministic ten-stage evaluation order with input-side validation at stage
+  6 and candidate-state/output validation at stage 8;
 - `Applied / NoChange / Rejected` dispositions;
 - caller-supplied resource-limit categories;
 - `SPV0_` diagnostic namespace;

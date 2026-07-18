@@ -59,6 +59,13 @@ Normative rules:
 - Shell Player does not validate bundle trust;
 - Shell Player does not load the bundle.
 
+The deterministic resource-limit set is supplied exactly once through
+`ActivatedShellSessionContext`. It is the sole normative limit source and is
+immutable for the lifetime of the activated session. A transition does not
+accept a second independent resource-limit set. Changing resource limits
+requires a new caller-supplied activated session context and does not mutate an
+existing session in place.
+
 The exact Rust representation of `ActivatedShellSessionContext` remains
 unresolved and unauthorized.
 
@@ -161,8 +168,7 @@ Common transition inputs are:
 
 - previous `ShellLocalState`;
 - `ActivatedShellSessionContext`;
-- the primary stimulus;
-- caller-supplied deterministic limits.
+- the primary stimulus.
 
 A transition must not acquire additional data from the host. Hidden reads are
 not permitted.
@@ -176,13 +182,36 @@ Every transition is evaluated in this deterministic order:
 3. validate stimulus shape;
 4. validate stable target identities;
 5. validate replay-cursor compatibility where applicable;
-6. validate resource limits;
-7. calculate candidate next state;
-8. validate candidate invariants;
-9. commit the complete next state or reject the transition;
-10. produce outputs and diagnostics.
+6. validate input-side resource bounds;
+7. calculate the candidate next state and candidate outputs without committing;
+8. validate candidate invariants and all candidate-state/output resource bounds;
+9. commit the complete candidate state or preserve the previous state;
+10. publish the disposition, bounded outputs, and deterministic diagnostics.
 
 No partial local-state commit is permitted.
+
+Stage 6 validates limits measurable directly from the supplied stimulus:
+
+- maximum patches per transition;
+- maximum transition stimulus bytes.
+
+Stage 8 validates limits that depend on the calculated candidate state or
+candidate outputs:
+
+- maximum active nodes;
+- maximum focusable nodes;
+- maximum hit-test entries;
+- maximum accessibility nodes;
+- maximum draw commands per transition;
+- maximum projected text bytes;
+- maximum local session-state bytes;
+- maximum projected-value cache entries;
+- maximum invalidation entries;
+- maximum damage regions.
+
+No candidate state is committed until stage 8 succeeds. Failure at either
+resource-validation stage produces `Rejected` and preserves the complete
+previous state.
 
 This contract does not define `Atomic` versus `OrderedPartial` semantics inside
 a `ProjectionPatch` batch. Patch-batch transaction and rollback semantics
@@ -246,11 +275,19 @@ This contract assigns no default numeric values.
 
 Normative rules:
 
-- limits are explicit inputs;
+- limits are caller supplied exactly once through
+  `ActivatedShellSessionContext`;
+- limits grant no authority;
+- limits are immutable for the lifetime of the activated session;
+- Shell Player does not invent or widen limits;
 - limits are checked before state commit;
 - limit exhaustion yields `Rejected`;
 - limit exhaustion never causes partial commit;
 - limit-exhaustion diagnostics are deterministic.
+
+Diagnostic production is deterministically bounded by maximum diagnostics per
+transition. Diagnostic bounding does not permit state commit after any other
+resource bound has failed.
 
 ## 11. Diagnostic namespace
 
@@ -289,7 +326,6 @@ For identical:
 - `ActivatedShellSessionContext`;
 - previous `ShellLocalState`;
 - `ShellTransitionInput`;
-- resource limits;
 
 the transition produces identical:
 
