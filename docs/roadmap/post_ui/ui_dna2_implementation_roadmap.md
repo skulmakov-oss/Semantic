@@ -1,7 +1,7 @@
 # UI-DNA2 implementation roadmap
 
 Status: DIRECTIONAL RESEARCH ROADMAP
-Repository evidence baseline: `b514c51455c086ba624fbfe173e510b61ebd9946`
+Repository evidence baseline: `3e229a821cebc013acd5f294c4872efaa6fd37a1`
 Live tracker: `#1489`
 
 ## Document role
@@ -120,6 +120,9 @@ Renderer owns pixels.
 | #1518 | `547e00c98c24079f2a01f02ead9088c333cbb8da` | Task Projection P2 corrective qualification landed; reviewed head `bf258b89969636244edb4912b6969c219445c40c`; exact-head CI `29595540320` and post-merge CI `29598533948` succeeded; exact aggregate text bounds and lossless `TaskRecordRef(u64)` projection qualified |
 | #1519 | `d395e5708ddca696d296003e9182fde1f43f651c` | UI-DNA2-8A ProjectionBundle v0 logical contract freeze; documentation-only; deterministic and non-overlapping structural, cross-artifact, compatibility, trust-verification and inert-loading boundaries; final serialization unresolved; parser implementation blocked; general Level 4 not claimed; reviewed head `b9409868781ddb564ab60d4bcbe7f097c85c96f0`; exact-head push CI `29632061124`, exact-head PR CI `29632062257`, post-merge CI `29632178545` — all 8/8 |
 | #1520 | `b514c51455c086ba624fbfe173e510b61ebd9946` | Documentation-only Shell Player v0 ownership and stage boundary freeze; initial head `6cbafc3379d59cdffa1b0c5c67a41e88c2ba09e2`; final reviewed head `f3cfb9d9cd4b51af05fbf83c5f6263228dc6bb43`; exact-head push CI `29635394874`, exact-head PR CI `29635396064`, post-merge CI `29636264299` — all 8/8 PASS; one input-contract inconsistency corrected before Ready; no implementation authorization |
+| #1521 | `c71242d04c1f6962c9bc816b535b9136e9113d23` | UI-DNA2-9A1 closeout and roadmap ledger evidence landed; Shell Player boundary authorization consumed and closed; no implementation authorization |
+| #1522 | `6219e67e6f5f233797cfe8047cc54e0148a5a223` | Rust 1.97.1 repository and CI baseline qualification landed; seven exact Clippy compatibility corrections qualified; no Shell Player scope expansion |
+| #1523 | `3e229a821cebc013acd5f294c4872efaa6fd37a1` | Explicit `rustfmt` installation landed for both Rust 1.97.1 Windows 7hell workflows; post-merge CI `29652449165` passed 8/8; no Shell Player scope expansion |
 
 ## 4. Current landed contract state
 
@@ -229,7 +232,7 @@ Future evidence may split, combine, reorder, or retire phases.
 | UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
 | UI-DNA2-7 — Denial, recovery, task and freshness projection | **UI-DNA2-7A DENIAL/RECOVERY/FRESHNESS V0, UI-DNA2-7B TASK PROJECTION V0 AND P2 CORRECTIVE QUALIFICATION THROUGH #1518 LANDED** | denial/recovery/freshness v0 contract, crate-private implementation, inert ProjectionPatch construction and qualification landed in #1516; Task Projection v0 contract, crate-private pure in-memory implementation, canonical representation and inert patch construction landed in #1517; exact aggregate text bounds and lossless `TaskRecordRef(u64)` projection qualified in #1518 | Task Projection application, admission execution, runtime integration, Gate D and production promotion remain unauthorized |
 | UI-DNA2-8 — ProjectionBundle qualification | **UI-DNA2-8A LOGICAL CONTRACT FREEZE LANDED; GENERAL LEVEL 4, IMPLEMENTATION, INERT LOADING AND ACTIVATION NOT AUTHORIZED** | ProjectionBundle v0 logical identity, deterministic stage ownership, validation, resource, diagnostic and authority boundaries landed through #1519 | Resolve final serialization and other blocking decisions; separate authorization for UI-DNA2-8B parser/validator/verifier implementation and qualification; separate authorization for UI-DNA2-8C pure in-memory inert-loader qualification; separate activation decision |
-| UI-DNA2-9 — Shell player integration | **UI-DNA2-9A1 SHELL PLAYER V0 OWNERSHIP AND STAGE BOUNDARY LANDED; UI-DNA2-9 REMAINS INCOMPLETE; IMPLEMENTATION, PATCH APPLICATION, ACTIVATION, DRAW-SEAM RUNTIME, BACKEND INTEGRATION AND PRODUCTION PROMOTION NOT AUTHORIZED** | #1520; squash `b514c51455c086ba624fbfe173e510b61ebd9946`; reviewed head `f3cfb9d9cd4b51af05fbf83c5f6263228dc6bb43`; exact-head push CI `29635394874`, exact-head PR CI `29635396064`, post-merge CI `29636264299` — all 8/8 PASS; canonical O26/O27 ownership and dependency boundaries; experimental `ui-shell-kit` evidence inventory; Shell Player v0 boundary contract | Resolve the implementation-blocking decisions named by `shell_player_boundary_v0.md`; separate authorization for detailed local-state and transition contracts; separate authorization for ProjectionPatch runtime-application semantics; complete UI-DNA2-8B and UI-DNA2-8C prerequisites where required; separate authorization for bounded crate-private Shell Player implementation; separate Gate D and production-promotion decisions |
+| UI-DNA2-9 — Shell player integration | **UI-DNA2-9A1 LANDED / CLOSED; UI-DNA2-9B ACTIVE DOCUMENTATION CONTRACT SLICE; UI-DNA2-9 INCOMPLETE; IMPLEMENTATION, PATCH APPLICATION, ACTIVATION, DRAW-SEAM RUNTIME, BACKEND INTEGRATION AND PRODUCTION PROMOTION NOT AUTHORIZED** | #1520 and #1521 freeze and close the 9A1 ownership/stage boundary; UI-DNA2-9B freezes session input, lifecycle, local-state domains, deterministic transition envelope, resource categories and the `SPV0_` diagnostic namespace only | Preserve unresolved patch-batch, rollback, focus, pointer-capture, hit-test, accessibility, draw, layout, route-emission and Rust representation decisions; separate authorization for ProjectionPatch runtime-application semantics or bounded crate-private Shell Player implementation; separate Gate D and production-promotion decisions |
 | UI-DNA2-10 — End-to-end reference slice | **NOT STARTED** | no complete pipeline | One deterministic non-critical reference application |
 | UI-DNA2-11 — Production promotion decision | **NOT STARTED** | no promotion claim | Explicit `PROMOTE / PROMOTE WITH LIMITS / KEEP EXPERIMENTAL / REWORK / STOP` decision |
 
@@ -270,11 +273,12 @@ UI wiring
 
 ## 7. Latest bounded research checkpoint
 
-### UI-DNA2-9A1 Shell Player v0 boundary contract
+### UI-DNA2-9A1 and UI-DNA2-9B Shell Player contracts
 
 UI-DNA2-9A1 Shell Player v0 boundary contract = LANDED IN #1520
 UI-DNA2-9A1 authorization = CONSUMED / CLOSED
-UI-DNA2-9 = NOT COMPLETE
+UI-DNA2-9B = ACTIVE DOCUMENTATION CONTRACT SLICE
+UI-DNA2-9 = INCOMPLETE
 
 Current state:
 
@@ -294,7 +298,9 @@ ProjectionBundle activation = NOT AUTHORIZED
 bundle activation = NOT AUTHORIZED
 Shell Player v0 ownership and stage boundary = LANDED IN #1520
 UI-DNA2-9A1 authorization = CONSUMED / CLOSED
-UI-DNA2-9 = NOT COMPLETE
+UI-DNA2-9B session/local-state semantics = ACTIVE DOCUMENTATION CONTRACT SLICE
+UI-DNA2-9B Rust implementation authorization = NONE
+UI-DNA2-9 = INCOMPLETE
 Shell Player implementation = NOT AUTHORIZED
 ProjectionPatch application = NOT AUTHORIZED
 renderer integration = NOT AUTHORIZED
@@ -319,9 +325,10 @@ shell transition != backend event loop
 ```
 
 The UI-DNA2-9A1 authorization was consumed and is now closed by the landed
-Shell Player v0 ownership and stage boundary freeze. UI-DNA2-8B, UI-DNA2-8C, Shell Player implementation,
-activation, patch application, admission/runtime integration, or any later
-contour requires a new explicit bounded authorization and a new harness task.
+Shell Player v0 ownership and stage boundary freeze. UI-DNA2-9B freezes
+session and local-state semantics only. It does not authorize UI-DNA2-8B,
+UI-DNA2-8C, Shell Player implementation, activation, patch application,
+admission/runtime integration, or any later contour.
 
 ## 8. Dependency order after rebaseline
 
@@ -342,6 +349,15 @@ EVIDENCE LANDED:
 → Task Projection P2 corrective qualification (#1518)
 → ProjectionBundle v0 logical contract freeze (#1519)
 → Shell Player ownership and stage boundary freeze (#1520)
+→ Shell Player boundary closeout (#1521)
+→ Rust 1.97.1 repository and CI qualification (#1522)
+→ explicit Rust 1.97.1 7hell rustfmt qualification (#1523)
+```
+
+ACTIVE DOCUMENTATION CONTRACT SLICE:
+
+```text
+UI-DNA2-9B Shell Player session and local-state contract v0
 ```
 
 CURRENTLY UNAUTHORIZED FUTURE CONTOURS:
@@ -426,6 +442,7 @@ reference slice != production promotion
 - [ ] ProjectionBundle pure in-memory inert loader is separately authorized and qualified.
 - [ ] ProjectionBundle activation is separately authorized.
 - [x] Shell Player v0 ownership, inputs, outputs, stage relationships and non-authority boundaries are frozen by UI-DNA2-9A1 without implementation authorization.
+- [ ] UI-DNA2-9B is the active documentation-only freeze of Shell Player session input, lifecycle, local-state, transition, resource and diagnostic semantics; it grants no implementation authorization.
 - [ ] Shell player is qualified without authority transfer.
 - [ ] End-to-end deterministic reference slice is complete.
 - [ ] Production promotion decision is explicit.
