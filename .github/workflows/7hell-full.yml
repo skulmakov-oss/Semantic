@@ -13,7 +13,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
       - uses: Swatinem/rust-cache@v2
       - name: 7hell PCC Full Runner
         shell: powershell

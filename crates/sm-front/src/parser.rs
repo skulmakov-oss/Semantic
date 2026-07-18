@@ -2975,7 +2975,7 @@ impl<'a> Parser<'a> {
         if !errors.is_empty() {
             return Err(self.merge_logos_errors(errors));
         }
-        out.laws.sort_by(|a, b| b.priority.cmp(&a.priority));
+        out.laws.sort_by_key(|law| core::cmp::Reverse(law.priority));
         Ok(out)
     }
 
