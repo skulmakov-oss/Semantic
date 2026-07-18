@@ -1,56 +1,31 @@
 task:
-  id: UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT
-  title: freeze Shell Player session and local-state contract v0
-  type: architecture
+  id: UI-DNA2-9B-P2-INPUT-RESOURCE-PREFLIGHT-CORRECTION
+  title: correct Shell Player input resource preflight ordering
+  type: corrective-qualification
   mode: active
 
 intent:
-  summary: "docs(ui): freeze Shell Player session-state contract"
-  predecessor: UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT
-
-evidence_baseline:
-  main_sha: "3e229a821cebc013acd5f294c4872efaa6fd37a1"
-  predecessor_pr: "#1520"
-  predecessor_closeout_pr: "#1521"
+  summary: "docs(ui): preflight Shell Player input limits"
+  predecessor: UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT
+  origin_pr: "#1524"
+  origin_thread: PRRT_kwDOROOm386SAqRT
+  origin_comment: "3608926265"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT.md
+    - .harness/reports/UI-DNA2-9B-P2-INPUT-RESOURCE-PREFLIGHT-CORRECTION.md
     - docs/spec/ui/shell_player_session_state_v0.md
-    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
-
-  forbidden_paths:
-    - Cargo.toml
-    - Cargo.lock
-    - rust-toolchain.toml
-    - crates/**
-    - src/**
-    - tests/**
-    - tools/**
-    - scripts/**
-    - apps/**
-    - examples/**
-    - benches/**
-    - experiments/**
-    - docs/dna/**
-    - docs/spec/ui/shell_player_boundary_v0.md
-    - docs/spec/ui/projection_bundle_v0.md
 
 authorization:
   documentation_only: true
-  normative_contract: true
-  roadmap_sync: true
+  normative_correction: true
 
   rust_implementation: false
   rust_types: false
   public_api: false
   projection_patch_application: false
-  projection_bundle_parser: false
-  projection_bundle_validator: false
-  projection_bundle_verifier: false
-  projection_bundle_loader: false
-  projection_bundle_activation: false
+  bundle_activation: false
   action_admission: false
   renderer_integration: false
   backend_integration: false
@@ -58,21 +33,15 @@ authorization:
 
   gate_d: closed
   production_promotion: false
+  closeout: false
   follow_on_implementation: false
 
 constraints:
   preserve_9a1_ownership_boundary: true
-  semantic_truth_remains_external: true
-  caller_supplied_inputs_only: true
-  deterministic_transition_model: true
+  preserve_9b_session_state_contract: true
+  input_limits_before_collection_traversal: true
+  bounded_outer_preflight_only: true
   no_partial_state_commit: true
-  no_host_clock: true
-  no_randomness: true
-  no_filesystem_access: true
-  no_network_access: true
-  no_backend_polling: true
-  no_live_semantic_reads: true
-  no_ambient_global_state: true
   no_additional_cleanup: true
   fail_closed: true
   next_authorized_implementation_slice: none
