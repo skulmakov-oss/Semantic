@@ -16,6 +16,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
+          components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: 7hell PCC Full Runner
         shell: powershell
