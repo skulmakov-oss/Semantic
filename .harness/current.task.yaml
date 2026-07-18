@@ -1,35 +1,38 @@
 task:
-  id: UI-DNA2-8A-PROJECTION-BUNDLE-CONTRACT-FREEZE
-  title: freeze ProjectionBundle v0 logical contract
+  id: UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT
+  title: freeze Shell Player v0 ownership and stage boundary
   type: documentation
   mode: active
 
 intent:
-  summary: "docs(ui): freeze ProjectionBundle v0 contract"
+  summary: "docs(ui): freeze Shell Player v0 boundary contract"
   issue: "#1489"
-  predecessor: "UI-DNA2-7B-TASK-PROJECTION-V0"
+  predecessor: "UI-DNA2-8A-PROJECTION-BUNDLE-CONTRACT-FREEZE"
 
 evidence_baseline:
-  main_sha: "547e00c98c24079f2a01f02ead9088c333cbb8da"
-  predecessor_pr: "#1517"
-  corrective_pr: "#1518"
-  predecessor_merge_sha: "a056f220dcfc73c1d4731b315138f8b148cfe1bd"
-  corrective_squash_sha: "547e00c98c24079f2a01f02ead9088c333cbb8da"
+  main_sha: "d395e5708ddca696d296003e9182fde1f43f651c"
+  predecessor_pr: "#1519"
+  predecessor_reviewed_head: "b9409868781ddb564ab60d4bcbe7f097c85c96f0"
+  predecessor_squash_sha: "d395e5708ddca696d296003e9182fde1f43f651c"
+  predecessor_push_ci: "29632061124"
+  predecessor_pr_ci: "29632062257"
+  predecessor_post_merge_ci: "29632178545"
 
 layer:
-  name: ui-projection-contract
-  owner: prom-ui
+  name: ui-shell-runtime-contract
+  owner: prom-ui-runtime::shell_player
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/UI-DNA2-7B-TASK-PROJECTION-V0-CLOSEOUT.md
-    - docs/spec/ui/projection_bundle_v0.md
-    - docs/roadmap/post_ui/projection_bundle_level4_evidence_matrix.md
+    - .harness/reports/UI-DNA2-8A-PROJECTION-BUNDLE-CONTRACT-FREEZE-CLOSEOUT.md
+    - docs/spec/ui/shell_player_boundary_v0.md
+    - docs/roadmap/post_ui/shell_player_evidence_inventory.md
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
 
   forbidden_paths:
     - crates/**
+    - experiments/**
     - tests/**
     - benches/**
     - examples/**
@@ -38,6 +41,10 @@ scope:
     - .github/**
     - Cargo.toml
     - Cargo.lock
+    - docs/dna/**
+    - docs/ERROR_CODES.md
+    - docs/spec/ui/projection_bundle_v0.md
+    - docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md
 
 actions:
   allowed:
@@ -67,6 +74,7 @@ actions:
     - modify_issue
     - mark_ready
     - approve
+    - submit_review
     - merge
     - rebase
     - amend
@@ -82,16 +90,28 @@ actions:
     - authorize_follow_on
 
 authorization:
-  contract_freeze: true
+  boundary_contract_freeze: true
   documentation_only: true
+
   implementation: false
-  parser: false
-  validator: false
-  verifier: false
-  loader: false
-  activation: false
-  runtime_integration: false
+  rust_types: false
   public_api: false
+
+  bundle_parser: false
+  bundle_validator: false
+  bundle_verifier: false
+  bundle_loader: false
+  bundle_activation: false
+
+  shell_session_creation: false
+  patch_application: false
+  interaction_runtime: false
+  action_intent_emission: false
+  accessibility_runtime: false
+  draw_command_runtime: false
+  renderer_integration: false
+  backend_integration: false
+
   gate_d: closed
   production_promotion: false
   follow_on_implementation: false
@@ -99,8 +119,12 @@ authorization:
 constraints:
   fail_closed: true
   preserve_authority_boundaries: true
-  preserve_historical_evidence: true
-  no_claim_level_widening: true
-  no_final_serialization_without_evidence: true
-  no_numeric_limit_defaults_without_evidence: true
+  preserve_experimental_boundary: true
+  no_implicit_ui_shell_kit_promotion: true
+  no_semantic_truth_in_shell: true
+  no_admission_authority_in_shell: true
+  no_renderer_pixel_authority_in_shell: true
+  no_backend_event_loop_in_shell: true
+  no_numeric_defaults_without_evidence: true
+  no_algorithm_freeze_without_evidence: true
   no_follow_on_work: true
