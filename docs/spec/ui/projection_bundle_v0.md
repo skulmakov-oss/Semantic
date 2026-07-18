@@ -56,7 +56,8 @@ bounded input
   → framing / preflight
   → parsing
   → structural validation
-  → cross-artifact and compatibility validation
+  → cross-artifact validation
+  → compatibility validation
   → trust verification
   → inert loading
   ─────────────────────────────
