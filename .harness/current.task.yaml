@@ -1,22 +1,22 @@
 task:
-  id: UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT
-  title: freeze Shell Player v0 ownership and stage boundary
+  id: UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT-CLOSEOUT
+  title: close out landed Shell Player v0 boundary contract
   type: documentation
   mode: active
 
 intent:
-  summary: "docs(ui): freeze Shell Player v0 boundary contract"
+  summary: "docs(ui): close out Shell Player boundary contract"
   issue: "#1489"
-  predecessor: "UI-DNA2-8A-PROJECTION-BUNDLE-CONTRACT-FREEZE"
+  predecessor: "UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT"
 
 evidence_baseline:
-  main_sha: "d395e5708ddca696d296003e9182fde1f43f651c"
-  predecessor_pr: "#1519"
-  predecessor_reviewed_head: "b9409868781ddb564ab60d4bcbe7f097c85c96f0"
-  predecessor_squash_sha: "d395e5708ddca696d296003e9182fde1f43f651c"
-  predecessor_push_ci: "29632061124"
-  predecessor_pr_ci: "29632062257"
-  predecessor_post_merge_ci: "29632178545"
+  main_sha: "b514c51455c086ba624fbfe173e510b61ebd9946"
+  predecessor_pr: "#1520"
+  predecessor_initial_head: "6cbafc3379d59cdffa1b0c5c67a41e88c2ba09e2"
+  predecessor_reviewed_head: "f3cfb9d9cd4b51af05fbf83c5f6263228dc6bb43"
+  predecessor_push_ci: "29635394874"
+  predecessor_pr_ci: "29635396064"
+  predecessor_post_merge_ci: "29636264299"
 
 layer:
   name: ui-shell-runtime-contract
@@ -25,9 +25,8 @@ layer:
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/UI-DNA2-8A-PROJECTION-BUNDLE-CONTRACT-FREEZE-CLOSEOUT.md
-    - docs/spec/ui/shell_player_boundary_v0.md
-    - docs/roadmap/post_ui/shell_player_evidence_inventory.md
+    - .harness/reports/UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT-CLOSEOUT.md
+    - docs/roadmap/post_ui/ui_dna2_9a1_shell_player_boundary_contract_closeout.md
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
 
   forbidden_paths:
@@ -43,21 +42,26 @@ scope:
     - Cargo.lock
     - docs/dna/**
     - docs/ERROR_CODES.md
+    - docs/spec/ui/shell_player_boundary_v0.md
     - docs/spec/ui/projection_bundle_v0.md
+    - docs/roadmap/post_ui/shell_player_evidence_inventory.md
     - docs/roadmap/post_ui/ui_dna2_ownership_and_compatibility_freeze.md
 
 actions:
   allowed:
     - inspect
     - edit_harness
-    - modify_docs
-    - modify_specs
-    - create_files
-    - test
+    - create_closeout_report
+    - create_durable_post_ui_closeout_mirror
+    - record_project_2_ledger_evidence
+    - record_historical_pr_body_baseline
+    - rebaseline_roadmap
+    - rebaseline_issue_1489_body
+    - validate
     - create_branch
     - commit
     - push
-    - create_pr
+    - create_draft_pr
 
   forbidden:
     - modify_rust
@@ -68,63 +72,84 @@ actions:
     - modify_workflows
     - modify_scripts
     - modify_tools
-    - modify_runtime
-    - modify_admission
     - modify_public_api
-    - modify_issue
+    - modify_runtime
+    - apply_projection_patch
+    - implement_bundle_parser
+    - implement_bundle_validator
+    - implement_bundle_verifier
+    - implement_bundle_loader
+    - activate_bundle
+    - admit_action_intent
+    - dispatch_action_intent
+    - integrate_renderer
+    - integrate_backend
+    - open_gate
+    - production_promotion
+    - authorize_implementation
+    - authorize_follow_on
     - mark_ready
-    - approve
     - submit_review
     - merge
-    - rebase
     - amend
+    - rebase
     - force_push
+    - enable_auto_merge
+    - admin_bypass
     - delete_branch
     - modify_repository_settings
     - modify_rulesets
     - modify_branch_protection
-    - admin_bypass
-    - enable_auto_merge
-    - open_gate
-    - production_promotion
-    - authorize_follow_on
 
 authorization:
-  boundary_contract_freeze: true
+  closeout_only: true
   documentation_only: true
+  issue_1489_body_rebaseline: true
 
   implementation: false
-  rust_types: false
   public_api: false
-
+  runtime: false
+  patch_application: false
   bundle_parser: false
   bundle_validator: false
   bundle_verifier: false
   bundle_loader: false
   bundle_activation: false
-
-  shell_session_creation: false
-  patch_application: false
-  interaction_runtime: false
-  action_intent_emission: false
-  accessibility_runtime: false
-  draw_command_runtime: false
+  action_intent_admission: false
+  action_intent_dispatch: false
   renderer_integration: false
   backend_integration: false
-
   gate_d: closed
   production_promotion: false
   follow_on_implementation: false
+
+project_2_evidence:
+  owner: skulmakov-oss
+  number: 2
+  target_content_url: https://github.com/skulmakov-oss/Semantic/pull/1521
+  expected_item_id: PVTI_lAHOD49aK84BRzo5zgzRCvs
+  read_metadata: true
+  add_item: false
+  edit_custom_fields: false
+  delete_items: false
+  modify_other_items: false
+
+repository_baseline:
+  tracked_pr_body_files:
+    - pr_body_action_mapping.md
+    - pr_body_intent_admission_boundary.md
+  expected_count: 2
+  cleanup_authorized: false
+  require_zero_pr_body_delta: true
 
 constraints:
   fail_closed: true
   preserve_authority_boundaries: true
   preserve_experimental_boundary: true
-  no_implicit_ui_shell_kit_promotion: true
+  preserve_issue_title_state_labels_milestone_assignees_comments: true
   no_semantic_truth_in_shell: true
   no_admission_authority_in_shell: true
   no_renderer_pixel_authority_in_shell: true
   no_backend_event_loop_in_shell: true
-  no_numeric_defaults_without_evidence: true
-  no_algorithm_freeze_without_evidence: true
-  no_follow_on_work: true
+  ui_dna2_9_complete: false
+  next_authorized_implementation_slice: none
