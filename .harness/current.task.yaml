@@ -1,39 +1,78 @@
 task:
-  id: MAINT-RUST-1.97.1-7HELL-RUSTFMT-COMPONENT
-  title: explicitly install rustfmt in Rust 1.97.1 7hell workflows
-  type: maintenance
+  id: UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT
+  title: freeze Shell Player session and local-state contract v0
+  type: architecture
   mode: active
 
 intent:
-  predecessor: MAINT-RUST-1.97.1-TOOLCHAIN-QUALIFICATION
-  summary: "ci: install rustfmt for Rust 1.97.1 7hell jobs"
+  summary: "docs(ui): freeze Shell Player session-state contract"
+  predecessor: UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT
+
+evidence_baseline:
+  main_sha: "3e229a821cebc013acd5f294c4872efaa6fd37a1"
+  predecessor_pr: "#1520"
+  predecessor_closeout_pr: "#1521"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .github/workflows/ci.yml
-    - .github/workflows/7hell-full.yml
-    - .harness/reports/MAINT-RUST-1.97.1-7HELL-RUSTFMT.md
+    - .harness/reports/UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT.md
+    - docs/spec/ui/shell_player_session_state_v0.md
+    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
+
+  forbidden_paths:
+    - Cargo.toml
+    - Cargo.lock
+    - rust-toolchain.toml
+    - crates/**
+    - src/**
+    - tests/**
+    - tools/**
+    - scripts/**
+    - apps/**
+    - examples/**
+    - benches/**
+    - experiments/**
+    - docs/dna/**
+    - docs/spec/ui/shell_player_boundary_v0.md
+    - docs/spec/ui/projection_bundle_v0.md
 
 authorization:
-  workflow_changes: true
-  qualification_report: true
-  source_changes: false
-  test_changes: false
-  script_changes: false
-  dependency_changes: false
-  toolchain_version_changes: false
-  runtime_changes: false
-  public_api_changes: false
+  documentation_only: true
+  normative_contract: true
+  roadmap_sync: true
+
+  rust_implementation: false
+  rust_types: false
+  public_api: false
+  projection_patch_application: false
+  projection_bundle_parser: false
+  projection_bundle_validator: false
+  projection_bundle_verifier: false
+  projection_bundle_loader: false
+  projection_bundle_activation: false
+  action_admission: false
+  renderer_integration: false
+  backend_integration: false
+  runtime_integration: false
+
   gate_d: closed
   production_promotion: false
+  follow_on_implementation: false
 
 constraints:
-  exact_workflow_change_count: 2
-  exact_component_addition: rustfmt
-  preserve_rust_version: "1.97.1"
-  preserve_workflow_commands: true
-  preserve_workflow_triggers: true
-  preserve_permissions: true
+  preserve_9a1_ownership_boundary: true
+  semantic_truth_remains_external: true
+  caller_supplied_inputs_only: true
+  deterministic_transition_model: true
+  no_partial_state_commit: true
+  no_host_clock: true
+  no_randomness: true
+  no_filesystem_access: true
+  no_network_access: true
+  no_backend_polling: true
+  no_live_semantic_reads: true
+  no_ambient_global_state: true
   no_additional_cleanup: true
   fail_closed: true
+  next_authorized_implementation_slice: none
