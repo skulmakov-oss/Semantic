@@ -68,7 +68,8 @@ The future Shell Player may accept only these conceptual input classes:
 - a separately owned activation result or authorization context;
 - normalized backend-neutral interaction input;
 - ordered inert `ProjectionPatch` input;
-- caller-supplied deterministic session and viewport context.
+- caller-supplied deterministic session and viewport context;
+- caller-supplied deterministic limits.
 
 This contract does not define Rust types or name a final activation-token
 representation.
