@@ -14,8 +14,9 @@ Level 5+ is not claimed.
 | Requirement | Evidence file / guard | Current status | Claim impact |
 | --- | --- | --- | --- |
 | Reader/parser basis exists | `docs/spec/ui/projection_bundle_reader_parser_basis.md` | complete | Defines the basis without claiming general Level 4. |
-| Approved input boundary | `docs/spec/ui/projection_bundle_reader_parser_basis.md` | partial | Input categories are defined, but final serialization remains open. |
-| Approved output boundary | `docs/spec/ui/projection_bundle_reader_parser_basis.md` | partial | Output stability constraints are defined, but general reader/parser behavior is still blocked. |
+| Normative logical contract freeze exists | `docs/spec/ui/projection_bundle_v0.md` | complete in UI-DNA2-8A | Freezes logical identity, stage, validation, resource and authority boundaries without claiming general Level 4. |
+| Approved input boundary | `docs/spec/ui/projection_bundle_reader_parser_basis.md` + `docs/spec/ui/projection_bundle_v0.md` | partial | Bounded-input categories and logical stage boundaries are defined, but final serialization remains unresolved and parser implementation is blocked. |
+| Approved output boundary | `docs/spec/ui/projection_bundle_reader_parser_basis.md` + `docs/spec/ui/projection_bundle_v0.md` | partial | Deterministic logical and inert-output constraints are defined, but general reader/parser behavior and an inert-loader implementation remain unauthorized. |
 | Positive deterministic output golden tests | `tests/fixtures/post_ui/projection_bundle/expected/manifest_minimal.reader.out.txt` + `tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1` | complete | Positive sketch output is deterministic and fixture-facing only. |
 | Negative deterministic rejection golden tests | `tests/fixtures/post_ui/projection_bundle/expected/negative_pack.reader.out.txt` + `tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1` | complete | Negative pack rejection is deterministic and fixture-facing only. |
 | Missing-field rejection tests | `tests/fixtures/post_ui/projection_bundle/invalid/` + `tools/post_ui/check_projection_bundle_sketch_reader_draft.ps1` | complete | Missing required-field cases are covered by the current negative pack. |
@@ -34,4 +35,5 @@ General Level 4 is not currently achieved.
 
 The current state contains narrow reader-facing fixture evidence only.
 
+UI-DNA2-8A contract freeze does not achieve general Level 4.
 The matrix is a promotion tracker, not a promotion claim.

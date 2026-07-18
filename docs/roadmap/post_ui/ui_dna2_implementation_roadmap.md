@@ -1,7 +1,7 @@
 # UI-DNA2 implementation roadmap
 
 Status: DIRECTIONAL RESEARCH ROADMAP
-Repository evidence baseline: `64bbaa6397b01ed220dbfec0c9df8564ec49525f`
+Repository evidence baseline: `547e00c98c24079f2a01f02ead9088c333cbb8da`
 Live tracker: `#1489`
 
 ## Document role
@@ -115,6 +115,9 @@ Renderer owns pixels.
 | #1513 | `57a9332b9de6bca1a545eada8df0db3b7f64d2ea` | Projection Source qualification lifecycle reconciled; Binding Graph observation/dirty v0 normative contract frozen; public APIs, Semantic adapters and runtime integration remain unauthorized |
 | #1514 | `5546272351a3913fcb76d62ada7dd44b2102a68e` | Crate-private pure in-memory Binding Graph observation/dirty engine v0 and executable qualification landed; exact Quad preservation, deterministic reverse-dependency propagation and bounded stage precedence qualified; public API, Semantic adapters and runtime integration remained absent from that slice |
 | #1515 | `64bbaa6397b01ed220dbfec0c9df8564ec49525f` | Crate-private caller-supplied Semantic observation adapter v0 and executable adapter-to-dirty-engine composition qualification landed; live Semantic reads, public APIs, runtime consumption and Projection Patch integration remain absent |
+| #1516 | `b6c151f0525d9052435814df5f0e6a1789ee8ae2` | Denial/recovery/freshness v0 contract, crate-private projection implementation, inert ProjectionPatch construction and executable qualification landed; Task Projection remained separately bounded |
+| #1517 | `a056f220dcfc73c1d4731b315138f8b148cfe1bd` | Task Projection v0 contract, crate-private pure in-memory implementation, canonical representation and inert ProjectionPatch construction landed; reviewed head `f4df2990036f3206c54a939c7d19bee11b61fbf5`; exact-head CI `29583403595` and post-merge CI `29587270649` succeeded |
+| #1518 | `547e00c98c24079f2a01f02ead9088c333cbb8da` | Task Projection P2 corrective qualification landed; reviewed head `bf258b89969636244edb4912b6969c219445c40c`; exact-head CI `29595540320` and post-merge CI `29598533948` succeeded; exact aggregate text bounds and lossless `TaskRecordRef(u64)` projection qualified |
 
 ## 4. Current landed contract state
 
@@ -139,6 +142,11 @@ ActionIntent transport contracts
 prom-refs authority-free value contracts
 exact CapabilityRef lookup in prom-cap
 Projection Patch contract foundation
+denial/recovery/freshness v0 projection qualification
+Task Projection v0 canonical representation
+crate-private pure in-memory Task Projection v0 qualification
+Task Projection inert ProjectionPatch construction
+Task Projection P2 corrective qualification through #1518
 ```
 
 Current reference and lookup invariants:
@@ -202,8 +210,8 @@ Future evidence may split, combine, reorder, or retire phases.
 | UI-DNA2-4 — Binding Graph | **FOUNDATION, OBSERVATION/DIRTY V0 ENGINE AND CALLER-SUPPLIED SEMANTIC OBSERVATION ADAPTER QUALIFICATION LANDED** | deterministic declarations, cycle validation and diagnostics in #1491; normative observation/dirty contract frozen in #1513; crate-private pure in-memory dirty engine and executable qualification landed in #1514; caller-supplied evidence adapter contract, crate-private implementation and executable composition qualification landed in #1515 | live Semantic reads and subscriptions remain absent; runtime consumption and Projection Patch application remain unauthorized behind Gate D; UI-DNA2-4 is not complete |
 | UI-DNA2-5 — Action IR integration | **CONTRACT FOUNDATION LANDED** | static routes, `ActionIntent`, invocation context, structural mapper, #1491 | Explicit adapter to existing admission boundary, accepted/denied traces, stale revision, idempotency and capability evidence; Gate D required |
 | UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
-| UI-DNA2-7 — Denial, recovery, task and freshness projection | **UI-DNA2-7B TASK PROJECTION V0 QUALIFICATION CARRIED BY THIS CHANGE** | focused normative denial/recovery/freshness v0 contract, crate-private projection implementation, inert ProjectionPatch construction and executable qualification carried by this change; task projection v0 contract, implementation and qualification also carried by this change | Task Projection application, admission execution, runtime integration, Gate D and production promotion remain unauthorized |
-| UI-DNA2-8 — ProjectionBundle qualification | **NOT STARTED** | fixture and draft-tool evidence only | Parser, validators, verifier, inert loader and activation separation |
+| UI-DNA2-7 — Denial, recovery, task and freshness projection | **UI-DNA2-7A DENIAL/RECOVERY/FRESHNESS V0, UI-DNA2-7B TASK PROJECTION V0 AND P2 CORRECTIVE QUALIFICATION THROUGH #1518 LANDED** | denial/recovery/freshness v0 contract, crate-private implementation, inert ProjectionPatch construction and qualification landed in #1516; Task Projection v0 contract, crate-private pure in-memory implementation, canonical representation and inert patch construction landed in #1517; exact aggregate text bounds and lossless `TaskRecordRef(u64)` projection qualified in #1518 | Task Projection application, admission execution, runtime integration, Gate D and production promotion remain unauthorized |
+| UI-DNA2-8 — ProjectionBundle qualification | **UI-DNA2-8A PROJECTIONBUNDLE V0 LOGICAL CONTRACT FREEZE CARRIED BY THIS DOCUMENTATION-ONLY CHANGE; GENERAL LEVEL 4, IMPLEMENTATION, INERT LOADING AND ACTIVATION NOT AUTHORIZED** | Level 3 fixture and draft-tool evidence retained; logical identity, stage, validation, resource, diagnostic and authority boundaries frozen by `docs/spec/ui/projection_bundle_v0.md` in the current change | Resolve final serialization and other blocking decisions; separate authorization for UI-DNA2-8B parser/validator/verifier implementation and qualification; separate authorization for UI-DNA2-8C pure in-memory inert-loader qualification; separate activation decision |
 | UI-DNA2-9 — Shell player integration | **NOT STARTED** | experimental `ui-shell-kit` evidence only | Separate promotion audit and bounded shell-player implementation |
 | UI-DNA2-10 — End-to-end reference slice | **NOT STARTED** | no complete pipeline | One deterministic non-critical reference application |
 | UI-DNA2-11 — Production promotion decision | **NOT STARTED** | no promotion claim | Explicit `PROMOTE / PROMOTE WITH LIMITS / KEEP EXPERIMENTAL / REWORK / STOP` decision |
@@ -245,46 +253,49 @@ UI wiring
 
 ## 7. Latest bounded research checkpoint
 
-### UI-DNA2 task projection v0
+### UI-DNA2-8A ProjectionBundle v0 logical contract freeze
 
-AUTHORIZED BOUNDED CHANGE —
-CRATE-PRIVATE TASK PROJECTION V0, INERT PATCH CONSTRUCTION
-AND EXECUTABLE QUALIFICATION CARRIED HERE; NOT ACTIVATED OR PROMOTED
+AUTHORIZED BOUNDED DOCUMENTATION-ONLY CHANGE —
+LOGICAL CONTRACT FREEZE CARRIED HERE; IMPLEMENTATION,
+INERT LOADING, ACTIVATION AND PROMOTION NOT AUTHORIZED
 
 Current state:
 
 ```text
 Binding Graph Semantic observation adapter v0 = LANDED IN #1515
 denial/recovery/freshness v0 contract = LANDED IN #1516
-task projection v0 contract = FROZEN BY THIS CHANGE
-crate-private pure in-memory projection and qualification = CARRIED BY THIS CHANGE
-caller-supplied outcome and freshness = PRESENTATION EVIDENCE ONLY
-ProjectionPatch construction = INCLUDED
+Task Projection v0 = LANDED IN #1517
+Task Projection P2 corrective qualification = LANDED IN #1518
+ProjectionBundle v0 logical contract = FROZEN BY THIS DOCUMENTATION-ONLY CHANGE
+General Level 4 = NOT CLAIMED
+FINAL SERIALIZATION = UNRESOLVED
+ProjectionBundle parser/validator/verifier = NOT IMPLEMENTED
+ProjectionBundle inert loader = NOT IMPLEMENTED
+ProjectionBundle activation = NOT AUTHORIZED
 ProjectionPatch application = NOT AUTHORIZED
-admission and recovery execution = NOT AUTHORIZED
 runtime integration = NOT AUTHORIZED
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
-FOLLOW-ON AUTHORIZED IMPLEMENTATION SLICE = NONE
+NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
 ```
 
 Required invariants:
 
 ```text
-caller-supplied outcome != admission execution
-denial evidence != Semantic truth
-recovery reference != recovery authority
-freshness carrier != connection truth
-ProjectionPatch construction != patch application
-projector success != UI mutation
-implementation != public API
-implementation != runtime integration
+ProjectionBundle carries projection artifacts.
+ProjectionBundle does not own Semantic truth.
+fixture reader != production parser
+parser != validator
+validator != verifier
+verifier != loader
+loader != activation
+activation != production promotion
 ```
 
-The current authorization is consumed by the crate-private projection,
-qualification and inert patch construction for task projection v0. Patch application,
-admission/runtime integration or any later contour requires a new explicit
-bounded authorization.
+The current authorization is consumed by the ProjectionBundle v0 logical
+contract freeze. UI-DNA2-8B, UI-DNA2-8C, activation, patch application,
+admission/runtime integration, or any later contour requires a new explicit
+bounded authorization and a new harness task.
 
 ## 8. Dependency order after rebaseline
 
@@ -300,15 +311,18 @@ EVIDENCE LANDED OR CARRIED BY THE CURRENT CHANGE:
 → Binding Graph observation/dirty v0 normative contract freeze
 → Binding Graph observation/dirty v0 crate-private engine implementation and qualification (#1514)
 → Binding Graph caller-supplied Semantic observation adapter v0 implementation and qualification (#1515)
-→ denial/recovery/freshness v0 contract, crate-private implementation and qualification (current change)
+→ denial/recovery/freshness v0 projection (#1516)
+→ task projection v0 (#1517)
+→ Task Projection P2 corrective qualification (#1518)
+→ UI-DNA2-8A ProjectionBundle v0 logical contract freeze (current change)
 ```
 
 CURRENTLY UNAUTHORIZED FUTURE CONTOURS:
 
 ```text
-admission integration behind Gate D
-Task Projection
-ProjectionBundle qualification
+ProjectionBundle parser/validator/verifier implementation
+ProjectionBundle inert-loader implementation
+ProjectionBundle activation
 shell-player implementation
 end-to-end reference slice
 production-promotion decision
@@ -376,9 +390,12 @@ reference slice != production promotion
 - [ ] Action IR admission integration is separately approved and qualified.
 - [x] Projection Patch replay-order model and qualification are complete in the bounded WP4B contour.
 - [ ] Patch application is separately qualified in the `prom-ui-runtime::shell_player` contour.
-- [x] Denial/recovery/freshness v0 projection and inert ProjectionPatch construction are specified, implemented and qualified by this bounded change.
-- [ ] Task Projection is separately specified, authorized and qualified.
-- [ ] ProjectionBundle parser/validator/verifier/loader sequence is qualified.
+- [x] Denial/recovery/freshness v0 projection and inert ProjectionPatch construction are specified, implemented and qualified through #1516.
+- [x] Task Projection v0 is separately specified, implemented and qualified at the crate-private pure in-memory boundary through #1518; application, live evidence acquisition, admission execution and runtime integration remain unauthorized.
+- [x] ProjectionBundle v0 logical identity, stage separation, validation, resource, diagnostic and authority boundaries are frozen by the bounded documentation-only UI-DNA2-8A change.
+- [ ] ProjectionBundle parser/validator/verifier implementation is separately authorized and qualified.
+- [ ] ProjectionBundle pure in-memory inert loader is separately authorized and qualified.
+- [ ] ProjectionBundle activation is separately authorized.
 - [ ] Shell player is qualified without authority transfer.
 - [ ] End-to-end deterministic reference slice is complete.
 - [ ] Production promotion decision is explicit.
