@@ -179,12 +179,12 @@ Every transition is evaluated in this deterministic order:
 
 1. validate session identity;
 2. validate lifecycle eligibility;
-3. validate stimulus shape;
-4. validate stable target identities;
-5. validate replay-cursor compatibility where applicable;
-6. validate input-side resource bounds;
+3. validate the outer transition envelope and primary stimulus class;
+4. validate input-side resource bounds;
+5. validate stable target identities;
+6. validate replay-cursor compatibility where applicable;
 7. calculate the candidate next state and candidate outputs without committing;
-8. validate candidate invariants and all candidate-state/output resource bounds;
+8. validate candidate invariants and candidate-state/output resource bounds;
 9. commit the complete candidate state or preserve the previous state;
 10. publish the disposition and already validated bounded outputs, then apply
     the immutable diagnostic emission cap to the stable logical diagnostic
@@ -192,10 +192,26 @@ Every transition is evaluated in this deterministic order:
 
 No partial local-state commit is permitted.
 
-Stage 6 validates limits measurable directly from the supplied stimulus:
+Stages 1 and 2 perform only bounded session and lifecycle checks.
+
+Stage 3 validates only the fixed outer envelope and primary stimulus
+discriminant required to identify the stimulus class. It does not traverse
+patch operations, target collections, route collections, or other
+variable-length semantic contents.
+
+Stage 4 validates every resource bound that can reject the supplied input
+before per-element processing begins:
 
 - maximum patches per transition;
 - maximum transition stimulus bytes.
+
+Patch count and transition stimulus byte length must be available through
+bounded structural metadata or another representation-independent bounded
+preflight mechanism. This contract does not select a Rust representation,
+serialized format, or counting algorithm.
+
+Stable-target validation and replay-cursor compatibility traversal do not begin
+until stage 4 succeeds.
 
 Stage 8 validates limits that depend on the calculated candidate state or
 candidate outputs:
@@ -211,9 +227,14 @@ candidate outputs:
 - maximum invalidation entries;
 - maximum damage regions.
 
-No candidate state is committed until stage 8 succeeds. Failure at either
-resource-validation stage produces `Rejected` and preserves the complete
-previous state.
+No candidate state is committed until stage 8 succeeds. Failure at stage 4 or
+stage 8 produces `Rejected` and preserves the complete previous
+`ShellLocalState`.
+
+After stage-4 rejection, no target, replay, candidate-state, draw,
+accessibility, hit-test, focus, or `ActionIntent` processing occurs. Any
+diagnostic produced by stage-4 rejection remains subject to the immutable
+stage-10 diagnostic emission cap.
 
 Before stage 10 emission, the transition has determined its disposition and
 complete logical diagnostic sequence in stable diagnostic order. Stage 10
