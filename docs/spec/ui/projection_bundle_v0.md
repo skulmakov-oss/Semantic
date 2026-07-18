@@ -268,16 +268,20 @@ Required precedence is:
 human-facing Semantic diagnostic catalog.
 
 Its Maintenance section currently names `src/bin/smc.rs` as the source
-catalog location. That path is stale at this repository baseline.
+catalog location. That path is stale at this repository baseline. The root
+binary is a thin CLI wrapper and does not own the diagnostic registry.
 
-The current source registry is
-`ton618_core::diagnostics::diagnostic_catalog`, defined in
-`crates/ton618-core/src/diagnostics.rs` and consumed by `smc-cli` through
-`crates/smc-cli/src/lib.rs`.
+The authoritative source registry is the `diagnostic_catalog` function owned
+by the canonical core diagnostics module. `smc-cli` consumes that registry
+through its import in `crates/smc-cli/src/lib.rs`.
 
-UI-DNA2-8A records the actual registry location but does not repair the
-stale general maintenance instruction because `docs/ERROR_CODES.md` is
-outside this PR's authorized scope.
+The defining core module is already governed by the repository's
+explicit legacy-compatibility perimeter. UI-DNA2-8A records the current
+ownership boundary without propagating compatibility-only crate names into
+this new UI contract.
+
+UI-DNA2-8A does not repair the stale general maintenance instruction because
+`docs/ERROR_CODES.md` is outside this PR's authorized scope.
 
 The current human-facing and source catalogs do not define a
 ProjectionBundle-specific diagnostic namespace. UI-DNA2-8A therefore
