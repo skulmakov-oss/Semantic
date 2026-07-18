@@ -1,12 +1,12 @@
 task:
-  id: MAINT-RUST-1.97.1-HARNESS-SCOPE-CONFLICT
-  title: resolve exact harness allow/forbidden conflict
+  id: MAINT-RUST-1.97.1-TOOLCHAIN-QUALIFICATION
+  title: qualify Rust 1.97.1 repository and CI baseline
   type: maintenance
   mode: active
 
 intent:
   summary: "build(ci): qualify Rust 1.97.1 toolchain baseline"
-  predecessor: "MAINT-RUST-1.97.1-TOOLCHAIN-BASELINE"
+  predecessor: "UI-DNA2-9A1-SHELL-PLAYER-BOUNDARY-CONTRACT-CLOSEOUT"
 
 evidence_baseline:
   main_sha: "c71242d04c1f6962c9bc816b535b9136e9113d23"
@@ -69,12 +69,19 @@ actions:
     - apply_exact_workspace_clippy_compatibility_fixes
     - validate_sm_sema
     - validate_sm_ir
+    - validate_smc_cli
+    - modify_exact_test_support_compatibility
+    - validate_test_support
+    - resolve_harness_scope_conflict
 
   forbidden:
     - modify_additional_rust
-    - modify_tests
-    - modify_fixtures
-    - modify_manifests
+    - modify_test_cases
+    - modify_test_assertions
+    - modify_test_fixtures
+    - modify_additional_test_support
+    - modify_cargo_manifests
+    - modify_additional_manifests
     - modify_lockfile
     - modify_dependencies
     - change_msrv
@@ -110,11 +117,21 @@ authorization:
   workflow_toolchain_unification: true
   qualification_report: true
 
-  source_changes: false
-  test_changes: false
+  exact_source_compatibility_changes: true
+  exact_test_support_compatibility_change: true
+  workflow_changes: true
+  toolchain_manifest_change: true
+  harness_manifest_change: true
+
+  broad_source_changes: false
+  test_case_changes: false
+  test_assertion_changes: false
+  fixture_changes: false
+  cargo_manifest_changes: false
+  lockfile_changes: false
   dependency_changes: false
-  manifest_changes: false
   msrv_changes: false
+  edition_changes: false
   architecture_changes: false
   runtime_changes: false
   public_api_changes: false
@@ -143,10 +160,10 @@ source_compatibility:
   newly_authorized_diagnostic:
     - clippy::unnecessary-sort-by
   newly_authorized_correction_count: 1
-  total_clippy_correction_count: 6
+  production_clippy_correction_count: 6
   behavior_changes: false
   public_api_changes: false
-  test_changes: false
+  test_case_changes: false
   additional_source_fixes: false
 
 test_support_compatibility:
@@ -201,10 +218,14 @@ constraints:
   preserve_msrv_declarations: true
   preserve_authority_boundaries: true
   exact_new_source_fix_count: 1
-  exact_total_source_fix_count: 6
+  exact_production_source_fix_count: 6
+  exact_test_support_fix_count: 1
+  exact_total_clippy_correction_count: 7
   no_semantic_behavior_change: true
   no_public_api_change: true
-  no_test_change: true
+  no_test_case_change: true
+  no_test_assertion_change: true
+  no_fixture_change: true
   no_lint_suppression: true
   no_allow_attributes: true
   no_additional_source_cleanup: true

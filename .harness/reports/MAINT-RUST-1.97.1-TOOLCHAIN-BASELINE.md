@@ -182,7 +182,7 @@ out.laws.sort_by_key(|law| core::cmp::Reverse(law.priority));
 This adjustment changed formatting only. Sorting behavior, stability,
 priority ordering, parser semantics, and public API remained unchanged.
 
-## Current workspace Clippy blockers
+## Historical workspace Clippy blockers
 
 After all five targeted checks passed, the resumed workspace Clippy command
 reported three new diagnostics outside the authorized source paths:
@@ -236,7 +236,7 @@ performed.
 Rust 1.97.1 qualification required two mechanical Clippy corrections and one
 formatting-only canonicalization of the already authorized parser correction.
 The resumed workspace check exposed three additional Clippy blockers, so the
-qualification remains blocked.
+qualification remained blocked at that checkpoint.
 
 ## Second workspace compatibility correction
 
@@ -264,7 +264,7 @@ diagnostics:
 
 No additional source correction was authorized or performed.
 
-## Current targeted formatting blocker
+## Historical targeted formatting blocker
 
 The first targeted validation command failed:
 
@@ -314,7 +314,7 @@ match instr {
 The replacement preserves instruction matching, label lookup, error position,
 error text, and return behavior. No crate edition or manifest was changed.
 
-## Current workspace Clippy blocker after edition correction
+## Historical workspace Clippy blocker after edition correction
 
 After all targeted checks passed, the resumed workspace Clippy command found
 one additional diagnostic:
@@ -356,7 +356,7 @@ Rust 1.97.1 exposed one additional denied Clippy diagnostic in
 
 No adjacent bundle, token, rename, range-replacement, or output logic changed.
 
-## Current test-support Clippy blocker
+## Historical test-support Clippy blocker
 
 After all targeted checks passed, the resumed workspace Clippy command found
 one additional diagnostic:
@@ -452,9 +452,16 @@ Rust 1.97.1 qualification required seven mechanical Clippy corrections,
 one rustfmt canonicalization, one Rust-2021-compatible structural rewrite,
 and one task-manifest scope-conflict correction.
 
-No test case, assertion, fixture, dependency, manifest, lockfile, MSRV,
+No test case, assertion, fixture, dependency, Cargo manifest, lockfile, MSRV,
 edition, public API, runtime, architecture, harness script, Gate D or
 production-status change was required.
+
+The qualification intentionally added the root `rust-toolchain.toml`, updated
+the local harness task manifest, and pinned the two authorized GitHub Actions
+workflow files.
+
+- Current blocker count: `0`
+- Qualification status: `PASS`
 
 ## Governance
 
