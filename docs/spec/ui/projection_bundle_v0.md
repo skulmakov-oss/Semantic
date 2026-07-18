@@ -264,17 +264,29 @@ Required precedence is:
 6. trust verification;
 7. inert-load validation.
 
-`docs/ERROR_CODES.md` exists and was inspected. It records the current
-Semantic diagnostic catalog and instructs maintainers to synchronize additions
-with the source catalog named `diagnostic_catalog` in `src/bin/smc.rs`.
+`docs/ERROR_CODES.md` exists and was inspected. It is the current
+human-facing Semantic diagnostic catalog.
 
-The current catalog does not define a ProjectionBundle-specific diagnostic
-namespace. UI-DNA2-8A therefore does not add, allocate, reserve, or freeze
-ProjectionBundle error codes.
+Its Maintenance section currently names `src/bin/smc.rs` as the source
+catalog location. That path is stale at this repository baseline.
 
-Any future ProjectionBundle diagnostic namespace requires a separate owner
-decision and an explicit collision audit against both `docs/ERROR_CODES.md`
-and the then-current source diagnostic registry before implementation.
+The current source registry is
+`ton618_core::diagnostics::diagnostic_catalog`, defined in
+`crates/ton618-core/src/diagnostics.rs` and consumed by `smc-cli` through
+`crates/smc-cli/src/lib.rs`.
+
+UI-DNA2-8A records the actual registry location but does not repair the
+stale general maintenance instruction because `docs/ERROR_CODES.md` is
+outside this PR's authorized scope.
+
+The current human-facing and source catalogs do not define a
+ProjectionBundle-specific diagnostic namespace. UI-DNA2-8A therefore
+does not add, allocate, reserve, or freeze ProjectionBundle error codes.
+
+Any future ProjectionBundle diagnostic namespace requires a separate
+owner decision and an explicit collision audit against both the
+then-current human-facing catalog and the authoritative source registry
+before implementation.
 
 ## 10. Resource-bound model
 
