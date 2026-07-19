@@ -1,7 +1,7 @@
 # UI-DNA2 implementation roadmap
 
 Status: DIRECTIONAL RESEARCH ROADMAP
-Repository evidence baseline: `3e229a821cebc013acd5f294c4872efaa6fd37a1`
+Repository evidence baseline: `0061df1e4134c7ced1c9a157140f602b3853466f`
 Live tracker: `#1489`
 
 ## Document role
@@ -123,6 +123,8 @@ Renderer owns pixels.
 | #1521 | `c71242d04c1f6962c9bc816b535b9136e9113d23` | UI-DNA2-9A1 closeout and roadmap ledger evidence landed; Shell Player boundary authorization consumed and closed; no implementation authorization |
 | #1522 | `6219e67e6f5f233797cfe8047cc54e0148a5a223` | Rust 1.97.1 repository and CI baseline qualification landed; seven exact Clippy compatibility corrections qualified; no Shell Player scope expansion |
 | #1523 | `3e229a821cebc013acd5f294c4872efaa6fd37a1` | Explicit `rustfmt` installation landed for both Rust 1.97.1 Windows 7hell workflows; post-merge CI `29652449165` passed 8/8; no Shell Player scope expansion |
+| #1524 | `0eede9391f6f5d1aaf446e94326b74797f1973d7` | Shell Player session/local-state normative contract landed; three independent P2 ambiguities were corrected before merge; post-merge CI `29655671082` passed 8/8 |
+| #1525 | `0061df1e4134c7ced1c9a157140f602b3853466f` | Post-merge P2 input-resource preflight correction landed; oversized inputs are rejected before stable-target and replay traversal; post-merge CI `29659183512` passed 8/8; origin thread resolved |
 
 ## 4. Current landed contract state
 
@@ -159,7 +161,15 @@ inert bundle loading separated from activation
 Shell Player v0 ownership and stage boundary freeze
 local projection playback ownership
 caller-supplied session/viewport context
-caller-supplied deterministic limits
+Shell Player activated-session input contract
+immutable session resource-limit authority
+Created / Active / Suspended / Closed lifecycle
+local reconstructible session-state domains
+deterministic ten-stage transition model
+input-side resource preflight before collection traversal
+complete candidate commit or complete previous-state preservation
+stage-10 diagnostic emission cap
+SPV0_ diagnostic namespace
 local shell state separated from Semantic truth
 hit-test result separated from action authorization
 ActionIntent candidate separated from admitted action
@@ -232,7 +242,7 @@ Future evidence may split, combine, reorder, or retire phases.
 | UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
 | UI-DNA2-7 — Denial, recovery, task and freshness projection | **UI-DNA2-7A DENIAL/RECOVERY/FRESHNESS V0, UI-DNA2-7B TASK PROJECTION V0 AND P2 CORRECTIVE QUALIFICATION THROUGH #1518 LANDED** | denial/recovery/freshness v0 contract, crate-private implementation, inert ProjectionPatch construction and qualification landed in #1516; Task Projection v0 contract, crate-private pure in-memory implementation, canonical representation and inert patch construction landed in #1517; exact aggregate text bounds and lossless `TaskRecordRef(u64)` projection qualified in #1518 | Task Projection application, admission execution, runtime integration, Gate D and production promotion remain unauthorized |
 | UI-DNA2-8 — ProjectionBundle qualification | **UI-DNA2-8A LOGICAL CONTRACT FREEZE LANDED; GENERAL LEVEL 4, IMPLEMENTATION, INERT LOADING AND ACTIVATION NOT AUTHORIZED** | ProjectionBundle v0 logical identity, deterministic stage ownership, validation, resource, diagnostic and authority boundaries landed through #1519 | Resolve final serialization and other blocking decisions; separate authorization for UI-DNA2-8B parser/validator/verifier implementation and qualification; separate authorization for UI-DNA2-8C pure in-memory inert-loader qualification; separate activation decision |
-| UI-DNA2-9 — Shell player integration | **UI-DNA2-9A1 LANDED / CLOSED; UI-DNA2-9B ACTIVE DOCUMENTATION CONTRACT SLICE; UI-DNA2-9 INCOMPLETE; IMPLEMENTATION, PATCH APPLICATION, ACTIVATION, DRAW-SEAM RUNTIME, BACKEND INTEGRATION AND PRODUCTION PROMOTION NOT AUTHORIZED** | #1520 and #1521 freeze and close the 9A1 ownership/stage boundary; UI-DNA2-9B freezes session input, lifecycle, local-state domains, deterministic transition envelope, resource categories and the `SPV0_` diagnostic namespace only | Preserve unresolved patch-batch, rollback, focus, pointer-capture, hit-test, accessibility, draw, layout, route-emission and Rust representation decisions; separate authorization for ProjectionPatch runtime-application semantics or bounded crate-private Shell Player implementation; separate Gate D and production-promotion decisions |
+| UI-DNA2-9 — Shell player integration | **UI-DNA2-9A1 LANDED / CLOSED; UI-DNA2-9B LANDED / CLOSED; UI-DNA2-9 INCOMPLETE; IMPLEMENTATION, PATCH APPLICATION, ACTIVATION, DRAW-SEAM RUNTIME, BACKEND INTEGRATION AND PRODUCTION PROMOTION NOT AUTHORIZED** | #1520 and #1521 freeze and close the 9A1 ownership/stage boundary; #1524 freezes the 9B activated-session, lifecycle, local-state, deterministic transition, resource and diagnostic contract; #1525 moves input-resource preflight ahead of target/replay traversal | Preserve unresolved patch transaction, Atomic versus OrderedPartial, rollback, unknown target/operation, patch mutation, focus, pointer-capture, hit-test, accessibility, draw, layout, route-emission, Rust representation, module-layout and public-API decisions; no later slice is authorized |
 | UI-DNA2-10 — End-to-end reference slice | **NOT STARTED** | no complete pipeline | One deterministic non-critical reference application |
 | UI-DNA2-11 — Production promotion decision | **NOT STARTED** | no promotion claim | Explicit `PROMOTE / PROMOTE WITH LIMITS / KEEP EXPERIMENTAL / REWORK / STOP` decision |
 
@@ -277,7 +287,9 @@ UI wiring
 
 UI-DNA2-9A1 Shell Player v0 boundary contract = LANDED IN #1520
 UI-DNA2-9A1 authorization = CONSUMED / CLOSED
-UI-DNA2-9B = ACTIVE DOCUMENTATION CONTRACT SLICE
+UI-DNA2-9B session/local-state contract = LANDED IN #1524
+UI-DNA2-9B post-merge preflight correction = LANDED IN #1525
+UI-DNA2-9B authorization = CONSUMED / CLOSED
 UI-DNA2-9 = INCOMPLETE
 
 Current state:
@@ -298,7 +310,8 @@ ProjectionBundle activation = NOT AUTHORIZED
 bundle activation = NOT AUTHORIZED
 Shell Player v0 ownership and stage boundary = LANDED IN #1520
 UI-DNA2-9A1 authorization = CONSUMED / CLOSED
-UI-DNA2-9B session/local-state semantics = ACTIVE DOCUMENTATION CONTRACT SLICE
+UI-DNA2-9B session/local-state semantics = LANDED / CLOSED
+UI-DNA2-9B input-side resource preflight = LANDED IN #1525
 UI-DNA2-9B Rust implementation authorization = NONE
 UI-DNA2-9 = INCOMPLETE
 Shell Player implementation = NOT AUTHORIZED
@@ -324,11 +337,10 @@ draw material != pixels
 shell transition != backend event loop
 ```
 
-The UI-DNA2-9A1 authorization was consumed and is now closed by the landed
-Shell Player v0 ownership and stage boundary freeze. UI-DNA2-9B freezes
-session and local-state semantics only. It does not authorize UI-DNA2-8B,
-UI-DNA2-8C, Shell Player implementation, activation, patch application,
-admission/runtime integration, or any later contour.
+The UI-DNA2-9A1 and UI-DNA2-9B authorizations were consumed and are now closed.
+The landed 9B evidence freezes session and local-state semantics only. It does
+not authorize UI-DNA2-8B, UI-DNA2-8C, Shell Player implementation, activation,
+patch application, admission/runtime integration, or any later contour.
 
 ## 8. Dependency order after rebaseline
 
@@ -352,12 +364,15 @@ EVIDENCE LANDED:
 → Shell Player boundary closeout (#1521)
 → Rust 1.97.1 repository and CI qualification (#1522)
 → explicit Rust 1.97.1 7hell rustfmt qualification (#1523)
+→ Shell Player session/local-state contract (#1524)
+→ Shell Player input-resource preflight correction (#1525)
 ```
 
-ACTIVE DOCUMENTATION CONTRACT SLICE:
+CLOSED DOCUMENTATION CONTRACT SLICE:
 
 ```text
 UI-DNA2-9B Shell Player session and local-state contract v0
+UI-DNA2-9B authorization = CONSUMED / CLOSED
 ```
 
 CURRENTLY UNAUTHORIZED FUTURE CONTOURS:
@@ -442,7 +457,7 @@ reference slice != production promotion
 - [ ] ProjectionBundle pure in-memory inert loader is separately authorized and qualified.
 - [ ] ProjectionBundle activation is separately authorized.
 - [x] Shell Player v0 ownership, inputs, outputs, stage relationships and non-authority boundaries are frozen by UI-DNA2-9A1 without implementation authorization.
-- [ ] UI-DNA2-9B is the active documentation-only freeze of Shell Player session input, lifecycle, local-state, transition, resource and diagnostic semantics; it grants no implementation authorization.
+- [x] UI-DNA2-9B Shell Player session input, lifecycle, local-state, transition, resource and diagnostic semantics are frozen through #1524 and the post-merge input-resource preflight correction in #1525; the consumed authorization is closed and grants no implementation authority.
 - [ ] Shell player is qualified without authority transfer.
 - [ ] End-to-end deterministic reference slice is complete.
 - [ ] Production promotion decision is explicit.
