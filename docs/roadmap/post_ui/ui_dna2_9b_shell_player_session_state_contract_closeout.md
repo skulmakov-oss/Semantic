@@ -175,19 +175,22 @@ script changes = 0
 
 ## Project #2 registration
 
-Project registration evidence is pending creation of the Draft closeout PR.
-The verified metadata will be recorded in the second closeout commit.
+The Draft closeout PR is registered exactly once as a content-backed
+pull-request item.
 
 ```text
 Project owner = skulmakov-oss
 Project number = 2
 Project title = Semantic UI Foundation Roadmap
-Project item ID = PENDING
-content URL = PENDING
+Project item ID = PVTI_lAHOD49aK84BRzo5zgzUc6Y
+content type = PullRequest
+content URL = https://github.com/skulmakov-oss/Semantic/pull/1527
 item count before = 249
-item count after = PENDING
-exact matching item count = PENDING
-duplicate count = PENDING
+item count after = 250
+exact matching item count = 1
+duplicate count = 0
+Status = Todo (inherited automatically)
+all other custom fields = UNSET
 custom fields modified = NO
 ```
 

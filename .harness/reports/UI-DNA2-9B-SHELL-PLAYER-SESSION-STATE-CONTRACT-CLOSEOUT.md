@@ -1,6 +1,6 @@
 # UI-DNA2-9B Shell Player Session-State Contract Closeout
 
-Status: PENDING PROJECT REGISTRATION
+Status: PASS
 
 ## Task
 
@@ -112,17 +112,20 @@ script changes = 0
 Project owner = skulmakov-oss
 Project number = 2
 Project title = Semantic UI Foundation Roadmap
-Project item ID = PENDING
-content URL = PENDING
+Project item ID = PVTI_lAHOD49aK84BRzo5zgzUc6Y
+content type = PullRequest
+content URL = https://github.com/skulmakov-oss/Semantic/pull/1527
 item count before = 249
-item count after = PENDING
-exact matching item count = PENDING
-duplicate count = PENDING
+item count after = 250
+exact matching item count = 1
+duplicate count = 0
+Status = Todo (inherited automatically)
+all other custom fields = UNSET
 custom fields modified = NO
 ```
 
-Status remains pending until the Draft PR is registered exactly once and the
-metadata is verified.
+The content-backed item, exact count and field values were verified through
+Project #2. No custom field was modified by this closeout.
 
 ## Governance
 
