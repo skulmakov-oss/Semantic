@@ -151,6 +151,36 @@ fn calculate_candidate_lifecycle(
     }
 }
 
+#[derive(Debug)]
+pub(crate) struct ShellSession {
+    context: ActivatedShellSessionContext,
+    state: ShellLocalState,
+}
+
+impl ShellSession {
+    pub(crate) fn new(context: ActivatedShellSessionContext) -> Self {
+        let state = ShellLocalState {
+            session_id: context.session_id,
+            lifecycle: ShellLifecycle::Created,
+        };
+        Self { context, state }
+    }
+
+    pub(crate) fn state(&self) -> &ShellLocalState {
+        &self.state
+    }
+
+    pub(crate) fn apply(&mut self, input: ShellTransitionInput) -> ShellTransitionResult {
+        let result = evaluate_lifecycle_transition(&self.context, &self.state, input);
+
+        if result.disposition == ShellTransitionDisposition::Applied {
+            self.state = result.state;
+        }
+
+        result
+    }
+}
+
 pub(crate) fn evaluate_lifecycle_transition(
     context: &ActivatedShellSessionContext,
     previous: &ShellLocalState,
@@ -530,5 +560,201 @@ mod tests {
 
         assert_eq!(previous.lifecycle, ShellLifecycle::Created);
         assert_eq!(res.state.lifecycle, ShellLifecycle::Active);
+    }
+
+    #[test]
+    fn test_owner_constructor() {
+        let ctx = make_ctx(10, 100);
+        let session = ShellSession::new(ctx);
+        assert_eq!(session.state().lifecycle, ShellLifecycle::Created);
+        assert_eq!(session.state().session_id, ctx.session_id);
+    }
+
+    #[test]
+    fn test_owner_valid_sequence() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+
+        let sequence = alloc::vec![
+            (ShellLifecycleCommand::Activate, ShellLifecycle::Active),
+            (ShellLifecycleCommand::Suspend, ShellLifecycle::Suspended),
+            (ShellLifecycleCommand::Resume, ShellLifecycle::Active),
+            (ShellLifecycleCommand::Close, ShellLifecycle::Closed),
+        ];
+
+        for (command, expected_state) in sequence {
+            let res = session.apply(cmd(command, 10));
+            assert_eq!(res.disposition, ShellTransitionDisposition::Applied);
+            assert_eq!(session.state().lifecycle, expected_state);
+            assert_eq!(res.state, *session.state());
+        }
+    }
+
+    #[test]
+    fn test_owner_invalid_command_preservation() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        let original_state = *session.state();
+
+        let res = session.apply(cmd(ShellLifecycleCommand::Suspend, 10));
+        assert_eq!(res.disposition, ShellTransitionDisposition::Rejected);
+        assert_eq!(*session.state(), original_state);
+        assert_eq!(res.state, *session.state());
+    }
+
+    #[test]
+    fn test_owner_resource_rejection_preservation() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        let original_state = *session.state();
+
+        let res = session.apply(cmd(ShellLifecycleCommand::Activate, 101));
+        assert_eq!(res.disposition, ShellTransitionDisposition::Rejected);
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_RESOURCE_LIMIT_EXCEEDED);
+        assert_eq!(*session.state(), original_state);
+    }
+
+    #[test]
+    fn test_owner_no_change_preservation() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+
+        // Test in Created
+        let original_state = *session.state();
+        let res = session.apply(ShellTransitionInput {
+            stimulus: ShellLifecycleStimulus::ExplicitNoOp,
+            stimulus_bytes: 10,
+        });
+        assert_eq!(res.disposition, ShellTransitionDisposition::NoChange);
+        assert_eq!(*session.state(), original_state);
+        assert_eq!(res.state, *session.state());
+
+        // Test in Active
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        let active_state = *session.state();
+        let res2 = session.apply(ShellTransitionInput {
+            stimulus: ShellLifecycleStimulus::ExplicitNoOp,
+            stimulus_bytes: 10,
+        });
+        assert_eq!(res2.disposition, ShellTransitionDisposition::NoChange);
+        assert_eq!(*session.state(), active_state);
+
+        // Test in Suspended
+        session.apply(cmd(ShellLifecycleCommand::Suspend, 10));
+        let suspended_state = *session.state();
+        let res3 = session.apply(ShellTransitionInput {
+            stimulus: ShellLifecycleStimulus::ExplicitNoOp,
+            stimulus_bytes: 10,
+        });
+        assert_eq!(res3.disposition, ShellTransitionDisposition::NoChange);
+        assert_eq!(*session.state(), suspended_state);
+    }
+
+    #[test]
+    fn test_owner_closed_is_terminal() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Close, 10)); // Created -> Closed
+
+        let closed_state = *session.state();
+        assert_eq!(closed_state.lifecycle, ShellLifecycle::Closed);
+
+        let inputs = alloc::vec![
+            ShellTransitionInput {
+                stimulus: ShellLifecycleStimulus::ExplicitNoOp,
+                stimulus_bytes: 10
+            },
+            cmd(ShellLifecycleCommand::Activate, 10),
+            cmd(ShellLifecycleCommand::Suspend, 10),
+            cmd(ShellLifecycleCommand::Resume, 10),
+            cmd(ShellLifecycleCommand::Close, 10),
+        ];
+
+        for input in inputs {
+            let res = session.apply(input);
+            assert_eq!(res.disposition, ShellTransitionDisposition::Rejected);
+            assert_eq!(res.diagnostics[0].stable_code, SPV0_SESSION_CLOSED);
+            assert_eq!(*session.state(), closed_state);
+        }
+    }
+
+    #[test]
+    fn test_owner_immutable_context() {
+        let original_ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(original_ctx);
+
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        session.apply(cmd(ShellLifecycleCommand::Suspend, 10));
+        session.apply(cmd(ShellLifecycleCommand::Resume, 10));
+
+        assert_eq!(session.context, original_ctx);
+    }
+
+    #[test]
+    fn test_owner_deterministic_sequence() {
+        let ctx = make_ctx(10, 100);
+        let mut session1 = ShellSession::new(ctx);
+        let mut session2 = ShellSession::new(ctx);
+
+        let sequence = alloc::vec![
+            cmd(ShellLifecycleCommand::Activate, 10),
+            ShellTransitionInput {
+                stimulus: ShellLifecycleStimulus::ExplicitNoOp,
+                stimulus_bytes: 10
+            },
+            cmd(ShellLifecycleCommand::Suspend, 10),
+            cmd(ShellLifecycleCommand::Resume, 101), // Rejected
+            cmd(ShellLifecycleCommand::Resume, 10),
+            cmd(ShellLifecycleCommand::Close, 10),
+        ];
+
+        for input in sequence {
+            let res1 = session1.apply(input);
+            let res2 = session2.apply(input);
+            assert_eq!(res1, res2);
+        }
+
+        assert_eq!(session1.state(), session2.state());
+        assert_eq!(session1.context, session2.context);
+    }
+
+    #[test]
+    fn test_owner_rejection_followed_by_recovery() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+
+        let invalid_res = session.apply(cmd(ShellLifecycleCommand::Suspend, 10));
+        assert_eq!(
+            invalid_res.disposition,
+            ShellTransitionDisposition::Rejected
+        );
+
+        let valid_res = session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        assert_eq!(valid_res.disposition, ShellTransitionDisposition::Applied);
+        assert_eq!(session.state().lifecycle, ShellLifecycle::Active);
+    }
+
+    #[test]
+    fn test_owner_returned_state_consistency() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+
+        // NoChange
+        let res1 = session.apply(ShellTransitionInput {
+            stimulus: ShellLifecycleStimulus::ExplicitNoOp,
+            stimulus_bytes: 10,
+        });
+        assert_eq!(res1.disposition, ShellTransitionDisposition::NoChange);
+        assert_eq!(res1.state, *session.state());
+
+        // Rejected
+        let res2 = session.apply(cmd(ShellLifecycleCommand::Suspend, 10));
+        assert_eq!(res2.disposition, ShellTransitionDisposition::Rejected);
+        assert_eq!(res2.state, *session.state());
+
+        // Applied
+        let res3 = session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        assert_eq!(res3.disposition, ShellTransitionDisposition::Applied);
+        assert_eq!(res3.state, *session.state());
     }
 }
