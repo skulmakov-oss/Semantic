@@ -1,31 +1,34 @@
 task:
-  id: UI-DNA2-9B-P2-INPUT-RESOURCE-PREFLIGHT-CORRECTION
-  title: correct Shell Player input resource preflight ordering
-  type: corrective-qualification
+  id: UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT-CLOSEOUT
+  title: close out Shell Player session-state contract
+  type: closeout
   mode: active
 
 intent:
-  summary: "docs(ui): preflight Shell Player input limits"
+  summary: "docs(ui): close out Shell Player session-state contract"
   predecessor: UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT
-  origin_pr: "#1524"
-  origin_thread: PRRT_kwDOROOm386SAqRT
-  origin_comment: "3608926265"
+  primary_pr: "#1524"
+  corrective_pr: "#1525"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/UI-DNA2-9B-P2-INPUT-RESOURCE-PREFLIGHT-CORRECTION.md
-    - docs/spec/ui/shell_player_session_state_v0.md
+    - .harness/reports/UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT-CLOSEOUT.md
+    - docs/roadmap/post_ui/ui_dna2_9b_shell_player_session_state_contract_closeout.md
+    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
 
 authorization:
   documentation_only: true
-  normative_correction: true
+  evidence_closeout: true
+  roadmap_sync: true
+  project_registration: true
 
+  normative_contract_change: false
   rust_implementation: false
   rust_types: false
   public_api: false
   projection_patch_application: false
-  bundle_activation: false
+  projection_bundle_activation: false
   action_admission: false
   renderer_integration: false
   backend_integration: false
@@ -33,15 +36,13 @@ authorization:
 
   gate_d: closed
   production_promotion: false
-  closeout: false
   follow_on_implementation: false
 
 constraints:
   preserve_9a1_ownership_boundary: true
   preserve_9b_session_state_contract: true
-  input_limits_before_collection_traversal: true
-  bounded_outer_preflight_only: true
-  no_partial_state_commit: true
+  preserve_preflight_correction: true
+  evidence_only: true
   no_additional_cleanup: true
   fail_closed: true
   next_authorized_implementation_slice: none
