@@ -1,22 +1,21 @@
 task:
-  id: SHELL-PLAYER-LIFECYCLE-SEED
-  title: implement crate-private Shell Player lifecycle seed
+  id: SHELL-PLAYER-STATEFUL-OWNER-SEED
+  title: add crate-private stateful Shell Player owner
   type: implementation
   mode: active
 
 intent:
-  summary: "feat(ui): add Shell Player lifecycle seed"
+  summary: "feat(ui): add stateful Shell Player owner"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-ui-runtime/src/lib.rs
     - crates/prom-ui-runtime/src/shell_player.rs
 
 authorization:
   rust_implementation: true
   crate_private_only: true
-  lifecycle_seed_only: true
+  stateful_owner_only: true
 
   normative_contract_change: false
   public_api: false
@@ -33,11 +32,12 @@ authorization:
   production_promotion: false
 
 constraints:
-  preserve_shell_player_ownership_boundary: true
-  preserve_semantic_non_authority: true
-  deterministic_transition: true
-  preserve_previous_state_on_rejection: true
-  no_partial_commit: true
+  reuse_existing_transition_function: true
+  immutable_session_context: true
+  commit_applied_state_only: true
+  preserve_state_on_no_change: true
+  preserve_state_on_rejection: true
+  deterministic_sequence: true
   no_hidden_inputs: true
   no_additional_cleanup: true
   fail_closed: true
