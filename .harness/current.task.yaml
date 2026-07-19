@@ -1,48 +1,43 @@
 task:
-  id: UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT-CLOSEOUT
-  title: close out Shell Player session-state contract
-  type: closeout
+  id: SHELL-PLAYER-LIFECYCLE-SEED
+  title: implement crate-private Shell Player lifecycle seed
+  type: implementation
   mode: active
 
 intent:
-  summary: "docs(ui): close out Shell Player session-state contract"
-  predecessor: UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT
-  primary_pr: "#1524"
-  corrective_pr: "#1525"
+  summary: "feat(ui): add Shell Player lifecycle seed"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/UI-DNA2-9B-SHELL-PLAYER-SESSION-STATE-CONTRACT-CLOSEOUT.md
-    - docs/roadmap/post_ui/ui_dna2_9b_shell_player_session_state_contract_closeout.md
-    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
+    - crates/prom-ui-runtime/src/lib.rs
+    - crates/prom-ui-runtime/src/shell_player.rs
 
 authorization:
-  documentation_only: true
-  evidence_closeout: true
-  roadmap_sync: true
-  project_registration: true
+  rust_implementation: true
+  crate_private_only: true
+  lifecycle_seed_only: true
 
   normative_contract_change: false
-  rust_implementation: false
-  rust_types: false
   public_api: false
   projection_patch_application: false
   projection_bundle_activation: false
+  interaction_processing: false
+  action_intent_emission: false
   action_admission: false
   renderer_integration: false
   backend_integration: false
-  runtime_integration: false
+  event_loop_integration: false
 
   gate_d: closed
   production_promotion: false
-  follow_on_implementation: false
 
 constraints:
-  preserve_9a1_ownership_boundary: true
-  preserve_9b_session_state_contract: true
-  preserve_preflight_correction: true
-  evidence_only: true
+  preserve_shell_player_ownership_boundary: true
+  preserve_semantic_non_authority: true
+  deterministic_transition: true
+  preserve_previous_state_on_rejection: true
+  no_partial_commit: true
+  no_hidden_inputs: true
   no_additional_cleanup: true
   fail_closed: true
-  next_authorized_implementation_slice: none
