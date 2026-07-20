@@ -33,6 +33,7 @@ pub(crate) enum ShellLifecycleStimulus {
 pub(crate) struct ShellLifecycleLimits {
     pub(crate) max_transition_stimulus_bytes: usize,
     pub(crate) max_diagnostics_per_transition: usize,
+    pub(crate) max_patches_per_transition: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +80,117 @@ pub(crate) struct ShellTransitionResult {
     pub(crate) stimulus_bytes: usize,
     pub(crate) logical_diagnostic_count: usize,
     pub(crate) emitted_diagnostic_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OrderedProjectionPatchBatchEnvelope {
+    pub(crate) session_id: ShellSessionId,
+    pub(crate) sequence_no: u64,
+    pub(crate) patch_count: usize,
+    pub(crate) stimulus_bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectionPatchPreflightDisposition {
+    Accepted,
+    Rejected,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectionPatchPreflightResult {
+    pub(crate) disposition: ProjectionPatchPreflightDisposition,
+    pub(crate) sequence_no: u64,
+    pub(crate) patch_count: usize,
+    pub(crate) stimulus_bytes: usize,
+    pub(crate) diagnostics: Vec<ShellDiagnostic>,
+    pub(crate) logical_diagnostic_count: usize,
+    pub(crate) emitted_diagnostic_count: usize,
+}
+
+pub(crate) fn evaluate_projection_patch_envelope_preflight(
+    context: &ActivatedShellSessionContext,
+    state: &ShellLocalState,
+    envelope: OrderedProjectionPatchBatchEnvelope,
+) -> ProjectionPatchPreflightResult {
+    // Stage 1 - SessionIdentity
+    if context.session_id != state.session_id || envelope.session_id != context.session_id {
+        let (diagnostics, logical_count, emitted_count) = apply_diagnostic_cap(
+            context.limits.max_diagnostics_per_transition,
+            alloc::vec![ShellDiagnostic {
+                stable_code: SPV0_SESSION_MISMATCH,
+                evaluation_stage: 1, // SessionIdentity
+            }],
+        );
+        return ProjectionPatchPreflightResult {
+            disposition: ProjectionPatchPreflightDisposition::Rejected,
+            sequence_no: envelope.sequence_no,
+            patch_count: envelope.patch_count,
+            stimulus_bytes: envelope.stimulus_bytes,
+            diagnostics,
+            logical_diagnostic_count: logical_count,
+            emitted_diagnostic_count: emitted_count,
+        };
+    }
+
+    // Stage 2 - LifecycleEligibility
+    if state.lifecycle == ShellLifecycle::Closed {
+        let (diagnostics, logical_count, emitted_count) = apply_diagnostic_cap(
+            context.limits.max_diagnostics_per_transition,
+            alloc::vec![ShellDiagnostic {
+                stable_code: SPV0_SESSION_CLOSED,
+                evaluation_stage: 2, // LifecycleEligibility
+            }],
+        );
+        return ProjectionPatchPreflightResult {
+            disposition: ProjectionPatchPreflightDisposition::Rejected,
+            sequence_no: envelope.sequence_no,
+            patch_count: envelope.patch_count,
+            stimulus_bytes: envelope.stimulus_bytes,
+            diagnostics,
+            logical_diagnostic_count: logical_count,
+            emitted_diagnostic_count: emitted_count,
+        };
+    }
+
+    // Stage 3 - TypedOuterEnvelope implicitly checked
+
+    // Stage 4 - InputResourcePreflight
+    let patch_count_exceeded = envelope.patch_count > context.limits.max_patches_per_transition;
+
+    let stimulus_bytes_exceeded =
+        envelope.stimulus_bytes > context.limits.max_transition_stimulus_bytes;
+
+    if patch_count_exceeded || stimulus_bytes_exceeded {
+        let (diagnostics, logical_count, emitted_count) = apply_diagnostic_cap(
+            context.limits.max_diagnostics_per_transition,
+            alloc::vec![ShellDiagnostic {
+                stable_code: SPV0_RESOURCE_LIMIT_EXCEEDED,
+                evaluation_stage: 4, // InputResourcePreflight
+            }],
+        );
+        return ProjectionPatchPreflightResult {
+            disposition: ProjectionPatchPreflightDisposition::Rejected,
+            sequence_no: envelope.sequence_no,
+            patch_count: envelope.patch_count,
+            stimulus_bytes: envelope.stimulus_bytes,
+            diagnostics,
+            logical_diagnostic_count: logical_count,
+            emitted_diagnostic_count: emitted_count,
+        };
+    }
+
+    let (diagnostics, logical_count, emitted_count) =
+        apply_diagnostic_cap(context.limits.max_diagnostics_per_transition, Vec::new());
+
+    ProjectionPatchPreflightResult {
+        disposition: ProjectionPatchPreflightDisposition::Accepted,
+        sequence_no: envelope.sequence_no,
+        patch_count: envelope.patch_count,
+        stimulus_bytes: envelope.stimulus_bytes,
+        diagnostics,
+        logical_diagnostic_count: logical_count,
+        emitted_diagnostic_count: emitted_count,
+    }
 }
 
 fn apply_diagnostic_cap(
@@ -178,6 +290,13 @@ impl ShellSession {
         }
 
         result
+    }
+
+    pub(crate) fn preflight_projection_patch_envelope(
+        &self,
+        envelope: OrderedProjectionPatchBatchEnvelope,
+    ) -> ProjectionPatchPreflightResult {
+        evaluate_projection_patch_envelope_preflight(&self.context, &self.state, envelope)
     }
 }
 
@@ -306,6 +425,7 @@ mod tests {
             limits: ShellLifecycleLimits {
                 max_transition_stimulus_bytes: max_bytes,
                 max_diagnostics_per_transition: cap,
+                max_patches_per_transition: 64,
             },
         }
     }
@@ -756,5 +876,406 @@ mod tests {
         let res3 = session.apply(cmd(ShellLifecycleCommand::Activate, 10));
         assert_eq!(res3.disposition, ShellTransitionDisposition::Applied);
         assert_eq!(res3.state, *session.state());
+    }
+
+    #[test]
+    fn test_preflight_1_accepted_within_limits() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+        assert_eq!(res.diagnostics.len(), 0);
+        assert_eq!(res.sequence_no, 42);
+        assert_eq!(res.patch_count, 5);
+        assert_eq!(res.stimulus_bytes, 50);
+    }
+
+    #[test]
+    fn test_preflight_2_exact_limits_accepted() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 64,
+            stimulus_bytes: 100,
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+    }
+
+    #[test]
+    fn test_preflight_3_patch_count_exceeded() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 65,
+            stimulus_bytes: 50,
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_RESOURCE_LIMIT_EXCEEDED);
+        assert_eq!(res.diagnostics[0].evaluation_stage, 4);
+        assert_eq!(res.sequence_no, 42);
+        assert_eq!(res.patch_count, 65);
+        assert_eq!(res.stimulus_bytes, 50);
+    }
+
+    #[test]
+    fn test_preflight_4_stimulus_bytes_exceeded() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 101,
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_RESOURCE_LIMIT_EXCEEDED);
+        assert_eq!(res.diagnostics[0].evaluation_stage, 4);
+        assert_eq!(res.sequence_no, 42);
+        assert_eq!(res.patch_count, 5);
+        assert_eq!(res.stimulus_bytes, 101);
+    }
+
+    #[test]
+    fn test_preflight_5_both_limits_exceeded() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 65,
+            stimulus_bytes: 101,
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(res.logical_diagnostic_count, 1);
+        assert_eq!(res.emitted_diagnostic_count, 1);
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_RESOURCE_LIMIT_EXCEEDED);
+        assert_eq!(res.sequence_no, 42);
+        assert_eq!(res.patch_count, 65);
+        assert_eq!(res.stimulus_bytes, 101);
+    }
+
+    #[test]
+    fn test_preflight_6_envelope_session_mismatch() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(999),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_SESSION_MISMATCH);
+        assert_eq!(res.diagnostics[0].evaluation_stage, 1);
+    }
+
+    #[test]
+    fn test_preflight_7_context_state_mismatch() {
+        let ctx = make_ctx(10, 100);
+        let state = ShellLocalState {
+            session_id: ShellSessionId(999),
+            lifecycle: ShellLifecycle::Active,
+        };
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+
+        let res = evaluate_projection_patch_envelope_preflight(&ctx, &state, envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_SESSION_MISMATCH);
+        assert_eq!(res.diagnostics[0].evaluation_stage, 1);
+    }
+
+    #[test]
+    fn test_preflight_8_session_mismatch_precedence() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Close, 10)); // closed lifecycle
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(999), // session mismatch
+            sequence_no: 42,
+            patch_count: 65,     // resource overflow
+            stimulus_bytes: 101, // resource overflow
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(res.logical_diagnostic_count, 1);
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_SESSION_MISMATCH);
+        assert_eq!(res.diagnostics[0].evaluation_stage, 1);
+    }
+
+    #[test]
+    fn test_preflight_9_closed_precedence_over_resources() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Close, 10)); // closed lifecycle
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 65,     // resource overflow
+            stimulus_bytes: 101, // resource overflow
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(res.logical_diagnostic_count, 1);
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_SESSION_CLOSED);
+        assert_eq!(res.diagnostics[0].evaluation_stage, 2);
+    }
+
+    #[test]
+    fn test_preflight_10_non_closed_lifecycle_eligibility() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx); // Created
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+
+        let res1 = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res1.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10)); // Active
+        let res2 = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res2.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+
+        session.apply(cmd(ShellLifecycleCommand::Suspend, 10)); // Suspended
+        let res3 = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res3.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+    }
+
+    #[test]
+    fn test_preflight_11_diagnostic_cap_zero() {
+        let ctx = make_ctx(0, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 65,
+            stimulus_bytes: 101,
+        };
+
+        let res = session.preflight_projection_patch_envelope(envelope);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(res.logical_diagnostic_count, 1);
+        assert_eq!(res.emitted_diagnostic_count, 0);
+        assert_eq!(res.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_preflight_12_opaque_sequence_metadata() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelopes = vec![
+            OrderedProjectionPatchBatchEnvelope {
+                session_id: ShellSessionId(1),
+                sequence_no: 0,
+                patch_count: 5,
+                stimulus_bytes: 50,
+            },
+            OrderedProjectionPatchBatchEnvelope {
+                session_id: ShellSessionId(1),
+                sequence_no: u64::MAX,
+                patch_count: 5,
+                stimulus_bytes: 50,
+            },
+        ];
+
+        for envelope in envelopes {
+            let res = session.preflight_projection_patch_envelope(envelope);
+            assert_eq!(
+                res.disposition,
+                ProjectionPatchPreflightDisposition::Accepted
+            );
+            assert_eq!(res.sequence_no, envelope.sequence_no);
+        }
+    }
+
+    #[test]
+    fn test_preflight_13_empty_batch_metadata() {
+        // Case A
+        let ctx_a = make_ctx(10, 100);
+        let mut session_a = ShellSession::new(ctx_a);
+        session_a.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope_a = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 0,
+            stimulus_bytes: 0,
+        };
+
+        let res_a = session_a.preflight_projection_patch_envelope(envelope_a);
+        assert_eq!(
+            res_a.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+        assert_eq!(res_a.patch_count, 0);
+        assert!(res_a.diagnostics.is_empty());
+        assert_eq!(res_a.logical_diagnostic_count, 0);
+        assert_eq!(res_a.emitted_diagnostic_count, 0);
+
+        // Case B
+        let mut zero_limit_ctx = make_ctx(10, 100);
+        zero_limit_ctx.limits.max_patches_per_transition = 0;
+        let mut session_b = ShellSession::new(zero_limit_ctx);
+        session_b.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope_b = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 0,
+            stimulus_bytes: 0,
+        };
+
+        let res_b = session_b.preflight_projection_patch_envelope(envelope_b);
+        assert_eq!(
+            res_b.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+        assert_eq!(res_b.patch_count, 0);
+        assert!(res_b.diagnostics.is_empty());
+        assert_eq!(res_b.logical_diagnostic_count, 0);
+        assert_eq!(res_b.emitted_diagnostic_count, 0);
+    }
+
+    #[test]
+    fn test_preflight_14_session_remains_unchanged() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let original_state = *session.state();
+        let original_context = session.context;
+
+        // Accepted preflight
+        let env_accepted = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        session.preflight_projection_patch_envelope(env_accepted);
+        assert_eq!(*session.state(), original_state);
+        assert_eq!(session.context, original_context);
+
+        // Rejected preflight
+        let env_rejected = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(999),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        session.preflight_projection_patch_envelope(env_rejected);
+        assert_eq!(*session.state(), original_state);
+        assert_eq!(session.context, original_context);
+    }
+
+    #[test]
+    fn test_preflight_15_determinism() {
+        let ctx = make_ctx(10, 100);
+        let mut session_a = ShellSession::new(ctx);
+        let mut session_b = ShellSession::new(ctx);
+        session_a.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        session_b.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+
+        let result_a = session_a.preflight_projection_patch_envelope(envelope);
+        let result_b = session_b.preflight_projection_patch_envelope(envelope);
+
+        assert_eq!(result_a, result_b);
+        assert_eq!(session_a.state(), session_b.state());
+        assert_eq!(session_a.context, session_b.context);
     }
 }
