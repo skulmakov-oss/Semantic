@@ -1,35 +1,42 @@
 task:
-  id: SHELL-PLAYER-REPLAY-CURSOR-COMPATIBILITY-CONTRACT
-  title: freeze Shell Player replay cursor compatibility
-  type: documentation
+  id: SHELL-PLAYER-REPLAY-CURSOR-COMPATIBILITY-EVALUATOR
+  title: add pure Shell Player replay cursor compatibility evaluator
+  type: implementation
   mode: active
 
 intent:
-  summary: "docs(ui): freeze Shell Player replay cursor compatibility"
+  summary: "feat(ui): add replay cursor compatibility evaluator"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - docs/spec/ui/shell_player_session_state_v0.md
+    - crates/prom-ui-runtime/src/shell_player.rs
 
 authorization:
-  normative_contract_change: true
-  documentation_only: true
+  rust_implementation: true
+  crate_private_only: true
 
-  rust_implementation: false
-  public_api: false
+  replay_cursor_compatibility_implementation: true
+  stage6_only_evaluator: true
 
-  replay_cursor_compatibility_contract: true
-  replay_cursor_implementation: false
+  stage5_target_validation: false
+  full_transition_integration: false
+  preflight_integration: false
+  shell_session_delegate: false
+
   replay_cursor_advancement: false
   replay_cursor_mutation: false
+  replay_cursor_reset: false
+  replay_cursor_persistence: false
+  replay_cursor_restoration: false
+
+  projection_patch_adapter: false
+  patch_traversal: false
   patch_application: false
-  patch_operation_model: false
   patch_transaction_semantics: false
   rollback: false
-  target_validation: false
 
-  projection_bundle_activation: false
+  public_api: false
   renderer_integration: false
   backend_integration: false
   event_loop_integration: false
@@ -38,13 +45,16 @@ authorization:
   production_promotion: false
 
 constraints:
-  outer_batch_sequence_only: true
+  requires_prior_stages_1_through_5_success: true
+  stage6_does_not_validate_targets: true
   empty_batch_is_not_applicable: true
   uninitialized_accepts_first_non_empty_sequence: true
   positioned_cursor_requires_checked_successor: true
   sequence_wrap_forbidden: true
+  one_mismatch_diagnostic_class: true
   compatibility_is_read_only: true
-  compatibility_does_not_authorize_application: true
-  internal_patch_sequence_unchanged: true
+  no_cursor_candidate: true
+  no_hidden_inputs: true
+  deterministic_result: true
   no_additional_cleanup: true
   fail_closed: true

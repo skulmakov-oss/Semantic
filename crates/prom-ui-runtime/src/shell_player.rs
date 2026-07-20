@@ -78,6 +78,7 @@ pub(crate) const SPV0_SESSION_MISMATCH: &str = "SPV0_SESSION_MISMATCH";
 pub(crate) const SPV0_INVALID_LIFECYCLE: &str = "SPV0_INVALID_LIFECYCLE";
 pub(crate) const SPV0_SESSION_CLOSED: &str = "SPV0_SESSION_CLOSED";
 pub(crate) const SPV0_RESOURCE_LIMIT_EXCEEDED: &str = "SPV0_RESOURCE_LIMIT_EXCEEDED";
+pub(crate) const SPV0_REPLAY_CURSOR_MISMATCH: &str = "SPV0_REPLAY_CURSOR_MISMATCH";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ShellTransitionResult {
@@ -112,6 +113,82 @@ pub(crate) struct ProjectionPatchPreflightResult {
     pub(crate) diagnostics: Vec<ShellDiagnostic>,
     pub(crate) logical_diagnostic_count: usize,
     pub(crate) emitted_diagnostic_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectionReplayCompatibilityDisposition {
+    NotApplicable,
+    Compatible,
+    Mismatch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectionReplayCompatibilityResult {
+    pub(crate) disposition: ProjectionReplayCompatibilityDisposition,
+    pub(crate) sequence_no: u64,
+    pub(crate) patch_count: usize,
+    pub(crate) diagnostics: Vec<ShellDiagnostic>,
+    pub(crate) logical_diagnostic_count: usize,
+    pub(crate) emitted_diagnostic_count: usize,
+}
+
+// Stage-6-only pure evaluator.
+// The caller must invoke this only after stages 1 through 5 have succeeded.
+// This function performs no stage-1-through-5 validation.
+pub(crate) fn evaluate_projection_patch_replay_compatibility(
+    replay_cursor: ProjectionReplayCursor,
+    envelope: OrderedProjectionPatchBatchEnvelope,
+    max_diagnostics_per_transition: usize,
+) -> ProjectionReplayCompatibilityResult {
+    if envelope.patch_count == 0 {
+        return ProjectionReplayCompatibilityResult {
+            disposition: ProjectionReplayCompatibilityDisposition::NotApplicable,
+            sequence_no: envelope.sequence_no,
+            patch_count: 0,
+            diagnostics: Vec::new(),
+            logical_diagnostic_count: 0,
+            emitted_diagnostic_count: 0,
+        };
+    }
+
+    match replay_cursor {
+        ProjectionReplayCursor::Uninitialized => ProjectionReplayCompatibilityResult {
+            disposition: ProjectionReplayCompatibilityDisposition::Compatible,
+            sequence_no: envelope.sequence_no,
+            patch_count: envelope.patch_count,
+            diagnostics: Vec::new(),
+            logical_diagnostic_count: 0,
+            emitted_diagnostic_count: 0,
+        },
+        ProjectionReplayCursor::At(established) => {
+            let compatible = established.checked_add(1) == Some(envelope.sequence_no);
+            if compatible {
+                ProjectionReplayCompatibilityResult {
+                    disposition: ProjectionReplayCompatibilityDisposition::Compatible,
+                    sequence_no: envelope.sequence_no,
+                    patch_count: envelope.patch_count,
+                    diagnostics: Vec::new(),
+                    logical_diagnostic_count: 0,
+                    emitted_diagnostic_count: 0,
+                }
+            } else {
+                let diagnostic = ShellDiagnostic {
+                    stable_code: SPV0_REPLAY_CURSOR_MISMATCH,
+                    evaluation_stage: 6,
+                };
+                let (diagnostics, logical_count, emitted_count) =
+                    apply_diagnostic_cap(max_diagnostics_per_transition, alloc::vec![diagnostic]);
+                ProjectionReplayCompatibilityResult {
+                    disposition: ProjectionReplayCompatibilityDisposition::Mismatch,
+                    sequence_no: envelope.sequence_no,
+                    patch_count: envelope.patch_count,
+                    diagnostics,
+                    logical_diagnostic_count: logical_count,
+                    emitted_diagnostic_count: emitted_count,
+                }
+            }
+        }
+    }
 }
 
 pub(crate) fn evaluate_projection_patch_envelope_preflight(
@@ -1544,5 +1621,427 @@ mod tests {
         assert_eq!(result_a, result_b);
         assert_eq!(session_a.state(), session_b.state());
         assert_eq!(session_a.context, session_b.context);
+    }
+
+    #[test]
+    fn test_replay_compatibility_1_empty_batch_with_uninitialized() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 0,
+            patch_count: 0,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::Uninitialized,
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::NotApplicable
+        );
+        assert_eq!(res.diagnostics.len(), 0);
+        assert_eq!(res.logical_diagnostic_count, 0);
+        assert_eq!(res.emitted_diagnostic_count, 0);
+    }
+
+    #[test]
+    fn test_replay_compatibility_2_empty_batch_ignores_positioned_cursor() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 123,
+            patch_count: 0,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(u64::MAX),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::NotApplicable
+        );
+        assert!(!(res.disposition == ProjectionReplayCompatibilityDisposition::Mismatch));
+    }
+
+    #[test]
+    fn test_replay_compatibility_3_uninitialized_accepts_sequence_zero() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 0,
+            patch_count: 1,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::Uninitialized,
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Compatible
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_4_uninitialized_accepts_maximum_sequence() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: u64::MAX,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::Uninitialized,
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Compatible
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_5_at_0_accepts_sequence_1() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 1,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(0),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Compatible
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_6_positioned_cursor_accepts_exact_successor() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(41),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Compatible
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_7_duplicate_is_mismatch() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 41,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(41),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_8_lower_value_is_mismatch() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 40,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(41),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_9_gap_is_mismatch() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 43,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(41),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_10_large_gap_is_mismatch() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: u64::MAX,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(1),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_11_maximum_cursor_rejects_zero() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 0,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(u64::MAX),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_12_maximum_cursor_rejects_maximum() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: u64::MAX,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(u64::MAX),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+    }
+
+    #[test]
+    fn test_replay_compatibility_13_mismatch_diagnostic_is_exact() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 41,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(41),
+            envelope,
+            10,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+        assert_eq!(res.logical_diagnostic_count, 1);
+        assert_eq!(res.emitted_diagnostic_count, 1);
+        assert_eq!(res.diagnostics.len(), 1);
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_REPLAY_CURSOR_MISMATCH);
+        assert_eq!(res.diagnostics[0].evaluation_stage, 6);
+    }
+
+    #[test]
+    fn test_replay_compatibility_14_zero_diagnostic_cap_preserves_mismatch_disposition() {
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 41,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(41),
+            envelope,
+            0,
+        );
+        assert_eq!(
+            res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+        assert_eq!(res.logical_diagnostic_count, 1);
+        assert_eq!(res.emitted_diagnostic_count, 0);
+        assert_eq!(res.diagnostics.len(), 0);
+    }
+
+    #[test]
+    fn test_replay_compatibility_15_metadata_is_preserved_exactly() {
+        // NotApplicable
+        let env_na = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 12345,
+            patch_count: 0,
+            stimulus_bytes: 50,
+        };
+        let res_na = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::Uninitialized,
+            env_na,
+            10,
+        );
+        assert_eq!(
+            res_na.disposition,
+            ProjectionReplayCompatibilityDisposition::NotApplicable
+        );
+        assert_eq!(res_na.sequence_no, env_na.sequence_no);
+        assert_eq!(res_na.patch_count, env_na.patch_count);
+
+        // Compatible
+        let env_c = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 999,
+            patch_count: 8,
+            stimulus_bytes: 50,
+        };
+        let res_c = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(998),
+            env_c,
+            10,
+        );
+        assert_eq!(
+            res_c.disposition,
+            ProjectionReplayCompatibilityDisposition::Compatible
+        );
+        assert_eq!(res_c.sequence_no, env_c.sequence_no);
+        assert_eq!(res_c.patch_count, env_c.patch_count);
+
+        // Mismatch
+        let env_m = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 7,
+            stimulus_bytes: 50,
+        };
+        let res_m = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(50),
+            env_m,
+            10,
+        );
+        assert_eq!(
+            res_m.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
+        assert_eq!(res_m.sequence_no, env_m.sequence_no);
+        assert_eq!(res_m.patch_count, env_m.patch_count);
+    }
+
+    #[test]
+    fn test_replay_compatibility_16_determinism() {
+        let env_na = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 10,
+            patch_count: 0,
+            stimulus_bytes: 50,
+        };
+        let res_na1 = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(5),
+            env_na,
+            10,
+        );
+        let res_na2 = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(5),
+            env_na,
+            10,
+        );
+        assert_eq!(res_na1, res_na2);
+
+        let env_c = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 10,
+            patch_count: 1,
+            stimulus_bytes: 50,
+        };
+        let res_c1 = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(9),
+            env_c,
+            10,
+        );
+        let res_c2 = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(9),
+            env_c,
+            10,
+        );
+        assert_eq!(res_c1, res_c2);
+
+        let env_m = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 10,
+            patch_count: 1,
+            stimulus_bytes: 50,
+        };
+        let res_m1 = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(10),
+            env_m,
+            10,
+        );
+        let res_m2 = evaluate_projection_patch_replay_compatibility(
+            ProjectionReplayCursor::At(10),
+            env_m,
+            10,
+        );
+        assert_eq!(res_m1, res_m2);
+    }
+
+    #[test]
+    fn test_replay_compatibility_17_stage_4_preflight_remains_stage_4_only() {
+        let ctx = make_ctx(10, 100);
+        let mut state = make_state(ShellLifecycle::Active);
+        state.replay_cursor = ProjectionReplayCursor::At(10);
+
+        let envelope = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 10, // Duplicate, invalid for stage 6
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+
+        let preflight_res = evaluate_projection_patch_envelope_preflight(&ctx, &state, envelope);
+        assert_eq!(
+            preflight_res.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+
+        let compat_res =
+            evaluate_projection_patch_replay_compatibility(state.replay_cursor, envelope, 10);
+        assert_eq!(
+            compat_res.disposition,
+            ProjectionReplayCompatibilityDisposition::Mismatch
+        );
     }
 }
