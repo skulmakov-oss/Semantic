@@ -43,9 +43,16 @@ pub(crate) struct ActivatedShellSessionContext {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectionReplayCursor {
+    Uninitialized,
+    At(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ShellLocalState {
     pub(crate) session_id: ShellSessionId,
     pub(crate) lifecycle: ShellLifecycle,
+    pub(crate) replay_cursor: ProjectionReplayCursor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -274,6 +281,7 @@ impl ShellSession {
         let state = ShellLocalState {
             session_id: context.session_id,
             lifecycle: ShellLifecycle::Created,
+            replay_cursor: ProjectionReplayCursor::Uninitialized,
         };
         Self { context, state }
     }
@@ -393,6 +401,7 @@ pub(crate) fn evaluate_lifecycle_transition(
     let state = ShellLocalState {
         session_id: previous.session_id,
         lifecycle: candidate_lifecycle,
+        replay_cursor: previous.replay_cursor,
     };
 
     let disposition = if action == ValidatedLifecycleAction::ExplicitNoOp {
@@ -419,6 +428,262 @@ pub(crate) fn evaluate_lifecycle_transition(
 mod tests {
     use super::*;
 
+    fn make_state_with_cursor(
+        lifecycle: ShellLifecycle,
+        replay_cursor: ProjectionReplayCursor,
+    ) -> ShellLocalState {
+        ShellLocalState {
+            session_id: ShellSessionId(1),
+            lifecycle,
+            replay_cursor,
+        }
+    }
+
+    #[test]
+    fn test_cursor_1_new_session_uninitialized() {
+        let ctx = make_ctx(10, 100);
+        let session = ShellSession::new(ctx);
+        assert_eq!(session.state().session_id, ctx.session_id);
+        assert_eq!(session.state().lifecycle, ShellLifecycle::Created);
+        assert_eq!(
+            session.state().replay_cursor,
+            ProjectionReplayCursor::Uninitialized
+        );
+    }
+
+    #[test]
+    fn test_cursor_2_activate_preserves_uninitialized() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        let res = session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        assert_eq!(res.disposition, ShellTransitionDisposition::Applied);
+        assert_eq!(
+            session.state().replay_cursor,
+            ProjectionReplayCursor::Uninitialized
+        );
+        assert_eq!(
+            res.state.replay_cursor,
+            ProjectionReplayCursor::Uninitialized
+        );
+    }
+
+    #[test]
+    fn test_cursor_3_full_lifecycle_preserves_positioned_cursor() {
+        let ctx = make_ctx(10, 100);
+        let mut state =
+            make_state_with_cursor(ShellLifecycle::Created, ProjectionReplayCursor::At(41));
+
+        let transitions = alloc::vec![
+            (ShellLifecycleCommand::Activate, ShellLifecycle::Active),
+            (ShellLifecycleCommand::Suspend, ShellLifecycle::Suspended),
+            (ShellLifecycleCommand::Resume, ShellLifecycle::Active),
+            (ShellLifecycleCommand::Close, ShellLifecycle::Closed),
+        ];
+
+        for (command, expected_lifecycle) in transitions {
+            let res = evaluate_lifecycle_transition(&ctx, &state, cmd(command, 10));
+            assert_eq!(res.disposition, ShellTransitionDisposition::Applied);
+            assert_eq!(res.state.lifecycle, expected_lifecycle);
+            assert_eq!(res.state.replay_cursor, ProjectionReplayCursor::At(41));
+            state = res.state;
+        }
+    }
+
+    #[test]
+    fn test_cursor_4_direct_close_preserves_positioned_cursor() {
+        let ctx = make_ctx(10, 100);
+
+        let state1 = make_state_with_cursor(ShellLifecycle::Created, ProjectionReplayCursor::At(0));
+        let res1 =
+            evaluate_lifecycle_transition(&ctx, &state1, cmd(ShellLifecycleCommand::Close, 10));
+        assert_eq!(res1.disposition, ShellTransitionDisposition::Applied);
+        assert_eq!(res1.state.lifecycle, ShellLifecycle::Closed);
+        assert_eq!(res1.state.replay_cursor, ProjectionReplayCursor::At(0));
+
+        let state2 =
+            make_state_with_cursor(ShellLifecycle::Suspended, ProjectionReplayCursor::At(0));
+        let res2 =
+            evaluate_lifecycle_transition(&ctx, &state2, cmd(ShellLifecycleCommand::Close, 10));
+        assert_eq!(res2.disposition, ShellTransitionDisposition::Applied);
+        assert_eq!(res2.state.lifecycle, ShellLifecycle::Closed);
+        assert_eq!(res2.state.replay_cursor, ProjectionReplayCursor::At(0));
+    }
+
+    #[test]
+    fn test_cursor_5_explicit_noop_preserves_cursor() {
+        let ctx = make_ctx(10, 100);
+        let state =
+            make_state_with_cursor(ShellLifecycle::Active, ProjectionReplayCursor::At(u64::MAX));
+        let res = evaluate_lifecycle_transition(
+            &ctx,
+            &state,
+            ShellTransitionInput {
+                stimulus: ShellLifecycleStimulus::ExplicitNoOp,
+                stimulus_bytes: 10,
+            },
+        );
+        assert_eq!(res.disposition, ShellTransitionDisposition::NoChange);
+        assert_eq!(
+            res.state.replay_cursor,
+            ProjectionReplayCursor::At(u64::MAX)
+        );
+        assert_eq!(res.state, state);
+    }
+
+    #[test]
+    fn test_cursor_6_invalid_lifecycle_preserves_cursor() {
+        let ctx = make_ctx(10, 100);
+        let state = make_state_with_cursor(ShellLifecycle::Created, ProjectionReplayCursor::At(42));
+        let res =
+            evaluate_lifecycle_transition(&ctx, &state, cmd(ShellLifecycleCommand::Suspend, 10));
+        assert_eq!(res.disposition, ShellTransitionDisposition::Rejected);
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_INVALID_LIFECYCLE);
+        assert_eq!(res.state, state);
+        assert_eq!(res.state.replay_cursor, ProjectionReplayCursor::At(42));
+    }
+
+    #[test]
+    fn test_cursor_7_closed_session_rejection_preserves_cursor() {
+        let ctx = make_ctx(10, 100);
+        let state = make_state_with_cursor(ShellLifecycle::Closed, ProjectionReplayCursor::At(17));
+        let res =
+            evaluate_lifecycle_transition(&ctx, &state, cmd(ShellLifecycleCommand::Activate, 10));
+        assert_eq!(res.disposition, ShellTransitionDisposition::Rejected);
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_SESSION_CLOSED);
+        assert_eq!(res.state, state);
+        assert_eq!(res.state.replay_cursor, ProjectionReplayCursor::At(17));
+    }
+
+    #[test]
+    fn test_cursor_8_resource_rejection_preserves_cursor() {
+        let ctx = make_ctx(10, 100);
+        let state = make_state_with_cursor(ShellLifecycle::Active, ProjectionReplayCursor::At(23));
+        let res =
+            evaluate_lifecycle_transition(&ctx, &state, cmd(ShellLifecycleCommand::Suspend, 101));
+        assert_eq!(res.disposition, ShellTransitionDisposition::Rejected);
+        assert_eq!(res.diagnostics[0].stable_code, SPV0_RESOURCE_LIMIT_EXCEEDED);
+        assert_eq!(res.diagnostics[0].evaluation_stage, 4);
+        assert_eq!(res.state, state);
+        assert_eq!(res.state.replay_cursor, ProjectionReplayCursor::At(23));
+    }
+
+    #[test]
+    fn test_cursor_9_accepted_preflight_preserves_uninitialized() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        let original_state = *session.state();
+
+        let env = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res = session.preflight_projection_patch_envelope(env);
+        assert_eq!(
+            res.disposition,
+            ProjectionPatchPreflightDisposition::Accepted
+        );
+        assert_eq!(*session.state(), original_state);
+        assert_eq!(
+            session.state().replay_cursor,
+            ProjectionReplayCursor::Uninitialized
+        );
+    }
+
+    #[test]
+    fn test_cursor_10_rejected_preflight_preserves_cursor() {
+        let ctx = make_ctx(10, 100);
+        let state = make_state_with_cursor(ShellLifecycle::Active, ProjectionReplayCursor::At(31));
+
+        // Resource overflow
+        let env1 = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 100, // exceeds max_patches
+            stimulus_bytes: 50,
+        };
+        let res1 = evaluate_projection_patch_envelope_preflight(&ctx, &state, env1);
+        assert_eq!(
+            res1.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(state.replay_cursor, ProjectionReplayCursor::At(31));
+
+        // Session mismatch
+        let env2 = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(999),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let res2 = evaluate_projection_patch_envelope_preflight(&ctx, &state, env2);
+        assert_eq!(
+            res2.disposition,
+            ProjectionPatchPreflightDisposition::Rejected
+        );
+        assert_eq!(state.replay_cursor, ProjectionReplayCursor::At(31));
+    }
+
+    #[test]
+    fn test_cursor_11_cursor_values_are_opaque() {
+        let v1 = ProjectionReplayCursor::At(0);
+        let v2 = ProjectionReplayCursor::At(1);
+        let v3 = ProjectionReplayCursor::At(u64::MAX);
+
+        let state1 = make_state_with_cursor(ShellLifecycle::Active, v1);
+        let state2 = make_state_with_cursor(ShellLifecycle::Active, v2);
+        let state3 = make_state_with_cursor(ShellLifecycle::Active, v3);
+
+        assert_eq!(state1.replay_cursor, ProjectionReplayCursor::At(0));
+        assert_eq!(state2.replay_cursor, ProjectionReplayCursor::At(1));
+        assert_eq!(state3.replay_cursor, ProjectionReplayCursor::At(u64::MAX));
+
+        assert_ne!(state1.replay_cursor, state2.replay_cursor);
+        assert_ne!(state2.replay_cursor, state3.replay_cursor);
+    }
+
+    #[test]
+    fn test_cursor_12_independent_session_determinism() {
+        let ctx = make_ctx(10, 100);
+        let mut session_a = ShellSession::new(ctx);
+        let mut session_b = ShellSession::new(ctx);
+        let res_a = session_a.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        let res_b = session_b.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        assert_eq!(res_a, res_b);
+        assert_eq!(session_a.state(), session_b.state());
+        assert_eq!(
+            session_a.state().replay_cursor,
+            session_b.state().replay_cursor
+        );
+
+        let env = OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no: 42,
+            patch_count: 5,
+            stimulus_bytes: 50,
+        };
+        let pref_a = session_a.preflight_projection_patch_envelope(env);
+        let pref_b = session_b.preflight_projection_patch_envelope(env);
+
+        assert_eq!(pref_a, pref_b);
+        assert_eq!(session_a.state(), session_b.state());
+        assert_eq!(
+            session_a.state().replay_cursor,
+            session_b.state().replay_cursor
+        );
+    }
+
+    #[test]
+    fn test_cursor_13_context_remains_cursor_free() {
+        let ctx = make_ctx(10, 100);
+        let mut session = ShellSession::new(ctx);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        assert_eq!(session.context, ctx); // Context structural equality is preserved
+    }
+
     fn make_ctx(cap: usize, max_bytes: usize) -> ActivatedShellSessionContext {
         ActivatedShellSessionContext {
             session_id: ShellSessionId(1),
@@ -434,6 +699,7 @@ mod tests {
         ShellLocalState {
             session_id: ShellSessionId(1),
             lifecycle,
+            replay_cursor: ProjectionReplayCursor::Uninitialized,
         }
     }
 
@@ -1026,6 +1292,7 @@ mod tests {
         let state = ShellLocalState {
             session_id: ShellSessionId(999),
             lifecycle: ShellLifecycle::Active,
+            replay_cursor: ProjectionReplayCursor::Uninitialized,
         };
         let envelope = OrderedProjectionPatchBatchEnvelope {
             session_id: ShellSessionId(1),
