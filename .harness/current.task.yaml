@@ -1,27 +1,35 @@
 task:
-  id: SHELL-PLAYER-PATCH-ENVELOPE-PREFLIGHT
-  title: add ProjectionPatch envelope preflight
+  id: SHELL-PLAYER-REPLAY-CURSOR-SEED
+  title: add Shell Player replay cursor seed
   type: implementation
   mode: active
+
 intent:
-  summary: "feat(ui): add ProjectionPatch envelope preflight"
+  summary: "feat(ui): add Shell Player replay cursor seed"
+
 scope:
   allowed_paths:
     - .harness/current.task.yaml
     - crates/prom-ui-runtime/src/shell_player.rs
+
 authorization:
   rust_implementation: true
   crate_private_only: true
-  patch_envelope_preflight_only: true
+  replay_cursor_representation_only: true
+
   normative_contract_change: false
   public_api: false
-  projection_patch_application: false
-  projection_patch_operation_model: false
-  replay_cursor_validation: false
-  replay_cursor_mutation: false
+
+  replay_cursor_compatibility: false
+  replay_cursor_advancement: false
+  replay_rejection: false
+  sequence_policy: false
   patch_transaction_semantics: false
-  rollback: false
+  patch_application: false
+  patch_operation_model: false
   target_validation: false
+  rollback: false
+
   projection_bundle_activation: false
   interaction_processing: false
   action_intent_emission: false
@@ -29,16 +37,19 @@ authorization:
   renderer_integration: false
   backend_integration: false
   event_loop_integration: false
+
   gate_d: closed
   production_promotion: false
+
 constraints:
-  typed_outer_envelope_only: true
-  bounded_structural_metadata_only: true
-  input_resource_preflight_before_traversal: true
-  preserve_session_state: true
-  preserve_session_context: true
-  sequence_metadata_is_opaque: true
-  deterministic_result: true
+  cursor_is_local_state: true
+  cursor_is_non_authoritative: true
+  cursor_is_reconstructible: true
+  initial_cursor_is_uninitialized: true
+  preserve_cursor_on_lifecycle_transition: true
+  preserve_cursor_on_preflight: true
+  no_cursor_mutator: true
   no_hidden_inputs: true
+  deterministic_result: true
   no_additional_cleanup: true
   fail_closed: true
