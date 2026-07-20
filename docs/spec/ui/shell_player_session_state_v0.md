@@ -247,6 +247,74 @@ This contract does not define `Atomic` versus `OrderedPartial` semantics inside
 a `ProjectionPatch` batch. Patch-batch transaction and rollback semantics
 remain a separate future contract.
 
+### 7.1 Replay-cursor compatibility
+
+Replay-cursor compatibility is evaluated only for an
+`OrderedProjectionPatchBatch` after stages 1 through 5 have succeeded.
+
+Stage 5 owns stable-target validation. Stage 6 assumes that stage 5 has
+succeeded and does not repeat, bypass, weaken, or reinterpret target
+validation.
+
+The Shell Player replay cursor is local, reconstructible session state. It is
+not Semantic truth, authority, admission evidence, patch-application evidence,
+or a renderer/backend coordinate.
+
+`ProjectionReplayCursor` has the conceptual states:
+
+- `Uninitialized` — no outer patch-batch replay coordinate has been
+  established for this local session;
+- `At(n)` — `n` is the currently established outer patch-batch replay
+  coordinate for this local session.
+
+This contract defines only compatibility with the established coordinate. It
+does not define cursor advancement, cursor reset, persistence, restoration, or
+the operation that establishes `At(n)`.
+
+`OrderedProjectionPatchBatch.sequence_no` is the Shell Player outer batch
+sequence coordinate. It does not reinterpret, replace, validate, or expose the
+internal `ProjectionPatchSequence` values owned by the Projection Patch model.
+
+Compatibility is determined as follows:
+
+| Patch count | Previous cursor | Incoming sequence | Result |
+| --- | --- | --- | --- |
+| `0` | any cursor | any `u64` | Not applicable |
+| greater than `0` | `Uninitialized` | any `u64` | Compatible |
+| greater than `0` | `At(n)` | `n.checked_add(1) == Some(sequence_no)` | Compatible |
+| greater than `0` | `At(n)` | any other value | Mismatch |
+| greater than `0` | `At(u64::MAX)` | any value | Mismatch |
+
+A zero-patch batch does not participate in replay compatibility and does not
+establish or consume a replay coordinate.
+
+Sequence arithmetic never wraps. `u64::MAX + 1` is not sequence zero and is
+not a compatible successor.
+
+Duplicate, lower, skipped, wrapped, and otherwise non-successor values all map
+to the single stable diagnostic class:
+
+```text
+SPV0_REPLAY_CURSOR_MISMATCH
+```
+
+The diagnostic belongs to evaluation stage 6.
+
+Compatibility evaluation is read-only. It does not mutate the previous cursor,
+calculate a candidate cursor, traverse patch operations, validate stable
+targets, apply a patch, or commit local state.
+
+A compatible result means only that stage 6 succeeded. It does not mean that
+stages 7 through 9 will succeed, that the patch batch will be applied, or that
+the cursor will advance.
+
+If any of stages 1 through 5 rejects the transition, stage 6 is not evaluated.
+The diagnostic and preservation rules of the earlier rejecting stage retain
+precedence.
+
+Cursor advancement and the exact commit rule that may establish a new `At(n)`
+remain separately unauthorized.
+
 ## 8. Transition disposition
 
 The transition disposition is exactly one of:
@@ -343,7 +411,7 @@ The diagnostic classes are:
 | `SPV0_SESSION_SUSPENDED` | Interaction input was presented to a suspended session. |
 | `SPV0_INVALID_STIMULUS` | The primary stimulus shape or class is invalid. |
 | `SPV0_INVALID_TARGET` | A stable target identity is invalid for the active projection. |
-| `SPV0_REPLAY_CURSOR_MISMATCH` | Patch input is incompatible with the local replay cursor. |
+| `SPV0_REPLAY_CURSOR_MISMATCH` | stage-6 outer batch sequence incompatibility with the established local replay cursor. |
 | `SPV0_RESOURCE_LIMIT_EXCEEDED` | A caller-supplied deterministic limit would be exceeded. |
 | `SPV0_STATE_INVARIANT_VIOLATION` | The candidate next state violates a frozen invariant. |
 
@@ -392,6 +460,10 @@ Transition behavior must not depend on:
 
 The following remain unresolved:
 
+- replay cursor advancement rule;
+- replay cursor establishment/restore rule;
+- cursor persistence representation;
+- integration with ProjectionPatch internal sequences;
 - `ProjectionPatch` batch transaction model;
 - `Atomic` versus `OrderedPartial` patch semantics;
 - rollback representation;
@@ -441,7 +513,10 @@ Shell transition envelope = FROZEN
 transition disposition model = FROZEN
 resource-limit categories = FROZEN
 diagnostic namespace = FROZEN
+replay-cursor compatibility relation = FROZEN
 
+replay-cursor compatibility implementation = NOT AUTHORIZED
+replay-cursor advancement = NOT AUTHORIZED
 ProjectionPatch application = NOT AUTHORIZED
 Shell Player Rust implementation = NOT AUTHORIZED
 bundle activation = NOT AUTHORIZED

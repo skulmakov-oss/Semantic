@@ -1,39 +1,35 @@
 task:
-  id: SHELL-PLAYER-REPLAY-CURSOR-SEED
-  title: add Shell Player replay cursor seed
-  type: implementation
+  id: SHELL-PLAYER-REPLAY-CURSOR-COMPATIBILITY-CONTRACT
+  title: freeze Shell Player replay cursor compatibility
+  type: documentation
   mode: active
 
 intent:
-  summary: "feat(ui): add Shell Player replay cursor seed"
+  summary: "docs(ui): freeze Shell Player replay cursor compatibility"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-ui-runtime/src/shell_player.rs
+    - docs/spec/ui/shell_player_session_state_v0.md
 
 authorization:
-  rust_implementation: true
-  crate_private_only: true
-  replay_cursor_representation_only: true
+  normative_contract_change: true
+  documentation_only: true
 
-  normative_contract_change: false
+  rust_implementation: false
   public_api: false
 
-  replay_cursor_compatibility: false
+  replay_cursor_compatibility_contract: true
+  replay_cursor_implementation: false
   replay_cursor_advancement: false
-  replay_rejection: false
-  sequence_policy: false
-  patch_transaction_semantics: false
+  replay_cursor_mutation: false
   patch_application: false
   patch_operation_model: false
-  target_validation: false
+  patch_transaction_semantics: false
   rollback: false
+  target_validation: false
 
   projection_bundle_activation: false
-  interaction_processing: false
-  action_intent_emission: false
-  action_admission: false
   renderer_integration: false
   backend_integration: false
   event_loop_integration: false
@@ -42,14 +38,13 @@ authorization:
   production_promotion: false
 
 constraints:
-  cursor_is_local_state: true
-  cursor_is_non_authoritative: true
-  cursor_is_reconstructible: true
-  initial_cursor_is_uninitialized: true
-  preserve_cursor_on_lifecycle_transition: true
-  preserve_cursor_on_preflight: true
-  no_cursor_mutator: true
-  no_hidden_inputs: true
-  deterministic_result: true
+  outer_batch_sequence_only: true
+  empty_batch_is_not_applicable: true
+  uninitialized_accepts_first_non_empty_sequence: true
+  positioned_cursor_requires_checked_successor: true
+  sequence_wrap_forbidden: true
+  compatibility_is_read_only: true
+  compatibility_does_not_authorize_application: true
+  internal_patch_sequence_unchanged: true
   no_additional_cleanup: true
   fail_closed: true
