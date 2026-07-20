@@ -1,25 +1,27 @@
 task:
-  id: SHELL-PLAYER-STATEFUL-OWNER-SEED
-  title: add crate-private stateful Shell Player owner
+  id: SHELL-PLAYER-PATCH-ENVELOPE-PREFLIGHT
+  title: add ProjectionPatch envelope preflight
   type: implementation
   mode: active
-
 intent:
-  summary: "feat(ui): add stateful Shell Player owner"
-
+  summary: "feat(ui): add ProjectionPatch envelope preflight"
 scope:
   allowed_paths:
     - .harness/current.task.yaml
     - crates/prom-ui-runtime/src/shell_player.rs
-
 authorization:
   rust_implementation: true
   crate_private_only: true
-  stateful_owner_only: true
-
+  patch_envelope_preflight_only: true
   normative_contract_change: false
   public_api: false
   projection_patch_application: false
+  projection_patch_operation_model: false
+  replay_cursor_validation: false
+  replay_cursor_mutation: false
+  patch_transaction_semantics: false
+  rollback: false
+  target_validation: false
   projection_bundle_activation: false
   interaction_processing: false
   action_intent_emission: false
@@ -27,17 +29,16 @@ authorization:
   renderer_integration: false
   backend_integration: false
   event_loop_integration: false
-
   gate_d: closed
   production_promotion: false
-
 constraints:
-  reuse_existing_transition_function: true
-  immutable_session_context: true
-  commit_applied_state_only: true
-  preserve_state_on_no_change: true
-  preserve_state_on_rejection: true
-  deterministic_sequence: true
+  typed_outer_envelope_only: true
+  bounded_structural_metadata_only: true
+  input_resource_preflight_before_traversal: true
+  preserve_session_state: true
+  preserve_session_context: true
+  sequence_metadata_is_opaque: true
+  deterministic_result: true
   no_hidden_inputs: true
   no_additional_cleanup: true
   fail_closed: true
