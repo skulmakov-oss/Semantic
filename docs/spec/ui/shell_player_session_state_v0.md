@@ -27,6 +27,7 @@ This document defines the deterministic conceptual model for:
 - session lifecycle;
 - transition stimulus;
 - transition evaluation;
+- stable-target boundary;
 - transition result;
 - resource accounting;
 - diagnostics.
@@ -203,12 +204,39 @@ Stage 4 validates every resource bound that can reject the supplied input
 before per-element processing begins:
 
 - maximum patches per transition;
-- maximum transition stimulus bytes.
+- maximum transition stimulus bytes;
+- maximum target references per transition.
 
-Patch count and transition stimulus byte length must be available through
-bounded structural metadata or another representation-independent bounded
-preflight mechanism. This contract does not select a Rust representation,
-serialized format, or counting algorithm.
+Patch count, transition stimulus byte length, and target reference count must
+each be available through bounded structural metadata or another
+representation-independent bounded preflight mechanism. This contract does not
+select a Rust representation, serialized format, or counting algorithm.
+
+`target_reference_count` is conceptual structural metadata available without
+performing stage-5 semantic validation. Stage 4 validates
+`target_reference_count` against the maximum-target-references-per-transition
+limit before any target-reference traversal begins.
+
+`target_reference_count` and the bounded `OrderedStableTargetManifest` shape
+described in 7.1 form one coherent adapter-produced structural input. If a
+declared `target_reference_count` differs from the bounded manifest shape:
+
+- stage 4 rejects the transition;
+- the diagnostic class is `SPV0_INVALID_STIMULUS`;
+- the diagnostic evaluation stage is 4;
+- the complete previous `ShellLocalState` is preserved;
+- stage 5 does not begin;
+- stage 6 does not begin;
+- candidate-state calculation does not begin;
+- the condition is not classified as `SPV0_RESOURCE_LIMIT_EXCEEDED`.
+
+This rule is separate from `target_reference_count` exceeding the maximum
+target references per transition, which remains `SPV0_RESOURCE_LIMIT_EXCEEDED`
+at stage 4.
+
+`patch_count`, an eventual `operation_count`, and `target_reference_count` are
+separate quantities. This contract does not equate them and does not define a
+derivation formula between them.
 
 Stable-target validation and replay-cursor compatibility traversal do not begin
 until stage 4 succeeds.
@@ -247,7 +275,229 @@ This contract does not define `Atomic` versus `OrderedPartial` semantics inside
 a `ProjectionPatch` batch. Patch-batch transaction and rollback semantics
 remain a separate future contract.
 
-### 7.1 Replay-cursor compatibility
+### 7.1 Stable-target boundary
+
+This subsection freezes the complete conceptual boundary required for
+deterministic stage-5 stable-target validation. It amends the existing
+normative contract; it is not a second stage-5 specification. This is a
+documentation-only contract slice. It does not implement Rust, does not expose
+`ProjectionPatch` types, and does not add public API.
+
+#### 7.1.1 Ownership split
+
+- `ProjectionPatch` owns patch-operation representation.
+- `prom-ui` owns extraction of target references from `ProjectionPatch`
+  operations.
+- Shell Player owns only stage-5 validation disposition for one transition.
+- The adapter implied by this boundary does not transfer `ProjectionPatch`
+  ownership to Shell Player.
+- The adapter does not grant Semantic authority, admission authority,
+  capability authority, patch-application authority, or mutation authority.
+- This contract does not authorize direct use of crate-private Rust types
+  across crate boundaries.
+- The exact Rust module, visibility, feature-gating, and API form that would
+  realize this ownership split remain unresolved and unauthorized.
+
+#### 7.1.2 Ordered stable-target manifest
+
+`OrderedStableTargetManifest` is a conceptual input delivered to stage 5
+through the caller-supplied transition boundary.
+
+Its contents are not caller-authored. `prom-ui` deterministically derives the
+complete manifest from the admitted `ProjectionPatch` batch at the
+`ProjectionPatch`-owning adapter boundary.
+
+The relationship is exactly:
+
+- the caller supplies the coherent transition input;
+- `prom-ui` owns target extraction;
+- the adapter derives manifest contents;
+- the caller does not independently author manifest contents.
+
+The manifest is:
+
+- inert;
+- read-only;
+- bounded;
+- deterministically ordered;
+- derived only from the admitted `ProjectionPatch` batch;
+- session-transition-scoped;
+- not Semantic truth;
+- not patch-application evidence;
+- not replay-cursor evidence.
+
+Normative rules:
+
+- the caller must not independently fabricate manifest entries;
+- the caller must not add, remove, reorder, substitute, or reinterpret entries
+  after adapter derivation;
+- manifest coordinates and `target_reference_count` must belong to the same
+  coherent adapter-produced structural input;
+- delivering the manifest through a caller-supplied boundary does not make its
+  contents caller-defined.
+
+It must not contain:
+
+- patch values;
+- text payloads;
+- draw commands;
+- backend handles;
+- memory addresses;
+- filesystem paths;
+- timestamps;
+- random UUIDs;
+- OS handles;
+- native-window handles;
+- thread identifiers;
+- map-iteration-derived ordering.
+
+The manifest preserves source order using stable coordinates such as:
+
+- patch ordinal;
+- operation ordinal;
+- target role.
+
+This contract does not freeze a Rust struct for the manifest and does not
+freeze its serialization.
+
+#### 7.1.3 Target classes
+
+The contract distinguishes at least these conceptual target classes carried by
+manifest entries:
+
+| Class | Carries |
+| --- | --- |
+| `NodeAnchor` | the stable node identity targeted by node-availability operations |
+| `BindingAnchor` | the stable node identity and the stable binding-slot identity targeted by a binding-value operation |
+| `CollectionAnchor` | the stable collection-node identity targeted by collection operations |
+
+`CollectionKey` existence, absence, insertion position, move legality, and
+item-state semantics remain operation and candidate-state concerns. This
+contract does not classify collection item keys as active-projection anchor
+identities and does not silently absorb them into stage 5.
+
+Repeated target references are not invalid merely because they repeat across
+an ordered batch. `ProjectionPatch` construction-time duplicate-mutation
+diagnostics remain owned by the `ProjectionPatch` model and are not
+reinterpreted as Shell Player stage-5 diagnostics.
+
+#### 7.1.4 Active projection target catalog
+
+`ActiveProjectionTargetCatalog` is a conceptual input supplied exactly once
+through `ActivatedShellSessionContext`. It is:
+
+- immutable for the lifetime of the activated session;
+- derived from the caller-supplied activated projection;
+- local and reconstructible;
+- non-authoritative;
+- deterministically ordered or deterministically searchable;
+- the sole stage-5 membership source.
+
+Normative rules:
+
+- Shell Player does not create the activation decision;
+- Shell Player does not validate bundle trust;
+- Shell Player does not load the bundle;
+- Shell Player does not reinterpret catalog membership as Semantic validity;
+- Shell Player does not reinterpret catalog membership as action
+  authorization;
+- changing the catalog requires a new caller-supplied activated session
+  context;
+- the catalog must not be mutated in place.
+
+This contract does not freeze a Rust collection type for the catalog and does
+not require `HashMap` or `HashSet`. Map iteration order remains forbidden as an
+identity or ordering source.
+
+#### 7.1.5 Stage-5 evaluation semantics
+
+Stage 5 runs only after stages 1 through 4 succeed. For each manifest entry, in
+stable manifest order:
+
+- `NodeAnchor`: the node must exist in the `ActiveProjectionTargetCatalog`;
+- `BindingAnchor`: the node and binding slot must exist as a declared binding
+  anchor in the catalog;
+- `CollectionAnchor`: the collection node must exist as a declared collection
+  anchor in the catalog.
+
+Stage 5 is read-only. It does not:
+
+- mutate `ShellLocalState`;
+- calculate a candidate state;
+- advance the replay cursor;
+- apply a patch;
+- validate patch sequence;
+- validate collection item operations;
+- validate bundle trust;
+- authorize actions.
+
+If every target is valid, stage 5 succeeds and stage 6 may begin.
+
+If any target is invalid, the transition is rejected, the complete previous
+`ShellLocalState` is preserved, stage 6 does not begin, and candidate-state
+calculation does not begin.
+
+No partial target acceptance is permitted.
+
+#### 7.1.6 Diagnostics
+
+Stage 5 and its stage-4 target-reference prerequisite use only these existing
+normative diagnostic classes:
+
+- `SPV0_INVALID_STIMULUS`: the coherent adapter-produced structural input is
+  malformed or internally inconsistent before normal stage-5 membership
+  evaluation. This includes `target_reference_count` not matching the bounded
+  manifest shape. For this boundary, its evaluation stage is 4.
+- `SPV0_INVALID_TARGET`: a structurally admitted target reference is not valid
+  for the immutable active projection catalog. Its evaluation stage is 5.
+- `SPV0_RESOURCE_LIMIT_EXCEEDED`: `target_reference_count` exceeds the
+  immutable maximum-target-references limit, or another deterministic
+  resource limit is exceeded. For target-reference preflight, its evaluation
+  stage is 4.
+
+This contract does not add a new diagnostic code. Normal unknown-target or
+outside-catalog membership failures are not classified as
+`SPV0_INVALID_STIMULUS`. Count/shape structural inconsistency is not
+classified as `SPV0_INVALID_TARGET`.
+
+Logical target diagnostics are ordered by stable manifest coordinates and
+remain subject to the immutable stage-10 diagnostic emission cap. A diagnostic
+cap never changes rejection into acceptance.
+
+#### 7.1.7 Stage-6 boundary preserved
+
+- Stage 6 executes only after complete stage-5 success.
+- Stage 6 does not repeat target membership checks.
+- Stage 6 does not inspect `ProjectionPatch` operations.
+- Stage 6 does not reinterpret the target manifest or the target catalog.
+- Stage-5 failure leaves the replay cursor untouched.
+
+This contract does not authorize stage-5/stage-6 orchestration
+implementation.
+
+#### 7.1.8 Explicitly unresolved
+
+The following remain unresolved and unauthorized by this subsection:
+
+- Rust adapter types;
+- cross-crate visibility mechanism;
+- feature-gating strategy;
+- public or private module layout;
+- manifest serialization;
+- catalog storage structure;
+- lookup algorithm;
+- target-coordinate Rust representation;
+- stage-5 evaluator implementation;
+- stage-4 target-reference envelope implementation;
+- `ActivatedShellSessionContext` Rust expansion;
+- stage-5/stage-6 orchestration;
+- patch application;
+- candidate-state model.
+
+This contract constrains future implementations of the stable-target boundary
+but does not select one.
+
+### 7.2 Replay-cursor compatibility
 
 Replay-cursor compatibility is evaluated only for an
 `OrderedProjectionPatchBatch` after stages 1 through 5 have succeeded.
@@ -360,6 +610,7 @@ Caller-supplied deterministic limits use these categories:
 - maximum hit-test entries;
 - maximum accessibility nodes;
 - maximum patches per transition;
+- maximum target references per transition;
 - maximum draw commands per transition;
 - maximum diagnostics per transition;
 - maximum projected text bytes;
@@ -410,7 +661,7 @@ The diagnostic classes are:
 | `SPV0_SESSION_CLOSED` | Input was presented to a closed session. |
 | `SPV0_SESSION_SUSPENDED` | Interaction input was presented to a suspended session. |
 | `SPV0_INVALID_STIMULUS` | The primary stimulus shape or class is invalid. |
-| `SPV0_INVALID_TARGET` | A stable target identity is invalid for the active projection. |
+| `SPV0_INVALID_TARGET` | A structurally admitted target reference is not valid for the immutable active projection catalog (see 7.1). |
 | `SPV0_REPLAY_CURSOR_MISMATCH` | stage-6 outer batch sequence incompatibility with the established local replay cursor. |
 | `SPV0_RESOURCE_LIMIT_EXCEEDED` | A caller-supplied deterministic limit would be exceeded. |
 | `SPV0_STATE_INVARIANT_VIOLATION` | The candidate next state violates a frozen invariant. |
@@ -470,6 +721,10 @@ The following remain unresolved:
 - unknown-target patch handling;
 - unknown-operation patch handling;
 - patch mutation algorithm;
+- `OrderedStableTargetManifest` Rust representation and serialization;
+- `ActiveProjectionTargetCatalog` Rust storage structure and lookup algorithm;
+- stage-5 stable-target evaluator implementation;
+- stage-5/stage-6 orchestration implementation;
 - focus traversal algorithm;
 - pointer-capture algorithm;
 - hit-test coordinate model;
@@ -514,10 +769,17 @@ transition disposition model = FROZEN
 resource-limit categories = FROZEN
 diagnostic namespace = FROZEN
 replay-cursor compatibility relation = FROZEN
+stage-5 stable-target boundary = FROZEN
+stage-5/stage-6 ownership separation = FROZEN
 
 replay-cursor compatibility implementation = NOT AUTHORIZED
 replay-cursor advancement = NOT AUTHORIZED
 ProjectionPatch application = NOT AUTHORIZED
+stage-5 stable-target evaluator implementation = NOT AUTHORIZED
+stage-5/stage-6 orchestration = NOT AUTHORIZED
+OrderedStableTargetManifest Rust representation = NOT AUTHORIZED
+ActiveProjectionTargetCatalog Rust representation = NOT AUTHORIZED
+cross-crate ProjectionPatch visibility change = NOT AUTHORIZED
 Shell Player Rust implementation = NOT AUTHORIZED
 bundle activation = NOT AUTHORIZED
 renderer integration = NOT AUTHORIZED
