@@ -1,60 +1,57 @@
 task:
-  id: SHELL-PLAYER-REPLAY-CURSOR-COMPATIBILITY-EVALUATOR
-  title: add pure Shell Player replay cursor compatibility evaluator
-  type: implementation
+  id: SHELL-PLAYER-STAGE5-BOUNDARY-CONTRACT
+  title: freeze Shell Player stage-5 boundary
+  type: documentation
   mode: active
 
 intent:
-  summary: "feat(ui): add replay cursor compatibility evaluator"
+  summary: "docs(ui): freeze Shell Player stage-5 boundary"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-ui-runtime/src/shell_player.rs
+    - docs/spec/ui/shell_player_session_state_v0.md
 
 authorization:
-  rust_implementation: true
-  crate_private_only: true
+  normative_contract_clarification: true
+  stage5_boundary_definition: true
+  bounded_target_manifest_concept: true
+  active_projection_target_catalog_concept: true
+  stage4_target_reference_resource_metadata: true
+  diagnostic_ownership_clarification: true
 
-  replay_cursor_compatibility_implementation: true
-  stage6_only_evaluator: true
-
-  stage5_target_validation: false
-  full_transition_integration: false
-  preflight_integration: false
-  shell_session_delegate: false
-
-  replay_cursor_advancement: false
-  replay_cursor_mutation: false
-  replay_cursor_reset: false
-  replay_cursor_persistence: false
-  replay_cursor_restoration: false
-
-  projection_patch_adapter: false
-  patch_traversal: false
-  patch_application: false
-  patch_transaction_semantics: false
-  rollback: false
-
+  rust_implementation: false
   public_api: false
+  projection_patch_visibility_changes: false
+  new_crate: false
+  dependency_changes: false
+  stage5_evaluator: false
+  stage6_integration: false
+  patch_traversal_implementation: false
+  patch_application: false
+  cursor_advancement: false
+  candidate_state_mutation: false
   renderer_integration: false
   backend_integration: false
-  event_loop_integration: false
-
-  gate_d: closed
   production_promotion: false
 
+  gate_d: closed
+
 constraints:
-  requires_prior_stages_1_through_5_success: true
-  stage6_does_not_validate_targets: true
-  empty_batch_is_not_applicable: true
-  uninitialized_accepts_first_non_empty_sequence: true
-  positioned_cursor_requires_checked_successor: true
-  sequence_wrap_forbidden: true
-  one_mismatch_diagnostic_class: true
-  compatibility_is_read_only: true
-  no_cursor_candidate: true
-  no_hidden_inputs: true
-  deterministic_result: true
-  no_additional_cleanup: true
+  docs_only: true
+  single_normative_source: true
+  no_second_stage5_document: true
+  no_rust_struct_frozen: true
+  no_serialization_frozen: true
+  no_rust_collection_type_frozen: true
+  no_hashmap_or_hashset_required: true
+  map_iteration_order_forbidden: true
+  no_diagnostic_codes_added: true
+  existing_diagnostic_classes_only: true
+  no_orchestration_authorized: true
+  stage_order_1_through_10_preserved: true
+  stage4_precedes_target_traversal: true
+  stage5_precedes_replay_compatibility: true
+  no_partial_commit: true
+  diagnostic_cap_is_output_shaping_only: true
   fail_closed: true
