@@ -182,6 +182,33 @@ impl ProjectionSourceNode {
     }
 }
 
+/// One authored explicit `CollectionAnchor` declaration.
+///
+/// A declaration means only that the identified projection-owned static node
+/// is explicitly declared and qualified as an eligible collection patch
+/// target. It carries no role, `CollectionKey`, binding coordinate, patch
+/// operation, runtime state, backend state, Semantic value, or authority
+/// field; see `docs/spec/ui/projection_source_model.md` section 12.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ProjectionSourceCollectionAnchorDeclaration {
+    target: ProjectionSourceNodeId,
+    source: SourceRef,
+}
+
+impl ProjectionSourceCollectionAnchorDeclaration {
+    pub(crate) const fn new(target: ProjectionSourceNodeId, source: SourceRef) -> Self {
+        Self { target, source }
+    }
+
+    pub(crate) const fn target(self) -> ProjectionSourceNodeId {
+        self.target
+    }
+
+    pub(crate) const fn source(self) -> SourceRef {
+        self.source
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ProjectionSourceDocument {
     source_id: SourceId,
@@ -189,6 +216,7 @@ pub(crate) struct ProjectionSourceDocument {
     epoch: Epoch,
     surfaces: Vec<ProjectionSourceSurface>,
     nodes: Vec<ProjectionSourceNode>,
+    collection_anchor_declarations: Vec<ProjectionSourceCollectionAnchorDeclaration>,
 }
 
 impl ProjectionSourceDocument {
@@ -199,6 +227,7 @@ impl ProjectionSourceDocument {
             epoch,
             surfaces: Vec::new(),
             nodes: Vec::new(),
+            collection_anchor_declarations: Vec::new(),
         }
     }
 
@@ -228,6 +257,19 @@ impl ProjectionSourceDocument {
 
     pub(crate) fn push_node(&mut self, node: ProjectionSourceNode) {
         self.nodes.push(node);
+    }
+
+    pub(crate) fn collection_anchor_declarations(
+        &self,
+    ) -> &[ProjectionSourceCollectionAnchorDeclaration] {
+        &self.collection_anchor_declarations
+    }
+
+    pub(crate) fn push_collection_anchor_declaration(
+        &mut self,
+        declaration: ProjectionSourceCollectionAnchorDeclaration,
+    ) {
+        self.collection_anchor_declarations.push(declaration);
     }
 
     pub(crate) fn validate(

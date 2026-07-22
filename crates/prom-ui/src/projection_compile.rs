@@ -4,8 +4,8 @@
 use alloc::vec::Vec;
 
 use crate::contract_primitives::{
-    ChildOrder, DiagnosticCode, DiagnosticCoordinate, StaticDocumentId, StaticNodeId,
-    StaticSurfaceId,
+    ChildOrder, DiagnosticCode, DiagnosticCoordinate, ProjectionSourceNodeId, StaticDocumentId,
+    StaticNodeId, StaticSurfaceId,
 };
 use crate::projection_source::{
     ProjectionSourceDiagnosticKind, ProjectionSourceDiagnostics, ProjectionSourceDocument,
@@ -35,14 +35,14 @@ pub(crate) fn compile_projection_source_to_static_ir(
                 ))
             })?;
         let mut static_node = StaticUiNode::new(
-            static_node_id(source_node.id().raw())?,
+            static_node_id(source_node.id())?,
             role,
             source_node.key(),
             Some(source_node.source()),
         );
         for child in source_node.children() {
             static_node.push_child(StaticUiChild::new(
-                static_node_id(child.child().raw())?,
+                static_node_id(child.child())?,
                 ChildOrder::new(child.order().raw()),
             ));
         }
@@ -52,7 +52,7 @@ pub(crate) fn compile_projection_source_to_static_ir(
     for surface in normalized.surfaces() {
         document.push_surface(StaticUiSurface::new(
             static_surface_id(surface.id().raw())?,
-            static_node_id(surface.root().raw())?,
+            static_node_id(surface.root())?,
             surface.key(),
             Some(surface.source()),
         ));
@@ -63,11 +63,22 @@ pub(crate) fn compile_projection_source_to_static_ir(
         .map_err(ProjectionCompileDiagnostics::from_static_ir)
 }
 
-fn static_node_id(raw: u64) -> Result<StaticNodeId, ProjectionCompileDiagnostics> {
-    StaticNodeId::new(raw).map_err(|_| {
+/// The compiler's sole deterministic `ProjectionSourceNodeId -> StaticNodeId`
+/// lowering. This is the one mapping policy for the crate; any other
+/// crate-private consumer that needs the same lowering (for example,
+/// explicit `CollectionAnchor` declaration qualification) must call this
+/// function rather than reimplement the mapping.
+pub(crate) fn lower_projection_source_node_id(id: ProjectionSourceNodeId) -> Option<StaticNodeId> {
+    StaticNodeId::new(id.raw()).ok()
+}
+
+fn static_node_id(
+    id: ProjectionSourceNodeId,
+) -> Result<StaticNodeId, ProjectionCompileDiagnostics> {
+    lower_projection_source_node_id(id).ok_or_else(|| {
         ProjectionCompileDiagnostics::from_compile_kind(
             ProjectionCompileDiagnosticKind::InvalidLoweredIdentity,
-            raw,
+            id.raw(),
             0,
         )
     })

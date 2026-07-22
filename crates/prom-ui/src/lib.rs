@@ -39,6 +39,7 @@ pub mod admitted_action;
 pub(crate) mod binding_graph;
 pub(crate) mod binding_graph_observation;
 pub(crate) mod binding_graph_semantic_adapter;
+pub(crate) mod collection_anchor_declarations;
 pub mod commit_boundary;
 pub mod commit_boundary_result;
 pub mod committed_effect;
@@ -90,6 +91,8 @@ pub mod validation;
 mod ui_dna2_binding_observation_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_binding_semantic_adapter_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_collection_anchor_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_denial_recovery_qualification_tests;
 #[cfg(test)]

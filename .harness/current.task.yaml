@@ -1,53 +1,67 @@
 task:
-  id: UI-DNA2-ROADMAP-SYNC-THROUGH-1536
-  title: rebaseline UI-DNA2 durable roadmap through PR #1536
-  type: documentation
+  id: COLLECTION-ANCHOR-DECLARATION-QUALIFICATION
+  title: qualify explicit CollectionAnchor declarations
+  type: implementation
   mode: active
 
 intent:
-  summary: "docs(ui): rebaseline UI-DNA2 roadmap through #1536"
+  summary: "feat(ui): qualify explicit collection-anchor declarations"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
+    - crates/prom-ui/src/contract_primitives.rs
+    - crates/prom-ui/src/projection_source.rs
+    - crates/prom-ui/src/projection_compile.rs
+    - crates/prom-ui/src/collection_anchor_declarations.rs
+    - crates/prom-ui/src/ui_dna2_collection_anchor_qualification_tests.rs
+    - crates/prom-ui/src/lib.rs
 
 authorization:
-  roadmap_evidence_baseline_update: true
-  merged_checkpoint_sync: true
-  landed_state_sync: true
-  research_matrix_sync: true
-  latest_checkpoint_sync: true
-  dependency_order_sync: true
-  acceptance_criteria_sync: true
-  unauthorized_contour_sync: true
+  rust_implementation: true
+  crate_private_only: true
+  programmatic_declaration_representation: true
+  collection_anchor_qualification: true
+  deterministic_diagnostics: true
+  qualification_tests: true
 
-  rust_implementation: false
-  normative_contract_change: false
-  ownership_change: false
-  authority_change: false
+  textual_grammar_change: false
+  parser_change: false
+  frontend_change: false
+  static_ir_artifact_change: false
+  canonical_encoding_change: false
+  prepared_transition_targets: false
+  prepared_activation_targets: false
+  runtime_catalog: false
+  activated_context_expansion: false
+  stage4_integration: false
+  stage5_evaluator: false
+  stage6_change: false
+  orchestration: false
+  patch_application: false
+  cursor_advancement: false
   public_api: false
   public_api_guard_changes: false
-  snapshot_changes: false
-  new_crate: false
   dependency_changes: false
   workflow_changes: false
+  roadmap_changes: false
   issue_1489_changes: false
   project_changes: false
-  next_slice_authorization: false
   gate_d_change: false
   production_promotion: false
 
   gate_d: closed
 
 constraints:
-  directional_roadmap_only: true
-  repository_truth_remains_external: true
-  roadmap_is_not_authority: true
-  landed_code_distinguished_from_contracts: true
-  concepts_distinguished_from_implementations: true
-  full_shell_player_not_claimed: true
-  patch_application_not_claimed: true
-  gate_d: closed
-  next_authorized_implementation_slice: none
+  no_std_alloc_compatible: true
   fail_closed: true
+  whole_set_only: true
+  no_partial_qualified_set: true
+  explicit_declarations_only: true
+  no_collection_anchor_inference: true
+  compiler_owned_source_to_static_mapping: true
+  deterministic_static_node_order: true
+  collection_key_is_not_anchor_identity: true
+  source_span_is_provenance_not_identity: true
+  no_public_surface_change: true
+  next_authorized_implementation_slice_after_this_task: none
