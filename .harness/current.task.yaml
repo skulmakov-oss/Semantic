@@ -1,78 +1,53 @@
 task:
-  id: COLLECTION-ANCHOR-DECLARATION-CONTRACT
-  title: freeze explicit CollectionAnchor declarations
+  id: UI-DNA2-ROADMAP-SYNC-THROUGH-1536
+  title: rebaseline UI-DNA2 durable roadmap through PR #1536
   type: documentation
   mode: active
 
 intent:
-  summary: "docs(ui): freeze collection-anchor declarations"
+  summary: "docs(ui): rebaseline UI-DNA2 roadmap through #1536"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - docs/spec/ui/projection_source_model.md
-    - docs/spec/ui/shell_player_session_state_v0.md
+    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
 
 authorization:
-  collection_anchor_declaration_ownership: true
-  collection_anchor_identity_contract: true
-  collection_anchor_validation_contract: true
-  collection_anchor_ordering_contract: true
-  collection_anchor_diagnostic_contract: true
-  prepared_activation_collection_source_contract: true
-  shell_player_cross_reference_update: true
+  roadmap_evidence_baseline_update: true
+  merged_checkpoint_sync: true
+  landed_state_sync: true
+  research_matrix_sync: true
+  latest_checkpoint_sync: true
+  dependency_order_sync: true
+  acceptance_criteria_sync: true
+  unauthorized_contour_sync: true
 
   rust_implementation: false
-  projection_source_ast_change: false
-  projection_source_parser_change: false
-  projection_source_grammar_change: false
-  static_ir_change: false
-  binding_graph_change: false
-  projection_patch_change: false
+  normative_contract_change: false
+  ownership_change: false
+  authority_change: false
   public_api: false
-  doc_hidden_pub_additions: false
   public_api_guard_changes: false
   snapshot_changes: false
   new_crate: false
   dependency_changes: false
-  new_cargo_feature: false
-  collection_anchor_representation: false
-  collection_anchor_lowering: false
-  collection_anchor_validation_implementation: false
-  prepared_transition_implementation: false
-  prepared_activation_implementation: false
-  catalog_implementation: false
-  activated_context_expansion: false
-  stage4_integration: false
-  stage5_evaluator: false
-  stage6_integration: false
-  patch_application: false
-  cursor_advancement: false
-  candidate_state: false
-  renderer_integration: false
-  backend_integration: false
+  workflow_changes: false
+  issue_1489_changes: false
+  project_changes: false
+  next_slice_authorization: false
+  gate_d_change: false
   production_promotion: false
 
   gate_d: closed
 
 constraints:
-  docs_only: true
-  single_normative_home_for_declaration_contract: true
-  no_second_specification: true
-  projection_owned_declarations: true
-  explicit_declaration_only: true
-  collection_key_is_not_anchor_identity: true
-  patch_operation_is_not_declaration: true
-  role_text_is_not_declaration: true
-  binding_domain_is_not_declaration: true
-  caller_assertion_is_not_declaration: true
-  stable_node_identity_required: true
-  deterministic_order_required: true
-  duplicate_declaration_rejected: true
-  missing_node_rejected: true
-  no_partial_declaration_set: true
-  prepared_activation_consumes_qualified_set_only: true
-  catalog_remains_runtime_owned: true
-  no_semantic_authority: true
+  directional_roadmap_only: true
+  repository_truth_remains_external: true
+  roadmap_is_not_authority: true
+  landed_code_distinguished_from_contracts: true
+  concepts_distinguished_from_implementations: true
+  full_shell_player_not_claimed: true
+  patch_application_not_claimed: true
   gate_d: closed
+  next_authorized_implementation_slice: none
   fail_closed: true
