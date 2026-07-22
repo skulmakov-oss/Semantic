@@ -28,6 +28,7 @@ This document defines the deterministic conceptual model for:
 - transition stimulus;
 - transition evaluation;
 - stable-target boundary;
+- prepared cross-crate handoff;
 - transition result;
 - resource accounting;
 - diagnostics.
@@ -409,6 +410,9 @@ This contract does not freeze a Rust collection type for the catalog and does
 not require `HashMap` or `HashSet`. Map iteration order remains forbidden as an
 identity or ordering source.
 
+The Rust crate responsible for the catalog type is frozen in 7.1.9.6. That
+decision does not alter any conceptual property stated in this subsection.
+
 #### 7.1.5 Stage-5 evaluation semantics
 
 Stage 5 runs only after stages 1 through 4 succeed. For each manifest entry, in
@@ -496,6 +500,436 @@ The following remain unresolved and unauthorized by this subsection:
 
 This contract constrains future implementations of the stable-target boundary
 but does not select one.
+
+#### 7.1.9 Prepared cross-crate handoff
+
+This subsection freezes one complete cross-crate prepared-handoff mechanism for
+stage 5. It resolves the ownership of the two distinct pieces of evidence
+stage 5 needs (transition-scoped and activation-scoped) and the Rust-crate
+responsibility for the runtime catalog. It amends the existing normative
+contract; it is not a second stage-5 specification. This is a
+documentation-only contract slice. It does not implement Rust, does not change
+public API, does not change the public API guard, and does not implement any
+manifest, activation-target, catalog, evaluator, or orchestration.
+
+##### 7.1.9.1 Complete ownership model
+
+- `prom-ui` owns private `ProjectionPatch` representation.
+- `prom-ui` owns deterministic extraction of stable target evidence.
+- `prom-ui-runtime` owns the session-local `ActiveProjectionTargetCatalog`
+  Rust responsibility.
+- Shell Player owns only stage-5 validation disposition.
+- A higher-level composition caller may transport opaque prepared values but
+  does not own, inspect, reconstruct, or reinterpret their contents.
+
+The composition caller does not become:
+
+- `ProjectionPatch` owner;
+- target-extraction owner;
+- catalog authority;
+- stage-5 evaluator owner;
+- Semantic authority;
+- action-authorization authority.
+
+The transport-only restriction in this subsection applies to the composition
+caller, not to `prom-ui-runtime`. `prom-ui-runtime` is the designated
+controlled consumer of prepared evidence; it is not the composition caller
+this subsection restricts. The composition caller specifically must remain
+unable to:
+
+- inspect semantic contents;
+- decompose prepared values;
+- reassemble prepared values;
+- reinterpret evidence;
+- construct catalog membership;
+- perform stage-5 evaluation.
+
+The composition caller must not expose prepared contents to any other
+consumer. The exact controlled-consumption boundary for `prom-ui-runtime` is
+frozen separately in 7.1.9.4.
+
+No reverse `prom-ui -> prom-ui-runtime` dependency is authorized. No new
+shared crate is authorized.
+
+##### 7.1.9.2 Prepared transition target evidence
+
+`PreparedProjectionPatchTargets` is a conceptual value whose lifetime is one
+admitted projection-patch transition. It contains, conceptually:
+
+- an ordered stable-target manifest;
+- the actual manifest target-reference count;
+- stable manifest coordinates;
+- the target role for each entry;
+- sufficient immutable batch-binding metadata to prevent mixing manifest
+  evidence with unrelated transition metadata.
+
+It is:
+
+- derived only inside `prom-ui`;
+- derived only from an admitted private `ProjectionPatch` batch;
+- opaque outside `prom-ui`;
+- immutable after derivation;
+- transportable without interpretation;
+- not caller-authored;
+- not Semantic truth;
+- not patch-application evidence;
+- not action authorization.
+
+The external caller must not be able to:
+
+- construct it from raw target IDs;
+- construct it from operation descriptors;
+- construct it from a `Vec`;
+- construct it through `Default`;
+- construct it through `From` or `Into`;
+- construct it through deserialization;
+- add entries;
+- remove entries;
+- reorder entries;
+- replace coordinates;
+- replace count metadata;
+- mix evidence from different prepared transitions.
+
+This contract does not freeze a Rust type name, field layout, serialization,
+ABI, digest, or cryptographic mechanism for `PreparedProjectionPatchTargets`.
+It is the same conceptual manifest evidence described in 7.1.2, named here to
+distinguish it explicitly from the activation-scoped evidence in 7.1.9.3.
+
+##### 7.1.9.3 Prepared activation target evidence
+
+`PreparedActiveProjectionTargets` is a conceptual value whose lifetime is one
+activated projection. It is produced by `prom-ui` from validated
+projection-owned structural data. It carries only immutable evidence needed to
+construct a session-local catalog:
+
+- declared `NodeAnchor` coordinates;
+- declared `BindingAnchor` coordinates;
+- explicitly declared `CollectionAnchor` coordinates.
+
+It is:
+
+- opaque outside `prom-ui`;
+- immutable;
+- read-only;
+- local and reconstructible;
+- non-authoritative;
+- transportable by a composition caller;
+- not the runtime catalog itself.
+
+It must not contain:
+
+- `ProjectionPatch` operations;
+- patch values;
+- renderer commands;
+- backend handles;
+- Semantic values;
+- action authorization;
+- bundle trust decisions;
+- mutable collections.
+
+External code must not be able to construct `PreparedActiveProjectionTargets`
+from:
+
+- raw node IDs;
+- raw binding coordinates;
+- raw collection coordinates;
+- a `Vec`;
+- a map;
+- `Default`;
+- `From` or `Into`;
+- deserialization;
+- backend state;
+- host state;
+- caller assertions;
+- patch operations.
+
+External code must not be able to:
+
+- add coordinates;
+- remove coordinates;
+- reorder coordinates;
+- substitute coordinates;
+- change target classes;
+- combine evidence from different activations.
+
+`PreparedActiveProjectionTargets` must be produced only by `prom-ui` from one
+coherent validated projection-owned structural input. This contract does not
+claim that this producer currently exists; its entry point remains unresolved
+per 7.1.9.14. This does not weaken the explicit `CollectionAnchor`
+implementation block in 7.1.9.5.
+
+##### 7.1.9.4 Construction opacity versus controlled read-only consumption
+
+This subsection resolves an ambiguity in the term "opaque outside `prom-ui`"
+as used for `PreparedProjectionPatchTargets` (7.1.9.2) and
+`PreparedActiveProjectionTargets` (7.1.9.3). "Opaque outside `prom-ui`" means:
+
+- external code cannot construct the prepared value from raw parts;
+- external code cannot access or depend on its storage representation;
+- external code cannot mutate, decompose, reassemble, or reinterpret it;
+- the composition caller may transport it only as a whole value.
+
+It does not mean that the designated runtime consumer is unable to read the
+bounded evidence required by the frozen stage-4 and stage-5 contracts. A
+future controlled read-only bridge may allow `prom-ui-runtime` to consume only
+the following, and nothing beyond it:
+
+From `PreparedProjectionPatchTargets`:
+
+- the actual target-reference count;
+- stable entry order;
+- patch ordinal;
+- operation ordinal;
+- target role;
+- `NodeAnchor` coordinate;
+- `BindingAnchor` coordinates;
+- `CollectionAnchor` coordinate;
+- immutable batch-binding/coherence evidence.
+
+From `PreparedActiveProjectionTargets`:
+
+- declared `NodeAnchor` coordinates;
+- declared `BindingAnchor` coordinates;
+- declared `CollectionAnchor` coordinates.
+
+Rules:
+
+- `prom-ui-runtime` may consume only the read-only evidence required to
+  construct the catalog and evaluate stages 4 and 5;
+- the composition caller receives no semantic inspection authority merely
+  because it transports the value;
+- controlled read access does not grant construction, mutation, extraction,
+  `ProjectionPatch`, catalog-authority, Semantic-authority, or
+  action-authorization ownership.
+
+This contract does not freeze Rust accessor names, traits, iterators, slice
+types, module paths, visibility keywords, lifetimes, or owned-versus-borrowed
+representation. This contract does not authorize any public bridge item.
+
+##### 7.1.9.5 CollectionAnchor provenance
+
+`CollectionAnchor` membership must originate from an explicit projection-owned
+declaration source. `CollectionAnchor` membership must not be inferred merely
+from:
+
+- the existence of a `StaticNodeId`;
+- node role text;
+- `CollectionKey`;
+- `BindingValueDomain::Collection`;
+- the presence of a collection patch operation;
+- a caller assertion;
+- map iteration order.
+
+The current Rust representation of explicit collection-anchor declarations
+does not exist and remains unresolved. Therefore, `PreparedActiveProjectionTargets`
+implementation is not authorized until an explicit collection-anchor
+declaration substrate is separately frozen and available. This does not block
+the ownership contract in 7.1.9.1; it blocks catalog implementation
+specifically.
+
+##### 7.1.9.6 Runtime-owned catalog responsibility
+
+- `ActiveProjectionTargetCatalog` is owned by `prom-ui-runtime`.
+- It is constructed inside the Shell Player/runtime boundary only from one
+  `PreparedActiveProjectionTargets` value.
+- It is attached exactly once to `ActivatedShellSessionContext`.
+- It is immutable for the complete `ShellSession` lifetime.
+- Changing it requires a new activated session context.
+- It is the sole stage-5 membership source.
+
+The catalog must not be constructed from:
+
+- raw caller-supplied IDs;
+- raw `Vec` values;
+- patch operations;
+- manifest entries;
+- `Default`;
+- `From` of externally constructible values;
+- deserialization;
+- backend or host state.
+
+Catalog construction does not:
+
+- validate bundle trust;
+- create the activation decision;
+- grant Semantic authority;
+- authorize actions;
+- load a bundle;
+- apply patches.
+
+This contract does not freeze a Rust collection type or lookup algorithm for
+the catalog. This supersedes 7.1.4 only on the question of which crate is
+responsible for the Rust type; 7.1.4's conceptual properties remain unchanged
+and unweakened.
+
+##### 7.1.9.7 Handoff atomicity
+
+The prepared transition evidence must cross the crate/composition boundary as
+one coherent opaque value. The following must not cross as independently
+replaceable caller-authored values:
+
+- manifest entries;
+- manifest coordinates;
+- actual target-reference count;
+- prepared batch-binding metadata.
+
+The composition caller may transport the whole value but may not decompose
+and reassemble it. A whole prepared value may be cloned only if cloning
+preserves identical, already-derived evidence. This contract does not require
+`Clone`. This contract does not authorize serialization.
+
+##### 7.1.9.8 Declared and actual count coherence
+
+Two values are distinguished:
+
+- **Declared preflight count**: the transition envelope may carry a
+  caller-supplied declared `target_reference_count` for bounded stage-4
+  preflight.
+- **Actual prepared count**: `PreparedProjectionPatchTargets` carries or
+  exposes the actual count derived from its own immutable manifest shape.
+
+Rules:
+
+- the declared count is checked against the maximum target-reference limit
+  before Shell Player performs per-entry target validation;
+- after prepared evidence is available, stage 4 compares the declared count
+  with the actual prepared count without traversing or mutating manifest
+  entries;
+- mismatch: `SPV0_INVALID_STIMULUS`, stage 4, `Rejected`, complete previous
+  `ShellLocalState` preserved, stage 5 not entered, stage 6 not entered;
+- limit excess: `SPV0_RESOURCE_LIMIT_EXCEEDED`, stage 4.
+
+"Before target traversal" means before Shell Player stage-5 per-entry
+membership traversal. It does not claim that upstream `prom-ui` derivation
+occurred after runtime preflight.
+
+The mismatch check is a defensive coherence check for caller inconsistency,
+transport substitution, foreign implementation error, or adapter defect. Safe
+in-process Rust construction should normally make it unreachable, but the
+contract remains fail-closed.
+
+##### 7.1.9.9 Public visibility semantics
+
+- Any future `pub` or `#[doc(hidden)] pub` bridge item is publicly accessible
+  Rust API.
+- `#[doc(hidden)]` changes ordinary rustdoc presentation only.
+- "Workspace internal" is a stability and ownership policy, not
+  compiler-enforced visibility.
+- Private fields and absent raw constructors provide fabrication resistance;
+  they do not make a type crate-private.
+
+This contract does not authorize any `pub` item.
+
+##### 7.1.9.10 Public API guard policy
+
+The first PR that introduces any public stage-5 bridge item must also
+introduce guard coverage for that complete bridge surface. No earlier
+standalone baseline-snapshot PR is authorized. The bridge must not be left
+untracked by an intentional decision to defer guard coverage.
+
+Future guard coverage must cover:
+
+1. the complete public surface of the dedicated stage-5 bridge module;
+2. the exact crate-root exposure of that bridge module or its re-exports.
+
+The following implementation options are frozen as acceptable in principle,
+without selecting one:
+
+- a dedicated snapshot for the bridge module source file;
+- a targeted assertion for the exact crate-root `pub mod` / `pub use`
+  exposure;
+- another equally narrow guard mechanism that detects removal, renaming, or
+  widening of that exact exposure.
+
+Guarding the exact crate-root exposure does not require snapshotting the
+entire pre-existing unrelated public surface of `crates/prom-ui/src/lib.rs`
+or `crates/prom-ui-runtime/src/lib.rs`. If a future implementation
+voluntarily chooses a whole-file crate-root snapshot, that is a separate
+intentional API-baseline decision and is not required by this contract.
+
+The future guard must detect:
+
+- bridge module exposure added;
+- bridge exposure removed;
+- bridge exposure renamed;
+- bridge exposure widened;
+- additional bridge re-exports added.
+
+This contract does not freeze snapshot filenames, test function names,
+scanner implementation, regex, an AST parser, `cargo-public-api`, or
+rustdoc-json. Any public `prom-ui-runtime` bridge item introduced later
+remains subject to the same first-PR guard-coverage requirement.
+
+##### 7.1.9.11 Testability boundary
+
+Testing must not create a production raw-parts constructor. Testing must not
+expose `ProjectionPatch` or `ProjectionPatchOperation`. Testing must not add
+`Default`, `From<Vec<_>>`, `serde`, unsafe fabrication, or a public fixture
+builder accepting arbitrary target coordinates.
+
+Future implementations may use:
+
+- same-crate private constructors in `prom-ui` unit tests;
+- same-crate private catalog fixtures in `prom-ui-runtime` unit tests;
+- a crate-private read-only view trait with test-local fake implementations;
+- real prepared producer paths when integration tests exist.
+
+This contract does not freeze one Rust testing technique and does not
+authorize a test-fixtures Cargo feature.
+
+##### 7.1.9.12 Manifest and catalog separation
+
+- `PreparedProjectionPatchTargets` is transition-scoped.
+- `PreparedActiveProjectionTargets` is activation-scoped.
+- `ActiveProjectionTargetCatalog` is session-scoped.
+- They are not one fused object.
+- The transition manifest must not mutate or replace the active catalog.
+- The active catalog must not be derived from the current patch batch.
+
+##### 7.1.9.13 Stage ordering restated
+
+- Stages 1-3 validate transition/session/envelope shape.
+- Stage 4 validates resource limits and prepared-evidence coherence.
+- Stage 5 performs catalog membership checks.
+- Stage 6 performs replay compatibility.
+- Stage 5 failure leaves the replay cursor unchanged.
+- Stage 6 does not inspect prepared target entries or catalog construction
+  data.
+
+No orchestration implementation is authorized.
+
+##### 7.1.9.14 Explicitly unresolved
+
+The following remain unresolved:
+
+- final Rust type names;
+- module paths;
+- field layouts;
+- public functions;
+- public re-export structure;
+- public API guard implementation;
+- snapshot filenames;
+- prepared transition producer entry point;
+- prepared activation producer entry point;
+- explicit collection-anchor declaration representation;
+- catalog storage;
+- catalog lookup algorithm;
+- view traits;
+- test fixture technique;
+- `ActivatedShellSessionContext` Rust expansion;
+- stage-4 integration;
+- stage-5 evaluator;
+- stage-5/stage-6 orchestration.
+
+This contract does not claim implementation readiness for any of the above.
+
+##### 7.1.9.15 Status clarification
+
+The visibility primitive is understood. The complete prepared handoff is now
+contractually selected. Manifest implementation remains unauthorized.
+Activation-target implementation remains blocked on explicit `CollectionAnchor`
+declarations. Catalog implementation remains unauthorized. No public bridge is
+yet authorized.
 
 ### 7.2 Replay-cursor compatibility
 
@@ -723,6 +1157,11 @@ The following remain unresolved:
 - patch mutation algorithm;
 - `OrderedStableTargetManifest` Rust representation and serialization;
 - `ActiveProjectionTargetCatalog` Rust storage structure and lookup algorithm;
+- `PreparedProjectionPatchTargets` Rust representation and producer entry point;
+- `PreparedActiveProjectionTargets` Rust representation and producer entry point;
+- explicit `CollectionAnchor` declaration substrate;
+- public API guard test implementation and snapshot filenames for the future
+  stage-5 bridge;
 - stage-5 stable-target evaluator implementation;
 - stage-5/stage-6 orchestration implementation;
 - focus traversal algorithm;
@@ -771,6 +1210,15 @@ diagnostic namespace = FROZEN
 replay-cursor compatibility relation = FROZEN
 stage-5 stable-target boundary = FROZEN
 stage-5/stage-6 ownership separation = FROZEN
+prepared cross-crate handoff ownership model = FROZEN
+PreparedProjectionPatchTargets concept = FROZEN
+PreparedActiveProjectionTargets concept = FROZEN
+CollectionAnchor provenance requirement = FROZEN
+runtime-owned ActiveProjectionTargetCatalog responsibility = FROZEN
+handoff atomicity = FROZEN
+declared/actual count coherence = FROZEN
+public API guard policy (same-PR-as-bridge) = FROZEN
+testability boundary = FROZEN
 
 replay-cursor compatibility implementation = NOT AUTHORIZED
 replay-cursor advancement = NOT AUTHORIZED
@@ -779,6 +1227,11 @@ stage-5 stable-target evaluator implementation = NOT AUTHORIZED
 stage-5/stage-6 orchestration = NOT AUTHORIZED
 OrderedStableTargetManifest Rust representation = NOT AUTHORIZED
 ActiveProjectionTargetCatalog Rust representation = NOT AUTHORIZED
+PreparedProjectionPatchTargets implementation = NOT AUTHORIZED
+PreparedActiveProjectionTargets implementation = NOT AUTHORIZED
+explicit CollectionAnchor declaration substrate = NOT AUTHORIZED
+any public stage-5 bridge item = NOT AUTHORIZED
+public API guard change = NOT AUTHORIZED
 cross-crate ProjectionPatch visibility change = NOT AUTHORIZED
 Shell Player Rust implementation = NOT AUTHORIZED
 bundle activation = NOT AUTHORIZED

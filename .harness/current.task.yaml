@@ -1,11 +1,11 @@
 task:
-  id: SHELL-PLAYER-STAGE5-BOUNDARY-CONTRACT
-  title: freeze Shell Player stage-5 boundary
+  id: SHELL-PLAYER-STAGE5-PREPARED-HANDOFF-CONTRACT
+  title: freeze stage-5 prepared handoff
   type: documentation
   mode: active
 
 intent:
-  summary: "docs(ui): freeze Shell Player stage-5 boundary"
+  summary: "docs(ui): freeze stage-5 prepared handoff"
 
 scope:
   allowed_paths:
@@ -13,24 +13,33 @@ scope:
     - docs/spec/ui/shell_player_session_state_v0.md
 
 authorization:
-  normative_contract_clarification: true
-  stage5_boundary_definition: true
-  bounded_target_manifest_concept: true
-  active_projection_target_catalog_concept: true
-  stage4_target_reference_resource_metadata: true
-  diagnostic_ownership_clarification: true
+  prepared_handoff_ownership_contract: true
+  manifest_capsule_concept: true
+  activation_target_evidence_concept: true
+  runtime_owned_catalog_decision: true
+  collection_anchor_source_requirement: true
+  public_bridge_stability_policy: true
+  public_api_guard_requirement: true
+  count_coherence_clarification: true
+  testability_boundary_clarification: true
 
   rust_implementation: false
   public_api: false
+  doc_hidden_pub_additions: false
+  public_api_guard_changes: false
+  snapshot_changes: false
   projection_patch_visibility_changes: false
   new_crate: false
-  dependency_changes: false
+  new_cargo_feature: false
+  manifest_implementation: false
+  activation_target_implementation: false
+  catalog_implementation: false
   stage5_evaluator: false
   stage6_integration: false
   patch_traversal_implementation: false
   patch_application: false
   cursor_advancement: false
-  candidate_state_mutation: false
+  candidate_state: false
   renderer_integration: false
   backend_integration: false
   production_promotion: false
@@ -54,4 +63,15 @@ constraints:
   stage5_precedes_replay_compatibility: true
   no_partial_commit: true
   diagnostic_cap_is_output_shaping_only: true
+  manifest_and_catalog_remain_separate: true
+  prepared_transition_is_transition_scoped: true
+  prepared_activation_is_activation_scoped: true
+  catalog_is_session_scoped: true
+  collection_anchor_declaration_source_required: true
+  collection_anchor_implementation_blocked: true
+  no_reverse_dependency_authorized: true
+  no_new_shared_crate_authorized: true
+  guard_coverage_same_pr_as_bridge: true
+  no_standalone_baseline_guard_pr: true
+  no_test_fixtures_feature_authorized: true
   fail_closed: true
