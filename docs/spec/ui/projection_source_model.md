@@ -358,3 +358,329 @@ The spec is acceptable when:
 - it treats accessibility as contract;
 - it does not implement parser grammar;
 - it does not claim production readiness.
+
+## 12. Explicit CollectionAnchor Declarations
+
+Status: normative contract freeze.
+Scope type: documentation only.
+This section amends this document. It is not a second specification.
+
+This section freezes the ownership, identity, validation, ordering,
+diagnostic, resource, integration, mutation, and authority contract for
+explicit projection-owned `CollectionAnchor` declarations. It removes the
+remaining semantic blocker recorded against future
+`PreparedActiveProjectionTargets` and `ActiveProjectionTargetCatalog`
+implementation in `docs/spec/ui/shell_player_session_state_v0.md`.
+
+This section does not implement Rust, does not modify parser grammar, does
+not add public API, and does not modify the public API guard. It does not
+authorize implementation of `PreparedActiveProjectionTargets`,
+`ActiveProjectionTargetCatalog`, or the stage-5 evaluator.
+
+### Ownership
+
+- Projection Source owns authored collection-anchor declaration intent.
+- `prom-ui` owns validation and deterministic lowering of that intent into
+  projection-owned structural declaration evidence.
+- The validated Static UI structural layer owns the stable target node
+  identities against which declarations are qualified.
+- `PreparedActiveProjectionTargets` may consume only the successfully
+  qualified collection-anchor declaration set.
+- `prom-ui-runtime` does not own source declarations, declaration
+  validation, declaration lowering, or declaration identity.
+- `ActiveProjectionTargetCatalog` remains owned by `prom-ui-runtime` only
+  after prepared activation evidence crosses the controlled handoff.
+
+Neither a composition caller nor Shell Player may become:
+
+- declaration author;
+- declaration validator;
+- declaration lowerer;
+- collection-anchor identity owner;
+- projection source owner;
+- Semantic authority;
+- action-authorization authority.
+
+No reverse dependency is authorized. No shared crate is authorized.
+
+### The `CollectionAnchorDeclaration` concept
+
+`CollectionAnchorDeclaration` is the conceptual name for one authored
+declaration. A declaration means only:
+
+```text
+the identified projection-owned static node is explicitly declared and
+qualified as an eligible collection patch target for local projection playback
+```
+
+This eligibility is projection-structural only. It is not Semantic admission,
+verifier admission, capability admission, bundle admission, patch admission,
+action admission, runtime activation, or effect authorization.
+
+A declaration does not mean:
+
+- the node currently contains collection elements;
+- a Semantic collection exists;
+- a `BindingValueDomain::Collection` binding exists;
+- the node has a collection-like role name;
+- a `CollectionKey` identifies the anchor;
+- a collection patch has already targeted it;
+- the collection is visible;
+- the collection is mutable;
+- an action is authorized;
+- a patch is valid;
+- a patch may be applied.
+
+A declaration is projection structure, not runtime state.
+
+### Source and lowered identities
+
+Two identity stages are distinguished.
+
+**Authored source target.** At the Projection Source level, an authored
+declaration targets exactly one projection source node identity. Conceptually
+this is a `ProjectionSourceNodeId`. This contract does not freeze grammar
+syntax or an AST field name. The declaration must refer to a node declared in
+the same `ProjectionSourceDocument`. A declaration must not target:
+
+- a surface ID;
+- a role name;
+- a `CollectionKey`;
+- a `BindingId`;
+- a `BindingSlot`;
+- a patch operation;
+- an arbitrary numeric ID outside the source document.
+
+**Qualified static target.** After deterministic lowering, the qualified
+anchor identity is `StaticDocumentId` + `StaticNodeId`. The declaration set is
+also bound to the corresponding `Revision` and `Epoch`.
+
+The following are frozen explicitly:
+
+- `CollectionAnchor` identity is the static target node within one exact
+  static document version.
+- `CollectionKey` is not part of `CollectionAnchor` identity.
+- `SourceSpan` is provenance, not identity.
+- Authored declaration order is not identity.
+- Storage position is not identity.
+- Map iteration position is not identity.
+
+This contract does not freeze an assumption that raw `ProjectionSourceNodeId`
+and `StaticNodeId` values must always remain numerically identical. The
+compiler owns deterministic source-node-to-static-node mapping.
+
+### The qualified declaration set
+
+`QualifiedCollectionAnchorDeclarations` is the conceptual name for the set of
+all successfully qualified collection anchors for exactly one validated
+projection-owned static document version. It is bound coherently to
+`StaticDocumentId`, `Revision`, and `Epoch`. It contains only stable
+collection target coordinates. It is:
+
+- immutable after qualification;
+- deterministically ordered;
+- local and reconstructible;
+- non-authoritative;
+- not caller-authored after qualification;
+- not the runtime catalog;
+- not prepared activation evidence by itself.
+
+It must not be mixed across documents, revisions, epochs, or projection
+activations. An empty declaration set is valid.
+
+### Validation rules
+
+Validation is fail-closed and deterministic.
+
+**Rule 1 — Source target existence.** Every authored declaration target must
+resolve to exactly one node declared in the same `ProjectionSourceDocument`.
+A missing target rejects the declaration set and emits
+`CAD_MISSING_TARGET_NODE`.
+
+**Rule 2 — Duplicate declaration.** The same qualified static node must not
+be declared more than once. A duplicate declaration rejects the declaration
+set and emits `CAD_DUPLICATE_DECLARATION`. Duplicate detection is by
+qualified collection-anchor identity, not by `SourceRef`, `CollectionKey`,
+role, authored order, or object identity.
+
+**Rule 3 — Static target existence.** After lowering, every qualified
+declaration must reference a node present in the same validated
+`StaticUiDocument`. Failure rejects the declaration set and emits
+`CAD_MISSING_STATIC_NODE`. This is a defensive compiler/adapter coherence
+diagnostic.
+
+**Rule 4 — Document-version coherence.** Declarations and the target Static
+UI document must agree on `StaticDocumentId`, `Revision`, and `Epoch`. A
+mismatch rejects the declaration set and emits
+`CAD_DOCUMENT_VERSION_MISMATCH`.
+
+**Rule 5 — No inferred declarations.** A node must not become a
+`CollectionAnchor` merely because of: `StaticNodeId` existence,
+`ProjectionSourceNode` existence, `CollectionKey` existence, role text, a
+`List`-like role, `BindingValueDomain::Collection`, `collection_key` on a
+`BindingDeclaration`, `CollectionInsert`, `CollectionUpdate`,
+`CollectionRemove`, `CollectionMove`, prior patch history, caller assertion,
+host state, backend state, map membership, or map iteration order.
+
+**Rule 6 — No extra role requirement.** A valid explicit declaration does not
+additionally require a specific role name or binding domain unless a later
+independent contract introduces such a requirement. This contract does not
+silently add a `List`-role requirement.
+
+**Rule 7 — No new reachability rule.** Collection-anchor validation must not
+invent a new surface-reachability rule. It relies on the already validated
+projection-owned structural document. This contract does not weaken existing
+Static UI IR validation.
+
+### Deterministic ordering
+
+Qualified collection anchors must be ordered solely by stable qualified
+target identity. The normative v0 order is: ascending `StaticNodeId` within
+the one bound `StaticDocumentId`/version. Because the set is bound to one
+document version, the document identity does not need to be repeated as a
+per-entry sort component.
+
+Forbidden ordering sources:
+
+- authored declaration order;
+- `Vec` insertion order;
+- `HashMap` or `HashSet` iteration;
+- source byte order as final identity order;
+- role name;
+- `CollectionKey`;
+- patch order;
+- runtime discovery order;
+- backend order;
+- host order;
+- pointer address.
+
+Qualification must produce the same ordered set for equivalent declarations
+regardless of authored declaration order. This contract does not freeze a
+Rust collection type.
+
+### Diagnostic ownership
+
+The declaration diagnostics belong to `prom-ui` projection qualification.
+They are not Shell Player `SPV0_*` diagnostics. The following stable codes
+are frozen:
+
+| Code | Class |
+| --- | --- |
+| `CAD_MISSING_TARGET_NODE` | An authored declaration target does not resolve to a node in the same `ProjectionSourceDocument`. |
+| `CAD_DUPLICATE_DECLARATION` | The same qualified static node is declared more than once. |
+| `CAD_MISSING_STATIC_NODE` | A qualified declaration references a node absent from the validated `StaticUiDocument`. |
+| `CAD_DOCUMENT_VERSION_MISMATCH` | Declarations and the target Static UI document disagree on `StaticDocumentId`, `Revision`, or `Epoch`. |
+
+Diagnostic ordering must be deterministic. Conceptual ordering is consistent
+with the existing diagnostic-coordinate posture: source provenance when
+present, then stable diagnostic code, then primary stable node identity, then
+secondary coordinate. Exact Rust diagnostic structs and field layouts remain
+unresolved.
+
+Any declaration diagnostic means: no `QualifiedCollectionAnchorDeclarations`
+value, no `PreparedActiveProjectionTargets` value from that input, and no
+runtime catalog construction from that input. No partial declaration set may
+escape.
+
+`CAD_*` diagnostics are not mapped to `SPV0_INVALID_TARGET`. `SPV0_INVALID_TARGET`
+remains a stage-5 runtime membership failure after a valid catalog already
+exists; `CAD_*` diagnostics are projection-qualification-time failures that
+occur before any catalog exists.
+
+### Resource posture
+
+The v0 declaration set is structurally bounded by the number of unique nodes
+in the validated static document. Therefore:
+
+```text
+qualified declaration count <= validated static node count
+```
+
+This contract does not introduce a separate host resource limit, an
+arbitrary declaration quota, a new `ShellLifecycleLimits` field, or a stage-4
+diagnostic. A future smaller operational limit requires a separate contract.
+Representation-size overflow and allocation strategy remain unresolved.
+
+### `PreparedActiveProjectionTargets` integration
+
+`PreparedActiveProjectionTargets` obtains `CollectionAnchor` coordinates only
+from `QualifiedCollectionAnchorDeclarations`. No other source may contribute
+`CollectionAnchor` membership. The collection-anchor coordinates retain the
+qualified deterministic order. `PreparedActiveProjectionTargets` may combine
+the qualified collection anchors with independently qualified `NodeAnchor`
+and `BindingAnchor` evidence, but it must not reinterpret or regenerate
+collection declarations.
+
+Absence rules:
+
+- no explicit declaration means no `CollectionAnchor` membership;
+- a later collection patch targeting that node means stage-5 membership
+  rejection once the runtime catalog exists;
+- a `CollectionKey` or collection patch operation never creates declaration
+  evidence.
+
+This contract does not authorize implementation of
+`PreparedActiveProjectionTargets`, `ActiveProjectionTargetCatalog`, or the
+stage-5 evaluator.
+
+### Mutation and lifetime posture
+
+Declarations belong to one projection structural version. They are not
+mutated by `ProjectionPatch`, `ShellSession`, `ActiveProjectionTargetCatalog`,
+collection inserts, collection updates, collection removals, collection
+moves, renderer activity, backend activity, focus state, or event handling.
+
+Changing declarations requires a newly qualified projection structural
+version. A patch must not add or remove `CollectionAnchor` declarations. A
+new activation may transport a new prepared declaration set only from a
+newly qualified projection version.
+
+### Authority boundaries
+
+```text
+CollectionAnchor declaration != Semantic collection truth
+CollectionAnchor declaration != collection contents
+CollectionAnchor declaration != action authorization
+CollectionAnchor declaration != patch admission
+CollectionAnchor declaration != patch application
+CollectionAnchor declaration != renderer command
+CollectionAnchor declaration != backend resource
+CollectionAnchor declaration != runtime discovery
+CollectionAnchor declaration != bundle trust
+```
+
+Declaration qualification does not load a bundle, activate a bundle, create
+a `ShellSession`, construct the runtime catalog, validate replay
+compatibility, apply a patch, advance the replay cursor, calculate candidate
+state, authorize effects, or move Gate D.
+
+### Explicitly unresolved
+
+The following remain unresolved and unauthorized by this section:
+
+- Projection Source grammar syntax;
+- parser tokens;
+- source AST field names;
+- Rust declaration type names;
+- Rust declaration-set type names;
+- module paths;
+- field layouts;
+- constructors;
+- visibility;
+- public API;
+- public re-exports;
+- serialization;
+- ABI;
+- canonical byte format;
+- source-to-static mapping representation;
+- diagnostic Rust representation;
+- storage collection;
+- allocation strategy;
+- representation-size overflow behavior;
+- prepared activation producer;
+- runtime catalog implementation;
+- `ActivatedShellSessionContext` expansion;
+- stage-5 evaluator;
+- stage-5/stage-6 orchestration.
+
+This section does not claim implementation readiness for any of the above.

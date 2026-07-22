@@ -1,42 +1,51 @@
 task:
-  id: SHELL-PLAYER-STAGE5-PREPARED-HANDOFF-CONTRACT
-  title: freeze stage-5 prepared handoff
+  id: COLLECTION-ANCHOR-DECLARATION-CONTRACT
+  title: freeze explicit CollectionAnchor declarations
   type: documentation
   mode: active
 
 intent:
-  summary: "docs(ui): freeze stage-5 prepared handoff"
+  summary: "docs(ui): freeze collection-anchor declarations"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
+    - docs/spec/ui/projection_source_model.md
     - docs/spec/ui/shell_player_session_state_v0.md
 
 authorization:
-  prepared_handoff_ownership_contract: true
-  manifest_capsule_concept: true
-  activation_target_evidence_concept: true
-  runtime_owned_catalog_decision: true
-  collection_anchor_source_requirement: true
-  public_bridge_stability_policy: true
-  public_api_guard_requirement: true
-  count_coherence_clarification: true
-  testability_boundary_clarification: true
+  collection_anchor_declaration_ownership: true
+  collection_anchor_identity_contract: true
+  collection_anchor_validation_contract: true
+  collection_anchor_ordering_contract: true
+  collection_anchor_diagnostic_contract: true
+  prepared_activation_collection_source_contract: true
+  shell_player_cross_reference_update: true
 
   rust_implementation: false
+  projection_source_ast_change: false
+  projection_source_parser_change: false
+  projection_source_grammar_change: false
+  static_ir_change: false
+  binding_graph_change: false
+  projection_patch_change: false
   public_api: false
   doc_hidden_pub_additions: false
   public_api_guard_changes: false
   snapshot_changes: false
-  projection_patch_visibility_changes: false
   new_crate: false
+  dependency_changes: false
   new_cargo_feature: false
-  manifest_implementation: false
-  activation_target_implementation: false
+  collection_anchor_representation: false
+  collection_anchor_lowering: false
+  collection_anchor_validation_implementation: false
+  prepared_transition_implementation: false
+  prepared_activation_implementation: false
   catalog_implementation: false
+  activated_context_expansion: false
+  stage4_integration: false
   stage5_evaluator: false
   stage6_integration: false
-  patch_traversal_implementation: false
   patch_application: false
   cursor_advancement: false
   candidate_state: false
@@ -48,30 +57,22 @@ authorization:
 
 constraints:
   docs_only: true
-  single_normative_source: true
-  no_second_stage5_document: true
-  no_rust_struct_frozen: true
-  no_serialization_frozen: true
-  no_rust_collection_type_frozen: true
-  no_hashmap_or_hashset_required: true
-  map_iteration_order_forbidden: true
-  no_diagnostic_codes_added: true
-  existing_diagnostic_classes_only: true
-  no_orchestration_authorized: true
-  stage_order_1_through_10_preserved: true
-  stage4_precedes_target_traversal: true
-  stage5_precedes_replay_compatibility: true
-  no_partial_commit: true
-  diagnostic_cap_is_output_shaping_only: true
-  manifest_and_catalog_remain_separate: true
-  prepared_transition_is_transition_scoped: true
-  prepared_activation_is_activation_scoped: true
-  catalog_is_session_scoped: true
-  collection_anchor_declaration_source_required: true
-  collection_anchor_implementation_blocked: true
-  no_reverse_dependency_authorized: true
-  no_new_shared_crate_authorized: true
-  guard_coverage_same_pr_as_bridge: true
-  no_standalone_baseline_guard_pr: true
-  no_test_fixtures_feature_authorized: true
+  single_normative_home_for_declaration_contract: true
+  no_second_specification: true
+  projection_owned_declarations: true
+  explicit_declaration_only: true
+  collection_key_is_not_anchor_identity: true
+  patch_operation_is_not_declaration: true
+  role_text_is_not_declaration: true
+  binding_domain_is_not_declaration: true
+  caller_assertion_is_not_declaration: true
+  stable_node_identity_required: true
+  deterministic_order_required: true
+  duplicate_declaration_rejected: true
+  missing_node_rejected: true
+  no_partial_declaration_set: true
+  prepared_activation_consumes_qualified_set_only: true
+  catalog_remains_runtime_owned: true
+  no_semantic_authority: true
+  gate_d: closed
   fail_closed: true

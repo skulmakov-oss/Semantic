@@ -720,12 +720,14 @@ from:
 - a caller assertion;
 - map iteration order.
 
-The current Rust representation of explicit collection-anchor declarations
-does not exist and remains unresolved. Therefore, `PreparedActiveProjectionTargets`
-implementation is not authorized until an explicit collection-anchor
-declaration substrate is separately frozen and available. This does not block
-the ownership contract in 7.1.9.1; it blocks catalog implementation
-specifically.
+The normative explicit `CollectionAnchor` declaration contract is frozen in
+`docs/spec/ui/projection_source_model.md`. Its Rust representation, source
+syntax, lowering, qualification implementation, prepared-activation
+integration, and catalog integration remain unresolved and unauthorized.
+Therefore, `PreparedActiveProjectionTargets` implementation is not authorized
+until the explicit declaration representation and qualification path exist.
+This does not block the ownership contract in 7.1.9.1; it blocks catalog
+implementation specifically.
 
 ##### 7.1.9.6 Runtime-owned catalog responsibility
 
@@ -911,7 +913,9 @@ The following remain unresolved:
 - snapshot filenames;
 - prepared transition producer entry point;
 - prepared activation producer entry point;
-- explicit collection-anchor declaration representation;
+- explicit `CollectionAnchor` declaration Rust representation;
+- explicit `CollectionAnchor` source/lowering implementation;
+- qualified declaration-set implementation;
 - catalog storage;
 - catalog lookup algorithm;
 - view traits;
@@ -1159,7 +1163,9 @@ The following remain unresolved:
 - `ActiveProjectionTargetCatalog` Rust storage structure and lookup algorithm;
 - `PreparedProjectionPatchTargets` Rust representation and producer entry point;
 - `PreparedActiveProjectionTargets` Rust representation and producer entry point;
-- explicit `CollectionAnchor` declaration substrate;
+- explicit `CollectionAnchor` declaration Rust representation;
+- explicit `CollectionAnchor` source/lowering implementation;
+- qualified declaration-set implementation;
 - public API guard test implementation and snapshot filenames for the future
   stage-5 bridge;
 - stage-5 stable-target evaluator implementation;
@@ -1219,6 +1225,7 @@ handoff atomicity = FROZEN
 declared/actual count coherence = FROZEN
 public API guard policy (same-PR-as-bridge) = FROZEN
 testability boundary = FROZEN
+explicit CollectionAnchor declaration contract = FROZEN
 
 replay-cursor compatibility implementation = NOT AUTHORIZED
 replay-cursor advancement = NOT AUTHORIZED
@@ -1229,7 +1236,7 @@ OrderedStableTargetManifest Rust representation = NOT AUTHORIZED
 ActiveProjectionTargetCatalog Rust representation = NOT AUTHORIZED
 PreparedProjectionPatchTargets implementation = NOT AUTHORIZED
 PreparedActiveProjectionTargets implementation = NOT AUTHORIZED
-explicit CollectionAnchor declaration substrate = NOT AUTHORIZED
+explicit CollectionAnchor declaration implementation = NOT AUTHORIZED
 any public stage-5 bridge item = NOT AUTHORIZED
 public API guard change = NOT AUTHORIZED
 cross-crate ProjectionPatch visibility change = NOT AUTHORIZED
