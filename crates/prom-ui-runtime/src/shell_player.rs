@@ -1,14 +1,16 @@
-//! This is a lifecycle-only Shell Player seed.
-//! It is not the complete Shell Player implementation.
-//! It owns no Semantic truth or authority.
+//! Shell Player: local projection playback for one activated session.
+//! It owns no Semantic truth or authority (see module invariants in
+//! `docs/spec/ui/shell_player_session_state_v0.md`).
 
 use alloc::vec::Vec;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ShellSessionId(pub(crate) u64);
+use crate::active_projection_target_catalog::ActiveProjectionTargetCatalog;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShellLifecycle {
+pub struct ShellSessionId(pub u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellLifecycle {
     Created,
     Active,
     Suspended,
@@ -16,7 +18,7 @@ pub(crate) enum ShellLifecycle {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShellLifecycleCommand {
+pub enum ShellLifecycleCommand {
     Activate,
     Suspend,
     Resume,
@@ -24,54 +26,56 @@ pub(crate) enum ShellLifecycleCommand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShellLifecycleStimulus {
+pub enum ShellLifecycleStimulus {
     Command(ShellLifecycleCommand),
     ExplicitNoOp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ShellLifecycleLimits {
-    pub(crate) max_transition_stimulus_bytes: usize,
-    pub(crate) max_diagnostics_per_transition: usize,
-    pub(crate) max_patches_per_transition: usize,
+pub struct ShellLifecycleLimits {
+    pub max_transition_stimulus_bytes: usize,
+    pub max_diagnostics_per_transition: usize,
+    pub max_patches_per_transition: usize,
+    pub max_target_references_per_transition: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivatedShellSessionContext {
     pub(crate) session_id: ShellSessionId,
     pub(crate) limits: ShellLifecycleLimits,
+    pub(crate) catalog: ActiveProjectionTargetCatalog,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ProjectionReplayCursor {
+pub enum ProjectionReplayCursor {
     Uninitialized,
     At(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ShellLocalState {
-    pub(crate) session_id: ShellSessionId,
-    pub(crate) lifecycle: ShellLifecycle,
-    pub(crate) replay_cursor: ProjectionReplayCursor,
+pub struct ShellLocalState {
+    pub session_id: ShellSessionId,
+    pub lifecycle: ShellLifecycle,
+    pub replay_cursor: ProjectionReplayCursor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ShellTransitionInput {
-    pub(crate) stimulus: ShellLifecycleStimulus,
-    pub(crate) stimulus_bytes: usize,
+pub struct ShellTransitionInput {
+    pub stimulus: ShellLifecycleStimulus,
+    pub stimulus_bytes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ShellTransitionDisposition {
+pub enum ShellTransitionDisposition {
     Applied,
     NoChange,
     Rejected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ShellDiagnostic {
-    pub(crate) stable_code: &'static str,
-    pub(crate) evaluation_stage: usize,
+pub struct ShellDiagnostic {
+    pub stable_code: &'static str,
+    pub evaluation_stage: usize,
 }
 
 pub(crate) const SPV0_SESSION_MISMATCH: &str = "SPV0_SESSION_MISMATCH";
@@ -79,23 +83,26 @@ pub(crate) const SPV0_INVALID_LIFECYCLE: &str = "SPV0_INVALID_LIFECYCLE";
 pub(crate) const SPV0_SESSION_CLOSED: &str = "SPV0_SESSION_CLOSED";
 pub(crate) const SPV0_RESOURCE_LIMIT_EXCEEDED: &str = "SPV0_RESOURCE_LIMIT_EXCEEDED";
 pub(crate) const SPV0_REPLAY_CURSOR_MISMATCH: &str = "SPV0_REPLAY_CURSOR_MISMATCH";
+pub(crate) const SPV0_INVALID_STIMULUS: &str = "SPV0_INVALID_STIMULUS";
+pub(crate) const SPV0_INVALID_TARGET: &str = "SPV0_INVALID_TARGET";
+pub(crate) const SPV0_STATE_INVARIANT_VIOLATION: &str = "SPV0_STATE_INVARIANT_VIOLATION";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ShellTransitionResult {
-    pub(crate) disposition: ShellTransitionDisposition,
-    pub(crate) state: ShellLocalState,
-    pub(crate) diagnostics: Vec<ShellDiagnostic>,
-    pub(crate) stimulus_bytes: usize,
-    pub(crate) logical_diagnostic_count: usize,
-    pub(crate) emitted_diagnostic_count: usize,
+pub struct ShellTransitionResult {
+    pub disposition: ShellTransitionDisposition,
+    pub state: ShellLocalState,
+    pub diagnostics: Vec<ShellDiagnostic>,
+    pub stimulus_bytes: usize,
+    pub logical_diagnostic_count: usize,
+    pub emitted_diagnostic_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct OrderedProjectionPatchBatchEnvelope {
-    pub(crate) session_id: ShellSessionId,
-    pub(crate) sequence_no: u64,
-    pub(crate) patch_count: usize,
-    pub(crate) stimulus_bytes: usize,
+pub struct OrderedProjectionPatchBatchEnvelope {
+    pub session_id: ShellSessionId,
+    pub sequence_no: u64,
+    pub patch_count: usize,
+    pub stimulus_bytes: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -347,10 +354,69 @@ fn calculate_candidate_lifecycle(
     }
 }
 
+/// Caller-supplied deterministic resource limits for one activated Shell
+/// Player session. Public mirror of [`ShellLifecycleLimits`] used only at
+/// [`create_shell_session`] construction time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellSessionLimits {
+    pub max_transition_stimulus_bytes: usize,
+    pub max_diagnostics_per_transition: usize,
+    pub max_patches_per_transition: usize,
+    pub max_target_references_per_transition: usize,
+}
+
+/// The disposition of one `ProjectionPatch` batch transition through the
+/// complete stages 1-9 pipeline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectionPatchApplicationDisposition {
+    /// The batch was accepted and its effects were committed.
+    Applied,
+    /// The batch was valid but produced no observable change (an empty
+    /// batch never establishes or consumes a replay coordinate).
+    NoChange,
+    /// The batch was rejected. The complete previous local projection
+    /// state and replay cursor are preserved unchanged.
+    Rejected,
+}
+
+/// The result of one [`ShellSession::apply_projection_patch_batch`] call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectionPatchApplicationResult {
+    pub disposition: ProjectionPatchApplicationDisposition,
+    pub diagnostics: Vec<ShellDiagnostic>,
+    pub logical_diagnostic_count: usize,
+    pub emitted_diagnostic_count: usize,
+    pub replay_cursor: ProjectionReplayCursor,
+}
+
 #[derive(Debug)]
-pub(crate) struct ShellSession {
+pub struct ShellSession {
     context: ActivatedShellSessionContext,
     state: ShellLocalState,
+    local_projection: prom_ui::shell_bridge::LocalProjectionStateHandle,
+}
+
+/// Creates and activates one Shell Player session from caller-supplied
+/// limits and one activation-target snapshot (contract section 7.1.9.6).
+/// The returned session's [`ActiveProjectionTargetCatalog`] is constructed
+/// exactly once, here, from `activation_snapshot`, and is immutable for the
+/// complete session lifetime.
+pub fn create_shell_session(
+    session_id: u64,
+    limits: ShellSessionLimits,
+    activation_snapshot: &prom_ui::shell_bridge::ActivationTargetSnapshot,
+) -> ShellSession {
+    let context = ActivatedShellSessionContext {
+        session_id: ShellSessionId(session_id),
+        limits: ShellLifecycleLimits {
+            max_transition_stimulus_bytes: limits.max_transition_stimulus_bytes,
+            max_diagnostics_per_transition: limits.max_diagnostics_per_transition,
+            max_patches_per_transition: limits.max_patches_per_transition,
+            max_target_references_per_transition: limits.max_target_references_per_transition,
+        },
+        catalog: ActiveProjectionTargetCatalog::from_snapshot(activation_snapshot),
+    };
+    ShellSession::new(context)
 }
 
 impl ShellSession {
@@ -360,14 +426,53 @@ impl ShellSession {
             lifecycle: ShellLifecycle::Created,
             replay_cursor: ProjectionReplayCursor::Uninitialized,
         };
-        Self { context, state }
+        Self {
+            context,
+            state,
+            local_projection: prom_ui::shell_bridge::initial_local_projection_state(),
+        }
     }
 
-    pub(crate) fn state(&self) -> &ShellLocalState {
+    pub fn state(&self) -> &ShellLocalState {
         &self.state
     }
 
-    pub(crate) fn apply(&mut self, input: ShellTransitionInput) -> ShellTransitionResult {
+    pub fn lifecycle(&self) -> ShellLifecycle {
+        self.state.lifecycle
+    }
+
+    pub fn replay_cursor(&self) -> ProjectionReplayCursor {
+        self.state.replay_cursor
+    }
+
+    /// Reads the current committed binding value at `(node, slot)`, or
+    /// `None` if unset.
+    pub fn binding_value(
+        &self,
+        node: u64,
+        slot: u32,
+    ) -> Option<prom_ui::shell_bridge::BridgeValue> {
+        prom_ui::shell_bridge::binding_value(&self.local_projection, node, slot)
+    }
+
+    /// Reads the current committed availability of `node`, or `None` if
+    /// unset.
+    pub fn node_availability(
+        &self,
+        node: u64,
+    ) -> Option<prom_ui::shell_bridge::BridgeAvailability> {
+        prom_ui::shell_bridge::node_availability(&self.local_projection, node)
+    }
+
+    /// Reads the current committed ordered entries of `collection`.
+    pub fn collection_entries(
+        &self,
+        collection: u64,
+    ) -> Vec<(u64, prom_ui::shell_bridge::BridgeValue)> {
+        prom_ui::shell_bridge::collection_entries(&self.local_projection, collection)
+    }
+
+    pub fn apply(&mut self, input: ShellTransitionInput) -> ShellTransitionResult {
         let result = evaluate_lifecycle_transition(&self.context, &self.state, input);
 
         if result.disposition == ShellTransitionDisposition::Applied {
@@ -382,6 +487,154 @@ impl ShellSession {
         envelope: OrderedProjectionPatchBatchEnvelope,
     ) -> ProjectionPatchPreflightResult {
         evaluate_projection_patch_envelope_preflight(&self.context, &self.state, envelope)
+    }
+
+    /// Runs the complete stages 1-9 `ProjectionPatch` batch transition:
+    /// stages 1-4 (session/lifecycle/envelope/resource preflight, reusing
+    /// [`Self::preflight_projection_patch_envelope`]), stage 4b (declared
+    /// vs actual target-reference count coherence, contract section
+    /// 7.1.9.8), stage 4c (target-reference resource limit), stage 5
+    /// (stable-target membership against the immutable session catalog,
+    /// contract section 7.1.5), stage 6 (replay-cursor compatibility,
+    /// reusing [`evaluate_projection_patch_replay_compatibility`]), stage 7
+    /// (candidate local-projection-state calculation via
+    /// `prom_ui::shell_bridge::apply_admitted_patch_batch`), and stage 9
+    /// (atomic commit).
+    ///
+    /// On any rejection, the complete previous local projection state and
+    /// replay cursor are preserved: this method does not mutate `self`
+    /// until every stage has succeeded.
+    pub fn apply_projection_patch_batch(
+        &mut self,
+        envelope: OrderedProjectionPatchBatchEnvelope,
+        target_reference_count: usize,
+        manifest: &prom_ui::shell_bridge::PreparedManifestSnapshot,
+        batch: &prom_ui::shell_bridge::AdmittedProjectionPatchBatch,
+    ) -> ProjectionPatchApplicationResult {
+        let cap = self.context.limits.max_diagnostics_per_transition;
+
+        // Stages 1-4: session identity, lifecycle eligibility, envelope
+        // shape, and declared resource bounds (existing pure evaluator).
+        let preflight = self.preflight_projection_patch_envelope(envelope);
+        if preflight.disposition == ProjectionPatchPreflightDisposition::Rejected {
+            return ProjectionPatchApplicationResult {
+                disposition: ProjectionPatchApplicationDisposition::Rejected,
+                diagnostics: preflight.diagnostics,
+                logical_diagnostic_count: preflight.logical_diagnostic_count,
+                emitted_diagnostic_count: preflight.emitted_diagnostic_count,
+                replay_cursor: self.state.replay_cursor,
+            };
+        }
+
+        // Stage 4b: declared/actual target-reference count coherence.
+        if target_reference_count != manifest.target_reference_count {
+            return self.reject_patch_batch(SPV0_INVALID_STIMULUS, 4, cap);
+        }
+
+        // Stage 4c: target-reference resource limit.
+        if target_reference_count > self.context.limits.max_target_references_per_transition {
+            return self.reject_patch_batch(SPV0_RESOURCE_LIMIT_EXCEEDED, 4, cap);
+        }
+
+        // Stage 5: stable-target membership, using only the immutable
+        // session catalog. Read-only; does not mutate local state.
+        let mut invalid_targets = Vec::new();
+        for entry in &manifest.entries {
+            let valid = match entry.role {
+                prom_ui::shell_bridge::BridgeTargetRole::Node { node } => {
+                    self.context.catalog.contains_node(node)
+                }
+                prom_ui::shell_bridge::BridgeTargetRole::Binding { node, slot } => {
+                    self.context.catalog.contains_binding(node, slot)
+                }
+                prom_ui::shell_bridge::BridgeTargetRole::Collection { collection } => {
+                    self.context.catalog.contains_collection(collection)
+                }
+            };
+            if !valid {
+                invalid_targets.push(ShellDiagnostic {
+                    stable_code: SPV0_INVALID_TARGET,
+                    evaluation_stage: 5,
+                });
+            }
+        }
+        if !invalid_targets.is_empty() {
+            let (diagnostics, logical_diagnostic_count, emitted_diagnostic_count) =
+                apply_diagnostic_cap(cap, invalid_targets);
+            return ProjectionPatchApplicationResult {
+                disposition: ProjectionPatchApplicationDisposition::Rejected,
+                diagnostics,
+                logical_diagnostic_count,
+                emitted_diagnostic_count,
+                replay_cursor: self.state.replay_cursor,
+            };
+        }
+
+        // Stage 6: replay-cursor compatibility (existing pure evaluator).
+        let compatibility =
+            evaluate_projection_patch_replay_compatibility(self.state.replay_cursor, envelope, cap);
+        if compatibility.disposition == ProjectionReplayCompatibilityDisposition::Mismatch {
+            return ProjectionPatchApplicationResult {
+                disposition: ProjectionPatchApplicationDisposition::Rejected,
+                diagnostics: compatibility.diagnostics,
+                logical_diagnostic_count: compatibility.logical_diagnostic_count,
+                emitted_diagnostic_count: compatibility.emitted_diagnostic_count,
+                replay_cursor: self.state.replay_cursor,
+            };
+        }
+
+        // Stage 7: deterministic candidate-state calculation, without
+        // committing. Structural application failures (e.g. a collection
+        // operation targeting an already-present or missing key) are
+        // candidate-state invariant violations.
+        let candidate = match prom_ui::shell_bridge::apply_admitted_patch_batch(
+            &self.local_projection,
+            batch,
+        ) {
+            Ok(candidate) => candidate,
+            Err(_) => return self.reject_patch_batch(SPV0_STATE_INVARIANT_VIOLATION, 8, cap),
+        };
+
+        // Stage 9: atomic commit. A zero-patch batch does not establish or
+        // consume a replay coordinate (contract section 7.2).
+        let disposition = if envelope.patch_count == 0 {
+            ProjectionPatchApplicationDisposition::NoChange
+        } else {
+            self.state.replay_cursor = ProjectionReplayCursor::At(envelope.sequence_no);
+            ProjectionPatchApplicationDisposition::Applied
+        };
+        self.local_projection = candidate;
+
+        ProjectionPatchApplicationResult {
+            disposition,
+            diagnostics: Vec::new(),
+            logical_diagnostic_count: 0,
+            emitted_diagnostic_count: 0,
+            replay_cursor: self.state.replay_cursor,
+        }
+    }
+
+    fn reject_patch_batch(
+        &self,
+        stable_code: &'static str,
+        evaluation_stage: usize,
+        cap: usize,
+    ) -> ProjectionPatchApplicationResult {
+        let (diagnostics, logical_diagnostic_count, emitted_diagnostic_count) =
+            apply_diagnostic_cap(
+                cap,
+                alloc::vec![ShellDiagnostic {
+                    stable_code,
+                    evaluation_stage,
+                }],
+            );
+        ProjectionPatchApplicationResult {
+            disposition: ProjectionPatchApplicationDisposition::Rejected,
+            diagnostics,
+            logical_diagnostic_count,
+            emitted_diagnostic_count,
+            replay_cursor: self.state.replay_cursor,
+        }
     }
 }
 
@@ -519,7 +772,7 @@ mod tests {
     #[test]
     fn test_cursor_1_new_session_uninitialized() {
         let ctx = make_ctx(10, 100);
-        let session = ShellSession::new(ctx);
+        let session = ShellSession::new(ctx.clone());
         assert_eq!(session.state().session_id, ctx.session_id);
         assert_eq!(session.state().lifecycle, ShellLifecycle::Created);
         assert_eq!(
@@ -724,7 +977,7 @@ mod tests {
     #[test]
     fn test_cursor_12_independent_session_determinism() {
         let ctx = make_ctx(10, 100);
-        let mut session_a = ShellSession::new(ctx);
+        let mut session_a = ShellSession::new(ctx.clone());
         let mut session_b = ShellSession::new(ctx);
         let res_a = session_a.apply(cmd(ShellLifecycleCommand::Activate, 10));
         let res_b = session_b.apply(cmd(ShellLifecycleCommand::Activate, 10));
@@ -756,7 +1009,7 @@ mod tests {
     #[test]
     fn test_cursor_13_context_remains_cursor_free() {
         let ctx = make_ctx(10, 100);
-        let mut session = ShellSession::new(ctx);
+        let mut session = ShellSession::new(ctx.clone());
         session.apply(cmd(ShellLifecycleCommand::Activate, 10));
         assert_eq!(session.context, ctx); // Context structural equality is preserved
     }
@@ -768,7 +1021,9 @@ mod tests {
                 max_transition_stimulus_bytes: max_bytes,
                 max_diagnostics_per_transition: cap,
                 max_patches_per_transition: 64,
+                max_target_references_per_transition: 64,
             },
+            catalog: ActiveProjectionTargetCatalog::empty(),
         }
     }
 
@@ -1028,7 +1283,7 @@ mod tests {
     #[test]
     fn test_owner_constructor() {
         let ctx = make_ctx(10, 100);
-        let session = ShellSession::new(ctx);
+        let session = ShellSession::new(ctx.clone());
         assert_eq!(session.state().lifecycle, ShellLifecycle::Created);
         assert_eq!(session.state().session_id, ctx.session_id);
     }
@@ -1144,7 +1399,7 @@ mod tests {
     #[test]
     fn test_owner_immutable_context() {
         let original_ctx = make_ctx(10, 100);
-        let mut session = ShellSession::new(original_ctx);
+        let mut session = ShellSession::new(original_ctx.clone());
 
         session.apply(cmd(ShellLifecycleCommand::Activate, 10));
         session.apply(cmd(ShellLifecycleCommand::Suspend, 10));
@@ -1156,7 +1411,7 @@ mod tests {
     #[test]
     fn test_owner_deterministic_sequence() {
         let ctx = make_ctx(10, 100);
-        let mut session1 = ShellSession::new(ctx);
+        let mut session1 = ShellSession::new(ctx.clone());
         let mut session2 = ShellSession::new(ctx);
 
         let sequence = alloc::vec![
@@ -1575,7 +1830,7 @@ mod tests {
         session.apply(cmd(ShellLifecycleCommand::Activate, 10));
 
         let original_state = *session.state();
-        let original_context = session.context;
+        let original_context = session.context.clone();
 
         // Accepted preflight
         let env_accepted = OrderedProjectionPatchBatchEnvelope {
@@ -1603,7 +1858,7 @@ mod tests {
     #[test]
     fn test_preflight_15_determinism() {
         let ctx = make_ctx(10, 100);
-        let mut session_a = ShellSession::new(ctx);
+        let mut session_a = ShellSession::new(ctx.clone());
         let mut session_b = ShellSession::new(ctx);
         session_a.apply(cmd(ShellLifecycleCommand::Activate, 10));
         session_b.apply(cmd(ShellLifecycleCommand::Activate, 10));
@@ -2043,5 +2298,408 @@ mod tests {
             compat_res.disposition,
             ProjectionReplayCompatibilityDisposition::Mismatch
         );
+    }
+
+    // ---- stages 1-9 orchestration (`apply_projection_patch_batch`) ------
+
+    fn orchestration_limits(max_target_references_per_transition: usize) -> ShellSessionLimits {
+        ShellSessionLimits {
+            max_transition_stimulus_bytes: 1000,
+            max_diagnostics_per_transition: 10,
+            max_patches_per_transition: 64,
+            max_target_references_per_transition,
+        }
+    }
+
+    fn make_active_session() -> ShellSession {
+        let snapshot = prom_ui::shell_bridge::demo_activation_snapshot();
+        let mut session = create_shell_session(1, orchestration_limits(64), &snapshot);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+        session
+    }
+
+    fn outer_envelope(sequence_no: u64, patch_count: usize) -> OrderedProjectionPatchBatchEnvelope {
+        OrderedProjectionPatchBatchEnvelope {
+            session_id: ShellSessionId(1),
+            sequence_no,
+            patch_count,
+            stimulus_bytes: 50,
+        }
+    }
+
+    /// A batch touching two targets declared in `demo_activation_snapshot`:
+    /// the label binding (node 2, slot 0) and the status node (node 3).
+    fn valid_batch_touching_declared_targets(
+        seq: u64,
+    ) -> (
+        prom_ui::shell_bridge::AdmittedProjectionPatchBatch,
+        prom_ui::shell_bridge::PreparedManifestSnapshot,
+    ) {
+        let ops = alloc::vec![
+            prom_ui::shell_bridge::BridgePatchOperation::SetBindingValue {
+                node: 2,
+                slot: 0,
+                value: prom_ui::shell_bridge::BridgeValue::Text("hi".into()),
+            },
+            prom_ui::shell_bridge::BridgePatchOperation::SetNodeAvailability {
+                node: 3,
+                availability: prom_ui::shell_bridge::BridgeAvailability::Hidden,
+            },
+        ];
+        let envelope = prom_ui::shell_bridge::BridgePatchEnvelope {
+            patch_id: seq,
+            stream_id: 1,
+            document_id: 1,
+            previous_revision: seq - 1,
+            revision: seq,
+            epoch: 1,
+            sequence: seq,
+        };
+        let batch = prom_ui::shell_bridge::admit_projection_patch_batch(envelope, ops)
+            .expect("valid batch");
+        let manifest = prom_ui::shell_bridge::prepared_manifest_snapshot(&batch).expect("derives");
+        (batch, manifest)
+    }
+
+    #[test]
+    fn test_orchestration_1_valid_batch_applies_and_commits() {
+        let mut session = make_active_session();
+        let (batch, manifest) = valid_batch_touching_declared_targets(1);
+
+        let result = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest.target_reference_count,
+            &manifest,
+            &batch,
+        );
+
+        assert_eq!(
+            result.disposition,
+            ProjectionPatchApplicationDisposition::Applied
+        );
+        assert_eq!(result.replay_cursor, ProjectionReplayCursor::At(1));
+        assert_eq!(session.replay_cursor(), ProjectionReplayCursor::At(1));
+        assert_eq!(
+            session.binding_value(2, 0),
+            Some(prom_ui::shell_bridge::BridgeValue::Text("hi".into()))
+        );
+        assert_eq!(
+            session.node_availability(3),
+            Some(prom_ui::shell_bridge::BridgeAvailability::Hidden)
+        );
+    }
+
+    #[test]
+    fn test_orchestration_2_undeclared_target_rejected() {
+        let mut session = make_active_session();
+        let ops = alloc::vec![
+            prom_ui::shell_bridge::BridgePatchOperation::SetNodeAvailability {
+                node: 999,
+                availability: prom_ui::shell_bridge::BridgeAvailability::Hidden,
+            }
+        ];
+        let envelope = prom_ui::shell_bridge::BridgePatchEnvelope {
+            patch_id: 1,
+            stream_id: 1,
+            document_id: 1,
+            previous_revision: 0,
+            revision: 1,
+            epoch: 1,
+            sequence: 1,
+        };
+        let batch =
+            prom_ui::shell_bridge::admit_projection_patch_batch(envelope, ops).expect("valid");
+        let manifest = prom_ui::shell_bridge::prepared_manifest_snapshot(&batch).expect("derives");
+
+        let result = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest.target_reference_count,
+            &manifest,
+            &batch,
+        );
+
+        assert_eq!(
+            result.disposition,
+            ProjectionPatchApplicationDisposition::Rejected
+        );
+        assert_eq!(result.diagnostics[0].stable_code, SPV0_INVALID_TARGET);
+        assert_eq!(result.diagnostics[0].evaluation_stage, 5);
+        assert_eq!(result.replay_cursor, ProjectionReplayCursor::Uninitialized);
+        assert_eq!(
+            session.replay_cursor(),
+            ProjectionReplayCursor::Uninitialized
+        );
+        assert_eq!(session.node_availability(999), None);
+    }
+
+    #[test]
+    fn test_orchestration_3_declared_actual_count_mismatch_rejected() {
+        let mut session = make_active_session();
+        let (batch, manifest) = valid_batch_touching_declared_targets(1);
+        let wrong_declared_count = manifest.target_reference_count + 1;
+
+        let result = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            wrong_declared_count,
+            &manifest,
+            &batch,
+        );
+
+        assert_eq!(
+            result.disposition,
+            ProjectionPatchApplicationDisposition::Rejected
+        );
+        assert_eq!(result.diagnostics[0].stable_code, SPV0_INVALID_STIMULUS);
+        assert_eq!(result.diagnostics[0].evaluation_stage, 4);
+        assert_eq!(
+            session.replay_cursor(),
+            ProjectionReplayCursor::Uninitialized
+        );
+    }
+
+    #[test]
+    fn test_orchestration_4_target_reference_resource_limit_rejected() {
+        let snapshot = prom_ui::shell_bridge::demo_activation_snapshot();
+        let mut session = create_shell_session(1, orchestration_limits(1), &snapshot);
+        session.apply(cmd(ShellLifecycleCommand::Activate, 10));
+
+        let (batch, manifest) = valid_batch_touching_declared_targets(1); // 2 target refs > limit of 1
+        let result = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest.target_reference_count,
+            &manifest,
+            &batch,
+        );
+
+        assert_eq!(
+            result.disposition,
+            ProjectionPatchApplicationDisposition::Rejected
+        );
+        assert_eq!(
+            result.diagnostics[0].stable_code,
+            SPV0_RESOURCE_LIMIT_EXCEEDED
+        );
+        assert_eq!(result.diagnostics[0].evaluation_stage, 4);
+    }
+
+    #[test]
+    fn test_orchestration_5_replay_cursor_mismatch_rejected_preserves_committed_state() {
+        let mut session = make_active_session();
+        let (batch1, manifest1) = valid_batch_touching_declared_targets(1);
+        let result1 = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest1.target_reference_count,
+            &manifest1,
+            &batch1,
+        );
+        assert_eq!(
+            result1.disposition,
+            ProjectionPatchApplicationDisposition::Applied
+        );
+        assert_eq!(session.replay_cursor(), ProjectionReplayCursor::At(1));
+
+        // Duplicate sequence_no: not a valid successor of At(1).
+        let (batch2, manifest2) = valid_batch_touching_declared_targets(1);
+        let result2 = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest2.target_reference_count,
+            &manifest2,
+            &batch2,
+        );
+
+        assert_eq!(
+            result2.disposition,
+            ProjectionPatchApplicationDisposition::Rejected
+        );
+        assert_eq!(
+            result2.diagnostics[0].stable_code,
+            SPV0_REPLAY_CURSOR_MISMATCH
+        );
+        assert_eq!(result2.diagnostics[0].evaluation_stage, 6);
+        assert_eq!(session.replay_cursor(), ProjectionReplayCursor::At(1));
+        assert_eq!(
+            session.binding_value(2, 0),
+            Some(prom_ui::shell_bridge::BridgeValue::Text("hi".into()))
+        );
+    }
+
+    #[test]
+    fn test_orchestration_6_structural_application_failure_preserves_committed_state() {
+        let mut session = make_active_session();
+        let insert_ops = alloc::vec![
+            prom_ui::shell_bridge::BridgePatchOperation::CollectionInsert {
+                collection: 4,
+                key: 10,
+                before: None,
+                value: prom_ui::shell_bridge::BridgeValue::Unsigned(1),
+            }
+        ];
+        let env1 = prom_ui::shell_bridge::BridgePatchEnvelope {
+            patch_id: 1,
+            stream_id: 1,
+            document_id: 1,
+            previous_revision: 0,
+            revision: 1,
+            epoch: 1,
+            sequence: 1,
+        };
+        let batch1 =
+            prom_ui::shell_bridge::admit_projection_patch_batch(env1, insert_ops).expect("valid");
+        let manifest1 =
+            prom_ui::shell_bridge::prepared_manifest_snapshot(&batch1).expect("derives");
+        let result1 = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest1.target_reference_count,
+            &manifest1,
+            &batch1,
+        );
+        assert_eq!(
+            result1.disposition,
+            ProjectionPatchApplicationDisposition::Applied
+        );
+
+        // Same key, second (independently valid-looking) transition: fails
+        // at candidate-state calculation (stage 7/8), not stage 5.
+        let dup_ops = alloc::vec![
+            prom_ui::shell_bridge::BridgePatchOperation::CollectionInsert {
+                collection: 4,
+                key: 10,
+                before: None,
+                value: prom_ui::shell_bridge::BridgeValue::Unsigned(2),
+            }
+        ];
+        let env2 = prom_ui::shell_bridge::BridgePatchEnvelope {
+            patch_id: 2,
+            stream_id: 1,
+            document_id: 1,
+            previous_revision: 1,
+            revision: 2,
+            epoch: 1,
+            sequence: 2,
+        };
+        let batch2 =
+            prom_ui::shell_bridge::admit_projection_patch_batch(env2, dup_ops).expect("valid");
+        let manifest2 =
+            prom_ui::shell_bridge::prepared_manifest_snapshot(&batch2).expect("derives");
+        let result2 = session.apply_projection_patch_batch(
+            outer_envelope(2, 1),
+            manifest2.target_reference_count,
+            &manifest2,
+            &batch2,
+        );
+
+        assert_eq!(
+            result2.disposition,
+            ProjectionPatchApplicationDisposition::Rejected
+        );
+        assert_eq!(
+            result2.diagnostics[0].stable_code,
+            SPV0_STATE_INVARIANT_VIOLATION
+        );
+        assert_eq!(result2.diagnostics[0].evaluation_stage, 8);
+        assert_eq!(session.replay_cursor(), ProjectionReplayCursor::At(1));
+        assert_eq!(
+            session.collection_entries(4),
+            alloc::vec![(10, prom_ui::shell_bridge::BridgeValue::Unsigned(1))]
+        );
+    }
+
+    #[test]
+    fn test_orchestration_7_committed_state_persists_across_subsequent_queries() {
+        let mut session = make_active_session();
+        let (batch, manifest) = valid_batch_touching_declared_targets(1);
+        session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest.target_reference_count,
+            &manifest,
+            &batch,
+        );
+
+        for _ in 0..3 {
+            assert_eq!(
+                session.binding_value(2, 0),
+                Some(prom_ui::shell_bridge::BridgeValue::Text("hi".into()))
+            );
+            assert_eq!(
+                session.node_availability(3),
+                Some(prom_ui::shell_bridge::BridgeAvailability::Hidden)
+            );
+            assert_eq!(session.replay_cursor(), ProjectionReplayCursor::At(1));
+        }
+    }
+
+    #[test]
+    fn test_orchestration_8_rejection_does_not_block_subsequent_valid_batch() {
+        let mut session = make_active_session();
+        let bad_ops = alloc::vec![
+            prom_ui::shell_bridge::BridgePatchOperation::SetNodeAvailability {
+                node: 999,
+                availability: prom_ui::shell_bridge::BridgeAvailability::Hidden,
+            }
+        ];
+        let bad_envelope = prom_ui::shell_bridge::BridgePatchEnvelope {
+            patch_id: 1,
+            stream_id: 1,
+            document_id: 1,
+            previous_revision: 0,
+            revision: 1,
+            epoch: 1,
+            sequence: 1,
+        };
+        let bad_batch = prom_ui::shell_bridge::admit_projection_patch_batch(bad_envelope, bad_ops)
+            .expect("valid");
+        let bad_manifest =
+            prom_ui::shell_bridge::prepared_manifest_snapshot(&bad_batch).expect("derives");
+        let bad_result = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            bad_manifest.target_reference_count,
+            &bad_manifest,
+            &bad_batch,
+        );
+        assert_eq!(
+            bad_result.disposition,
+            ProjectionPatchApplicationDisposition::Rejected
+        );
+        assert_eq!(
+            session.replay_cursor(),
+            ProjectionReplayCursor::Uninitialized
+        );
+
+        let (good_batch, good_manifest) = valid_batch_touching_declared_targets(1);
+        let good_result = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            good_manifest.target_reference_count,
+            &good_manifest,
+            &good_batch,
+        );
+        assert_eq!(
+            good_result.disposition,
+            ProjectionPatchApplicationDisposition::Applied
+        );
+        assert_eq!(session.replay_cursor(), ProjectionReplayCursor::At(1));
+    }
+
+    #[test]
+    fn test_orchestration_9_determinism() {
+        let (batch, manifest) = valid_batch_touching_declared_targets(1);
+        let mut session_a = make_active_session();
+        let mut session_b = make_active_session();
+
+        let result_a = session_a.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest.target_reference_count,
+            &manifest,
+            &batch,
+        );
+        let result_b = session_b.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            manifest.target_reference_count,
+            &manifest,
+            &batch,
+        );
+
+        assert_eq!(result_a, result_b);
+        assert_eq!(session_a.binding_value(2, 0), session_b.binding_value(2, 0));
+        assert_eq!(session_a.replay_cursor(), session_b.replay_cursor());
     }
 }

@@ -59,11 +59,14 @@ pub mod intent_stream;
 pub mod interaction;
 pub mod layout;
 pub mod layout_rect;
+pub(crate) mod local_projection_state;
 pub mod lowering;
 pub mod minimal_block_layout;
 pub mod model;
+pub(crate) mod prepared_active_projection_targets;
 pub mod prepared_effect;
 pub mod prepared_effect_result;
+pub(crate) mod prepared_projection_patch_targets;
 pub mod projection;
 pub(crate) mod projection_compile;
 pub(crate) mod projection_patch;
@@ -76,8 +79,10 @@ pub(crate) mod role_dictionary;
 pub mod runtime_capability_mapping;
 pub mod runtime_capability_mapping_result;
 pub(crate) mod semantic_refs;
+pub mod shell_bridge;
 pub(crate) mod static_ir;
 pub(crate) mod static_ir_artifact;
+pub(crate) mod target_anchor;
 pub(crate) mod task_projection;
 pub mod trace;
 pub mod tree_bridge;
@@ -95,6 +100,14 @@ mod ui_dna2_binding_semantic_adapter_qualification_tests;
 mod ui_dna2_collection_anchor_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_denial_recovery_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_local_projection_state_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_prepared_active_projection_targets_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_prepared_projection_patch_targets_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_shell_bridge_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_task_projection_qualification_tests;
 #[cfg(test)]
