@@ -136,6 +136,7 @@ Renderer owns pixels.
 | #1535 | `fecbaae5de60163466cd60b4bd2bfee20325c341` | Documentation-only prepared-handoff ownership contract frozen; transition-, activation- and session-scoped lifetimes separated; future catalog ownership assigned to `prom-ui-runtime`. |
 | #1536 | `d1797a1a18bb48512f549bc8fc522dcfc455ef68` | Documentation-only explicit `CollectionAnchor` declaration contract frozen; source/qualified identity, `CAD_*` diagnostics, ordering and prepared-activation source boundary defined. |
 | #1539 | `94ae4a4ed187f589264160e794f6ebb45de1261d` | Crate-private programmatic explicit `CollectionAnchor` declaration representation landed; declaration storage in `ProjectionSourceDocument` landed; deterministic compiler-owned source-to-static qualification landed; immutable `QualifiedCollectionAnchorDeclarations` landed; four exact `CAD_*` diagnostics landed; whole-set fail-closed behavior landed; deterministic ascending `StaticNodeId` output landed; deterministic duplicate provenance landed; 20 focused tests landed; reviewed head `327c52bb05191a5e6a01f93d7a32874f119540c3`; exact-head CI `30031617862` passed 8/8; post-merge CI `30034743940` passed 8/8. |
+| #1541 | `8d29c19c782928aae546ced3c1b9c58e8db8491c` | Complete remaining Shell Player contour landed: `PreparedProjectionPatchTargets` and `PreparedActiveProjectionTargets` producers; the first public `prom-ui::shell_bridge` cross-crate surface (patch admission, prepared-evidence and activation-target snapshots, local-projection-state application/queries) with same-change golden-snapshot public API guard coverage for both `prom-ui::shell_bridge` and the now-public `prom-ui-runtime::shell_player`; runtime-owned `ActiveProjectionTargetCatalog` constructed only from one activation snapshot; stage-4 prepared-evidence coherence and target-reference resource checks; stage-5 stable-target membership evaluator using only the immutable session catalog; stage-5/stage-6 orchestration; deterministic `LocalProjectionState` with atomic `SetBindingValue`/`SetNodeAvailability`/`CollectionInsert`/`CollectionUpdate`/`CollectionRemove`/`CollectionMove` application; atomic commit and replay-cursor advancement in `ShellSession::apply_projection_patch_batch`; a deterministic `--shell-player-demo` native mode rendering every frame from committed Shell Player state through the existing winit/wgpu backend; 60+ new focused tests. CI status: not yet run (branch not pushed as of this commit). Gate D remains closed; production promotion remains unauthorized. |
 
 ## 4. Current landed contract state
 
@@ -210,6 +211,23 @@ deterministic CollectionAnchor declaration qualification
 whole-set CAD_* diagnostic qualification
 deterministic duplicate SourceRef provenance
 ascending StaticNodeId qualified declaration ordering
+PreparedProjectionPatchTargets Rust representation and producer
+PreparedActiveProjectionTargets Rust representation and producer
+shared NodeAnchor/BindingAnchor/CollectionAnchor target-class representation
+first public prom-ui::shell_bridge cross-crate surface
+same-PR golden-snapshot public API guard for prom-ui::shell_bridge and prom-ui-runtime::shell_player
+ActiveProjectionTargetCatalog Rust representation owned by prom-ui-runtime
+ActivatedShellSessionContext catalog attachment
+stage-4 prepared-evidence declared/actual count coherence integration
+stage-4 target-reference resource-limit integration
+stage-5 stable-target evaluator using only the immutable session catalog
+stage-5/stage-6 orchestration
+deterministic LocalProjectionState with atomic collection insert/update/remove/move semantics
+ProjectionPatch runtime application
+replay-cursor advancement
+candidate-state calculation and atomic commit
+deterministic native Shell Player demo mode in prom-ui-demo
+renderer/backend event-loop integration for Shell Player (Clear/FillRect commands only; DrawText remains an existing backend no-op)
 ```
 
 Current reference and lookup invariants:
@@ -232,7 +250,7 @@ patch = inert projection contract data
 patch validation is deterministic
 patch diagnostics preserve exact coordinates
 patch order is explicit
-patch runtime application is not yet landed
+patch runtime application is landed through #1541 for the SetBindingValue/SetNodeAvailability/CollectionInsert/CollectionUpdate/CollectionRemove/CollectionMove family
 patch != Semantic truth
 patch != capability
 patch != admission
@@ -255,30 +273,28 @@ UI wiring
 ProjectionBundle parser/validator/verifier implementation
 ProjectionBundle inert-loader implementation
 ProjectionBundle activation
-complete Shell Player transition pipeline
-PreparedProjectionPatchTargets Rust representation and producer
-PreparedActiveProjectionTargets Rust representation and producer
 textual CollectionAnchor declaration syntax
 Grammar v0 parser support for CollectionAnchor declarations
 parser-to-compiler frontend support for textual CollectionAnchor declarations
-PreparedActiveProjectionTargets producer and consumption integration
-ActiveProjectionTargetCatalog Rust representation and lookup
-ActivatedShellSessionContext catalog attachment
-stage-4 prepared-evidence coherence integration
-stage-5 stable-target evaluator
-stage-5/stage-6 orchestration
-ProjectionPatch runtime application
-replay-cursor advancement
-candidate-state calculation and commit
 focus and pointer-capture integration
 hit-test and accessibility integration
 draw/layout realization
-renderer/backend event-loop integration
-public stage-5 bridge
-future public API guard implementation for that bridge
+DrawText / glyph rendering in the native backend (pre-existing backend gap, unrelated to Shell Player; Clear/FillRect are the only implemented draw commands)
 Workbench or Semantic Studio work
 production promotion
 ```
+
+The complete Shell Player transition pipeline (`PreparedProjectionPatchTargets`/
+`PreparedActiveProjectionTargets` producers, the `prom-ui::shell_bridge` public
+bridge with same-PR API guard coverage, the runtime-owned
+`ActiveProjectionTargetCatalog`, stage-4 coherence/resource checks, the
+stage-5 evaluator, stage-5/stage-6 orchestration, `ProjectionPatch` runtime
+application, replay-cursor advancement, candidate-state calculation and
+atomic commit, and a deterministic native demo mode) is landed through
+#1541. This is Shell Player's own local playback/rendering integration; it
+is not `ProjectionBundle` parsing/loading/activation, not focus/pointer-capture,
+not hit-test/accessibility, not general draw/layout realization, and not
+production promotion, all of which remain absent or unauthorized above.
 
 ## 5. Current research checkpoint matrix
 
@@ -296,7 +312,7 @@ Future evidence may split, combine, reorder, or retire phases.
 | UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
 | UI-DNA2-7 — Denial, recovery, task and freshness projection | **UI-DNA2-7A DENIAL/RECOVERY/FRESHNESS V0, UI-DNA2-7B TASK PROJECTION V0 AND P2 CORRECTIVE QUALIFICATION THROUGH #1518 LANDED** | denial/recovery/freshness v0 contract, crate-private implementation, inert ProjectionPatch construction and qualification landed in #1516; Task Projection v0 contract, crate-private pure in-memory implementation, canonical representation and inert patch construction landed in #1517; exact aggregate text bounds and lossless `TaskRecordRef(u64)` projection qualified in #1518 | Task Projection application, admission execution, runtime integration, Gate D and production promotion remain unauthorized |
 | UI-DNA2-8 — ProjectionBundle qualification | **UI-DNA2-8A LOGICAL CONTRACT FREEZE LANDED; GENERAL LEVEL 4, IMPLEMENTATION, INERT LOADING AND ACTIVATION NOT AUTHORIZED** | ProjectionBundle v0 logical identity, deterministic stage ownership, validation, resource, diagnostic and authority boundaries landed through #1519 | Resolve final serialization and other blocking decisions; separate authorization for UI-DNA2-8B parser/validator/verifier implementation and qualification; separate authorization for UI-DNA2-8C pure in-memory inert-loader qualification; separate activation decision |
-| UI-DNA2-9 — Shell player integration | **BOUNDARY AND SESSION CONTRACTS LANDED/CLOSED; BOUNDED CRATE-PRIVATE LIFECYCLE, STATE OWNER, ENVELOPE PREFLIGHT, REPLAY CURSOR AND STAGE-6 EVALUATOR LANDED; STAGE-5/PREPARED-HANDOFF CONTRACTS FROZEN; COLLECTIONANCHOR DECLARATION CONTRACT FROZEN IN #1536 AND PROGRAMMATIC DECLARATION REPRESENTATION/QUALIFICATION LANDED IN #1539; FULL SHELL PLAYER PIPELINE INCOMPLETE** | #1520 and #1521 freeze and close the 9A1 ownership/stage boundary; #1524 freezes the 9B activated-session, lifecycle, local-state, deterministic transition, resource and diagnostic contract; #1525 moves input-resource preflight ahead of target/replay traversal; #1527 closes UI-DNA2-9B evidence; #1528 lands the crate-private lifecycle evaluator; #1529 lands the stateful `ShellSession` owner; #1530 lands ordered ProjectionPatch envelope preflight through stages 1-4; #1531 lands the local replay-cursor representation; #1532 freezes the stage-6 replay-cursor compatibility contract; #1533 lands the crate-private stage-6 replay-cursor compatibility evaluator; #1534 freezes the stage-5 stable-target boundary contract; #1535 freezes the prepared-handoff ownership contract; #1536 freezes the explicit `CollectionAnchor` declaration contract; #1539 lands the crate-private programmatic `CollectionAnchor` declaration representation, `ProjectionSourceDocument` declaration storage, deterministic compiler-owned qualification, immutable `QualifiedCollectionAnchorDeclarations`, four `CAD_*` diagnostics, deterministic duplicate provenance and 20 focused tests (reviewed head `327c52bb05191a5e6a01f93d7a32874f119540c3`; exact-head CI `30031617862` 8/8; post-merge CI `30034743940` 8/8) | textual CollectionAnchor declaration syntax, Grammar v0 parser and parser-to-compiler frontend integration for CollectionAnchor declarations; `PreparedProjectionPatchTargets`/`PreparedActiveProjectionTargets` Rust representation and producers; `ActiveProjectionTargetCatalog` Rust representation and lookup; `ActivatedShellSessionContext` catalog attachment; stage-4 prepared-evidence coherence integration; stage-5 stable-target evaluator; stage-5/stage-6 orchestration; `ProjectionPatch` runtime application; replay-cursor advancement; candidate-state calculation and commit; focus/pointer-capture integration; hit-test/accessibility integration; draw/layout realization; renderer/backend event-loop integration; public stage-5 bridge and its guard implementation; no later slice is authorized |
+| UI-DNA2-9 — Shell player integration | **CORE STAGES 1-9 TRANSITION PIPELINE LANDED THROUGH #1541, INCLUDING PATCH APPLICATION, ATOMIC COMMIT, REPLAY-CURSOR ADVANCEMENT AND A NATIVE DEMO; FOCUS/HIT-TEST/ACCESSIBILITY/LAYOUT AND PRODUCTION PROMOTION REMAIN SEPARATELY OUT OF SCOPE** | #1520 and #1521 freeze and close the 9A1 ownership/stage boundary; #1524 freezes the 9B activated-session, lifecycle, local-state, deterministic transition, resource and diagnostic contract; #1525 moves input-resource preflight ahead of target/replay traversal; #1527 closes UI-DNA2-9B evidence; #1528 lands the crate-private lifecycle evaluator; #1529 lands the stateful `ShellSession` owner; #1530 lands ordered ProjectionPatch envelope preflight through stages 1-4; #1531 lands the local replay-cursor representation; #1532 freezes the stage-6 replay-cursor compatibility contract; #1533 lands the crate-private stage-6 replay-cursor compatibility evaluator; #1534 freezes the stage-5 stable-target boundary contract; #1535 freezes the prepared-handoff ownership contract; #1536 freezes the explicit `CollectionAnchor` declaration contract; #1539 lands the crate-private programmatic `CollectionAnchor` declaration representation, `ProjectionSourceDocument` declaration storage, deterministic compiler-owned qualification, immutable `QualifiedCollectionAnchorDeclarations`, four `CAD_*` diagnostics, deterministic duplicate provenance and 20 focused tests (reviewed head `327c52bb05191a5e6a01f93d7a32874f119540c3`; exact-head CI `30031617862` 8/8; post-merge CI `30034743940` 8/8); #1541 lands `PreparedProjectionPatchTargets`/`PreparedActiveProjectionTargets` producers, the first public `prom-ui::shell_bridge` bridge with same-change API guard coverage, the runtime-owned `ActiveProjectionTargetCatalog`, stage-4 coherence/resource checks, the stage-5 evaluator, stage-5/stage-6 orchestration, `ProjectionPatch` runtime application, replay-cursor advancement, candidate-state calculation and atomic commit, and a deterministic `--shell-player-demo` native mode manually verified via a live screenshot (reviewed head `8d29c19c782928aae546ced3c1b9c58e8db8491c`; CI not yet run as of this commit) | textual CollectionAnchor declaration syntax and Grammar v0 parser/frontend integration for CollectionAnchor declarations remain separately unauthorized; focus/pointer-capture integration; hit-test/accessibility integration; general draw/layout realization beyond Clear/FillRect; `DrawText`/glyph rendering in the native backend; `ProjectionBundle` parsing/loading/activation; Gate D and production promotion remain closed/unauthorized |
 | UI-DNA2-10 — End-to-end reference slice | **NOT STARTED** | no complete pipeline | One deterministic non-critical reference application |
 | UI-DNA2-11 — Production promotion decision | **NOT STARTED** | no promotion claim | Explicit `PROMOTE / PROMOTE WITH LIMITS / KEEP EXPERIMENTAL / REWORK / STOP` decision |
 
@@ -355,7 +371,18 @@ stage-5 stable-target boundary contract = LANDED IN #1534
 prepared-handoff contract = LANDED IN #1535
 CollectionAnchor declaration contract = LANDED IN #1536
 CollectionAnchor declaration qualification = LANDED IN #1539
-UI-DNA2-9 = INCOMPLETE
+PreparedProjectionPatchTargets producer = LANDED IN #1541
+PreparedActiveProjectionTargets producer = LANDED IN #1541
+prom-ui::shell_bridge public cross-crate surface = LANDED IN #1541
+ActiveProjectionTargetCatalog = LANDED IN #1541
+stage-4 prepared-evidence coherence and resource checks = LANDED IN #1541
+stage-5 stable-target evaluator = LANDED IN #1541
+stage-5/stage-6 orchestration = LANDED IN #1541
+ProjectionPatch runtime application = LANDED IN #1541
+replay-cursor advancement = LANDED IN #1541
+candidate-state calculation and atomic commit = LANDED IN #1541
+native Shell Player demo mode = LANDED IN #1541
+UI-DNA2-9 core transition pipeline = LANDED IN #1541
 
 Current state:
 
@@ -389,16 +416,20 @@ prepared-handoff ownership contract = LANDED IN #1535
 explicit CollectionAnchor declaration contract = LANDED IN #1536
 crate-private CollectionAnchor declaration qualification = LANDED IN #1539
 QualifiedCollectionAnchorDeclarations = LANDED IN #1539
-UI-DNA2-9 = INCOMPLETE
-full Shell Player pipeline = NOT IMPLEMENTED
-stage-5 evaluator = NOT IMPLEMENTED
-prepared evidence producers = NOT IMPLEMENTED
-runtime catalog = NOT IMPLEMENTED
-patch application = NOT IMPLEMENTED
-cursor advancement = NOT IMPLEMENTED
-renderer integration = NOT AUTHORIZED
-backend integration = NOT AUTHORIZED
-runtime integration = NOT AUTHORIZED
+prepared evidence producers (PreparedProjectionPatchTargets, PreparedActiveProjectionTargets) = LANDED IN #1541
+runtime catalog (ActiveProjectionTargetCatalog) = LANDED IN #1541
+stage-5 evaluator = LANDED IN #1541
+stage-5/stage-6 orchestration = LANDED IN #1541
+patch application = LANDED IN #1541
+cursor advancement = LANDED IN #1541
+candidate-state calculation and atomic commit = LANDED IN #1541
+native Shell Player demo mode = LANDED IN #1541
+renderer integration for Shell Player = LANDED IN #1541 (Clear/FillRect only; DrawText remains a pre-existing backend no-op)
+backend integration for Shell Player = LANDED IN #1541 (existing native winit/wgpu event loop, no new backend)
+UI-DNA2-9 core transition pipeline = LANDED IN #1541
+focus/pointer-capture, hit-test/accessibility, general draw/layout realization = NOT IMPLEMENTED (separately scoped, out of #1541)
+ProjectionBundle parser/validator/verifier/inert-loader/activation = NOT IMPLEMENTED
+textual CollectionAnchor declaration syntax and Grammar v0/frontend integration = NOT IMPLEMENTED
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
 NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
@@ -417,10 +448,13 @@ draw material != pixels
 shell transition != backend event loop
 ```
 
-The UI-DNA2-9A1 and UI-DNA2-9B authorizations were consumed and are now closed.
-The landed 9B evidence freezes session and local-state semantics only. It does
-not authorize UI-DNA2-8B, UI-DNA2-8C, Shell Player implementation, activation,
-patch application, admission/runtime integration, or any later contour.
+The UI-DNA2-9A1, UI-DNA2-9B, and #1541 (`SHELL-PLAYER-END-TO-END-TURBO`)
+authorizations were each consumed and are now closed. The #1541 authorization
+covered exactly the bounded Shell Player transition pipeline, public bridge,
+runtime catalog, and native demo landed in that change. It does not authorize
+UI-DNA2-8B, UI-DNA2-8C, `ProjectionBundle` activation, focus/pointer-capture,
+hit-test/accessibility, general draw/layout realization, admission/dispatch
+runtime integration, Gate D movement, or production promotion.
 
 ## 8. Dependency order after rebaseline
 
@@ -457,6 +491,7 @@ EVIDENCE LANDED:
 → prepared-handoff ownership contract (#1535)
 → explicit CollectionAnchor declaration contract (#1536)
 → programmatic explicit CollectionAnchor declaration qualification (#1539)
+→ complete Shell Player transition pipeline, public prom-ui::shell_bridge, runtime catalog, patch application, replay-cursor advancement and native demo (#1541)
 ```
 
 CLOSED DOCUMENTATION CONTRACT SLICE:
@@ -466,33 +501,26 @@ UI-DNA2-9B Shell Player session and local-state contract v0
 UI-DNA2-9B authorization = CONSUMED / CLOSED
 ```
 
+CLOSED IMPLEMENTATION SLICE:
+
+```text
+SHELL-PLAYER-END-TO-END-TURBO (#1541)
+#1541 authorization = CONSUMED / CLOSED
+```
+
 CURRENTLY UNAUTHORIZED FUTURE CONTOURS:
 
 ```text
 ProjectionBundle parser/validator/verifier implementation
 ProjectionBundle inert-loader implementation
 ProjectionBundle activation
-complete Shell Player transition pipeline
-PreparedProjectionPatchTargets Rust representation and producer
-PreparedActiveProjectionTargets Rust representation and producer
 textual CollectionAnchor declaration syntax
 Grammar v0 parser support for CollectionAnchor declarations
 parser-to-compiler frontend support for textual CollectionAnchor declarations
-PreparedActiveProjectionTargets producer and consumption integration
-ActiveProjectionTargetCatalog Rust representation and lookup
-ActivatedShellSessionContext catalog attachment
-stage-4 prepared-evidence coherence integration
-stage-5 stable-target evaluator
-stage-5/stage-6 orchestration
-ProjectionPatch runtime application
-replay-cursor advancement
-candidate-state calculation and commit
 focus and pointer-capture integration
 hit-test and accessibility integration
-draw/layout realization
-renderer/backend event-loop integration
-public stage-5 bridge
-future public API guard implementation for that bridge
+general draw/layout realization
+DrawText/glyph rendering in the native backend
 bundle activation
 end-to-end reference slice
 production-promotion decision
@@ -559,7 +587,7 @@ reference slice != production promotion
 - [x] The crate-private caller-supplied Semantic observation adapter for Binding Graph observations is landed and qualified through #1515; live Semantic reads remain absent and unauthorized.
 - [ ] Action IR admission integration is separately approved and qualified.
 - [x] Projection Patch replay-order model and qualification are complete in the bounded WP4B contour.
-- [ ] Patch application is separately qualified in the `prom-ui-runtime::shell_player` contour.
+- [x] Patch application is qualified in the `prom-ui-runtime::shell_player` contour through #1541 for the `SetBindingValue`/`SetNodeAvailability`/`CollectionInsert`/`CollectionUpdate`/`CollectionRemove`/`CollectionMove` family.
 - [x] Denial/recovery/freshness v0 projection and inert ProjectionPatch construction are specified, implemented and qualified through #1516.
 - [x] Task Projection v0 is separately specified, implemented and qualified at the crate-private pure in-memory boundary through #1518; application, live evidence acquisition, admission execution and runtime integration remain unauthorized.
 - [x] ProjectionBundle v0 logical identity, stage separation, validation, resource, diagnostic and authority boundaries are frozen by the bounded documentation-only UI-DNA2-8A change.
@@ -576,16 +604,16 @@ reference slice != production promotion
 - [x] Shell Player stage-5 stable-target boundary contract is frozen through #1534 without implementation authorization.
 - [x] Prepared cross-crate handoff ownership contract is frozen through #1535 without implementation authorization.
 - [x] Explicit `CollectionAnchor` declaration contract is frozen through #1536 without implementation authorization.
-- [x] Crate-private programmatic explicit `CollectionAnchor` declaration representation, `ProjectionSourceDocument` declaration storage, deterministic compiler-owned qualification and immutable `QualifiedCollectionAnchorDeclarations` are landed through #1539; textual declaration syntax, Grammar v0 parser/frontend integration, and prepared-activation producer/consumption integration remain unauthorized.
-- [ ] `PreparedProjectionPatchTargets` and `PreparedActiveProjectionTargets` are implemented and have a producer entry point.
-- [ ] `ActiveProjectionTargetCatalog` runtime catalog is implemented.
-- [ ] Stage-5 stable-target evaluator is implemented.
-- [ ] ProjectionPatch runtime application and replay-cursor advancement are implemented.
-- [ ] The complete Shell Player transition pipeline is implemented and integrated.
-- [ ] Renderer and backend integration are implemented.
-- [ ] Shell player is qualified without authority transfer.
-- [ ] End-to-end deterministic reference slice is complete.
-- [ ] Production promotion decision is explicit.
+- [x] Crate-private programmatic explicit `CollectionAnchor` declaration representation, `ProjectionSourceDocument` declaration storage, deterministic compiler-owned qualification and immutable `QualifiedCollectionAnchorDeclarations` are landed through #1539; textual declaration syntax and Grammar v0 parser/frontend integration remain unauthorized; prepared-activation producer/consumption integration is landed through #1541.
+- [x] `PreparedProjectionPatchTargets` and `PreparedActiveProjectionTargets` are implemented and have a producer entry point, landed through #1541.
+- [x] `ActiveProjectionTargetCatalog` runtime catalog is implemented, landed through #1541, constructed only from one activation-target snapshot and attached immutably to the activated session context.
+- [x] Stage-5 stable-target evaluator is implemented, landed through #1541, using only the immutable session catalog.
+- [x] ProjectionPatch runtime application and replay-cursor advancement are implemented, landed through #1541, atomic and with no cursor advancement on rejection.
+- [x] The complete Shell Player transition pipeline (stages 1-9) is implemented and integrated, landed through #1541.
+- [x] Renderer and backend integration are implemented, landed through #1541, through the existing native winit/wgpu backend and `--shell-player-demo` mode, manually verified via a live screenshot; `DrawText`/glyph rendering remains an existing backend gap unrelated to Shell Player.
+- [x] Shell Player is qualified without authority transfer: it owns no Semantic truth, grants no action or effect authorization, and the renderer gains no Semantic authority (contract invariants preserved and tested through #1541).
+- [ ] End-to-end deterministic reference slice (UI-DNA2-10, a complete non-critical reference application) remains separately unauthorized and not started.
+- [ ] Production promotion decision (UI-DNA2-11) remains separately unauthorized and not started.
 
 ## 11. Definition of Done
 
@@ -608,20 +636,34 @@ This umbrella issue may close only when:
 4. Phase UI-DNA2-11 records an explicit promotion outcome;
 5. no historical, experimental or renderer-local structure has been silently promoted to semantic authority.
 
-Until then:
+This roadmap does not itself close UI DNA v2. The following remain true after
+#1541:
 
 ```text
 UI-DNA2-8B = NOT AUTHORIZED
 UI-DNA2-8C = NOT AUTHORIZED
-complete Shell Player transition pipeline = NOT AUTHORIZED
-PreparedProjectionPatchTargets / PreparedActiveProjectionTargets implementation = NOT AUTHORIZED
-ActiveProjectionTargetCatalog implementation = NOT AUTHORIZED
-textual CollectionAnchor declaration syntax and parser/frontend integration = NOT AUTHORIZED
-stage-5 stable-target evaluator = NOT AUTHORIZED
-stage-5/stage-6 orchestration = NOT AUTHORIZED
-ProjectionPatch runtime application = NOT AUTHORIZED
 bundle activation = NOT AUTHORIZED
+textual CollectionAnchor declaration syntax and parser/frontend integration = NOT AUTHORIZED
+focus/pointer-capture, hit-test/accessibility, general draw/layout realization = NOT IMPLEMENTED
+end-to-end reference slice (UI-DNA2-10) = NOT STARTED
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
 NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
+```
+
+The following are now landed and no longer belong to the unauthorized list
+above:
+
+```text
+complete Shell Player stages 1-9 transition pipeline = LANDED IN #1541
+PreparedProjectionPatchTargets / PreparedActiveProjectionTargets implementation = LANDED IN #1541
+ActiveProjectionTargetCatalog implementation = LANDED IN #1541
+stage-4 prepared-evidence coherence and resource checks = LANDED IN #1541
+stage-5 stable-target evaluator = LANDED IN #1541
+stage-5/stage-6 orchestration = LANDED IN #1541
+ProjectionPatch runtime application = LANDED IN #1541
+replay-cursor advancement = LANDED IN #1541
+candidate-state calculation and atomic commit = LANDED IN #1541
+first public prom-ui::shell_bridge bridge with same-change API guard = LANDED IN #1541
+deterministic native Shell Player demo mode = LANDED IN #1541
 ```
