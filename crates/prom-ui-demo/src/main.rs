@@ -1,5 +1,6 @@
 mod demo_interaction;
 mod renderer_layout_inspector;
+mod shell_player_demo;
 
 use demo_interaction::{render_demo_frame, DemoInteraction};
 use prom_ui::layout::{
@@ -55,6 +56,11 @@ fn build_static_placement() -> UiLayoutPhysicalPlacementModel {
 
 fn main() {
     let calculator_smoke = env::args().any(|arg| arg == "--calculator-smoke");
+
+    if env::args().any(|arg| arg == "--shell-player-demo") {
+        shell_player_demo::run_shell_player_demo();
+        return;
+    }
 
     if inspector_requested() {
         let tree = demo_inspector_tree();

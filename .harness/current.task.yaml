@@ -1,52 +1,77 @@
 task:
-  id: COLLECTION-ANCHOR-QUALIFICATION-CLOSEOUT
-  title: close out landed CollectionAnchor declaration qualification
-  type: documentation
+  id: SHELL-PLAYER-END-TO-END-TURBO
+  title: complete Shell Player end-to-end with a visible native result
+  type: implementation
   mode: active
 
 intent:
-  summary: "docs(ui): close out collection-anchor qualification"
+  summary: "feat(ui): complete Shell Player end-to-end pipeline with native demo"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
+    - crates/prom-ui/src/**
+    - crates/prom-ui-runtime/src/**
+    - crates/prom-ui-demo/src/**
+    - tests/public_api_contracts.rs
+    - tests/golden_snapshots/public_api/prom_ui_shell_bridge.txt
+    - tests/golden_snapshots/public_api/prom_ui_runtime_shell_player.txt
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
+    - docs/spec/ui/shell_player_session_state_v0.md
 
 authorization:
-  merged_evidence_sync: true
-  roadmap_evidence_baseline_update: true
-  landed_state_sync: true
-  stale_absence_claim_removal: true
-  research_matrix_sync: true
-  latest_checkpoint_sync: true
-  dependency_order_sync: true
-  issue_1489_changes: false
-
-  rust_implementation: false
-  normative_contract_change: false
-  ownership_change: false
-  authority_change: false
-  public_api: false
-  public_api_guard_changes: false
+  rust_implementation: true
+  crate_private_and_public_bridge: true
+  prepared_transition_targets: true
+  prepared_activation_targets: true
+  runtime_catalog: true
+  activated_context_expansion: true
+  stage4_integration: true
+  stage5_evaluator: true
+  stage6_change: true
+  orchestration: true
+  patch_application: true
+  cursor_advancement: true
+  local_projection_state: true
+  public_api: true
+  public_api_guard_changes: true
+  renderer_integration: true
+  backend_integration: true
+  demo_integration: true
   dependency_changes: false
   workflow_changes: false
+  roadmap_changes: true
+  issue_1489_changes: false
+  issue_1541_changes: true
   project_changes: false
-  next_slice_authorization: false
   gate_d_change: false
   production_promotion: false
 
   gate_d: closed
 
 constraints:
-  directional_roadmap_only: true
-  repository_truth_remains_external: true
-  roadmap_is_not_authority: true
-  merged_evidence_only: true
-  landed_code_distinguished_from_full_pipeline: true
-  qualification_distinguished_from_runtime_integration: true
-  prepared_targets_remain_unimplemented: true
-  runtime_catalog_remains_unimplemented: true
-  stage5_evaluator_remains_unimplemented: true
-  patch_application_remains_unimplemented: true
-  gate_d: closed
-  next_authorized_implementation_slice: none
+  no_std_alloc_compatible_in_prom_ui_and_runtime: true
+  fail_closed: true
+  deterministic_output: true
+  deterministic_operation_ordering: true
+  deterministic_diagnostic_ordering: true
+  no_partial_target_acceptance: true
+  no_partial_patch_application: true
+  no_partial_state_commit: true
+  no_cursor_advancement_on_rejection: true
+  no_state_mutation_on_rejection: true
+  atomic_commit_semantics: true
+  explicit_collection_anchor_declarations_are_sole_source: true
+  runtime_catalog_not_constructed_from_patch_operations: true
+  runtime_catalog_not_constructed_from_raw_caller_ids: true
+  stage6_does_not_repeat_stage5: true
+  shell_player_not_owner_of_semantic_truth: true
+  shell_player_no_action_or_effect_authorization: true
+  renderer_gains_no_semantic_authority: true
+  no_fabrication_via_public_fields_default_raw_vec_from_into_deserialization: true
+  new_public_bridge_receives_guard_coverage_same_change: true
+  no_unrelated_compiler_verifier_vm_capability_effect_boundary_widening: true
+  one_branch_one_pr: true
+  no_intermediate_documentation_only_pr: true
+  roadmap_and_issue_updated_once_at_end: true
+  next_authorized_implementation_slice_after_this_task: none

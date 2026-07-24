@@ -2,7 +2,10 @@
 
 Status: NORMATIVE CONTRACT FREEZE
 Track: UI-DNA2-9B
-Implementation: NOT AUTHORIZED
+Implementation: PARTIALLY IMPLEMENTED (PR #1542) — see section 15 for the
+concrete Rust delivery record and section 16 for the current status of every
+item this contract enumerates. The conceptual rules in sections 1-14 remain
+frozen and unweakened by that implementation.
 
 This contract preserves the UI-DNA2-9A1 ownership boundary:
 
@@ -481,6 +484,11 @@ implementation.
 
 #### 7.1.8 Explicitly unresolved
 
+This list records what subsection 7.1 itself, as a documentation-only
+contract slice, left unresolved at freeze time. See section 15 for which of
+these a later implementation (PR #1542) has since delivered, and section 16
+for the current status of each.
+
 The following remain unresolved and unauthorized by this subsection:
 
 - Rust adapter types;
@@ -722,12 +730,15 @@ from:
 
 The normative explicit `CollectionAnchor` declaration contract is frozen in
 `docs/spec/ui/projection_source_model.md`. Its Rust representation, source
-syntax, lowering, qualification implementation, prepared-activation
-integration, and catalog integration remain unresolved and unauthorized.
-Therefore, `PreparedActiveProjectionTargets` implementation is not authorized
-until the explicit declaration representation and qualification path exist.
-This does not block the ownership contract in 7.1.9.1; it blocks catalog
-implementation specifically.
+syntax, lowering, qualification implementation
+(`collection_anchor_declarations::qualify_collection_anchor_declarations`),
+prepared-activation integration, and catalog integration have since been
+delivered by PR #1542; see section 15. `PreparedActiveProjectionTargets`
+implementation proceeded only once the explicit declaration representation
+and qualification path existed, exactly as this gate required. This does not
+weaken the ownership contract in 7.1.9.1, and it does not retroactively
+authorize inferring `CollectionAnchor` membership from any source other than
+an explicit declaration.
 
 ##### 7.1.9.6 Runtime-owned catalog responsibility
 
@@ -902,6 +913,11 @@ No orchestration implementation is authorized.
 
 ##### 7.1.9.14 Explicitly unresolved
 
+This list records what subsection 7.1.9 itself, as a documentation-only
+contract slice, left unresolved at freeze time. See section 15 for which of
+these a later implementation (PR #1542) has since delivered, and section 16
+for the current status of each.
+
 The following remain unresolved:
 
 - final Rust type names;
@@ -930,10 +946,13 @@ This contract does not claim implementation readiness for any of the above.
 ##### 7.1.9.15 Status clarification
 
 The visibility primitive is understood. The complete prepared handoff is now
-contractually selected. Manifest implementation remains unauthorized.
-Activation-target implementation remains blocked on explicit `CollectionAnchor`
-declarations. Catalog implementation remains unauthorized. No public bridge is
-yet authorized.
+contractually selected. Manifest implementation, activation-target
+implementation, catalog implementation, and the public bridge itself have
+since been delivered by PR #1542, realizing this subsection exactly as frozen
+here — see section 15 for the concrete Rust mapping and section 16 for the
+current implementation status of every item in this document. This
+subsection's conceptual rules remain unchanged and unweakened by that
+implementation.
 
 ### 7.2 Replay-cursor compatibility
 
@@ -1147,6 +1166,12 @@ Transition behavior must not depend on:
 
 ## 13. Explicitly unresolved after UI-DNA2-9B
 
+This is a historical record of what the UI-DNA2-9B documentation-only
+contract freeze itself left unresolved at freeze time; it is not a live
+status list. See section 15 for which of these a later implementation
+(PR #1542) has since delivered, and section 16 for the current status of
+each.
+
 The following remain unresolved:
 
 - replay cursor advancement rule;
@@ -1203,7 +1228,93 @@ These decisions must not be silently solved by UI-DNA2-9B.
 - no Gate D movement;
 - no production promotion.
 
-## 15. Final status
+These are non-goals of the UI-DNA2-9B documentation-only contract freeze
+itself, not a standing prohibition on later implementation tasks. Section 15
+records what a later implementation (PR #1542) has since delivered against
+this frozen contract; Gate D and production promotion remain closed and
+unauthorized regardless (see section 16).
+
+## 15. Delivered implementation record (PR #1542)
+
+This section records the concrete Rust implementation delivered against the
+frozen conceptual contract in sections 1-14 above. It is a synchronization
+record of what now exists, not a new design proposal: it does not add,
+weaken, reinterpret, or relitigate any conceptual rule stated elsewhere in
+this document.
+
+- **Public cross-crate bridge** (7.1.9.1): `prom_ui::shell_bridge`
+  (`crates/prom-ui/src/shell_bridge.rs`) realizes the ownership split — every
+  prepared-evidence type remains crate-private to `prom-ui`; the bridge
+  exposes only controlled ingress (patch admission) and controlled read-only
+  egress.
+- **Prepared transition target evidence** (7.1.9.2): realized as
+  `shell_bridge::PreparedPatchSubmission`, producible only through
+  `shell_bridge::prepare_patch_submission`, which consumes one private
+  `AdmittedProjectionPatchBatch` and derives the manifest entries, actual
+  patch count, and actual target-reference count from that same batch as one
+  opaque value. There is no entry point that accepts prepared manifest
+  evidence and a separately supplied batch, so evidence from one admitted
+  batch can never authorize operations from another — this satisfies 7.1.9.7
+  handoff atomicity structurally, not just by caller convention.
+- **Prepared activation target evidence** (7.1.9.3): realized as
+  `shell_bridge::ActivationTargetSnapshot`, with private fields and
+  read-only accessors (`node_anchor_ids`, `binding_anchor_ids`,
+  `collection_anchor_ids`). It has no public constructor, `Default`,
+  `From`/`Into`, or deserialization path outside its one trusted producer
+  (`shell_bridge::demo_activation_snapshot` today), matching the
+  construction-opacity rule in 7.1.9.4.
+- **Explicit `CollectionAnchor` provenance** (7.1.9.5): realized by
+  `collection_anchor_declarations::qualify_collection_anchor_declarations`;
+  collection membership is derived only from explicit declarations, never
+  inferred from `CollectionKey`, binding domain, or patch operations.
+- **Runtime-owned catalog** (7.1.9.6): realized as
+  `prom_ui_runtime::active_projection_target_catalog::ActiveProjectionTargetCatalog`,
+  constructed only from one `ActivationTargetSnapshot` via `from_snapshot`,
+  attached once per activated session, and immutable thereafter.
+- **Stage 4 and stage 4b** (resource bounds, and declared-vs-actual
+  patch-count/target-reference-count coherence per 7.1.9.8): realized in
+  `prom_ui_runtime::shell_player::ShellSession::apply_projection_patch_batch`.
+- **Stage 5** (stable-target membership, 7.1.5): realized in the same
+  function, iterating `shell_bridge::prepared_submission_entries` in stable
+  manifest order.
+- **Stage 6** (replay-cursor compatibility, 7.2): realized per the
+  compatibility table in 7.2, evaluated only after stage 5 succeeds.
+- **Atomic local patch application and commit** (stages 7-9): realized via
+  `shell_bridge::apply_prepared_patch_submission`, invoked only after stages
+  4-6 succeed. Rejection at any stage preserves the previous local
+  projection state and the previous replay cursor byte-for-byte; no partial
+  commit path exists.
+- **Replay-cursor advancement**: the outer batch `sequence_no` becomes the
+  new established `At(n)` coordinate only on successful commit.
+- **Public API guard coverage** (7.1.9.10): `tests/public_api_contracts.rs`
+  snapshots the exact public surface of
+  `crates/prom-ui/src/shell_bridge.rs` and
+  `crates/prom-ui-runtime/src/shell_player.rs` against
+  `tests/golden_snapshots/public_api/prom_ui_shell_bridge.txt` and
+  `tests/golden_snapshots/public_api/prom_ui_runtime_shell_player.txt`,
+  introduced in the same change that introduced the bridge.
+- **Native demo integration**: `prom-ui-demo`'s `--shell-player-demo` drives
+  the complete pipeline above through `prom-ui-backend-native`'s native
+  window/render loop — one accepted patch batch and one deliberately invalid
+  patch batch — rendering every frame from committed Shell Player state only
+  (`binding_value`/`node_availability`/`collection_entries`/
+  `replay_cursor`), with no parallel demo-only mutation path.
+
+Not delivered by this implementation, and remaining explicitly out of scope:
+
+- `ProjectionBundle` parsing, loading, verification, and activation — the
+  native demo activates from `demo_activation_snapshot`, a fixed
+  in-crate fixture, not a loaded/verified bundle;
+- focus realization, hit-test realization, accessibility realization, and
+  full layout realization;
+- `ActionIntent` emission and action/effect authorization;
+- patch-batch transaction/rollback semantics beyond one atomic whole-batch
+  commit (`Atomic` vs. `OrderedPartial`, per section 7 and section 13);
+- any change to Semantic truth ownership, capability authority, or admission
+  authority — local shell state remains local, non-authoritative,
+  reconstructible state exactly as defined in section 4.
+
+## 16. Final status
 
 ```text
 Shell Player session input contract = FROZEN
@@ -1227,23 +1338,38 @@ public API guard policy (same-PR-as-bridge) = FROZEN
 testability boundary = FROZEN
 explicit CollectionAnchor declaration contract = FROZEN
 
-replay-cursor compatibility implementation = NOT AUTHORIZED
-replay-cursor advancement = NOT AUTHORIZED
-ProjectionPatch application = NOT AUTHORIZED
-stage-5 stable-target evaluator implementation = NOT AUTHORIZED
-stage-5/stage-6 orchestration = NOT AUTHORIZED
-OrderedStableTargetManifest Rust representation = NOT AUTHORIZED
-ActiveProjectionTargetCatalog Rust representation = NOT AUTHORIZED
-PreparedProjectionPatchTargets implementation = NOT AUTHORIZED
-PreparedActiveProjectionTargets implementation = NOT AUTHORIZED
-explicit CollectionAnchor declaration implementation = NOT AUTHORIZED
-any public stage-5 bridge item = NOT AUTHORIZED
-public API guard change = NOT AUTHORIZED
+IMPLEMENTED (delivered by PR #1542; see section 15 for the exact Rust
+mapping; conceptual rules above remain FROZEN and unweakened):
+
+replay-cursor compatibility implementation = IMPLEMENTED
+replay-cursor advancement = IMPLEMENTED
+ProjectionPatch application (one atomic whole-batch commit) = IMPLEMENTED
+stage-5 stable-target evaluator implementation = IMPLEMENTED
+stage-4/stage-5/stage-6 orchestration through commit = IMPLEMENTED
+OrderedStableTargetManifest Rust representation = IMPLEMENTED
+ActiveProjectionTargetCatalog Rust representation = IMPLEMENTED
+PreparedProjectionPatchTargets implementation = IMPLEMENTED
+PreparedActiveProjectionTargets implementation = IMPLEMENTED
+explicit CollectionAnchor declaration implementation = IMPLEMENTED
+the public stage-5 bridge (prom_ui::shell_bridge) = IMPLEMENTED
+public API guard coverage for the bridge = IMPLEMENTED
+Shell Player Rust implementation (session/lifecycle/transition/patch
+  pipeline described in section 15) = IMPLEMENTED
+renderer integration (native demo, committed-state-only draw material) = IMPLEMENTED
+backend integration (prom-ui-backend-native window/event loop) = IMPLEMENTED
+native demo end-to-end (accept, commit, cursor advance, reject, preserve) = IMPLEMENTED
+
+NOT AUTHORIZED (still out of scope; unchanged by this implementation):
+
 cross-crate ProjectionPatch visibility change = NOT AUTHORIZED
-Shell Player Rust implementation = NOT AUTHORIZED
-bundle activation = NOT AUTHORIZED
-renderer integration = NOT AUTHORIZED
-backend integration = NOT AUTHORIZED
+ProjectionBundle parsing/loading/verification/activation = NOT AUTHORIZED
+focus realization implementation = NOT AUTHORIZED
+hit-test realization implementation = NOT AUTHORIZED
+accessibility realization implementation = NOT AUTHORIZED
+full layout realization implementation = NOT AUTHORIZED
+ActionIntent emission / action-effect authorization = NOT AUTHORIZED
+patch-batch transaction/rollback semantics beyond one atomic
+  whole-batch commit = NOT AUTHORIZED
 Gate D = CLOSED
 production promotion = NOT AUTHORIZED
 NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE

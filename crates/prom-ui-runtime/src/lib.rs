@@ -37,6 +37,7 @@
 extern crate alloc;
 
 pub mod action_mapping;
+pub(crate) mod active_projection_target_catalog;
 pub mod adapter_boundary;
 pub mod admission_facade;
 pub mod boundary_registry;
@@ -48,8 +49,7 @@ pub mod intent_dispatch;
 pub mod interaction;
 pub mod interaction_pipeline;
 pub mod layout_primitives;
-#[allow(dead_code)] // crate-private seed not yet connected to runtime caller path
-pub(crate) mod shell_player;
+pub mod shell_player;
 pub mod state_update;
 pub mod visual_tokens;
 

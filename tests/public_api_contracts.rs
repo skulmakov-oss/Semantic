@@ -54,6 +54,14 @@ const TARGETS: &[(&str, &str)] = &[
         "crates/prom-refs/src/lib.rs",
         "tests/golden_snapshots/public_api/prom_refs_lib.txt",
     ),
+    (
+        "crates/prom-ui/src/shell_bridge.rs",
+        "tests/golden_snapshots/public_api/prom_ui_shell_bridge.txt",
+    ),
+    (
+        "crates/prom-ui-runtime/src/shell_player.rs",
+        "tests/golden_snapshots/public_api/prom_ui_runtime_shell_player.txt",
+    ),
 ];
 
 fn normalize_ws(line: &str) -> String {

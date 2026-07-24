@@ -1,0 +1,53 @@
+source: crates/prom-ui/src/shell_bridge.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeQuad {
+#[derive(Debug, Clone, PartialEq)]
+pub enum BridgeValue {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeAvailability {
+#[derive(Debug, Clone, PartialEq)]
+pub enum BridgePatchOperation {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgePatchEnvelope {
+pub patch_id: u64,
+pub stream_id: u64,
+pub document_id: u64,
+pub previous_revision: u64,
+pub revision: u64,
+pub epoch: u64,
+pub sequence: u64,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeAdmissionError {
+#[derive(Debug, Clone)]
+pub struct AdmittedProjectionPatchBatch {
+pub fn admit_projection_patch_batch( envelope: BridgePatchEnvelope, operations: Vec<BridgePatchOperation>, ) -> Result<AdmittedProjectionPatchBatch, BridgeAdmissionError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeTargetRole {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgeManifestEntry {
+pub patch_ordinal: u64,
+pub operation_ordinal: u64,
+pub role: BridgeTargetRole,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeManifestError {
+#[derive(Debug, Clone)]
+pub struct PreparedPatchSubmission {
+pub fn prepare_patch_submission( batch: AdmittedProjectionPatchBatch, ) -> Result<PreparedPatchSubmission, BridgeManifestError> {
+pub fn prepared_submission_entries(submission: &PreparedPatchSubmission) -> &[BridgeManifestEntry] {
+pub fn prepared_submission_target_reference_count(submission: &PreparedPatchSubmission) -> usize {
+pub fn prepared_submission_patch_count(submission: &PreparedPatchSubmission) -> usize {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivationTargetSnapshot {
+pub fn node_anchor_ids(&self) -> &[u64] {
+pub fn binding_anchor_ids(&self) -> &[(u64, u32)] {
+pub fn collection_anchor_ids(&self) -> &[u64] {
+pub fn demo_activation_snapshot() -> ActivationTargetSnapshot {
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocalProjectionStateHandle {
+pub fn initial_local_projection_state() -> LocalProjectionStateHandle {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeApplicationError {
+pub fn apply_prepared_patch_submission( previous: &LocalProjectionStateHandle, submission: &PreparedPatchSubmission, ) -> Result<LocalProjectionStateHandle, BridgeApplicationError> {
+pub fn binding_value( state: &LocalProjectionStateHandle, node: u64, slot: u32, ) -> Option<BridgeValue> {
+pub fn node_availability( state: &LocalProjectionStateHandle, node: u64, ) -> Option<BridgeAvailability> {
+pub fn collection_entries( state: &LocalProjectionStateHandle, collection: u64, ) -> Vec<(u64, BridgeValue)> {

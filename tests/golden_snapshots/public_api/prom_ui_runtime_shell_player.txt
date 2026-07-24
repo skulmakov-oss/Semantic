@@ -1,0 +1,111 @@
+source: crates/prom-ui-runtime/src/shell_player.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellSessionId(pub u64);
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellLifecycle {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellLifecycleCommand {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellLifecycleStimulus {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellLifecycleLimits {
+pub max_transition_stimulus_bytes: usize,
+pub max_diagnostics_per_transition: usize,
+pub max_patches_per_transition: usize,
+pub max_target_references_per_transition: usize,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActivatedShellSessionContext {
+pub(crate) session_id: ShellSessionId,
+pub(crate) limits: ShellLifecycleLimits,
+pub(crate) catalog: ActiveProjectionTargetCatalog,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectionReplayCursor {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellLocalState {
+pub session_id: ShellSessionId,
+pub lifecycle: ShellLifecycle,
+pub replay_cursor: ProjectionReplayCursor,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellTransitionInput {
+pub stimulus: ShellLifecycleStimulus,
+pub stimulus_bytes: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShellTransitionDisposition {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellDiagnostic {
+pub stable_code: &'static str,
+pub evaluation_stage: usize,
+pub(crate) const SPV0_SESSION_MISMATCH: &str = "SPV0_SESSION_MISMATCH";
+pub(crate) const SPV0_INVALID_LIFECYCLE: &str = "SPV0_INVALID_LIFECYCLE";
+pub(crate) const SPV0_SESSION_CLOSED: &str = "SPV0_SESSION_CLOSED";
+pub(crate) const SPV0_RESOURCE_LIMIT_EXCEEDED: &str = "SPV0_RESOURCE_LIMIT_EXCEEDED";
+pub(crate) const SPV0_REPLAY_CURSOR_MISMATCH: &str = "SPV0_REPLAY_CURSOR_MISMATCH";
+pub(crate) const SPV0_INVALID_STIMULUS: &str = "SPV0_INVALID_STIMULUS";
+pub(crate) const SPV0_INVALID_TARGET: &str = "SPV0_INVALID_TARGET";
+pub(crate) const SPV0_STATE_INVARIANT_VIOLATION: &str = "SPV0_STATE_INVARIANT_VIOLATION";
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellTransitionResult {
+pub disposition: ShellTransitionDisposition,
+pub state: ShellLocalState,
+pub diagnostics: Vec<ShellDiagnostic>,
+pub stimulus_bytes: usize,
+pub logical_diagnostic_count: usize,
+pub emitted_diagnostic_count: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OrderedProjectionPatchBatchEnvelope {
+pub session_id: ShellSessionId,
+pub sequence_no: u64,
+pub patch_count: usize,
+pub stimulus_bytes: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectionPatchPreflightDisposition {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectionPatchPreflightResult {
+pub(crate) disposition: ProjectionPatchPreflightDisposition,
+pub(crate) sequence_no: u64,
+pub(crate) patch_count: usize,
+pub(crate) stimulus_bytes: usize,
+pub(crate) diagnostics: Vec<ShellDiagnostic>,
+pub(crate) logical_diagnostic_count: usize,
+pub(crate) emitted_diagnostic_count: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProjectionReplayCompatibilityDisposition {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProjectionReplayCompatibilityResult {
+pub(crate) disposition: ProjectionReplayCompatibilityDisposition,
+pub(crate) sequence_no: u64,
+pub(crate) patch_count: usize,
+pub(crate) diagnostics: Vec<ShellDiagnostic>,
+pub(crate) logical_diagnostic_count: usize,
+pub(crate) emitted_diagnostic_count: usize,
+pub(crate) fn evaluate_projection_patch_replay_compatibility( replay_cursor: ProjectionReplayCursor, envelope: OrderedProjectionPatchBatchEnvelope, max_diagnostics_per_transition: usize, ) -> ProjectionReplayCompatibilityResult {
+pub(crate) fn evaluate_projection_patch_envelope_preflight( context: &ActivatedShellSessionContext, state: &ShellLocalState, envelope: OrderedProjectionPatchBatchEnvelope, ) -> ProjectionPatchPreflightResult {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellSessionLimits {
+pub max_transition_stimulus_bytes: usize,
+pub max_diagnostics_per_transition: usize,
+pub max_patches_per_transition: usize,
+pub max_target_references_per_transition: usize,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectionPatchApplicationDisposition {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectionPatchApplicationResult {
+pub disposition: ProjectionPatchApplicationDisposition,
+pub diagnostics: Vec<ShellDiagnostic>,
+pub logical_diagnostic_count: usize,
+pub emitted_diagnostic_count: usize,
+pub replay_cursor: ProjectionReplayCursor,
+#[derive(Debug)]
+pub struct ShellSession {
+pub fn create_shell_session( session_id: u64, limits: ShellSessionLimits, activation_snapshot: &prom_ui::shell_bridge::ActivationTargetSnapshot, ) -> ShellSession {
+pub(crate) fn new(context: ActivatedShellSessionContext) -> Self {
+pub fn state(&self) -> &ShellLocalState {
+pub fn lifecycle(&self) -> ShellLifecycle {
+pub fn replay_cursor(&self) -> ProjectionReplayCursor {
+pub fn binding_value( &self, node: u64, slot: u32, ) -> Option<prom_ui::shell_bridge::BridgeValue> {
+pub fn node_availability( &self, node: u64, ) -> Option<prom_ui::shell_bridge::BridgeAvailability> {
+pub fn collection_entries( &self, collection: u64, ) -> Vec<(u64, prom_ui::shell_bridge::BridgeValue)> {
+pub fn apply(&mut self, input: ShellTransitionInput) -> ShellTransitionResult {
+pub(crate) fn preflight_projection_patch_envelope( &self, envelope: OrderedProjectionPatchBatchEnvelope, ) -> ProjectionPatchPreflightResult {
+pub fn apply_projection_patch_batch( &mut self, envelope: OrderedProjectionPatchBatchEnvelope, declared_target_reference_count: usize, submission: &prom_ui::shell_bridge::PreparedPatchSubmission, ) -> ProjectionPatchApplicationResult {
+pub(crate) fn evaluate_lifecycle_transition( context: &ActivatedShellSessionContext, previous: &ShellLocalState, input: ShellTransitionInput, ) -> ShellTransitionResult {
