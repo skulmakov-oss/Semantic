@@ -20,7 +20,7 @@ authorization:
   research_matrix_sync: true
   latest_checkpoint_sync: true
   dependency_order_sync: true
-  issue_1489_changes: true
+  issue_1489_changes: false
 
   rust_implementation: false
   normative_contract_change: false
