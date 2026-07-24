@@ -17,6 +17,7 @@ scope:
     - tests/golden_snapshots/public_api/prom_ui_shell_bridge.txt
     - tests/golden_snapshots/public_api/prom_ui_runtime_shell_player.txt
     - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
+    - docs/spec/ui/shell_player_session_state_v0.md
 
 authorization:
   rust_implementation: true

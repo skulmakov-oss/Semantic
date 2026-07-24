@@ -9,8 +9,9 @@
 //! `ShellSession` via `binding_value`/`node_availability`/`collection_entries`.
 
 use prom_ui::shell_bridge::{
-    admit_projection_patch_batch, demo_activation_snapshot, prepared_manifest_snapshot,
-    BridgeAvailability, BridgePatchEnvelope, BridgePatchOperation, BridgeValue,
+    admit_projection_patch_batch, demo_activation_snapshot, prepare_patch_submission,
+    prepared_submission_target_reference_count, BridgeAvailability, BridgePatchEnvelope,
+    BridgePatchOperation, BridgeValue,
 };
 use prom_ui_backend_native::NativeBackend;
 use prom_ui_runtime::shell_player::{
@@ -150,7 +151,9 @@ pub fn run_shell_player_demo() {
     let snapshot = demo_activation_snapshot();
     println!(
         "activation snapshot: node_anchors={:?} binding_anchors={:?} collection_anchors={:?}",
-        snapshot.node_anchor_ids, snapshot.binding_anchor_ids, snapshot.collection_anchor_ids
+        snapshot.node_anchor_ids(),
+        snapshot.binding_anchor_ids(),
+        snapshot.collection_anchor_ids()
     );
 
     let mut shell = create_shell_session(1, session_limits(), &snapshot);
@@ -226,17 +229,17 @@ pub fn run_shell_player_demo() {
                 };
                 let batch =
                     admit_projection_patch_batch(patch_envelope, ops).expect("valid batch admits");
-                let manifest = prepared_manifest_snapshot(&batch).expect("manifest derives");
+                let submission = prepare_patch_submission(batch).expect("submission derives");
+                let target_reference_count =
+                    prepared_submission_target_reference_count(&submission);
 
                 let result = shell.apply_projection_patch_batch(
                     outer_envelope(1),
-                    manifest.target_reference_count,
-                    &manifest,
-                    &batch,
+                    target_reference_count,
+                    &submission,
                 );
                 println!(
-                    "2) submitted valid patch batch (4 operations, {} target references)",
-                    manifest.target_reference_count
+                    "2) submitted valid patch batch (4 operations, {target_reference_count} target references)"
                 );
                 println!(
                     "3)+4) committed update: disposition={:?} label={:?} status={:?}",
@@ -276,16 +279,17 @@ pub fn run_shell_player_demo() {
                 };
                 let batch = admit_projection_patch_batch(patch_envelope, ops)
                     .expect("structurally valid batch admits");
-                let manifest = prepared_manifest_snapshot(&batch).expect("manifest derives");
+                let submission = prepare_patch_submission(batch).expect("submission derives");
+                let target_reference_count =
+                    prepared_submission_target_reference_count(&submission);
 
                 let cursor_before = shell.replay_cursor();
                 let label_before = shell.binding_value(LABEL_NODE, LABEL_SLOT);
 
                 let result = shell.apply_projection_patch_batch(
                     outer_envelope(2),
-                    manifest.target_reference_count,
-                    &manifest,
-                    &batch,
+                    target_reference_count,
+                    &submission,
                 );
                 println!("7) submitted deliberately invalid patch batch (undeclared target 999)");
                 println!(

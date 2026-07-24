@@ -492,14 +492,32 @@ impl ShellSession {
     /// Runs the complete stages 1-9 `ProjectionPatch` batch transition:
     /// stages 1-4 (session/lifecycle/envelope/resource preflight, reusing
     /// [`Self::preflight_projection_patch_envelope`]), stage 4b (declared
-    /// vs actual target-reference count coherence, contract section
-    /// 7.1.9.8), stage 4c (target-reference resource limit), stage 5
+    /// vs actual patch-count and target-reference-count coherence, contract
+    /// section 7.1.9.8), stage 4c (target-reference resource limit), stage 5
     /// (stable-target membership against the immutable session catalog,
     /// contract section 7.1.5), stage 6 (replay-cursor compatibility,
     /// reusing [`evaluate_projection_patch_replay_compatibility`]), stage 7
     /// (candidate local-projection-state calculation via
-    /// `prom_ui::shell_bridge::apply_admitted_patch_batch`), and stage 9
+    /// `prom_ui::shell_bridge::apply_prepared_patch_submission`), and stage 9
     /// (atomic commit).
+    ///
+    /// `submission` is the single source of truth for the manifest, the
+    /// actual target-reference count, the actual patch count, and the
+    /// operations applied at stage 7: it is an opaque
+    /// `prom_ui::shell_bridge::PreparedPatchSubmission` whose manifest and
+    /// batch were derived together, atomically, by
+    /// `prom_ui::shell_bridge::prepare_patch_submission`. There is no
+    /// parameter here through which a manifest derived from one batch could
+    /// be paired with a different batch's operations — stage 5 always
+    /// validates, and stage 7 always applies, the same admitted batch.
+    /// `envelope` remains an independently caller-declared value only for
+    /// the session/lifecycle/resource preflight and the stage-6 outer replay
+    /// coordinate (contract section 7.2, which explicitly keeps the outer
+    /// `sequence_no` a separate concept from the inner `ProjectionPatch`
+    /// sequencing); its declared `patch_count` is cross-checked against
+    /// `submission`'s actual patch count below before any target validation
+    /// or mutation, so it cannot be used to mis-classify a mutating
+    /// transition as a no-op.
     ///
     /// On any rejection, the complete previous local projection state and
     /// replay cursor are preserved: this method does not mutate `self`
@@ -507,9 +525,8 @@ impl ShellSession {
     pub fn apply_projection_patch_batch(
         &mut self,
         envelope: OrderedProjectionPatchBatchEnvelope,
-        target_reference_count: usize,
-        manifest: &prom_ui::shell_bridge::PreparedManifestSnapshot,
-        batch: &prom_ui::shell_bridge::AdmittedProjectionPatchBatch,
+        declared_target_reference_count: usize,
+        submission: &prom_ui::shell_bridge::PreparedPatchSubmission,
     ) -> ProjectionPatchApplicationResult {
         let cap = self.context.limits.max_diagnostics_per_transition;
 
@@ -526,20 +543,32 @@ impl ShellSession {
             };
         }
 
-        // Stage 4b: declared/actual target-reference count coherence.
-        if target_reference_count != manifest.target_reference_count {
+        let actual_patch_count = prom_ui::shell_bridge::prepared_submission_patch_count(submission);
+        let actual_target_reference_count =
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(submission);
+
+        // Stage 4b: declared/actual patch-count and target-reference-count
+        // coherence, checked against the submission's own admitted batch —
+        // never against an independently supplied manifest. This is what
+        // prevents a declared `envelope.patch_count` (e.g. spoofed to 0)
+        // from disguising a batch that actually mutates state.
+        if envelope.patch_count != actual_patch_count
+            || declared_target_reference_count != actual_target_reference_count
+        {
             return self.reject_patch_batch(SPV0_INVALID_STIMULUS, 4, cap);
         }
 
         // Stage 4c: target-reference resource limit.
-        if target_reference_count > self.context.limits.max_target_references_per_transition {
+        if actual_target_reference_count > self.context.limits.max_target_references_per_transition
+        {
             return self.reject_patch_batch(SPV0_RESOURCE_LIMIT_EXCEEDED, 4, cap);
         }
 
         // Stage 5: stable-target membership, using only the immutable
-        // session catalog. Read-only; does not mutate local state.
+        // session catalog and `submission`'s own manifest. Read-only; does
+        // not mutate local state.
         let mut invalid_targets = Vec::new();
-        for entry in &manifest.entries {
+        for entry in prom_ui::shell_bridge::prepared_submission_entries(submission) {
             let valid = match entry.role {
                 prom_ui::shell_bridge::BridgeTargetRole::Node { node } => {
                     self.context.catalog.contains_node(node)
@@ -584,12 +613,14 @@ impl ShellSession {
         }
 
         // Stage 7: deterministic candidate-state calculation, without
-        // committing. Structural application failures (e.g. a collection
-        // operation targeting an already-present or missing key) are
-        // candidate-state invariant violations.
-        let candidate = match prom_ui::shell_bridge::apply_admitted_patch_batch(
+        // committing. `submission` guarantees these are exactly the
+        // operations stage 5 just validated. Structural application
+        // failures (e.g. a collection operation targeting an
+        // already-present or missing key) are candidate-state invariant
+        // violations.
+        let candidate = match prom_ui::shell_bridge::apply_prepared_patch_submission(
             &self.local_projection,
-            batch,
+            submission,
         ) {
             Ok(candidate) => candidate,
             Err(_) => return self.reject_patch_batch(SPV0_STATE_INVARIANT_VIOLATION, 8, cap),
@@ -2327,14 +2358,27 @@ mod tests {
         }
     }
 
-    /// A batch touching two targets declared in `demo_activation_snapshot`:
-    /// the label binding (node 2, slot 0) and the status node (node 3).
-    fn valid_batch_touching_declared_targets(
+    fn admit(
         seq: u64,
-    ) -> (
-        prom_ui::shell_bridge::AdmittedProjectionPatchBatch,
-        prom_ui::shell_bridge::PreparedManifestSnapshot,
-    ) {
+        ops: Vec<prom_ui::shell_bridge::BridgePatchOperation>,
+    ) -> prom_ui::shell_bridge::AdmittedProjectionPatchBatch {
+        let envelope = prom_ui::shell_bridge::BridgePatchEnvelope {
+            patch_id: seq,
+            stream_id: 1,
+            document_id: 1,
+            previous_revision: seq - 1,
+            revision: seq,
+            epoch: 1,
+            sequence: seq,
+        };
+        prom_ui::shell_bridge::admit_projection_patch_batch(envelope, ops).expect("valid batch")
+    }
+
+    /// A submission touching two targets declared in `demo_activation_snapshot`:
+    /// the label binding (node 2, slot 0) and the status node (node 3).
+    fn valid_submission_touching_declared_targets(
+        seq: u64,
+    ) -> prom_ui::shell_bridge::PreparedPatchSubmission {
         let ops = alloc::vec![
             prom_ui::shell_bridge::BridgePatchOperation::SetBindingValue {
                 node: 2,
@@ -2346,31 +2390,18 @@ mod tests {
                 availability: prom_ui::shell_bridge::BridgeAvailability::Hidden,
             },
         ];
-        let envelope = prom_ui::shell_bridge::BridgePatchEnvelope {
-            patch_id: seq,
-            stream_id: 1,
-            document_id: 1,
-            previous_revision: seq - 1,
-            revision: seq,
-            epoch: 1,
-            sequence: seq,
-        };
-        let batch = prom_ui::shell_bridge::admit_projection_patch_batch(envelope, ops)
-            .expect("valid batch");
-        let manifest = prom_ui::shell_bridge::prepared_manifest_snapshot(&batch).expect("derives");
-        (batch, manifest)
+        prom_ui::shell_bridge::prepare_patch_submission(admit(seq, ops)).expect("derives")
     }
 
     #[test]
     fn test_orchestration_1_valid_batch_applies_and_commits() {
         let mut session = make_active_session();
-        let (batch, manifest) = valid_batch_touching_declared_targets(1);
+        let submission = valid_submission_touching_declared_targets(1);
 
         let result = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest.target_reference_count,
-            &manifest,
-            &batch,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission),
+            &submission,
         );
 
         assert_eq!(
@@ -2398,24 +2429,13 @@ mod tests {
                 availability: prom_ui::shell_bridge::BridgeAvailability::Hidden,
             }
         ];
-        let envelope = prom_ui::shell_bridge::BridgePatchEnvelope {
-            patch_id: 1,
-            stream_id: 1,
-            document_id: 1,
-            previous_revision: 0,
-            revision: 1,
-            epoch: 1,
-            sequence: 1,
-        };
-        let batch =
-            prom_ui::shell_bridge::admit_projection_patch_batch(envelope, ops).expect("valid");
-        let manifest = prom_ui::shell_bridge::prepared_manifest_snapshot(&batch).expect("derives");
+        let submission =
+            prom_ui::shell_bridge::prepare_patch_submission(admit(1, ops)).expect("derives");
 
         let result = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest.target_reference_count,
-            &manifest,
-            &batch,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission),
+            &submission,
         );
 
         assert_eq!(
@@ -2433,16 +2453,16 @@ mod tests {
     }
 
     #[test]
-    fn test_orchestration_3_declared_actual_count_mismatch_rejected() {
+    fn test_orchestration_3_declared_actual_target_reference_count_mismatch_rejected() {
         let mut session = make_active_session();
-        let (batch, manifest) = valid_batch_touching_declared_targets(1);
-        let wrong_declared_count = manifest.target_reference_count + 1;
+        let submission = valid_submission_touching_declared_targets(1);
+        let wrong_declared_count =
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission) + 1;
 
         let result = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
             wrong_declared_count,
-            &manifest,
-            &batch,
+            &submission,
         );
 
         assert_eq!(
@@ -2457,18 +2477,53 @@ mod tests {
         );
     }
 
+    /// P1 regression: declaring a `patch_count` that does not match the
+    /// submission's own actual patch count is rejected before any target
+    /// validation or mutation — a caller cannot declare `patch_count: 0`
+    /// (or any other mismatched value) to disguise a batch that actually
+    /// carries operations.
+    #[test]
+    fn test_orchestration_declared_actual_patch_count_mismatch_rejected() {
+        let mut session = make_active_session();
+        let submission = valid_submission_touching_declared_targets(1);
+        let target_reference_count =
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission);
+
+        // Declares patch_count: 0 even though the submission carries one
+        // real patch with two real operations.
+        let result = session.apply_projection_patch_batch(
+            outer_envelope(1, 0),
+            target_reference_count,
+            &submission,
+        );
+
+        assert_eq!(
+            result.disposition,
+            ProjectionPatchApplicationDisposition::Rejected
+        );
+        assert_eq!(result.diagnostics[0].stable_code, SPV0_INVALID_STIMULUS);
+        assert_eq!(result.diagnostics[0].evaluation_stage, 4);
+        // No mutation and no cursor advancement occurred despite the
+        // spoofed patch_count.
+        assert_eq!(
+            session.replay_cursor(),
+            ProjectionReplayCursor::Uninitialized
+        );
+        assert_eq!(session.binding_value(2, 0), None);
+        assert_eq!(session.node_availability(3), None);
+    }
+
     #[test]
     fn test_orchestration_4_target_reference_resource_limit_rejected() {
         let snapshot = prom_ui::shell_bridge::demo_activation_snapshot();
         let mut session = create_shell_session(1, orchestration_limits(1), &snapshot);
         session.apply(cmd(ShellLifecycleCommand::Activate, 10));
 
-        let (batch, manifest) = valid_batch_touching_declared_targets(1); // 2 target refs > limit of 1
+        let submission = valid_submission_touching_declared_targets(1); // 2 target refs > limit of 1
         let result = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest.target_reference_count,
-            &manifest,
-            &batch,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission),
+            &submission,
         );
 
         assert_eq!(
@@ -2485,12 +2540,11 @@ mod tests {
     #[test]
     fn test_orchestration_5_replay_cursor_mismatch_rejected_preserves_committed_state() {
         let mut session = make_active_session();
-        let (batch1, manifest1) = valid_batch_touching_declared_targets(1);
+        let submission1 = valid_submission_touching_declared_targets(1);
         let result1 = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest1.target_reference_count,
-            &manifest1,
-            &batch1,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission1),
+            &submission1,
         );
         assert_eq!(
             result1.disposition,
@@ -2498,13 +2552,14 @@ mod tests {
         );
         assert_eq!(session.replay_cursor(), ProjectionReplayCursor::At(1));
 
-        // Duplicate sequence_no: not a valid successor of At(1).
-        let (batch2, manifest2) = valid_batch_touching_declared_targets(1);
+        // Duplicate sequence_no: not a valid successor of At(1). The real
+        // targets in this second submission are still valid, so this
+        // proves stage 6 alone rejects it, not stage 5.
+        let submission2 = valid_submission_touching_declared_targets(1);
         let result2 = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest2.target_reference_count,
-            &manifest2,
-            &batch2,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission2),
+            &submission2,
         );
 
         assert_eq!(
@@ -2523,6 +2578,39 @@ mod tests {
         );
     }
 
+    /// P1 regression: a mismatched (spoofed) `sequence_no` can only ever
+    /// cause rejection via stage 6 — it cannot be used to bypass stage-5
+    /// target validation for a batch touching an undeclared target. The
+    /// submission's own real targets are always what stage 5 checks,
+    /// regardless of what outer sequence coordinate accompanies it.
+    #[test]
+    fn test_orchestration_spoofed_sequence_no_cannot_bypass_target_validation() {
+        let mut session = make_active_session();
+        let ops = alloc::vec![
+            prom_ui::shell_bridge::BridgePatchOperation::SetNodeAvailability {
+                node: 999,
+                availability: prom_ui::shell_bridge::BridgeAvailability::Hidden,
+            }
+        ];
+        let submission =
+            prom_ui::shell_bridge::prepare_patch_submission(admit(1, ops)).expect("derives");
+
+        // A "plausible" sequence_no (valid successor of Uninitialized) does
+        // not help: the real targets are still invalid.
+        let result = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission),
+            &submission,
+        );
+
+        assert_eq!(
+            result.disposition,
+            ProjectionPatchApplicationDisposition::Rejected
+        );
+        assert_eq!(result.diagnostics[0].stable_code, SPV0_INVALID_TARGET);
+        assert_eq!(result.diagnostics[0].evaluation_stage, 5);
+    }
+
     #[test]
     fn test_orchestration_6_structural_application_failure_preserves_committed_state() {
         let mut session = make_active_session();
@@ -2534,24 +2622,12 @@ mod tests {
                 value: prom_ui::shell_bridge::BridgeValue::Unsigned(1),
             }
         ];
-        let env1 = prom_ui::shell_bridge::BridgePatchEnvelope {
-            patch_id: 1,
-            stream_id: 1,
-            document_id: 1,
-            previous_revision: 0,
-            revision: 1,
-            epoch: 1,
-            sequence: 1,
-        };
-        let batch1 =
-            prom_ui::shell_bridge::admit_projection_patch_batch(env1, insert_ops).expect("valid");
-        let manifest1 =
-            prom_ui::shell_bridge::prepared_manifest_snapshot(&batch1).expect("derives");
+        let submission1 =
+            prom_ui::shell_bridge::prepare_patch_submission(admit(1, insert_ops)).expect("derives");
         let result1 = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest1.target_reference_count,
-            &manifest1,
-            &batch1,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission1),
+            &submission1,
         );
         assert_eq!(
             result1.disposition,
@@ -2568,24 +2644,12 @@ mod tests {
                 value: prom_ui::shell_bridge::BridgeValue::Unsigned(2),
             }
         ];
-        let env2 = prom_ui::shell_bridge::BridgePatchEnvelope {
-            patch_id: 2,
-            stream_id: 1,
-            document_id: 1,
-            previous_revision: 1,
-            revision: 2,
-            epoch: 1,
-            sequence: 2,
-        };
-        let batch2 =
-            prom_ui::shell_bridge::admit_projection_patch_batch(env2, dup_ops).expect("valid");
-        let manifest2 =
-            prom_ui::shell_bridge::prepared_manifest_snapshot(&batch2).expect("derives");
+        let submission2 =
+            prom_ui::shell_bridge::prepare_patch_submission(admit(2, dup_ops)).expect("derives");
         let result2 = session.apply_projection_patch_batch(
             outer_envelope(2, 1),
-            manifest2.target_reference_count,
-            &manifest2,
-            &batch2,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission2),
+            &submission2,
         );
 
         assert_eq!(
@@ -2607,12 +2671,11 @@ mod tests {
     #[test]
     fn test_orchestration_7_committed_state_persists_across_subsequent_queries() {
         let mut session = make_active_session();
-        let (batch, manifest) = valid_batch_touching_declared_targets(1);
+        let submission = valid_submission_touching_declared_targets(1);
         session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest.target_reference_count,
-            &manifest,
-            &batch,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission),
+            &submission,
         );
 
         for _ in 0..3 {
@@ -2637,24 +2700,12 @@ mod tests {
                 availability: prom_ui::shell_bridge::BridgeAvailability::Hidden,
             }
         ];
-        let bad_envelope = prom_ui::shell_bridge::BridgePatchEnvelope {
-            patch_id: 1,
-            stream_id: 1,
-            document_id: 1,
-            previous_revision: 0,
-            revision: 1,
-            epoch: 1,
-            sequence: 1,
-        };
-        let bad_batch = prom_ui::shell_bridge::admit_projection_patch_batch(bad_envelope, bad_ops)
-            .expect("valid");
-        let bad_manifest =
-            prom_ui::shell_bridge::prepared_manifest_snapshot(&bad_batch).expect("derives");
+        let bad_submission =
+            prom_ui::shell_bridge::prepare_patch_submission(admit(1, bad_ops)).expect("derives");
         let bad_result = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            bad_manifest.target_reference_count,
-            &bad_manifest,
-            &bad_batch,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&bad_submission),
+            &bad_submission,
         );
         assert_eq!(
             bad_result.disposition,
@@ -2665,12 +2716,11 @@ mod tests {
             ProjectionReplayCursor::Uninitialized
         );
 
-        let (good_batch, good_manifest) = valid_batch_touching_declared_targets(1);
+        let good_submission = valid_submission_touching_declared_targets(1);
         let good_result = session.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            good_manifest.target_reference_count,
-            &good_manifest,
-            &good_batch,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&good_submission),
+            &good_submission,
         );
         assert_eq!(
             good_result.disposition,
@@ -2681,25 +2731,90 @@ mod tests {
 
     #[test]
     fn test_orchestration_9_determinism() {
-        let (batch, manifest) = valid_batch_touching_declared_targets(1);
+        let submission_a = valid_submission_touching_declared_targets(1);
+        let submission_b = valid_submission_touching_declared_targets(1);
         let mut session_a = make_active_session();
         let mut session_b = make_active_session();
 
         let result_a = session_a.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest.target_reference_count,
-            &manifest,
-            &batch,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission_a),
+            &submission_a,
         );
         let result_b = session_b.apply_projection_patch_batch(
             outer_envelope(1, 1),
-            manifest.target_reference_count,
-            &manifest,
-            &batch,
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission_b),
+            &submission_b,
         );
 
         assert_eq!(result_a, result_b);
         assert_eq!(session_a.binding_value(2, 0), session_b.binding_value(2, 0));
         assert_eq!(session_a.replay_cursor(), session_b.replay_cursor());
+    }
+
+    /// P1 regression: there is no API through which a manifest/evidence
+    /// derived from one admitted batch can be paired with a different
+    /// batch's operations. Two independently prepared submissions targeting
+    /// different nodes are each validated and applied strictly against
+    /// their own targets — applying `submission_b` never touches node 1
+    /// (only present in `submission_a`), and vice versa.
+    #[test]
+    fn test_orchestration_cross_submission_evidence_cannot_be_mixed() {
+        let mut session = make_active_session();
+        let submission_a = prom_ui::shell_bridge::prepare_patch_submission(admit(
+            1,
+            alloc::vec![
+                prom_ui::shell_bridge::BridgePatchOperation::SetNodeAvailability {
+                    node: 2,
+                    availability: prom_ui::shell_bridge::BridgeAvailability::Available,
+                }
+            ],
+        ))
+        .expect("derives");
+        let submission_b = prom_ui::shell_bridge::prepare_patch_submission(admit(
+            1,
+            alloc::vec![
+                prom_ui::shell_bridge::BridgePatchOperation::SetNodeAvailability {
+                    node: 3,
+                    availability: prom_ui::shell_bridge::BridgeAvailability::Hidden,
+                }
+            ],
+        ))
+        .expect("derives");
+
+        let result_a = session.apply_projection_patch_batch(
+            outer_envelope(1, 1),
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission_a),
+            &submission_a,
+        );
+        assert_eq!(
+            result_a.disposition,
+            ProjectionPatchApplicationDisposition::Applied
+        );
+        assert_eq!(
+            session.node_availability(2),
+            Some(prom_ui::shell_bridge::BridgeAvailability::Available)
+        );
+        // submission_b's target was never touched by applying submission_a.
+        assert_eq!(session.node_availability(3), None);
+
+        let result_b = session.apply_projection_patch_batch(
+            outer_envelope(2, 1),
+            prom_ui::shell_bridge::prepared_submission_target_reference_count(&submission_b),
+            &submission_b,
+        );
+        assert_eq!(
+            result_b.disposition,
+            ProjectionPatchApplicationDisposition::Applied
+        );
+        // submission_a's earlier commit is untouched by applying submission_b.
+        assert_eq!(
+            session.node_availability(2),
+            Some(prom_ui::shell_bridge::BridgeAvailability::Available)
+        );
+        assert_eq!(
+            session.node_availability(3),
+            Some(prom_ui::shell_bridge::BridgeAvailability::Hidden)
+        );
     }
 }

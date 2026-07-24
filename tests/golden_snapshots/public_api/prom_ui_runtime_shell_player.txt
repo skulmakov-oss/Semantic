@@ -107,5 +107,5 @@ pub fn node_availability( &self, node: u64, ) -> Option<prom_ui::shell_bridge::B
 pub fn collection_entries( &self, collection: u64, ) -> Vec<(u64, prom_ui::shell_bridge::BridgeValue)> {
 pub fn apply(&mut self, input: ShellTransitionInput) -> ShellTransitionResult {
 pub(crate) fn preflight_projection_patch_envelope( &self, envelope: OrderedProjectionPatchBatchEnvelope, ) -> ProjectionPatchPreflightResult {
-pub fn apply_projection_patch_batch( &mut self, envelope: OrderedProjectionPatchBatchEnvelope, target_reference_count: usize, manifest: &prom_ui::shell_bridge::PreparedManifestSnapshot, batch: &prom_ui::shell_bridge::AdmittedProjectionPatchBatch, ) -> ProjectionPatchApplicationResult {
+pub fn apply_projection_patch_batch( &mut self, envelope: OrderedProjectionPatchBatchEnvelope, declared_target_reference_count: usize, submission: &prom_ui::shell_bridge::PreparedPatchSubmission, ) -> ProjectionPatchApplicationResult {
 pub(crate) fn evaluate_lifecycle_transition( context: &ActivatedShellSessionContext, previous: &ShellLocalState, input: ShellTransitionInput, ) -> ShellTransitionResult {

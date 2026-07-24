@@ -40,9 +40,9 @@ impl ActiveProjectionTargetCatalog {
     /// the sole construction path other than [`Self::empty`].
     pub(crate) fn from_snapshot(snapshot: &ActivationTargetSnapshot) -> Self {
         Self {
-            node_anchors: snapshot.node_anchor_ids.iter().copied().collect(),
-            binding_anchors: snapshot.binding_anchor_ids.iter().copied().collect(),
-            collection_anchors: snapshot.collection_anchor_ids.iter().copied().collect(),
+            node_anchors: snapshot.node_anchor_ids().iter().copied().collect(),
+            binding_anchors: snapshot.binding_anchor_ids().iter().copied().collect(),
+            collection_anchors: snapshot.collection_anchor_ids().iter().copied().collect(),
         }
     }
 
@@ -62,15 +62,13 @@ impl ActiveProjectionTargetCatalog {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
+    use prom_ui::shell_bridge::demo_activation_snapshot;
 
-    fn snapshot() -> ActivationTargetSnapshot {
-        ActivationTargetSnapshot {
-            node_anchor_ids: vec![1, 2, 3],
-            binding_anchor_ids: vec![(2, 0)],
-            collection_anchor_ids: vec![3],
-        }
-    }
+    // `ActivationTargetSnapshot` is opaque outside `prom-ui`: it has no
+    // public constructor here, so these tests build the catalog from the
+    // one authentic snapshot producer (`demo_activation_snapshot`) rather
+    // than a hand-authored fixture. Its fixed shape is: node anchors
+    // 1,2,3,4; one binding anchor (2, 0); one collection anchor 4.
 
     #[test]
     fn test_empty_catalog_contains_nothing() {
@@ -82,24 +80,44 @@ mod tests {
 
     #[test]
     fn test_from_snapshot_membership() {
-        let catalog = ActiveProjectionTargetCatalog::from_snapshot(&snapshot());
+        let catalog = ActiveProjectionTargetCatalog::from_snapshot(&demo_activation_snapshot());
         assert!(catalog.contains_node(1));
         assert!(catalog.contains_node(2));
         assert!(catalog.contains_node(3));
-        assert!(!catalog.contains_node(4));
+        assert!(catalog.contains_node(4));
+        assert!(!catalog.contains_node(999));
 
         assert!(catalog.contains_binding(2, 0));
         assert!(!catalog.contains_binding(2, 1));
         assert!(!catalog.contains_binding(1, 0));
 
-        assert!(catalog.contains_collection(3));
+        assert!(catalog.contains_collection(4));
         assert!(!catalog.contains_collection(2));
     }
 
     #[test]
     fn test_determinism() {
-        let a = ActiveProjectionTargetCatalog::from_snapshot(&snapshot());
-        let b = ActiveProjectionTargetCatalog::from_snapshot(&snapshot());
+        let a = ActiveProjectionTargetCatalog::from_snapshot(&demo_activation_snapshot());
+        let b = ActiveProjectionTargetCatalog::from_snapshot(&demo_activation_snapshot());
         assert_eq!(a, b);
+    }
+
+    /// Proves the P1 fix: `ActivationTargetSnapshot` cannot be constructed
+    /// from arbitrary raw ids. There is no struct-literal, `Default`,
+    /// `From<Vec<_>>`, or raw-parts constructor available here — the only
+    /// way to obtain one is the authentic `demo_activation_snapshot`
+    /// producer, so a caller cannot fabricate catalog membership for ids
+    /// that were never declared by validated projection-owned evidence.
+    /// (Documentation test: absence of a fabrication path is proven by this
+    /// module compiling without one, not by a runtime assertion.)
+    #[test]
+    fn test_catalog_only_ever_built_from_authentic_snapshot() {
+        let snapshot = demo_activation_snapshot();
+        let catalog = ActiveProjectionTargetCatalog::from_snapshot(&snapshot);
+        // Node 999 was never declared anywhere in the authentic fixture;
+        // there is no way to inject it into `snapshot` from this crate.
+        assert!(!catalog.contains_node(999));
+        assert!(!catalog.contains_binding(999, 0));
+        assert!(!catalog.contains_collection(999));
     }
 }

@@ -28,25 +28,26 @@ pub struct BridgeManifestEntry {
 pub patch_ordinal: u64,
 pub operation_ordinal: u64,
 pub role: BridgeTargetRole,
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreparedManifestSnapshot {
-pub entries: Vec<BridgeManifestEntry>,
-pub target_reference_count: usize,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeManifestError {
-pub fn prepared_manifest_snapshot( batch: &AdmittedProjectionPatchBatch, ) -> Result<PreparedManifestSnapshot, BridgeManifestError> {
+#[derive(Debug, Clone)]
+pub struct PreparedPatchSubmission {
+pub fn prepare_patch_submission( batch: AdmittedProjectionPatchBatch, ) -> Result<PreparedPatchSubmission, BridgeManifestError> {
+pub fn prepared_submission_entries(submission: &PreparedPatchSubmission) -> &[BridgeManifestEntry] {
+pub fn prepared_submission_target_reference_count(submission: &PreparedPatchSubmission) -> usize {
+pub fn prepared_submission_patch_count(submission: &PreparedPatchSubmission) -> usize {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivationTargetSnapshot {
-pub node_anchor_ids: Vec<u64>,
-pub binding_anchor_ids: Vec<(u64, u32)>,
-pub collection_anchor_ids: Vec<u64>,
+pub fn node_anchor_ids(&self) -> &[u64] {
+pub fn binding_anchor_ids(&self) -> &[(u64, u32)] {
+pub fn collection_anchor_ids(&self) -> &[u64] {
 pub fn demo_activation_snapshot() -> ActivationTargetSnapshot {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LocalProjectionStateHandle {
 pub fn initial_local_projection_state() -> LocalProjectionStateHandle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeApplicationError {
-pub fn apply_admitted_patch_batch( previous: &LocalProjectionStateHandle, batch: &AdmittedProjectionPatchBatch, ) -> Result<LocalProjectionStateHandle, BridgeApplicationError> {
+pub fn apply_prepared_patch_submission( previous: &LocalProjectionStateHandle, submission: &PreparedPatchSubmission, ) -> Result<LocalProjectionStateHandle, BridgeApplicationError> {
 pub fn binding_value( state: &LocalProjectionStateHandle, node: u64, slot: u32, ) -> Option<BridgeValue> {
 pub fn node_availability( state: &LocalProjectionStateHandle, node: u64, ) -> Option<BridgeAvailability> {
 pub fn collection_entries( state: &LocalProjectionStateHandle, collection: u64, ) -> Vec<(u64, BridgeValue)> {

@@ -326,27 +326,37 @@ pub struct BridgeManifestEntry {
     pub role: BridgeTargetRole,
 }
 
-/// Freshly computed, plain read-only snapshot of `PreparedProjectionPatchTargets`.
-/// This is a copy for controlled consumption, not the opaque evidence value
-/// itself: it cannot be fed back in to construct or replace prepared
-/// evidence, and there is no path from it back to a
-/// `AdmittedProjectionPatchBatch`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PreparedManifestSnapshot {
-    pub entries: Vec<BridgeManifestEntry>,
-    pub target_reference_count: usize,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeManifestError {
     ReplayIndexOverflow,
 }
 
-/// Derives a read-only [`PreparedManifestSnapshot`] from one admitted patch
-/// batch, via [`derive_prepared_projection_patch_targets`].
-pub fn prepared_manifest_snapshot(
-    batch: &AdmittedProjectionPatchBatch,
-) -> Result<PreparedManifestSnapshot, BridgeManifestError> {
+/// One coherent submission: an admitted patch batch bound atomically to the
+/// prepared stable-target manifest, actual target-reference count, and
+/// actual patch count derived from that exact batch.
+///
+/// Opaque outside `prom-ui`: no field access, and the only public
+/// constructor is [`prepare_patch_submission`], which consumes the admitted
+/// batch by value and derives every other field from that same value in the
+/// same call. There is no accessor that returns the inner
+/// `AdmittedProjectionPatchBatch` separately, and no constructor that
+/// accepts a manifest and a batch as independent parameters — a manifest
+/// derived from one batch can never be paired with a different batch's
+/// operations, because the two are never representable apart from each
+/// other after this point.
+#[derive(Debug, Clone)]
+pub struct PreparedPatchSubmission {
+    batch: AdmittedProjectionPatchBatch,
+    entries: Vec<BridgeManifestEntry>,
+    target_reference_count: usize,
+    patch_count: usize,
+}
+
+/// Deterministically derives the complete [`PreparedPatchSubmission`] for
+/// one admitted patch batch, via [`derive_prepared_projection_patch_targets`].
+pub fn prepare_patch_submission(
+    batch: AdmittedProjectionPatchBatch,
+) -> Result<PreparedPatchSubmission, BridgeManifestError> {
     let prepared = derive_prepared_projection_patch_targets(&batch.inner)
         .map_err(|_| BridgeManifestError::ReplayIndexOverflow)?;
 
@@ -375,23 +385,77 @@ pub fn prepared_manifest_snapshot(
         })
         .collect();
 
-    Ok(PreparedManifestSnapshot {
+    let target_reference_count = prepared.target_reference_count();
+    let patch_count = submission_patch_count(&batch);
+
+    Ok(PreparedPatchSubmission {
+        batch,
         entries,
-        target_reference_count: prepared.target_reference_count(),
+        target_reference_count,
+        patch_count,
     })
+}
+
+fn submission_patch_count(batch: &AdmittedProjectionPatchBatch) -> usize {
+    batch.inner.patches().len()
+}
+
+/// The ordered stable-target manifest entries derived from `submission`'s
+/// own admitted batch.
+pub fn prepared_submission_entries(submission: &PreparedPatchSubmission) -> &[BridgeManifestEntry] {
+    &submission.entries
+}
+
+/// The actual target-reference count derived from `submission`'s own
+/// admitted batch.
+pub fn prepared_submission_target_reference_count(submission: &PreparedPatchSubmission) -> usize {
+    submission.target_reference_count
+}
+
+/// The actual patch count derived from `submission`'s own admitted batch.
+pub fn prepared_submission_patch_count(submission: &PreparedPatchSubmission) -> usize {
+    submission.patch_count
 }
 
 // ---- Prepared activation-target evidence (read-only egress) ---------------
 
-/// Freshly computed, plain read-only snapshot of `PreparedActiveProjectionTargets`.
+/// Freshly computed, read-only snapshot of `PreparedActiveProjectionTargets`.
 /// `prom-ui-runtime` builds its own `ActiveProjectionTargetCatalog` from
 /// this snapshot exactly once, at activation (contract section 7.1.9.6);
 /// this snapshot itself is not the runtime catalog.
+///
+/// Opaque outside `prom-ui`: fields are private, there is no `Default`, no
+/// public raw-parts constructor, and no `From`/`Into` path. The only
+/// constructor in this module is [`demo_activation_snapshot`], which derives
+/// every id from a validated projection-owned structural fixture via
+/// [`derive_prepared_active_projection_targets`] — never from caller-supplied
+/// raw ids. Cross-crate consumers may only read the declared ids back out
+/// through the accessor methods below; they cannot construct or mutate a
+/// snapshot, so a runtime catalog built from one is never fabricable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivationTargetSnapshot {
-    pub node_anchor_ids: Vec<u64>,
-    pub binding_anchor_ids: Vec<(u64, u32)>,
-    pub collection_anchor_ids: Vec<u64>,
+    node_anchor_ids: Vec<u64>,
+    binding_anchor_ids: Vec<(u64, u32)>,
+    collection_anchor_ids: Vec<u64>,
+}
+
+impl ActivationTargetSnapshot {
+    /// Declared `NodeAnchor` ids, in deterministic ascending order.
+    pub fn node_anchor_ids(&self) -> &[u64] {
+        &self.node_anchor_ids
+    }
+
+    /// Declared `BindingAnchor` `(node, slot)` ids, in deterministic
+    /// ascending order.
+    pub fn binding_anchor_ids(&self) -> &[(u64, u32)] {
+        &self.binding_anchor_ids
+    }
+
+    /// Declared `CollectionAnchor` ids, in deterministic ascending order.
+    /// Sourced only from explicit `CollectionAnchor` declarations.
+    pub fn collection_anchor_ids(&self) -> &[u64] {
+        &self.collection_anchor_ids
+    }
 }
 
 /// Returns a small, fixed, deterministic projection-owned structural
@@ -516,7 +580,7 @@ pub fn demo_activation_snapshot() -> ActivationTargetSnapshot {
 /// Opaque handle to committed local projected-value state for one Shell
 /// Player session. Opaque outside `prom-ui`: no field access and no public
 /// constructor other than [`initial_local_projection_state`] and
-/// [`apply_admitted_patch_batch`].
+/// [`apply_prepared_patch_submission`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct LocalProjectionStateHandle {
     inner: LocalProjectionState,
@@ -562,15 +626,19 @@ fn map_application_error(error: LocalProjectionApplicationError) -> BridgeApplic
 }
 
 /// Deterministically computes the candidate [`LocalProjectionStateHandle`]
-/// from applying every operation in `batch` to `previous`, via
-/// [`apply_projection_patch_set`]. Atomic: `previous` is never mutated, and
-/// this returns `Ok` only if the complete batch applies successfully.
-pub fn apply_admitted_patch_batch(
+/// from applying every operation in `submission`'s own admitted batch to
+/// `previous`, via [`apply_projection_patch_set`]. Atomic: `previous` is
+/// never mutated, and this returns `Ok` only if the complete batch applies
+/// successfully. The applied operations are always exactly the operations
+/// `submission`'s manifest was derived from (contract section 7.1.9.7): this
+/// function takes no separate batch parameter through which a different
+/// batch's operations could be substituted.
+pub fn apply_prepared_patch_submission(
     previous: &LocalProjectionStateHandle,
-    batch: &AdmittedProjectionPatchBatch,
+    submission: &PreparedPatchSubmission,
 ) -> Result<LocalProjectionStateHandle, BridgeApplicationError> {
-    let inner =
-        apply_projection_patch_set(&previous.inner, &batch.inner).map_err(map_application_error)?;
+    let inner = apply_projection_patch_set(&previous.inner, &submission.batch.inner)
+        .map_err(map_application_error)?;
     Ok(LocalProjectionStateHandle { inner })
 }
 
