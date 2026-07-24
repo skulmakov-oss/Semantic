@@ -1,67 +1,52 @@
 task:
-  id: COLLECTION-ANCHOR-DECLARATION-QUALIFICATION
-  title: qualify explicit CollectionAnchor declarations
-  type: implementation
+  id: COLLECTION-ANCHOR-QUALIFICATION-CLOSEOUT
+  title: close out landed CollectionAnchor declaration qualification
+  type: documentation
   mode: active
 
 intent:
-  summary: "feat(ui): qualify explicit collection-anchor declarations"
+  summary: "docs(ui): close out collection-anchor qualification"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-ui/src/contract_primitives.rs
-    - crates/prom-ui/src/projection_source.rs
-    - crates/prom-ui/src/projection_compile.rs
-    - crates/prom-ui/src/collection_anchor_declarations.rs
-    - crates/prom-ui/src/ui_dna2_collection_anchor_qualification_tests.rs
-    - crates/prom-ui/src/lib.rs
+    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
 
 authorization:
-  rust_implementation: true
-  crate_private_only: true
-  programmatic_declaration_representation: true
-  collection_anchor_qualification: true
-  deterministic_diagnostics: true
-  qualification_tests: true
+  merged_evidence_sync: true
+  roadmap_evidence_baseline_update: true
+  landed_state_sync: true
+  stale_absence_claim_removal: true
+  research_matrix_sync: true
+  latest_checkpoint_sync: true
+  dependency_order_sync: true
+  issue_1489_changes: false
 
-  textual_grammar_change: false
-  parser_change: false
-  frontend_change: false
-  static_ir_artifact_change: false
-  canonical_encoding_change: false
-  prepared_transition_targets: false
-  prepared_activation_targets: false
-  runtime_catalog: false
-  activated_context_expansion: false
-  stage4_integration: false
-  stage5_evaluator: false
-  stage6_change: false
-  orchestration: false
-  patch_application: false
-  cursor_advancement: false
+  rust_implementation: false
+  normative_contract_change: false
+  ownership_change: false
+  authority_change: false
   public_api: false
   public_api_guard_changes: false
   dependency_changes: false
   workflow_changes: false
-  roadmap_changes: false
-  issue_1489_changes: false
   project_changes: false
+  next_slice_authorization: false
   gate_d_change: false
   production_promotion: false
 
   gate_d: closed
 
 constraints:
-  no_std_alloc_compatible: true
-  fail_closed: true
-  whole_set_only: true
-  no_partial_qualified_set: true
-  explicit_declarations_only: true
-  no_collection_anchor_inference: true
-  compiler_owned_source_to_static_mapping: true
-  deterministic_static_node_order: true
-  collection_key_is_not_anchor_identity: true
-  source_span_is_provenance_not_identity: true
-  no_public_surface_change: true
-  next_authorized_implementation_slice_after_this_task: none
+  directional_roadmap_only: true
+  repository_truth_remains_external: true
+  roadmap_is_not_authority: true
+  merged_evidence_only: true
+  landed_code_distinguished_from_full_pipeline: true
+  qualification_distinguished_from_runtime_integration: true
+  prepared_targets_remain_unimplemented: true
+  runtime_catalog_remains_unimplemented: true
+  stage5_evaluator_remains_unimplemented: true
+  patch_application_remains_unimplemented: true
+  gate_d: closed
+  next_authorized_implementation_slice: none
