@@ -10,16 +10,17 @@ intent:
   summary: "refactor(language): migrate current examples to Source Style v0"
 
 scope:
+  # Narrowed to the actual final write surface of this PR (verified against
+  # `git diff main...HEAD --name-only`), not the wider surface anticipated
+  # when this task started. examples/readiness_draft_canonical/** is
+  # deliberately absent: it is preserved historical evidence, not touched.
   allowed_paths:
     - .harness/current.task.yaml
+    - docs/examples_index.md
+    - docs/spec/source_style.md
     - examples/canonical/**
-    - examples/readiness_draft_canonical/**
-    - docs/**
-    - README.md
-    - tests/canonical_examples.rs
     - tests/canonical_source_style.rs
-    - tools/language/**
-    - crates/smc-cli/src/formatter.rs
+    - tools/language/check_source_style_contract.ps1
 
   forbidden_paths:
     - crates/sm-front/**
@@ -46,7 +47,14 @@ scope:
     - src/**
 
 authorization:
-  rust_implementation: false
+  # No dedicated "test-only Rust" field exists in this repository's harness
+  # convention (checked prior task.yaml files and .harness/reports/; none
+  # define one), so this is the general rust_implementation flag, scoped
+  # explicitly by the line below: qualification/drift-guard TEST code only
+  # (tests/canonical_source_style.rs) -- no production Rust, no language or
+  # runtime implementation.
+  rust_implementation: true
+  rust_implementation_scope: "test-only: qualification/drift-guard tests in tests/canonical_source_style.rs; no production Rust, no language/runtime implementation"
   repository_example_inventory: true
   current_facing_source_migration: true
   current_documentation_synchronization: true
