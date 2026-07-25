@@ -41,7 +41,12 @@ fn ui_frame_inspection_fixtures_are_attributed_text_eol_lf() {
         "expected tracked fixture files under {FIXTURE_DIR}"
     );
 
-    let mut args = vec!["check-attr".to_string(), "text".to_string(), "eol".to_string(), "--".to_string()];
+    let mut args = vec![
+        "check-attr".to_string(),
+        "text".to_string(),
+        "eol".to_string(),
+        "--".to_string(),
+    ];
     args.extend(files.iter().cloned());
 
     let output = Command::new("git")
