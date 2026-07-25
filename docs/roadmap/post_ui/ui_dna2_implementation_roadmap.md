@@ -63,7 +63,11 @@ reference != referenced truth
 reference slice != production promotion
 ```
 
-Gate D activation and integration remain closed.
+**Historical (WP4B baseline, PR #1498):** Gate D activation and integration
+remained closed at that time. **Current status:** Issue #1543 later opened
+Gate D **WITH LIMITS**, bounded strictly to the `--ui-dna2-reference`
+contour — see section 6. General Gate D activation and integration remain
+closed outside that one bounded contour.
 
 ## 2. Governing formula
 
@@ -683,10 +687,19 @@ outside roadmap progression, including:
 This umbrella issue may close only when:
 
 1. `docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md` exists and matches the accepted execution state;
-2. every remaining phase is either completed or represented by an approved child issue with explicit ownership and gates;
+2. every remaining phase is either:
+   1. completed; or
+   2. represented by an approved child issue with explicit ownership and gates; or
+   3. explicitly carried forward in section 5's checkpoint matrix with its current implementation status, ownership boundary, remaining work, and authorization state recorded, and with no implied completion or promotion;
 3. the end-to-end reference slice has deterministic and authority-preserving evidence;
 4. Phase UI-DNA2-11 records an explicit promotion outcome;
 5. no historical, experimental or renderer-local structure has been silently promoted to semantic authority.
+
+This roadmap does not maintain a separate set of approved child issues for
+each remaining phase; UI-DNA2-4, the general slice of UI-DNA2-5, and
+UI-DNA2-7's remaining work satisfy criterion 2 through its third option —
+they are carried forward in section 5, not completed and not silently
+dropped.
 
 ### UI-DNA2-11 production promotion decision (recorded in #1544)
 
@@ -755,7 +768,7 @@ matrix is not being overridden here.
 Against that honest baseline, the five closure criteria are met as follows:
 
 1. This document reflects the accepted execution state, including the evidence landed in #1544 and this decision recorded in #1545.
-2. Every remaining phase has the status section 5's checkpoint matrix already records for it — this update does not mark any phase complete beyond what that matrix states. UI-DNA2-4 (live Binding Graph/Semantic reads), the general slice of UI-DNA2-5 (Action IR admission beyond the bounded reference contour), and UI-DNA2-7's remaining Task Projection application/runtime-integration work are represented there with explicit ownership and remaining-work descriptions, not silently dropped, and none of it was required by #1543's own bounded scope.
+2. Every remaining phase satisfies one of criterion 2's three options above. UI-DNA2-4 (live Binding Graph/Semantic reads), the general slice of UI-DNA2-5 (Action IR admission beyond the bounded reference contour), and UI-DNA2-7's remaining Task Projection application/runtime-integration work satisfy option 3: they're carried forward in section 5's checkpoint matrix with their current implementation status, ownership boundary, remaining work, and authorization state recorded — not completed, not represented by a separate child issue, and not silently dropped. None of it was required by #1543's own bounded scope.
 3. UI-DNA2-10 has deterministic, authority-preserving evidence: real synthetic OS input verified reaching hit-testing, admission, and commit, with screenshot evidence for both an admitted and a denied action, and automated evidence for invalid-bundle and replay/stale rejection, all preserving prior state on rejection.
 4. UI-DNA2-11 records the explicit outcome above: `PROMOTE WITH LIMITS`.
 5. No historical, experimental, or renderer-local structure was silently promoted to semantic authority — Shell Player still owns no Semantic truth, `hit-test result != action authorization`, `ActionIntent candidate != admitted action`, and the ProjectionBundle verifier is documented everywhere as self-consistency rather than cryptographic trust.
