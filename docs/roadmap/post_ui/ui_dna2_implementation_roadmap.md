@@ -738,16 +738,37 @@ remains exactly as unauthorized as it was before.
 
 ### Closure criteria status
 
-All five closure criteria above are now met:
+**UI-DNA2-4 (Binding Graph live Semantic reads/subscriptions), the general,
+unbounded slice of UI-DNA2-5 (Action IR admission integration beyond the
+one bounded reference contour), and UI-DNA2-7's remaining Task Projection
+application/runtime-integration work are NOT complete and are explicitly
+out of scope for this closure.** Issue #1543 itself scopes required work
+"to the extent required for one complete deterministic non-critical
+reference application" — live Binding Graph/Semantic subscriptions and
+general-purpose Action IR/Task Projection runtime integration are not
+required by, and were not exercised by, that one bounded reference
+application, and neither #1543 nor #1544 implemented them. Section 5's
+checkpoint matrix above is the accepted record of that: it still marks
+UI-DNA2-4 as not complete and UI-DNA2-5/7 as foundation/partial, and that
+matrix is not being overridden here.
 
-1. This document was updated in #1544 and reflects the accepted execution state, including this decision.
-2. Every remaining phase is either complete (UI-DNA2-0 through UI-DNA2-10) or has an explicit, documented boundary of what remains unauthorized and why (UI-DNA2-11's limits above; general Level 4/5 ProjectionBundle, cryptographic trust, full accessibility-tree integration, and unrestricted admission/dispatch/promotion all remain explicitly out of scope rather than silently dropped).
+Against that honest baseline, the five closure criteria are met as follows:
+
+1. This document reflects the accepted execution state, including the evidence landed in #1544 and this decision recorded in #1545.
+2. Every remaining phase has the status section 5's checkpoint matrix already records for it — this update does not mark any phase complete beyond what that matrix states. UI-DNA2-4 (live Binding Graph/Semantic reads), the general slice of UI-DNA2-5 (Action IR admission beyond the bounded reference contour), and UI-DNA2-7's remaining Task Projection application/runtime-integration work are represented there with explicit ownership and remaining-work descriptions, not silently dropped, and none of it was required by #1543's own bounded scope.
 3. UI-DNA2-10 has deterministic, authority-preserving evidence: real synthetic OS input verified reaching hit-testing, admission, and commit, with screenshot evidence for both an admitted and a denied action, and automated evidence for invalid-bundle and replay/stale rejection, all preserving prior state on rejection.
 4. UI-DNA2-11 records the explicit outcome above: `PROMOTE WITH LIMITS`.
 5. No historical, experimental, or renderer-local structure was silently promoted to semantic authority — Shell Player still owns no Semantic truth, `hit-test result != action authorization`, `ActionIntent candidate != admitted action`, and the ProjectionBundle verifier is documented everywhere as self-consistency rather than cryptographic trust.
 
-This roadmap update, together with the #1544 evidence it records, is what
-allows the umbrella issue #1489 to close.
+Issue #1543's own definition of done requires the roadmap to be
+"reconciled" and does not require UI-DNA2-4/5/7 completion; its explicit
+non-closure conditions for #1489 are Gate D remaining closed, UI-DNA2-10
+not started, or the promotion outcome unresolved — none of which hold.
+On that basis this roadmap update, together with the #1544 evidence it
+records, is what allows the umbrella issue #1489 to close, with UI-DNA2-4,
+the general slice of UI-DNA2-5, and the remainder of UI-DNA2-7 explicitly
+and honestly carried forward as future, unauthorized, not-yet-started work
+rather than treated as done.
 
 The following remain true after #1544:
 

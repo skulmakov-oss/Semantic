@@ -12,7 +12,11 @@ Activation: bounded Gate D reference contour only; general production
 activation remains NOT AUTHORIZED
 Runtime integration: bounded to the UI-DNA2-10 reference contour only
 Gate D: OPEN WITH LIMITS for the bounded UI-DNA2-10 reference contour only
-Production promotion: NOT AUTHORIZED
+Production promotion: PROMOTE WITH LIMITS, bounded strictly to the
+UI-DNA2-10 reference contour (see
+`docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md` UI-DNA2-11);
+unrestricted, critical, or general production promotion remains NOT
+AUTHORIZED
 
 ## 1. Purpose and scope
 
@@ -524,7 +528,7 @@ ProjectionBundle activation = bounded Gate D reference contour only; general pro
 ProjectionPatch application = unchanged; governed by the existing Shell Player contract
 runtime integration = bounded to the UI-DNA2-10 reference contour only
 Gate D = OPEN WITH LIMITS for the bounded UI-DNA2-10 reference contour only
-production promotion = NOT AUTHORIZED
+production promotion = PROMOTE WITH LIMITS, bounded strictly to the UI-DNA2-10 reference contour (see roadmap UI-DNA2-11); unrestricted/critical/general production promotion remains NOT AUTHORIZED
 General Level 4/5 production ProjectionBundle reader/parser = NOT CLAIMED
 NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
 ```
