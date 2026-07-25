@@ -14,9 +14,7 @@ fn find_first_over(limit: i32, threshold: i32) -> i32 {
     let mut i: i32 = 0;
 
     while i < limit {
-        if i > threshold {
-            return i;
-        }
+        if i > threshold { return i; }
 
         i = i + 1;
     }

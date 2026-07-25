@@ -9,12 +9,8 @@ fn classify_exit(codes: Sequence(i32)) -> text {
             saw_retry ||= true;
         }
     }
-    if saw_error == true {
-        return "error";
-    }
-    if saw_retry == true {
-        return "retry";
-    }
+    if saw_error == true { return "error"; }
+    if saw_retry == true { return "retry"; }
     return "ok";
 }
 

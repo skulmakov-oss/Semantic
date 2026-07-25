@@ -43,9 +43,7 @@ fn map_score() -> i32 {
     assert(map_get(flags, 1, false) == true);
     assert(map_get(flags, 2, true) == false);
 
-    if map_get(flags, 1, false) {
-        return 10;
-    }
+    if map_get(flags, 1, false) { return 10; }
 
     return -1;
 }

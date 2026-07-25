@@ -43,72 +43,48 @@ enough to serve as representative language samples:
 The boundary example remains included as an honest exclusion marker and should
 not be treated as a positive sample for Linguist detection.
 
-## Canonical Examples
+## Canonical Examples — Authoritative Inventory
 
-1. `cli_batch_core`
-   - purpose: small CLI-style computation core over `Sequence(i32)` and `text`
-   - current reading: `qualified limited release`
+This table is the **single authoritative inventory** of the canonical
+examples pack. Every other current-facing index (`docs/examples_index.md`,
+`docs/spec/source_style.md`, `docs/language/semantic_linguist_entry_draft.md`)
+links to this table rather than maintaining its own copy of the same status
+fields, so there is exactly one place to update when an example's status
+changes.
 
-2. `rule_state_decision`
-   - purpose: record-oriented rule/state decision logic with explicit
-     `Result(T, E)` handling
-   - current reading: `qualified limited release`
+| # | Example | Profile | Purpose | Qualification level | Expected result | Style v0 status |
+|---|---|---|---|---|---|---|
+| 1 | `cli_batch_core` | Rust-like | small CLI-style computation core over `Sequence(i32)` and `text` | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 2 | `rule_state_decision` | Rust-like | record-oriented rule/state decision logic with explicit `Result(T, E)` handling | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 3 | `data_audit_record_iterable` | Rust-like | data-heavy audit pass over direct-record `Iterable` dispatch | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 4 | `text_collections_toolbox` | Rust-like | practical toolbox example for control flow, text, collections, and stdlib | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 5 | `stdlib_v0_helpers` | Rust-like | practical helper-surface example for current PCC stdlib v0 | executable: `check`/`compile`/`verify`/`run` | pass | already compliant |
+| 6 | `collections_core` | Rust-like | standalone practical collections surface example | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 7 | `text_core` | Rust-like | standalone practical `text` surface example | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 8 | `match_control_flow` | Rust-like | compact quad decision program; demonstrates Source Style v0 | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 9 | `option_result_control_flow` | Rust-like | practical `Option` / `Result` control flow over the admitted public surface | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 10 | `loop_control_flow` | Rust-like | practical loop-driven control flow over admitted `while`, `loop`, `break`, and `continue` | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 11 | `wave2_local_helper_import` | Rust-like | admitted helper-module executable authoring with direct local-path bare import | executable: `check`/`compile`/`verify`/`run` | pass | already compliant |
+| 12 | `positive_selected_import` | Rust-like | admitted helper-module executable authoring with direct local-path selected import | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
+| 13 | `boundary_alias_import` | Rust-like | intentional boundary: top-level alias import on the executable path is still rejected | intentional rejection: `check` | expected diagnostic failure preserved | already compliant |
+| 14 | `quad_cycle_logos` | Logos | canonical Logos declarative-profile example (`System` / `Entity` / `Law`); demonstrates Source Style v0 | parse + lowering only: `dump-ast`, `dump-ir --profile logos`; `check`/`run` honestly rejected | pass (parse/lowering); honest rejection (`check`/`run`) | migrated |
 
-3. `data_audit_record_iterable`
-   - purpose: data-heavy audit pass over direct-record `Iterable` dispatch
-   - current reading: `qualified limited release`
+Style v0 status meanings:
 
-4. `text_collections_toolbox`
-   - purpose: practical toolbox example for control flow, text, collections,
-     and stdlib
-   - current reading: `qualified limited release`
+- **migrated** — the file was rewritten in this or a prior migration pass to
+  apply `docs/spec/source_style.md` (compact guard returns where the
+  condition and returned expression are simple, compact match arms, blank
+  lines between semantic phases).
+- **already compliant** — the file already matched Source Style v0 before any
+  migration pass; no rewrite was needed or performed.
 
-5. `stdlib_v0_helpers`
-   - purpose: practical helper-surface example for current PCC stdlib v0
-   - current reading: `qualified limited release`
-
-6. `collections_core`
-   - purpose: standalone practical collections surface example
-   - current reading: `qualified limited release`
-
-7. `text_core`
-   - purpose: standalone practical `text` surface example
-   - current reading: `qualified limited release`
-
-8. `match_control_flow`
-   - purpose: practical `match`-driven control-flow over `quad`
-   - current reading: `qualified limited release`
-
-9. `option_result_control_flow`
-   - purpose: practical `Option` / `Result` control flow over the admitted
-     public surface
-   - current reading: `qualified limited release`
-
-10. `loop_control_flow`
-   - purpose: practical loop-driven control flow over admitted `while`,
-     `loop`, `break`, and `continue`
-   - current reading: `qualified limited release`
-
-11. `wave2_local_helper_import`
-   - purpose: admitted helper-module executable authoring with direct local-path
-     bare import
-   - current reading: `qualified limited release`
-
-12. `positive_selected_import`
-   - purpose: admitted helper-module executable authoring with direct local-path
-     selected import over the current function-only helper slice
-   - current reading: `qualified limited release`
-
-13. `boundary_alias_import`
-   - purpose: honest boundary example showing that top-level alias import on the
-     executable path is still rejected
-   - current reading: `out of scope`
-
-14. `quad_cycle_logos`
-   - purpose: canonical Logos declarative-profile example (`System` / `Entity`
-     / `Law`)
-   - current reading: `parse-qualified and IR-lowering-qualified`, explicitly
-     not `check`/`compile`/`verify`/`run`-qualified — see its own README
+`stdlib_v0_helpers` and `wave2_local_helper_import` (and its helper module)
+contain no single-condition/single-`return` guards, so B.5 compaction does
+not apply to them; their existing multi-line `if` blocks (assignment bodies,
+not `return`) are already the canonical B.8 shape. `boundary_alias_import`'s
+files contain no guard-return or match-arm forms to migrate; they are
+preserved byte-for-byte to protect the exact rejection diagnostic asserted by
+`tests/canonical_examples.rs`.
 
 ## Validation
 

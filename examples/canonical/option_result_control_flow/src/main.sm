@@ -20,13 +20,8 @@ fn combine(option_value: Option(i32), result_value: Result(i32, i32)) -> i32 {
     let option_part: i32 = option_score(option_value);
     let result_part: i32 = result_score(result_value);
 
-    if option_part < 0 {
-        return option_part;
-    }
-
-    if result_part < 0 {
-        return result_part;
-    }
+    if option_part < 0 { return option_part; }
+    if result_part < 0 { return result_part; }
 
     return option_part + result_part;
 }

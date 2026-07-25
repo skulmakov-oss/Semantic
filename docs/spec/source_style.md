@@ -397,9 +397,10 @@ must, in the same series:
 
 ## Canonical Examples
 
-Three examples demonstrate this contract; each README states its exact
-qualification command and status per the table in
-[`docs/examples_index.md`](../examples_index.md):
+Three examples demonstrate this contract most directly (the full canonical
+pack's authoritative inventory — every example, profile, qualification
+level, expected result, and migration status — lives in
+[`examples/canonical/README.md`](../../examples/canonical/README.md#canonical-examples--authoritative-inventory)):
 
 - `examples/canonical/match_control_flow/` — compact quad decision program
   (Rust-like, executable, `check`/`compile`/`verify`/`run`-qualified).
