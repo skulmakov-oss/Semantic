@@ -21,20 +21,27 @@ AUTHORIZED
 ## 1. Purpose and scope
 
 This document freezes the ProjectionBundle v0 logical contract and the
-boundaries between its future processing stages. It does not define Rust
-types, a stable public API, or a final wire format.
+boundaries between its processing stages. It does not define Rust types,
+a stable public API, or a final general wire format.
 
 ProjectionBundle carries projection artifacts.
 ProjectionBundle does not own Semantic truth.
 
-This contract does not claim reader, parser, validator, verifier,
-cryptographic verifier, loader, filesystem-loading, runtime-loading,
+**Historical note (UI-DNA2-8A freeze):** as originally frozen, before
+Issue #1543, this contract was documentation-only and claimed no reader,
+parser, validator, verifier, cryptographic verifier, loader, loading,
 activation, shell-integration, production-readiness, or security-proof
-evidence.
+evidence. Any later implementation would require a new owner
+authorization and a new harness task resolving every blocking decision
+named in this document.
 
-UI-DNA2-8A is documentation-only. A later implementation requires a new
-owner authorization, a new harness task, and resolution of every blocking
-decision named in this document.
+**Current status:** Issue #1543 later supplied that owner authorization
+and harness task, bounded to the UI-DNA2-10 `--ui-dna2-reference`
+contour. For that bounded contour only, a parser, validator, verifier,
+and inert loader are implemented and Gate D activation is landed (§17).
+Cryptographic verification, a general/unbounded reader or loader,
+general production-readiness, and any security-proof claim remain
+unclaimed — see §13-§16.
 
 ## 2. Prior Evidence Reconciliation
 
@@ -439,38 +446,53 @@ activation != production promotion
 ```
 
 UI-DNA2-8A freezes the logical contract only.
-General Level 4 remains not claimed.
-UI-DNA2-8B is not authorized.
-UI-DNA2-8C is not authorized.
+General Level 4/5 remains not claimed.
+
+**Historical (at the time of the UI-DNA2-8A freeze, before Issue #1543):**
+UI-DNA2-8B (parser/validator/verifier) and UI-DNA2-8C (inert loader) were
+not authorized.
+
+**Current status:** Issue #1543 later supplied that authorization, bounded
+to the `--ui-dna2-reference` contour — UI-DNA2-8B and UI-DNA2-8C are
+landed for that contour only (§17). They remain not authorized for any
+general or unbounded contour.
 
 ## 14. Explicit non-goals
 
-This contract does not authorize:
+**Historical (UI-DNA2-8A freeze, before Issue #1543):** this contract
+authorized none of the following — Rust implementation; a reader, parser,
+validator, verifier, or cryptographic verifier; a public API; final
+serialization or canonical encoding; a filesystem loader or runtime
+loader; shell-player integration; Action IR execution or admission;
+ProjectionPatch construction or application; UI mutation; Gate D
+transition; production promotion; a security-proof claim.
 
-- Rust implementation;
-- a reader, parser, validator, verifier, or cryptographic verifier;
-- a public API;
-- final serialization or canonical encoding;
-- a filesystem loader or runtime loader;
-- shell-player integration;
-- Action IR execution or admission;
-- ProjectionPatch construction or application;
-- UI mutation;
-- Gate D transition;
-- production promotion;
-- a security-proof claim.
+**Current status:** Issue #1543 later authorized and landed, bounded
+strictly to the `--ui-dna2-reference` contour: a crate-private Rust
+parser/validator/verifier/inert-loader; final serialization and canonical
+encoding (§7); Gate D transition (`docs/spec/ui/gate_d_activation_policy_v0.md`);
+Action IR admission through the existing admission boundary
+(`ReferenceContourAdmission`); `ProjectionPatch` construction/application
+and visible UI mutation through the existing, unmodified Shell Player; and
+a bounded production-promotion decision (PROMOTE WITH LIMITS, roadmap
+UI-DNA2-11).
+
+This contract still does not authorize, for any contour: a stable public
+API; a filesystem loader; a cryptographic verifier or any security-proof
+claim; or general/unrestricted Gate D, admission, or production promotion.
 
 ## 15. Follow-on decomposition
 
-These contours are descriptive only:
+**Historical (UI-DNA2-8A freeze):** UI-DNA2-8B (bounded crate-private
+parser/validator/verifier qualification), UI-DNA2-8C (bounded pure
+in-memory inert-loader qualification), and a later activation contour
+were descriptive only, each requiring separate ownership and gating.
 
-- UI-DNA2-8B: bounded crate-private parser / validator / verifier
-  qualification;
-- UI-DNA2-8C: bounded pure in-memory inert-loader qualification;
-- later activation contour: separately owned and separately gated.
-
-Every future slice requires new owner authorization and a new harness task.
-Roadmap order alone is not authorization.
+**Current status:** Issue #1543 later supplied that authorization.
+UI-DNA2-8B, UI-DNA2-8C, and a bounded Gate D activation contour are now
+landed, scoped to `--ui-dna2-reference` only (§17). Any contour beyond
+that one still requires new owner authorization and a new harness task —
+roadmap order alone remains not authorization.
 
 ## 16. Unresolved Decisions Blocking Implementation
 
@@ -516,6 +538,10 @@ CRYPTOGRAPHIC TRUST (digest/signature) = UNRESOLVED
 ```
 
 ## 17. Final status
+
+This is the authoritative current-state summary; where earlier sections
+describe UI-DNA2-8A's original historical freeze posture, this section
+reflects what Issue #1543 later landed on top of it.
 
 ```text
 ProjectionBundle v0 logical contract = FROZEN BY UI-DNA2-8A
