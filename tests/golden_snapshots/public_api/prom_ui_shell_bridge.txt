@@ -51,3 +51,27 @@ pub fn apply_prepared_patch_submission( previous: &LocalProjectionStateHandle, s
 pub fn binding_value( state: &LocalProjectionStateHandle, node: u64, slot: u32, ) -> Option<BridgeValue> {
 pub fn node_availability( state: &LocalProjectionStateHandle, node: u64, ) -> Option<BridgeAvailability> {
 pub fn collection_entries( state: &LocalProjectionStateHandle, collection: u64, ) -> Vec<(u64, BridgeValue)> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeActivatedNode {
+pub fn id(&self) -> u64 {
+pub fn role(&self) -> &str {
+pub fn children(&self) -> &[u64] {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeAccessibilityRole {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeAccessibilityEntry {
+pub fn node(&self) -> u64 {
+pub fn role(&self) -> BridgeAccessibilityRole {
+pub fn label(&self) -> &str {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateDActivatedBundle {
+pub fn nodes(&self) -> &[BridgeActivatedNode] {
+pub fn accessibility_entries(&self) -> &[BridgeAccessibilityEntry] {
+pub fn activation_snapshot(&self) -> &ActivationTargetSnapshot {
+pub fn root_node(&self) -> u64 {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateDActivationError {
+pub fn activate_projection_bundle_v0_gate_d( bytes: &[u8], ) -> Result<GateDActivatedBundle, GateDActivationError> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectionBundleCompileError {
+pub fn compile_projection_source_to_bundle_v0( source_id: u64, source_text: &str, document_id: u64, bundle_revision: u64, bundle_epoch: u64, compiler_identity: &str, ) -> Result<Vec<u8>, ProjectionBundleCompileError> {

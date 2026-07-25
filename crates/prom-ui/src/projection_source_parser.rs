@@ -10,8 +10,8 @@ use crate::contract_primitives::{
     ProjectionSourceSurfaceId, Revision, SourceId, SourceRef, SourceSpan,
 };
 use crate::projection_source::{
-    ProjectionSourceChild, ProjectionSourceDocument, ProjectionSourceNode,
-    ProjectionSourceRoleName, ProjectionSourceSurface,
+    ProjectionSourceChild, ProjectionSourceCollectionAnchorDeclaration, ProjectionSourceDocument,
+    ProjectionSourceNode, ProjectionSourceRoleName, ProjectionSourceSurface,
 };
 
 pub(crate) const MAX_PROJECTION_SOURCE_BYTES: u32 = u32::MAX;
@@ -192,6 +192,8 @@ impl<'a> Parser<'a> {
             match token.text {
                 "surface" => document.push_surface(self.parse_surface(token.start)?),
                 "node" => document.push_node(self.parse_node(token.start)?),
+                "collection_anchor" => document
+                    .push_collection_anchor_declaration(self.parse_collection_anchor(token.start)?),
                 "revision" => {
                     return Err(self.error(
                         ProjectionSourceParserDiagnosticKind::DuplicateRevision,
@@ -252,6 +254,25 @@ impl<'a> Parser<'a> {
             ProjectionSourceSurfaceId::new(id).expect("non-zero surface id"),
             ProjectionSourceNodeId::new(root).expect("non-zero root id"),
             CollectionKey::new(key).expect("non-zero surface key"),
+            self.source_ref(start, end),
+        ))
+    }
+
+    /// Parses one explicit textual `CollectionAnchor` declaration:
+    /// `collection_anchor <nonzero_u64>;`. The operand is a bare node-id
+    /// integer in the same domain as `surface_decl`'s `root` and
+    /// `child_decl`'s `child` operands -- not a role, not a `CollectionKey`,
+    /// not a quoted identifier. Target-node existence and duplicate-target
+    /// rejection are qualification-time (`CAD_*`) concerns, not parser
+    /// concerns; see `docs/spec/ui/projection_source_model.md` section 12.
+    fn parse_collection_anchor(
+        &mut self,
+        start: usize,
+    ) -> Result<ProjectionSourceCollectionAnchorDeclaration, ProjectionSourceParseError> {
+        let id = self.parse_number(u64::MAX, true)?;
+        let end = self.expect_semicolon()?;
+        Ok(ProjectionSourceCollectionAnchorDeclaration::new(
+            ProjectionSourceNodeId::new(id).expect("non-zero collection anchor id"),
             self.source_ref(start, end),
         ))
     }
@@ -734,5 +755,6 @@ fn is_keyword(text: &str) -> bool {
             | "role"
             | "child"
             | "order"
+            | "collection_anchor"
     )
 }

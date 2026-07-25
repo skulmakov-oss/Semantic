@@ -1,0 +1,13 @@
+source: crates/prom-ui-runtime/src/reference_admission.rs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceActionInvocation {
+pub intent: SemanticIntent,
+pub revision: u64,
+pub epoch: u64,
+pub sequence: u64,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceAdmissionDenial {
+#[derive(Debug)]
+pub struct ReferenceContourAdmission {
+pub fn new(granted_action_ids: impl IntoIterator<Item = u64>) -> Self {
+pub fn evaluate( &self, invocation: &ReferenceActionInvocation, ) -> Result<InteractionAdmittedSemanticAction, ReferenceAdmissionDenial> {

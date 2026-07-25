@@ -1,6 +1,7 @@
 mod demo_interaction;
 mod renderer_layout_inspector;
 mod shell_player_demo;
+mod ui_dna2_reference;
 
 use demo_interaction::{render_demo_frame, DemoInteraction};
 use prom_ui::layout::{
@@ -59,6 +60,11 @@ fn main() {
 
     if env::args().any(|arg| arg == "--shell-player-demo") {
         shell_player_demo::run_shell_player_demo();
+        return;
+    }
+
+    if env::args().any(|arg| arg == "--ui-dna2-reference") {
+        ui_dna2_reference::run_ui_dna2_reference();
         return;
     }
 

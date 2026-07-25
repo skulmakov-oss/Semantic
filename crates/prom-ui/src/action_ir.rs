@@ -95,7 +95,7 @@ impl PartialOrd for ActionIrDiagnostic {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct ActionIrDocument {
     pub(crate) routes: Vec<ActionRoute>,
 }

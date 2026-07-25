@@ -30,7 +30,9 @@ impl UiBackendAdapter for FailingBackend {
 
     fn close_window(&mut self) {}
 
-    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
+    fn run_event_loop<
+        F: FnMut(&[prom_ui_runtime::InputEvent], LoopControl, &mut prom_ui_runtime::DrawFrame),
+    >(
         &mut self,
         _on_event: F,
     ) -> Result<(), UiRuntimeError> {

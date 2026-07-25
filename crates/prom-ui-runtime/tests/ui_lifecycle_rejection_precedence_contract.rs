@@ -35,7 +35,7 @@ impl UiBackendAdapter for FailingCountingBackend {
         self.counters.borrow_mut().close_window += 1;
     }
 
-    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
+    fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut prom_ui_runtime::DrawFrame)>(
         &mut self,
         _on_event: F,
     ) -> Result<(), UiRuntimeError> {

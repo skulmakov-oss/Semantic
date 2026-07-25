@@ -2,11 +2,11 @@
 
 Status: NORMATIVE GRAMMAR V0; PARSER AND FRONTEND QUALIFICATION LANDED
 Track: UI DNA v2
-Phase coverage: UI-DNA2-WP2B + WP2C-P1 + WP2C-P2 + WP2C-P3 + WP2C-P4 + WP2C-P5
+Phase coverage: UI-DNA2-WP2B + WP2C-P1 + WP2C-P2 + WP2C-P3 + WP2C-P4 + WP2C-P5 + explicit `CollectionAnchor` declaration syntax (Issue #1543)
 File posture: `.proj.sm`
-Implementation status: CRATE-PRIVATE PARSER AND PURE IN-MEMORY FRONTEND LANDED
+Implementation status: CRATE-PRIVATE PARSER AND PURE IN-MEMORY FRONTEND LANDED, INCLUDING explicit `CollectionAnchor` declaration syntax
 Public parser/frontend APIs and filesystem/runtime loaders: ABSENT
-Runtime activation: NOT AUTHORIZED
+Runtime activation: bounded Gate D reference contour only (Issue #1543); general production activation remains NOT AUTHORIZED
 
 ## 1. Ownership and Boundaries
 
@@ -52,7 +52,11 @@ surface collection key;
 node identity;
 node role;
 node collection key;
-ordered child edge.
+ordered child edge;
+explicit `CollectionAnchor` declaration (landed via Issue #1543; the
+declaration carries only a target node identity, per
+`docs/spec/ui/projection_source_model.md` section 12 -- no role,
+`CollectionKey`, binding coordinate, or patch operation).
 
 The following are reserved for later grammar versions or separate approved extensions:
 state bindings;
@@ -92,6 +96,8 @@ projection v0 {
 
     node 12 role text key 12 {
     }
+
+    collection_anchor 12;
 }
 ```
 
@@ -116,13 +122,28 @@ epoch_decl
 
 declaration
     = surface_decl
-    | node_decl;
+    | node_decl
+    | collection_anchor_decl;
 
 surface_decl
     = "surface" nonzero_u64
       "root" nonzero_u64
       "key" nonzero_u64
       ";";
+
+collection_anchor_decl
+    = "collection_anchor" nonzero_u64 ";";
+
+The operand is a bare node-id integer in the same domain as `surface_decl`'s
+`root` operand and `child_decl`'s `child` operand -- not a role, not a
+`CollectionKey`, not a quoted or namespaced identifier. The declaration may
+appear zero or more times, interleaved with `surface_decl`/`node_decl` at the
+document declaration-list position. Target-node existence and duplicate-target
+rejection are qualification-time concerns (`CAD_MISSING_TARGET_NODE`,
+`CAD_DUPLICATE_DECLARATION`), not parser concerns; the parser accepts any
+syntactically well-formed nonzero operand. See
+`docs/spec/ui/projection_source_model.md` section 12 for the complete
+ownership, validation, diagnostic, and ordering contract this syntax feeds.
 
 node_decl
     = "node" nonzero_u64
@@ -371,6 +392,7 @@ node
 role
 child
 order
+collection_anchor
 
 Reject: Projection, V0, NODE, Root, etc.
 
@@ -1427,6 +1449,25 @@ projection v0 {
 ```
 This yields the same provenance-independent normalized structural inventory as a document with nodes declared in order `10` then `11`.
 AST inventory: revision: 0, epoch: 0, surface IDs: 1, node IDs: 10, 11, roles: root, text, keys: 1, 10, 11, child IDs: 11, ChildOrder values: 0.
+
+### 5. Explicit textual `CollectionAnchor` declarations
+```text
+projection v0 {
+    revision 1;
+    epoch 2;
+    surface 1 root 10 key 1;
+    node 10 role root key 10 {
+        child 11 order 0;
+        child 12 order 1;
+    }
+    node 11 role text key 11 {}
+    node 12 role text key 12 {}
+    collection_anchor 12;
+    collection_anchor 11;
+}
+```
+AST inventory: revision: 1, epoch: 2, surface IDs: 1, node IDs: 10, 11, 12, roles: root, text, text, keys: 1, 10, 11, 12, child IDs: 11, 12, ChildOrder values: 0, 1, collection-anchor declaration targets (authored order, parser-preserved): 12, 11.
+Qualification inventory (via `qualify_collection_anchor_declarations` against the compiled Static UI IR): both targets resolve to declared nodes and are qualified, deterministically reordered ascending by `StaticNodeId`: 11, 12.
 
 ## 13. Invalid Normative Examples
 

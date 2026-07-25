@@ -1,14 +1,17 @@
 # ProjectionBundle v0 Contract
 
 Status: NORMATIVE CONTRACT FREEZE
-Track: UI-DNA2-8A
-Scope: documentation-only logical contract
-Implementation: NOT AUTHORIZED
+Track: UI-DNA2-8A; bounded codec delivered under Issue #1543
+Scope: documentation-only logical contract, plus one bounded crate-private
+codec resolving this section's representation decisions for the UI-DNA2-10
+reference contour only (see section 17)
+Implementation: BOUNDED (crate-private, reference-contour-only; see section 17)
 General Level 4: NOT CLAIMED
-Loader: NOT IMPLEMENTED
-Activation: NOT AUTHORIZED
-Runtime integration: NOT AUTHORIZED
-Gate D: CLOSED
+Loader: IMPLEMENTED (bounded, crate-private, pure in-memory; see section 17)
+Activation: bounded Gate D reference contour only; general production
+activation remains NOT AUTHORIZED
+Runtime integration: bounded to the UI-DNA2-10 reference contour only
+Gate D: OPEN WITH LIMITS for the bounded UI-DNA2-10 reference contour only
 Production promotion: NOT AUTHORIZED
 
 ## 1. Purpose and scope
@@ -204,6 +207,36 @@ UI-DNA2-8B cannot begin until an owner decision selects:
 
 JSON, YAML, TOML, binary, or another encoding must not be selected merely for
 implementation convenience.
+
+Under the direct owner authorization recorded in Issue #1543, a concrete
+representation was selected and implemented for the bounded UI-DNA2-10
+reference contour (`crates/prom-ui/src/projection_bundle.rs`), exactly as
+prior UI-DNA2 implementation PRs have resolved analogous
+"representation unresolved" spec language for other artifact classes (e.g.
+Static UI IR Artifact V1 through PR #1511). This resolves the representation
+questions above for that bounded contour only:
+
+- final serialization: a length-prefixed binary framing (magic, schema and
+  contract version fields, a fixed positional section table);
+- canonical encoding: little-endian fixed-width integers, length-prefixed
+  byte strings, ascending-sorted collections, proven by re-encode-and-compare
+  exact equality;
+- embedding versus exact reference: every artifact class is embedded
+  in-line (no exact-reference/content-addressed form is implemented);
+- trust metadata representation: **not selected**. No digest or signature
+  field exists in this format and no cryptographic algorithm was chosen —
+  see the trust-verification boundary note in section 11 and item 4/5 in
+  section 16, which remain genuinely unresolved;
+- source-coordinate semantics: the same `SourceRef`/`SourceSpan` coordinates
+  already used elsewhere in this codebase;
+- numeric resource limits: caller-supplied (`ProjectionBundleLimits`), no
+  frozen defaults;
+- compatibility-version negotiation: exact-equality only (declared bundle
+  schema/contract version and Role Dictionary version must exactly match the
+  caller-supplied accepted context; no range or fallback negotiation).
+
+This resolution is bounded to the UI-DNA2-10 reference contour. It is not a
+claim of general Level 4/5 production readiness (see section 13).
 
 ## 8. Validation policy
 
@@ -437,50 +470,61 @@ Roadmap order alone is not authorization.
 
 ## 16. Unresolved Decisions Blocking Implementation
 
-The following are contract decisions, not hidden implementation details:
+This section originally blocked ALL implementation. Under the direct owner
+authorization recorded in Issue #1543, items 1-3 and 6-9 were resolved by
+the concrete bounded implementation described in section 7 and section 17.
+Items 4 and 5 (digest and signature algorithm ownership) remain genuinely
+unresolved: no cryptographic hash or signature crate was added to the
+workspace, and this implementation's "trust" stage is deterministic
+self-consistency verification only, not cryptographic trust (section 11).
+Item 10 (safety-classification policy) also remains unresolved; the bounded
+contour does not implement safety-classification acceptance constraints.
 
-1. **Final serialization** — no accepted evidence selects text, binary, or
-   another external form.
-2. **Canonical encoding** — exact field, section, and byte encoding remains
-   unselected.
-3. **Artifact embedding versus exact references** — the policy must be selected
-   per artifact class.
-4. **Digest algorithm ownership** — the owner and algorithm remain unassigned.
-5. **Signature algorithm ownership** — the owner and algorithm remain
-   unassigned.
-6. **Numeric resource defaults** — no defaults are supported by current
-   evidence; future values remain caller-supplied unless separately frozen.
-7. **Compatibility-version negotiation** — exact supported-version and
-   negotiation behavior remains unselected.
-8. **Critical/pinned bundle policy ownership** — directional delivery doctrine
-   names critical and pinned bundles, but the enforcing owner and policy are
-   unresolved.
-9. **Unknown and duplicate field policy placement** — the selected
-   serialization must assign these failures deterministically to framing,
-   syntax, or structural validation.
-10. **Safety-classification policy ownership** — representation is required,
-    but acceptance constraints require a separate owner decision.
+1. **Final serialization** — RESOLVED for the bounded reference contour
+   (section 7): length-prefixed binary framing.
+2. **Canonical encoding** — RESOLVED for the bounded reference contour
+   (section 7).
+3. **Artifact embedding versus exact references** — RESOLVED for the bounded
+   reference contour: every artifact class is embedded in-line.
+4. **Digest algorithm ownership** — still unresolved; no algorithm selected,
+   no crypto dependency added.
+5. **Signature algorithm ownership** — still unresolved; no algorithm
+   selected, no crypto dependency added.
+6. **Numeric resource defaults** — RESOLVED as caller-supplied only
+   (`ProjectionBundleLimits`), consistent with this item's own framing; no
+   defaults are frozen.
+7. **Compatibility-version negotiation** — RESOLVED for the bounded
+   reference contour as exact-equality only (section 7).
+8. **Critical/pinned bundle policy ownership** — still unresolved; the
+   bounded contour does not implement a critical/pinned bundle concept.
+9. **Unknown and duplicate field policy placement** — RESOLVED for the
+   bounded reference contour: unknown section kinds and duplicate/
+   out-of-order sections are Structural rejections (section 8).
+10. **Safety-classification policy ownership** — still unresolved; not
+    implemented by the bounded contour.
 
-Until these decisions are resolved:
+The following remains true for general, non-bounded implementation:
 
 ```text
-FINAL SERIALIZATION = UNRESOLVED
-PARSER IMPLEMENTATION = BLOCKED
+FINAL SERIALIZATION (general) = UNRESOLVED
+GENERAL PARSER IMPLEMENTATION (beyond the bounded reference contour) = BLOCKED
+CRYPTOGRAPHIC TRUST (digest/signature) = UNRESOLVED
 ```
 
 ## 17. Final status
 
 ```text
 ProjectionBundle v0 logical contract = FROZEN BY UI-DNA2-8A
-ProjectionBundle implementation = NOT AUTHORIZED
-ProjectionBundle parser = NOT IMPLEMENTED
-ProjectionBundle validator = NOT IMPLEMENTED
-ProjectionBundle verifier = NOT IMPLEMENTED
-ProjectionBundle inert loader = NOT IMPLEMENTED
-ProjectionBundle activation = NOT AUTHORIZED
-ProjectionPatch application = NOT AUTHORIZED
-runtime integration = NOT AUTHORIZED
-Gate D = CLOSED
+ProjectionBundle implementation = BOUNDED (crate-private, reference-contour-only, Issue #1543)
+ProjectionBundle parser = IMPLEMENTED (bounded reference contour)
+ProjectionBundle validator = IMPLEMENTED (structural, cross-artifact, compatibility; bounded reference contour)
+ProjectionBundle verifier = IMPLEMENTED as deterministic self-consistency verification (NOT cryptographic digest/signature trust -- that remains UNRESOLVED)
+ProjectionBundle inert loader = IMPLEMENTED (bounded, crate-private, pure in-memory)
+ProjectionBundle activation = bounded Gate D reference contour only; general production activation remains NOT AUTHORIZED
+ProjectionPatch application = unchanged; governed by the existing Shell Player contract
+runtime integration = bounded to the UI-DNA2-10 reference contour only
+Gate D = OPEN WITH LIMITS for the bounded UI-DNA2-10 reference contour only
 production promotion = NOT AUTHORIZED
+General Level 4/5 production ProjectionBundle reader/parser = NOT CLAIMED
 NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
 ```

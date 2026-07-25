@@ -19,6 +19,6 @@ fn native_backend_winit_run_event_loop_can_be_invoked() {
     #[allow(clippy::type_complexity)]
     let _run_fn: fn(
         &mut NativeBackend,
-        fn(LoopControl, &mut prom_ui_runtime::DrawFrame),
+        fn(&[prom_ui_runtime::InputEvent], LoopControl, &mut prom_ui_runtime::DrawFrame),
     ) -> Result<(), UiRuntimeError> = NativeBackend::run_event_loop;
 }

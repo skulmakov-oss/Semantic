@@ -68,6 +68,7 @@ pub mod prepared_effect;
 pub mod prepared_effect_result;
 pub(crate) mod prepared_projection_patch_targets;
 pub mod projection;
+pub(crate) mod projection_bundle;
 pub(crate) mod projection_compile;
 pub(crate) mod projection_patch;
 pub(crate) mod projection_source;
@@ -97,6 +98,8 @@ mod ui_dna2_binding_observation_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_binding_semantic_adapter_qualification_tests;
 #[cfg(test)]
+mod ui_dna2_collection_anchor_grammar_qualification_tests;
+#[cfg(test)]
 mod ui_dna2_collection_anchor_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_denial_recovery_qualification_tests;
@@ -106,6 +109,8 @@ mod ui_dna2_local_projection_state_qualification_tests;
 mod ui_dna2_prepared_active_projection_targets_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_prepared_projection_patch_targets_qualification_tests;
+#[cfg(test)]
+mod ui_dna2_projection_bundle_qualification_tests;
 #[cfg(test)]
 mod ui_dna2_shell_bridge_qualification_tests;
 #[cfg(test)]

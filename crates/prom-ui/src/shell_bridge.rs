@@ -37,8 +37,9 @@ use crate::binding_graph::{
 };
 use crate::collection_anchor_declarations::qualify_collection_anchor_declarations;
 use crate::contract_primitives::{
-    ChildOrder, CollectionKey, Epoch, ProjectionSourceNodeId, ProjectionSourceSurfaceId, Revision,
-    SourceId, SourceRef, SourceSpan, StaticDocumentId, StaticNodeId,
+    ChildOrder, CollectionKey, ContractVersion, Epoch, ProjectionSourceNodeId,
+    ProjectionSourceSurfaceId, Revision, SchemaVersion, SourceId, SourceRef, SourceSpan,
+    StaticDocumentId, StaticNodeId,
 };
 use crate::local_projection_state::{
     apply_projection_patch_set, LocalProjectionApplicationError, LocalProjectionState,
@@ -679,4 +680,314 @@ pub fn collection_entries(
         .iter()
         .map(|(key, value)| (key.raw(), read_value(value)))
         .collect()
+}
+
+// ---- Gate D bounded ProjectionBundle activation (Issue #1543) ------------
+//
+// Bounded to the UI-DNA2-10 reference contour only. This is not general
+// `ProjectionBundle` activation, does not imply production promotion, and
+// uses a fixed, non-caller-configurable policy (accepted bundle schema/
+// contract version, `RoleDictionary::current()`, and resource limits sized
+// for the bounded reference contour) -- see
+// `docs/spec/ui/gate_d_activation_policy_v0.md` for the exact limits and
+// exclusions.
+
+/// One node's bridge-safe structural evidence from an activated bundle:
+/// identity, role name, and ordered child identities. Read-only; not the
+/// internal `StaticUiNode` type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeActivatedNode {
+    id: u64,
+    role: String,
+    children: Vec<u64>,
+}
+
+impl BridgeActivatedNode {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub fn role(&self) -> &str {
+        &self.role
+    }
+
+    pub fn children(&self) -> &[u64] {
+        &self.children
+    }
+}
+
+/// Bridge-safe mirror of `projection_bundle::AccessibilityRole`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeAccessibilityRole {
+    GenericContainer,
+    Label,
+    Button,
+}
+
+/// One node's deterministically-derived accessibility evidence from an
+/// activated bundle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeAccessibilityEntry {
+    node: u64,
+    role: BridgeAccessibilityRole,
+    label: String,
+}
+
+impl BridgeAccessibilityEntry {
+    pub fn node(&self) -> u64 {
+        self.node
+    }
+
+    pub fn role(&self) -> BridgeAccessibilityRole {
+        self.role
+    }
+
+    pub fn label(&self) -> &str {
+        &self.label
+    }
+}
+
+/// Opaque bounded Gate D activation result. Wraps every artifact class from
+/// one verified `ProjectionBundle v0`, reduced to the bridge-safe evidence
+/// the UI-DNA2-10 reference contour consumes. Construction is possible only
+/// through [`activate_projection_bundle_v0_gate_d`]; there is no public
+/// constructor, `Default`, `From`/`Into`, or deserialization path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateDActivatedBundle {
+    nodes: Vec<BridgeActivatedNode>,
+    accessibility: Vec<BridgeAccessibilityEntry>,
+    snapshot: ActivationTargetSnapshot,
+    root_node: u64,
+}
+
+impl GateDActivatedBundle {
+    /// Every node in the activated bundle's Static UI IR, ascending by id.
+    pub fn nodes(&self) -> &[BridgeActivatedNode] {
+        &self.nodes
+    }
+
+    /// Deterministically-derived accessibility evidence, ascending by node
+    /// id.
+    pub fn accessibility_entries(&self) -> &[BridgeAccessibilityEntry] {
+        &self.accessibility
+    }
+
+    /// The Shell Player activation-target snapshot derived from this
+    /// bundle's Binding Graph and qualified `CollectionAnchor`
+    /// declarations. Pass this directly to
+    /// `prom_ui_runtime::shell_player::create_shell_session`.
+    pub fn activation_snapshot(&self) -> &ActivationTargetSnapshot {
+        &self.snapshot
+    }
+
+    /// The first declared surface's root node id, or `0` if the bundle
+    /// declares no surface (structurally impossible for a verified bundle,
+    /// since Static UI IR structural validation requires a root; `0` is a
+    /// defensive fallback only).
+    pub fn root_node(&self) -> u64 {
+        self.root_node
+    }
+}
+
+/// Bounded Gate D activation failed. The complete bundle is rejected; no
+/// partial `GateDActivatedBundle` ever escapes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateDActivationError {
+    BundleRejected,
+}
+
+fn gate_d_reference_contour_limits() -> crate::projection_bundle::ProjectionBundleLimits {
+    crate::projection_bundle::ProjectionBundleLimits {
+        max_bundle_bytes: 256 * 1024,
+        max_binding_count: 256,
+        max_action_route_count: 256,
+        max_collection_anchor_count: 256,
+        max_accessibility_entry_count: 512,
+        static_ir_limits: crate::static_ir_artifact::StaticUiArtifactV1Limits {
+            max_input_bytes: 256 * 1024,
+            max_surfaces: 16,
+            max_nodes: 512,
+            max_children_per_node: 64,
+            max_role_bytes: 64,
+        },
+    }
+}
+
+/// Verifies one candidate `ProjectionBundle v0` byte sequence (structural,
+/// cross-artifact, compatibility, and self-consistency verification, per
+/// `crate::projection_bundle::verify_projection_bundle_v0`) against a
+/// fixed, bounded Gate D policy, and -- only if every stage succeeds --
+/// derives the bridge-safe activation evidence the UI-DNA2-10 reference
+/// application needs. Fails closed: a rejected bundle never produces a
+/// `GateDActivatedBundle`, an `ActivationTargetSnapshot`, or any Shell
+/// Player state.
+///
+/// This is bounded Gate D activation for the reference contour only. It
+/// does not select a cryptographic trust algorithm (none exists in this
+/// workspace), does not imply general `ProjectionBundle` production
+/// readiness, and does not imply production promotion.
+pub fn activate_projection_bundle_v0_gate_d(
+    bytes: &[u8],
+) -> Result<GateDActivatedBundle, GateDActivationError> {
+    let dictionary = RoleDictionary::current();
+    let compat = crate::projection_bundle::ProjectionBundleCompatContext {
+        accepted_schema_version: SchemaVersion::CURRENT,
+        accepted_contract_version: ContractVersion::CURRENT,
+        role_dictionary: dictionary,
+    };
+    let verified = crate::projection_bundle::verify_projection_bundle_v0(
+        bytes,
+        compat,
+        gate_d_reference_contour_limits(),
+    )
+    .map_err(|_| GateDActivationError::BundleRejected)?;
+    let bundle = verified.bundle();
+
+    let prepared = derive_prepared_active_projection_targets(
+        bundle.static_document(),
+        bundle.binding_graph(),
+        bundle.collection_anchors(),
+    )
+    .map_err(|_| GateDActivationError::BundleRejected)?;
+
+    let snapshot = ActivationTargetSnapshot {
+        node_anchor_ids: prepared
+            .node_anchors()
+            .iter()
+            .map(|a| a.node().raw())
+            .collect(),
+        binding_anchor_ids: prepared
+            .binding_anchors()
+            .iter()
+            .map(|a| (a.node().raw(), a.slot().0))
+            .collect(),
+        collection_anchor_ids: prepared
+            .collection_anchors()
+            .iter()
+            .map(|a| a.collection().raw())
+            .collect(),
+    };
+
+    let nodes = bundle
+        .static_document()
+        .nodes()
+        .iter()
+        .map(|node| BridgeActivatedNode {
+            id: node.id().raw(),
+            role: String::from(node.role().as_str()),
+            children: node.children().iter().map(|c| c.child().raw()).collect(),
+        })
+        .collect();
+
+    let accessibility = bundle
+        .accessibility_entries()
+        .iter()
+        .map(|entry| BridgeAccessibilityEntry {
+            node: entry.node().raw(),
+            role: match entry.role() {
+                crate::projection_bundle::AccessibilityRole::GenericContainer => {
+                    BridgeAccessibilityRole::GenericContainer
+                }
+                crate::projection_bundle::AccessibilityRole::Label => {
+                    BridgeAccessibilityRole::Label
+                }
+                crate::projection_bundle::AccessibilityRole::Button => {
+                    BridgeAccessibilityRole::Button
+                }
+            },
+            label: String::from(entry.label()),
+        })
+        .collect();
+
+    let root_node = bundle
+        .static_document()
+        .surfaces()
+        .first()
+        .map(|s| s.root().raw())
+        .unwrap_or(0);
+
+    Ok(GateDActivatedBundle {
+        nodes,
+        accessibility,
+        snapshot,
+        root_node,
+    })
+}
+
+// ---- ProjectionBundle v0 compilation from source text (Issue #1543) ------
+
+/// Compilation failure. The complete input is rejected; no partial bundle
+/// bytes are ever produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectionBundleCompileError {
+    ParseOrCompile,
+    CollectionAnchorQualification,
+    Canonicalization,
+}
+
+/// Compiles Projection Source text (Grammar v0, including the textual
+/// `collection_anchor` declaration syntax) all the way through to canonical
+/// `ProjectionBundle v0` bytes: parse, Static UI IR lowering, explicit
+/// `CollectionAnchor` qualification, an empty (but present) Binding Graph
+/// and Action IR section, deterministically-derived accessibility
+/// evidence, and canonical serialization.
+///
+/// This is the public production-side counterpart to
+/// [`activate_projection_bundle_v0_gate_d`], which consumes the bytes this
+/// function produces. Together they realize the complete
+/// `source text -> ... -> ProjectionBundle -> parse/validate/verify ->
+/// inert load -> Gate D activation` pipeline through public API only.
+pub fn compile_projection_source_to_bundle_v0(
+    source_id: u64,
+    source_text: &str,
+    document_id: u64,
+    bundle_revision: u64,
+    bundle_epoch: u64,
+    compiler_identity: &str,
+) -> Result<Vec<u8>, ProjectionBundleCompileError> {
+    let source_id =
+        SourceId::new(source_id).map_err(|_| ProjectionBundleCompileError::ParseOrCompile)?;
+    let document_id = StaticDocumentId::new(document_id)
+        .map_err(|_| ProjectionBundleCompileError::ParseOrCompile)?;
+    let dictionary = RoleDictionary::current();
+
+    let compiled = crate::projection_source_frontend::compile_projection_source_text_with_collection_anchors(
+        source_id,
+        source_text,
+        document_id,
+        dictionary,
+    )
+    .map_err(|err| match err {
+        crate::projection_source_frontend::ProjectionSourceFrontendWithAnchorsError::CollectionAnchor(_) => {
+            ProjectionBundleCompileError::CollectionAnchorQualification
+        }
+        _ => ProjectionBundleCompileError::ParseOrCompile,
+    })?;
+
+    let binding_graph = BindingGraphDocument::build(Vec::new(), compiled.static_document())
+        .map_err(|_| ProjectionBundleCompileError::ParseOrCompile)?;
+    let action_ir =
+        crate::action_ir::ActionIrDocument::build(Vec::new(), compiled.static_document())
+            .map_err(|_| ProjectionBundleCompileError::ParseOrCompile)?;
+
+    let bundle = crate::projection_bundle::ProjectionBundleV0::assemble(
+        document_id,
+        Revision::new(bundle_revision),
+        Epoch::new(bundle_epoch),
+        dictionary,
+        compiled.static_document().clone(),
+        binding_graph,
+        action_ir,
+        compiled.collection_anchors().clone(),
+        crate::projection_bundle::BundleProvenance::new(
+            String::from(compiler_identity),
+            source_id,
+            Revision::new(bundle_revision),
+            Epoch::new(bundle_epoch),
+        ),
+    );
+
+    bundle
+        .canonical_bytes(dictionary)
+        .map_err(|_| ProjectionBundleCompileError::Canonicalization)
 }

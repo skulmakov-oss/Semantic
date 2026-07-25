@@ -16,6 +16,7 @@ wgpu-backend = [
     "dep:pollster",
     "dep:bytemuck",
     "dep:semantic-core-quad",
+    "dep:glyphon",
 ]
 
 [dependencies]
@@ -23,6 +24,7 @@ prom-ui = { path = "../prom-ui", default-features = false }
 prom-ui-runtime = { path = "../prom-ui-runtime", default-features = false }
 semantic-core-quad = { path = "../semantic-core-quad", optional = true, default-features = false }
 winit = { version = "0.30.13", optional = true, default-features = false, features = ["rwh_06", "x11"] }
-wgpu = { version = "0.20", optional = true, default-features = false, features = ["wgsl"] }
+wgpu = { version = "23", optional = true, default-features = false, features = ["wgsl"] }
 pollster = { version = "0.3", optional = true }
 bytemuck = { version = "1.15", optional = true, features = ["derive"] }
+glyphon = { version = "0.7", optional = true }
