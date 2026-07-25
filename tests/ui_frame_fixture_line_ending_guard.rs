@@ -8,13 +8,27 @@
 //! Windows Git default) rewrites their line endings to CRLF, which the
 //! decoders then correctly reject as noncanonical.
 //!
-//! This checks the *attribute policy* itself via `git check-attr`, not the
-//! current checkout's bytes -- `core.autocrlf` doesn't apply on the Linux
-//! CI runners this repo uses, so a bytes-only check would never catch this
-//! regression there. `git check-attr` reports what `.gitattributes` would
-//! do regardless of the checking-out platform, so this guard is meaningful
-//! on every runner.
+//! Two checks, for two different failure modes:
+//!
+//! 1. Attribute policy, via `git check-attr` -- catches a *policy*
+//!    regression (someone removing or narrowing the `.gitattributes` rule).
+//!    `core.autocrlf` doesn't apply on the Linux CI runners this repo uses,
+//!    so a bytes-only check would never catch a policy regression there;
+//!    `git check-attr` reports what `.gitattributes` would do regardless of
+//!    the checking-out platform.
+//! 2. Actual working-tree bytes -- catches the case `git check-attr` alone
+//!    cannot: an *already-affected* Windows clone (checked out before this
+//!    `.gitattributes` rule existed) that pulls this fix. Git only
+//!    re-applies line-ending filters when a blob's content changes or the
+//!    file is freshly checked out; an attribute-only change does not
+//!    retroactively re-smudge files git already considers up to date, so a
+//!    pre-existing CRLF-corrupted working copy stays corrupted after
+//!    pulling this commit even though `git check-attr` now correctly
+//!    reports `eol: lf`. If this second check ever fails locally, run
+//!    `git add --renormalize tests/fixtures/ui_frame_inspection` (or
+//!    delete and re-checkout the directory) to repair the working copy.
 
+use std::fs;
 use std::process::Command;
 
 const FIXTURE_DIR: &str = "tests/fixtures/ui_frame_inspection";
@@ -64,6 +78,28 @@ fn ui_frame_inspection_fixtures_are_attributed_text_eol_lf() {
         assert!(
             report.contains(&format!("{file}: eol: lf")),
             "expected '{file}: eol: lf' in git check-attr output, got:\n{report}"
+        );
+    }
+}
+
+/// Catches an already-affected working copy that the attribute-policy check
+/// above cannot see (see module docs): asserts the bytes actually on disk,
+/// right now, are LF-only, regardless of what `.gitattributes` currently says.
+#[test]
+fn ui_frame_inspection_fixture_bytes_are_lf_only() {
+    let files = tracked_fixture_files();
+    assert!(
+        !files.is_empty(),
+        "expected tracked fixture files under {FIXTURE_DIR}"
+    );
+
+    for file in &files {
+        let bytes = fs::read(file).unwrap_or_else(|e| panic!("read {file}: {e}"));
+        assert!(
+            !bytes.windows(2).any(|w| w == b"\r\n"),
+            "{file} contains CRLF line endings in the working tree; run \
+             `git add --renormalize {FIXTURE_DIR}` (or delete and re-checkout \
+             the directory) to repair this checkout"
         );
     }
 }
