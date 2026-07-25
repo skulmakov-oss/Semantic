@@ -52,7 +52,10 @@ Recommended plan:
 - `samples/Semantic/positive_selected_import.sm`
 
 These should mirror the existing canonical examples pack rather than invent new
-syntax or new behavior.
+syntax or new behavior. The plan intentionally draws only from the Rust-like
+executable surface; `examples/canonical/quad_cycle_logos/` (Logos profile) is
+a separate, parse/lowering-only qualified example and is not part of this
+`.sm` Linguist sample set (see `docs/spec/source_style.md`).
 
 ## Extension Review
 

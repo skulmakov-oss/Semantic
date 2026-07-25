@@ -1,0 +1,9 @@
+System QuadCycle(sample_count = 48, state_period = 4):
+
+Entity Sensor:
+    state val: quad
+    prop threshold: f64
+
+Law "CheckSignal" [priority 10]:
+    When Sensor.val == T -> Log.emit("Signal OK")
+    When Sensor.val == S -> System.recovery()

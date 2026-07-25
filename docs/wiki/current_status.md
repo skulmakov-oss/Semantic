@@ -150,18 +150,9 @@ source check
 
 ```sm
 fn decide(sensor: quad, ready: bool) -> quad {
-    if sensor == N {
-        return N;
-    }
-
-    if sensor == S {
-        return S;
-    }
-
-    if ready == true {
-        return T;
-    }
-
+    if sensor == N { return N; }
+    if sensor == S { return S; }
+    if ready == true { return T; }
     return F;
 }
 
@@ -170,6 +161,9 @@ fn main() {
     assert(verdict == T);
 }
 ```
+
+This follows the canonical compact guard-return style frozen in
+[`docs/spec/source_style.md`](../spec/source_style.md).
 
 Save it as `decision.sm`, then run:
 
@@ -564,6 +558,7 @@ and controlled expansion
 | Browse working programs | [Examples Index](../examples_index.md) |
 | Understand the language | [Language Overview](../LANGUAGE.md) |
 | Learn quad syntax | [Semantic Quad Surface](../language/semantic_quad_surface.md) |
+| Write canonical-style source | [Canonical Source Style v0](../spec/source_style.md) |
 | Read the public contract | [Specification Index](../spec/index.md) |
 | Understand architecture | [ARCHITECTURE.md](../../ARCHITECTURE.md) |
 | Check feature maturity | [Feature Maturity Matrix](../status/feature_maturity_matrix.md) |

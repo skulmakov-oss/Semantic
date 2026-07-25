@@ -1,53 +1,56 @@
-fn classify_signal(state: quad) -> i32 {
-    let result: i32 = match state {
-        T => { 10 }
-        F => { 0 }
-        N => { 1 }
-        S => { -10 }
-        _ => { 0 }
-    };
-    return result;
+record CycleConfig {
+    sample_count: i32,
+    state_period: i32,
 }
 
-fn route_signal(state: quad, priority: i32) -> i32 {
-    let result: i32 = match state {
-        S => { -100 }
+fn state_from_index(index: i32, config: CycleConfig) -> quad {
+    let slot: i32 = index % config.state_period;
+
+    if slot == 0 { return N; }
+    if slot == 1 { return F; }
+    if slot == 2 { return T; }
+    return S;
+}
+
+fn dispatch_code(state: quad) -> i32 {
+    return match state {
         N => { 0 }
-        F => { -1 }
-        T => {
-            if priority > 5 {
-                20
-            } else {
-                10
-            }
-        }
-        _ => { 0 }
+        F => { 1 }
+        T => { 2 }
+        _ => { 3 }
     };
-    return result;
 }
 
-fn alarm_level(state: quad, priority: i32) -> i32 {
-    let class: i32 = classify_signal(state);
-    let route: i32 = route_signal(state, priority);
-
-    if class < 0 {
-        return class;
-    }
-
-    if route < 0 {
-        return route;
-    }
-
-    return class + route;
+fn validate_distribution(n_count: i32, f_count: i32, t_count: i32, s_count: i32, code_sum: i32) {
+    assert(n_count > 0);
+    assert(f_count > 0);
+    assert(t_count > 0);
+    assert(s_count > 0);
+    assert(code_sum > 0);
+    return;
 }
 
 fn main() {
-    let stable: i32 = alarm_level(T, 7);
-    let unknown: i32 = alarm_level(N, 3);
-    let conflict: i32 = alarm_level(S, 9);
+    let config: CycleConfig = CycleConfig { sample_count: 48, state_period: 4 };
 
-    assert(stable == 30);
-    assert(unknown == 1);
-    assert(conflict == -10);
+    let mut n_count: i32 = 0;
+    let mut f_count: i32 = 0;
+    let mut t_count: i32 = 0;
+    let mut s_count: i32 = 0;
+    let mut code_sum: i32 = 0;
+
+    for index in 0..config.sample_count {
+        let state: quad = state_from_index(index, config);
+        code_sum += dispatch_code(state);
+
+        match state {
+            N => { n_count += 1; }
+            F => { f_count += 1; }
+            T => { t_count += 1; }
+            _ => { s_count += 1; }
+        }
+    }
+
+    validate_distribution(n_count, f_count, t_count, s_count, code_sum);
     return;
 }

@@ -1,134 +1,59 @@
 task:
-  id: UI-DNA2-END-TO-END-GATE-D-TURBO
-  title: complete UI-DNA2 end-to-end, activate Gate D for one bounded reference contour, close #1489
+  id: LANGUAGE-CANONICAL-SOURCE-STYLE-V0
+  title: define canonical compact source style and structured program layout, close #1538
   type: implementation
   mode: active
-  supersedes: SHELL-PLAYER-END-TO-END-TURBO
-  authorized_by: "Issue #1543 (repository owner direct instruction), umbrella Issue #1489"
+  supersedes: UI-DNA2-END-TO-END-GATE-D-TURBO
+  authorized_by: "Issue #1538 (repository owner direct instruction)"
 
 intent:
-  summary: "feat(ui): complete UI-DNA2 end-to-end reference application, activate Gate D with limits"
+  summary: "feat(language): freeze canonical Semantic source style v0"
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - Cargo.toml
-    - Cargo.lock
-    - crates/prom-ui/Cargo.toml
-    - crates/prom-ui/src/**
-    - crates/prom-ui/tests/**
-    - crates/prom-ui-runtime/Cargo.toml
-    - crates/prom-ui-runtime/src/**
-    - crates/prom-ui-runtime/tests/**
-    - crates/prom-ui-backend-native/Cargo.toml
-    - crates/prom-ui-backend-native/src/**
-    - crates/prom-ui-backend-native/tests/**
-    - crates/prom-ui-demo/Cargo.toml
-    - crates/prom-ui-demo/src/**
-    - tests/public_api_contracts.rs
-    - tests/golden_snapshots/public_api/**
-    - docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md
-    - docs/spec/ui/projection_source_grammar_v0.md
-    - docs/spec/ui/projection_source_model.md
-    - docs/spec/ui/projection_bundle_v0.md
-    - docs/spec/ui/shell_player_session_state_v0.md
-    - docs/spec/ui/gate_d_activation_policy_v0.md
+    - docs/spec/source_style.md
+    - docs/spec/index.md
+    - docs/examples_index.md
+    - docs/language/semantic_syntax_signature.md
+    - docs/language/semantic_linguist_entry_draft.md
+    - docs/language/semantic_style.md
+    - docs/language/semantic_code_style_principles.md
+    - README.md
+    - docs/wiki/current_status.md
+    - examples/canonical/README.md
+    - examples/canonical/match_control_flow/**
+    - examples/canonical/rule_state_decision/**
+    - examples/canonical/quad_cycle_logos/**
+    - crates/smc-cli/src/formatter.rs
+    - tests/canonical_examples.rs
+    - tests/canonical_source_style.rs
+    - tools/language/check_source_style_contract.ps1
 
 authorization:
   rust_implementation: true
-  # -- textual CollectionAnchor grammar amendment (Grammar v0 explicit extension) --
-  grammar_v0_extension_collection_anchor: true
-  parser_frontend_collection_anchor_wiring: true
-  # -- ProjectionBundle codec (resolves the "unresolved" concrete representation
-  #    decisions left open by the UI-DNA2-8A documentation-only freeze, exactly as
-  #    prior UI-DNA2 implementation PRs (#1507/#1508/#1511/#1541) have always
-  #    resolved analogous "Rust representation unresolved" spec language) --
-  projection_bundle_codec: true
-  projection_bundle_structural_validation: true
-  projection_bundle_cross_artifact_validation: true
-  projection_bundle_compatibility_validation: true
-  projection_bundle_trust_stage: true          # deterministic self-consistency verification only;
-                                                 # NOT cryptographic digest/signature trust -- no crypto
-                                                 # algorithm has been selected by any owner decision, and
-                                                 # none is added by this task. This stage rejects placeholder/
-                                                 # malformed trust material and proves canonical self-
-                                                 # consistency (mirrors the existing Static UI IR Artifact V1
-                                                 # precedent's own explicit disclaimer). Real cryptographic
-                                                 # trust remains a distinct, separately-ownable future decision.
-  projection_bundle_inert_loader: true
-  # -- Gate D: this task IS the owner authorization that opens it, for the bounded
-  #    reference contour only. Prior CLOSED state described the repository before
-  #    this authorization and does not override it. --
-  gate_d_change: true
-  gate_d_activation_policy: true
-  bundle_activation: true
-  # -- Action IR -> existing admission boundary wiring --
-  action_intent_admission_wiring: true
-  # -- renderer / input / accessibility --
-  renderer_integration: true
-  backend_integration: true
-  native_text_rendering: true
-  hit_test_wiring: true
-  focus_and_pointer_capture: true
-  accessibility_integration: true
-  demo_integration: true
-  reference_application: true
-  # -- shared bridge/runtime plumbing already authorized by the closed Shell Player task,
-  #    preserved here since the reference app builds on it --
-  crate_private_and_public_bridge: true
-  public_api: true
-  public_api_guard_changes: true
-  dependency_changes: true   # new: glyphon 0.7 (text rendering; paired with a wgpu
-                               # 0.20 -> 23 bump, the nearest glyphon-compatible version).
-                               # Accessibility ships as deterministic evidence
-                               # (BridgeAccessibilityEntry) only, not full accesskit/OS
-                               # accessibility-tree integration -- see
-                               # gate_d_activation_policy_v0.md section 9. Deliberately
-                               # NOT adding any crypto/hash/signature crate -- see
-                               # projection_bundle_trust_stage above.
+  formatter_regression_tests: true
+  canonical_example_revision: true
+  canonical_example_addition: true
+  style_drift_guard_tests: true
+  documentation_synchronization: true
   workflow_changes: false
-  roadmap_changes: true
-  issue_1489_changes: true
-  issue_1543_changes: true
+  roadmap_changes: false
+  issue_1538_changes: true
   project_changes: false
-  production_promotion: false   # UI-DNA2-11 decision is PROMOTE WITH LIMITS at most, recorded
-                                  # in the roadmap; this is not unrestricted production promotion.
-
-  gate_d: open_with_limits   # bounded non-critical reference contour only; see
-                              # docs/spec/ui/gate_d_activation_policy_v0.md for the exact
-                              # machine-checkable limits and exclusions once landed.
+  # no new language grammar, type-system, lowering, SemCode, verifier, VM, or
+  # PROMETHEUS ABI semantics -- style/example/formatter-contract only
+  grammar_semantic_expansion: false
+  verifier_vm_abi_changes: false
 
 constraints:
-  no_std_alloc_compatible_in_prom_ui_and_runtime: true
-  fail_closed: true
-  deterministic_output: true
-  deterministic_operation_ordering: true
-  deterministic_diagnostic_ordering: true
-  no_partial_target_acceptance: true
-  no_partial_patch_application: true
-  no_partial_state_commit: true
-  no_cursor_advancement_on_rejection: true
-  no_state_mutation_on_rejection: true
-  atomic_commit_semantics: true
-  explicit_collection_anchor_declarations_are_sole_source: true
-  runtime_catalog_not_constructed_from_patch_operations: true
-  runtime_catalog_not_constructed_from_raw_caller_ids: true
-  stage6_does_not_repeat_stage5: true
-  shell_player_not_owner_of_semantic_truth: true
-  shell_player_no_action_or_effect_authorization: true
-  renderer_gains_no_semantic_authority: true
-  no_fabrication_via_public_fields_default_raw_vec_from_into_deserialization: true
-  new_public_bridge_receives_guard_coverage_same_change: true
-  no_unrelated_compiler_verifier_vm_capability_effect_boundary_widening: true
-  no_unrelated_workbench_studio_or_ui_shell_kit_changes: true
-  projection_bundle_stage_separation: "parser != validator != verifier != loader != activation != production promotion"
-  projection_bundle_trust_stage_is_self_consistency_not_cryptographic_trust: true
-  gate_d_fail_closed_before_shell_session_construction: true
-  gate_d_bounded_to_reference_contour_only: true
-  hit_test_result_not_action_authorization: true
-  action_intent_candidate_not_admitted_action: true
-  ui_owns_interaction_candidates_only_not_authority_decisions: true
+  no_grammar_or_runtime_semantic_change: true
+  no_new_syntax_to_satisfy_illustrative_examples: true
+  rustlike_and_logos_surfaces_never_presented_as_one_executable_program: true
+  formatter_stays_conservative_and_lexical_only: true
+  formatter_idempotent: true
+  canonical_examples_must_pass_real_toolchain_qualification: true
   one_branch_one_pr: true
   no_intermediate_documentation_only_pr: true
-  roadmap_and_issues_updated_once_at_end: true
-  next_authorized_implementation_slice_after_this_task: none
+  no_child_issues: true
+  no_unrelated_ui_workbench_studio_alm_changes: true

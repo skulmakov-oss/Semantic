@@ -110,9 +110,17 @@ Do not treat these as evidence for Linguist classification:
 - benchmark-only samples
 - private qualification scaffolding
 
+## Canonical Presentation
+
+The preferred layout and density of these markers — top-level ordering,
+indentation, line width, compact guard/match forms — is frozen separately in
+`docs/spec/source_style.md` (Semantic Canonical Source Style v0). This note
+covers identity markers; that document covers presentation.
+
 ## Related Documents
 
 - `docs/LANGUAGE.md`
 - `docs/NAMING.md`
 - `docs/spec/syntax.md`
+- `docs/spec/source_style.md`
 - `examples/canonical/README.md`

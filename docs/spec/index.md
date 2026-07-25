@@ -13,6 +13,8 @@ Current documents in this PR:
 - `diagnostics.md` - source-facing parse, policy, type, and module diagnostics
 - `modules.md` - module, import, and re-export contract
 - `logos.md` - declarative Logos source-surface contract
+- `source_style.md` - Semantic Canonical Source Style v0: presentation, layout,
+  and formatter contract for both source surfaces
 - `semcode.md` - SemCode binary contract and compatibility rules
 - `profile.md` - `ParserProfile` policy contract
 - `verifier.md` - SemCode admission verification contract

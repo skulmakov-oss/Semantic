@@ -5,6 +5,11 @@ Status: first-pass compact quad-style density doctrine
 See also:
 
 - [`semantic_command_lexicon.md`](semantic_command_lexicon.md)
+- [`docs/spec/source_style.md`](../spec/source_style.md) — the frozen
+  canonical style contract for the *current* executable and Logos surfaces.
+  This document remains a future-vocabulary density sketch (`entry` /
+  `require` / `observe` / `complete` is not accepted syntax); it does not
+  describe present-day source.
 
 ## 1. Purpose
 
