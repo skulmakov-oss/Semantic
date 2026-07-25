@@ -410,11 +410,59 @@ fn canonical_pack_all_sm_files_are_fmt_clean_and_lexically_sound() {
     }
 }
 
+/// Closed vocabulary of qualification paths this suite knows how to exercise
+/// against the real toolchain. `classify_qualification` is the single place
+/// that decides which path a row belongs to; every other test below filters
+/// through it instead of re-testing `row.qualification`/`row.profile`
+/// directly, so a row can never be silently skipped by every toolchain test
+/// at once (the P2 this closes: a row with an unrecognized qualification
+/// string used to satisfy the aggregate `checked >= N` counts on other rows
+/// while never itself being run through anything).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QualificationKind {
+    Executable,
+    IntentionalRejection,
+    LogosProfileOnly,
+}
+
+fn classify_qualification(row: &InventoryRow) -> Vec<QualificationKind> {
+    let mut kinds = Vec::new();
+    if row.qualification.contains("executable") {
+        kinds.push(QualificationKind::Executable);
+    }
+    if row.qualification.contains("intentional rejection") {
+        kinds.push(QualificationKind::IntentionalRejection);
+    }
+    if row.profile == "Logos" {
+        kinds.push(QualificationKind::LogosProfileOnly);
+    }
+    kinds
+}
+
+#[test]
+fn canonical_inventory_every_row_matches_exactly_one_recognized_qualification_path() {
+    for row in parse_authoritative_inventory() {
+        let kinds = classify_qualification(&row);
+        assert_eq!(
+            kinds.len(),
+            1,
+            "{}: qualification {:?} / profile {:?} matched {} recognized paths (want exactly 1: \
+             Executable, IntentionalRejection, or LogosProfileOnly). A new qualification wording \
+             or profile must extend `classify_qualification` with real toolchain coverage, not just \
+             prose in the inventory table.",
+            row.name,
+            row.qualification,
+            row.profile,
+            kinds.len()
+        );
+    }
+}
+
 #[test]
 fn canonical_inventory_executable_rows_check_compile_verify_and_run() {
     let mut checked = 0;
     for row in parse_authoritative_inventory() {
-        if !row.qualification.contains("executable") {
+        if !classify_qualification(&row).contains(&QualificationKind::Executable) {
             continue;
         }
         checked += 1;
@@ -456,7 +504,7 @@ fn canonical_inventory_executable_rows_check_compile_verify_and_run() {
 fn canonical_inventory_intentional_rejection_rows_still_reject() {
     let mut checked = 0;
     for row in parse_authoritative_inventory() {
-        if !row.qualification.contains("intentional rejection") {
+        if !classify_qualification(&row).contains(&QualificationKind::IntentionalRejection) {
             continue;
         }
         checked += 1;
@@ -476,7 +524,7 @@ fn canonical_inventory_intentional_rejection_rows_still_reject() {
 fn canonical_inventory_logos_rows_qualify_via_profile_path_and_stay_honestly_non_executable() {
     let mut checked = 0;
     for row in parse_authoritative_inventory() {
-        if row.profile != "Logos" {
+        if !classify_qualification(&row).contains(&QualificationKind::LogosProfileOnly) {
             continue;
         }
         checked += 1;
