@@ -49,6 +49,7 @@ pub mod intent_dispatch;
 pub mod interaction;
 pub mod interaction_pipeline;
 pub mod layout_primitives;
+pub mod reference_admission;
 pub mod shell_player;
 pub mod state_update;
 pub mod visual_tokens;
@@ -213,7 +214,7 @@ pub trait UiBackendAdapter {
     ///
     /// The backend controls iteration timing; the closure signals whether to
     /// continue, and fills the provided `DrawFrame` with commands for the current frame.
-    fn run_event_loop<F: FnMut(LoopControl, &mut DrawFrame)>(
+    fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut DrawFrame)>(
         &mut self,
         on_event: F,
     ) -> Result<(), UiRuntimeError>;
@@ -269,16 +270,21 @@ impl<B: UiBackendAdapter> DesktopSession<B> {
         self.lifecycle.apply(UiOperationId::WindowRun)?;
         let mut buffer = EventBuffer::new();
         let exit_requested = core::cell::Cell::new(false);
-        let result = self.backend.run_event_loop(|_backend_control, frame| {
-            if exit_requested.get() {
-                return;
-            }
-            let signal = on_frame(&mut buffer, frame);
-            let _ = buffer.drain();
-            if signal == LoopControl::ExitRequested {
-                exit_requested.set(true);
-            }
-        });
+        let result = self
+            .backend
+            .run_event_loop(|events, _backend_control, frame| {
+                if exit_requested.get() {
+                    return;
+                }
+                for event in events {
+                    buffer.push(event.clone());
+                }
+                let signal = on_frame(&mut buffer, frame);
+                let _ = buffer.drain();
+                if signal == LoopControl::ExitRequested {
+                    exit_requested.set(true);
+                }
+            });
         result
     }
 
@@ -685,7 +691,7 @@ impl UiBackendAdapter for InMemoryBackend {
         self.close_window_calls = self.close_window_calls.saturating_add(1);
     }
 
-    fn run_event_loop<F: FnMut(LoopControl, &mut DrawFrame)>(
+    fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut DrawFrame)>(
         &mut self,
         mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
@@ -693,7 +699,7 @@ impl UiBackendAdapter for InMemoryBackend {
 
         for _ in 0..self.loop_iterations {
             let mut f = DrawFrame::new();
-            on_event(LoopControl::Continue, &mut f);
+            on_event(&[], LoopControl::Continue, &mut f);
         }
 
         Ok(())
@@ -741,12 +747,12 @@ mod tests {
 
         fn close_window(&mut self) {}
 
-        fn run_event_loop<F: FnMut(LoopControl, &mut DrawFrame)>(
+        fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut DrawFrame)>(
             &mut self,
             mut on_event: F,
         ) -> Result<(), UiRuntimeError> {
             let mut f = DrawFrame::new();
-            on_event(LoopControl::ExitRequested, &mut f);
+            on_event(&[], LoopControl::ExitRequested, &mut f);
             Ok(())
         }
 
@@ -927,13 +933,13 @@ mod tests {
             fn close_window(&mut self) {
                 self.closed = true;
             }
-            fn run_event_loop<F: FnMut(LoopControl, &mut DrawFrame)>(
+            fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut DrawFrame)>(
                 &mut self,
                 mut on_event: F,
             ) -> Result<(), UiRuntimeError> {
                 for _ in 0..self.loop_iters {
                     let mut f = DrawFrame::new();
-                    on_event(LoopControl::Continue, &mut f);
+                    on_event(&[], LoopControl::Continue, &mut f);
                 }
                 Ok(())
             }
@@ -975,7 +981,7 @@ mod tests {
             fn close_window(&mut self) {
                 self.closed = true;
             }
-            fn run_event_loop<F: FnMut(LoopControl, &mut DrawFrame)>(
+            fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut DrawFrame)>(
                 &mut self,
                 _on_event: F,
             ) -> Result<(), UiRuntimeError> {
@@ -1008,12 +1014,12 @@ mod tests {
                 Ok(())
             }
             fn close_window(&mut self) {}
-            fn run_event_loop<F: FnMut(LoopControl, &mut DrawFrame)>(
+            fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut DrawFrame)>(
                 &mut self,
                 mut on_event: F,
             ) -> Result<(), UiRuntimeError> {
                 let mut f = DrawFrame::new();
-                on_event(LoopControl::ExitRequested, &mut f);
+                on_event(&[], LoopControl::ExitRequested, &mut f);
                 Ok(())
             }
         }
@@ -1050,7 +1056,7 @@ mod tests {
             fn close_window(&mut self) {
                 self.closed = self.closed.saturating_add(1);
             }
-            fn run_event_loop<F: FnMut(LoopControl, &mut DrawFrame)>(
+            fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut DrawFrame)>(
                 &mut self,
                 _on_event: F,
             ) -> Result<(), UiRuntimeError> {
@@ -1466,12 +1472,12 @@ mod tests {
                 Ok(())
             }
             fn close_window(&mut self) {}
-            fn run_event_loop<F: FnMut(LoopControl, &mut DrawFrame)>(
+            fn run_event_loop<F: FnMut(&[InputEvent], LoopControl, &mut DrawFrame)>(
                 &mut self,
                 mut on_event: F,
             ) -> Result<(), UiRuntimeError> {
                 let mut f = DrawFrame::new();
-                on_event(LoopControl::Continue, &mut f);
+                on_event(&[], LoopControl::Continue, &mut f);
                 Ok(())
             }
             fn draw_frame(&mut self, frame: &DrawFrame) -> Result<(), UiRuntimeError> {

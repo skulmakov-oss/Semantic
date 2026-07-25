@@ -656,31 +656,31 @@ state, authorize effects, or move Gate D.
 
 ### Explicitly unresolved
 
+This list is a historical record of what this section left unresolved at
+freeze time; it is not a live status list. The following items have since
+been resolved by landed implementation and are no longer unresolved:
+Projection Source grammar syntax (the `collection_anchor <nonzero_u64>;`
+textual declaration, landed via Issue #1543 in
+`crates/prom-ui/src/projection_source_parser.rs` and
+`docs/spec/ui/projection_source_grammar_v0.md` section 4); parser tokens;
+source AST field names; Rust declaration type names
+(`ProjectionSourceCollectionAnchorDeclaration`); Rust declaration-set type
+names (`QualifiedCollectionAnchorDeclarations`); module paths
+(`crates/prom-ui/src/collection_anchor_declarations.rs`); field layouts;
+constructors; visibility (crate-private); storage collection; allocation
+strategy; source-to-static mapping representation; diagnostic Rust
+representation (`CollectionAnchorDeclarationDiagnostic`); prepared activation
+producer and runtime catalog implementation (landed via #1541);
+`ActivatedShellSessionContext` expansion, stage-5 evaluator, and
+stage-5/stage-6 orchestration (landed via #1541).
+
 The following remain unresolved and unauthorized by this section:
 
-- Projection Source grammar syntax;
-- parser tokens;
-- source AST field names;
-- Rust declaration type names;
-- Rust declaration-set type names;
-- module paths;
-- field layouts;
-- constructors;
-- visibility;
 - public API;
 - public re-exports;
 - serialization;
 - ABI;
 - canonical byte format;
-- source-to-static mapping representation;
-- diagnostic Rust representation;
-- storage collection;
-- allocation strategy;
-- representation-size overflow behavior;
-- prepared activation producer;
-- runtime catalog implementation;
-- `ActivatedShellSessionContext` expansion;
-- stage-5 evaluator;
-- stage-5/stage-6 orchestration.
+- representation-size overflow behavior.
 
 This section does not claim implementation readiness for any of the above.

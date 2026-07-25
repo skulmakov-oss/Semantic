@@ -42,6 +42,24 @@ pub(crate) struct QualifiedCollectionAnchorDeclarations {
 }
 
 impl QualifiedCollectionAnchorDeclarations {
+    /// Rebuilds already-verified evidence from one `ProjectionBundle v0`
+    /// decode pass. Callable only from `crate::projection_bundle`, and only
+    /// after that module's own verification has independently proven: (a)
+    /// the anchors arrived in strictly ascending `StaticNodeId` order
+    /// (equivalent to Rule 2 duplicate rejection plus Rule 7 ordering), and
+    /// (b) every anchor references a node present in the same bundle's
+    /// verified Static UI IR (equivalent to Rule 1/Rule 3 existence). This
+    /// is not a public constructor and does not accept caller-asserted
+    /// evidence from outside the verified bundle decode path.
+    pub(crate) fn from_verified_bundle_evidence(
+        document_id: StaticDocumentId,
+        revision: Revision,
+        epoch: Epoch,
+        anchors: Vec<StaticNodeId>,
+    ) -> Self {
+        Self::new(document_id, revision, epoch, anchors)
+    }
+
     fn new(
         document_id: StaticDocumentId,
         revision: Revision,

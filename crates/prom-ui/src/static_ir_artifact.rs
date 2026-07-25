@@ -16,7 +16,7 @@ use crate::static_ir::{
 
 pub(crate) const STATIC_UI_IR_ARTIFACT_V1_MAGIC: &[u8] = b"UI_DNA2_STATIC_IR_V1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct StaticUiArtifactV1Limits {
     pub(crate) max_input_bytes: usize,
     pub(crate) max_surfaces: u32,

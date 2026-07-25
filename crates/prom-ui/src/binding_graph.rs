@@ -110,7 +110,7 @@ impl PartialOrd for BindingDiagnostic {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct BindingGraphDocument {
     pub(crate) bindings: Vec<BindingDeclaration>,
 }

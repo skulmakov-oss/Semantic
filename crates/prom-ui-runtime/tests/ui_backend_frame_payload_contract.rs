@@ -23,13 +23,15 @@ impl UiBackendAdapter for CapturingBackend {
 
     fn close_window(&mut self) {}
 
-    fn run_event_loop<F: FnMut(LoopControl, &mut prom_ui_runtime::DrawFrame)>(
+    fn run_event_loop<
+        F: FnMut(&[prom_ui_runtime::InputEvent], LoopControl, &mut prom_ui_runtime::DrawFrame),
+    >(
         &mut self,
         mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
         {
             let mut f = prom_ui_runtime::DrawFrame::new();
-            on_event(LoopControl::ExitRequested, &mut f);
+            on_event(&[], LoopControl::ExitRequested, &mut f);
         };
         Ok(())
     }

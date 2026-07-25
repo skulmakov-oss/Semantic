@@ -255,6 +255,7 @@ pub mod winit_placeholder {
             KeyCode::Enter => Some(13),
             KeyCode::Escape => Some(27),
             KeyCode::Space => Some(32),
+            KeyCode::Tab => Some(9),
             _ => None,
         }
     }
@@ -1371,7 +1372,11 @@ pub mod winit_placeholder {
     /// It hosts the backend temporarily while the event loop runs.
     pub struct WinitRunLoopHost<
         'a,
-        F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame),
+        F: FnMut(
+            &[prom_ui_runtime::InputEvent],
+            prom_ui_runtime::LoopControl,
+            &mut prom_ui_runtime::DrawFrame,
+        ),
     > {
         pub backend: &'a mut NativeBackend,
         pub on_event: F,
@@ -1384,8 +1389,14 @@ pub mod winit_placeholder {
         pub presentation_surface: Option<super::wgpu_integration::NativeBackendPresentationSurface>,
     }
 
-    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>
-        WinitRunLoopHost<'a, F>
+    impl<
+            'a,
+            F: FnMut(
+                &[prom_ui_runtime::InputEvent],
+                prom_ui_runtime::LoopControl,
+                &mut prom_ui_runtime::DrawFrame,
+            ),
+        > WinitRunLoopHost<'a, F>
     {
         pub fn new(backend: &'a mut NativeBackend, on_event: F) -> Self {
             Self {
@@ -1401,8 +1412,14 @@ pub mod winit_placeholder {
         }
     }
 
-    impl<'a, F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>
-        ApplicationHandler for WinitRunLoopHost<'a, F>
+    impl<
+            'a,
+            F: FnMut(
+                &[prom_ui_runtime::InputEvent],
+                prom_ui_runtime::LoopControl,
+                &mut prom_ui_runtime::DrawFrame,
+            ),
+        > ApplicationHandler for WinitRunLoopHost<'a, F>
     {
         fn resumed(&mut self, event_loop: &ActiveEventLoop) {
             if self.window.is_some() {
@@ -1477,8 +1494,13 @@ pub mod winit_placeholder {
 
             if let Some(backend_event) = translate_winit_to_raw_backend_event(&event) {
                 if matches!(backend_event, super::RawBackendEvent::CloseRequested) {
+                    let events = core::mem::take(&mut self.backend.pending_events);
                     let mut frame = prom_ui_runtime::DrawFrame::new();
-                    (self.on_event)(prom_ui_runtime::LoopControl::ExitRequested, &mut frame);
+                    (self.on_event)(
+                        &events,
+                        prom_ui_runtime::LoopControl::ExitRequested,
+                        &mut frame,
+                    );
                     use prom_ui_runtime::UiBackendAdapter;
                     let _ = self.backend.draw_frame(&frame);
                     event_loop.exit();
@@ -1491,8 +1513,9 @@ pub mod winit_placeholder {
                     if let Some(input_event) = translate_winit_window_event(&event, scale_factor) {
                         self.backend.pending_events.push(input_event);
                     }
+                    let events = core::mem::take(&mut self.backend.pending_events);
                     let mut frame = prom_ui_runtime::DrawFrame::new();
-                    (self.on_event)(prom_ui_runtime::LoopControl::Continue, &mut frame);
+                    (self.on_event)(&events, prom_ui_runtime::LoopControl::Continue, &mut frame);
                     use prom_ui_runtime::UiBackendAdapter;
                     let _ = self.backend.draw_frame(&frame);
                 }
@@ -1501,8 +1524,9 @@ pub mod winit_placeholder {
 
         fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
             // Unconditionally advance the app loop on every iteration
+            let events = core::mem::take(&mut self.backend.pending_events);
             let mut frame = prom_ui_runtime::DrawFrame::new();
-            (self.on_event)(prom_ui_runtime::LoopControl::Continue, &mut frame);
+            (self.on_event)(&events, prom_ui_runtime::LoopControl::Continue, &mut frame);
             use prom_ui_runtime::UiBackendAdapter;
             let _ = self.backend.draw_frame(&frame);
             // Redraw continuously
@@ -1826,7 +1850,13 @@ impl UiBackendAdapter for NativeBackend {
         self.closed = true;
     }
 
-    fn run_event_loop<F: FnMut(prom_ui_runtime::LoopControl, &mut prom_ui_runtime::DrawFrame)>(
+    fn run_event_loop<
+        F: FnMut(
+            &[prom_ui_runtime::InputEvent],
+            prom_ui_runtime::LoopControl,
+            &mut prom_ui_runtime::DrawFrame,
+        ),
+    >(
         &mut self,
         #[allow(unused_mut)] mut on_event: F,
     ) -> Result<(), UiRuntimeError> {
@@ -1853,15 +1883,23 @@ impl UiBackendAdapter for NativeBackend {
             for event in events {
                 self.run_loop_ticks = self.run_loop_ticks.saturating_add(1);
 
-                match event.kind {
+                match &event.kind {
                     InputEventKind::CloseRequested => {
                         let mut frame = prom_ui_runtime::DrawFrame::new();
-                        on_event(LoopControl::ExitRequested, &mut frame);
+                        on_event(
+                            core::slice::from_ref(&event),
+                            LoopControl::ExitRequested,
+                            &mut frame,
+                        );
                         break;
                     }
                     _ => {
                         let mut frame = prom_ui_runtime::DrawFrame::new();
-                        on_event(LoopControl::Continue, &mut frame);
+                        on_event(
+                            core::slice::from_ref(&event),
+                            LoopControl::Continue,
+                            &mut frame,
+                        );
                     }
                 }
             }
@@ -1890,16 +1928,42 @@ pub mod wgpu_integration {
     //! which are wired into the `winit` run loop when both `wgpu-backend` and
     //! `winit-backend` features are enabled.
 
+    use core::cell::RefCell;
     use wgpu::{Adapter, Device, Instance, Queue};
 
-    /// Encapsulates the core wgpu primitives.
-    #[derive(Debug)]
+    /// The fixed surface format used by both the quad pipeline and the
+    /// glyph text pipeline. Chosen once at context-creation time, before
+    /// any window surface exists.
+    const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+    /// Encapsulates the core wgpu primitives, plus the glyphon text-shaping
+    /// and glyph-rendering state (Issue #1543): `DrawCommand::DrawText`
+    /// previously reached the presenter as a silent no-op. Text state uses
+    /// interior mutability so `present_semantic_commands` can remain a
+    /// `&self` method, matching the existing quad-rendering call shape.
     pub struct NativeBackendWgpuContext {
         pub instance: Instance,
         pub adapter: Adapter,
         pub device: Device,
         pub queue: Queue,
         pub pipeline: wgpu::RenderPipeline,
+        pub(crate) font_system: RefCell<glyphon::FontSystem>,
+        pub(crate) swash_cache: RefCell<glyphon::SwashCache>,
+        pub(crate) text_atlas: RefCell<glyphon::TextAtlas>,
+        pub(crate) text_renderer: RefCell<glyphon::TextRenderer>,
+        pub(crate) text_viewport: RefCell<glyphon::Viewport>,
+    }
+
+    impl core::fmt::Debug for NativeBackendWgpuContext {
+        fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+            f.debug_struct("NativeBackendWgpuContext")
+                .field("instance", &self.instance)
+                .field("adapter", &self.adapter)
+                .field("device", &self.device)
+                .field("queue", &self.queue)
+                .field("pipeline", &self.pipeline)
+                .finish_non_exhaustive()
+        }
     }
 
     #[repr(C)]
@@ -1951,6 +2015,7 @@ pub mod wgpu_integration {
                     label: Some("NativeBackend Minimal Device"),
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits::downlevel_defaults(),
+                    memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
             ))
@@ -1998,13 +2063,13 @@ pub mod wgpu_integration {
                 layout: Some(&render_pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     buffers: &[Vertex::desc()],
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: "fs_main",
+                    entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: wgpu::TextureFormat::Rgba8UnormSrgb,
                         blend: Some(wgpu::BlendState::REPLACE),
@@ -2028,7 +2093,19 @@ pub mod wgpu_integration {
                     alpha_to_coverage_enabled: false,
                 },
                 multiview: None,
+                cache: None,
             });
+
+            let glyphon_cache = glyphon::Cache::new(&device);
+            let mut text_atlas =
+                glyphon::TextAtlas::new(&device, &queue, &glyphon_cache, SURFACE_FORMAT);
+            let text_renderer = glyphon::TextRenderer::new(
+                &mut text_atlas,
+                &device,
+                wgpu::MultisampleState::default(),
+                None,
+            );
+            let text_viewport = glyphon::Viewport::new(&device, &glyphon_cache);
 
             Some(Self {
                 instance,
@@ -2036,6 +2113,11 @@ pub mod wgpu_integration {
                 device,
                 queue,
                 pipeline,
+                font_system: RefCell::new(glyphon::FontSystem::new()),
+                swash_cache: RefCell::new(glyphon::SwashCache::new()),
+                text_atlas: RefCell::new(text_atlas),
+                text_renderer: RefCell::new(text_renderer),
+                text_viewport: RefCell::new(text_viewport),
             })
         }
 
@@ -2190,6 +2272,12 @@ pub mod wgpu_integration {
             };
 
             let mut vertices = alloc::vec::Vec::new();
+            let mut text_commands: alloc::vec::Vec<(
+                alloc::string::String,
+                i32,
+                i32,
+                prom_ui_runtime::Color,
+            )> = alloc::vec::Vec::new();
             let surface_width = self.config.width as f32;
             let surface_height = self.config.height as f32;
 
@@ -2202,6 +2290,9 @@ pub mod wgpu_integration {
                             b: color.b as f64 / 255.0,
                             a: color.a as f64 / 255.0,
                         };
+                    }
+                    prom_ui_runtime::DrawCommand::DrawText { text, x, y, color } => {
+                        text_commands.push((text.clone(), *x, *y, *color));
                     }
                     prom_ui_runtime::DrawCommand::FillRect { rect, color } => {
                         let r = color.r as f32 / 255.0;
@@ -2243,7 +2334,6 @@ pub mod wgpu_integration {
                             color: c,
                         });
                     }
-                    _ => {}
                 }
             }
 
@@ -2261,6 +2351,68 @@ pub mod wgpu_integration {
             } else {
                 None
             };
+
+            // Shape every DrawText command into a glyphon Buffer before the
+            // render pass begins. Buffers must outlive `prepare`'s TextArea
+            // borrows, so they are collected here rather than inline.
+            let mut font_system = context.font_system.borrow_mut();
+            let mut swash_cache = context.swash_cache.borrow_mut();
+            let mut text_atlas = context.text_atlas.borrow_mut();
+            let mut text_renderer = context.text_renderer.borrow_mut();
+            let mut text_viewport = context.text_viewport.borrow_mut();
+
+            let mut glyphon_buffers = alloc::vec::Vec::with_capacity(text_commands.len());
+            for (text, _x, _y, _color) in &text_commands {
+                let mut buffer =
+                    glyphon::Buffer::new(&mut font_system, glyphon::Metrics::new(16.0, 20.0));
+                buffer.set_text(
+                    &mut font_system,
+                    text,
+                    glyphon::Attrs::new().family(glyphon::Family::SansSerif),
+                    glyphon::Shaping::Advanced,
+                );
+                buffer.shape_until_scroll(&mut font_system, false);
+                glyphon_buffers.push(buffer);
+            }
+
+            let text_areas = text_commands.iter().zip(glyphon_buffers.iter()).map(
+                |((_, x, y, color), buffer)| glyphon::TextArea {
+                    buffer,
+                    left: *x as f32,
+                    top: *y as f32,
+                    scale: 1.0,
+                    bounds: glyphon::TextBounds {
+                        left: 0,
+                        top: 0,
+                        right: self.config.width as i32,
+                        bottom: self.config.height as i32,
+                    },
+                    default_color: glyphon::cosmic_text::Color::rgba(
+                        color.r, color.g, color.b, color.a,
+                    ),
+                    custom_glyphs: &[],
+                },
+            );
+
+            text_viewport.update(
+                &context.queue,
+                glyphon::Resolution {
+                    width: self.config.width,
+                    height: self.config.height,
+                },
+            );
+
+            let text_prepared = text_renderer
+                .prepare(
+                    &context.device,
+                    &context.queue,
+                    &mut font_system,
+                    &mut text_atlas,
+                    &text_viewport,
+                    text_areas,
+                    &mut swash_cache,
+                )
+                .is_ok();
 
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2283,7 +2435,17 @@ pub mod wgpu_integration {
                     render_pass.set_vertex_buffer(0, vb.slice(..));
                     render_pass.draw(0..vertices.len() as u32, 0..1);
                 }
+
+                if text_prepared {
+                    let _ = text_renderer.render(&text_atlas, &text_viewport, &mut render_pass);
+                }
             }
+
+            drop(font_system);
+            drop(swash_cache);
+            drop(text_atlas);
+            drop(text_renderer);
+            drop(text_viewport);
 
             context.queue.submit(Some(encoder.finish()));
             frame.present();

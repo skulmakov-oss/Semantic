@@ -111,7 +111,7 @@ fn run_event_loop_is_staged_until_winit_wiring() {
     let mut controls = Vec::new();
 
     backend
-        .run_event_loop(|control, _frame| controls.push(control))
+        .run_event_loop(|_events, control, _frame| controls.push(control))
         .unwrap();
 
     assert_eq!(backend.run_loop_calls(), 1);
