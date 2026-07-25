@@ -102,18 +102,23 @@ and `tests/canonical_source_style.rs`.
 1. Source is UTF-8.
 2. Line endings are LF (`\n`) only; no CR.
 3. No trailing spaces or tabs at the end of any line.
-4. Indentation uses spaces only — no tab characters, no mixed indentation on
-   one line.
-5. Indentation step is 4 spaces per nesting level (Rust-like surface).
-6. Exactly one trailing newline; no trailing blank lines.
-7. No formatting-dependent semantic claim: layout never changes what a program
+4. No tab characters anywhere in a canonical file.
+5. Exactly one trailing newline; no trailing blank lines.
+6. No formatting-dependent semantic claim: layout never changes what a program
    means. (`quad` control flow, in particular, is governed entirely by
    `source_semantics.md`, never by indentation or spacing.)
 
-Rules 1–4 and 6 are already what `smc fmt` enforces today (see
-[Section D](#d-formatter-contract)). Rule 5 and the "one final newline" part
-of rule 6 are checked against canonical examples by
-`tests/canonical_source_style.rs` rather than rewritten automatically.
+Rules 1–3 and 5 are already what `smc fmt` enforces today: CRLF/CR
+normalization, trailing-whitespace trimming, and final-newline normalization
+(see [Section D](#d-formatter-contract)). Rule 4 (no tabs) and the "exactly
+one final newline" part of rule 5 are also asserted directly against
+canonical examples by `tests/canonical_source_style.rs`.
+
+**Current tooling does not structurally validate indentation depth or
+nesting.** The absence of tabs (rule 4) means a canonical file cannot mix tabs
+and spaces, but it does not by itself prove any particular indentation width
+is followed — that is a Section B canonical presentation rule (B.2), checked
+only by code review today, not by `smc fmt` or by an automated depth check.
 
 ## B. Canonical Presentation Rules
 
@@ -136,7 +141,11 @@ dependency-resolution rule enforced by the compiler.
 
 ### B.2 Indentation
 
-- 4 spaces per level, no tabs (also a Section A invariant).
+- 4 spaces per nesting level. This is the frozen canonical presentation,
+  enforced by code review — **no tool currently validates nesting depth**.
+  The Section A tab prohibition is a separate, machine-checked invariant; it
+  rules out mixed tab/space indentation but does not by itself prove 4-space
+  depth is followed.
 - Continuation lines (wrapped call arguments, wrapped parameter lists) add one
   further 4-space level relative to the line being continued.
 - Braces open on the same line as the construct they belong to (`fn f() {`,
@@ -329,8 +338,10 @@ should not appear in canonical examples:
 - Block-bodied functions for logic that could be expressed with the B.7
   expression-bodied sugar.
 - Wrapping a signature that would still fit on one line under the B.3 target.
-- A different (but still consistent, tab-free, 4-space) indentation width
-  chosen by an author for a non-canonical, non-repository-owned program.
+- A different, but still internally consistent and tab-free, indentation
+  width chosen by an author for a non-canonical, non-repository-owned
+  program. Canonical, repository-owned examples still follow the 4-space
+  presentation rule in B.2, but nothing currently checks that automatically.
 
 ## D. Formatter Contract
 

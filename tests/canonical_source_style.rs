@@ -98,7 +98,9 @@ fn style_contract_examples_have_no_tab_indentation() {
         let content = read(rel);
         assert!(
             !content.contains('\t'),
-            "{rel} contains a tab character; Section A requires 4-space indentation"
+            "{rel} contains a tab character; Section A requires no tab characters. \
+             (This does not by itself prove 4-space nesting depth, which is a Section B \
+             canonical presentation rule, not machine-checked.)"
         );
     }
 }
@@ -205,6 +207,27 @@ fn style_contract_examples_do_not_regress_to_verbose_pre_contract_shape() {
     assert!(
         quad_cycle_logos.contains("):\n\nEntity") && quad_cycle_logos.contains("\n\nLaw"),
         "quad_cycle_logos/src/main.sm lost the required blank line between System/Entity/Law blocks"
+    );
+}
+
+#[test]
+fn source_style_document_does_not_overclaim_indentation_enforcement() {
+    // Regression guard for a reviewed P2: 4-space nesting depth is a Section B
+    // canonical presentation rule, not a Section A machine-checked invariant.
+    // Neither `smc fmt` nor this test suite validates nesting depth -- only
+    // the absence of tab characters is machine-checked.
+    let doc = read("docs/spec/source_style.md");
+    assert!(
+        !doc.contains("Indentation step is 4 spaces per nesting level"),
+        "docs/spec/source_style.md must not list 4-space nesting as a Section A required invariant"
+    );
+    assert!(
+        doc.contains("does not structurally validate indentation depth"),
+        "docs/spec/source_style.md must keep disclosing that no tool validates nesting depth"
+    );
+    assert!(
+        doc.contains("no tool currently validates nesting depth"),
+        "docs/spec/source_style.md's Section B.2 must keep disclosing that no tool validates nesting depth"
     );
 }
 

@@ -65,6 +65,15 @@ foreach ($text in $formatterDisclaimers) {
     Assert-Contains -Content $spec -Text $text -Label "Formatter non-claim" -Where $specPath
 }
 
+# --- 3b. Indentation depth must stay a Section B claim, not Section A. -----
+# Regression guard for a reviewed P2: no tool validates nesting depth today;
+# only the absence of tab characters is machine-checked (Section A).
+if ($spec.Contains("Indentation step is 4 spaces per nesting level")) {
+    Fail "$specPath lists 4-space nesting as a Section A required invariant; it must live in Section B (no tool validates nesting depth)"
+}
+Assert-Contains -Content $spec -Text "does not structurally validate indentation depth" -Label "Indentation-depth non-claim" -Where $specPath
+Assert-Contains -Content $spec -Text "no tool currently validates nesting depth" -Label "Indentation-depth non-claim" -Where $specPath
+
 # --- 4. The required canonical examples must exist on disk. ----------------
 $requiredExamples = @(
     "examples/canonical/match_control_flow/src/main.sm",
