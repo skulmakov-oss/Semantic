@@ -276,17 +276,29 @@ function Assert-PromotionClaimsScoped {
 # mechanism it actually uses to justify closing (carrying incomplete phases
 # forward in a checkpoint matrix, rather than requiring every phase complete
 # or spun into a child issue) must be one of the stated criteria -- not just
-# asserted in prose elsewhere in the same document.
+# asserted in prose elsewhere in the same document. Deliberately bounded to
+# the rule text itself (up to the next heading of any level): searching the
+# whole document would still pass even if a later edit stripped the
+# carried-forward option from the actual rule, as long as an unrelated
+# explanation section elsewhere still happened to contain the same phrase.
 function Assert-ClosureCriterionIncludesCarriedForward {
     param([string]$Content, [string]$File)
 
-    $hasClosureRule = ($Content.IndexOf("may close only when", [System.StringComparison]::OrdinalIgnoreCase) -ge 0)
-    if (-not $hasClosureRule) {
+    $ruleIdx = $Content.IndexOf("may close only when", [System.StringComparison]::OrdinalIgnoreCase)
+    if ($ruleIdx -lt 0) {
         return
     }
 
-    if ($Content.IndexOf("carried forward", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
-        Fail "FAIL: In ${File}, a closure rule ('may close only when ...') is defined, but no criterion covers phases that are carried forward (incomplete, but explicitly tracked) rather than completed or handed to a child issue -- yet the closure explanation elsewhere in this repository relies on exactly that mechanism. Add a carried-forward option to the rule itself."
+    $rest = $Content.Substring($ruleIdx)
+    $nextHeading = [regex]::Match($rest, "(?m)^#{1,6}\s")
+    if ($nextHeading.Success -and $nextHeading.Index -gt 0) {
+        $ruleText = $rest.Substring(0, $nextHeading.Index)
+    } else {
+        $ruleText = $rest
+    }
+
+    if ($ruleText.IndexOf("carried forward", [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        Fail "FAIL: In ${File}, the closure rule itself ('may close only when ...', up to the next heading) does not include a carried-forward-phase option -- even though a carried-forward mechanism may still be described elsewhere in the document. A rule/explanation divergence like this is exactly what this check exists to catch; add the carried-forward option to the rule text itself, not just to prose near it."
     }
 }
 
