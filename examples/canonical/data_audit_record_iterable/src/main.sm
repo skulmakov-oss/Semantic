@@ -15,15 +15,9 @@ record AuditSummary {
 
 impl Iterable for Samples {
     fn next(self: Self, index: i32) -> Option(i32) {
-        if index == 0 {
-            return Option::Some(self.first);
-        }
-        if index == 1 {
-            return Option::Some(self.second);
-        }
-        if index == 2 {
-            return Option::Some(self.third);
-        }
+        if index == 0 { return Option::Some(self.first); }
+        if index == 1 { return Option::Some(self.second); }
+        if index == 2 { return Option::Some(self.third); }
         return Option::None;
     }
 }

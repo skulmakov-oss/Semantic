@@ -6,13 +6,8 @@ fn build_status(name: text, value: i32) -> text {
 }
 
 fn check_status(message: text) -> i32 {
-    if message == "" {
-        return -1;
-    }
-
-    if message != "sensor:pressure=42" {
-        return -2;
-    }
+    if message == "" { return -1; }
+    if message != "sensor:pressure=42" { return -2; }
 
     return 1;
 }
