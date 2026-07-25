@@ -5,8 +5,11 @@ Track: UI-DNA2-10, authorized directly by Issue #1543
 Gate D: OPEN WITH LIMITS for the bounded reference contour described below.
 General Gate D (unrestricted runtime/admission/dispatch integration across
 UI-DNA2): remains CLOSED. This document does not open it.
-Production promotion: NOT AUTHORIZED (see
+Production promotion: PROMOTE WITH LIMITS, bounded strictly to this
+contour (recorded in
 `docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md` UI-DNA2-11).
+Unrestricted, critical, or general production promotion remains NOT
+AUTHORIZED.
 
 ## 1. Purpose
 

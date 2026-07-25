@@ -137,6 +137,7 @@ Renderer owns pixels.
 | #1536 | `d1797a1a18bb48512f549bc8fc522dcfc455ef68` | Documentation-only explicit `CollectionAnchor` declaration contract frozen; source/qualified identity, `CAD_*` diagnostics, ordering and prepared-activation source boundary defined. |
 | #1539 | `94ae4a4ed187f589264160e794f6ebb45de1261d` | Crate-private programmatic explicit `CollectionAnchor` declaration representation landed; declaration storage in `ProjectionSourceDocument` landed; deterministic compiler-owned source-to-static qualification landed; immutable `QualifiedCollectionAnchorDeclarations` landed; four exact `CAD_*` diagnostics landed; whole-set fail-closed behavior landed; deterministic ascending `StaticNodeId` output landed; deterministic duplicate provenance landed; 20 focused tests landed; reviewed head `327c52bb05191a5e6a01f93d7a32874f119540c3`; exact-head CI `30031617862` passed 8/8; post-merge CI `30034743940` passed 8/8. |
 | #1541 | `8d29c19c782928aae546ced3c1b9c58e8db8491c` | Complete remaining Shell Player contour landed: `PreparedProjectionPatchTargets` and `PreparedActiveProjectionTargets` producers; the first public `prom-ui::shell_bridge` cross-crate surface (patch admission, prepared-evidence and activation-target snapshots, local-projection-state application/queries) with same-change golden-snapshot public API guard coverage for both `prom-ui::shell_bridge` and the now-public `prom-ui-runtime::shell_player`; runtime-owned `ActiveProjectionTargetCatalog` constructed only from one activation snapshot; stage-4 prepared-evidence coherence and target-reference resource checks; stage-5 stable-target membership evaluator using only the immutable session catalog; stage-5/stage-6 orchestration; deterministic `LocalProjectionState` with atomic `SetBindingValue`/`SetNodeAvailability`/`CollectionInsert`/`CollectionUpdate`/`CollectionRemove`/`CollectionMove` application; atomic commit and replay-cursor advancement in `ShellSession::apply_projection_patch_batch`; a deterministic `--shell-player-demo` native mode rendering every frame from committed Shell Player state through the existing winit/wgpu backend; 60+ new focused tests. CI status: not yet run (branch not pushed as of this commit). Gate D remains closed; production promotion remains unauthorized. |
+| #1544 | `f9727312b9a3a8aa0b1523ce41ed5a77935c2538` | UI-DNA2 end-to-end pipeline landed (closes #1543): textual `collection_anchor` Grammar v0 declaration syntax and parser/frontend integration (`compile_projection_source_text_with_collection_anchors`); `ProjectionBundle v0` canonical binary codec (`crates/prom-ui/src/projection_bundle.rs`) with an 8-stage verifier (decode, header, structural, cross-artifact, compatibility, self-consistency trust), committed golden vectors and an exhaustive negative-test matrix — trust verification is deterministic self-consistency (canonicalize → re-encode → byte-compare), explicitly not cryptographic signing; bounded fail-closed Gate D activation (`activate_projection_bundle_v0_gate_d`) restricted to the `--ui-dna2-reference` contour only, documented as **OPEN WITH LIMITS** for that contour in the new `docs/spec/ui/gate_d_activation_policy_v0.md` — general/global Gate D is not claimed; `ReferenceContourAdmission` (`prom-ui-runtime::reference_admission`) reusing the existing `action_admission`/`action_admission_result`/`admitted_action` evidence chain plus a bounded replay/staleness invocation guard; real glyphon-backed `DrawText`/glyph rendering in the native wgpu backend; bounded hit-testing, focus routing and pointer-capture; the `--ui-dna2-reference` end-to-end native reference application (UI-DNA2-10) starting from real Projection Source text; and a cross-cutting fix to `UiBackendAdapter::run_event_loop` (`prom-ui-runtime`/`prom-ui-backend-native`, all 15 implementors updated) so real winit-translated input actually reaches application event loops — previously every native backend silently dropped all real OS input regardless of application, including the already-merged #1541 Shell Player demo, because `DesktopSession::run`'s `EventBuffer` was never fed from `NativeBackend::pending_events`; unit tests never caught this because they exercise state handlers directly. Reviewed head `ae7e2c37ddc5f65773e0dbbd9c399eac8d07d3b0`; exact-head CI (runs `30152392177`/`30152409984`) 16/16 passed; post-merge CI `30153625541` passed. Verified natively with real synthetic OS-level pointer input reaching hit-testing → focus → admission → commit → visible re-render for both an admitted click (button flips Unavailable, collection appends, replay cursor advances) and a denied click (state preserved, DENIED banner shown), each with screenshot evidence; invalid-bundle rejection and replay/stale-invocation rejection verified automatically with unchanged-state assertions. UI-DNA2-11 promotion decision: **PROMOTE WITH LIMITS** — see §7 and §11. |
 
 ## 4. Current landed contract state
 
@@ -228,6 +229,23 @@ replay-cursor advancement
 candidate-state calculation and atomic commit
 deterministic native Shell Player demo mode in prom-ui-demo
 renderer/backend event-loop integration for Shell Player (Clear/FillRect commands only; DrawText remains an existing backend no-op)
+ProjectionBundle v0 canonical binary codec (assemble/canonical_bytes)
+ProjectionBundle v0 8-stage verifier (decode/header/structural/cross-artifact/compatibility/self-consistency trust)
+ProjectionBundle v0 golden vectors and exhaustive negative-test matrix
+ProjectionBundle v0 self-consistency trust verification (explicitly not cryptographic signing; no digest/signature algorithm selected anywhere)
+bounded fail-closed Gate D activation for the --ui-dna2-reference contour only
+Gate D = OPEN WITH LIMITS for the --ui-dna2-reference contour (general/global Gate D remains not claimed)
+textual collection_anchor declaration Grammar v0 syntax
+Grammar v0 parser support for textual CollectionAnchor declarations
+parser-to-compiler frontend support for textual CollectionAnchor declarations (compile_projection_source_text_with_collection_anchors)
+ReferenceContourAdmission reusing the existing action_admission/action_admission_result/admitted_action evidence chain
+bounded replay/staleness invocation guard for the reference contour
+real glyphon-backed DrawText/glyph rendering in the native wgpu backend
+bounded hit-testing, focus routing and pointer-capture in the reference application
+deterministic vertical-stack-by-declared-child-order layout for the reference application
+deterministic accessibility evidence (BridgeAccessibilityEntry: node/role/label) for the reference application
+--ui-dna2-reference end-to-end native reference application (UI-DNA2-10)
+UiBackendAdapter::run_event_loop delivers real translated input events to application event loops (cross-cutting fix; previously every native backend silently dropped all real input for every application, including the #1541 Shell Player demo)
 ```
 
 Current reference and lookup invariants:
@@ -267,21 +285,15 @@ generic Resolver<T>
 mutable authority registry
 latest-generation fallback
 implicit reference-domain resolution
-runtime admission integration
-runtime dispatch integration
-UI wiring
-ProjectionBundle parser/validator/verifier implementation
-ProjectionBundle inert-loader implementation
-ProjectionBundle activation
-textual CollectionAnchor declaration syntax
-Grammar v0 parser support for CollectionAnchor declarations
-parser-to-compiler frontend support for textual CollectionAnchor declarations
-focus and pointer-capture integration
-hit-test and accessibility integration
-draw/layout realization
-DrawText / glyph rendering in the native backend (pre-existing backend gap, unrelated to Shell Player; Clear/FillRect are the only implemented draw commands)
+general/unbounded runtime admission integration (bounded reference-contour admission is landed through #1544)
+general/unbounded runtime dispatch integration
+general UI wiring beyond the bounded reference contour
+digest/signature algorithm selection for ProjectionBundle trust (cryptographic trust, as distinct from the landed self-consistency verification)
+general Level 4/5 production ProjectionBundle reader/parser (bounded contour parser/verifier/loader are landed through #1544)
+full OS accessibility-tree / accesskit integration (deterministic BridgeAccessibilityEntry evidence is landed through #1544)
+general draw/layout realization beyond the bounded reference contour's deterministic vertical-stack layout
 Workbench or Semantic Studio work
-production promotion
+unrestricted/critical/production promotion (UI-DNA2-11 records PROMOTE WITH LIMITS, bounded to the --ui-dna2-reference contour; see §11)
 ```
 
 The complete Shell Player transition pipeline (`PreparedProjectionPatchTargets`/
@@ -291,10 +303,16 @@ bridge with same-PR API guard coverage, the runtime-owned
 stage-5 evaluator, stage-5/stage-6 orchestration, `ProjectionPatch` runtime
 application, replay-cursor advancement, candidate-state calculation and
 atomic commit, and a deterministic native demo mode) is landed through
-#1541. This is Shell Player's own local playback/rendering integration; it
-is not `ProjectionBundle` parsing/loading/activation, not focus/pointer-capture,
-not hit-test/accessibility, not general draw/layout realization, and not
-production promotion, all of which remain absent or unauthorized above.
+#1541. This is Shell Player's own local playback/rendering integration.
+
+`ProjectionBundle` parsing/validation/verification/inert-loading, bounded
+Gate D activation, bounded hit-test/focus/pointer-capture, bounded
+deterministic accessibility evidence, and the end-to-end reference slice
+(UI-DNA2-10) are landed through #1544, strictly bounded to the
+`--ui-dna2-reference` contour. General/unrestricted admission integration,
+full OS accessibility-tree integration, general draw/layout realization
+beyond that one contour's deterministic layout, and unrestricted/critical
+production promotion remain absent or unauthorized above.
 
 ## 5. Current research checkpoint matrix
 
@@ -311,10 +329,10 @@ Future evidence may split, combine, reorder, or retire phases.
 | UI-DNA2-5 — Action IR integration | **CONTRACT FOUNDATION LANDED** | static routes, `ActionIntent`, invocation context, structural mapper, #1491 | Explicit adapter to existing admission boundary, accepted/denied traces, stale revision, idempotency and capability evidence; Gate D required |
 | UI-DNA2-6 — Projection patch model and runtime | **WP4A FOUNDATION + WP4B REPLAY-ORDER CHECKPOINT COMPLETE** | #1497 — Projection Patch contract foundation<br>#1499 — deterministic replay-order model and qualification | actual patch application remains deferred to the separately gated UI-DNA2-9 prom-ui-runtime::shell_player contour |
 | UI-DNA2-7 — Denial, recovery, task and freshness projection | **UI-DNA2-7A DENIAL/RECOVERY/FRESHNESS V0, UI-DNA2-7B TASK PROJECTION V0 AND P2 CORRECTIVE QUALIFICATION THROUGH #1518 LANDED** | denial/recovery/freshness v0 contract, crate-private implementation, inert ProjectionPatch construction and qualification landed in #1516; Task Projection v0 contract, crate-private pure in-memory implementation, canonical representation and inert patch construction landed in #1517; exact aggregate text bounds and lossless `TaskRecordRef(u64)` projection qualified in #1518 | Task Projection application, admission execution, runtime integration, Gate D and production promotion remain unauthorized |
-| UI-DNA2-8 — ProjectionBundle qualification | **UI-DNA2-8A LOGICAL CONTRACT FREEZE LANDED; GENERAL LEVEL 4, IMPLEMENTATION, INERT LOADING AND ACTIVATION NOT AUTHORIZED** | ProjectionBundle v0 logical identity, deterministic stage ownership, validation, resource, diagnostic and authority boundaries landed through #1519 | Resolve final serialization and other blocking decisions; separate authorization for UI-DNA2-8B parser/validator/verifier implementation and qualification; separate authorization for UI-DNA2-8C pure in-memory inert-loader qualification; separate activation decision |
-| UI-DNA2-9 — Shell player integration | **CORE STAGES 1-9 TRANSITION PIPELINE LANDED THROUGH #1541, INCLUDING PATCH APPLICATION, ATOMIC COMMIT, REPLAY-CURSOR ADVANCEMENT AND A NATIVE DEMO; FOCUS/HIT-TEST/ACCESSIBILITY/LAYOUT AND PRODUCTION PROMOTION REMAIN SEPARATELY OUT OF SCOPE** | #1520 and #1521 freeze and close the 9A1 ownership/stage boundary; #1524 freezes the 9B activated-session, lifecycle, local-state, deterministic transition, resource and diagnostic contract; #1525 moves input-resource preflight ahead of target/replay traversal; #1527 closes UI-DNA2-9B evidence; #1528 lands the crate-private lifecycle evaluator; #1529 lands the stateful `ShellSession` owner; #1530 lands ordered ProjectionPatch envelope preflight through stages 1-4; #1531 lands the local replay-cursor representation; #1532 freezes the stage-6 replay-cursor compatibility contract; #1533 lands the crate-private stage-6 replay-cursor compatibility evaluator; #1534 freezes the stage-5 stable-target boundary contract; #1535 freezes the prepared-handoff ownership contract; #1536 freezes the explicit `CollectionAnchor` declaration contract; #1539 lands the crate-private programmatic `CollectionAnchor` declaration representation, `ProjectionSourceDocument` declaration storage, deterministic compiler-owned qualification, immutable `QualifiedCollectionAnchorDeclarations`, four `CAD_*` diagnostics, deterministic duplicate provenance and 20 focused tests (reviewed head `327c52bb05191a5e6a01f93d7a32874f119540c3`; exact-head CI `30031617862` 8/8; post-merge CI `30034743940` 8/8); #1541 lands `PreparedProjectionPatchTargets`/`PreparedActiveProjectionTargets` producers, the first public `prom-ui::shell_bridge` bridge with same-change API guard coverage, the runtime-owned `ActiveProjectionTargetCatalog`, stage-4 coherence/resource checks, the stage-5 evaluator, stage-5/stage-6 orchestration, `ProjectionPatch` runtime application, replay-cursor advancement, candidate-state calculation and atomic commit, and a deterministic `--shell-player-demo` native mode manually verified via a live screenshot (reviewed head `8d29c19c782928aae546ced3c1b9c58e8db8491c`; CI not yet run as of this commit) | textual CollectionAnchor declaration syntax and Grammar v0 parser/frontend integration for CollectionAnchor declarations remain separately unauthorized; focus/pointer-capture integration; hit-test/accessibility integration; general draw/layout realization beyond Clear/FillRect; `DrawText`/glyph rendering in the native backend; `ProjectionBundle` parsing/loading/activation; Gate D and production promotion remain closed/unauthorized |
-| UI-DNA2-10 — End-to-end reference slice | **NOT STARTED** | no complete pipeline | One deterministic non-critical reference application |
-| UI-DNA2-11 — Production promotion decision | **NOT STARTED** | no promotion claim | Explicit `PROMOTE / PROMOTE WITH LIMITS / KEEP EXPERIMENTAL / REWORK / STOP` decision |
+| UI-DNA2-8 — ProjectionBundle qualification | **UI-DNA2-8A LOGICAL CONTRACT FREEZE, UI-DNA2-8B PARSER/VALIDATOR/VERIFIER AND UI-DNA2-8C INERT-LOADER LANDED THROUGH #1544, BOUNDED TO THE `--ui-dna2-reference` CONTOUR; GENERAL LEVEL 4/5 PRODUCTION READER NOT CLAIMED** | ProjectionBundle v0 logical identity, deterministic stage ownership, validation, resource, diagnostic and authority boundaries landed through #1519; canonical binary codec, 8-stage parser/validator/verifier (structural, cross-artifact, compatibility, self-consistency trust), golden vectors, exhaustive negative-test matrix and pure in-memory inert loading landed through #1544 | Digest/signature algorithm ownership for cryptographic trust remains unresolved (self-consistency verification only); general Level 4/5 production reader/parser remains not claimed |
+| UI-DNA2-9 — Shell player integration | **CORE STAGES 1-9 TRANSITION PIPELINE LANDED THROUGH #1541; BOUNDED GATE D ACTIVATION, HIT-TEST/FOCUS/ACCESSIBILITY AND NATIVE TEXT RENDERING LANDED THROUGH #1544 FOR THE `--ui-dna2-reference` CONTOUR; PRODUCTION PROMOTION REMAINS OUT OF SCOPE** | #1520 and #1521 freeze and close the 9A1 ownership/stage boundary; #1524 freezes the 9B activated-session, lifecycle, local-state, deterministic transition, resource and diagnostic contract; #1525 moves input-resource preflight ahead of target/replay traversal; #1527 closes UI-DNA2-9B evidence; #1528 lands the crate-private lifecycle evaluator; #1529 lands the stateful `ShellSession` owner; #1530 lands ordered ProjectionPatch envelope preflight through stages 1-4; #1531 lands the local replay-cursor representation; #1532 freezes the stage-6 replay-cursor compatibility contract; #1533 lands the crate-private stage-6 replay-cursor compatibility evaluator; #1534 freezes the stage-5 stable-target boundary contract; #1535 freezes the prepared-handoff ownership contract; #1536 freezes the explicit `CollectionAnchor` declaration contract; #1539 lands the crate-private programmatic `CollectionAnchor` declaration representation, `ProjectionSourceDocument` declaration storage, deterministic compiler-owned qualification, immutable `QualifiedCollectionAnchorDeclarations`, four `CAD_*` diagnostics, deterministic duplicate provenance and 20 focused tests (reviewed head `327c52bb05191a5e6a01f93d7a32874f119540c3`; exact-head CI `30031617862` 8/8; post-merge CI `30034743940` 8/8); #1541 lands `PreparedProjectionPatchTargets`/`PreparedActiveProjectionTargets` producers, the first public `prom-ui::shell_bridge` bridge with same-change API guard coverage, the runtime-owned `ActiveProjectionTargetCatalog`, stage-4 coherence/resource checks, the stage-5 evaluator, stage-5/stage-6 orchestration, `ProjectionPatch` runtime application, replay-cursor advancement, candidate-state calculation and atomic commit, and a deterministic `--shell-player-demo` native mode manually verified via a live screenshot (reviewed head `8d29c19c782928aae546ced3c1b9c58e8db8491c`); #1544 lands textual `CollectionAnchor` declaration syntax and Grammar v0/frontend integration, bounded Gate D activation, `ReferenceContourAdmission`, real glyphon `DrawText` rendering, bounded hit-test/focus/pointer-capture and deterministic accessibility evidence, plus a cross-cutting fix so real native input actually reaches application event loops (reviewed head `ae7e2c37ddc5f65773e0dbbd9c399eac8d07d3b0`; exact-head CI 16/16; post-merge CI passed) | general/unrestricted admission, dispatch and UI wiring beyond the bounded reference contour; full OS accessibility-tree/accesskit integration; general draw/layout realization beyond the bounded contour's deterministic layout; production promotion remain closed/unauthorized |
+| UI-DNA2-10 — End-to-end reference slice | **COMPLETE, LANDED IN #1544** | `--ui-dna2-reference`: one deterministic, non-critical reference application driving the full pipeline from real Projection Source text through to a visible native window, verified with real synthetic OS input reaching hit-testing, admission, commit and visible re-render (screenshots) | None; bounded to this one reference contour by design |
+| UI-DNA2-11 — Production promotion decision | **DECIDED IN #1544: PROMOTE WITH LIMITS** | Explicit decision recorded in §11: the `--ui-dna2-reference` contour, its bounded Gate D policy, and the ProjectionBundle self-consistency verifier are promoted for that bounded, non-critical contour only | Explicit exclusions apply: no cryptographic trust, no general/unrestricted Gate D, no critical or production use; see §11 |
 
 ## 6. Gate D0 reference and lookup subtrack
 
@@ -339,16 +357,27 @@ prom-cap -> prom-refs
 
 `prom-cap` owns capability lookup only.
 
-Gate D remains closed for:
+Gate D status as of #1544:
 
 ```text
-runtime integration
-admission integration
-dispatch integration
+Gate D = OPEN WITH LIMITS, bounded strictly to the --ui-dna2-reference contour
+```
+
+The bounded policy (`docs/spec/ui/gate_d_activation_policy_v0.md`) is
+fail-closed, has fixed non-caller-configurable resource limits and an
+accepted-versions table, and authorizes exactly one activation function
+(`activate_projection_bundle_v0_gate_d`) for exactly one reference contour.
+
+Gate D remains closed for everything else:
+
+```text
+general/unbounded runtime integration
+general/unbounded admission integration
+general/unbounded dispatch integration
 mutable registry
 revocation
 other reference-domain resolution
-UI wiring
+general UI wiring beyond the bounded reference contour
 ```
 
 ## 7. Latest bounded research checkpoint
@@ -392,14 +421,14 @@ denial/recovery/freshness v0 contract = LANDED IN #1516
 Task Projection v0 = LANDED IN #1517
 Task Projection P2 corrective qualification = LANDED IN #1518
 ProjectionBundle v0 logical contract = LANDED IN #1519
-General Level 4 = NOT CLAIMED
-FINAL SERIALIZATION = UNRESOLVED
-UI-DNA2-8B = NOT AUTHORIZED
-UI-DNA2-8C = NOT AUTHORIZED
-ProjectionBundle parser/validator/verifier = NOT IMPLEMENTED
-ProjectionBundle inert loader = NOT IMPLEMENTED
-ProjectionBundle activation = NOT AUTHORIZED
-bundle activation = NOT AUTHORIZED
+General Level 4/5 production reader/parser = NOT CLAIMED
+FINAL SERIALIZATION = RESOLVED for the bounded contour in #1544; trust-metadata representation (digest/signature) remains NOT SELECTED
+UI-DNA2-8B = LANDED IN #1544 (bounded contour parser/validator/verifier)
+UI-DNA2-8C = LANDED IN #1544 (bounded contour pure in-memory inert loader)
+ProjectionBundle parser/validator/verifier = IMPLEMENTED in #1544, bounded to the --ui-dna2-reference contour
+ProjectionBundle inert loader = IMPLEMENTED in #1544, bounded to the --ui-dna2-reference contour
+ProjectionBundle activation = bounded Gate D activation IMPLEMENTED in #1544 (activate_projection_bundle_v0_gate_d); general activation remains NOT AUTHORIZED
+bundle activation = bounded (see above); general bundle activation remains NOT AUTHORIZED
 Shell Player v0 ownership and stage boundary = LANDED IN #1520
 UI-DNA2-9A1 authorization = CONSUMED / CLOSED
 UI-DNA2-9B session/local-state semantics = LANDED / CLOSED
@@ -427,11 +456,20 @@ native Shell Player demo mode = LANDED IN #1541
 renderer integration for Shell Player = LANDED IN #1541 (Clear/FillRect only; DrawText remains a pre-existing backend no-op)
 backend integration for Shell Player = LANDED IN #1541 (existing native winit/wgpu event loop, no new backend)
 UI-DNA2-9 core transition pipeline = LANDED IN #1541
-focus/pointer-capture, hit-test/accessibility, general draw/layout realization = NOT IMPLEMENTED (separately scoped, out of #1541)
-ProjectionBundle parser/validator/verifier/inert-loader/activation = NOT IMPLEMENTED
-textual CollectionAnchor declaration syntax and Grammar v0/frontend integration = NOT IMPLEMENTED
-Gate D = CLOSED
-production promotion = NOT AUTHORIZED
+textual CollectionAnchor declaration syntax and Grammar v0/frontend integration = LANDED IN #1544
+ProjectionBundle parser/validator/verifier/inert-loader = LANDED IN #1544 (bounded contour)
+bounded Gate D activation (activate_projection_bundle_v0_gate_d) = LANDED IN #1544
+ReferenceContourAdmission (reuses existing action_admission/action_admission_result/admitted_action evidence chain) = LANDED IN #1544
+real glyphon DrawText/glyph rendering in the native wgpu backend = LANDED IN #1544
+bounded hit-test/focus/pointer-capture = LANDED IN #1544
+deterministic accessibility evidence (BridgeAccessibilityEntry) = LANDED IN #1544
+--ui-dna2-reference end-to-end reference application (UI-DNA2-10) = LANDED IN #1544
+UiBackendAdapter::run_event_loop real-input delivery fix (cross-cutting, all 15 implementors) = LANDED IN #1544
+general draw/layout realization beyond the bounded reference contour = NOT IMPLEMENTED
+full OS accessibility-tree/accesskit integration = NOT IMPLEMENTED (deterministic evidence only)
+general/unbounded ProjectionBundle activation = NOT AUTHORIZED
+Gate D = OPEN WITH LIMITS, bounded strictly to the --ui-dna2-reference contour; general/global Gate D remains CLOSED
+production promotion = PROMOTE WITH LIMITS, bounded strictly to the --ui-dna2-reference contour (UI-DNA2-11, see §11); unrestricted/critical/production promotion remains NOT AUTHORIZED
 NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
 ```
 
@@ -448,13 +486,30 @@ draw material != pixels
 shell transition != backend event loop
 ```
 
-The UI-DNA2-9A1, UI-DNA2-9B, and #1541 (`SHELL-PLAYER-END-TO-END-TURBO`)
-authorizations were each consumed and are now closed. The #1541 authorization
-covered exactly the bounded Shell Player transition pipeline, public bridge,
-runtime catalog, and native demo landed in that change. It does not authorize
-UI-DNA2-8B, UI-DNA2-8C, `ProjectionBundle` activation, focus/pointer-capture,
-hit-test/accessibility, general draw/layout realization, admission/dispatch
-runtime integration, Gate D movement, or production promotion.
+The UI-DNA2-9A1, UI-DNA2-9B, #1541 (`SHELL-PLAYER-END-TO-END-TURBO`), and
+#1543/#1544 (`UI-DNA2-END-TO-END-GATE-D-TURBO`) authorizations were each
+consumed and are now closed. The #1541 authorization covered exactly the
+bounded Shell Player transition pipeline, public bridge, runtime catalog,
+and native demo landed in that change.
+
+The #1544 authorization covered exactly: textual `CollectionAnchor`
+Grammar v0 syntax and frontend integration; the `ProjectionBundle v0`
+codec, bounded UI-DNA2-8B/8C parser/validator/verifier/inert-loader;
+bounded Gate D activation for the `--ui-dna2-reference` contour only;
+`ReferenceContourAdmission` reusing the existing admission evidence chain;
+real native text rendering; bounded hit-test/focus/pointer-capture and
+deterministic accessibility evidence; the UI-DNA2-10 end-to-end reference
+application; and the UI-DNA2-11 promotion decision (**PROMOTE WITH
+LIMITS**, bounded to that one contour — see §11). It also fixed a
+cross-cutting bug in `UiBackendAdapter::run_event_loop` discovered while
+verifying #1544 natively, which affects every native backend consumer
+including the previously-merged #1541 Shell Player demo.
+
+It does not authorize general/unrestricted `ProjectionBundle` activation,
+general admission/dispatch runtime integration, general/unbounded Gate D
+movement, full OS accessibility-tree integration, general draw/layout
+realization beyond the bounded contour, or unrestricted/critical/production
+promotion.
 
 ## 8. Dependency order after rebaseline
 
@@ -492,6 +547,7 @@ EVIDENCE LANDED:
 → explicit CollectionAnchor declaration contract (#1536)
 → programmatic explicit CollectionAnchor declaration qualification (#1539)
 → complete Shell Player transition pipeline, public prom-ui::shell_bridge, runtime catalog, patch application, replay-cursor advancement and native demo (#1541)
+→ textual CollectionAnchor Grammar v0 syntax, ProjectionBundle v0 codec (parser/validator/verifier/inert-loader), bounded Gate D activation, ReferenceContourAdmission, native text rendering, bounded hit-test/focus/accessibility, UI-DNA2-10 reference application, UI-DNA2-11 promotion decision, and the UiBackendAdapter::run_event_loop real-input delivery fix (#1544, closes #1543)
 ```
 
 CLOSED DOCUMENTATION CONTRACT SLICE:
@@ -506,24 +562,19 @@ CLOSED IMPLEMENTATION SLICE:
 ```text
 SHELL-PLAYER-END-TO-END-TURBO (#1541)
 #1541 authorization = CONSUMED / CLOSED
+UI-DNA2-END-TO-END-GATE-D-TURBO (#1543/#1544)
+#1543/#1544 authorization = CONSUMED / CLOSED
 ```
 
 CURRENTLY UNAUTHORIZED FUTURE CONTOURS:
 
 ```text
-ProjectionBundle parser/validator/verifier implementation
-ProjectionBundle inert-loader implementation
-ProjectionBundle activation
-textual CollectionAnchor declaration syntax
-Grammar v0 parser support for CollectionAnchor declarations
-parser-to-compiler frontend support for textual CollectionAnchor declarations
-focus and pointer-capture integration
-hit-test and accessibility integration
-general draw/layout realization
-DrawText/glyph rendering in the native backend
-bundle activation
-end-to-end reference slice
-production-promotion decision
+general/unrestricted ProjectionBundle activation (bounded Gate D activation for the --ui-dna2-reference contour is landed in #1544)
+digest/signature algorithm selection for ProjectionBundle cryptographic trust
+general/unbounded admission and dispatch runtime integration
+full OS accessibility-tree / accesskit integration
+general draw/layout realization beyond the bounded reference contour
+unrestricted/critical/production promotion (UI-DNA2-11 recorded PROMOTE WITH LIMITS, bounded to the --ui-dna2-reference contour only)
 ```
 
 This order is directional rather than immutable.
@@ -579,7 +630,7 @@ reference slice != production promotion
 - [x] `docs/roadmap/post_ui/ui_dna2_implementation_roadmap.md` exists from this rebaseline.
 - [x] Workbench and Semantic Studio remain outside scope.
 - [x] `ui-shell-kit` remains experimental.
-- [x] Gate D activation/integration remains closed.
+- [x] Gate D is OPEN WITH LIMITS for the bounded `--ui-dna2-reference` contour only, landed through #1544; general/global Gate D activation/integration remains closed.
 - [x] Projection source textual parser/grammar and pure in-memory parser-to-compiler frontend are qualified through #1507 and #1508; both remain crate-private, with no public API or filesystem/runtime loading authorization.
 - [x] Static UI IR Artifact V1 qualification is landed at the crate-private pure in-memory boundary through #1511; public codec API and filesystem/runtime loaders remain absent, runtime loading remains unauthorized, Gate D remains closed, and production promotion remains unauthorized.
 - [x] Binding Graph observation comparison and dirty-propagation v0 contract is normatively frozen independently of implementation authorization.
@@ -591,9 +642,9 @@ reference slice != production promotion
 - [x] Denial/recovery/freshness v0 projection and inert ProjectionPatch construction are specified, implemented and qualified through #1516.
 - [x] Task Projection v0 is separately specified, implemented and qualified at the crate-private pure in-memory boundary through #1518; application, live evidence acquisition, admission execution and runtime integration remain unauthorized.
 - [x] ProjectionBundle v0 logical identity, stage separation, validation, resource, diagnostic and authority boundaries are frozen by the bounded documentation-only UI-DNA2-8A change.
-- [ ] ProjectionBundle parser/validator/verifier implementation is separately authorized and qualified.
-- [ ] ProjectionBundle pure in-memory inert loader is separately authorized and qualified.
-- [ ] ProjectionBundle activation is separately authorized.
+- [x] ProjectionBundle parser/validator/verifier implementation is landed through #1544 (UI-DNA2-8B): an 8-stage verifier (decode, header, structural, cross-artifact, compatibility, self-consistency trust) with golden vectors and an exhaustive negative-test matrix; general Level 4/5 production reader/parser is not claimed; digest/signature cryptographic trust remains unresolved.
+- [x] ProjectionBundle pure in-memory inert loader is landed through #1544 (UI-DNA2-8C), bounded to the `--ui-dna2-reference` contour.
+- [x] ProjectionBundle activation is landed through #1544 as bounded, fail-closed Gate D activation (`activate_projection_bundle_v0_gate_d`) for the `--ui-dna2-reference` contour only; general/unrestricted activation is separately authorized and not yet approved.
 - [x] Shell Player v0 ownership, inputs, outputs, stage relationships and non-authority boundaries are frozen by UI-DNA2-9A1 without implementation authorization.
 - [x] UI-DNA2-9B Shell Player session input, lifecycle, local-state, transition, resource and diagnostic semantics are frozen through #1524 and the post-merge input-resource preflight correction in #1525; the consumed authorization is closed and grants no implementation authority.
 - [x] Crate-private deterministic Shell Player lifecycle seed is landed through #1528.
@@ -604,16 +655,17 @@ reference slice != production promotion
 - [x] Shell Player stage-5 stable-target boundary contract is frozen through #1534 without implementation authorization.
 - [x] Prepared cross-crate handoff ownership contract is frozen through #1535 without implementation authorization.
 - [x] Explicit `CollectionAnchor` declaration contract is frozen through #1536 without implementation authorization.
-- [x] Crate-private programmatic explicit `CollectionAnchor` declaration representation, `ProjectionSourceDocument` declaration storage, deterministic compiler-owned qualification and immutable `QualifiedCollectionAnchorDeclarations` are landed through #1539; textual declaration syntax and Grammar v0 parser/frontend integration remain unauthorized; prepared-activation producer/consumption integration is landed through #1541.
+- [x] Crate-private programmatic explicit `CollectionAnchor` declaration representation, `ProjectionSourceDocument` declaration storage, deterministic compiler-owned qualification and immutable `QualifiedCollectionAnchorDeclarations` are landed through #1539; prepared-activation producer/consumption integration is landed through #1541; textual declaration syntax and Grammar v0 parser/frontend integration (`compile_projection_source_text_with_collection_anchors`) are landed through #1544.
 - [x] `PreparedProjectionPatchTargets` and `PreparedActiveProjectionTargets` are implemented and have a producer entry point, landed through #1541.
 - [x] `ActiveProjectionTargetCatalog` runtime catalog is implemented, landed through #1541, constructed only from one activation-target snapshot and attached immutably to the activated session context.
 - [x] Stage-5 stable-target evaluator is implemented, landed through #1541, using only the immutable session catalog.
 - [x] ProjectionPatch runtime application and replay-cursor advancement are implemented, landed through #1541, atomic and with no cursor advancement on rejection.
 - [x] The complete Shell Player transition pipeline (stages 1-9) is implemented and integrated, landed through #1541.
-- [x] Renderer and backend integration are implemented, landed through #1541, through the existing native winit/wgpu backend and `--shell-player-demo` mode, manually verified via a live screenshot; `DrawText`/glyph rendering remains an existing backend gap unrelated to Shell Player.
-- [x] Shell Player is qualified without authority transfer: it owns no Semantic truth, grants no action or effect authorization, and the renderer gains no Semantic authority (contract invariants preserved and tested through #1541).
-- [ ] End-to-end deterministic reference slice (UI-DNA2-10, a complete non-critical reference application) remains separately unauthorized and not started.
-- [ ] Production promotion decision (UI-DNA2-11) remains separately unauthorized and not started.
+- [x] Renderer and backend integration are implemented, landed through #1541, through the existing native winit/wgpu backend and `--shell-player-demo` mode, manually verified via a live screenshot; real glyphon `DrawText`/glyph rendering is landed through #1544, closing the previously-noted backend gap.
+- [x] Shell Player is qualified without authority transfer: it owns no Semantic truth, grants no action or effect authorization, and the renderer gains no Semantic authority (contract invariants preserved and tested through #1541 and #1544).
+- [x] Bounded hit-testing, focus routing, pointer-capture and deterministic accessibility evidence (`BridgeAccessibilityEntry`) are landed through #1544 for the `--ui-dna2-reference` contour; full OS accessibility-tree/accesskit integration remains not implemented.
+- [x] End-to-end deterministic reference slice (UI-DNA2-10) is landed through #1544: `--ui-dna2-reference`, one canonical, non-critical reference application driving the full pipeline from real Projection Source text to a visible native window, verified with real synthetic OS input reaching hit-testing, admission, commit and visible re-render (admitted-click and denied-click screenshot evidence).
+- [x] Production promotion decision (UI-DNA2-11) is recorded in #1544: **PROMOTE WITH LIMITS**, bounded strictly to the `--ui-dna2-reference` contour, its bounded Gate D policy, and the ProjectionBundle self-consistency verifier — see §11 for the full decision and its explicit exclusions.
 
 ## 11. Definition of Done
 
@@ -636,18 +688,99 @@ This umbrella issue may close only when:
 4. Phase UI-DNA2-11 records an explicit promotion outcome;
 5. no historical, experimental or renderer-local structure has been silently promoted to semantic authority.
 
-This roadmap does not itself close UI DNA v2. The following remain true after
-#1541:
+### UI-DNA2-11 production promotion decision (recorded in #1544)
+
+**Decision: PROMOTE WITH LIMITS.**
+
+Scope of the decision — promoted:
 
 ```text
-UI-DNA2-8B = NOT AUTHORIZED
-UI-DNA2-8C = NOT AUTHORIZED
-bundle activation = NOT AUTHORIZED
-textual CollectionAnchor declaration syntax and parser/frontend integration = NOT AUTHORIZED
-focus/pointer-capture, hit-test/accessibility, general draw/layout realization = NOT IMPLEMENTED
-end-to-end reference slice (UI-DNA2-10) = NOT STARTED
-Gate D = CLOSED
-production promotion = NOT AUTHORIZED
+the --ui-dna2-reference end-to-end reference contour (UI-DNA2-10), in full
+the bounded Gate D activation policy for exactly that contour
+the ProjectionBundle v0 parser/validator/verifier/inert-loader for exactly that contour
+the ProjectionBundle v0 self-consistency trust verifier (deterministic
+  canonicalize -> re-encode -> byte-compare; explicitly not cryptographic trust)
+ReferenceContourAdmission reusing the existing admission evidence chain,
+  bounded to that contour's fixed granted-action set
+real native text rendering, bounded hit-test/focus/pointer-capture and
+  deterministic accessibility evidence for that contour
+```
+
+Explicit exclusions from this decision:
+
+```text
+no general or unrestricted Gate D activation (Gate D remains CLOSED outside
+  the bounded --ui-dna2-reference contour)
+no cryptographic trust claim for ProjectionBundle (no digest/signature
+  algorithm is selected or implemented anywhere in this repository)
+no general Level 4/5 production ProjectionBundle reader/parser
+no general/unrestricted runtime admission or dispatch integration
+no full OS accessibility-tree / accesskit integration (deterministic
+  BridgeAccessibilityEntry evidence only)
+no general draw/layout realization beyond the bounded contour's
+  deterministic vertical-stack layout
+no critical, safety-relevant, or unrestricted production use of any kind
+```
+
+Rationale: every arrow in the pipeline (Projection Source text through to a
+committed, visible native update) is real, tested code, verified with real
+synthetic OS-level input reaching hit-testing, admission, and commit end to
+end — not console simulation and not hand-built post-activation fixtures.
+The verification and admission mechanisms are honest about their own
+limits (self-consistency, not cryptography; one fixed granted-action set,
+not general capability evaluation), and every exclusion above reflects a
+real, currently-unresolved or intentionally out-of-scope decision rather
+than an oversight. That combination of genuine end-to-end evidence plus
+explicit, honestly-stated limits is exactly what `PROMOTE WITH LIMITS`
+means: this bounded contour is fit to stand as evidence and as a reference
+implementation, while everything general, critical, or safety-relevant
+remains exactly as unauthorized as it was before.
+
+### Closure criteria status
+
+**UI-DNA2-4 (Binding Graph live Semantic reads/subscriptions), the general,
+unbounded slice of UI-DNA2-5 (Action IR admission integration beyond the
+one bounded reference contour), and UI-DNA2-7's remaining Task Projection
+application/runtime-integration work are NOT complete and are explicitly
+out of scope for this closure.** Issue #1543 itself scopes required work
+"to the extent required for one complete deterministic non-critical
+reference application" — live Binding Graph/Semantic subscriptions and
+general-purpose Action IR/Task Projection runtime integration are not
+required by, and were not exercised by, that one bounded reference
+application, and neither #1543 nor #1544 implemented them. Section 5's
+checkpoint matrix above is the accepted record of that: it still marks
+UI-DNA2-4 as not complete and UI-DNA2-5/7 as foundation/partial, and that
+matrix is not being overridden here.
+
+Against that honest baseline, the five closure criteria are met as follows:
+
+1. This document reflects the accepted execution state, including the evidence landed in #1544 and this decision recorded in #1545.
+2. Every remaining phase has the status section 5's checkpoint matrix already records for it — this update does not mark any phase complete beyond what that matrix states. UI-DNA2-4 (live Binding Graph/Semantic reads), the general slice of UI-DNA2-5 (Action IR admission beyond the bounded reference contour), and UI-DNA2-7's remaining Task Projection application/runtime-integration work are represented there with explicit ownership and remaining-work descriptions, not silently dropped, and none of it was required by #1543's own bounded scope.
+3. UI-DNA2-10 has deterministic, authority-preserving evidence: real synthetic OS input verified reaching hit-testing, admission, and commit, with screenshot evidence for both an admitted and a denied action, and automated evidence for invalid-bundle and replay/stale rejection, all preserving prior state on rejection.
+4. UI-DNA2-11 records the explicit outcome above: `PROMOTE WITH LIMITS`.
+5. No historical, experimental, or renderer-local structure was silently promoted to semantic authority — Shell Player still owns no Semantic truth, `hit-test result != action authorization`, `ActionIntent candidate != admitted action`, and the ProjectionBundle verifier is documented everywhere as self-consistency rather than cryptographic trust.
+
+Issue #1543's own definition of done requires the roadmap to be
+"reconciled" and does not require UI-DNA2-4/5/7 completion; its explicit
+non-closure conditions for #1489 are Gate D remaining closed, UI-DNA2-10
+not started, or the promotion outcome unresolved — none of which hold.
+On that basis this roadmap update, together with the #1544 evidence it
+records, is what allows the umbrella issue #1489 to close, with UI-DNA2-4,
+the general slice of UI-DNA2-5, and the remainder of UI-DNA2-7 explicitly
+and honestly carried forward as future, unauthorized, not-yet-started work
+rather than treated as done.
+
+The following remain true after #1544:
+
+```text
+general Level 4/5 production ProjectionBundle reader/parser = NOT CLAIMED
+digest/signature algorithm for cryptographic trust = NOT SELECTED
+general/unrestricted ProjectionBundle activation = NOT AUTHORIZED
+general/unbounded admission and dispatch runtime integration = NOT AUTHORIZED
+full OS accessibility-tree / accesskit integration = NOT IMPLEMENTED
+general draw/layout realization beyond the bounded reference contour = NOT IMPLEMENTED
+Gate D = CLOSED outside the bounded --ui-dna2-reference contour
+unrestricted/critical/production promotion = NOT AUTHORIZED
 NEXT AUTHORIZED IMPLEMENTATION SLICE = NONE
 ```
 
@@ -666,4 +799,14 @@ replay-cursor advancement = LANDED IN #1541
 candidate-state calculation and atomic commit = LANDED IN #1541
 first public prom-ui::shell_bridge bridge with same-change API guard = LANDED IN #1541
 deterministic native Shell Player demo mode = LANDED IN #1541
+textual CollectionAnchor declaration syntax and Grammar v0/frontend integration = LANDED IN #1544
+ProjectionBundle v0 canonical codec (parser/validator/verifier/inert-loader), bounded to --ui-dna2-reference = LANDED IN #1544
+bounded fail-closed Gate D activation for --ui-dna2-reference = LANDED IN #1544 (Gate D = OPEN WITH LIMITS for that contour)
+ReferenceContourAdmission reusing the existing admission evidence chain = LANDED IN #1544
+real glyphon DrawText/glyph rendering in the native backend = LANDED IN #1544
+bounded hit-test/focus/pointer-capture = LANDED IN #1544
+deterministic accessibility evidence = LANDED IN #1544
+end-to-end reference slice (UI-DNA2-10, --ui-dna2-reference) = LANDED IN #1544
+UI-DNA2-11 production promotion decision = DECIDED IN #1544 (PROMOTE WITH LIMITS)
+UiBackendAdapter::run_event_loop real-input delivery (cross-cutting fix) = LANDED IN #1544
 ```
