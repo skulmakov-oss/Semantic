@@ -1,0 +1,64 @@
+//! Regression guard for the strict canonical UI frame inspection fixtures
+//! (Issue #1365 follow-up).
+//!
+//! `smc look ui frame`'s Frame Snapshot v0 / Event Script v0 decoders are
+//! strict: they require an exact trailing `\n`, not `\r\n`. Without a
+//! `.gitattributes` override these fixtures fall under the repo's generic
+//! `* text=auto` rule, so a checkout with `core.autocrlf=true` (a common
+//! Windows Git default) rewrites their line endings to CRLF, which the
+//! decoders then correctly reject as noncanonical.
+//!
+//! This checks the *attribute policy* itself via `git check-attr`, not the
+//! current checkout's bytes -- `core.autocrlf` doesn't apply on the Linux
+//! CI runners this repo uses, so a bytes-only check would never catch this
+//! regression there. `git check-attr` reports what `.gitattributes` would
+//! do regardless of the checking-out platform, so this guard is meaningful
+//! on every runner.
+
+use std::process::Command;
+
+const FIXTURE_DIR: &str = "tests/fixtures/ui_frame_inspection";
+
+fn tracked_fixture_files() -> Vec<String> {
+    let output = Command::new("git")
+        .args(["ls-files", "-z", "--", FIXTURE_DIR])
+        .output()
+        .expect("run git ls-files");
+    assert!(output.status.success(), "git ls-files must succeed");
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|entry| !entry.is_empty())
+        .map(|entry| String::from_utf8_lossy(entry).replace('\\', "/"))
+        .collect()
+}
+
+#[test]
+fn ui_frame_inspection_fixtures_are_attributed_text_eol_lf() {
+    let files = tracked_fixture_files();
+    assert!(
+        !files.is_empty(),
+        "expected tracked fixture files under {FIXTURE_DIR}"
+    );
+
+    let mut args = vec!["check-attr".to_string(), "text".to_string(), "eol".to_string(), "--".to_string()];
+    args.extend(files.iter().cloned());
+
+    let output = Command::new("git")
+        .args(&args)
+        .output()
+        .expect("run git check-attr");
+    assert!(output.status.success(), "git check-attr must succeed");
+    let report = String::from_utf8_lossy(&output.stdout);
+
+    for file in &files {
+        assert!(
+            report.contains(&format!("{file}: text: set")),
+            "expected '{file}: text: set' in git check-attr output, got:\n{report}"
+        );
+        assert!(
+            report.contains(&format!("{file}: eol: lf")),
+            "expected '{file}: eol: lf' in git check-attr output, got:\n{report}"
+        );
+    }
+}
