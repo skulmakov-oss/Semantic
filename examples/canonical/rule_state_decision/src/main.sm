@@ -5,19 +5,16 @@ record DecisionContext {
 }
 
 fn decide(ctx: DecisionContext) -> Result(quad, quad) {
-    if ctx.override_state == T {
-        return Result::Ok(T);
-    }
-    if ctx.override_state == F {
-        return Result::Ok(F);
-    }
-    if ctx.camera == N {
-        return Result::Err(N);
-    }
-    if ctx.ready == true {
-        return Result::Ok(T);
-    }
+    if ctx.override_state == T { return Result::Ok(T); }
+    if ctx.override_state == F { return Result::Ok(F); }
+    if ctx.camera == N { return Result::Err(N); }
+    if ctx.ready == true { return Result::Ok(T); }
     return Result::Err(S);
+}
+
+fn validate_verdict(verdict: quad) {
+    assert(verdict == T || verdict == F || verdict == N || verdict == S);
+    return;
 }
 
 fn main() {
@@ -26,10 +23,13 @@ fn main() {
         override_state: S,
         ready: true,
     };
+
     let verdict: quad = match decide(ctx) {
         Result::Ok(value) => { value }
         Result::Err(code) => { code }
     };
+
+    validate_verdict(verdict);
     assert(verdict == T);
     return;
 }

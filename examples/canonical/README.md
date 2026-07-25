@@ -15,6 +15,13 @@ This pack is intentionally split into:
 
 - twelve positive examples inside the current `qualified limited release` contour
 - one boundary example that shows a still-real limit honestly
+- one Logos declarative-profile example, qualified through its own
+  parse/lowering path rather than `check`/`compile`/`verify`/`run`
+
+`match_control_flow` and `rule_state_decision` also serve as the canonical
+demonstrations of `docs/spec/source_style.md` (Semantic Canonical Source Style
+v0): compact guard returns, compact `match` arms, and a data/domain/validation/
+orchestration top-level order.
 
 This pack is also the canonical `.sm` sample surface intended for future GitHub
 Linguist review. The twelve positive examples are small, readable, and stable
@@ -97,12 +104,19 @@ not be treated as a positive sample for Linguist detection.
      executable path is still rejected
    - current reading: `out of scope`
 
+14. `quad_cycle_logos`
+   - purpose: canonical Logos declarative-profile example (`System` / `Entity`
+     / `Law`)
+   - current reading: `parse-qualified and IR-lowering-qualified`, explicitly
+     not `check`/`compile`/`verify`/`run`-qualified — see its own README
+
 ## Validation
 
 Canonical examples are validated by:
 
 ```text
 cargo test -q --test canonical_examples
+cargo test -q --test canonical_source_style
 ```
 
 Positive examples are checked, compiled, verified, and run through the public
@@ -110,3 +124,9 @@ Positive examples are checked, compiled, verified, and run through the public
 
 The boundary example is checked to ensure the current diagnostic remains
 explicit and deterministic.
+
+The Logos example is validated through `smc dump-ast` and
+`smc dump-ir --profile logos`, and is checked to confirm that `smc check`
+still fails on it with a Rust-like frontend diagnostic (the documented
+honesty boundary between the two source surfaces — see
+`docs/spec/source_style.md`).

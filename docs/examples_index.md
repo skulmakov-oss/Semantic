@@ -18,6 +18,11 @@ The older planning-only pack remains in:
 The draft pack is historical context. The canonical pack is the current
 onboarding and readiness-facing examples surface.
 
+`match_control_flow` and `rule_state_decision` demonstrate the frozen
+[Canonical Source Style v0](spec/source_style.md); `quad_cycle_logos`
+demonstrates the same contract's Logos declarative-profile presentation
+rules.
+
 ## Canonical Examples
 
 ### `cli_batch_core`
@@ -171,10 +176,24 @@ Expected result:
 - it should not be treated as a failing canonical success example
 - future support requires an explicit language/source-admission change
 
+### `quad_cycle_logos`
+
+- path: `examples/canonical/quad_cycle_logos/`
+- purpose: canonical Logos declarative-profile example (`System` / `Entity` / `Law`)
+- current reading: `parse-qualified and IR-lowering-qualified`, not
+  `check`/`compile`/`verify`/`run`-qualified (see its README for the honesty
+  boundary)
+- first command:
+
+```powershell
+cargo run --bin smc -- dump-ast examples/canonical/quad_cycle_logos/src/main.sm
+```
+
 ## Validation
 
 The canonical examples pack is covered by:
 
 ```powershell
 cargo test -q --test canonical_examples
+cargo test -q --test canonical_source_style
 ```

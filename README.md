@@ -122,18 +122,9 @@ Save this as `decision.sm`:
 
 ```sm
 fn decide(sensor: quad, ready: bool) -> quad {
-    if sensor == N {
-        return N;
-    }
-
-    if sensor == S {
-        return S;
-    }
-
-    if ready == true {
-        return T;
-    }
-
+    if sensor == N { return N; }
+    if sensor == S { return S; }
+    if ready == true { return T; }
     return F;
 }
 
@@ -142,6 +133,9 @@ fn main() {
     assert(verdict == T);
 }
 ```
+
+This follows the canonical compact guard-return style frozen in
+[`docs/spec/source_style.md`](docs/spec/source_style.md).
 
 Check and run it:
 
@@ -412,6 +406,7 @@ Choose the path that matches what you need:
 | Browse working programs | [Examples Index](docs/examples_index.md) |
 | Learn the language philosophy | [Semantic Language Principles](docs/language/semantic_language_principles.md) |
 | Learn quad syntax | [Semantic Quad Surface](docs/language/semantic_quad_surface.md) |
+| Write canonical-style source | [Canonical Source Style v0](docs/spec/source_style.md) |
 | Read the public contract | [Specification Index](docs/spec/index.md) |
 | Understand the architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Check feature maturity | [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md) |

@@ -24,6 +24,8 @@ This document complements:
 
 - [`docs/language/semantic_style.md`](semantic_style.md)
 - [`docs/language/semantic_language_principles.md`](semantic_language_principles.md)
+- [`docs/spec/source_style.md`](../spec/source_style.md) — the frozen
+  canonical presentation contract for currently executable Semantic source
 
 It does not replace them.
 

@@ -159,6 +159,79 @@ mod tests {
     }
 
     #[test]
+    fn format_source_text_is_idempotent() {
+        let input = "fn main() {  \r\n    return;\t\r\n}\r\n\r\n";
+        let once = format_source_text(input);
+        let twice = format_source_text(&once);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn format_source_text_preserves_string_and_comment_contents() {
+        let input = "fn main() {\n    // keep this comment intact\n    let s: text = \"  spaced text  \";\n    return;\n}\n";
+        assert_eq!(format_source_text(input), input);
+    }
+
+    #[test]
+    fn format_source_text_preserves_compact_guard_returns() {
+        let input = "fn f(x: i32) -> i32 {\n    if x == 0 { return 1; }\n    return 0;\n}\n";
+        assert_eq!(format_source_text(input), input);
+    }
+
+    #[test]
+    fn format_source_text_does_not_collapse_multiline_control_flow() {
+        let input =
+            "fn f(x: i32) -> i32 {\n    if x == 0 {\n        return 1;\n    }\n    return 0;\n}\n";
+        assert_eq!(format_source_text(input), input);
+    }
+
+    #[test]
+    fn format_source_text_preserves_logos_significant_indentation() {
+        let input = "Entity Sensor:\n    state val: quad\n    prop active: bool\n";
+        assert_eq!(format_source_text(input), input);
+    }
+
+    #[test]
+    fn format_path_write_is_idempotent_on_disk() {
+        let dir = mk_temp_dir("smc_fmt_idempotent");
+        let file = dir.join("main.sm");
+        fs::write(&file, "fn main() {  \r\n    return;\n}\n\n").expect("write");
+
+        format_path(&file, FormatterMode::Write).expect("first write");
+        let after_first = fs::read_to_string(&file).expect("read after first");
+
+        let summary = format_path(&file, FormatterMode::Write).expect("second write");
+        let after_second = fs::read_to_string(&file).expect("read after second");
+
+        assert_eq!(after_first, after_second);
+        assert_eq!(
+            summary.files_changed, 0,
+            "second write pass should change nothing"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn collect_semantic_files_walks_in_deterministic_sorted_order() {
+        let dir = mk_temp_dir("smc_fmt_dir_order");
+        fs::write(dir.join("zeta.sm"), "fn main() { return; }\n").expect("write zeta");
+        fs::write(dir.join("alpha.sm"), "fn main() { return; }\n").expect("write alpha");
+        fs::write(dir.join("mid.sm"), "fn main() { return; }\n").expect("write mid");
+
+        let mut files = Vec::new();
+        collect_semantic_files(&dir, &mut files).expect("collect");
+        let names: Vec<String> = files
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(names, vec!["alpha.sm", "mid.sm", "zeta.sm"]);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn format_path_write_updates_recursive_tree() {
         let dir = mk_temp_dir("smc_fmt_write");
         let nested = dir.join("nested");
