@@ -10,6 +10,8 @@ mod api_contract;
 #[cfg(feature = "std")]
 mod app;
 #[cfg(feature = "std")]
+mod canonical_json;
+#[cfg(feature = "std")]
 mod config;
 #[cfg(feature = "std")]
 mod executable_bundle;
@@ -21,6 +23,12 @@ mod incremental;
 mod package_manifest;
 #[cfg(feature = "std")]
 mod schema_versioning;
+#[cfg(feature = "std")]
+mod ui_event_script;
+#[cfg(feature = "std")]
+mod ui_frame_inspect;
+#[cfg(feature = "std")]
+mod ui_frame_snapshot;
 #[cfg(feature = "std")]
 mod wire_contract;
 

@@ -1,0 +1,37 @@
+source: crates/prom-ui-runtime/src/reference_contour.rs
+pub const ROOT_NODE: u64 = 10;
+pub const LABEL_NODE: u64 = 11;
+pub const BUTTON_NODE: u64 = 12;
+pub const LIST_NODE: u64 = 13;
+pub const REFERENCE_SOURCE_TEXT: &str = concat!(
+pub const INVALID_SOURCE_TEXT: &str = concat!(
+pub struct ReferenceLayout {
+pub fn build(bundle: &GateDActivatedBundle) -> Self {
+pub fn hit_test(&self, x: f64, y: f64) -> Option<u64> {
+pub fn rect_of(&self, id: u64) -> Option<Rect> {
+pub fn focus_order(&self) -> Vec<u64> {
+pub fn compile_source_to_reference_bundle( source_text: &str, ) -> Result<Vec<u8>, ProjectionBundleCompileError> {
+pub fn compile_reference_bundle() -> Vec<u8> {
+pub fn compile_invalid_bundle() -> Option<Vec<u8>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceContourError {
+pub struct ReferenceState {
+pub fn new(source_text: &str) -> Result<Self, ReferenceContourError> {
+pub fn handle_pointer_moved(&mut self, x: f64, y: f64) {
+pub fn handle_pointer_down(&mut self) {
+pub fn handle_tab(&mut self) {
+pub fn handle_activate(&mut self) {
+pub fn trigger(&mut self, node: u64) {
+pub fn run_invalid_bundle_check(&mut self) {
+pub fn run_replay_and_staleness_check(&mut self) {
+pub fn last_denied(&self) -> bool {
+pub fn invalid_bundle_rejected(&self) -> bool {
+pub fn replay_rejected(&self) -> bool {
+pub fn stale_rejected(&self) -> bool {
+pub fn hovered(&self) -> Option<u64> {
+pub fn focused(&self) -> Option<u64> {
+pub fn shell(&self) -> &ShellSession {
+pub fn bundle(&self) -> &GateDActivatedBundle {
+pub fn layout(&self) -> &ReferenceLayout {
+pub fn dispatch_input_event(state: &mut ReferenceState, kind: &InputEventKind) -> LoopControl {
+pub fn render_frame(state: &ReferenceState) -> DrawFrame {

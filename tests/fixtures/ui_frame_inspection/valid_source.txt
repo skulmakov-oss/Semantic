@@ -1,0 +1,9 @@
+projection v0 {
+revision 1; epoch 1;
+surface 1 root 10 key 1;
+node 10 role root key 10 { child 11 order 0; child 12 order 1; child 13 order 2; }
+node 11 role text key 11 {}
+node 12 role danger_action key 12 {}
+node 13 role evidence_panel key 13 {}
+collection_anchor 13;
+}

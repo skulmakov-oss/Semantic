@@ -50,6 +50,7 @@ pub mod interaction;
 pub mod interaction_pipeline;
 pub mod layout_primitives;
 pub mod reference_admission;
+pub mod reference_contour;
 pub mod shell_player;
 pub mod state_update;
 pub mod visual_tokens;

@@ -38,6 +38,7 @@ The admitted `smc` command surface is currently:
 - `run-smc`
 - `disasm`
 - `7hell`
+- `look ui frame`
 
 Current accepted usage forms are:
 
@@ -61,6 +62,8 @@ Current accepted usage forms are:
 - `smc run-smc <input.smc>`
 - `smc disasm <input.smc>`
 - `smc 7hell <input.sm> [--json]`
+- `smc look ui frame --from <snapshot> [--frame <n>] [--format text|draw-json] [--out <path>]`
+- `smc look ui frame <source-file> [--events <script>] [--frame <n>] [--format text|draw-json] [--out <path>]`
 
 This draft does not claim that every command is permanently frozen, but it defines the current public CLI surface that tooling may rely on.
 
@@ -114,14 +117,16 @@ Current output families are:
 
 - human-readable text
 - plain-text dumps and hashes for inspection commands
+- one admitted canonical machine-readable JSON format: `smc look ui frame --format draw-json` (Frame Snapshot v0; see `docs/spec/ui/ui_frame_inspection_cli.md`)
 
-There is currently no admitted machine-readable JSON output contract in `smc-cli`.
+There is currently no other admitted machine-readable JSON output contract in `smc-cli`.
 
 Current output rules:
 
 - `smc features` reports enabled and disabled feature sets as text
 - `smc dump-*`, `smc hash-*`, and `smc disasm` emit plain text for inspection
 - `smc check`, `smc lint`, and `smc watch` support colorized human-readable diagnostics via `--color auto|always|never`
+- `smc look ui frame` supports `--format text|draw-json`; both are deterministic and suitable for golden tests (see the dedicated spec)
 
 ## Verified Execution Rule
 
@@ -152,6 +157,7 @@ Current rule:
 - project-root `smc hash-ir` uses the same bounded project entry resolution and emits the existing IR hash for the resolved source file
 - project-root `smc hash-smc` uses the same bounded project entry resolution and emits the existing SemCode hash for the resolved source or artifact path
 - widening package resolution, helper import loading, or source-root admission is a public CLI and source-boundary change
+- `smc look ui frame <source-file>` is explicitly exempt from this `.sm`-source package-admission boundary: its input is Projection Source v0 text, a distinct source profile owned by `prom-ui` (not Semantic language source), read directly with a bounded file-size check; see `docs/spec/ui/ui_frame_inspection_cli.md` for its exact accepted source profile and limits
 
 ## Tooling Helper Rule
 
@@ -161,6 +167,7 @@ The following commands are workflow helpers rather than source-language contract
 - `smc snapshots`
 - `smc repl`
 - `smc explain`
+- `smc look ui frame`
 
 Current helper behavior:
 
@@ -168,6 +175,7 @@ Current helper behavior:
 - `smc snapshots` shells out to `cargo test --test golden_snapshots`, with `--update` enabling snapshot refresh
 - `smc repl` runs interactive check-mode analysis
 - `smc explain` renders diagnostic help text or lists known error codes
+- `smc look ui frame` is read-only UI frame inspection tooling: it reports existing admission/verification evidence produced by `prom-ui`/`prom-ui-runtime`, but owns no Semantic or admission authority itself (see `docs/spec/ui/ui_frame_inspection_cli.md`)
 
 ## Exit Behavior
 

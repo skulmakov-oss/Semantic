@@ -1,0 +1,23 @@
+smc look ui frame v0
+mode: source
+input: tests/fixtures/ui_frame_inspection/valid_source.txt
+source-profile: projection-source-v0
+events: none
+requested-frame: 0
+captured-frames: 1
+selected-frame: 0
+status: Captured
+admission: last-denied=false
+draw-commands: 10
+  0: clear color=(18,18,24,255)
+  1: fill_rect rect=(x=20,y=20,w=560,h=110) color=(50,56,74,255)
+  2: fill_rect rect=(x=20,y=20,w=560,h=3) color=(255,210,90,255)
+  3: fill_rect rect=(x=20,y=127,w=560,h=3) color=(255,210,90,255)
+  4: draw_text "Label (text role)" at (32,44) color=(255,255,255,255)
+  5: fill_rect rect=(x=20,y=146,w=560,h=110) color=(70,70,90,255)
+  6: draw_text "Danger action -- availability: None" at (32,170) color=(255,255,255,255)
+  7: fill_rect rect=(x=20,y=272,w=560,h=110) color=(50,56,74,255)
+  8: draw_text "Evidence panel -- collection: []" at (32,296) color=(255,255,255,255)
+  9: draw_text "cursor=Uninitialized  last denied=false  invalid-bundle rejected=false  replay rejected=false  stale rejected=false" at (20,400) color=(220,220,230,255)
+warnings: none
+NOTICE: inspection output only; not live runtime authority; does not authorize action or committed effect
