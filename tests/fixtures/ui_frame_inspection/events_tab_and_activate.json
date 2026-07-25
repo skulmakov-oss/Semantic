@@ -1,0 +1,1 @@
+{"schema":"semantic.ui.event_script.v0","schema_version":0,"steps":[{"events":[{"kind":"key_down","key_code":9}]},{"events":[{"kind":"key_down","key_code":13}]}]}

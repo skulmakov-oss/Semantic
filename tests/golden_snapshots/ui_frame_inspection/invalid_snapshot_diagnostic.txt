@@ -1,0 +1,1 @@
+InvalidSnapshot: malformed snapshot at byte offset 0: expected byte '{'

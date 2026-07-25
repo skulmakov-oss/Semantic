@@ -1,28 +1,45 @@
 task:
-  id: LANGUAGE-SOURCE-STYLE-V0-REPOSITORY-MIGRATION
-  title: migrate all current-facing Semantic examples to Source Style v0
+  id: SMC-LOOK-UI-FRAME-E2E
+  title: "cli: add `smc look ui frame` deterministic UI frame inspection"
   type: implementation
   mode: active
-  supersedes: LANGUAGE-CANONICAL-SOURCE-STYLE-V0
-  authorized_by: "repository owner direct instruction, follow-on to #1538/#1548"
+  supersedes: null
+  authorized_by: "repository owner direct instruction, Issue #1365"
 
 intent:
-  summary: "refactor(language): migrate current examples to Source Style v0"
+  summary: "feat(cli): complete deterministic UI frame inspection"
 
 scope:
-  # Narrowed to the actual final write surface of this PR (verified against
-  # `git diff main...HEAD --name-only`), not the wider surface anticipated
-  # when this task started. examples/readiness_draft_canonical/** is
-  # deliberately absent: it is preserved historical evidence, not touched.
+  # Narrowed to the actual write surface required to close #1365: the CLI
+  # command itself, the two new CLI-owned codecs (snapshot, event script),
+  # the one lower-level extraction genuinely required to drive the existing
+  # UI-DNA2 pipeline headlessly (prom-ui-runtime::reference_contour, moved
+  # out of the prom-ui-demo binary which has no [lib] target), its public
+  # API guard, fixtures/goldens, docs, and this file.
   allowed_paths:
     - .harness/current.task.yaml
-    - docs/examples_index.md
-    - docs/spec/source_style.md
-    - examples/canonical/**
-    - tests/canonical_source_style.rs
-    - tools/language/check_source_style_contract.ps1
+    - crates/prom-ui-runtime/src/lib.rs
+    - crates/prom-ui-runtime/src/reference_contour.rs
+    - crates/prom-ui-runtime/tests/**
+    - crates/prom-ui-demo/src/ui_dna2_reference.rs
+    - crates/smc-cli/Cargo.toml
+    - crates/smc-cli/src/app.rs
+    - crates/smc-cli/src/lib.rs
+    - crates/smc-cli/src/canonical_json.rs
+    - crates/smc-cli/src/ui_frame_snapshot.rs
+    - crates/smc-cli/src/ui_event_script.rs
+    - crates/smc-cli/src/ui_frame_inspect.rs
+    - docs/spec/cli.md
+    - docs/spec/ui/ui_frame_inspection_cli.md
+    - tests/cli_look_ui_frame.rs
+    - tests/public_api_contracts.rs
+    - tests/fixtures/ui_frame_inspection/**
+    - tests/golden_snapshots/ui_frame_inspection/**
+    - tests/golden_snapshots/public_api/prom_ui_runtime_reference_contour.txt
 
   forbidden_paths:
+    - crates/prom-ui/**
+    - crates/prom-ui-backend-native/**
     - crates/sm-front/**
     - crates/sm-sema/**
     - crates/sm-ir/**
@@ -31,55 +48,79 @@ scope:
     - crates/sm-vm/**
     - crates/sm-runtime-core/**
     - crates/sm-profile/**
-    - crates/prom-*/**
     - crates/semantic-core-*/**
     - crates/core-lab/**
     - crates/ton618-core/**
     - apps/**
     - experiments/**
-    - tests/golden_snapshots/**
-    - tests/fixtures/**
     - docs/roadmap/**
     - docs/architecture/**
-    - docs/spec/ui/**
-    - docs/spec/ui_*.md
+    - docs/spec/ui/gate_d_activation_policy_v0.md
+    - docs/spec/ui/draw_command_snapshot_policy.md
+    - docs/spec/ui/projection_source_grammar_v0.md
     - reports/**
     - src/**
+    - examples/**
 
 authorization:
-  # No dedicated "test-only Rust" field exists in this repository's harness
-  # convention (checked prior task.yaml files and .harness/reports/; none
-  # define one), so this is the general rust_implementation flag, scoped
-  # explicitly by the line below: qualification/drift-guard TEST code only
-  # (tests/canonical_source_style.rs) -- no production Rust, no language or
-  # runtime implementation.
+  # No dedicated "new CLI command + lower-level runtime extraction" field
+  # exists in this repository's harness convention; this is the general
+  # rust_implementation flag, scoped explicitly below.
   rust_implementation: true
-  rust_implementation_scope: "test-only: qualification/drift-guard tests in tests/canonical_source_style.rs; no production Rust, no language/runtime implementation"
-  repository_example_inventory: true
-  current_facing_source_migration: true
-  current_documentation_synchronization: true
-  canonical_example_qualification: true
-  style_drift_guard_expansion: true
+  rust_implementation_scope: >-
+    production Rust: one new smc-cli subcommand (`look ui frame`) and its
+    two owned codecs (canonical Frame Snapshot v0, deterministic Event
+    Script v0); one extraction of already-existing, already-tested
+    deterministic UI-DNA2 reference-contour logic out of the prom-ui-demo
+    binary into a new pub module of prom-ui-runtime (behavior-preserving,
+    no new admission/verification/compiler semantics); plus qualification
+    and golden-test code for all of the above.
+  cli_command_implementation: true
+  ui_frame_inspection_contracts: true
+  snapshot_codec_and_validation: true
+  deterministic_preview_capture: true
+  event_script_parsing: true
+  lower_level_seam_extraction: true
+  public_api_guard_addition: true
+  fixtures_and_goldens: true
+  documentation_synchronization: true
   owner_issue_lifecycle: true
   workflow_changes: false
   roadmap_changes: false
   project_changes: false
   # explicitly not authorized this round
-  grammar_semantic_expansion: false
-  verifier_vm_abi_changes: false
-  ui_workbench_studio_alm_changes: false
-  pulsar_atlas_hub_changes: false
+  workbench_implementation: false
+  semantic_studio_implementation: false
+  alm_changes: false
+  hub_changes: false
+  arbitrary_ui_productization: false
+  native_production_window_changes: false
+  general_grammar_redesign: false
+  semcode_semantic_changes: false
+  verifier_semantic_widening: false
+  vm_semantic_widening: false
+  prometheus_abi_widening: false
+  unrelated_renderer_refactors: false
+  gate_d_widening: false
+  admission_grant_set_widening: false
 
 constraints:
-  no_grammar_or_runtime_semantic_change: true
-  no_new_syntax_to_satisfy_examples: true
-  rustlike_and_logos_surfaces_never_presented_as_one_executable_program: true
-  formatter_stays_conservative_and_lexical_only: true
-  preserve_qualification_status_of_every_migrated_example: true
-  preserve_intentional_rejection_contracts: true
-  do_not_rewrite_historical_golden_or_evidence_fixtures: true
-  do_not_upgrade_or_downgrade_qualification_level_without_real_implementation_change: true
+  no_second_ui_parser_or_compiler: true
+  no_second_projection_bundle_verifier: true
+  no_second_shell_player: true
+  no_second_admission_model: true
+  no_second_drawframe_type: true
+  no_cli_only_ui_truth_model: true
+  no_demo_only_mutation_path: true
+  demo_crate_must_not_become_smc_cli_dependency: true
+  production_native_backend_must_not_be_required: true
+  no_native_window_or_gpu_in_smc_cli_dependency_graph: true
+  snapshot_mode_never_compiles_or_runs_source: true
+  source_mode_never_opens_native_window: true
+  extraction_must_be_behavior_preserving_for_prom_ui_demo: true
+  reference_contour_admission_grant_set_stays_fixed_to_button_node: true
   one_branch_one_pr: true
   no_intermediate_documentation_only_pr: true
   no_child_issues: true
-  no_unrelated_ui_workbench_studio_alm_pulsar_atlas_hub_changes: true
+  no_unrelated_workbench_studio_alm_hub_changes: true
+  do_not_reinterpret_or_close_issue_675: true

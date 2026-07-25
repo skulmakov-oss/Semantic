@@ -108,6 +108,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "run-smc" => cmd_run_smc(&args[1..]),
         "disasm" => cmd_disasm(&args[1..]),
         "work" => cmd_work(&args[1..]),
+        "look" => crate::ui_frame_inspect::cmd_look(&args[1..]),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             Ok(())
@@ -2661,6 +2662,8 @@ fn usage() -> String {
         "  smc run <input.sm|project-root>",
         "  smc run-smc <input.smc>",
         "  smc disasm <input.smc>",
+        "  smc look ui frame --from <snapshot> [--frame <n>] [--format text|draw-json] [--out <path>]",
+        "  smc look ui frame <source-file> [--events <script>] [--frame <n>] [--format text|draw-json] [--out <path>]",
     ]
     .join("\n")
 }

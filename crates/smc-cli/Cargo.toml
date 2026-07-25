@@ -23,6 +23,8 @@ std = [
     "sm-runtime-core/std",
     "prom-cap/std",
     "prom-audit/std",
+    "prom-ui/std",
+    "prom-ui-runtime/std",
 ]
 profile-rust = ["sm-ir/profile-rust"]
 profile-logos = ["sm-ir/profile-logos"]
@@ -41,3 +43,5 @@ sm-vm = { path = "../sm-vm", default-features = false, features = ["std", "disas
 sm-runtime-core = { path = "../sm-runtime-core", default-features = false, features = ["std"] }
 prom-cap = { path = "../prom-cap", default-features = false, features = ["std"] }
 prom-audit = { path = "../prom-audit", default-features = false, features = ["std"] }
+prom-ui = { path = "../prom-ui", default-features = false, features = ["std"] }
+prom-ui-runtime = { path = "../prom-ui-runtime", default-features = false, features = ["std"] }
