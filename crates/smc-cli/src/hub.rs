@@ -76,6 +76,45 @@ fn hub_data_root() -> PathBuf {
     PathBuf::from(HUB_DATA_DIR)
 }
 
+/// Reject a directory whose path contains a symlink/junction in any
+/// component. Mirrors `semantic_hub_turbovec::storage::ScopedStorage`'s
+/// `check_root_is_not_a_symlink` (walking every successively-longer
+/// prefix via `symlink_metadata`, never `canonicalize`, which would
+/// silently resolve through the very link this is checking for) -- that
+/// check only ever protects the TurboVec adapter's own `.tvim` files,
+/// reached from inside `Hub::invoke`. This module's own direct
+/// filesystem writes (the project lock, the pending marker, the audit
+/// log) never route through `ScopedStorage` at all, so without an
+/// equivalent check here, a checked-out project supplying `.semantic` or
+/// `.semantic/hub` as a pre-planted symlink would have every one of
+/// these CLI-level reads/writes silently follow it, escaping the
+/// project directory before the adapter's own check ever runs. A
+/// directory that does not exist yet is not a violation.
+fn check_dir_is_not_a_symlink(dir: &Path) -> Result<(), String> {
+    let mut probe = PathBuf::new();
+    for component in dir.components() {
+        probe.push(component);
+        match fs::symlink_metadata(&probe) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(format!(
+                    "ScopedStorageViolation: '{}' is a symlink or reparse point, which could \
+                     resolve outside the project directory",
+                    probe.display()
+                ));
+            }
+            Ok(_) => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) => {
+                return Err(format!(
+                    "InternalHubFault: could not stat '{}': {e}",
+                    probe.display()
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Acquire an exclusive, whole-project advisory lock (`std::fs::File::lock`,
 /// which wraps `flock(2)` on Unix / `LockFileEx` on Windows) covering one
 /// invocation's entire load-audit-trail -> dispatch -> save-audit-trail
@@ -94,6 +133,7 @@ fn hub_data_root() -> PathBuf {
 /// detection to recover from an ungraceful exit.
 fn acquire_project_lock() -> Result<fs::File, String> {
     let dir = hub_data_root();
+    check_dir_is_not_a_symlink(&dir)?;
     fs::create_dir_all(&dir).map_err(|e| {
         format!(
             "InternalHubFault: could not create '{}': {e}",
@@ -165,7 +205,11 @@ fn write_pending_marker(
     });
     let text = serde_json::to_string_pretty(&marker)
         .map_err(|e| format!("InternalHubFault: could not render pending marker: {e}"))?;
-    write_output_atomic(&pending_marker_path(request_id), &text)
+    let marker_path = pending_marker_path(request_id);
+    if let Some(dir) = marker_path.parent() {
+        check_dir_is_not_a_symlink(dir)?;
+    }
+    write_output_atomic(&marker_path, &text)
 }
 
 fn clear_pending_marker(request_id: &HubRequestId) {
@@ -249,6 +293,9 @@ fn write_output_atomic(path: &Path, contents: &str) -> Result<(), String> {
 }
 
 fn load_audit_trail(path: &Path) -> Result<HubAuditTrail, String> {
+    if let Some(dir) = path.parent() {
+        check_dir_is_not_a_symlink(dir)?;
+    }
     if !path.is_file() {
         return Ok(HubAuditTrail::new());
     }
@@ -265,6 +312,9 @@ fn load_audit_trail(path: &Path) -> Result<HubAuditTrail, String> {
 }
 
 fn save_audit_trail(path: &Path, trail: &HubAuditTrail) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        check_dir_is_not_a_symlink(dir)?;
+    }
     write_output_atomic(path, &trail.to_canonical_text())
 }
 
@@ -352,6 +402,7 @@ fn cmd_hub_describe(args: &[String]) -> Result<(), String> {
 // ---------------------------------------------------------------------
 
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CliRequestFile {
     #[serde(default = "default_schema_version")]
     schema_version: u32,
@@ -704,6 +755,50 @@ mod tests {
     }
 
     #[test]
+    fn check_dir_is_not_a_symlink_accepts_a_real_or_not_yet_created_directory() {
+        let dir = temp_hub_dir("symlink-check-real");
+        assert!(check_dir_is_not_a_symlink(&dir).is_ok());
+        assert!(check_dir_is_not_a_symlink(&dir.join("not-yet-created")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn check_dir_is_not_a_symlink_rejects_a_symlinked_ancestor() {
+        // Regression test: none of this module's own direct writes (the
+        // project lock, the pending marker, the audit log) route through
+        // semantic_hub_turbovec::storage::ScopedStorage's symlink check --
+        // that only protects the TurboVec adapter's own .tvim files. A
+        // checked-out project supplying an ancestor like ".semantic" as a
+        // pre-planted symlink must still be rejected here, before any of
+        // this module's own reads/writes follow it.
+        let real_target = std::env::temp_dir().join(format!(
+            "smc-hub-unit-symlink-target-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&real_target).unwrap();
+        let fake_ancestor = std::env::temp_dir().join(format!(
+            "smc-hub-unit-symlink-ancestor-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::os::unix::fs::symlink(&real_target, &fake_ancestor).unwrap();
+
+        let dir_through_link = fake_ancestor.join("hub").join("pending");
+        let err = check_dir_is_not_a_symlink(&dir_through_link).unwrap_err();
+        assert!(
+            err.starts_with("ScopedStorageViolation"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn read_bounded_accepts_a_file_over_the_request_file_limit_under_the_audit_log_limit() {
         // Regression test: the audit log must not share MAX_INPUT_BYTES
         // (sized for one caller-supplied request file). A file larger than
@@ -752,6 +847,21 @@ mod tests {
         // caller narrowing their own budget intends.
         let result: Result<CliResourceBudgetOverride, _> =
             serde_json::from_str(r#"{"output_byte": 1}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn request_envelope_rejects_an_unknown_top_level_field() {
+        // Regression test: without deny_unknown_fields on the outer
+        // envelope, a typo such as "resource_budgett" (extra 't') was
+        // silently dropped, resource_budget fell back to its
+        // #[serde(default)] of None, and merge_budget(None) substitutes
+        // the full, generous V0_CEILING for every dimension -- the same
+        // fail-open-to-a-permissive-default pattern already fixed one
+        // layer down in CliResourceBudgetOverride and payload.rs's
+        // request structs.
+        let result: Result<CliRequestFile, _> =
+            serde_json::from_str(r#"{"resource_budgett": {"memory_bytes": 1}, "payload": {}}"#);
         assert!(result.is_err());
     }
 }

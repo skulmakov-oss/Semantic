@@ -209,22 +209,30 @@ signal into, but no such signal is wired in v0.
 `deadline: Option<Instant>` is combined with a deadline derived from the
 admitted `request.resource_budget.wall_time_millis`
 (`started + Duration::from_millis(wall_time_millis)`) -- the tighter of
-the two wins. This combined, *effective* deadline is checked exactly once,
-at the very top of `Hub::invoke`, before admission runs -- already passed
-produces `DeadlineExceeded` without ever calling `admit()`. The same
-effective deadline is then threaded into `RestrictedHubContext` and made
-available to the adapter via `context.deadline_exceeded()`, but the Hub
-itself never calls that method again once dispatch has started: there is
-no mid-call preemption. This is an honest limitation, not an oversight --
-Hub v0's CLI dispatch path is synchronous and single-threaded, so nothing
-could preempt a running `handle()` call even if the Hub tried (doing so
-would require detached background execution with shared-ownership worker
+the two wins. This combined, *effective* deadline is checked twice, never
+mid-call: once at the very top of `Hub::invoke`, before admission runs
+(already passed produces `DeadlineExceeded` without ever calling
+`admit()`), and once more immediately after `dispatch()` returns, which
+downgrades an otherwise-successful adapter result to `DeadlineExceeded`
+if the same effective deadline has since passed. Any side effects the
+adapter already committed before returning are **not** undone by this
+second check -- the same "effects happened, but the reply reports
+failure" property Hub already accepts for `OutputRejected` (Section 6).
+The effective deadline is also threaded into `RestrictedHubContext` and
+made available to the adapter via `context.deadline_exceeded()`, but the
+Hub itself never calls that method on the adapter's behalf, and neither
+of its own two checks runs *during* dispatch: there is no mid-call
+preemption. This is an honest limitation, not an oversight -- Hub v0's
+CLI dispatch path is synchronous and single-threaded, so nothing could
+preempt a running `handle()` call even if the Hub tried (doing so would
+require detached background execution with shared-ownership worker
 state, deferred to a future execution mode). An adapter that wants to
 honor a deadline inside a long-running operation must poll
 `context.deadline_exceeded()` itself between internal steps; the Hub does
 not do this on the adapter's behalf. Concretely: `wall_time_millis` is
-enforced at dispatch entry (a request whose budget is already effectively
-exhausted is rejected before the adapter is ever called), not enforced by
+enforced at dispatch entry and dispatch exit (a request whose budget was
+already exhausted before dispatch, or that ran long enough to exhaust it
+during dispatch, is reported as `DeadlineExceeded`), not enforced by
 stopping an in-flight native call once started.
 
 ## 10. Panic handling

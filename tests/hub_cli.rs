@@ -784,3 +784,41 @@ fn concurrent_inserts_against_the_same_index_do_not_lose_updates() {
         "not all N concurrent inserts landed in the final index -- at least one was lost"
     );
 }
+
+// ---- CLI-level symlink confinement (not the TurboVec adapter's own) ----
+
+#[cfg(unix)]
+#[test]
+fn invoke_rejects_a_project_whose_semantic_directory_is_a_pre_planted_symlink() {
+    // Regression test: the TurboVec adapter's own scoped-storage symlink
+    // check (crates/semantic-hub-turbovec/src/storage.rs) only protects
+    // its own .tvim files, reached from inside Hub::invoke. This CLI
+    // module's own direct writes (the project lock, the pending marker,
+    // the audit log) never route through that check at all -- a project
+    // shipping ".semantic" itself as a pre-planted symlink must still be
+    // rejected before any of those CLI-level writes follow it outside the
+    // project directory.
+    let dir = temp_dir("hub_cli_semantic_symlink");
+    let real_target = temp_dir("hub_cli_semantic_symlink_target");
+
+    std::os::unix::fs::symlink(&real_target, dir.join(".semantic")).unwrap();
+
+    let output = invoke(&dir, "vector.index.create", "valid_index_create.json");
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).starts_with("ScopedStorageViolation"),
+        "{:?}",
+        output
+    );
+
+    // Nothing must have been written through the symlink into the real
+    // target directory.
+    let leaked: Vec<_> = fs::read_dir(&real_target)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .collect();
+    assert!(
+        leaked.is_empty(),
+        "a rejected invocation must not have written anything through the symlink: {leaked:?}"
+    );
+}

@@ -25,6 +25,7 @@ pub const MAX_INDEX_COUNT: usize = 256;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScopedStorageError {
     RootIsSymlink,
+    IndexFileIsSymlink,
     Io(String),
 }
 
@@ -34,6 +35,10 @@ impl std::fmt::Display for ScopedStorageError {
             ScopedStorageError::RootIsSymlink => write!(
                 f,
                 "scoped storage root is a symlink or reparse point, which could resolve outside the scoped directory"
+            ),
+            ScopedStorageError::IndexFileIsSymlink => write!(
+                f,
+                "index file is a symlink or reparse point, which could resolve outside the scoped directory"
             ),
             ScopedStorageError::Io(msg) => write!(f, "{msg}"),
         }
@@ -169,11 +174,27 @@ impl ScopedStorage {
     }
 
     /// Fallible variant of [`Self::index_path`] that rejects a symlinked
-    /// root before deriving the path. Use this (not `index_path`) on
-    /// every path that is actually read from or written to.
+    /// root OR a symlinked final `<name>.tvim` file before returning the
+    /// path. Use this (not `index_path`) on every path that is actually
+    /// read from or written to. Checking only the root's components (as
+    /// `check_root_is_not_a_symlink` does) is not enough: if the leaf
+    /// `<name>.tvim` file itself is a pre-planted symlink -- even inside
+    /// a perfectly ordinary root directory -- `turbovec::IdMapIndex::load`
+    /// would follow it via a plain `std::fs::File::open`, which
+    /// dereferences symlinks by default. A not-yet-created index file is
+    /// not a violation -- it will be a real file once `save_atomic`'s
+    /// first write completes.
     pub fn checked_index_path(&self, name: &IndexName) -> Result<PathBuf, ScopedStorageError> {
         self.check_root_is_not_a_symlink()?;
-        Ok(self.index_path(name))
+        let path = self.index_path(name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                Err(ScopedStorageError::IndexFileIsSymlink)
+            }
+            Ok(_) => Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(path),
+            Err(e) => Err(ScopedStorageError::Io(e.to_string())),
+        }
     }
 
     /// Count of currently persisted indexes, for the bounded-index-count
@@ -322,6 +343,31 @@ mod tests {
         assert_eq!(
             storage.checked_index_path(&name).unwrap_err(),
             ScopedStorageError::RootIsSymlink
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_index_path_rejects_a_symlinked_index_file_inside_a_real_root() {
+        // Regression test: check_root_is_not_a_symlink only ever inspects
+        // self.root's own components -- it never sees the <name>.tvim
+        // leaf appended afterward. A perfectly ordinary root directory
+        // containing a pre-planted symlink AT the index file's own path
+        // must still be rejected, since turbovec::IdMapIndex::load
+        // dereferences symlinks via a plain std::fs::File::open.
+        let root = temp_dir("leaf-symlink-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let outside_target = temp_dir("leaf-symlink-outside-target");
+        std::fs::write(&outside_target, b"not a real .tvim file").unwrap();
+
+        let storage = ScopedStorage::new(&root);
+        let name = IndexName::new("docs").unwrap();
+        let leaf_path = storage.index_path(&name);
+        std::os::unix::fs::symlink(&outside_target, &leaf_path).unwrap();
+
+        assert_eq!(
+            storage.checked_index_path(&name).unwrap_err(),
+            ScopedStorageError::IndexFileIsSymlink
         );
     }
 }

@@ -346,11 +346,24 @@ impl TurboVecAdapter {
         let req: SearchRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
-        check_result_count_bounds(req.k, max_results)
-            .map_err(|e| HubToolError::new("TooManyResults", e.to_string()))?;
         if req.queries.is_empty() {
             return Err(HubToolError::new("EmptyQuery", "queries must not be empty"));
         }
+        // Bound the TOTAL result count (queries.len() * k), not just k
+        // alone: turbovec allocates score/id buffers proportional to
+        // queries.len() * min(k, index.len()), and the Hub's own `hits`
+        // construction below does the same. A payload well under the
+        // input-bytes budget can still contain hundreds of thousands of
+        // small queries; checking only k left the total unbounded before
+        // ever calling into turbovec. Checked multiplication: nq is
+        // always >= 1 here, so this is at least as strict as (and, for
+        // nq > 1, strictly stricter than) the old k-only check.
+        let total_results =
+            req.queries.len().checked_mul(req.k).ok_or_else(|| {
+                HubToolError::new("TooManyResults", "queries.len() * k overflowed")
+            })?;
+        check_result_count_bounds(total_results, max_results)
+            .map_err(|e| HubToolError::new("TooManyResults", e.to_string()))?;
         let index = self.load(&name, max_dim)?;
         let dim = index.dim();
         for (i, q) in req.queries.iter().enumerate() {
@@ -904,6 +917,91 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(err.code, "VectorDimensionMismatch");
+    }
+
+    #[test]
+    fn search_rejects_a_query_batch_whose_total_result_count_exceeds_the_budget() {
+        // Regression test: only k was checked against max_results, never
+        // queries.len() * k -- a multi-query batch could request a total
+        // result count far beyond the budget while each individual k
+        // stayed under it, since turbovec allocates score/id buffers
+        // proportional to the total across all queries, not per query.
+        let mut a = adapter("total-results-budget");
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":8,"bit_width":4}"#,
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+
+        let narrow_budget = HubResourceBudget {
+            result_count: 10,
+            ..HubResourceBudget::V0_CEILING
+        };
+        // 3 queries * k=5 = 15 total results, exceeding the budget of 10
+        // even though k=5 alone is well under it.
+        let search_req = serde_json::json!({
+            "index": "docs",
+            "queries": [
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            "k": 5,
+        });
+        let err = a
+            .handle(
+                &op("vector.search"),
+                serde_json::to_vec(&search_req).unwrap().as_slice(),
+                &ctx(&narrow_budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "TooManyResults");
+    }
+
+    #[test]
+    fn search_accepts_a_query_batch_whose_total_result_count_is_within_the_budget() {
+        let mut a = adapter("total-results-budget-ok");
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":8,"bit_width":4}"#,
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+        let insert_req = serde_json::json!({
+            "index": "docs",
+            "vectors": [[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]],
+            "ids": [1],
+        });
+        a.handle(
+            &op("vector.index.insert"),
+            serde_json::to_vec(&insert_req).unwrap().as_slice(),
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+
+        let narrow_budget = HubResourceBudget {
+            result_count: 10,
+            ..HubResourceBudget::V0_CEILING
+        };
+        // 2 queries * k=5 = 10 total results, exactly at the budget.
+        let search_req = serde_json::json!({
+            "index": "docs",
+            "queries": [
+                [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ],
+            "k": 5,
+        });
+        assert!(a
+            .handle(
+                &op("vector.search"),
+                serde_json::to_vec(&search_req).unwrap().as_slice(),
+                &ctx(&narrow_budget, &caps),
+            )
+            .is_ok());
     }
 
     #[test]

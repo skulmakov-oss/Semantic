@@ -632,13 +632,114 @@ zero failures; `cargo clippy --workspace --all-targets --all-features --
 -D warnings`: 0 warnings; `cargo fmt --all`: clean; harness-check: ok;
 `git diff --check`: clean).
 
-## Codex review, round 5 (PR #1554, commit `681bdeb5`) -- clean pass
+## Correction: round 5 was NOT a clean pass (process error, self-caught)
 
-Round 5 (submitted against `681bdeb5`) came back with no new inline
-findings -- the automated review's own convention is to react instead of
-commenting when it has no suggestions. All 21 findings across rounds 1-4
-are now either fixed with regression tests or classified with documented
-reasoning (out of scope / repeat of an already-adjudicated decision).
+This report previously stated round 5 (submitted against `681bdeb5`)
+"came back with no new inline findings." That was wrong -- caused by
+querying `GET /pulls/{n}/comments` without pagination, which silently
+returned only the first page and hid one finding from round 4 and all
+five findings from round 5. The repository owner pointed out "there are
+more comments there" after this incorrect claim; re-querying with
+`--paginate` (and cross-checking against the GraphQL `reviewThreads`
+API, which exposes `isResolved`/`isOutdated` and made the gap obvious)
+surfaced the missed findings. All PR-comment queries in this task now
+use pagination. The six findings actually present (one missed from round
+4, five from round 5) are remediated below.
+
+## Codex review, round 4 addendum + round 5 (PR #1554, commits `27cb0daf`/`681bdeb5`) -- 5 confirmed, 1 doc-sync
+
+1. **P2 -- CONFIRMED (missed from round 4). Synchronize the timeout spec
+   with post-dispatch enforcement.** `docs/spec/hub/hub_adapter_contract_v0.md`
+   Section 9 still said the effective deadline is "checked exactly once"
+   and the Hub "never calls that method again once dispatch has
+   started" -- stale prose from before the round-3 post-dispatch
+   deadline recheck existed. Same underlying gap raised twice (once in
+   round 4, once again in round 5 against the doc file directly).
+   Fixed: Section 9 rewritten to describe both checks (pre-admission
+   entry, and the post-dispatch recheck that can downgrade an
+   otherwise-successful result to `DeadlineExceeded`, mirroring the
+   `OutputRejected` "effects happened, reply reports failure" precedent).
+   Docs-only, no code change.
+
+2. **P1 -- CONFIRMED, SEVERE. Reject symlinks before writing Hub
+   metadata.** The round-3/4 `ScopedStorage` symlink checks protect only
+   the TurboVec adapter's own `.tvim` files, reached from inside
+   `Hub::invoke`. This CLI module's own direct filesystem operations --
+   `acquire_project_lock` (the new project lock file), `write_pending_marker`,
+   `save_audit_trail`, and `load_audit_trail` -- never route through
+   `ScopedStorage` at all, so a project shipping `.semantic` or
+   `.semantic/hub` as a pre-planted symlink had every one of these
+   CLI-level reads/writes silently follow it, escaping the project
+   directory before the adapter's own check ever ran. Fixed: added
+   `check_dir_is_not_a_symlink` (mirrors `storage.rs`'s ancestor-walking
+   check, duplicated locally since these two crates are not otherwise
+   coupled) and wired it into all four call sites -- but deliberately
+   *not* into `write_output_atomic` itself, since that function is also
+   used for the caller-supplied `--out <file>` path, where following a
+   user-chosen symlink is legitimate CLI behavior, not an
+   attacker-planted-project risk. Regression tests:
+   `check_dir_is_not_a_symlink_rejects_a_symlinked_ancestor` (unit,
+   Unix-gated) and `invoke_rejects_a_project_whose_semantic_directory_is_a_pre_planted_symlink`
+   (end-to-end, real `smc` subprocess, Unix-gated), the latter also
+   confirming nothing is written through the symlink.
+
+3. **P1 -- CONFIRMED, SEVERE. Reject symlinked index files before
+   loading.** The round-3/4 fixes to `check_root_is_not_a_symlink` only
+   ever inspect `self.root`'s own path components -- they never see the
+   `<name>.tvim` leaf appended afterward by `index_path`. A perfectly
+   ordinary root directory containing a pre-planted symlink *at* the
+   index file's own path was therefore still followed by
+   `turbovec::IdMapIndex::load`'s plain `std::fs::File::open` (confirmed
+   against the vendored `turbovec` 0.9.0 source, which dereferences
+   symlinks by default). Fixed: `checked_index_path` now also
+   `symlink_metadata`-checks the final joined path itself, returning a
+   new distinct `ScopedStorageError::IndexFileIsSymlink` (kept separate
+   from `RootIsSymlink` for a clearer message). Regression test:
+   `checked_index_path_rejects_a_symlinked_index_file_inside_a_real_root`
+   (Unix-gated).
+
+4. **P1 -- CONFIRMED, SEVERE. Bound total search results before
+   dispatch.** `handle_search` checked only per-query `k` against
+   `max_results`; TurboVec allocates score/id buffers proportional to
+   `queries.len() * min(k, index.len())`, the total across the whole
+   batch. A payload well under the input-bytes budget can contain
+   hundreds of thousands of small queries, each requesting a `k` under
+   the per-query ceiling but summing to an enormous allocation before
+   the Hub's own post-return `output_bytes` check ever runs --
+   potentially aborting the process via OOM. Fixed: replaced the
+   per-query-only check with `queries.len().checked_mul(req.k)` checked
+   against `max_results` as a *total* ceiling (strictly stronger than
+   the old check for any batch of more than one query; identical for a
+   single-query batch, so no existing test's semantics changed).
+   Regression tests:
+   `search_rejects_a_query_batch_whose_total_result_count_exceeds_the_budget`
+   / `search_accepts_a_query_batch_whose_total_result_count_is_within_the_budget`.
+
+5. **P1 -- CONFIRMED. Reject unknown request-envelope fields.** The
+   outer `CliRequestFile` envelope struct had no
+   `#[serde(deny_unknown_fields)]`, even though the nested
+   `CliResourceBudgetOverride` and all six adapter payload structs now
+   do. The round-4 decision to leave this struct unchanged reasoned only
+   about the `capabilities` field (which does fail closed) and
+   incorrectly generalized that to "its top-level fields" -- but the
+   sibling top-level `resource_budget` field fails *open*: a misspelled
+   key (e.g. `resource_budgett`) is silently dropped, falls back to
+   `None`, and `merge_budget(None)` substitutes the single most
+   permissive budget on every dimension (`V0_CEILING`) -- the identical
+   fail-open-to-a-permissive-default pattern already rated P2 and fixed
+   one struct layer down. Fixed: added `#[serde(deny_unknown_fields)]` to
+   `CliRequestFile` (no `#[serde(flatten)]` used, conflict-free).
+   Regression test: `request_envelope_rejects_an_unknown_top_level_field`.
+
+All fixes verified independently before implementation (4 of 5 via a
+dedicated verification workflow; one -- the search-result-bound finding
+-- verified by direct code reading after that workflow's agent hit a
+session-usage limit mid-run). Full local gates re-run and green (`cargo
+test --workspace --all-features`: zero failures, including new
+Unix-gated tests compiled out on this Windows dev machine but exercised
+on ubuntu-latest/macos CI; `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`: 0 warnings; `cargo fmt --all`: clean;
+harness-check: ok; `git diff --check`: clean).
 
 ## Post-review-loop hardening: close the two round-4 out-of-scope findings
 
@@ -703,10 +804,13 @@ ok; `git diff --check`: clean).
 
 ## Remaining before merge
 
-- Push this remediation, confirm CI goes green on the new head, post a
-  brief note on the PR describing the owner-directed hardening (not a
-  Codex-finding reply, since Codex did not raise this in round 5), and
-  request one final review pass.
-- If that pass is clean, stop for explicit repository-owner merge
-  approval (already granted, conditional on a clean review pass) before
-  squash-merging.
+- Push this remediation (the corrected round-4/5 fixes plus the earlier
+  owner-directed concurrency-lock hardening), confirm CI goes green on
+  the new head, reply to all 6 round-4/5 review threads with
+  classifications (using paginated queries this time), and request
+  another review pass -- using paginated queries to confirm its result
+  this time.
+- If that pass is genuinely clean (verified via paginated REST query
+  and the GraphQL `reviewThreads` unresolved-count, not just the first
+  page), stop for explicit repository-owner merge approval (already
+  granted, conditional on a clean review pass) before squash-merging.
