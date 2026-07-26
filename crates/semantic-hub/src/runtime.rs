@@ -267,12 +267,32 @@ impl Hub {
                     )));
                 }
                 let worker_ref = self.workers.get(&tool.tool_id).expect("worker present");
-                if let Err(reason) = worker_ref.validate_reply(&request.operation_id, &bytes) {
-                    let _ = health.report_protocol_violation();
-                    return Err(HubFault::ProtocolViolation(reason));
+                // `validate_reply` is adapter-overridable code, exactly
+                // like `handle` -- it must be panic-contained the same
+                // way. Without this, a validator bug or assertion panic
+                // would escape `Hub::invoke` entirely (crashing the whole
+                // `smc` process) before worker state, concurrency
+                // accounting, or the audit record were ever finalized,
+                // violating `invoke`'s own documented guarantee to
+                // always return a `HubReply`.
+                let validation_outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+                    worker_ref.validate_reply(&request.operation_id, &bytes)
+                }));
+                match validation_outcome {
+                    Ok(Ok(())) => {
+                        let _ = health.mark_ready();
+                        Ok(bytes)
+                    }
+                    Ok(Err(reason)) => {
+                        let _ = health.report_protocol_violation();
+                        Err(HubFault::ProtocolViolation(reason))
+                    }
+                    Err(panic_payload) => {
+                        let message = panic_message(&panic_payload);
+                        let _ = health.report_crash();
+                        Err(HubFault::WorkerPanicked(message))
+                    }
                 }
-                let _ = health.mark_ready();
-                Ok(bytes)
             }
             Ok(Err(tool_error)) => {
                 let _ = health.mark_ready();
@@ -514,6 +534,12 @@ mod tests {
                         HubDeterminismClass::Deterministic,
                         false,
                     ),
+                    HubOperationDescriptor::new(
+                        HubOperationId::new("test.panic-in-validate").unwrap(),
+                        [HubCapability::CpuCompute],
+                        HubDeterminismClass::Deterministic,
+                        false,
+                    ),
                 ],
                 resource_ceiling: crate::resource::HubResourceBudget::V0_CEILING,
                 adapter_provenance: "test-only fault injection tool".into(),
@@ -555,6 +581,7 @@ mod tests {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     Ok(b"ok".to_vec())
                 }
+                "test.panic-in-validate" => Ok(b"ok".to_vec()),
                 other => Err(HubToolError::new("UnknownOperation", other)),
             }
         }
@@ -566,6 +593,9 @@ mod tests {
         ) -> Result<(), String> {
             if operation_id.as_str() == "test.protocol-violation" {
                 return Err("forced protocol violation for test".into());
+            }
+            if operation_id.as_str() == "test.panic-in-validate" {
+                panic!("intentional validate_reply panic");
             }
             let _ = payload;
             Ok(())
@@ -767,5 +797,26 @@ mod tests {
         let reply = hub.invoke(request, None);
         assert!(matches!(reply.status, HubReplyStatus::ToolFailed(_)));
         assert_eq!(reply.status.fault().unwrap().code(), "DeadlineExceeded");
+    }
+
+    #[test]
+    fn a_panic_inside_validate_reply_is_contained_the_same_way_as_a_panic_inside_handle() {
+        // Regression test: validate_reply is adapter-overridable code,
+        // exactly like handle, but was previously called outside
+        // catch_unwind entirely -- a panicking validator would escape
+        // Hub::invoke and crash the whole process (this test function
+        // itself would fail with "test panicked" instead of a clean
+        // assertion failure if the containment fix were missing).
+        let mut hub = hub_with_fault_injection_tool();
+        let reply = hub.invoke(request_for("test.panic-in-validate", granted()), None);
+        assert!(matches!(reply.status, HubReplyStatus::Crashed(_)));
+        assert_eq!(reply.status.fault().unwrap().code(), "WorkerPanicked");
+        // The panic must not have poisoned the Hub: a second, unrelated
+        // invocation still completes normally.
+        let second = hub.invoke(request_for("test.succeed", granted()), None);
+        assert!(
+            matches!(second.status, HubReplyStatus::Success)
+                || matches!(second.status, HubReplyStatus::Rejected(_))
+        );
     }
 }

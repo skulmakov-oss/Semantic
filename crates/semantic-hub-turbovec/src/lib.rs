@@ -416,6 +416,17 @@ impl TurboVecAdapter {
             }
             Some(ids)
         } else {
+            // SearchRequest is shared by vector.search and
+            // vector.search.filtered; a caller mistakenly setting
+            // allowed_ids on the unfiltered operation must not have it
+            // silently discarded -- that would return hits outside what
+            // the caller's own request declared it wanted restricted to.
+            if req.allowed_ids.is_some() {
+                return Err(HubToolError::new(
+                    "UnexpectedFilter",
+                    "vector.search does not accept allowed_ids -- use vector.search.filtered instead",
+                ));
+            }
             None
         };
 
@@ -756,6 +767,52 @@ mod tests {
             .unwrap();
         let search_again: SearchReply = serde_json::from_slice(&search_again).unwrap();
         assert!(!search_again.hits[0].iter().any(|h| h.external_id == 20));
+    }
+
+    #[test]
+    fn plain_search_rejects_an_allowed_ids_field_instead_of_silently_ignoring_it() {
+        // Regression test: vector.search and vector.search.filtered share
+        // SearchRequest. A caller mistakenly setting allowed_ids on the
+        // unfiltered vector.search previously had it silently discarded,
+        // so the invocation succeeded with hits outside the allowlist
+        // the caller's own request declared -- surprising, not just
+        // permissive, since the field was accepted but its stated intent
+        // was ignored.
+        let mut a = adapter("plain-search-with-filter");
+        let budget = HubResourceBudget::V0_CEILING;
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":8,"bit_width":4}"#,
+            &ctx(&budget, &caps),
+        )
+        .unwrap();
+        let insert_req = serde_json::json!({
+            "index": "docs",
+            "vectors": unit_vectors(2, 8),
+            "ids": [1, 2],
+        });
+        a.handle(
+            &op("vector.index.insert"),
+            serde_json::to_vec(&insert_req).unwrap().as_slice(),
+            &ctx(&budget, &caps),
+        )
+        .unwrap();
+
+        let search_req = serde_json::json!({
+            "index": "docs",
+            "queries": [unit_vectors(1, 8)[0].clone()],
+            "k": 1,
+            "allowed_ids": [1],
+        });
+        let err = a
+            .handle(
+                &op("vector.search"),
+                serde_json::to_vec(&search_req).unwrap().as_slice(),
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "UnexpectedFilter");
     }
 
     #[test]

@@ -434,14 +434,19 @@ vocabulary (`request_id`, `session_id`, `caller_identity`, `tool_id`,
 string): `\` -> `\\`, tab -> `\t`, newline -> `\n`. Every other field is
 rendered from a fixed `Display` implementation that cannot itself contain a
 tab, newline, or backslash, so it is written and read back unescaped.
-`capabilities_granted` decodes only the eleven non-sensitive capability
-names (Section 4); the decoder's name table does not include the nine
-sensitive names.
+`capabilities_granted` decodes all twenty capability names (Section 4),
+including the nine sensitive ones -- a request may *grant* a sensitive
+capability even though admission never lets it satisfy an operation's
+required set, and the audit trail records that grant as evidence of what
+was asked for, not just what was honored. The decoder's name table is
+exhaustive, not limited to the eleven non-sensitive names.
 
 Sequence numbers must strictly increase line-to-line (`sequence <=
 previous_sequence` is rejected as `NonMonotonicSequence`; a freshly parsed
 trail's first record has no such constraint). `HubAuditTrail::next_sequence()`
-returns `0` for an empty trail, `last.sequence + 1` otherwise;
+returns `Some(0)` for an empty trail, `Some(last.sequence + 1)` otherwise,
+or `None` if `last.sequence` is already `u64::MAX` (sequence space
+exhausted -- checked arithmetic, not a wrapping or panicking `+ 1`);
 `Hub::seed_next_sequence(n)` lets an embedder (the CLI starts a fresh,
 empty in-memory `Hub` every process invocation) resume a persisted log's
 numbering instead of restarting at 0 each run.

@@ -942,14 +942,62 @@ the fixture line-ending guard after editing `valid_index_create.json`;
 0 warnings; `cargo fmt --all`: clean; harness-check: ok; `git diff
 --check`: clean).
 
+## Codex review, round 9 (PR #1554, commit `703036c0`) -- 4 confirmed
+
+1. **P1 -- CONFIRMED, SEVERE. Catch panics from reply validators.**
+   `validate_reply` is adapter-overridable code, exactly like `handle`,
+   but was called *outside* the `catch_unwind` boundary wrapping
+   `handle` -- a validator panic would escape `Hub::invoke` entirely,
+   crashing the whole `smc` process before worker state, concurrency
+   accounting, or the audit record were finalized, violating `invoke`'s
+   own documented "always returns a `HubReply`" guarantee. Fixed:
+   wrapped the `validate_reply` call in its own `catch_unwind`,
+   classifying a panic there identically to a `handle` panic
+   (`WorkerPanicked`/`Crashed`, worker quarantine bookkeeping via
+   `report_crash`). Regression test:
+   `a_panic_inside_validate_reply_is_contained_the_same_way_as_a_panic_inside_handle`,
+   using a new test-only `test.panic-in-validate` fault-injection
+   operation whose `handle` succeeds but whose `validate_reply` panics.
+2. **P2 -- CONFIRMED. Reject filters on plain search.** `vector.search`
+   and `vector.search.filtered` share `SearchRequest`; a caller
+   mistakenly setting `allowed_ids` on the unfiltered operation had it
+   silently discarded, so the invocation succeeded with hits outside
+   what the caller's own request declared it wanted restricted to.
+   Fixed: `handle_search` now rejects with a new `UnexpectedFilter` error
+   when `!filtered && req.allowed_ids.is_some()`. Regression test:
+   `plain_search_rejects_an_allowed_ids_field_instead_of_silently_ignoring_it`.
+3. **P2 -- CONFIRMED. Reject exhausted audit sequence numbers.**
+   `HubAuditTrail::next_sequence()` computed `last.sequence + 1` with
+   plain addition -- at `u64::MAX` this panics in an overflow-checked
+   build or wraps to `0` in release, violating the trail's own
+   monotonic-sequence invariant. Astronomically unlikely in practice
+   (~1.8x10^19 invocations) but the checked arithmetic costs nothing.
+   Fixed: `next_sequence()` now returns `Option<u64>` (`None` means the
+   sequence space is exhausted); `cmd_hub_invoke`'s one call site now
+   surfaces `None` as a controlled `AuditProvenanceFailure` instead of
+   ever reaching the addition. `docs/spec/hub/hub_api_v0.md` updated to
+   match (also fixing a second, unrelated stale claim in the same
+   section: the audit decoder was described as rejecting the nine
+   sensitive capability names, though round 1 already made it exhaustive
+   over all twenty). Regression test:
+   `next_sequence_is_none_when_the_last_record_is_at_u64_max`.
+4. **P2 -- CONFIRMED (docs-only, folded into fix 3 above).** "Document
+   sensitive capability audit decoding correctly" -- the same stale
+   `hub_api_v0.md` claim fix 3's doc update also corrects.
+
+All fixes verified by direct code reading. Full local gates re-run and
+green (`cargo test --workspace --all-features`: 304 test result blocks,
+zero failures; `cargo clippy --workspace --all-targets --all-features --
+-D warnings`: 0 warnings; `cargo fmt --all`: clean; harness-check: ok;
+`git diff --check`: clean).
+
 ## Remaining before merge
 
 - Push this remediation, confirm CI goes green on the new head, reply to
-  all 4 round-8 review threads with classifications, and request another
-  review pass -- checked with paginated REST queries AND the GraphQL
-  `reviewThreads` last-comment-authorship check together (the method
-  that actually caught round 8), not a single unpaginated call, before
-  declaring it clean.
+  all 4 round-9 review threads with classifications, and request another
+  review pass -- paginated REST queries and the GraphQL `reviewThreads`
+  last-comment-authorship check together, every time, not a single
+  unpaginated call, before declaring it clean.
 - If that pass is genuinely clean, stop for explicit repository-owner
   merge approval (already granted, conditional on a clean review pass)
   before squash-merging.

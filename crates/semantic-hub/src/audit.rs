@@ -468,8 +468,18 @@ impl HubAuditTrail {
         }
     }
 
-    pub fn next_sequence(&self) -> u64 {
-        self.records.last().map(|r| r.sequence + 1).unwrap_or(0)
+    /// `None` means the sequence space is exhausted (the last record's
+    /// sequence is already `u64::MAX`) -- the caller must treat this as a
+    /// hard failure, not silently wrap to `0` (which would violate the
+    /// trail's own monotonic-sequence invariant) or panic (in an
+    /// overflow-checked build). Reaching this is astronomically unlikely
+    /// in practice, but the checked arithmetic costs nothing and this
+    /// type's whole purpose is never accepting a silently-wrong sequence.
+    pub fn next_sequence(&self) -> Option<u64> {
+        self.records
+            .last()
+            .map(|r| r.sequence.checked_add(1))
+            .unwrap_or(Some(0))
     }
 
     pub fn push(&mut self, record: HubAuditRecord) {
@@ -685,9 +695,19 @@ mod tests {
     #[test]
     fn next_sequence_is_zero_for_empty_trail_and_increments_after_push() {
         let mut trail = HubAuditTrail::new();
-        assert_eq!(trail.next_sequence(), 0);
+        assert_eq!(trail.next_sequence(), Some(0));
         trail.push(sample_record(0));
-        assert_eq!(trail.next_sequence(), 1);
+        assert_eq!(trail.next_sequence(), Some(1));
+    }
+
+    #[test]
+    fn next_sequence_is_none_when_the_last_record_is_at_u64_max() {
+        // Regression test: a plain `+ 1` would panic in an
+        // overflow-checked build or silently wrap to 0 in release,
+        // violating the trail's own monotonic-sequence invariant.
+        let mut trail = HubAuditTrail::new();
+        trail.push(sample_record(u64::MAX));
+        assert_eq!(trail.next_sequence(), None);
     }
 
     #[test]

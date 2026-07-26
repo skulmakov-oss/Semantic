@@ -596,7 +596,12 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
     let _project_lock = acquire_project_lock()?;
 
     let mut persisted_trail = load_audit_trail(&audit_path)?;
-    hub.seed_next_sequence(persisted_trail.next_sequence());
+    let next_sequence = persisted_trail.next_sequence().ok_or_else(|| {
+        "AuditProvenanceFailure: audit sequence numbers exhausted (the last record is already \
+         at u64::MAX) -- rotate or archive the audit log to continue"
+            .to_string()
+    })?;
+    hub.seed_next_sequence(next_sequence);
 
     // Reject a reused request_id before writing anything: `find_by_request`
     // only ever returns the *first* matching record, so a second audited
