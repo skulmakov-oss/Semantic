@@ -60,6 +60,7 @@ pub fn descriptor(resource_ceiling: HubResourceBudget) -> HubToolDescriptor {
                 op("vector.index.create"),
                 [
                     HubCapability::VectorIndexCreate,
+                    HubCapability::PrivateStorageRead,
                     HubCapability::PrivateStorageWrite,
                 ],
                 HubDeterminismClass::Deterministic,
@@ -313,10 +314,17 @@ impl TurboVecAdapter {
         }))
     }
 
-    fn handle_remove(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
+    fn handle_remove(
+        &self,
+        payload: &[u8],
+        max_vectors: usize,
+        max_dim: usize,
+    ) -> Result<Vec<u8>, HubToolError> {
         let req: RemoveRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
+        check_vector_batch_bounds(req.ids.len(), max_vectors)
+            .map_err(|e| HubToolError::new("TooManyVectors", e.to_string()))?;
         let mut index = self.load(&name, max_dim)?;
         let mut removed = Vec::new();
         let mut not_found = Vec::new();
@@ -473,7 +481,7 @@ impl HubTool for TurboVecAdapter {
             "vector.index.create" => self.handle_create(payload, max_dim),
             "vector.index.describe" => self.handle_describe(payload, max_dim),
             "vector.index.insert" => self.handle_insert(payload, max_vectors, max_dim),
-            "vector.index.remove" => self.handle_remove(payload, max_dim),
+            "vector.index.remove" => self.handle_remove(payload, max_vectors, max_dim),
             "vector.search" => self.handle_search(payload, max_results, false, max_dim),
             "vector.search.filtered" => self.handle_search(payload, max_results, true, max_dim),
             "vector.index.reset" => self.handle_reset(payload, max_dim),
@@ -892,6 +900,85 @@ mod tests {
             .handle(&op("vector.search"), raw, &ctx(&budget, &caps))
             .unwrap_err();
         assert_eq!(err.code, "MalformedInput");
+    }
+
+    #[test]
+    fn remove_rejects_a_batch_exceeding_the_admitted_item_count_budget() {
+        // Regression test: handle_remove previously received only max_dim
+        // and never checked req.ids.len() against the admitted
+        // index_item_count budget at all, unlike handle_insert's
+        // analogous check_vector_batch_bounds call -- a request admitted
+        // with a tiny item budget could still remove an unbounded number
+        // of ids in one call.
+        let mut a = adapter("remove-item-budget");
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":8,"bit_width":4}"#,
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+        let insert_req = serde_json::json!({
+            "index": "docs",
+            "vectors": unit_vectors(4, 8),
+            "ids": [1, 2, 3, 4],
+        });
+        a.handle(
+            &op("vector.index.insert"),
+            serde_json::to_vec(&insert_req).unwrap().as_slice(),
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+
+        let narrow_budget = HubResourceBudget {
+            index_item_count: 2,
+            ..HubResourceBudget::V0_CEILING
+        };
+        let remove_req = serde_json::json!({"index": "docs", "ids": [1, 2, 3, 4]});
+        let err = a
+            .handle(
+                &op("vector.index.remove"),
+                serde_json::to_vec(&remove_req).unwrap().as_slice(),
+                &ctx(&narrow_budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "TooManyVectors");
+    }
+
+    #[test]
+    fn remove_within_the_admitted_item_count_budget_is_accepted() {
+        let mut a = adapter("remove-item-budget-ok");
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":8,"bit_width":4}"#,
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+        let insert_req = serde_json::json!({
+            "index": "docs",
+            "vectors": unit_vectors(4, 8),
+            "ids": [1, 2, 3, 4],
+        });
+        a.handle(
+            &op("vector.index.insert"),
+            serde_json::to_vec(&insert_req).unwrap().as_slice(),
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+
+        let narrow_budget = HubResourceBudget {
+            index_item_count: 2,
+            ..HubResourceBudget::V0_CEILING
+        };
+        let remove_req = serde_json::json!({"index": "docs", "ids": [1, 2]});
+        assert!(a
+            .handle(
+                &op("vector.index.remove"),
+                serde_json::to_vec(&remove_req).unwrap().as_slice(),
+                &ctx(&narrow_budget, &caps),
+            )
+            .is_ok());
     }
 
     #[test]

@@ -732,8 +732,19 @@ fn cmd_hub_audit(args: &[String]) -> Result<(), String> {
             // Distinguish "never attempted" from "attempted but never
             // durably audited" (see `write_pending_marker`'s doc comment)
             // instead of reporting a bare, potentially misleading
-            // UnknownRequest for the latter case.
-            if pending_marker_path(&request_id).is_file() {
+            // UnknownRequest for the latter case. Checked for symlinks
+            // the same way the lock/audit-log paths are: without this, a
+            // pre-planted symlink at the pending directory or the marker
+            // leaf itself would be silently followed by `is_file()`,
+            // letting an external target be mistaken for durable
+            // evidence and reported as PendingUnresolved instead of the
+            // real ScopedStorageViolation.
+            let marker_path = pending_marker_path(&request_id);
+            if let Some(dir) = marker_path.parent() {
+                check_dir_is_not_a_symlink(dir)?;
+            }
+            check_file_is_not_a_symlink(&marker_path)?;
+            if marker_path.is_file() {
                 return Err(format!(
                     "PendingUnresolved: an invocation for request_id '{request_id_raw}' was \
                      started but never durably audited (a crash or audit-write failure during \

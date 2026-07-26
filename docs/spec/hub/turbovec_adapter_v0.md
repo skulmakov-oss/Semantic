@@ -58,13 +58,13 @@ tool descriptor in `src/lib.rs`:
 
 | Operation | Required capabilities | Determinism class | Mutates state |
 | --- | --- | --- | --- |
-| `vector.index.create` | `VectorIndexCreate`, `PrivateStorageWrite` | `Deterministic` | yes |
+| `vector.index.create` | `VectorIndexCreate`, `PrivateStorageRead`, `PrivateStorageWrite` | `Deterministic` | yes |
 | `vector.index.describe` | `VectorIndexRead`, `PrivateStorageRead` | `Deterministic` | no |
 | `vector.index.insert` | `VectorIndexMutate`, `PrivateStorageRead`, `PrivateStorageWrite` | `DeterministicWithSeed` | yes |
 | `vector.index.remove` | `VectorIndexMutate`, `PrivateStorageRead`, `PrivateStorageWrite` | `Deterministic` | yes |
 | `vector.search` | `VectorSearch`, `PrivateStorageRead` | `DeterministicWithSeed` | no |
 | `vector.search.filtered` | `VectorFilteredSearch`, `PrivateStorageRead` | `DeterministicWithSeed` | no |
-| `vector.index.reset` | `VectorIndexMutate`, `PrivateStorageWrite` | `Deterministic` | yes |
+| `vector.index.reset` | `VectorIndexMutate`, `PrivateStorageRead`, `PrivateStorageWrite` | `Deterministic` | yes |
 
 `DeterministicWithSeed` marks the three operations that run a turbovec
 floating-point kernel (`insert`, `search`, `search.filtered`) -- see Section
@@ -169,10 +169,10 @@ corrupting the index (Section 6).
 `MAX_INDEX_COUNT` is counted by counting `.tvim` files in the scoped
 directory; a read error counts as zero rather than failing the caller, since
 this is only an admission ceiling, not a source of truth. Per-request batch
-bounds on vector count (insert) and result count `k` (search) are also
-enforced by this adapter ahead of any turbovec call, so an attacker-
-controlled count in the request cannot drive unbounded allocation before
-validation runs.
+bounds on id/vector count (insert, remove) and on total result count
+(`queries.len() * k`, not `k` alone -- search) are also enforced by this
+adapter ahead of any turbovec call, so an attacker-controlled count in the
+request cannot drive unbounded allocation before validation runs.
 
 ## 6. Vector and query validation
 

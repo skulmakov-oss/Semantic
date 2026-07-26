@@ -359,7 +359,7 @@ fn same_request_repeated_produces_deterministic_search_ranking() {
 fn create_rejects_dimension_exceeding_the_admitted_budget() {
     let dir = temp_dir("hub_cli_dim_budget");
     let req = serde_json::json!({
-        "capabilities": ["VectorIndexCreate", "PrivateStorageWrite"],
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
         "resource_budget": {"vector_dimensions": 8},
         "payload": {"index": "docs", "dim": 4096, "bit_width": 4}
     });
@@ -423,7 +423,7 @@ fn granting_a_sensitive_capability_survives_audit_round_trip() {
     // log for every subsequent invocation.
     let dir = temp_dir("hub_cli_sensitive_cap_audit");
     let req = serde_json::json!({
-        "capabilities": ["VectorIndexCreate", "PrivateStorageWrite", "NetworkAccess"],
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite", "NetworkAccess"],
         "payload": {"index": "sensitive-cap-docs", "dim": 8, "bit_width": 4}
     });
     let input = dir.join("create_with_sensitive_cap.json");
@@ -561,7 +561,7 @@ fn a_reused_request_id_is_rejected_and_does_not_append_a_second_audit_record() {
     let request_id = "req-reused-once";
     let req = serde_json::json!({
         "request_id": request_id,
-        "capabilities": ["VectorIndexCreate", "PrivateStorageWrite"],
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
         "payload": {"index": "dup-id-docs", "dim": 8, "bit_width": 4}
     });
     let input = dir.join("create_with_fixed_id.json");
@@ -875,6 +875,37 @@ fn invoke_rejects_a_pre_planted_symlinked_audit_log_leaf() {
     std::os::unix::fs::symlink(&forged_log, &audit_log).unwrap();
 
     let output = invoke(&dir, "vector.index.describe", "valid_index_describe.json");
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).starts_with("ScopedStorageViolation"),
+        "{:?}",
+        output
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn audit_lookup_rejects_a_symlinked_pending_marker_leaf() {
+    // Regression test: cmd_hub_audit's own pending-marker existence
+    // check used a bare `.is_file()` with none of the directory/leaf
+    // symlink checks applied to the lock, pending-marker write, and
+    // audit log elsewhere in this module. A pre-planted symlink at a
+    // pending marker's own path must be rejected as a
+    // ScopedStorageViolation, not silently followed and reported as a
+    // misleading PendingUnresolved.
+    let dir = temp_dir("hub_cli_audit_pending_leaf_symlink");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+
+    let pending_dir = dir.join(".semantic").join("hub").join("pending");
+    fs::create_dir_all(&pending_dir).unwrap();
+    let request_id = "req-pending-leaf-symlink";
+    let marker_path = pending_dir.join(format!("{request_id}.json"));
+    let outside_target = temp_dir("hub_cli_audit_pending_leaf_symlink_target");
+    let forged_marker = outside_target.join("forged.json");
+    fs::write(&forged_marker, b"{}").unwrap();
+    std::os::unix::fs::symlink(&forged_marker, &marker_path).unwrap();
+
+    let output = smc_in(&dir, &["hub", "audit", "--request", request_id]);
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).starts_with("ScopedStorageViolation"),

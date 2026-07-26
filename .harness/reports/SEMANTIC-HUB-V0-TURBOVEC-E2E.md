@@ -882,13 +882,74 @@ after editing `valid_index_reset.json`; `cargo clippy --workspace
 --all-targets --all-features -- -D warnings`: 0 warnings; `cargo fmt
 --all`: clean; harness-check: ok; `git diff --check`: clean).
 
+## Codex review, round 8 (PR #1554, commit `699280ba`) -- 4 confirmed, 0 repeats
+
+The repository owner asked for a re-check after the round-6/7 remediation
+was reported; an exhaustive parallel sweep (paginated REST comments
+cross-referenced against replies, GraphQL `reviewThreads` last-comment
+authorship, a check for any PR participant other than the owner and
+Codex, PR timeline events, and check-run annotations) confirmed round 8
+had landed (4 new findings, all genuinely new, none repeats) and found
+nothing else out of place (no other participants, no unusual timeline
+events, no hidden check-run content). All 4 verified directly against
+current source before fixing.
+
+1. **P2 -- CONFIRMED. Require read capability before probing storage on
+   create.** `handle_create` calls `ScopedStorage::exists` and
+   `index_count` (both stat/enumerate the scoped directory) before its
+   own `DimensionExceedsBudget` check, but `vector.index.create`'s
+   descriptor declared only `VectorIndexCreate` + `PrivateStorageWrite`
+   -- the same capability gap already fixed once for `reset` (round 6).
+   Fixed: added `PrivateStorageRead` to `create`'s required capabilities;
+   updated `valid_index_create.json` and three inline CLI-test requests
+   that previously granted only the insufficient pair.
+2. **P1 -- CONFIRMED, SEVERE. Bound remove batches by the index item
+   budget.** `handle_remove` received only `max_dim` and never checked
+   `req.ids.len()` against `resource_budget.index_item_count` at all --
+   unlike `handle_insert`'s analogous `check_vector_batch_bounds` call --
+   so a request admitted with a tiny item budget could still remove an
+   unbounded number of ids in one call, despite `IndexItemCount` being
+   documented hard-enforced. Fixed: threaded `max_vectors` into
+   `handle_remove` and added the same `check_vector_batch_bounds` check
+   already used by insert. Regression tests:
+   `remove_rejects_a_batch_exceeding_the_admitted_item_count_budget` /
+   `remove_within_the_admitted_item_count_budget_is_accepted`.
+3. **P2 -- CONFIRMED. Synchronize the reset capability table.**
+   `docs/spec/hub/turbovec_adapter_v0.md`'s capability table still
+   listed only `VectorIndexMutate`, `PrivateStorageWrite` for `reset`
+   after round 6 added `PrivateStorageRead` to the code -- and the
+   `create` row needed the same update for finding 1 above. Fixed both
+   table rows and the "Limits" section's prose to also mention the new
+   remove/search-total bounds. Docs-only.
+4. **P2 -- CONFIRMED. Validate pending marker paths before following
+   them.** `cmd_hub_audit`'s own pending-marker lookup used a bare
+   `pending_marker_path(&request_id).is_file()` with none of the
+   directory/leaf symlink checks applied everywhere else in this module
+   -- a pre-planted symlink at the pending directory or the marker's own
+   leaf path would be silently followed, letting an external target be
+   mistaken for durable evidence and reported as a misleading
+   `PendingUnresolved` instead of the real `ScopedStorageViolation`.
+   Fixed: added the same `check_dir_is_not_a_symlink`/
+   `check_file_is_not_a_symlink` pair used elsewhere, checked before the
+   `is_file()` lookup. Regression test:
+   `audit_lookup_rejects_a_symlinked_pending_marker_leaf` (end-to-end,
+   real `smc` subprocess).
+
+All fixes verified by direct code reading. Full local gates re-run and
+green (`cargo test --workspace --all-features`: zero failures, including
+the fixture line-ending guard after editing `valid_index_create.json`;
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`:
+0 warnings; `cargo fmt --all`: clean; harness-check: ok; `git diff
+--check`: clean).
+
 ## Remaining before merge
 
 - Push this remediation, confirm CI goes green on the new head, reply to
-  all 6 round-6/7 review threads with classifications, and request
-  another review pass -- checked with paginated REST queries and the
-  GraphQL `reviewThreads` unresolved-count both, not a single unpaginated
-  call, before declaring it clean.
+  all 4 round-8 review threads with classifications, and request another
+  review pass -- checked with paginated REST queries AND the GraphQL
+  `reviewThreads` last-comment-authorship check together (the method
+  that actually caught round 8), not a single unpaginated call, before
+  declaring it clean.
 - If that pass is genuinely clean, stop for explicit repository-owner
   merge approval (already granted, conditional on a clean review pass)
   before squash-merging.
