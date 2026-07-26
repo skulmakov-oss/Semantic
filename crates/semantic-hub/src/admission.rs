@@ -70,6 +70,20 @@ pub fn admit(
             MAX_PAYLOAD_BYTES
         )));
     }
+    // The budget check below (step 5) only verifies the *requested budget
+    // itself* does not exceed the tool/global ceiling -- it does not check
+    // that the actual payload conforms to the caller's own declared
+    // input_bytes. Without this, a caller narrowing input_bytes below
+    // MAX_PAYLOAD_BYTES got no enforcement at all: any payload under the
+    // global ceiling was silently dispatched regardless of what budget was
+    // requested for it.
+    if request.payload.len() as u64 > request.resource_budget.input_bytes {
+        return Err(HubFault::InputRejected(format!(
+            "payload {} bytes exceeds the request's own declared input_bytes budget {}",
+            request.payload.len(),
+            request.resource_budget.input_bytes
+        )));
+    }
     if ambient.already_cancelled {
         return Err(HubFault::Cancelled);
     }
@@ -228,6 +242,31 @@ mod tests {
             admit(&reg, &req, base_ambient()).unwrap_err(),
             HubFault::InputRejected(_)
         ));
+    }
+
+    #[test]
+    fn payload_exceeding_the_requests_own_input_bytes_budget_is_rejected() {
+        // Regression test: a caller narrowing resource_budget.input_bytes
+        // below MAX_PAYLOAD_BYTES previously got no enforcement at all --
+        // only the requested *budget itself* was checked against the
+        // ceiling, never the actual payload against that narrower budget.
+        let reg = registry_with_turbovec();
+        let mut req = base_request(HubCapabilitySet::empty().grant(HubCapability::VectorSearch));
+        req.payload = vec![0u8; 100];
+        req.resource_budget.input_bytes = 10;
+        assert!(matches!(
+            admit(&reg, &req, base_ambient()).unwrap_err(),
+            HubFault::InputRejected(_)
+        ));
+    }
+
+    #[test]
+    fn payload_within_the_requests_own_input_bytes_budget_is_admitted() {
+        let reg = registry_with_turbovec();
+        let mut req = base_request(HubCapabilitySet::empty().grant(HubCapability::VectorSearch));
+        req.payload = vec![0u8; 10];
+        req.resource_budget.input_bytes = 100;
+        assert!(admit(&reg, &req, base_ambient()).is_ok());
     }
 
     #[test]

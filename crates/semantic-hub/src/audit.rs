@@ -333,20 +333,17 @@ impl HubAuditRecord {
         let mut capabilities_granted = Vec::new();
         if !caps_raw.is_empty() {
             for part in caps_raw.split(';') {
-                capabilities_granted.push(match part {
-                    "VectorIndexCreate" => HubCapability::VectorIndexCreate,
-                    "VectorIndexRead" => HubCapability::VectorIndexRead,
-                    "VectorIndexMutate" => HubCapability::VectorIndexMutate,
-                    "VectorSearch" => HubCapability::VectorSearch,
-                    "VectorFilteredSearch" => HubCapability::VectorFilteredSearch,
-                    "VectorIndexPersist" => HubCapability::VectorIndexPersist,
-                    "CpuCompute" => HubCapability::CpuCompute,
-                    "MemoryAllocateBounded" => HubCapability::MemoryAllocateBounded,
-                    "PrivateStorageRead" => HubCapability::PrivateStorageRead,
-                    "PrivateStorageWrite" => HubCapability::PrivateStorageWrite,
-                    "ClockMonotonic" => HubCapability::ClockMonotonic,
-                    _ => return Err(AuditParseError::Malformed("capabilities_granted")),
-                });
+                // Reuse HubCapability::parse's exhaustive list (all 20
+                // variants, sensitive included) rather than a hand-written
+                // partial match -- a request that grants (not just
+                // requires) a sensitive capability such as NetworkAccess is
+                // still recorded verbatim in the audit trail even though
+                // admission denies using it, and a parser that only
+                // recognized non-sensitive names corrupted the whole audit
+                // log on the very next read.
+                let cap = HubCapability::parse(part)
+                    .ok_or(AuditParseError::Malformed("capabilities_granted"))?;
+                capabilities_granted.push(cap);
             }
         }
 
@@ -575,6 +572,32 @@ mod tests {
     #[test]
     fn single_record_round_trips_through_canonical_line() {
         let record = sample_record(0);
+        let line = record.to_canonical_line();
+        let parsed = HubAuditRecord::from_canonical_line(&line, None).unwrap();
+        assert_eq!(parsed, record);
+    }
+
+    #[test]
+    fn a_record_granting_every_sensitive_capability_round_trips() {
+        // Regression test: a caller can grant (not just require) a
+        // sensitive capability such as NetworkAccess -- admission denies
+        // using it, but HubCapabilitySet::grant() does not filter it out
+        // of what gets recorded in the audit trail. An earlier version of
+        // this parser only recognized the 11 non-sensitive names, so any
+        // request granting one sensitive capability corrupted the whole
+        // audit log for every subsequent read.
+        let mut record = sample_record(0);
+        record.capabilities_granted = vec![
+            HubCapability::NetworkAccess,
+            HubCapability::ArbitraryFilesystemRead,
+            HubCapability::ArbitraryFilesystemWrite,
+            HubCapability::ProcessSpawn,
+            HubCapability::DeviceAccess,
+            HubCapability::EnvironmentRead,
+            HubCapability::SecretRead,
+            HubCapability::ProjectMutation,
+            HubCapability::SemanticStateMutation,
+        ];
         let line = record.to_canonical_line();
         let parsed = HubAuditRecord::from_canonical_line(&line, None).unwrap();
         assert_eq!(parsed, record);

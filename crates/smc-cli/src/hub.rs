@@ -28,11 +28,26 @@ use semantic_hub::{
 use semantic_hub_turbovec::TurboVecAdapter;
 
 /// Bound checked against file metadata before any read, per the same
-/// convention as `smc look ui frame`'s `MAX_SOURCE_BYTES`.
+/// convention as `smc look ui frame`'s `MAX_SOURCE_BYTES`. Applies only to
+/// one caller-supplied request file, not to the audit log (see
+/// `MAX_AUDIT_LOG_BYTES` below) -- the two have very different growth
+/// profiles and must not share a limit.
 const MAX_INPUT_BYTES: u64 = 8 * 1024 * 1024;
+/// Bound on the whole persisted audit log, checked before every read.
+/// `audit.log` grows by one bounded record (`MAX_AUDIT_RECORD_BYTES` in
+/// `semantic_hub::audit`) per invocation for the lifetime of a project and
+/// has no retention/rotation policy in v0 (a documented limitation) -- it
+/// must not share `MAX_INPUT_BYTES` (sized for one caller-supplied request
+/// file), or normal accumulated history would eventually make every
+/// subsequent `smc hub invoke`/`smc hub audit` call fail permanently. This
+/// is still a bound, not "unbounded", to reject a pathologically corrupted
+/// or maliciously huge file before allocating; it is sized generously
+/// rather than tuned to any expected real-world history size.
+const MAX_AUDIT_LOG_BYTES: u64 = 512 * 1024 * 1024;
 const HUB_DATA_DIR: &str = ".semantic/hub";
 const AUDIT_LOG_FILE: &str = "audit.log";
 const TURBOVEC_DATA_SUBDIR: &str = "vector.turbovec";
+const PENDING_DIR: &str = "pending";
 const CLI_ENVELOPE_SCHEMA_VERSION: u32 = 1;
 
 pub fn cmd_hub(args: &[String]) -> Result<(), String> {
@@ -67,6 +82,51 @@ fn build_hub() -> Hub {
     hub.register_tool(Box::new(adapter))
         .expect("the one built-in vector.turbovec registration cannot conflict with itself");
     hub
+}
+
+/// The Hub CLI's own effect (e.g. an adapter's `.tvim` write) and the
+/// durable audit record for that same invocation are two separate atomic
+/// writes to two separate files -- true single-transaction commit across
+/// both isn't attempted in v0. To still leave recoverable evidence if the
+/// process is interrupted between them (a crash, a full disk on the audit
+/// write, a permissions change mid-run), a small pending marker is written
+/// *before* dispatch and removed only after the audit log write succeeds.
+/// If dispatch mutated durable state but the marker is still present
+/// afterward, that is itself the recoverable evidence: an operation was
+/// attempted and possibly applied, but this invocation's audit record
+/// never made it to disk. `smc hub audit` surfaces a stale marker
+/// distinctly from a truly-unknown request_id instead of silently
+/// reporting "unknown".
+fn pending_marker_path(request_id: &HubRequestId) -> PathBuf {
+    hub_data_root()
+        .join(PENDING_DIR)
+        .join(format!("{}.json", request_id.as_str()))
+}
+
+fn write_pending_marker(
+    request_id: &HubRequestId,
+    tool_id: &HubToolId,
+    operation_id: &HubOperationId,
+) -> Result<(), String> {
+    let marker = serde_json::json!({
+        "request_id": request_id.as_str(),
+        "tool_id": tool_id.as_str(),
+        "operation_id": operation_id.as_str(),
+        "started_at_nanos": SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0),
+    });
+    let text = serde_json::to_string_pretty(&marker)
+        .map_err(|e| format!("InternalHubFault: could not render pending marker: {e}"))?;
+    write_output_atomic(&pending_marker_path(request_id), &text)
+}
+
+fn clear_pending_marker(request_id: &HubRequestId) {
+    // Best-effort: a failure to remove the marker only means a future
+    // lookup sees stale-but-harmless evidence of a completed invocation,
+    // never a false claim that one failed.
+    let _ = fs::remove_file(pending_marker_path(request_id));
 }
 
 fn next_value(args: &[String], i: &mut usize, flag: &str) -> Result<String, String> {
@@ -149,7 +209,7 @@ fn load_audit_trail(path: &Path) -> Result<HubAuditTrail, String> {
     let bytes = read_bounded(
         path.to_str()
             .ok_or("AuditProvenanceFailure: audit log path is not valid UTF-8")?,
-        MAX_INPUT_BYTES,
+        MAX_AUDIT_LOG_BYTES,
     )
     .map_err(|e| e.replace("InputRejected", "AuditProvenanceFailure"))?;
     let text = String::from_utf8(bytes)
@@ -369,6 +429,10 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
     let payload = serde_json::to_vec(&request_file.payload)
         .map_err(|e| format!("InputRejected: payload is not representable as JSON: {e}"))?;
 
+    let request_id_for_marker = request_id.clone();
+    let tool_id_for_marker = tool_id.clone();
+    let operation_id_for_marker = operation_id.clone();
+
     let request = HubRequest {
         schema_version: HUB_ENVELOPE_SCHEMA_VERSION,
         api_version: HubApiVersion::CURRENT,
@@ -388,12 +452,21 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
     let mut persisted_trail = load_audit_trail(&audit_path)?;
     hub.seed_next_sequence(persisted_trail.next_sequence());
 
+    // Durable evidence-of-attempt written BEFORE dispatch: see
+    // `write_pending_marker`'s doc comment for why this exists.
+    write_pending_marker(
+        &request_id_for_marker,
+        &tool_id_for_marker,
+        &operation_id_for_marker,
+    )?;
+
     let reply = hub.invoke(request, None);
 
     for record in hub.audit().records() {
         persisted_trail.push(record.clone());
     }
     save_audit_trail(&audit_path, &persisted_trail)?;
+    clear_pending_marker(&request_id_for_marker);
 
     let reply_json = build_cli_reply_json(&reply);
     let output_text = serde_json::to_string_pretty(&reply_json)
@@ -471,9 +544,26 @@ fn cmd_hub_audit(args: &[String]) -> Result<(), String> {
 
     let audit_path = hub_data_root().join(AUDIT_LOG_FILE);
     let trail = load_audit_trail(&audit_path)?;
-    let record = trail.find_by_request(&request_id).ok_or_else(|| {
-        format!("UnknownRequest: no audit record for request_id '{request_id_raw}'")
-    })?;
+    let record = match trail.find_by_request(&request_id) {
+        Some(record) => record,
+        None => {
+            // Distinguish "never attempted" from "attempted but never
+            // durably audited" (see `write_pending_marker`'s doc comment)
+            // instead of reporting a bare, potentially misleading
+            // UnknownRequest for the latter case.
+            if pending_marker_path(&request_id).is_file() {
+                return Err(format!(
+                    "PendingUnresolved: an invocation for request_id '{request_id_raw}' was \
+                     started but never durably audited (a crash or audit-write failure during \
+                     that invocation) -- the underlying tool operation may or may not have \
+                     applied; verify directly (e.g. `smc hub invoke ... vector.index.describe`)"
+                ));
+            }
+            return Err(format!(
+                "UnknownRequest: no audit record for request_id '{request_id_raw}'"
+            ));
+        }
+    };
 
     println!("request_id: {}", record.request_id);
     println!("session_id: {}", record.session_id);
@@ -492,4 +582,44 @@ fn cmd_hub_audit(args: &[String]) -> Result<(), String> {
     println!("status: {}", record.status_code);
     println!("fault_code: {}", record.fault_code.unwrap_or("-"));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_hub_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "smc-hub-unit-{tag}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn read_bounded_accepts_a_file_over_the_request_file_limit_under_the_audit_log_limit() {
+        // Regression test: the audit log must not share MAX_INPUT_BYTES
+        // (sized for one caller-supplied request file). A file larger than
+        // MAX_INPUT_BYTES but well under MAX_AUDIT_LOG_BYTES must still be
+        // readable when checked against the audit-log-specific bound.
+        let dir = temp_hub_dir("audit-size");
+        let path = dir.join("big.log");
+        let over_request_limit = vec![b'x'; (MAX_INPUT_BYTES + 1024) as usize];
+        fs::write(&path, &over_request_limit).unwrap();
+
+        assert!(
+            read_bounded(path.to_str().unwrap(), MAX_INPUT_BYTES).is_err(),
+            "sanity check: this file really does exceed MAX_INPUT_BYTES"
+        );
+        assert!(
+            read_bounded(path.to_str().unwrap(), MAX_AUDIT_LOG_BYTES).is_ok(),
+            "a file over MAX_INPUT_BYTES but under MAX_AUDIT_LOG_BYTES must be readable \
+             when bounded against the audit-log-specific limit"
+        );
+    }
 }

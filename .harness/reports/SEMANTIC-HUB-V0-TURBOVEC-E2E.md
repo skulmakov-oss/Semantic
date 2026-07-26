@@ -219,7 +219,116 @@ fresh `cargo build` of the default-features binaries in its current
 form), `pcc-qualification-7hell` (runs on `windows-latest`, where
 turbovec's Linux/macOS-only BLAS feature is never enabled).
 
+## Codex review (PR #1554, commit `6045b40585`) -- 5 P1 + 1 P2 findings, all resolved
+
+Codex's automated review found 5 real defects (P1) and one real gap (P2)
+via genuine analysis of the diff -- none were stylistic/speculative. Each
+is listed with its classification and the fix landed in the same PR.
+
+1. **P1 -- CONFIRMED. `handle_create` never checked the admitted
+   `resource_budget.vector_dimensions` ceiling** before calling
+   `turbovec::IdMapIndex::new`, so a caller could request up to turbovec's
+   own much looser `MAX_DIM` (65536) despite a narrower admitted budget
+   (default 4096), risking a `dim^2` rotation-matrix allocation beyond
+   what was ever admitted. Fixed: `handle()` now passes
+   `context.resource_budget.vector_dimensions` through to `handle_create`,
+   which rejects with `DimensionExceedsBudget` before constructing
+   anything. Regression tests: `create_rejects_dimension_exceeding_the_admitted_budget`
+   / `create_within_the_admitted_dimension_budget_is_accepted` (adapter
+   unit tests) and a CLI-level equivalent in `tests/hub_cli.rs`.
+
+2. **P1 -- CONFIRMED, SEVERE. The audit capability parser only recognized
+   the 11 non-sensitive `HubCapability` names.** A caller's request can
+   *grant* (not just require) a sensitive capability such as
+   `NetworkAccess` -- `HubCapabilitySet::grant()` does not filter these
+   out, and the audit writer serializes every granted capability
+   verbatim. The next `smc hub invoke`/`smc hub audit` call then failed to
+   parse that capability name back, corrupting the whole audit log --
+   the exact same class of bug as the earlier status_code/fault_code
+   conflation, but reachable by any caller's request file, not just an
+   internal code path. Fixed: the parser now calls `HubCapability::parse`
+   (the same exhaustive, already-tested 20-variant parser used
+   elsewhere) instead of a hand-duplicated partial match. Regression
+   tests: `a_record_granting_every_sensitive_capability_round_trips`
+   (library) and `granting_a_sensitive_capability_survives_audit_round_trip`
+   (CLI).
+
+3. **P1 -- CONFIRMED, SEVERE. The persisted audit log was read with
+   `MAX_INPUT_BYTES` (8 MiB) -- the bound meant for one caller-supplied
+   request file, not for `audit.log`, which grows by one record per
+   invocation for the lifetime of a project with no retention policy in
+   v0.** Once real accumulated history exceeded 8 MiB, every subsequent
+   `smc hub invoke`/`smc hub audit` call would permanently fail until the
+   user manually deleted the log -- a realistic, inevitable time bomb
+   under normal use, not an edge case. Fixed: introduced a separate,
+   dedicated `MAX_AUDIT_LOG_BYTES` (512 MiB, generous rather than tuned to
+   any specific real-world size) used only for `audit.log`. Regression
+   test: `read_bounded_accepts_a_file_over_the_request_file_limit_under_the_audit_log_limit`.
+
+4. **P1 -- CONFIRMED. A mutating operation's effect (the adapter's `.tvim`
+   write) could durably commit before that invocation's audit record was
+   durably persisted**, since the two are separate atomic writes to
+   separate files with no shared transaction. If the process crashed or
+   the audit write failed in that window, the mutation applied with zero
+   durable audit trace for it. Genuinely full transactional (single-
+   commit) semantics across two independent file formats was judged
+   disproportionate to implement in this pass; instead landed a real,
+   scoped mitigation: a small pending-marker file
+   (`.semantic/hub/pending/<request_id>.json`) is written *before*
+   dispatch and cleared only after the audit log write succeeds. If a
+   crash/failure happens in between, the marker survives as recoverable
+   evidence that an operation was attempted; `smc hub audit --request`
+   now reports a distinct `PendingUnresolved` status instead of a bare,
+   misleading `UnknownRequest` when it finds a stale marker. This does
+   not eliminate the risk window, but converts a previously *silent* gap
+   into an *inspectable* one, and the invocation itself is still always
+   reported as a failure (never a false success) when the audit write
+   fails. Regression test:
+   `audit_write_failure_leaves_a_pending_marker_and_the_mutation_still_applies`
+   (forces the failure for real by replacing `audit.log` with a directory
+   mid-run and confirming both the marker and the applied mutation).
+
+5. **P2 -- CONFIRMED. Admission checked that a requested `resource_budget`
+   did not exceed the tool/global ceiling, but never checked that the
+   actual payload conformed to the caller's own declared
+   `resource_budget.input_bytes`.** A caller narrowing `input_bytes` below
+   the 32 MiB global ceiling got no enforcement at all -- any payload
+   under the global ceiling was silently dispatched regardless of the
+   budget requested for it. Fixed: `admit()` now also checks
+   `request.payload.len()` against `request.resource_budget.input_bytes`.
+   Regression tests: `payload_exceeding_the_requests_own_input_bytes_budget_is_rejected`
+   / `payload_within_the_requests_own_input_bytes_budget_is_admitted`
+   (library) and `payload_exceeding_the_requests_own_declared_input_budget_is_rejected`
+   (CLI).
+
+6. **"Route index writes through the PROMETHEUS boundary" -- CLASSIFIED
+   AS OUT OF SCOPE / CONFLICTS WITH THE EXPLICIT ARCHITECTURE DIRECTIVE**,
+   not implemented as a code change. This finding cites `AGENTS.md`'s
+   general "no direct external effects outside PROMETHEUS boundaries"
+   rule, but issue #1553 (and architecture issue #1526 it implements)
+   explicitly directs building Semantic Hub as its *own*, new, parallel
+   governance boundary for external tools -- with its own capability
+   admission, resource budgets, worker supervision, and audit/provenance
+   -- specifically so a second effect boundary does not need to be routed
+   through PROMETHEUS's SemCode-host-ABI-specific capability model (a
+   different domain, as documented at length in
+   `docs/architecture/semantic_hub_v0.md` and the PR body). Routing
+   Hub's own filesystem writes through `prom-cap`/`prom-audit` would be
+   the "second capability framework" duplication the issue explicitly
+   warns against, not a fix for one. Replied on the PR thread with this
+   reasoning rather than implementing the suggested change; left for the
+   repository owner to overrule if they disagree with this reading of
+   the architecture.
+
+All fixes landed in commit `<see git log>`, full local gates re-run and
+green (`cargo test --workspace --all-features`: 304 test result blocks,
+0 failed; `cargo clippy --workspace --all-targets --all-features -- -D
+warnings`: 0 warnings; `cargo fmt --all --check`: clean; harness-check:
+ok).
+
 ## Remaining before merge
 
-- Push the CI fix, confirm the new exact head goes green, request/handle
-  review, then stop for explicit repository-owner merge approval.
+- Push this remediation, confirm the new exact head goes green, resolve
+  the review threads (reply to each Codex comment with its
+  classification), then stop for explicit repository-owner merge
+  approval.

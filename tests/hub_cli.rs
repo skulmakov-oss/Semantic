@@ -340,3 +340,200 @@ fn same_request_repeated_produces_deterministic_search_ranking() {
         assert_eq!(extract_ranking(&repeat), first_ranking);
     }
 }
+
+// ---- Codex review remediation regression tests --------------------------
+
+#[test]
+fn create_rejects_dimension_exceeding_the_admitted_budget() {
+    let dir = temp_dir("hub_cli_dim_budget");
+    let req = serde_json::json!({
+        "capabilities": ["VectorIndexCreate", "PrivateStorageWrite"],
+        "resource_budget": {"vector_dimensions": 8},
+        "payload": {"index": "docs", "dim": 4096, "bit_width": 4}
+    });
+    let input = dir.join("create_over_budget.json");
+    fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+    let output = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(!output.status.success());
+    let json = stdout_json(&output);
+    assert_eq!(json["status"], "ToolFailed");
+    assert_eq!(json["payload"], serde_json::Value::Null);
+    let fault_message = json["fault_message"].as_str().unwrap();
+    assert!(
+        fault_message.contains("DimensionExceedsBudget"),
+        "{fault_message}"
+    );
+}
+
+#[test]
+fn payload_exceeding_the_requests_own_declared_input_budget_is_rejected() {
+    // Regression test: a caller narrowing resource_budget.input_bytes below
+    // the global ceiling previously got no enforcement at all.
+    let dir = temp_dir("hub_cli_input_budget");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+    let req = serde_json::json!({
+        "capabilities": ["VectorSearch", "PrivateStorageRead"],
+        "resource_budget": {"input_bytes": 4},
+        "payload": {"index": "fixture-docs", "queries": [[0,1,0,0,0,0,0,0]], "k": 3}
+    });
+    let input = dir.join("search_over_input_budget.json");
+    fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+    let output = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.search",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("InputRejected"));
+}
+
+#[test]
+fn granting_a_sensitive_capability_survives_audit_round_trip() {
+    // Regression test: the audit writer previously could not parse back a
+    // sensitive capability name (e.g. NetworkAccess) that a caller granted
+    // (even though admission denies using it), corrupting the whole audit
+    // log for every subsequent invocation.
+    let dir = temp_dir("hub_cli_sensitive_cap_audit");
+    let req = serde_json::json!({
+        "capabilities": ["VectorIndexCreate", "PrivateStorageWrite", "NetworkAccess"],
+        "payload": {"index": "sensitive-cap-docs", "dim": 8, "bit_width": 4}
+    });
+    let input = dir.join("create_with_sensitive_cap.json");
+    fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+    let first = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(first.status.success(), "{:?}", first);
+
+    // The audit log must still be readable afterward -- this is exactly
+    // the failure mode the earlier status_code/fault_code bug produced.
+    let describe_req = serde_json::json!({
+        "capabilities": ["VectorIndexRead", "PrivateStorageRead"],
+        "payload": {"index": "sensitive-cap-docs"}
+    });
+    let describe_input = dir.join("describe_sensitive_cap_docs.json");
+    fs::write(&describe_input, serde_json::to_vec(&describe_req).unwrap()).unwrap();
+    let second = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.describe",
+            "--input",
+            describe_input.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        second.status.success(),
+        "audit log must remain readable after a request granting a sensitive capability: {:?}",
+        second
+    );
+}
+
+#[test]
+fn audit_write_failure_leaves_a_pending_marker_and_the_mutation_still_applies() {
+    // Regression test for the "commit-before-audit-persists" gap: force the
+    // durable audit write to fail (by replacing audit.log with a directory
+    // right before a mutating call) and confirm (a) the underlying TurboVec
+    // mutation still applies, (b) the invocation itself is reported as a
+    // failure (never a false "success"), and (c) `smc hub audit` surfaces a
+    // distinct PendingUnresolved status for that request_id instead of a
+    // bare UnknownRequest, because a pending marker was written before
+    // dispatch and never cleared.
+    let dir = temp_dir("hub_cli_pending_marker");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+    invoke(&dir, "vector.index.insert", "valid_index_insert.json");
+
+    let audit_log = dir.join(".semantic").join("hub").join("audit.log");
+    assert!(
+        audit_log.is_file(),
+        "audit.log must exist after two successful invocations"
+    );
+    fs::remove_file(&audit_log).unwrap();
+    fs::create_dir_all(&audit_log).unwrap(); // audit.log is now a directory
+
+    let request_id = "req-pending-marker-test";
+    let remove_req = serde_json::json!({
+        "request_id": request_id,
+        "capabilities": ["VectorIndexMutate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "fixture-docs", "ids": [102]}
+    });
+    let input = dir.join("remove_with_broken_audit.json");
+    fs::write(&input, serde_json::to_vec(&remove_req).unwrap()).unwrap();
+    let broken = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.remove",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(
+        !broken.status.success(),
+        "an invocation must never report success when its audit write failed"
+    );
+    assert!(String::from_utf8_lossy(&broken.stderr).starts_with("AuditProvenanceFailure"));
+
+    let marker = dir
+        .join(".semantic")
+        .join("hub")
+        .join("pending")
+        .join(format!("{request_id}.json"));
+    assert!(
+        marker.is_file(),
+        "a pending marker must remain on disk when the audit write fails"
+    );
+
+    // Restore audit.log to a normal (missing -> freshly empty) file so
+    // subsequent commands can run, then confirm the removal itself DID
+    // apply even though it was never durably audited.
+    fs::remove_dir_all(&audit_log).unwrap();
+    let search = invoke(&dir, "vector.search", "valid_search.json");
+    assert!(search.status.success());
+    let ids: Vec<u64> = stdout_json(&search)["payload"]["hits"][0]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["external_id"].as_u64().unwrap())
+        .collect();
+    assert!(
+        !ids.contains(&102),
+        "the remove mutation must have applied even though its audit write failed: {ids:?}"
+    );
+
+    let lookup = smc_in(&dir, &["hub", "audit", "--request", request_id]);
+    assert!(!lookup.status.success());
+    assert!(
+        String::from_utf8_lossy(&lookup.stderr).starts_with("PendingUnresolved"),
+        "{:?}",
+        lookup
+    );
+}

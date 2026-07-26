@@ -189,7 +189,7 @@ impl TurboVecAdapter {
         IndexName::new(raw).map_err(|e| HubToolError::new("InvalidIndexName", e.to_string()))
     }
 
-    fn handle_create(&self, payload: &[u8]) -> Result<Vec<u8>, HubToolError> {
+    fn handle_create(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
         let req: CreateIndexRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
@@ -203,6 +203,17 @@ impl TurboVecAdapter {
             return Err(HubToolError::new(
                 "TooManyIndexes",
                 format!("index count already at bound {MAX_INDEX_COUNT}"),
+            ));
+        }
+        // Enforce the admitted budget's vector_dimensions ceiling before
+        // constructing anything -- turbovec's own MAX_DIM (65536) is far
+        // looser than the Hub's admitted budget, and dimension drives a
+        // dim^2 rotation-matrix allocation, so this must be checked here,
+        // not left to turbovec's own (much larger) internal limit.
+        if req.dim > max_dim {
+            return Err(HubToolError::new(
+                "DimensionExceedsBudget",
+                format!("requested dim {} exceeds the admitted budget's vector_dimensions ceiling {max_dim}", req.dim),
             ));
         }
         let index = turbovec::IdMapIndex::new(req.dim, req.bit_width)
@@ -412,8 +423,9 @@ impl HubTool for TurboVecAdapter {
     ) -> Result<Vec<u8>, HubToolError> {
         let max_vectors = context.resource_budget.index_item_count as usize;
         let max_results = context.resource_budget.result_count as usize;
+        let max_dim = context.resource_budget.vector_dimensions as usize;
         match operation_id.as_str() {
-            "vector.index.create" => self.handle_create(payload),
+            "vector.index.create" => self.handle_create(payload, max_dim),
             "vector.index.describe" => self.handle_describe(payload),
             "vector.index.insert" => self.handle_insert(payload, max_vectors),
             "vector.index.remove" => self.handle_remove(payload),
@@ -510,6 +522,46 @@ mod tests {
         assert_eq!(describe.dim, 8);
         assert_eq!(describe.bit_width, 4);
         assert_eq!(describe.len, 0);
+    }
+
+    #[test]
+    fn create_rejects_dimension_exceeding_the_admitted_budget() {
+        // Regression test: `handle_create` previously never consulted the
+        // admitted resource_budget.vector_dimensions at all, so a caller
+        // could request a dim up to turbovec's own much looser MAX_DIM
+        // (65536) despite a narrower admitted ceiling (e.g. the documented
+        // default of 4096).
+        let mut a = adapter("dim-budget");
+        let caps = HubCapabilitySet::empty();
+        let budget = HubResourceBudget {
+            vector_dimensions: 8,
+            ..HubResourceBudget::V0_CEILING
+        };
+        let err = a
+            .handle(
+                &op("vector.index.create"),
+                br#"{"index":"docs","dim":16,"bit_width":4}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "DimensionExceedsBudget");
+    }
+
+    #[test]
+    fn create_within_the_admitted_dimension_budget_is_accepted() {
+        let mut a = adapter("dim-budget-ok");
+        let caps = HubCapabilitySet::empty();
+        let budget = HubResourceBudget {
+            vector_dimensions: 16,
+            ..HubResourceBudget::V0_CEILING
+        };
+        assert!(a
+            .handle(
+                &op("vector.index.create"),
+                br#"{"index":"docs","dim":16,"bit_width":4}"#,
+                &ctx(&budget, &caps),
+            )
+            .is_ok());
     }
 
     #[test]
