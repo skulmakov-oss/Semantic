@@ -24,9 +24,19 @@
 //!    retroactively re-smudge files git already considers up to date, so a
 //!    pre-existing CRLF-corrupted working copy stays corrupted after
 //!    pulling this commit even though `git check-attr` now correctly
-//!    reports `eol: lf`. If this second check ever fails locally, run
-//!    `git add --renormalize tests/fixtures/ui_frame_inspection` (or
-//!    delete and re-checkout the directory) to repair the working copy.
+//!    reports `eol: lf`. If this second check ever fails locally, delete
+//!    and re-checkout the directory to repair the working copy -- e.g.
+//!    (from the repo root):
+//!
+//!    ```text
+//!    rm -rf tests/fixtures/ui_frame_inspection
+//!    git checkout -- tests/fixtures/ui_frame_inspection
+//!    ```
+//!
+//!    `git add --renormalize <path>` alone is *not* sufficient: it
+//!    re-applies the clean filter into the index, but never rewrites the
+//!    working-tree file, so the on-disk bytes stay CRLF and this check
+//!    would still fail (verified empirically).
 
 use std::fs;
 use std::process::Command;
@@ -97,9 +107,10 @@ fn ui_frame_inspection_fixture_bytes_are_lf_only() {
         let bytes = fs::read(file).unwrap_or_else(|e| panic!("read {file}: {e}"));
         assert!(
             !bytes.windows(2).any(|w| w == b"\r\n"),
-            "{file} contains CRLF line endings in the working tree; run \
-             `git add --renormalize {FIXTURE_DIR}` (or delete and re-checkout \
-             the directory) to repair this checkout"
+            "{file} contains CRLF line endings in the working tree; \
+             `git add --renormalize` alone will NOT fix this (it updates \
+             the index, not the working tree). Repair with:\n  \
+             rm -rf {FIXTURE_DIR}\n  git checkout -- {FIXTURE_DIR}"
         );
     }
 }
