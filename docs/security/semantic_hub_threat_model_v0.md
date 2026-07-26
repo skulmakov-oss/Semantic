@@ -144,10 +144,11 @@ step, is owned by `crates/semantic-hub/src/admission.rs::admit()` and is
 documented in full in `docs/architecture/semantic_hub_v0.md`, section 6. This
 document does not repeat that ordering; it references it as the canonical
 source. In summary, admission runs (in order) API-version compatibility,
-envelope schema-version check, the 32 MiB payload size bound, an
-already-cancelled check, registry lookup, worker lifecycle gate, capability
-check, resource budget check, and queue/concurrency admission -- each
-producing a distinct, typed `HubFault` rather than a generic rejection.
+envelope schema-version check, the 32 MiB payload size bound, the
+request's own declared input-budget check, an already-cancelled check,
+registry lookup, worker lifecycle gate, capability check, resource
+budget check, and queue/concurrency admission -- each producing a
+distinct, typed `HubFault` rather than a generic rejection.
 
 Below that admission layer, the TurboVec adapter performs its own
 domain-specific validation (vector coordinate checks, dimension checks,

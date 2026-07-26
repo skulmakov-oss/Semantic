@@ -169,32 +169,40 @@ earlier steps never depend on state a later step establishes.
      HUB_ENVELOPE_SCHEMA_VERSION = 1
 3. payload size bound
      MAX_PAYLOAD_BYTES = 32 MiB, rejected before registry lookup
-4. already-cancelled check
-5. registry lookup
+4. request's own declared input-budget check
+     request.payload.len() <= request.resource_budget.input_bytes;
+     narrower than step 3 if the caller chose to narrow it, so step 3
+     alone does not enforce this
+5. already-cancelled check
+6. registry lookup
      unknown tool_id                 -> UnknownTool
      unknown operation on known tool -> UnknownOperation (distinct fault)
-6. worker lifecycle gate
+7. worker lifecycle gate
      Disabled / Quarantined / Stopped states reject before dispatch
-7. capability check
+8. capability check
      HubCapabilitySet::satisfies(): every required capability must be
      both present in the grant AND non-sensitive
-8. resource budget check
+9. resource budget check
      requested HubResourceBudget must be within BOTH the tool's declared
      resource_ceiling AND the global HubResourceBudget::V0_CEILING,
      checked via first_violation(), which returns the real violating
      dimension/limit/attempted value, never a placeholder
-9. queue/concurrency admission
+10. queue/concurrency admission
      request's declared queue_depth/concurrent_requests checked
      against ambient counters
 ```
 
-Steps 3 and 5 are ordered deliberately: payload size is bounded before the
+Steps 3 and 6 are ordered deliberately: payload size is bounded before the
 registry is consulted, so an oversized request cannot be used to probe which
-tool/operation names exist.
+tool/operation names exist. Step 4 (the request's own narrower input-budget
+check) sits between them for the same reason: it is still a payload-shape
+rejection, decided before anything registry- or capability-related runs, so
+a request that is both over its own input budget and already cancelled
+deterministically gets `InputRejected`, not `Cancelled`.
 
 ### 6.1 Capability check is structural, not just unfilled
 
-Step 7 is not "nobody has granted these yet." Nine capabilities are marked
+Step 8 is not "nobody has granted these yet." Nine capabilities are marked
 `is_sensitive()` on `HubCapability` and can never be satisfied by any grant:
 
 ```text
@@ -306,7 +314,7 @@ storage_write_bytes = 256 MiB      audit_bytes         = 1 MiB
 ```
 
 A caller's requested budget is checked against both the tool's declared
-`resource_ceiling` and this global ceiling (admission step 8); the caller can
+`resource_ceiling` and this global ceiling (admission step 9); the caller can
 only ask for less, never more, than either.
 
 ## 10. Fault taxonomy

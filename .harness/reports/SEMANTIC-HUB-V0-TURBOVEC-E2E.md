@@ -1032,13 +1032,64 @@ clippy --workspace --all-targets --all-features -- -D warnings`: 0
 warnings; `cargo fmt --all`: clean; harness-check: ok; `git diff
 --check`: clean).
 
+## Codex review, round 11 (PR #1554, commit `3cf07dc3`) -- 3 confirmed
+
+1. **P1 -- CONFIRMED, SEVERE. Validate the scoped root before create
+   preflight.** `handle_create`'s own `self.storage.exists(&name)` and
+   `self.storage.index_count()` preflight checks call the *unchecked*
+   `ScopedStorage` methods directly -- neither routes through
+   `checked_index_path`/`ensure_root_checked`. A symlinked root would
+   have both silently follow it (an `exists()` probe of `<target>/<name>.tvim`,
+   an `index_count()` enumeration of the target directory) before any
+   symlink rejection ever ran; only the later `save_atomic()` call
+   (reached at the very end of `handle_create`, after the requested
+   dimension check) was checked. The round-3/round-5 end-to-end tests
+   missed this because their symlink target was empty, so the unchecked
+   preflight reads happened to be harmless in that specific case and the
+   later `save_atomic` check still produced the right error code for the
+   wrong reason. Fixed: `handle_create` now calls
+   `self.storage.ensure_root_checked()` as its very first action, before
+   either preflight read. Regression test:
+   `create_rejects_a_symlinked_root_even_when_the_target_already_has_a_matching_file`
+   (Unix-gated), using a *non-empty* symlink target so the old code's
+   `IndexAlreadyExists` (proof it had already read outside the scope)
+   is distinguishable from the correct `ScopedStorageViolation`.
+2. **P1 -- CONFIRMED, SEVERE. Bound filtered allowlists by the item
+   budget.** `vector.search.filtered`'s `allowed_ids` was cloned and
+   iterated with no check against `resource_budget.index_item_count` at
+   all -- a compact allowlist of several million ids fits comfortably
+   under the 8 MiB request-file cap, well beyond a narrow admitted item
+   budget, before any budget check ran. Fixed: threaded `max_vectors`
+   into `handle_search` and added a `check_vector_batch_bounds(ids.len(),
+   max_vectors)` call before the allowlist is used for anything.
+   Regression test:
+   `filtered_search_rejects_an_allowlist_exceeding_the_admitted_item_count_budget`.
+3. **P2 -- CONFIRMED. Add the input-budget check to every
+   admission-order contract.** Round 10 fixed only `hub_api_v0.md`'s copy
+   of the admission-order list; `docs/architecture/semantic_hub_v0.md`
+   had its own separate, numbered copy (also missing the round-2
+   input-budget step), and `docs/security/semantic_hub_threat_model_v0.md`
+   had a third, prose-summary copy with the same omission. An exhaustive
+   grep this time (`already-cancelled|already_cancelled.*Cancelled|
+   registry lookup.*worker lifecycle` across all of `docs/`) confirmed
+   exactly these three files and no more. Fixed all three, including
+   renumbering the architecture doc's later step cross-references
+   ("Steps 3 and 5" -> "Steps 3 and 6", "Step 7" -> "Step 8", "admission
+   step 8" -> "admission step 9"). Docs-only.
+
+All fixes verified by direct code reading. Full local gates re-run and
+green (`cargo test --workspace --all-features`: zero failures; `cargo
+clippy --workspace --all-targets --all-features -- -D warnings`: 0
+warnings; `cargo fmt --all`: clean; harness-check: ok; `git diff
+--check`: clean).
+
 ## Remaining before merge
 
 - Push this remediation, confirm CI goes green on the new head, reply to
-  both round-10 review threads with classifications, and request another
-  review pass -- paginated REST queries and the GraphQL `reviewThreads`
-  last-comment-authorship check together, every time, before declaring
-  it clean.
+  all 3 round-11 review threads with classifications, and request
+  another review pass -- paginated REST queries and the GraphQL
+  `reviewThreads` last-comment-authorship check together, every time,
+  before declaring it clean.
 - If that pass is genuinely clean, stop for explicit repository-owner
   merge approval (already granted, conditional on a clean review pass)
   before squash-merging.

@@ -220,6 +220,18 @@ impl TurboVecAdapter {
         let req: CreateIndexRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
+        // Validate the scoped root before either preflight read below:
+        // `exists()`/`index_count()` call the unchecked `ScopedStorage`
+        // methods directly (neither goes through `checked_index_path`),
+        // so a pre-planted symlink at the root would have both probes
+        // silently follow it -- `exists()` checking for a `.tvim` file
+        // outside the scoped directory, `index_count()` enumerating an
+        // external directory's contents -- before any symlink rejection
+        // ever ran. `ensure_root_checked()` performs the same check
+        // `save_atomic()` already relies on later.
+        self.storage
+            .ensure_root_checked()
+            .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
         if self.storage.exists(&name) {
             return Err(HubToolError::new(
                 "IndexAlreadyExists",
@@ -349,6 +361,7 @@ impl TurboVecAdapter {
         &self,
         payload: &[u8],
         max_results: usize,
+        max_vectors: usize,
         filtered: bool,
         max_dim: usize,
     ) -> Result<Vec<u8>, HubToolError> {
@@ -406,6 +419,13 @@ impl TurboVecAdapter {
                     "vector.search.filtered requires a non-empty allowed_ids list",
                 ));
             }
+            // Bound the allowlist against the admitted item-count budget
+            // before cloning/iterating any further: a compact allowlist
+            // of several million ids fits comfortably under the 8 MiB
+            // request-file cap, and nothing upstream of this point checks
+            // its length against resource_budget.index_item_count.
+            check_vector_batch_bounds(ids.len(), max_vectors)
+                .map_err(|e| HubToolError::new("TooManyVectors", e.to_string()))?;
             for id in &ids {
                 if !index.contains(*id) {
                     return Err(HubToolError::new(
@@ -493,8 +513,12 @@ impl HubTool for TurboVecAdapter {
             "vector.index.describe" => self.handle_describe(payload, max_dim),
             "vector.index.insert" => self.handle_insert(payload, max_vectors, max_dim),
             "vector.index.remove" => self.handle_remove(payload, max_vectors, max_dim),
-            "vector.search" => self.handle_search(payload, max_results, false, max_dim),
-            "vector.search.filtered" => self.handle_search(payload, max_results, true, max_dim),
+            "vector.search" => {
+                self.handle_search(payload, max_results, max_vectors, false, max_dim)
+            }
+            "vector.search.filtered" => {
+                self.handle_search(payload, max_results, max_vectors, true, max_dim)
+            }
             "vector.index.reset" => self.handle_reset(payload, max_dim),
             other => Err(HubToolError::new(
                 "UnknownOperation",
@@ -684,6 +708,84 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.code, "ScopedStorageViolation");
         assert!(std::fs::read_dir(&target).unwrap().next().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_rejects_a_symlinked_root_even_when_the_target_already_has_a_matching_file() {
+        // Regression test: the test above uses an EMPTY symlink target,
+        // which happens to still surface ScopedStorageViolation via
+        // save_atomic's later check -- but handle_create's own earlier,
+        // unchecked exists()/index_count() preflight reads would
+        // silently follow the symlink first. With a pre-existing
+        // <name>.tvim already in the target, the unfixed code returned
+        // IndexAlreadyExists (proof it had already read outside the
+        // scoped directory) instead of rejecting the root itself.
+        let target = temp_dir("symlink-root-preexisting-target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("docs.tvim"), b"not a real index").unwrap();
+
+        let link = temp_dir("symlink-root-preexisting-link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let mut a = TurboVecAdapter::new(link, HubResourceBudget::V0_CEILING);
+        let budget = HubResourceBudget::V0_CEILING;
+        let caps = HubCapabilitySet::empty();
+        let err = a
+            .handle(
+                &op("vector.index.create"),
+                br#"{"index":"docs","dim":8,"bit_width":4}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "ScopedStorageViolation");
+    }
+
+    #[test]
+    fn filtered_search_rejects_an_allowlist_exceeding_the_admitted_item_count_budget() {
+        // Regression test: allowed_ids was cloned and iterated with no
+        // check against resource_budget.index_item_count at all -- a
+        // compact allowlist of several million ids fits comfortably
+        // under the 8 MiB request-file cap, well beyond a narrow
+        // admitted item budget.
+        let mut a = adapter("filtered-allowlist-budget");
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":8,"bit_width":4}"#,
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+        let insert_req = serde_json::json!({
+            "index": "docs",
+            "vectors": unit_vectors(4, 8),
+            "ids": [1, 2, 3, 4],
+        });
+        a.handle(
+            &op("vector.index.insert"),
+            serde_json::to_vec(&insert_req).unwrap().as_slice(),
+            &ctx(&HubResourceBudget::V0_CEILING, &caps),
+        )
+        .unwrap();
+
+        let narrow_budget = HubResourceBudget {
+            index_item_count: 2,
+            ..HubResourceBudget::V0_CEILING
+        };
+        let search_req = serde_json::json!({
+            "index": "docs",
+            "queries": [unit_vectors(1, 8)[0].clone()],
+            "k": 1,
+            "allowed_ids": [1, 2, 3, 4],
+        });
+        let err = a
+            .handle(
+                &op("vector.search.filtered"),
+                serde_json::to_vec(&search_req).unwrap().as_slice(),
+                &ctx(&narrow_budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "TooManyVectors");
     }
 
     #[test]
