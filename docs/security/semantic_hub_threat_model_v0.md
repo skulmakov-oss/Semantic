@@ -296,10 +296,17 @@ These are real, named gaps in v0, not merely theoretical future work:
   pinned at =0.9.0 and used as published; it has not been independently
   audited byte-by-byte as part of this task
 - concurrent multi-process access to the same `.semantic/hub/` directory
-  is not guarded: there is no file locking implemented. Two simultaneous
-  `smc hub invoke` processes writing the same index could race. This is
-  a real, previously-undocumented gap, named here explicitly as
-  out-of-scope for v0, not something silently assumed safe
+  is now serialized by a single whole-project exclusive advisory lock
+  (`std::fs::File::lock`, `hub_data_root/hub.lock`), acquired by
+  `cmd_hub_invoke` before the first read of `audit.log` and held through
+  the final write; this closes the audit-log-record-loss and
+  index-update-loss races previously named here. It does not eliminate
+  every possible interleaving: it blocks indefinitely (no timeout), so
+  heavy concurrent use queues rather than runs in parallel -- acceptable
+  for v0's single-user CLI usage pattern, not for a future
+  multi-tenant/server deployment. `smc hub audit` (read-only) does not
+  take the lock, since atomic rename already guarantees a reader never
+  observes a torn file
 - cryptographic tamper-evidence of the audit log does not exist: digests
   (HubDigest = FNV-1a-64 + byte length) are non-cryptographic correlation
   fingerprints only, chosen to confirm "this record refers to exactly
@@ -323,9 +330,11 @@ These are real, named gaps in v0, not merely theoretical future work:
   guarantee than an enforced sandbox or firewall -- it holds only because
   there is no networking code, not because network access was attempted
   and blocked
-- concurrent-process file races on `.semantic/hub/`: named again here
-  because it is easy to mistake for a network or capability concern when
-  it is actually a plain missing-file-lock gap (see section 8)
+- multi-tenant/server-style concurrent Hub usage: the project-level lock
+  described in section 8 makes concurrent CLI invocations safe (no lost
+  records/updates) but serializes them into a queue with no fairness,
+  priority, or timeout guarantees -- adequate for v0's single-user CLI,
+  not a substitute for a real multi-tenant scheduler
 ```
 
 ## 10. Relationship to #1371 / #1372

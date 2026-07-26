@@ -26,6 +26,18 @@ fn smc_in(dir: &Path, args: &[&str]) -> Output {
         .expect("run smc")
 }
 
+/// Launches without waiting, so callers can start several real `smc`
+/// subprocesses before any of them completes -- required to actually
+/// exercise the cross-process project lock, unlike `smc_in`'s `.output()`
+/// which blocks until that one process exits.
+fn smc_spawn_in(dir: &Path, args: &[String]) -> std::process::Child {
+    Command::new(env!("CARGO_BIN_EXE_smc"))
+        .args(args)
+        .current_dir(dir)
+        .spawn()
+        .expect("spawn smc")
+}
+
 fn fixture_path(name: &str) -> String {
     let path = std::env::current_dir()
         .expect("cwd")
@@ -658,5 +670,117 @@ fn reusing_a_request_id_with_an_unresolved_pending_marker_is_rejected() {
     assert!(
         marker.is_file(),
         "a rejected retry must not have cleared the still-unresolved pending marker"
+    );
+}
+
+// ---- concurrent-process regression tests (project-level lock) ---------
+
+#[test]
+fn concurrent_invocations_against_the_same_project_do_not_lose_audit_records() {
+    // Regression test: without a cross-process lock, two "smc hub invoke"
+    // processes racing against the same project directory could each load
+    // the same on-disk audit.log, mutate their own in-memory copy, and
+    // atomically rename their own replacement over the other's -- the
+    // last rename wins and an earlier process's already-Success-reported
+    // record silently vanishes. Real subprocesses, actually launched
+    // concurrently (spawn, not output), not simulated.
+    let dir = temp_dir("hub_cli_concurrent_audit");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+    invoke(&dir, "vector.index.insert", "valid_index_insert.json");
+
+    const N: usize = 8;
+    let children: Vec<_> = (0..N)
+        .map(|i| {
+            let request_id = format!("req-concurrent-audit-{i}");
+            let req = serde_json::json!({
+                "request_id": request_id,
+                "capabilities": ["VectorSearch", "PrivateStorageRead"],
+                "payload": {"index": "fixture-docs", "queries": [[0,1,0,0,0,0,0,0]], "k": 3}
+            });
+            let input = dir.join(format!("concurrent_search_{i}.json"));
+            fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+            let args = vec![
+                "hub".to_string(),
+                "invoke".to_string(),
+                "vector.turbovec".to_string(),
+                "vector.search".to_string(),
+                "--input".to_string(),
+                input.to_str().unwrap().to_string(),
+            ];
+            (request_id, smc_spawn_in(&dir, &args))
+        })
+        .collect();
+
+    for (request_id, child) in children {
+        let output = child.wait_with_output().expect("wait for smc");
+        assert!(
+            output.status.success(),
+            "invocation for {request_id} failed: {output:?}"
+        );
+    }
+
+    let audit_log = fs::read_to_string(dir.join(".semantic").join("hub").join("audit.log"))
+        .expect("read audit.log");
+    for i in 0..N {
+        let request_id = format!("req-concurrent-audit-{i}");
+        assert!(
+            audit_log.contains(&request_id),
+            "audit.log is missing the record for {request_id} -- a concurrent invocation's \
+             record was lost:\n{audit_log}"
+        );
+    }
+}
+
+#[test]
+fn concurrent_inserts_against_the_same_index_do_not_lose_updates() {
+    // Regression test: the identical race one layer down -- concurrent
+    // inserts into the same .tvim index could each load the same old
+    // snapshot and rename their own replacement over the other's,
+    // silently losing an insert even though every invocation reports
+    // Success.
+    let dir = temp_dir("hub_cli_concurrent_insert");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+
+    const N: usize = 6;
+    let children: Vec<_> = (0..N)
+        .map(|i| {
+            let mut vector = vec![0.0f64; 8];
+            vector[i % 8] = 1.0;
+            let req = serde_json::json!({
+                "request_id": format!("req-concurrent-insert-{i}"),
+                "capabilities": ["VectorIndexMutate", "PrivateStorageRead", "PrivateStorageWrite"],
+                "payload": {
+                    "index": "fixture-docs",
+                    "vectors": [vector],
+                    "ids": [500 + i],
+                }
+            });
+            let input = dir.join(format!("concurrent_insert_{i}.json"));
+            fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+            let args = vec![
+                "hub".to_string(),
+                "invoke".to_string(),
+                "vector.turbovec".to_string(),
+                "vector.index.insert".to_string(),
+                "--input".to_string(),
+                input.to_str().unwrap().to_string(),
+            ];
+            smc_spawn_in(&dir, &args)
+        })
+        .collect();
+
+    for child in children {
+        let output = child.wait_with_output().expect("wait for smc");
+        assert!(
+            output.status.success(),
+            "concurrent insert failed: {output:?}"
+        );
+    }
+
+    let describe = invoke(&dir, "vector.index.describe", "valid_index_describe.json");
+    assert_eq!(
+        stdout_json(&describe)["payload"]["len"],
+        N,
+        "not all N concurrent inserts landed in the final index -- at least one was lost"
     );
 }

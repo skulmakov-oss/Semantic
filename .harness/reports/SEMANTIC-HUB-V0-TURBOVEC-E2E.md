@@ -150,8 +150,12 @@ cargo tree -i semantic-hub
 - Memory/storage/audit-byte budget dimensions are advisory-only (not hard
   enforceable in-process without OS containment) -- stated honestly, not
   claimed as enforced.
-- No file locking across concurrent `smc hub invoke` processes writing the
-  same index -- a real, named gap.
+- A single whole-project exclusive advisory lock (`std::fs::File::lock`)
+  now serializes concurrent `smc hub invoke` processes against the same
+  project, closing the audit-log/index-update-loss races previously
+  named here (see the round-5 remediation section below) -- it blocks
+  indefinitely with no timeout/fairness guarantee, adequate for v0's
+  single-user CLI, not a multi-tenant scheduler.
 - Digests (`HubDigest`, FNV-1a-64 + length) are non-cryptographic
   correlation fingerprints only, not a signing/tamper-evidence chain
   (tracked separately by issue #1374, not implemented here).
@@ -628,12 +632,81 @@ zero failures; `cargo clippy --workspace --all-targets --all-features --
 -D warnings`: 0 warnings; `cargo fmt --all`: clean; harness-check: ok;
 `git diff --check`: clean).
 
+## Codex review, round 5 (PR #1554, commit `681bdeb5`) -- clean pass
+
+Round 5 (submitted against `681bdeb5`) came back with no new inline
+findings -- the automated review's own convention is to react instead of
+commenting when it has no suggestions. All 21 findings across rounds 1-4
+are now either fixed with regression tests or classified with documented
+reasoning (out of scope / repeat of an already-adjudicated decision).
+
+## Post-review-loop hardening: close the two round-4 out-of-scope findings
+
+After round 5 came back clean, the repository owner reviewed the two
+round-4 findings that had been classified OUT_OF_SCOPE (concurrent
+multi-process races on `audit.log` and on a `.tvim` index file,
+disposed of by citing this report's and the threat model's own
+pre-existing "no file locking implemented, named here explicitly as
+out-of-scope for v0" documentation) and asked for them to be addressed
+rather than left as a documented limitation.
+
+Fixed: `crates/smc-cli/src/hub.rs` gained `acquire_project_lock()`,
+which opens (creating if absent) `.semantic/hub/hub.lock` and calls
+`std::fs::File::lock()` -- a blocking exclusive advisory lock, stable in
+std as of this project's pinned toolchain (1.97.1), wrapping `flock(2)`
+on Unix / `LockFileEx` on Windows with automatic release on `Drop`
+(including on an ungraceful process exit, which is why an OS-level lock
+was used here instead of a hand-rolled marker file that would need its
+own stale-lock recovery logic). `cmd_hub_invoke` now acquires this lock
+immediately before `load_audit_trail` and holds it (a local binding,
+dropped -- and so unlocked -- on every return path) through the final
+`save_audit_trail`/`clear_pending_marker`, serializing the entire
+load -> dispatch -> save sequence against any other `smc hub invoke`
+process for the same project. This single project-level lock closes
+both races at once, since `Hub::invoke` internally reaches the
+`TurboVecAdapter`'s `load`/`save_atomic` calls within the same critical
+section -- no separate per-index lock was needed in
+`crates/semantic-hub-turbovec`, keeping that crate's dependency-minimal
+design intact.
+
+A `fs4` crate dependency was added and then removed once compilation
+revealed `std::fs::File::lock` already provides this natively on the
+pinned toolchain -- ladder-checked (stdlib covers it) before settling on
+the final zero-new-dependency implementation.
+
+Regression tests (real subprocesses, actually launched concurrently via
+`spawn`, not simulated), added to `tests/hub_cli.rs`:
+- `concurrent_invocations_against_the_same_project_do_not_lose_audit_records`
+  -- 8 concurrent `smc hub invoke` processes against the same project;
+  confirms all 8 request_ids survive in `audit.log`.
+- `concurrent_inserts_against_the_same_index_do_not_lose_updates` -- 6
+  concurrent inserts against the same index; confirms the final index
+  length is 6, not fewer.
+
+Both tests pass, and per-invocation timing in the first test's output
+(~220-280ms each, summing to roughly the total wall-clock of the whole
+run) confirms the invocations genuinely serialized rather than
+coincidentally not colliding.
+
+`docs/security/semantic_hub_threat_model_v0.md` sections 8 and 9 and
+this report's "Honest limitations" section above were updated to
+describe the lock instead of the gap; the residual limitation (no
+timeout/fairness, adequate for a single-user CLI, not a future
+multi-tenant server mode) is now stated explicitly in its place.
+
+Full local gates re-run and green (`cargo test --workspace
+--all-features`: zero failures, including both new concurrency tests;
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`:
+0 warnings after one lint fix [`suspicious_open_options`, requiring an
+explicit `.truncate(false)`]; `cargo fmt --all`: clean; harness-check:
+ok; `git diff --check`: clean).
+
 ## Remaining before merge
 
-- Push this remediation, confirm the new exact head goes green, resolve
-  the round-4 review threads (reply to each Codex comment with its
-  classification), post `@codex review` to request a fifth pass, and
-  loop the fix/test/push/review cycle again if it surfaces further
-  confirmed findings.
-- Once a review pass converges (no new confirmed findings), stop for
-  explicit repository-owner merge approval before squash-merging.
+- Push this remediation, confirm CI goes green on the new head, post a
+  brief note on the PR describing the owner-directed hardening (not a
+  Codex-finding reply, since Codex did not raise this in round 5), and
+  request one final review pass.
+- If that pass is clean, stop for explicit repository-owner merge
+  approval (already granted, conditional on a clean review pass) before
+  squash-merging.

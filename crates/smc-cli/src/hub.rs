@@ -46,6 +46,7 @@ const MAX_INPUT_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_AUDIT_LOG_BYTES: u64 = 512 * 1024 * 1024;
 const HUB_DATA_DIR: &str = ".semantic/hub";
 const AUDIT_LOG_FILE: &str = "audit.log";
+const PROJECT_LOCK_FILE: &str = "hub.lock";
 const TURBOVEC_DATA_SUBDIR: &str = "vector.turbovec";
 const PENDING_DIR: &str = "pending";
 const CLI_ENVELOPE_SCHEMA_VERSION: u32 = 1;
@@ -73,6 +74,51 @@ fn hub_usage() -> String {
 
 fn hub_data_root() -> PathBuf {
     PathBuf::from(HUB_DATA_DIR)
+}
+
+/// Acquire an exclusive, whole-project advisory lock (`std::fs::File::lock`,
+/// which wraps `flock(2)` on Unix / `LockFileEx` on Windows) covering one
+/// invocation's entire load-audit-trail -> dispatch -> save-audit-trail
+/// sequence.
+/// Without this, two `smc hub invoke` processes racing against the same
+/// project directory could each load the same on-disk `audit.log`/`.tvim`
+/// snapshot, mutate their own in-memory copy, and then atomically rename
+/// their own replacement over the other's -- the last rename wins and the
+/// other process's already-`Success`-reported record or mutation is
+/// silently gone. Blocks (does not time out) until the lock is free: v0's
+/// CLI is a single-user tool, so a second invocation simply queues behind
+/// the first rather than racing it. The lock is released automatically
+/// when the returned `File` is dropped, including on a process crash --
+/// this is exactly why an OS-level advisory lock is used here instead of
+/// a hand-rolled marker file, which would need its own stale-lock
+/// detection to recover from an ungraceful exit.
+fn acquire_project_lock() -> Result<fs::File, String> {
+    let dir = hub_data_root();
+    fs::create_dir_all(&dir).map_err(|e| {
+        format!(
+            "InternalHubFault: could not create '{}': {e}",
+            dir.display()
+        )
+    })?;
+    let lock_path = dir.join(PROJECT_LOCK_FILE);
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|e| {
+            format!(
+                "InternalHubFault: could not open project lock file '{}': {e}",
+                lock_path.display()
+            )
+        })?;
+    file.lock().map_err(|e| {
+        format!(
+            "InternalHubFault: could not acquire project lock '{}': {e}",
+            lock_path.display()
+        )
+    })?;
+    Ok(file)
 }
 
 fn build_hub() -> Hub {
@@ -460,6 +506,15 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
 
     let mut hub = build_hub();
     let audit_path = hub_data_root().join(AUDIT_LOG_FILE);
+
+    // Held for the rest of this function (dropped -- and so unlocked --
+    // on every return path, success or error): see
+    // `acquire_project_lock`'s doc comment for why this exists. Acquired
+    // before the first read of shared on-disk state so the whole
+    // load -> dispatch -> save sequence below is serialized against any
+    // other `smc hub invoke` process for this same project.
+    let _project_lock = acquire_project_lock()?;
+
     let mut persisted_trail = load_audit_trail(&audit_path)?;
     hub.seed_next_sequence(persisted_trail.next_sequence());
 
