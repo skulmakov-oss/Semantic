@@ -70,6 +70,14 @@ const TARGETS: &[(&str, &str)] = &[
         "crates/prom-ui-runtime/src/reference_contour.rs",
         "tests/golden_snapshots/public_api/prom_ui_runtime_reference_contour.txt",
     ),
+    (
+        "crates/semantic-hub/src/lib.rs",
+        "tests/golden_snapshots/public_api/semantic_hub_lib.txt",
+    ),
+    (
+        "crates/semantic-hub-turbovec/src/lib.rs",
+        "tests/golden_snapshots/public_api/semantic_hub_turbovec_lib.txt",
+    ),
 ];
 
 fn normalize_ws(line: &str) -> String {

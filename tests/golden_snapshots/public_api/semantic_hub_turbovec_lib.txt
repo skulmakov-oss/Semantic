@@ -1,0 +1,11 @@
+source: crates/semantic-hub-turbovec/src/lib.rs
+pub mod payload;
+pub mod storage;
+pub const TOOL_ID: &str = "vector.turbovec";
+pub const TURBOVEC_DEPENDENCY_VERSION: &str = "0.9.0";
+pub const TURBOVEC_DEPENDENCY_LICENSE: &str = "MIT";
+pub const TURBOVEC_DEPENDENCY_SOURCE: &str = "https://github.com/RyanCodrai/turbovec";
+pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub fn descriptor(resource_ceiling: HubResourceBudget) -> HubToolDescriptor {
+pub struct TurboVecAdapter {
+pub fn new(data_dir: impl Into<PathBuf>, resource_ceiling: HubResourceBudget) -> Self {

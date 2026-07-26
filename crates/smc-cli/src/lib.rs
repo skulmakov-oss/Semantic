@@ -18,6 +18,8 @@ mod executable_bundle;
 #[cfg(feature = "std")]
 mod formatter;
 #[cfg(feature = "std")]
+mod hub;
+#[cfg(feature = "std")]
 mod incremental;
 #[cfg(feature = "std")]
 mod package_manifest;

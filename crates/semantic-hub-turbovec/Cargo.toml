@@ -1,0 +1,22 @@
+[package]
+name = "semantic-hub-turbovec"
+version = "0.1.0"
+edition = "2021"
+authors = ["Said Kulmakov"]
+license = "Apache-2.0"
+description = "Semantic Hub v0 reference adapter: vector.turbovec"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bench]]
+name = "hub_turbovec_bench"
+path = "benches/hub_turbovec_bench.rs"
+harness = false
+
+[dependencies]
+semantic-hub = { path = "../semantic-hub" }
+turbovec = "=0.9.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

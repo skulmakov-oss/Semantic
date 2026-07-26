@@ -36,6 +36,8 @@ members = [
     "crates/prom-ui-backend-native",
     "crates/prom-ui-demo",
     "crates/core-lab",
+    "crates/semantic-hub",
+    "crates/semantic-hub-turbovec",
     "crates/semantic-core-backend",
     "crates/semantic-core-bench",
     "crates/semantic-core-capsule",

@@ -1,0 +1,13 @@
+{
+  "capabilities": ["VectorIndexMutate", "PrivateStorageRead", "PrivateStorageWrite"],
+  "payload": {
+    "index": "fixture-docs",
+    "vectors": [
+      [1, 0, 0, 0, 0, 0, 0, 0],
+      [0, 1, 0, 0, 0, 0, 0, 0],
+      [0, 0, 1, 0, 0, 0, 0, 0],
+      [0, 0, 0, 1, 0, 0, 0, 0]
+    ],
+    "ids": [101, 102, 103, 104]
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "capabilities": ["VectorIndexRead", "PrivateStorageRead"],
+  "payload": {"index": "fixture-docs"}
+}

@@ -1,0 +1,4 @@
+{
+  "capabilities": ["VectorIndexCreate", "PrivateStorageWrite"],
+  "payload": {"index": "fixture-docs", "dim": 8, "bit_width": 4}
+}

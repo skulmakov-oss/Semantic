@@ -1,0 +1,495 @@
+//! `smc hub ...` -- CLI surface for Semantic Hub v0 (Issue #1553).
+//!
+//! ```text
+//! smc hub tools
+//! smc hub describe <tool-id>
+//! smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]
+//! smc hub audit --request <request-id>
+//! ```
+//!
+//! Every invocation goes through [`semantic_hub::runtime::Hub::invoke`] --
+//! there is no direct route from this module to `TurboVecAdapter` that
+//! bypasses admission, budgets, or audit. The Hub CLI is one short-lived
+//! process per invocation; persistent state (the TurboVec index files and
+//! the audit log) lives under `.semantic/hub/` relative to the current
+//! working directory and is reloaded by each invocation, matching the
+//! project-local storage convention proposed by issue #1372.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use semantic_hub::runtime::Hub;
+use semantic_hub::{
+    HubApiVersion, HubAuditTrail, HubCallerIdentity, HubCapability, HubCapabilitySet,
+    HubOperationId, HubPrivacyClass, HubRequest, HubRequestId, HubResourceBudget, HubSessionId,
+    HubToolId, HUB_ENVELOPE_SCHEMA_VERSION,
+};
+use semantic_hub_turbovec::TurboVecAdapter;
+
+/// Bound checked against file metadata before any read, per the same
+/// convention as `smc look ui frame`'s `MAX_SOURCE_BYTES`.
+const MAX_INPUT_BYTES: u64 = 8 * 1024 * 1024;
+const HUB_DATA_DIR: &str = ".semantic/hub";
+const AUDIT_LOG_FILE: &str = "audit.log";
+const TURBOVEC_DATA_SUBDIR: &str = "vector.turbovec";
+const CLI_ENVELOPE_SCHEMA_VERSION: u32 = 1;
+
+pub fn cmd_hub(args: &[String]) -> Result<(), String> {
+    match args.first().map(String::as_str) {
+        Some("tools") => cmd_hub_tools(&args[1..]),
+        Some("describe") => cmd_hub_describe(&args[1..]),
+        Some("invoke") => cmd_hub_invoke(&args[1..]),
+        Some("audit") => cmd_hub_audit(&args[1..]),
+        _ => Err(format!("InvalidArguments: {}", hub_usage())),
+    }
+}
+
+fn hub_usage() -> String {
+    [
+        "usage:",
+        "  smc hub tools",
+        "  smc hub describe <tool-id>",
+        "  smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]",
+        "  smc hub audit --request <request-id>",
+    ]
+    .join("\n")
+}
+
+fn hub_data_root() -> PathBuf {
+    PathBuf::from(HUB_DATA_DIR)
+}
+
+fn build_hub() -> Hub {
+    let mut hub = Hub::new();
+    let turbovec_dir = hub_data_root().join(TURBOVEC_DATA_SUBDIR);
+    let adapter = TurboVecAdapter::new(turbovec_dir, HubResourceBudget::V0_CEILING);
+    hub.register_tool(Box::new(adapter))
+        .expect("the one built-in vector.turbovec registration cannot conflict with itself");
+    hub
+}
+
+fn next_value(args: &[String], i: &mut usize, flag: &str) -> Result<String, String> {
+    let value = args
+        .get(*i + 1)
+        .ok_or_else(|| format!("InvalidArguments: missing value after '{flag}'"))?;
+    *i += 2;
+    Ok(value.clone())
+}
+
+fn read_bounded(path: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+    let meta = fs::metadata(path)
+        .map_err(|e| format!("InputRejected: cannot stat input file '{path}': {e}"))?;
+    if meta.len() > max_bytes {
+        return Err(format!(
+            "InputRejected: input file '{path}' is {} bytes, exceeding the maximum {max_bytes} bytes",
+            meta.len()
+        ));
+    }
+    fs::read(path).map_err(|e| format!("InputRejected: cannot read input file '{path}': {e}"))
+}
+
+/// Same atomic-write pattern as `ui_frame_inspect::write_output_atomic`
+/// (write to a sibling temp file, `sync_all`, then rename): duplicated
+/// locally rather than exposed from that unrelated module, since this is
+/// the only Hub-owned write path and the two modules are not otherwise
+/// coupled.
+fn write_output_atomic(path: &Path, contents: &str) -> Result<(), String> {
+    let dir = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    fs::create_dir_all(dir).map_err(|e| {
+        format!(
+            "AuditProvenanceFailure: cannot create '{}': {e}",
+            dir.display()
+        )
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("smc-hub-out");
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp_path = dir.join(format!(
+        ".{file_name}.tmp.{}.{}",
+        std::process::id(),
+        suffix
+    ));
+
+    let write_result = (|| {
+        use std::io::Write;
+        let mut f = fs::File::create(&tmp_path)?;
+        f.write_all(contents.as_bytes())?;
+        f.sync_all()
+    })();
+    if let Err(e) = write_result {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!(
+            "AuditProvenanceFailure: failed to write temporary file '{}': {e}",
+            tmp_path.display()
+        ));
+    }
+    if let Err(e) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!(
+            "AuditProvenanceFailure: failed to atomically replace '{}': {e}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn load_audit_trail(path: &Path) -> Result<HubAuditTrail, String> {
+    if !path.is_file() {
+        return Ok(HubAuditTrail::new());
+    }
+    let bytes = read_bounded(
+        path.to_str()
+            .ok_or("AuditProvenanceFailure: audit log path is not valid UTF-8")?,
+        MAX_INPUT_BYTES,
+    )
+    .map_err(|e| e.replace("InputRejected", "AuditProvenanceFailure"))?;
+    let text = String::from_utf8(bytes)
+        .map_err(|e| format!("AuditProvenanceFailure: audit log is not valid UTF-8: {e}"))?;
+    HubAuditTrail::from_canonical_text(&text)
+        .map_err(|e| format!("AuditProvenanceFailure: corrupt audit log: {e}"))
+}
+
+fn save_audit_trail(path: &Path, trail: &HubAuditTrail) -> Result<(), String> {
+    write_output_atomic(path, &trail.to_canonical_text())
+}
+
+// ---------------------------------------------------------------------
+// smc hub tools
+// ---------------------------------------------------------------------
+
+fn cmd_hub_tools(args: &[String]) -> Result<(), String> {
+    if let Some(extra) = args.first() {
+        return Err(format!("InvalidArguments: unexpected argument '{extra}'"));
+    }
+    let hub = build_hub();
+    for tool in hub.registry().list() {
+        let state = hub
+            .registry()
+            .worker_state(&tool.tool_id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "Unknown".to_string());
+        println!(
+            "{}\t{}\t{}\t{}",
+            tool.tool_id, tool.tool_version, tool.execution_mode, state
+        );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------
+// smc hub describe <tool-id>
+// ---------------------------------------------------------------------
+
+fn cmd_hub_describe(args: &[String]) -> Result<(), String> {
+    let raw = args
+        .first()
+        .ok_or_else(|| "InvalidArguments: missing <tool-id>".to_string())?;
+    if args.len() > 1 {
+        return Err(format!(
+            "InvalidArguments: unexpected argument '{}'",
+            args[1]
+        ));
+    }
+    let tool_id = HubToolId::new(raw.as_str()).map_err(|e| format!("InvalidArguments: {e}"))?;
+    let hub = build_hub();
+    let descriptor = hub
+        .registry()
+        .descriptor(&tool_id)
+        .ok_or_else(|| format!("UnknownTool: {raw}"))?;
+
+    println!("tool_id: {}", descriptor.tool_id);
+    println!("name: {}", descriptor.name);
+    println!("version: {}", descriptor.tool_version);
+    println!("hub_api_version: {}", descriptor.hub_api_version);
+    println!("execution_mode: {}", descriptor.execution_mode);
+    println!("trust_class: {}", descriptor.trust_class);
+    println!("adapter_provenance: {}", descriptor.adapter_provenance);
+    println!("operations:");
+    for op in &descriptor.operations {
+        let caps: Vec<&str> = op
+            .required_capabilities
+            .iter()
+            .map(|c| c.as_str())
+            .collect();
+        println!(
+            "  - {} determinism={} mutates_tool_state={} required_capabilities=[{}]",
+            op.operation_id,
+            op.determinism,
+            op.mutates_tool_state,
+            caps.join(",")
+        );
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------
+// smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]
+// ---------------------------------------------------------------------
+
+#[derive(serde::Deserialize)]
+struct CliRequestFile {
+    #[serde(default = "default_schema_version")]
+    schema_version: u32,
+    #[serde(default)]
+    request_id: Option<String>,
+    #[serde(default = "default_session_id")]
+    session_id: String,
+    #[serde(default = "default_caller_identity")]
+    caller_identity: String,
+    #[serde(default)]
+    capabilities: Vec<String>,
+    #[serde(default = "default_privacy_class")]
+    privacy_class: String,
+    #[serde(default)]
+    resource_budget: Option<CliResourceBudgetOverride>,
+    payload: serde_json::Value,
+}
+
+fn default_schema_version() -> u32 {
+    CLI_ENVELOPE_SCHEMA_VERSION
+}
+fn default_session_id() -> String {
+    "cli-session".to_string()
+}
+fn default_caller_identity() -> String {
+    "cli:local".to_string()
+}
+fn default_privacy_class() -> String {
+    "ProjectLocal".to_string()
+}
+
+#[derive(serde::Deserialize, Default)]
+struct CliResourceBudgetOverride {
+    wall_time_millis: Option<u64>,
+    memory_bytes: Option<u64>,
+    input_bytes: Option<u64>,
+    output_bytes: Option<u64>,
+    index_item_count: Option<u64>,
+    vector_dimensions: Option<u32>,
+    result_count: Option<u32>,
+    queue_depth: Option<u32>,
+    concurrent_requests: Option<u32>,
+    storage_read_bytes: Option<u64>,
+    storage_write_bytes: Option<u64>,
+    audit_bytes: Option<u64>,
+}
+
+fn merge_budget(overrides: Option<CliResourceBudgetOverride>) -> HubResourceBudget {
+    let ceiling = HubResourceBudget::V0_CEILING;
+    let Some(o) = overrides else { return ceiling };
+    HubResourceBudget {
+        wall_time_millis: o.wall_time_millis.unwrap_or(ceiling.wall_time_millis),
+        memory_bytes: o.memory_bytes.unwrap_or(ceiling.memory_bytes),
+        input_bytes: o.input_bytes.unwrap_or(ceiling.input_bytes),
+        output_bytes: o.output_bytes.unwrap_or(ceiling.output_bytes),
+        index_item_count: o.index_item_count.unwrap_or(ceiling.index_item_count),
+        vector_dimensions: o.vector_dimensions.unwrap_or(ceiling.vector_dimensions),
+        result_count: o.result_count.unwrap_or(ceiling.result_count),
+        queue_depth: o.queue_depth.unwrap_or(ceiling.queue_depth),
+        concurrent_requests: o.concurrent_requests.unwrap_or(ceiling.concurrent_requests),
+        storage_read_bytes: o.storage_read_bytes.unwrap_or(ceiling.storage_read_bytes),
+        storage_write_bytes: o.storage_write_bytes.unwrap_or(ceiling.storage_write_bytes),
+        audit_bytes: o.audit_bytes.unwrap_or(ceiling.audit_bytes),
+    }
+}
+
+fn generate_request_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    format!("req-{}-{nanos}", std::process::id())
+}
+
+fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err(format!("InvalidArguments: {}", hub_usage()));
+    }
+    let tool_id_raw = &args[0];
+    let operation_id_raw = &args[1];
+    let mut input_path: Option<String> = None;
+    let mut out_path: Option<String> = None;
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--input" => input_path = Some(next_value(args, &mut i, "--input")?),
+            "--out" => out_path = Some(next_value(args, &mut i, "--out")?),
+            other => return Err(format!("InvalidArguments: unexpected argument '{other}'")),
+        }
+    }
+    let input_path =
+        input_path.ok_or_else(|| "InvalidArguments: missing --input <file>".to_string())?;
+
+    let tool_id =
+        HubToolId::new(tool_id_raw.as_str()).map_err(|e| format!("InvalidArguments: {e}"))?;
+    let operation_id = HubOperationId::new(operation_id_raw.as_str())
+        .map_err(|e| format!("InvalidArguments: {e}"))?;
+
+    let raw_input = read_bounded(&input_path, MAX_INPUT_BYTES)?;
+    let request_file: CliRequestFile = serde_json::from_slice(&raw_input)
+        .map_err(|e| format!("InputRejected: malformed request file: {e}"))?;
+    if request_file.schema_version != CLI_ENVELOPE_SCHEMA_VERSION {
+        return Err(format!(
+            "SchemaVersionUnsupported: request file declares schema_version {}, this build supports {}",
+            request_file.schema_version, CLI_ENVELOPE_SCHEMA_VERSION
+        ));
+    }
+
+    let request_id = match request_file.request_id {
+        Some(id) => HubRequestId::new(id).map_err(|e| format!("InvalidArguments: {e}"))?,
+        None => HubRequestId::new(generate_request_id())
+            .expect("generated request id always satisfies the handle charset/length rules"),
+    };
+    let session_id =
+        HubSessionId::new(request_file.session_id).map_err(|e| format!("InvalidArguments: {e}"))?;
+    let caller_identity = HubCallerIdentity::new(request_file.caller_identity)
+        .map_err(|e| format!("InvalidArguments: {e}"))?;
+    let privacy_class = HubPrivacyClass::parse(&request_file.privacy_class).ok_or_else(|| {
+        format!(
+            "InvalidArguments: unsupported privacy_class '{}'",
+            request_file.privacy_class
+        )
+    })?;
+    let mut capability_context = HubCapabilitySet::empty();
+    for name in &request_file.capabilities {
+        let cap = HubCapability::parse(name)
+            .ok_or_else(|| format!("InvalidArguments: unknown capability '{name}'"))?;
+        capability_context = capability_context.grant(cap);
+    }
+    let resource_budget = merge_budget(request_file.resource_budget);
+    let payload = serde_json::to_vec(&request_file.payload)
+        .map_err(|e| format!("InputRejected: payload is not representable as JSON: {e}"))?;
+
+    let request = HubRequest {
+        schema_version: HUB_ENVELOPE_SCHEMA_VERSION,
+        api_version: HubApiVersion::CURRENT,
+        request_id,
+        session_id,
+        caller_identity,
+        tool_id,
+        operation_id,
+        capability_context,
+        privacy_class,
+        resource_budget,
+        payload,
+    };
+
+    let mut hub = build_hub();
+    let audit_path = hub_data_root().join(AUDIT_LOG_FILE);
+    let mut persisted_trail = load_audit_trail(&audit_path)?;
+    hub.seed_next_sequence(persisted_trail.next_sequence());
+
+    let reply = hub.invoke(request, None);
+
+    for record in hub.audit().records() {
+        persisted_trail.push(record.clone());
+    }
+    save_audit_trail(&audit_path, &persisted_trail)?;
+
+    let reply_json = build_cli_reply_json(&reply);
+    let output_text = serde_json::to_string_pretty(&reply_json)
+        .map_err(|e| format!("InternalHubFault: could not render reply: {e}"))?;
+    match out_path {
+        Some(path) => write_output_atomic(Path::new(&path), &output_text)?,
+        None => println!("{output_text}"),
+    }
+
+    match &reply.status {
+        semantic_hub::HubReplyStatus::Success => Ok(()),
+        status => {
+            let fault = status
+                .fault()
+                .expect("non-success status always carries a fault");
+            Err(format!("{}: {fault}", fault.code()))
+        }
+    }
+}
+
+fn build_cli_reply_json(reply: &semantic_hub::HubReply) -> serde_json::Value {
+    let payload_value = if reply.payload.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&reply.payload).unwrap_or_else(|_| {
+            serde_json::Value::String(String::from_utf8_lossy(&reply.payload).into_owned())
+        })
+    };
+    let (status_str, fault_code, fault_message) = match &reply.status {
+        semantic_hub::HubReplyStatus::Success => ("Success", None, None),
+        other => {
+            let fault = other.fault().expect("checked above");
+            (
+                other.as_str(),
+                Some(fault.code().to_string()),
+                Some(fault.to_string()),
+            )
+        }
+    };
+    serde_json::json!({
+        "schema_version": CLI_ENVELOPE_SCHEMA_VERSION,
+        "request_id": reply.request_id.as_str(),
+        "tool_id": reply.tool_id.as_str(),
+        "tool_version": reply.tool_version.to_string(),
+        "operation_id": reply.operation_id.as_str(),
+        "status": status_str,
+        "fault_code": fault_code,
+        "fault_message": fault_message,
+        "payload": payload_value,
+        "resource_usage": {
+            "wall_time_millis": reply.resource_usage.wall_time_millis,
+            "input_bytes": reply.resource_usage.input_bytes,
+            "output_bytes": reply.resource_usage.output_bytes,
+        },
+    })
+}
+
+// ---------------------------------------------------------------------
+// smc hub audit --request <request-id>
+// ---------------------------------------------------------------------
+
+fn cmd_hub_audit(args: &[String]) -> Result<(), String> {
+    let mut request_id_raw: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--request" => request_id_raw = Some(next_value(args, &mut i, "--request")?),
+            other => return Err(format!("InvalidArguments: unexpected argument '{other}'")),
+        }
+    }
+    let request_id_raw = request_id_raw
+        .ok_or_else(|| "InvalidArguments: missing --request <request-id>".to_string())?;
+    let request_id =
+        HubRequestId::new(request_id_raw.as_str()).map_err(|e| format!("InvalidArguments: {e}"))?;
+
+    let audit_path = hub_data_root().join(AUDIT_LOG_FILE);
+    let trail = load_audit_trail(&audit_path)?;
+    let record = trail.find_by_request(&request_id).ok_or_else(|| {
+        format!("UnknownRequest: no audit record for request_id '{request_id_raw}'")
+    })?;
+
+    println!("request_id: {}", record.request_id);
+    println!("session_id: {}", record.session_id);
+    println!("caller_identity: {}", record.caller_identity);
+    println!("tool_id: {}", record.tool_id);
+    println!("tool_version: {}", record.tool_version);
+    println!("adapter_provenance: {}", record.adapter_provenance);
+    println!("operation_id: {}", record.operation_id);
+    println!("execution_mode: {}", record.execution_mode);
+    println!("determinism: {}", record.determinism);
+    println!("trust_class: {}", record.trust_class);
+    println!("privacy_class: {}", record.privacy_class);
+    println!("input_digest: {}", record.input_digest);
+    println!("output_digest: {}", record.output_digest);
+    println!("worker_state_after: {}", record.worker_state_after);
+    println!("status: {}", record.status_code);
+    println!("fault_code: {}", record.fault_code.unwrap_or("-"));
+    Ok(())
+}

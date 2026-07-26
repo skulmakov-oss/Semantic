@@ -1,0 +1,19 @@
+[package]
+name = "semantic-hub"
+version = "0.1.0"
+edition = "2021"
+authors = ["Said Kulmakov"]
+license = "Apache-2.0"
+description = "Semantic Hub v0: governed execution boundary for external computational tools"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]
+
+[dev-dependencies]
