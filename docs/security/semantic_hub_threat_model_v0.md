@@ -1,6 +1,6 @@
 # Semantic Hub v0 Threat Model
 
-Status: Implemented (v0)
+Status: draft v0 -- reference implementation on branch `feat/semantic-hub-v0-turbovec-e2e` (PR #1554), not yet landed on `main`
 Track: Hub / execution boundary security
 Purpose: document the threat model for Semantic Hub v0 -- the governed
 execution boundary between the `smc` CLI and the `vector.turbovec` tool --

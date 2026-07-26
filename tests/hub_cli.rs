@@ -822,3 +822,63 @@ fn invoke_rejects_a_project_whose_semantic_directory_is_a_pre_planted_symlink() 
         "a rejected invocation must not have written anything through the symlink: {leaked:?}"
     );
 }
+
+#[test]
+fn reset_without_private_storage_read_is_denied() {
+    // Regression test: handle_reset loads the existing index (to read its
+    // dim/bit_width before writing a fresh empty one) but the operation's
+    // declared required_capabilities previously omitted
+    // PrivateStorageRead, letting a caller reset an index while granting
+    // only VectorIndexMutate + PrivateStorageWrite -- admission never
+    // checked for the read capability the operation actually performs.
+    let dir = temp_dir("hub_cli_reset_needs_read");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+
+    let req = serde_json::json!({
+        "capabilities": ["VectorIndexMutate", "PrivateStorageWrite"],
+        "payload": {"index": "fixture-docs"}
+    });
+    let input = dir.join("reset_missing_read.json");
+    fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+    let output = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.reset",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("CapabilityDenied"));
+}
+
+#[cfg(unix)]
+#[test]
+fn invoke_rejects_a_pre_planted_symlinked_audit_log_leaf() {
+    // Regression test: check_dir_is_not_a_symlink only ever walks a
+    // directory's own components -- it never sees the final audit.log
+    // file appended after it. A perfectly ordinary ".semantic/hub/"
+    // directory containing a pre-planted symlink AT audit.log's own path
+    // must still be rejected, since fs::read/path.is_file() dereference
+    // a symlink by default.
+    let dir = temp_dir("hub_cli_audit_log_leaf_symlink");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+
+    let audit_log = dir.join(".semantic").join("hub").join("audit.log");
+    fs::remove_file(&audit_log).unwrap();
+    let outside_target = temp_dir("hub_cli_audit_log_leaf_symlink_target");
+    let forged_log = outside_target.join("forged.log");
+    fs::write(&forged_log, b"not a real audit log").unwrap();
+    std::os::unix::fs::symlink(&forged_log, &audit_log).unwrap();
+
+    let output = invoke(&dir, "vector.index.describe", "valid_index_describe.json");
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).starts_with("ScopedStorageViolation"),
+        "{:?}",
+        output
+    );
+}

@@ -1,6 +1,6 @@
 # Semantic Hub v0 Data Policy
 
-Status: Implemented (v0)
+Status: draft v0 -- reference implementation on branch `feat/semantic-hub-v0-turbovec-e2e` (PR #1554), not yet landed on `main`
 Track: Hub / execution boundary privacy
 Purpose: document what Semantic Hub v0 stores, where, and under what privacy
 classification -- closing part of issue #1553, consuming issue #1372

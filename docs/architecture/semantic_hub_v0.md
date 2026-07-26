@@ -1,6 +1,6 @@
 # Semantic Hub v0 Architecture
 
-Status: Implemented (v0)
+Status: draft v0 -- reference implementation on branch `feat/semantic-hub-v0-turbovec-e2e` (PR #1554), not yet landed on `main`
 Track: Hub / execution boundary
 Purpose: document the Semantic Hub v0 architecture -- a governed execution boundary for external computational tools -- closing issue #1553 and consuming architecture issue #1526
 

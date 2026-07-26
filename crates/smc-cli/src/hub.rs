@@ -115,6 +115,31 @@ fn check_dir_is_not_a_symlink(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Reject a *leaf* file that is itself a symlink/junction.
+/// `check_dir_is_not_a_symlink` only ever walks a directory's own
+/// components -- it never sees a final file appended after it. A
+/// perfectly ordinary `.semantic/hub/` directory can still contain a
+/// pre-planted symlink AT `hub.lock`, `audit.log`, or a pending-marker
+/// file's own path: `OpenOptions::open`, `fs::read`, and `path.is_file()`
+/// all dereference a symlink by default, so without this, that leaf
+/// symlink would be followed the same way a symlinked directory would.
+/// A file that does not exist yet is not a violation.
+fn check_file_is_not_a_symlink(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => Err(format!(
+            "ScopedStorageViolation: '{}' is a symlink or reparse point, which could resolve \
+             outside the project directory",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!(
+            "InternalHubFault: could not stat '{}': {e}",
+            path.display()
+        )),
+    }
+}
+
 /// Acquire an exclusive, whole-project advisory lock (`std::fs::File::lock`,
 /// which wraps `flock(2)` on Unix / `LockFileEx` on Windows) covering one
 /// invocation's entire load-audit-trail -> dispatch -> save-audit-trail
@@ -141,6 +166,7 @@ fn acquire_project_lock() -> Result<fs::File, String> {
         )
     })?;
     let lock_path = dir.join(PROJECT_LOCK_FILE);
+    check_file_is_not_a_symlink(&lock_path)?;
     let file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -209,6 +235,7 @@ fn write_pending_marker(
     if let Some(dir) = marker_path.parent() {
         check_dir_is_not_a_symlink(dir)?;
     }
+    check_file_is_not_a_symlink(&marker_path)?;
     write_output_atomic(&marker_path, &text)
 }
 
@@ -296,6 +323,7 @@ fn load_audit_trail(path: &Path) -> Result<HubAuditTrail, String> {
     if let Some(dir) = path.parent() {
         check_dir_is_not_a_symlink(dir)?;
     }
+    check_file_is_not_a_symlink(path)?;
     if !path.is_file() {
         return Ok(HubAuditTrail::new());
     }
@@ -315,6 +343,7 @@ fn save_audit_trail(path: &Path, trail: &HubAuditTrail) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         check_dir_is_not_a_symlink(dir)?;
     }
+    check_file_is_not_a_symlink(path)?;
     write_output_atomic(path, &trail.to_canonical_text())
 }
 
@@ -792,6 +821,46 @@ mod tests {
 
         let dir_through_link = fake_ancestor.join("hub").join("pending");
         let err = check_dir_is_not_a_symlink(&dir_through_link).unwrap_err();
+        assert!(
+            err.starts_with("ScopedStorageViolation"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn check_file_is_not_a_symlink_accepts_a_real_or_not_yet_created_file() {
+        let dir = temp_hub_dir("leaf-check-real");
+        let path = dir.join("audit.log");
+        fs::write(&path, b"real content").unwrap();
+        assert!(check_file_is_not_a_symlink(&path).is_ok());
+        assert!(check_file_is_not_a_symlink(&dir.join("not-yet-created.log")).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn check_file_is_not_a_symlink_rejects_a_symlinked_leaf_file() {
+        // Regression test: check_dir_is_not_a_symlink only ever walks a
+        // directory's own components -- it never sees a final file
+        // appended after it. A perfectly ordinary ".semantic/hub/"
+        // directory containing a pre-planted symlink AT hub.lock's or
+        // audit.log's own path must still be rejected, since
+        // OpenOptions::open/fs::read/path.is_file() all dereference a
+        // symlink by default.
+        let dir = temp_hub_dir("leaf-check-symlink");
+        let outside_target = std::env::temp_dir().join(format!(
+            "smc-hub-unit-leaf-symlink-target-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(&outside_target, b"not really an audit log").unwrap();
+
+        let leaf_path = dir.join("audit.log");
+        std::os::unix::fs::symlink(&outside_target, &leaf_path).unwrap();
+
+        let err = check_file_is_not_a_symlink(&leaf_path).unwrap_err();
         assert!(
             err.starts_with("ScopedStorageViolation"),
             "unexpected error: {err}"

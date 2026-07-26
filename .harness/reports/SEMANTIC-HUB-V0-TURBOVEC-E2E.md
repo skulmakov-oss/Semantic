@@ -810,7 +810,85 @@ ok; `git diff --check`: clean).
   classifications (using paginated queries this time), and request
   another review pass -- using paginated queries to confirm its result
   this time.
-- If that pass is genuinely clean (verified via paginated REST query
-  and the GraphQL `reviewThreads` unresolved-count, not just the first
-  page), stop for explicit repository-owner merge approval (already
-  granted, conditional on a clean review pass) before squash-merging.
+## Codex review, rounds 6-7 (PR #1554, commits `18549581`/`4ab0626f`) -- 3 new confirmed, 3 already-fixed/repeat
+
+Rechecking with paginated queries after the round-4/5 correction (per the
+"Remaining before merge" note above) surfaced two more review batches
+that had also gone unseen: round 6 (5 findings, against `18549581`, the
+concurrency-lock commit) and round 7 (1 finding, against `4ab0626f`, the
+round-4/5 fix commit). Of round 6's 5 findings, 3 were already resolved
+by the time they were read (superseded by the `4ab0626f` fixes above,
+just raised against the older head) or a repeat of the already-adjudicated
+PROMETHEUS-routing decision; 2 were genuinely new. Round 7's 1 finding
+was genuinely new -- and a real gap in this task's own round-5 fix.
+
+1. **Repeat -- OUT OF SCOPE, same disposition as rounds 1/3.** "Route
+   index persistence through PROMETHEUS." Identical to the recurring
+   finding; no new reasoning, no code change.
+2. **Superseded -- ALREADY FIXED.** "Reject symlinks before creating Hub
+   state" and "Reject symlinked index files" (round 6, raised against
+   `18549581`) describe the same two gaps as round 5's "Reject symlinks
+   before writing Hub metadata" / "Reject symlinked index files before
+   loading," both already fixed in commit `4ab0626f` (see above). Replied
+   noting the fix commit; no further code change.
+3. **P1 -- CONFIRMED. Keep Hub status landed and unpromoted.**
+   `docs/architecture/semantic_hub_v0.md`, `docs/security/semantic_hub_threat_model_v0.md`,
+   and `docs/privacy/semantic_hub_data_policy_v0.md` all declared
+   `Status: Implemented (v0)` while the three sibling spec documents
+   (`hub_api_v0.md`, `hub_adapter_contract_v0.md`, `turbovec_adapter_v0.md`)
+   said `Status: draft v0` -- a real inconsistency, and, since this PR
+   has not yet merged to `main` at all, an overclaim against `AGENTS.md`'s
+   own "landed on main does not automatically mean stable or promised"
+   /  "no silent release claim widening" rules. Fixed: normalized all
+   three to `Status: draft v0 -- reference implementation on branch
+   feat/semantic-hub-v0-turbovec-e2e (PR #1554), not yet landed on main`,
+   matching the sibling docs and the repo's own established
+   landed-vs-promoted convention (`docs/spec/ui/*_v0.md`'s "LANDED"
+   phrasing). Docs-only.
+4. **P2 -- CONFIRMED. Require storage-read capability for reset.**
+   `vector.index.reset`'s descriptor declared only `VectorIndexMutate` +
+   `PrivateStorageWrite`, but `handle_reset` calls `self.load(...)` to
+   read the existing index's dimension/bit-width before writing a fresh
+   empty one -- a real storage read with no corresponding capability
+   requirement, confirmed directly against the committed
+   `valid_index_reset.json` fixture (which granted exactly that
+   insufficient pair). Fixed: added `HubCapability::PrivateStorageRead`
+   to reset's required capabilities; updated the fixture to grant it (no
+   other test constructs a reset request, so no behavior elsewhere
+   changed). Regression test: `reset_without_private_storage_read_is_denied`.
+5. **P1 -- CONFIRMED, SEVERE. Reject symlinked CLI state-file leaves.**
+   The round-5 fix's `check_dir_is_not_a_symlink` only ever walks a
+   *directory's* own path components -- it never inspects a final file
+   appended after it, exactly the same root/leaf distinction already
+   fixed once for the TurboVec adapter's own `.tvim` files (round 5 item
+   3). A perfectly ordinary `.semantic/hub/` directory containing
+   `audit.log` (or `hub.lock`) as a pre-planted symlink to a file outside
+   the project would still have `path.is_file()`/`fs::read`/
+   `OpenOptions::open` follow it. Fixed: added `check_file_is_not_a_symlink`
+   (leaf-only check, no ancestor walk needed since the directory check
+   already covers that) and wired it into `acquire_project_lock`
+   (`hub.lock`), `write_pending_marker` (the marker file itself, for
+   symmetry with the round-5 fix), `load_audit_trail`, and
+   `save_audit_trail` (`audit.log`). Regression tests:
+   `check_file_is_not_a_symlink_rejects_a_symlinked_leaf_file` (unit) and
+   `invoke_rejects_a_pre_planted_symlinked_audit_log_leaf` (end-to-end,
+   real `smc` subprocess), both Unix-gated.
+
+All fixes verified by direct code reading (not a delegated verification
+pass this round, given the narrow, mechanical nature of each finding).
+Full local gates re-run and green (`cargo test --workspace
+--all-features`: zero failures, including the fixture line-ending guard
+after editing `valid_index_reset.json`; `cargo clippy --workspace
+--all-targets --all-features -- -D warnings`: 0 warnings; `cargo fmt
+--all`: clean; harness-check: ok; `git diff --check`: clean).
+
+## Remaining before merge
+
+- Push this remediation, confirm CI goes green on the new head, reply to
+  all 6 round-6/7 review threads with classifications, and request
+  another review pass -- checked with paginated REST queries and the
+  GraphQL `reviewThreads` unresolved-count both, not a single unpaginated
+  call, before declaring it clean.
+- If that pass is genuinely clean, stop for explicit repository-owner
+  merge approval (already granted, conditional on a clean review pass)
+  before squash-merging.

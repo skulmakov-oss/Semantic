@@ -116,6 +116,7 @@ pub fn descriptor(resource_ceiling: HubResourceBudget) -> HubToolDescriptor {
                 op("vector.index.reset"),
                 [
                     HubCapability::VectorIndexMutate,
+                    HubCapability::PrivateStorageRead,
                     HubCapability::PrivateStorageWrite,
                 ],
                 HubDeterminismClass::Deterministic,
