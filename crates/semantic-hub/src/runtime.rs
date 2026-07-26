@@ -130,7 +130,20 @@ impl Hub {
     /// represented as reply statuses with audit records, not exceptions.
     pub fn invoke(&mut self, request: HubRequest, deadline: Option<Instant>) -> HubReply {
         let sequence = self.next_sequence;
-        self.next_sequence += 1;
+        // Saturating, not plain `+= 1`: if seeded at `u64::MAX` (the
+        // legitimately-valid next sequence when a persisted trail's last
+        // record is at `u64::MAX - 1`), this invocation must still
+        // proceed and record its own evidence at `sequence == u64::MAX`
+        // -- a plain `+= 1` here panics (or wraps in a release build)
+        // one instruction after capturing `sequence` above, aborting the
+        // whole invocation before that correctly-captured sequence is
+        // ever used. A second `invoke` call on an already-exhausted `Hub`
+        // would then reuse `u64::MAX` again, but that residual case is
+        // already caught by `HubAuditTrail`'s own monotonic-sequence
+        // validation on the next load, and is unreachable through this
+        // crate's real usage (the CLI builds one fresh `Hub` and calls
+        // `invoke` exactly once per process).
+        self.next_sequence = self.next_sequence.saturating_add(1);
         let started = Instant::now();
 
         // Derive a deadline from the admitted resource_budget.wall_time_millis
@@ -732,6 +745,22 @@ mod tests {
         hub.seed_next_sequence(41);
         hub.invoke(request_for("test.succeed", granted()), None);
         assert_eq!(hub.audit().records()[0].sequence, 41);
+    }
+
+    #[test]
+    fn an_invocation_seeded_at_u64_max_records_its_evidence_instead_of_panicking() {
+        // Regression test: `self.next_sequence += 1` previously panicked
+        // (or wrapped, in a release build) the instant this function ran
+        // past capturing `sequence`, when seeded at `u64::MAX` -- the
+        // legitimately valid next sequence when a persisted trail's last
+        // record is at `u64::MAX - 1`. That aborted the whole invocation
+        // before its own, correctly-captured `sequence == u64::MAX` was
+        // ever used to record its audit evidence.
+        let mut hub = hub_with_fault_injection_tool();
+        hub.seed_next_sequence(u64::MAX);
+        let reply = hub.invoke(request_for("test.succeed", granted()), None);
+        assert!(reply.status.is_success());
+        assert_eq!(hub.audit().records()[0].sequence, u64::MAX);
     }
 
     #[test]

@@ -991,13 +991,54 @@ zero failures; `cargo clippy --workspace --all-targets --all-features --
 -D warnings`: 0 warnings; `cargo fmt --all`: clean; harness-check: ok;
 `git diff --check`: clean).
 
+## Codex review, round 10 (PR #1554, commit `9251ff77`) -- 2 confirmed
+
+1. **P2 -- CONFIRMED, SEVERE. Record sequence `u64::MAX` before
+   reporting exhaustion.** Round 9's `next_sequence()` fix was itself
+   incomplete: `Hub::invoke`'s own internal counter (`self.next_sequence`,
+   a separate `u64` field from `HubAuditTrail::next_sequence()`) still
+   used a plain `+= 1`. When the CLI seeds `Hub` with
+   `Some(u64::MAX)` -- the legitimately valid next sequence when the
+   persisted trail's last record is at `u64::MAX - 1` -- `self.next_sequence
+   += 1` panics (or wraps, in a release build) one instruction after
+   capturing `sequence == u64::MAX` for the current invocation, aborting
+   the whole call before that correctly-captured sequence is ever used
+   to record its own evidence. The round-9 controlled-exhaustion error
+   never gets a chance to matter, because the crash happens one
+   invocation earlier than exhaustion. Fixed: `self.next_sequence =
+   self.next_sequence.saturating_add(1)`. This invocation still
+   correctly proceeds and records `sequence == u64::MAX`; a second
+   `invoke` call on an already-exhausted `Hub` instance would reuse
+   `u64::MAX` again (residual, since saturating doesn't advance
+   further), but that is unreachable through this crate's actual usage
+   (the CLI builds one fresh `Hub` and calls `invoke` exactly once per
+   process) and is caught as defense-in-depth by
+   `HubAuditTrail`'s own monotonic-sequence validation on the next load
+   regardless. Regression test:
+   `an_invocation_seeded_at_u64_max_records_its_evidence_instead_of_panicking`.
+2. **P2 -- CONFIRMED. Synchronize the documented admission order.**
+   `docs/spec/hub/hub_api_v0.md` Section 9's numbered admission-order
+   list jumped directly from the global `MAX_PAYLOAD_BYTES` check to
+   cancellation, omitting the per-request `input_bytes`-budget check
+   added in round 2 (which runs in between in the real code). Fixed:
+   inserted the missing step and renumbered the remaining seven steps.
+   Docs-only; the underlying behavior was already correct and already
+   covered by `payload_exceeding_the_requests_own_input_bytes_budget_is_rejected`
+   (round 2).
+
+All fixes verified by direct code reading. Full local gates re-run and
+green (`cargo test --workspace --all-features`: zero failures; `cargo
+clippy --workspace --all-targets --all-features -- -D warnings`: 0
+warnings; `cargo fmt --all`: clean; harness-check: ok; `git diff
+--check`: clean).
+
 ## Remaining before merge
 
 - Push this remediation, confirm CI goes green on the new head, reply to
-  all 4 round-9 review threads with classifications, and request another
+  both round-10 review threads with classifications, and request another
   review pass -- paginated REST queries and the GraphQL `reviewThreads`
-  last-comment-authorship check together, every time, not a single
-  unpaginated call, before declaring it clean.
+  last-comment-authorship check together, every time, before declaring
+  it clean.
 - If that pass is genuinely clean, stop for explicit repository-owner
   merge approval (already granted, conditional on a clean review pass)
   before squash-merging.

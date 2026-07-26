@@ -349,15 +349,18 @@ runs every check in this fixed order and stops at the first failure:
  1. HubApiVersion::CURRENT.is_compatible_with(request.api_version)   else ApiVersionUnsupported
  2. request.schema_version == HUB_ENVELOPE_SCHEMA_VERSION            else SchemaVersionUnsupported
  3. request.payload.len() <= MAX_PAYLOAD_BYTES                       else InputRejected
- 4. !ambient.already_cancelled                                       else Cancelled
- 5. registry lookup by tool_id                                       else UnknownTool
- 6. operation lookup on that tool's descriptor                       else UnknownOperation
- 7. worker state not Disabled/Stopped (-> ToolDisabled)
+ 4. request.payload.len() <= request.resource_budget.input_bytes     else InputRejected
+    (the request's own declared budget, narrower than MAX_PAYLOAD_BYTES
+    if the caller chose to narrow it -- step 3 alone does not enforce this)
+ 5. !ambient.already_cancelled                                       else Cancelled
+ 6. registry lookup by tool_id                                       else UnknownTool
+ 7. operation lookup on that tool's descriptor                       else UnknownOperation
+ 8. worker state not Disabled/Stopped (-> ToolDisabled)
     and not Quarantined (-> ToolQuarantined)
- 8. capability_context.satisfies(required_capabilities)              else CapabilityDenied(missing list)
- 9. resource_budget.first_violation(tool.resource_ceiling)
+ 9. capability_context.satisfies(required_capabilities)              else CapabilityDenied(missing list)
+10. resource_budget.first_violation(tool.resource_ceiling)
     then .first_violation(V0_CEILING)                                else ResourceBudgetInvalid(violation)
-10. ambient.current_queue_depth < request.resource_budget.queue_depth
+11. ambient.current_queue_depth < request.resource_budget.queue_depth
     and ambient.current_concurrent_requests < request.resource_budget.concurrent_requests
                                                                        else QueueFull
 ```
