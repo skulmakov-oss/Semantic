@@ -124,18 +124,33 @@ impl ScopedStorage {
         std::fs::create_dir_all(&self.root)
     }
 
-    /// Reject a root that is itself a symlink/junction before any check
-    /// that depends on the root's identity. `symlink_metadata` (unlike
-    /// `metadata`) inspects the link itself rather than following it. A
-    /// root that does not exist yet is not a violation -- it will be a
-    /// real directory once `create_dir_all` runs.
+    /// Reject a root whose path contains a symlink/junction in ANY
+    /// component, not only the final one. `symlink_metadata` on the full
+    /// joined path only inspects the *last* component's own link status --
+    /// the OS resolves every component before it (following symlinks) just
+    /// to locate that last component's parent directory. So checking only
+    /// `self.root` as a whole would miss an ancestor such as `.semantic`
+    /// or `.semantic/hub` being a symlink while the final component is a
+    /// real directory reached through it. Walking every successively-
+    /// longer prefix with its own `symlink_metadata` call (never
+    /// `canonicalize`, which would silently resolve through the very link
+    /// this is checking for) catches that. A root that does not exist yet
+    /// is not a violation -- it will be a real directory once
+    /// `create_dir_all` runs.
     fn check_root_is_not_a_symlink(&self) -> Result<(), ScopedStorageError> {
-        match std::fs::symlink_metadata(&self.root) {
-            Ok(meta) if meta.file_type().is_symlink() => Err(ScopedStorageError::RootIsSymlink),
-            Ok(_) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(ScopedStorageError::Io(e.to_string())),
+        let mut probe = PathBuf::new();
+        for component in self.root.components() {
+            probe.push(component);
+            match std::fs::symlink_metadata(&probe) {
+                Ok(meta) if meta.file_type().is_symlink() => {
+                    return Err(ScopedStorageError::RootIsSymlink)
+                }
+                Ok(_) => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(e) => return Err(ScopedStorageError::Io(e.to_string())),
+            }
         }
+        Ok(())
     }
 
     /// Fallible variant of [`Self::ensure_root`] that first confirms the
@@ -280,6 +295,32 @@ mod tests {
         );
         assert_eq!(
             storage.ensure_root_checked().unwrap_err(),
+            ScopedStorageError::RootIsSymlink
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_index_path_rejects_a_symlink_in_an_ancestor_component_not_just_the_root_itself() {
+        // Regression test: symlink_metadata on the full joined path only
+        // inspects the FINAL component's own link status -- an ancestor
+        // component (e.g. ".semantic" itself, above the actual scoped
+        // root) being a symlink is silently followed by the OS while
+        // locating that final component, so checking only whole-path
+        // metadata would miss it entirely even though the final
+        // component itself is a real directory.
+        let real_target = temp_dir("ancestor-symlink-real-target");
+        let nested_root = real_target.join("hub").join("vector.turbovec");
+        std::fs::create_dir_all(&nested_root).unwrap();
+
+        let fake_ancestor = temp_dir("ancestor-symlink-fake-ancestor");
+        std::os::unix::fs::symlink(&real_target, &fake_ancestor).unwrap();
+
+        let root_through_link = fake_ancestor.join("hub").join("vector.turbovec");
+        let storage = ScopedStorage::new(&root_through_link);
+        let name = IndexName::new("docs").unwrap();
+        assert_eq!(
+            storage.checked_index_path(&name).unwrap_err(),
             ScopedStorageError::RootIsSymlink
         );
     }

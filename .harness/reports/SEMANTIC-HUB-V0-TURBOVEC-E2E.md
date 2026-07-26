@@ -538,11 +538,101 @@ ubuntu-latest/macos CI runners; `cargo clippy --workspace --all-targets
 --all-features -- -D warnings`: 0 warnings; `cargo fmt --all`: clean;
 harness-check: ok; `git diff --check`: clean).
 
+## Codex review, round 4 (PR #1554, commit `27cb0daf`) -- 2 confirmed, 2 out of scope
+
+A fourth pass reviewed the round-3 remediation commit and surfaced 4 new
+findings (the other 12 inline comments GitHub showed against this head
+were round 1-3 comments GitHub re-anchors to the latest commit when their
+line position is still valid, not new findings). Each was independently
+re-verified before deciding; 2 confirmed and fixed, 2 classified out of
+scope against real, pre-existing documentation (not a post-hoc excuse
+invented for this review -- verified by reading the actual doc text
+before accepting the classification).
+
+1. **OUT OF SCOPE -- "Serialize audit-log updates across CLI processes"
+   (P1).** Two overlapping `smc hub invoke` processes against the same
+   project directory can genuinely race on `audit.log` via last-writer-
+   wins atomic rename, silently discarding one invocation's audit record
+   even though it already reported `Success` and cleared its own pending
+   marker. Independently confirmed the mechanics are real (no lock, mutex,
+   flock, or advisory-lock file exists anywhere in `crates/smc-cli` or
+   `crates/semantic-hub-turbovec`) -- but this exact gap was already
+   named, in almost these words, in `docs/security/semantic_hub_threat_model_v0.md`
+   sections 8 and 9 ("concurrent multi-process access to the same
+   `.semantic/hub/` directory is not guarded... named here explicitly as
+   out-of-scope for v0, not something silently assumed safe") and in this
+   report's own "Honest limitations" section below, written during v0's
+   original implementation pass -- before any Codex review ran, not
+   invented now to dodge the finding. Section 4 of the same doc already
+   assumes the attacker "can invoke the CLI repeatedly, including
+   concurrently." No code change.
+
+2. **OUT OF SCOPE -- "Serialize index read-modify-write transactions"
+   (P1).** The identical race one layer down: concurrent inserts/removes/
+   resets on the same `.tvim` index can lose an update the same way.
+   Same disposition and same pre-existing documentation as item 1 above
+   -- both races share the same root cause (no file locking under
+   `.semantic/hub/`) and the same prior adjudication. No code change.
+
+3. **P1 -- CONFIRMED, SEVERE. Reject symlinks in every scoped-root
+   component, not only the final one.** The round-3 fix's
+   `check_root_is_not_a_symlink` called `std::fs::symlink_metadata` on the
+   *whole* joined root path, which only inspects the final path
+   component's own link status -- the OS resolves every component before
+   it (following symlinks) just to locate that final component's parent.
+   So an ancestor such as `.semantic` or `.semantic/hub` being a symlink,
+   with `vector.turbovec` itself a real directory reached through it,
+   passed the round-3 check completely -- the identical bypass class one
+   directory level higher, left open by an incomplete first fix. Verified
+   empirically on this Windows dev machine by compiling the literal check
+   logic against a live NTFS junction one level above the scoped root:
+   the check reported `Ok` and a real read through that path returned
+   data from outside the intended tree. Fixed: `check_root_is_not_a_symlink`
+   now walks every successively-longer prefix of the root path
+   (`self.root.components()`), calling `symlink_metadata` on each and
+   rejecting as soon as any component reports `is_symlink()` --
+   `canonicalize` is deliberately not used, since it would silently
+   resolve through the very link this is hunting for. No signature or
+   call-site changes needed; `ensure_root_checked()`/`checked_index_path()`
+   already funnel every real read/write through this one function.
+   Regression test (Unix-gated, same rationale as round 3's leaf-symlink
+   test):
+   `checked_index_path_rejects_a_symlink_in_an_ancestor_component_not_just_the_root_itself`.
+
+4. **P2 -- CONFIRMED. Reject unknown resource-budget override fields.**
+   `CliResourceBudgetOverride` (the CLI request file's optional
+   `resource_budget` override) had no `#[serde(deny_unknown_fields)]`, so
+   a misspelled key such as `"output_byte"` (missing the trailing `s`)
+   was silently dropped by serde, and `merge_budget`'s
+   `unwrap_or(ceiling.field)` fallback then substituted the full,
+   generous `V0_CEILING` value for that dimension instead of erroring --
+   backwards from what a caller narrowing their own budget intends. This
+   is the identical bug class already fixed once for the six adapter
+   payload structs in round 3 (item 4 above), just in a sibling struct at
+   the CLI-envelope layer that fix never reached. Fixed: added
+   `#[serde(deny_unknown_fields)]` to `CliResourceBudgetOverride` (no
+   `#[serde(flatten)]` used, so conflict-free); the existing
+   `InputRejected: malformed request file` error path already surfaces
+   the resulting deserialize error with no new error-handling code
+   needed. (The outer `CliRequestFile` envelope struct was deliberately
+   left unchanged: a typo in its top-level fields, e.g. `capabilities` ->
+   `capabilites`, fails *closed* today via `#[serde(default)]` producing
+   an empty capability set that admission then denies -- the asymmetry
+   that makes the budget-override case a real security concern (fails
+   *open* to a permissive default) does not apply there.) Regression
+   test: `resource_budget_override_rejects_a_misspelled_field_instead_of_silently_defaulting`.
+
+All fixes landed in one remediation commit on top of `27cb0daf`, full
+local gates re-run and green (`cargo test --workspace --all-features`:
+zero failures; `cargo clippy --workspace --all-targets --all-features --
+-D warnings`: 0 warnings; `cargo fmt --all`: clean; harness-check: ok;
+`git diff --check`: clean).
+
 ## Remaining before merge
 
 - Push this remediation, confirm the new exact head goes green, resolve
-  the round-3 review threads (reply to each Codex comment with its
-  classification), post `@codex review` to request a fourth pass, and
+  the round-4 review threads (reply to each Codex comment with its
+  classification), post `@codex review` to request a fifth pass, and
   loop the fix/test/push/review cycle again if it surfaces further
   confirmed findings.
 - Once a review pass converges (no new confirmed findings), stop for

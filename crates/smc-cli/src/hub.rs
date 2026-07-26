@@ -338,6 +338,7 @@ fn default_privacy_class() -> String {
 }
 
 #[derive(serde::Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct CliResourceBudgetOverride {
     wall_time_millis: Option<u64>,
     memory_bytes: Option<u64>,
@@ -684,5 +685,18 @@ mod tests {
         assert!(would_exceed_audit_log_cap(
             (MAX_AUDIT_LOG_BYTES - per_record_max + 1) as usize
         ));
+    }
+
+    #[test]
+    fn resource_budget_override_rejects_a_misspelled_field_instead_of_silently_defaulting() {
+        // Regression test: without deny_unknown_fields, a typo such as
+        // "output_byte" (missing the trailing 's') was silently dropped by
+        // serde, and merge_budget's unwrap_or(ceiling.field) then
+        // substituted the full, generous V0_CEILING value for that
+        // dimension instead of erroring -- exactly backwards from what a
+        // caller narrowing their own budget intends.
+        let result: Result<CliResourceBudgetOverride, _> =
+            serde_json::from_str(r#"{"output_byte": 1}"#);
+        assert!(result.is_err());
     }
 }
