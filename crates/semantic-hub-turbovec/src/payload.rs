@@ -58,6 +58,7 @@ pub fn to_bytes<T: Serialize>(value: &T) -> Vec<u8> {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CreateIndexRequest {
     pub index: String,
     pub dim: usize,
@@ -77,6 +78,7 @@ pub struct CreateIndexReply {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct IndexNameOnlyRequest {
     pub index: String,
 }
@@ -90,6 +92,7 @@ pub struct DescribeIndexReply {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InsertRequest {
     pub index: String,
     pub vectors: Vec<Vec<f32>>,
@@ -104,6 +107,7 @@ pub struct InsertReply {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RemoveRequest {
     pub index: String,
     pub ids: Vec<u64>,
@@ -118,6 +122,7 @@ pub struct RemoveReply {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SearchRequest {
     pub index: String,
     pub queries: Vec<Vec<f32>>,
@@ -146,6 +151,7 @@ pub struct SearchReply {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResetRequest {
     pub index: String,
 }
@@ -216,6 +222,18 @@ mod tests {
     #[test]
     fn missing_required_field_is_rejected() {
         let result: Result<CreateIndexRequest, _> = parse(br#"{"dim":128}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_index_request_rejects_an_unknown_field_instead_of_silently_ignoring_it() {
+        // Regression test: without deny_unknown_fields, a typo like
+        // "bit_wdith" was silently dropped, bit_width fell back to its
+        // default, and the index was created with parameters the caller
+        // never asked for -- with no way to undo it (there is no
+        // delete-index operation).
+        let result: Result<CreateIndexRequest, _> =
+            parse(br#"{"index":"docs","dim":128,"bit_wdith":2}"#);
         assert!(result.is_err());
     }
 

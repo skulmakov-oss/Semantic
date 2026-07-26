@@ -19,6 +19,27 @@ pub const MAX_INDEX_NAME_LEN: usize = 64;
 /// Bounds on-disk state growth from a single Hub caller.
 pub const MAX_INDEX_COUNT: usize = 256;
 
+/// A scoped-storage safety violation: the root itself turned out to be a
+/// symlink (or, on Windows, an NTFS junction/mount-point reparse point)
+/// rather than a real directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ScopedStorageError {
+    RootIsSymlink,
+    Io(String),
+}
+
+impl std::fmt::Display for ScopedStorageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScopedStorageError::RootIsSymlink => write!(
+                f,
+                "scoped storage root is a symlink or reparse point, which could resolve outside the scoped directory"
+            ),
+            ScopedStorageError::Io(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IndexNameError {
     Empty,
@@ -103,6 +124,43 @@ impl ScopedStorage {
         std::fs::create_dir_all(&self.root)
     }
 
+    /// Reject a root that is itself a symlink/junction before any check
+    /// that depends on the root's identity. `symlink_metadata` (unlike
+    /// `metadata`) inspects the link itself rather than following it. A
+    /// root that does not exist yet is not a violation -- it will be a
+    /// real directory once `create_dir_all` runs.
+    fn check_root_is_not_a_symlink(&self) -> Result<(), ScopedStorageError> {
+        match std::fs::symlink_metadata(&self.root) {
+            Ok(meta) if meta.file_type().is_symlink() => Err(ScopedStorageError::RootIsSymlink),
+            Ok(_) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(ScopedStorageError::Io(e.to_string())),
+        }
+    }
+
+    /// Fallible variant of [`Self::ensure_root`] that first confirms the
+    /// root has not been swapped for a symlink -- every derived path is
+    /// `root.join(<validated-name>)`, so if `root` itself resolved
+    /// elsewhere (e.g. a malicious checked-out project shipping
+    /// `.semantic/hub/vector.turbovec` as a pre-planted symlink), the OS
+    /// would silently follow it on every read/write despite the index
+    /// name itself being charset-validated. This must run before
+    /// `create_dir_all`, not only before the final path join, so a
+    /// pre-planted symlink is rejected before any directory-creation
+    /// side effect too.
+    pub fn ensure_root_checked(&self) -> Result<(), ScopedStorageError> {
+        self.check_root_is_not_a_symlink()?;
+        std::fs::create_dir_all(&self.root).map_err(|e| ScopedStorageError::Io(e.to_string()))
+    }
+
+    /// Fallible variant of [`Self::index_path`] that rejects a symlinked
+    /// root before deriving the path. Use this (not `index_path`) on
+    /// every path that is actually read from or written to.
+    pub fn checked_index_path(&self, name: &IndexName) -> Result<PathBuf, ScopedStorageError> {
+        self.check_root_is_not_a_symlink()?;
+        Ok(self.index_path(name))
+    }
+
     /// Count of currently persisted indexes, for the bounded-index-count
     /// check. Best-effort: a read error is treated as zero rather than
     /// failing the caller, since this is only used as an admission ceiling
@@ -169,5 +227,60 @@ mod tests {
         let path = storage.index_path(&name);
         assert!(path.starts_with("C:/scoped/root"));
         assert_eq!(path.file_name().unwrap(), "my-index.tvim");
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "semantic-hub-turbovec-storage-test-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn checked_index_path_accepts_a_real_directory_root() {
+        let root = temp_dir("real-root");
+        let storage = ScopedStorage::new(&root);
+        storage.ensure_root_checked().unwrap();
+        let name = IndexName::new("docs").unwrap();
+        assert!(storage.checked_index_path(&name).is_ok());
+    }
+
+    #[test]
+    fn checked_index_path_accepts_a_not_yet_created_root() {
+        // A root that does not exist yet is not a violation -- it becomes
+        // a real directory the first time ensure_root_checked runs.
+        let root = temp_dir("not-yet-created");
+        let storage = ScopedStorage::new(&root);
+        let name = IndexName::new("docs").unwrap();
+        assert!(storage.checked_index_path(&name).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_index_path_rejects_a_symlinked_root() {
+        // Regression test: a scoped root that is itself a symlink must be
+        // rejected before any path derived from it is used for real I/O --
+        // otherwise every read/write silently resolves through the OS to
+        // wherever the symlink points, outside the directory this adapter
+        // is scoped to.
+        let target = temp_dir("symlink-target");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = temp_dir("symlink-root");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let storage = ScopedStorage::new(&link);
+        let name = IndexName::new("docs").unwrap();
+        assert_eq!(
+            storage.checked_index_path(&name).unwrap_err(),
+            ScopedStorageError::RootIsSymlink
+        );
+        assert_eq!(
+            storage.ensure_root_checked().unwrap_err(),
+            ScopedStorageError::RootIsSymlink
+        );
     }
 }

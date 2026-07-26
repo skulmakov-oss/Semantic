@@ -144,13 +144,35 @@ impl TurboVecAdapter {
         }
     }
 
-    fn load(&self, name: &IndexName) -> Result<turbovec::IdMapIndex, HubToolError> {
-        turbovec::IdMapIndex::load(self.storage.index_path(name)).map_err(|e| {
+    /// Loads the index and rejects it if its stored dimension exceeds
+    /// `max_dim` -- the admitted budget's `vector_dimensions` ceiling for
+    /// *this* invocation. Only `vector.index.create` gets to choose an
+    /// index's dimension; every other operation reaches its data through
+    /// this one function, so checking here (rather than per-caller)
+    /// enforces the budget against an index that was created under a
+    /// wider budget in an earlier, separate CLI invocation.
+    fn load(&self, name: &IndexName, max_dim: usize) -> Result<turbovec::IdMapIndex, HubToolError> {
+        let path = self
+            .storage
+            .checked_index_path(name)
+            .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
+        let index = turbovec::IdMapIndex::load(path).map_err(|e| {
             HubToolError::new(
                 "IndexLoadFailed",
                 format!("index {:?} could not be loaded: {e}", name.as_str()),
             )
-        })
+        })?;
+        if index.dim() > max_dim {
+            return Err(HubToolError::new(
+                "DimensionExceedsBudget",
+                format!(
+                    "index {:?} has dimension {} which exceeds the admitted budget's vector_dimensions ceiling {max_dim}",
+                    name.as_str(),
+                    index.dim()
+                ),
+            ));
+        }
+        Ok(index)
     }
 
     fn save_atomic(
@@ -158,13 +180,16 @@ impl TurboVecAdapter {
         name: &IndexName,
         index: &turbovec::IdMapIndex,
     ) -> Result<(), HubToolError> {
-        self.storage.ensure_root().map_err(|e| {
+        self.storage.ensure_root_checked().map_err(|e| {
             HubToolError::new(
                 "StorageUnavailable",
-                format!("could not create scoped storage directory: {e}"),
+                format!("could not prepare scoped storage directory: {e}"),
             )
         })?;
-        let final_path = self.storage.index_path(name);
+        let final_path = self
+            .storage
+            .checked_index_path(name)
+            .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
         let tmp_path = final_path.with_extension(format!(
             "tvim.tmp.{}.{}",
             std::process::id(),
@@ -226,11 +251,11 @@ impl TurboVecAdapter {
         }))
     }
 
-    fn handle_describe(&self, payload: &[u8]) -> Result<Vec<u8>, HubToolError> {
+    fn handle_describe(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
         let req: IndexNameOnlyRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
-        let index = self.load(&name)?;
+        let index = self.load(&name, max_dim)?;
         Ok(to_bytes(&DescribeIndexReply {
             index: name.as_str().to_string(),
             dim: index.dim(),
@@ -239,7 +264,12 @@ impl TurboVecAdapter {
         }))
     }
 
-    fn handle_insert(&self, payload: &[u8], max_vectors: usize) -> Result<Vec<u8>, HubToolError> {
+    fn handle_insert(
+        &self,
+        payload: &[u8],
+        max_vectors: usize,
+        max_dim: usize,
+    ) -> Result<Vec<u8>, HubToolError> {
         let req: InsertRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
@@ -255,7 +285,7 @@ impl TurboVecAdapter {
                 ),
             ));
         }
-        let mut index = self.load(&name)?;
+        let mut index = self.load(&name, max_dim)?;
         let dim = index.dim();
         for (i, v) in req.vectors.iter().enumerate() {
             if v.len() != dim {
@@ -282,11 +312,11 @@ impl TurboVecAdapter {
         }))
     }
 
-    fn handle_remove(&self, payload: &[u8]) -> Result<Vec<u8>, HubToolError> {
+    fn handle_remove(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
         let req: RemoveRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
-        let mut index = self.load(&name)?;
+        let mut index = self.load(&name, max_dim)?;
         let mut removed = Vec::new();
         let mut not_found = Vec::new();
         for id in req.ids {
@@ -311,6 +341,7 @@ impl TurboVecAdapter {
         payload: &[u8],
         max_results: usize,
         filtered: bool,
+        max_dim: usize,
     ) -> Result<Vec<u8>, HubToolError> {
         let req: SearchRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
@@ -320,7 +351,7 @@ impl TurboVecAdapter {
         if req.queries.is_empty() {
             return Err(HubToolError::new("EmptyQuery", "queries must not be empty"));
         }
-        let index = self.load(&name)?;
+        let index = self.load(&name, max_dim)?;
         let dim = index.dim();
         for (i, q) in req.queries.iter().enumerate() {
             if q.len() != dim {
@@ -389,11 +420,11 @@ impl TurboVecAdapter {
         }))
     }
 
-    fn handle_reset(&self, payload: &[u8]) -> Result<Vec<u8>, HubToolError> {
+    fn handle_reset(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
         let req: ResetRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
-        let existing = self.load(&name)?;
+        let existing = self.load(&name, max_dim)?;
         let (dim, bit_width) = (existing.dim(), existing.bit_width());
         // turbovec has no in-place clear/truncate: a v0 "reset" is
         // constructing a fresh empty index with the same shape and
@@ -426,12 +457,12 @@ impl HubTool for TurboVecAdapter {
         let max_dim = context.resource_budget.vector_dimensions as usize;
         match operation_id.as_str() {
             "vector.index.create" => self.handle_create(payload, max_dim),
-            "vector.index.describe" => self.handle_describe(payload),
-            "vector.index.insert" => self.handle_insert(payload, max_vectors),
-            "vector.index.remove" => self.handle_remove(payload),
-            "vector.search" => self.handle_search(payload, max_results, false),
-            "vector.search.filtered" => self.handle_search(payload, max_results, true),
-            "vector.index.reset" => self.handle_reset(payload),
+            "vector.index.describe" => self.handle_describe(payload, max_dim),
+            "vector.index.insert" => self.handle_insert(payload, max_vectors, max_dim),
+            "vector.index.remove" => self.handle_remove(payload, max_dim),
+            "vector.search" => self.handle_search(payload, max_results, false, max_dim),
+            "vector.search.filtered" => self.handle_search(payload, max_results, true, max_dim),
+            "vector.index.reset" => self.handle_reset(payload, max_dim),
             other => Err(HubToolError::new(
                 "UnknownOperation",
                 format!("vector.turbovec has no operation {other:?}"),
@@ -562,6 +593,64 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .is_ok());
+    }
+
+    #[test]
+    fn describe_rejects_an_existing_index_whose_dimension_exceeds_the_current_budget() {
+        // Regression test: only vector.index.create ever consulted
+        // vector_dimensions -- every other operation loaded an existing
+        // index with no check at all, so an index created under a wide
+        // budget in one CLI invocation could later be operated on by a
+        // separate invocation admitted with a much narrower dimension
+        // budget, with no enforcement.
+        let mut a = adapter("dim-budget-existing");
+        let wide_budget = HubResourceBudget::V0_CEILING;
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":16,"bit_width":4}"#,
+            &ctx(&wide_budget, &caps),
+        )
+        .unwrap();
+
+        let narrow_budget = HubResourceBudget {
+            vector_dimensions: 8,
+            ..HubResourceBudget::V0_CEILING
+        };
+        let err = a
+            .handle(
+                &op("vector.index.describe"),
+                br#"{"index":"docs"}"#,
+                &ctx(&narrow_budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "DimensionExceedsBudget");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_rejects_a_symlinked_scoped_root_end_to_end() {
+        // End-to-end companion to storage.rs's own unit test: confirms the
+        // adapter surfaces the violation as a typed HubToolError through
+        // the real handle() path, and that nothing was written through
+        // the symlink target.
+        let target = temp_dir("symlink-target-e2e");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = temp_dir("symlink-root-e2e");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        let mut a = TurboVecAdapter::new(link, HubResourceBudget::V0_CEILING);
+        let budget = HubResourceBudget::V0_CEILING;
+        let caps = HubCapabilitySet::empty();
+        let err = a
+            .handle(
+                &op("vector.index.create"),
+                br#"{"index":"docs","dim":8,"bit_width":4}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(err.code, "ScopedStorageViolation");
+        assert!(std::fs::read_dir(&target).unwrap().next().is_none());
     }
 
     #[test]

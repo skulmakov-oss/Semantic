@@ -419,11 +419,130 @@ zero failures across every crate; `cargo clippy --workspace --all-targets
 [`needless_option_as_deref`]; `cargo fmt --all`: clean; harness-check:
 ok; `git diff --check`: clean).
 
+## Codex review, round 3 (PR #1554, commit `dd7b5805`) -- 5 P1 + 1 P2 findings, all resolved
+
+A third automated review pass ran against the round-2 remediation commit.
+Before fixing anything, each of the 6 findings was independently
+re-verified against the actual current source by a dedicated investigator
+(not taken on the reviewer's word) -- 5 CONFIRMED, 1 a repeat of round 1's
+already-adjudicated out-of-scope PROMETHEUS-routing finding.
+
+0. **Repeat -- OUT OF SCOPE, same disposition as round 1 item 6.**
+   "Route TurboVec writes through PROMETHEUS." Independently re-verified:
+   the described mechanism (`save_atomic`'s `index.write`/`std::fs::rename`
+   reached via Hub-local capability checks only) is accurate but is the
+   deliberate, documented architecture of Hub v0 per issue #1553/#1526 and
+   `docs/architecture/semantic_hub_v0.md` sections 3.1/4/17 -- unchanged
+   since round 1's identical disposition. No code change.
+
+1. **P1 -- CONFIRMED, SEVERE. Reject symlinked scoped-storage roots.**
+   `ScopedStorage::index_path`/`ensure_root` joined/created the root
+   verbatim with no symlink check. If `.semantic/hub/vector.turbovec`
+   were already a symlink when the CLI starts (e.g. shipped inside a
+   malicious checked-out project), every read (`load`, feeding
+   describe/insert/remove/search/reset) and write (`save_atomic`, feeding
+   create/insert/remove/reset) would silently resolve through the OS to
+   wherever the symlink pointed -- outside the directory the adapter is
+   scoped to, despite the index name itself being charset-validated.
+   Fixed: `ScopedStorage` gained `ensure_root_checked()` and
+   `checked_index_path()`, both rejecting with `ScopedStorageError::RootIsSymlink`
+   via `std::fs::symlink_metadata(...).file_type().is_symlink()` (a root
+   that does not exist yet is not a violation); `load`/`save_atomic` now
+   use these instead of the unchecked originals, surfacing a new
+   `ScopedStorageViolation` `HubToolError`. Regression tests (Unix-gated,
+   since symlink creation needs no special privilege on the ubuntu/macos
+   CI runners but does on Windows):
+   `checked_index_path_rejects_a_symlinked_root` (storage.rs, mechanism
+   level) and `create_rejects_a_symlinked_scoped_root_end_to_end` (lib.rs,
+   through the real `handle()` path), both confirming the symlink target
+   is never touched.
+
+2. **P1 -- CONFIRMED. Enforce the deadline during adapter execution.**
+   `Hub::invoke`'s only deadline check ran once, before dispatch; a
+   dispatch that overran its `wall_time_millis` budget (nothing polls
+   `deadline_exceeded()` mid-call in v0) still returned a plain `Success`,
+   despite `WallTimeMillis` being classified `is_hard_enforced_v0() ==
+   true`. Fixed with the reviewer's own "at minimum" option: `invoke()`
+   now rechecks the same `effective_deadline` immediately after `dispatch`
+   returns, downgrading an `Ok` result to `HubFault::DeadlineExceeded` if
+   the deadline has since passed -- consistent with the existing
+   `OutputRejected` precedent that an adapter's already-applied side
+   effects are not undone by a post-hoc rejection. True in-flight
+   preemption (polling inside `handle_insert`'s/`handle_search`'s loops)
+   was scoped out as materially larger and already-documented as deferred
+   in `docs/spec/hub/hub_adapter_contract_v0.md` Section 9. Regression
+   test: `a_dispatch_that_overruns_its_wall_time_budget_is_rejected_after_the_fact`,
+   using a new test-only `test.slow` fault-injection operation that
+   sleeps past a 1ms budget.
+
+3. **P1 -- CONFIRMED. Apply vector-dimension budgets to existing
+   indexes.** Only `vector.index.create` ever consulted
+   `resource_budget.vector_dimensions`; `describe`/`insert`/`remove`/
+   `search`/`reset` all load an existing index via the shared `load()`
+   helper with no dimension check at all, so an index created under a
+   wide budget in one CLI invocation could later be operated on by a
+   separate invocation admitted with a much narrower dimension budget,
+   with zero enforcement -- the round-2 fix (commit 54bb441c) explicitly
+   scoped itself to `handle_create` only, per its own writeup above,
+   leaving this open by design of that pass's scope. Fixed at the one
+   shared choke point: `load(name, max_dim)` now rejects with
+   `DimensionExceedsBudget` if the loaded index's `dim()` exceeds the
+   caller's admitted ceiling, and every one of the five callers (plus
+   `create`'s pre-existing check) now threads `max_dim` through. Regression
+   test: `describe_rejects_an_existing_index_whose_dimension_exceeds_the_current_budget`.
+
+4. **P1 -- CONFIRMED. Reject unknown request fields before mutating
+   state.** None of the six `payload.rs` request structs set
+   `#[serde(deny_unknown_fields)]`, so a typo such as `"bit_wdith": 2` was
+   silently dropped, `bit_width` fell back to its default, and the index
+   was permanently created with parameters the caller never asked for --
+   unrecoverable, since there is no delete-index operation in v0. (The
+   investigator also flagged that the finding's citations -- `hub_api_v0.md`'s
+   exact-shape contract and `AGENTS.md:L9` -- don't actually mandate this
+   at the adapter-payload layer, which is explicitly documented as opaque
+   to the Hub; the underlying defect is real regardless of whether the
+   cited text technically requires the fix.) Fixed: added
+   `#[serde(deny_unknown_fields)]` to all six request structs (none use
+   `#[serde(flatten)]`, so this is conflict-free). Regression test:
+   `create_index_request_rejects_an_unknown_field_instead_of_silently_ignoring_it`.
+
+5. **P2 -- CONFIRMED. Prevent the audit log from exceeding its read
+   limit.** `save_audit_trail` had no preflight against
+   `MAX_AUDIT_LOG_BYTES` before writing -- the same defect class the
+   round-1 fix already addressed once at a smaller threshold (raising
+   `MAX_INPUT_BYTES` to a dedicated, larger `MAX_AUDIT_LOG_BYTES`), which
+   only delayed rather than closed the contradiction: once normal
+   accumulated history crossed the cap, every subsequent `invoke`/`audit`
+   call (mutating or read-only) would fail permanently at
+   `load_audit_trail`'s own read bound, with no rotation/trim mechanism to
+   recover except manual deletion. (The investigator also corrected the
+   finding's citation -- the actual "no size cap" promise lives in
+   `docs/privacy/semantic_hub_data_policy_v0.md`'s Retention section, not
+   `AGENTS.md:L9` as cited -- without that changing the underlying defect's
+   reality.) Fixed: `cmd_hub_invoke` now preflights via a new pure
+   `would_exceed_audit_log_cap(current_text_len)` helper (current trail
+   length + one worst-case `MAX_AUDIT_RECORD_BYTES` record vs. the cap),
+   rejecting with `AuditLogFull` before writing any pending marker or
+   dispatching -- so `audit.log` itself never crosses the cap, and
+   read-only `smc hub audit` keeps working indefinitely on the
+   still-under-cap log. Regression test:
+   `would_exceed_audit_log_cap_rejects_only_once_the_projected_size_passes_the_cap`,
+   exercised as pure logic rather than via a real multi-hundred-megabyte
+   fixture.
+
+All fixes landed in one remediation commit on top of `dd7b5805`, full
+local gates re-run and green (`cargo test --workspace --all-features`:
+zero failures across every crate, including the new Unix-gated symlink
+tests compiled out on this Windows dev machine but exercised on the
+ubuntu-latest/macos CI runners; `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`: 0 warnings; `cargo fmt --all`: clean;
+harness-check: ok; `git diff --check`: clean).
+
 ## Remaining before merge
 
 - Push this remediation, confirm the new exact head goes green, resolve
-  the round-2 review threads (reply to each Codex comment with its
-  classification), post `@codex review` to request a third pass, and
+  the round-3 review threads (reply to each Codex comment with its
+  classification), post `@codex review` to request a fourth pass, and
   loop the fix/test/push/review cycle again if it surfaces further
   confirmed findings.
 - Once a review pass converges (no new confirmed findings), stop for

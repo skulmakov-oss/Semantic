@@ -173,6 +173,30 @@ impl Hub {
         self.concurrent_requests = self.concurrent_requests.saturating_add(1);
         let result = self.dispatch(&request, &admitted.tool, effective_deadline, started);
         self.concurrent_requests = self.concurrent_requests.saturating_sub(1);
+
+        // Recheck the same effective deadline after dispatch returns: the
+        // entry check above only rejects a request whose budget was
+        // already exhausted *before* the adapter ever ran. Without this,
+        // an operation that ran long under a tiny wall_time_millis budget
+        // (nothing polls deadline_exceeded() mid-call in v0) would still
+        // be reported as a plain Success, even though WallTimeMillis is
+        // documented as hard-enforced. This does not stop or unwind an
+        // adapter call already in flight -- see
+        // docs/spec/hub/hub_adapter_contract_v0.md Section 9 for why that
+        // is out of reach for the synchronous v0 architecture -- it only
+        // ensures a dispatch that blew through its budget is never
+        // silently reported as successful. Side effects the adapter
+        // already committed before this check runs are not undone, the
+        // same "effects happened but the reply reports failure" property
+        // Hub already accepts for OutputRejected below.
+        let result = result.and_then(|bytes| {
+            if effective_deadline.is_some_and(|d| Instant::now() > d) {
+                Err(HubFault::DeadlineExceeded)
+            } else {
+                Ok(bytes)
+            }
+        });
+
         self.record_and_reply(request, sequence, started, admitted.tool, result)
     }
 
@@ -484,6 +508,12 @@ mod tests {
                         HubDeterminismClass::Deterministic,
                         false,
                     ),
+                    HubOperationDescriptor::new(
+                        HubOperationId::new("test.slow").unwrap(),
+                        [HubCapability::CpuCompute],
+                        HubDeterminismClass::Deterministic,
+                        false,
+                    ),
                 ],
                 resource_ceiling: crate::resource::HubResourceBudget::V0_CEILING,
                 adapter_provenance: "test-only fault injection tool".into(),
@@ -520,6 +550,10 @@ mod tests {
                     } else {
                         Ok(b"denied".to_vec())
                     }
+                }
+                "test.slow" => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    Ok(b"ok".to_vec())
                 }
                 other => Err(HubToolError::new("UnknownOperation", other)),
             }
@@ -716,5 +750,22 @@ mod tests {
             hub.audit().records()[0].fault_code,
             Some("DeadlineExceeded")
         );
+    }
+
+    #[test]
+    fn a_dispatch_that_overruns_its_wall_time_budget_is_rejected_after_the_fact() {
+        // Regression test: the entry-only deadline check can't catch a
+        // request whose budget was still unexpired when dispatch started
+        // but is blown through by a long-running adapter call (nothing
+        // polls deadline_exceeded() mid-call in v0). Without a
+        // post-dispatch recheck, such a call would be reported as a plain
+        // Success despite wall_time_millis being documented as
+        // hard-enforced.
+        let mut hub = hub_with_fault_injection_tool();
+        let mut request = request_for("test.slow", granted());
+        request.resource_budget.wall_time_millis = 1;
+        let reply = hub.invoke(request, None);
+        assert!(matches!(reply.status, HubReplyStatus::ToolFailed(_)));
+        assert_eq!(reply.status.fault().unwrap().code(), "DeadlineExceeded");
     }
 }

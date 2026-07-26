@@ -222,6 +222,16 @@ fn save_audit_trail(path: &Path, trail: &HubAuditTrail) -> Result<(), String> {
     write_output_atomic(path, &trail.to_canonical_text())
 }
 
+/// True if appending one more record (worst case
+/// `semantic_hub::audit::MAX_AUDIT_RECORD_BYTES`) to a trail whose current
+/// canonical-text length is `current_text_len` would push it past
+/// `MAX_AUDIT_LOG_BYTES`. A pure function (no I/O) so the boundary can be
+/// unit-tested directly instead of via a multi-hundred-megabyte fixture.
+fn would_exceed_audit_log_cap(current_text_len: usize) -> bool {
+    current_text_len as u64 + semantic_hub::audit::MAX_AUDIT_RECORD_BYTES as u64
+        > MAX_AUDIT_LOG_BYTES
+}
+
 // ---------------------------------------------------------------------
 // smc hub tools
 // ---------------------------------------------------------------------
@@ -471,6 +481,23 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
         ));
     }
 
+    // Preflight before dispatch: save_audit_trail itself never checks
+    // MAX_AUDIT_LOG_BYTES, it always writes whatever's given to it. Without
+    // this, a caller could keep invoking until audit.log crossed that cap,
+    // at which point load_audit_trail's own read bound would make every
+    // subsequent invoke/audit call -- mutating or read-only -- fail
+    // permanently, since nothing in v0 rotates or trims the log. Rejecting
+    // here, before the mutation runs, keeps the log itself always under
+    // the cap and gives a clear, actionable error instead of a silent,
+    // self-perpetuating outage discovered only on the next call.
+    if would_exceed_audit_log_cap(persisted_trail.to_canonical_text().len()) {
+        return Err(format!(
+            "AuditLogFull: appending this invocation's record would grow '{}' past the \
+             {MAX_AUDIT_LOG_BYTES} byte cap -- rotate or delete the audit log to continue",
+            audit_path.display()
+        ));
+    }
+
     // Durable evidence-of-attempt written BEFORE dispatch: see
     // `write_pending_marker`'s doc comment for why this exists.
     write_pending_marker(
@@ -640,5 +667,22 @@ mod tests {
             "a file over MAX_INPUT_BYTES but under MAX_AUDIT_LOG_BYTES must be readable \
              when bounded against the audit-log-specific limit"
         );
+    }
+
+    #[test]
+    fn would_exceed_audit_log_cap_rejects_only_once_the_projected_size_passes_the_cap() {
+        // Regression test: save_audit_trail previously had no preflight at
+        // all, so audit.log could grow past MAX_AUDIT_LOG_BYTES and every
+        // subsequent invoke/audit call would then fail permanently at
+        // load_audit_trail's own read cap. Exercised as a pure function
+        // rather than by writing a real multi-hundred-megabyte fixture.
+        let per_record_max = semantic_hub::audit::MAX_AUDIT_RECORD_BYTES as u64;
+        assert!(!would_exceed_audit_log_cap(0));
+        assert!(!would_exceed_audit_log_cap(
+            (MAX_AUDIT_LOG_BYTES - per_record_max) as usize
+        ));
+        assert!(would_exceed_audit_log_cap(
+            (MAX_AUDIT_LOG_BYTES - per_record_max + 1) as usize
+        ));
     }
 }
