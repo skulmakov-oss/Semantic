@@ -1,126 +1,65 @@
 task:
-  id: SMC-LOOK-UI-FRAME-E2E
-  title: "cli: add `smc look ui frame` deterministic UI frame inspection"
-  type: implementation
+  id: SMC-LOOK-UI-FRAME-LF-FIX
+  title: "fix(cli): preserve canonical UI frame fixtures as LF"
+  type: bugfix
   mode: active
-  supersedes: null
-  authorized_by: "repository owner direct instruction, Issue #1365"
+  supersedes: SMC-LOOK-UI-FRAME-E2E
+  authorized_by: "repository owner direct instruction, Issue #1365 reopened"
 
 intent:
-  summary: "feat(cli): complete deterministic UI frame inspection"
+  summary: "fix(cli): preserve canonical UI frame fixtures as LF"
 
 scope:
-  # Narrowed to the actual write surface required to close #1365: the CLI
-  # command itself, the two new CLI-owned codecs (snapshot, event script),
-  # the one lower-level extraction genuinely required to drive the existing
-  # UI-DNA2 pipeline headlessly (prom-ui-runtime::reference_contour, moved
-  # out of the prom-ui-demo binary which has no [lib] target), its public
-  # API guard, fixtures/goldens, docs, and this file.
+  # Minimal follow-up to the merged #1551: a confirmed post-merge portability
+  # defect (Windows checkouts with core.autocrlf=true corrupt the strict
+  # canonical Frame Snapshot v0 / Event Script v0 fixtures to CRLF, which the
+  # decoders correctly reject). Fix is checkout policy only -- no parser,
+  # decoder, or CLI behavior changes.
   allowed_paths:
     - .harness/current.task.yaml
-    - crates/prom-ui-runtime/src/lib.rs
-    - crates/prom-ui-runtime/src/reference_contour.rs
-    - crates/prom-ui-runtime/tests/**
-    - crates/prom-ui-demo/src/ui_dna2_reference.rs
-    - crates/smc-cli/Cargo.toml
-    - crates/smc-cli/src/app.rs
-    - crates/smc-cli/src/lib.rs
-    - crates/smc-cli/src/canonical_json.rs
-    - crates/smc-cli/src/ui_frame_snapshot.rs
-    - crates/smc-cli/src/ui_event_script.rs
-    - crates/smc-cli/src/ui_frame_inspect.rs
-    - docs/spec/cli.md
-    - docs/spec/ui/ui_frame_inspection_cli.md
-    - tests/cli_look_ui_frame.rs
-    - tests/public_api_contracts.rs
-    - tests/fixtures/ui_frame_inspection/**
-    - tests/golden_snapshots/ui_frame_inspection/**
-    - tests/golden_snapshots/public_api/prom_ui_runtime_reference_contour.txt
+    - .gitattributes
+    - tests/ui_frame_fixture_line_ending_guard.rs
 
   forbidden_paths:
-    - crates/prom-ui/**
-    - crates/prom-ui-backend-native/**
-    - crates/sm-front/**
-    - crates/sm-sema/**
-    - crates/sm-ir/**
-    - crates/sm-emit/**
-    - crates/sm-verify/**
-    - crates/sm-vm/**
-    - crates/sm-runtime-core/**
-    - crates/sm-profile/**
-    - crates/semantic-core-*/**
-    - crates/core-lab/**
-    - crates/ton618-core/**
-    - apps/**
-    - experiments/**
-    - docs/roadmap/**
-    - docs/architecture/**
-    - docs/spec/ui/gate_d_activation_policy_v0.md
-    - docs/spec/ui/draw_command_snapshot_policy.md
-    - docs/spec/ui/projection_source_grammar_v0.md
-    - reports/**
-    - src/**
+    - crates/**
+    - docs/**
     - examples/**
+    - experiments/**
+    - apps/**
+    - src/**
+    - reports/**
+    - tests/fixtures/**
+    - tests/golden_snapshots/**
+    - tests/cli_look_ui_frame.rs
+    - tests/public_api_contracts.rs
 
 authorization:
-  # No dedicated "new CLI command + lower-level runtime extraction" field
-  # exists in this repository's harness convention; this is the general
-  # rust_implementation flag, scoped explicitly below.
   rust_implementation: true
   rust_implementation_scope: >-
-    production Rust: one new smc-cli subcommand (`look ui frame`) and its
-    two owned codecs (canonical Frame Snapshot v0, deterministic Event
-    Script v0); one extraction of already-existing, already-tested
-    deterministic UI-DNA2 reference-contour logic out of the prom-ui-demo
-    binary into a new pub module of prom-ui-runtime (behavior-preserving,
-    no new admission/verification/compiler semantics); plus qualification
-    and golden-test code for all of the above.
-  cli_command_implementation: true
-  ui_frame_inspection_contracts: true
-  snapshot_codec_and_validation: true
-  deterministic_preview_capture: true
-  event_script_parsing: true
-  lower_level_seam_extraction: true
-  public_api_guard_addition: true
-  fixtures_and_goldens: true
-  documentation_synchronization: true
+    test-only: one narrow regression guard (tests/ui_frame_fixture_line_ending_guard.rs)
+    that verifies git attribute resolution for the strict canonical UI frame
+    fixture surface; no production Rust, no decoder/parser changes, no CLI
+    behavior changes.
+  checkout_policy_fix: true
+  regression_guard_addition: true
   owner_issue_lifecycle: true
   workflow_changes: false
   roadmap_changes: false
   project_changes: false
   # explicitly not authorized this round
+  decoder_or_parser_tolerance_widening: false
+  general_line_ending_refactor: false
+  new_test_framework: false
   workbench_implementation: false
   semantic_studio_implementation: false
   alm_changes: false
   hub_changes: false
-  arbitrary_ui_productization: false
-  native_production_window_changes: false
-  general_grammar_redesign: false
-  semcode_semantic_changes: false
-  verifier_semantic_widening: false
-  vm_semantic_widening: false
-  prometheus_abi_widening: false
-  unrelated_renderer_refactors: false
-  gate_d_widening: false
-  admission_grant_set_widening: false
 
 constraints:
-  no_second_ui_parser_or_compiler: true
-  no_second_projection_bundle_verifier: true
-  no_second_shell_player: true
-  no_second_admission_model: true
-  no_second_drawframe_type: true
-  no_cli_only_ui_truth_model: true
-  no_demo_only_mutation_path: true
-  demo_crate_must_not_become_smc_cli_dependency: true
-  production_native_backend_must_not_be_required: true
-  no_native_window_or_gpu_in_smc_cli_dependency_graph: true
-  snapshot_mode_never_compiles_or_runs_source: true
-  source_mode_never_opens_native_window: true
-  extraction_must_be_behavior_preserving_for_prom_ui_demo: true
-  reference_contour_admission_grant_set_stays_fixed_to_button_node: true
+  strict_canonical_decoder_must_not_be_weakened: true
+  crlf_input_must_remain_noncanonical_and_rejected: true
+  fix_belongs_in_checkout_policy_not_parser_tolerance: true
+  no_new_test_framework: true
+  no_general_line_ending_refactor: true
   one_branch_one_pr: true
-  no_intermediate_documentation_only_pr: true
   no_child_issues: true
-  no_unrelated_workbench_studio_alm_hub_changes: true
-  do_not_reinterpret_or_close_issue_675: true
