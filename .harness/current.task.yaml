@@ -39,6 +39,7 @@ scope:
     - docs/spec/cli.md
     - docs/security/semantic_hub_threat_model_v0.md
     - docs/privacy/semantic_hub_data_policy_v0.md
+    - .github/workflows/ci.yml
 
   forbidden_paths:
     - crates/sm-front/**
@@ -126,7 +127,24 @@ authorization:
     private, matching the existing ui_frame_inspect.rs pattern.
   dependency_lockfile_update: true
   owner_issue_lifecycle: true
-  workflow_changes: false
+  workflow_changes: true
+  workflow_changes_detail: >-
+    Narrow CI remediation, not a scope change: .github/workflows/ci.yml
+    gained one identical step ("Install system BLAS (required by the
+    turbovec Hub dependency on Linux)": apt-get install -y
+    libopenblas-dev) added to the 4 ubuntu-latest jobs that link a
+    default-features binary/test (boundary-enforcement, public-api-guard,
+    runtime-release-gates, test-std). Root cause, confirmed from the
+    actual failed CI run on this PR's exact head: turbovec's own
+    Cargo.toml unconditionally enables ndarray's "blas" feature on
+    target_os = "linux"/"macos", which requires linking against a system
+    BLAS library the GitHub Actions Ubuntu runner does not have
+    preinstalled ("rust-lld: error: unable to find library -lopenblas").
+    This cannot be fixed from semantic-hub-turbovec's own Cargo.toml
+    (Cargo feature unification is additive-only; a downstream crate
+    cannot un-enable a feature an upstream crate's own
+    target-conditional dependency turns on). No other workflow behavior,
+    trigger, or job was changed.
   roadmap_changes: false
   project_changes: false
   workbench_implementation: false

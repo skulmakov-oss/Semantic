@@ -180,8 +180,46 @@ cargo tree -i semantic-hub
   shows only the intended changes; all CLI dogfooding used isolated temp
   directories outside the repo, never the repo root).
 
+## CI remediation (PR #1554, first push)
+
+The initial pushed head failed 4 of 9 CI jobs (`boundary-enforcement`,
+`public-api-guard`, `runtime-release-gates`, `test-std`) with an identical
+root cause across all four:
+
+```text
+error: linking with `cc` failed: exit status: 1
+= note: rust-lld: error: unable to find library -lopenblas
+```
+
+Diagnosis: `turbovec`'s own `Cargo.toml` unconditionally enables
+`ndarray`'s `"blas"` feature via a `[target.'cfg(target_os = "linux")']`
+(and `"macos"`) dependency section. This requires a system BLAS library
+present on the linker path; the GitHub Actions `ubuntu-latest` runner does
+not have one preinstalled by default. This did not surface locally because
+this development machine is Windows, where turbovec's Cargo.toml does not
+enable that feature at all. It also cannot be fixed from
+`semantic-hub-turbovec`'s own `Cargo.toml` -- Cargo feature unification is
+additive-only, so a downstream crate cannot un-enable a feature an
+upstream crate's own target-conditional dependency turns on.
+
+Fix: added one identical CI step ("Install system BLAS (required by the
+turbovec Hub dependency on Linux)": `sudo apt-get install -y
+libopenblas-dev`) to the 4 affected `ubuntu-latest` jobs in
+`.github/workflows/ci.yml`. No other workflow behavior, trigger, or job
+was changed. `.harness/current.task.yaml`'s `workflow_changes` flag was
+updated to `true` with a full justification, since this is a genuine,
+narrowly-scoped environment remediation directly required by the pinned
+dependency this issue instructed adding -- not a scope change.
+
+Jobs that passed without this fix and were left untouched: `pr-ready`
+(clippy/fmt do not require a full link step), `check-no-std` (the `smc`
+binary has `required-features = ["std"]` and is skipped entirely under
+`--no-default-features`), `release-bundle-process` (does not invoke a
+fresh `cargo build` of the default-features binaries in its current
+form), `pcc-qualification-7hell` (runs on `windows-latest`, where
+turbovec's Linux/macOS-only BLAS feature is never enabled).
+
 ## Remaining before merge
 
-- Push branch, open PR, exact-head CI, review remediation -- pending
-  explicit next steps per the execution contract, followed by a stop for
-  explicit repository-owner merge approval.
+- Push the CI fix, confirm the new exact head goes green, request/handle
+  review, then stop for explicit repository-owner merge approval.
