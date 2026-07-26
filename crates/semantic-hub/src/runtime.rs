@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::panic::{self, AssertUnwindSafe};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::admission::{admit, AdmissionAmbient};
 use crate::audit::HubAuditRecord;
@@ -133,7 +133,27 @@ impl Hub {
         self.next_sequence += 1;
         let started = Instant::now();
 
-        if let Some(d) = deadline {
+        // Derive a deadline from the admitted resource_budget.wall_time_millis
+        // and combine it with any caller-supplied deadline (the tighter of
+        // the two wins). Honest scope: this makes wall_time_millis actually
+        // participate in the deadline check at admission/dispatch entry --
+        // it previously did not, so declaring even a 1ms budget had no
+        // effect at all. It is still NOT preemptive: a single native
+        // adapter call already in flight (e.g. one TurboVec operation)
+        // cannot be interrupted mid-computation once dispatch has started,
+        // since that would require detached background execution with
+        // shared-ownership worker state, a larger change than an
+        // in-process, synchronous-per-invocation v0 architecture supports.
+        // See docs/spec/hub/hub_adapter_contract_v0.md for this limitation
+        // stated explicitly.
+        let budget_deadline =
+            started + Duration::from_millis(request.resource_budget.wall_time_millis);
+        let effective_deadline = Some(match deadline {
+            Some(d) => d.min(budget_deadline),
+            None => budget_deadline,
+        });
+
+        if let Some(d) = effective_deadline {
             if Instant::now() > d {
                 return self.finish_pre_dispatch(request, sequence, HubFault::DeadlineExceeded);
             }
@@ -151,7 +171,7 @@ impl Hub {
         };
 
         self.concurrent_requests = self.concurrent_requests.saturating_add(1);
-        let result = self.dispatch(&request, &admitted.tool, deadline, started);
+        let result = self.dispatch(&request, &admitted.tool, effective_deadline, started);
         self.concurrent_requests = self.concurrent_requests.saturating_sub(1);
         self.record_and_reply(request, sequence, started, admitted.tool, result)
     }
@@ -186,9 +206,18 @@ impl Hub {
             ));
         };
 
+        // Never hand the adapter the caller's raw, unsanitized capability
+        // set: `satisfies()` only verified the operation's *required*
+        // capabilities were present and non-sensitive, it never strips a
+        // sensitive capability the caller happened to include alongside
+        // them. An adapter naively calling `.allows(NetworkAccess)` on the
+        // raw set could otherwise observe `true` for something Hub
+        // structurally denies. The unsanitized set is still what the audit
+        // record captures (via `request.capability_context` directly).
+        let sanitized_capabilities = request.capability_context.deny_sensitive();
         let context = RestrictedHubContext {
             resource_budget: &request.resource_budget,
-            capability_context: &request.capability_context,
+            capability_context: &sanitized_capabilities,
             deadline,
         };
 
@@ -449,6 +478,12 @@ mod tests {
                         HubDeterminismClass::Deterministic,
                         false,
                     ),
+                    HubOperationDescriptor::new(
+                        HubOperationId::new("test.report-network-access-visibility").unwrap(),
+                        [HubCapability::CpuCompute],
+                        HubDeterminismClass::Deterministic,
+                        false,
+                    ),
                 ],
                 resource_ceiling: crate::resource::HubResourceBudget::V0_CEILING,
                 adapter_provenance: "test-only fault injection tool".into(),
@@ -466,7 +501,7 @@ mod tests {
             &mut self,
             operation_id: &HubOperationId,
             _payload: &[u8],
-            _context: &RestrictedHubContext,
+            context: &RestrictedHubContext,
         ) -> Result<Vec<u8>, HubToolError> {
             match operation_id.as_str() {
                 "test.succeed" => Ok(b"ok".to_vec()),
@@ -476,6 +511,16 @@ mod tests {
                 )),
                 "test.panic" => panic!("intentional test panic"),
                 "test.protocol-violation" => Ok(b"not-json".to_vec()),
+                "test.report-network-access-visibility" => {
+                    if context
+                        .capability_context
+                        .allows(HubCapability::NetworkAccess)
+                    {
+                        Ok(b"leaked".to_vec())
+                    } else {
+                        Ok(b"denied".to_vec())
+                    }
+                }
                 other => Err(HubToolError::new("UnknownOperation", other)),
             }
         }
@@ -623,5 +668,53 @@ mod tests {
         hub.seed_next_sequence(41);
         hub.invoke(request_for("test.succeed", granted()), None);
         assert_eq!(hub.audit().records()[0].sequence, 41);
+    }
+
+    #[test]
+    fn a_sensitive_capability_granted_by_the_caller_is_not_visible_to_the_adapter() {
+        // Regression test: `dispatch` previously handed the adapter the
+        // caller's raw, unsanitized capability set. An admitted request only
+        // needs its operation's *required* (non-sensitive) capabilities to
+        // satisfy admission -- it may still carry additional, sensitive
+        // capabilities alongside them, and the adapter must never observe
+        // those as granted.
+        let mut hub = hub_with_fault_injection_tool();
+        let capabilities = granted().grant(HubCapability::NetworkAccess);
+        let reply = hub.invoke(
+            request_for("test.report-network-access-visibility", capabilities),
+            None,
+        );
+        assert!(reply.status.is_success());
+        assert_eq!(reply.payload, b"denied");
+
+        // The raw, unsanitized grant is still what the audit trail records
+        // -- sanitization is a dispatch-boundary concern, not an audit one.
+        assert!(hub.audit().records()[0]
+            .capabilities_granted
+            .contains(&HubCapability::NetworkAccess));
+    }
+
+    #[test]
+    fn a_tiny_wall_time_budget_produces_deadline_exceeded_before_dispatch() {
+        // Regression test: resource_budget.wall_time_millis was documented
+        // as hard-enforced but was never actually read anywhere -- a 0ms
+        // budget had no effect at all. `invoke` must derive a deadline from
+        // it and reject before the adapter ever runs.
+        let mut hub = hub_with_fault_injection_tool();
+        let mut request = request_for("test.succeed", granted());
+        request.resource_budget.wall_time_millis = 0;
+        let reply = hub.invoke(request, None);
+        // DeadlineExceeded is classified as a post-dispatch fault in the
+        // taxonomy (`HubFault::is_pre_dispatch_rejection` is false for it)
+        // even though this particular check runs before admission, so the
+        // reply status is `ToolFailed`, not `Rejected`.
+        assert!(matches!(reply.status, HubReplyStatus::ToolFailed(_)));
+        assert_eq!(reply.status.fault().unwrap().code(), "DeadlineExceeded");
+        // Never dispatched: no worker state transition, no attempt to run
+        // the adapter at all.
+        assert_eq!(
+            hub.audit().records()[0].fault_code,
+            Some("DeadlineExceeded")
+        );
     }
 }

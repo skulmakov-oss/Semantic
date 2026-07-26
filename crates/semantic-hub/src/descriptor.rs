@@ -8,6 +8,16 @@ use crate::execution::{HubDeterminismClass, HubExecutionMode, HubTrustClass};
 use crate::ids::{HubApiVersion, HubOperationId, HubToolId, HubToolVersion};
 use crate::resource::HubResourceBudget;
 
+/// Maximum byte length for `HubToolDescriptor.name`. Bounded because this
+/// field is embedded verbatim (escaped) into every canonical audit line
+/// for this tool -- an unbounded value could produce a serialized record
+/// exceeding `crate::audit::MAX_AUDIT_RECORD_BYTES`, which the audit
+/// trail's own parser would then reject on the very next read.
+pub const MAX_TOOL_NAME_LEN: usize = 256;
+/// Maximum byte length for `HubToolDescriptor.adapter_provenance`, for the
+/// same reason as `MAX_TOOL_NAME_LEN`.
+pub const MAX_ADAPTER_PROVENANCE_LEN: usize = 2048;
+
 /// Reasons a descriptor fails validation at registration time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DescriptorError {
@@ -20,6 +30,11 @@ pub enum DescriptorError {
     OperationRequiresSensitiveCapability {
         operation: HubOperationId,
         capability: HubCapability,
+    },
+    FieldTooLong {
+        field: &'static str,
+        max: usize,
+        actual: usize,
     },
 }
 
@@ -40,6 +55,10 @@ impl std::fmt::Display for DescriptorError {
             } => write!(
                 f,
                 "operation {operation} declares sensitive capability {capability}, which is denied by default in Hub v0"
+            ),
+            DescriptorError::FieldTooLong { field, max, actual } => write!(
+                f,
+                "descriptor field '{field}' is {actual} bytes, exceeding the maximum {max} bytes"
             ),
         }
     }
@@ -91,6 +110,20 @@ impl HubToolDescriptor {
     /// such a descriptor could never be admitted, so registration rejects it
     /// up front rather than accepting a tool nothing can ever invoke.
     pub fn validate(&self, running_hub_api: HubApiVersion) -> Result<(), DescriptorError> {
+        if self.name.len() > MAX_TOOL_NAME_LEN {
+            return Err(DescriptorError::FieldTooLong {
+                field: "name",
+                max: MAX_TOOL_NAME_LEN,
+                actual: self.name.len(),
+            });
+        }
+        if self.adapter_provenance.len() > MAX_ADAPTER_PROVENANCE_LEN {
+            return Err(DescriptorError::FieldTooLong {
+                field: "adapter_provenance",
+                max: MAX_ADAPTER_PROVENANCE_LEN,
+                actual: self.adapter_provenance.len(),
+            });
+        }
         if self.operations.is_empty() {
             return Err(DescriptorError::NoOperations);
         }
@@ -191,6 +224,34 @@ mod tests {
             d.validate(HubApiVersion::CURRENT).unwrap_err(),
             DescriptorError::OperationRequiresSensitiveCapability { .. }
         ));
+    }
+
+    #[test]
+    fn descriptor_with_oversized_name_is_rejected() {
+        let mut d = sample_descriptor();
+        d.name = "x".repeat(MAX_TOOL_NAME_LEN + 1);
+        assert_eq!(
+            d.validate(HubApiVersion::CURRENT).unwrap_err(),
+            DescriptorError::FieldTooLong {
+                field: "name",
+                max: MAX_TOOL_NAME_LEN,
+                actual: MAX_TOOL_NAME_LEN + 1,
+            }
+        );
+    }
+
+    #[test]
+    fn descriptor_with_oversized_adapter_provenance_is_rejected() {
+        let mut d = sample_descriptor();
+        d.adapter_provenance = "x".repeat(MAX_ADAPTER_PROVENANCE_LEN + 1);
+        assert_eq!(
+            d.validate(HubApiVersion::CURRENT).unwrap_err(),
+            DescriptorError::FieldTooLong {
+                field: "adapter_provenance",
+                max: MAX_ADAPTER_PROVENANCE_LEN,
+                actual: MAX_ADAPTER_PROVENANCE_LEN + 1,
+            }
+        );
     }
 
     #[test]

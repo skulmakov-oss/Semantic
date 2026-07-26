@@ -206,18 +206,26 @@ constructs its `AdmissionAmbient` with `already_cancelled: false`; the
 field exists in the contract for an embedder to wire a real cancellation
 signal into, but no such signal is wired in v0.
 
-`deadline: Option<Instant>` is checked exactly once, at the very top of
-`Hub::invoke`, before admission runs -- an already-passed deadline
+`deadline: Option<Instant>` is combined with a deadline derived from the
+admitted `request.resource_budget.wall_time_millis`
+(`started + Duration::from_millis(wall_time_millis)`) -- the tighter of
+the two wins. This combined, *effective* deadline is checked exactly once,
+at the very top of `Hub::invoke`, before admission runs -- already passed
 produces `DeadlineExceeded` without ever calling `admit()`. The same
-`deadline` is then threaded into `RestrictedHubContext` and made available
-to the adapter via `context.deadline_exceeded()`, but the Hub itself never
-calls that method again once dispatch has started: there is no mid-call
-preemption. This is an honest limitation, not an oversight -- Hub v0's CLI
-dispatch path is synchronous and single-threaded, so nothing could preempt
-a running `handle()` call even if the Hub tried. An adapter that wants to
+effective deadline is then threaded into `RestrictedHubContext` and made
+available to the adapter via `context.deadline_exceeded()`, but the Hub
+itself never calls that method again once dispatch has started: there is
+no mid-call preemption. This is an honest limitation, not an oversight --
+Hub v0's CLI dispatch path is synchronous and single-threaded, so nothing
+could preempt a running `handle()` call even if the Hub tried (doing so
+would require detached background execution with shared-ownership worker
+state, deferred to a future execution mode). An adapter that wants to
 honor a deadline inside a long-running operation must poll
 `context.deadline_exceeded()` itself between internal steps; the Hub does
-not do this on the adapter's behalf.
+not do this on the adapter's behalf. Concretely: `wall_time_millis` is
+enforced at dispatch entry (a request whose budget is already effectively
+exhausted is rejected before the adapter is ever called), not enforced by
+stopping an in-flight native call once started.
 
 ## 10. Panic handling
 

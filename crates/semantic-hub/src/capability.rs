@@ -142,15 +142,24 @@ impl HubCapabilitySet {
     }
 
     /// Grant a capability. Sensitive capabilities can be inserted into a
-    /// caller-declared set (so denial is auditable and explicit) but
-    /// `HubCapabilitySet::allows` for dispatch purposes is checked against
-    /// the tool's fixed sensitive-deny policy separately by the admission
-    /// path -- this type itself does not silently drop sensitive entries.
+    /// caller-declared set (so denial is auditable and explicit) --
+    /// this type itself does not silently drop sensitive entries. Note
+    /// that `allows()` is a raw membership check and does NOT itself deny
+    /// sensitive capabilities; callers that hand this set to untrusted
+    /// code (an adapter) must use `deny_sensitive()` first (see its doc
+    /// comment), and admission decisions must use `satisfies()`, not
+    /// `allows()` directly.
     pub fn grant(mut self, capability: HubCapability) -> Self {
         self.granted.insert(capability);
         self
     }
 
+    /// Raw membership check -- does NOT deny sensitive capabilities by
+    /// itself. Exists for inspection/audit purposes (e.g. "did the caller
+    /// ask for this, regardless of whether it was ever honored"). Do not
+    /// use this to decide whether an effect is permitted; use `satisfies()`
+    /// for admission or `deny_sensitive()` before exposing a set to
+    /// untrusted adapter code.
     pub fn allows(&self, capability: HubCapability) -> bool {
         self.granted.contains(&capability)
     }
@@ -162,6 +171,28 @@ impl HubCapabilitySet {
         required
             .iter()
             .all(|c| !c.is_sensitive() && self.allows(*c))
+    }
+
+    /// Returns a copy with every sensitive capability removed. This is
+    /// what an adapter must actually be given (via
+    /// `RestrictedHubContext::capability_context`) -- admission's
+    /// `satisfies()` only decides whether required (non-sensitive)
+    /// capabilities were present, it never strips the *original* set of
+    /// any sensitive entries a caller happened to include alongside them.
+    /// Without this, an adapter naively calling `.allows(NetworkAccess)`
+    /// on the unsanitized set could observe `true` for a capability the
+    /// Hub structurally denies. The unsanitized set is still what gets
+    /// recorded in the audit trail (evidence of what was asked for), only
+    /// the adapter-facing copy is sanitized.
+    pub fn deny_sensitive(&self) -> Self {
+        Self {
+            granted: self
+                .granted
+                .iter()
+                .filter(|c| !c.is_sensitive())
+                .copied()
+                .collect(),
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &HubCapability> {

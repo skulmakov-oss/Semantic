@@ -537,3 +537,126 @@ fn audit_write_failure_leaves_a_pending_marker_and_the_mutation_still_applies() 
         lookup
     );
 }
+
+#[test]
+fn a_reused_request_id_is_rejected_and_does_not_append_a_second_audit_record() {
+    // Regression test: request_id was accepted without checking whether it
+    // already existed in the persisted audit trail. `find_by_request` only
+    // ever returns the *first* matching record, so a second invocation
+    // reusing the same id would append a record that no lookup could ever
+    // surface.
+    let dir = temp_dir("hub_cli_dup_request_id");
+    let request_id = "req-reused-once";
+    let req = serde_json::json!({
+        "request_id": request_id,
+        "capabilities": ["VectorIndexCreate", "PrivateStorageWrite"],
+        "payload": {"index": "dup-id-docs", "dim": 8, "bit_width": 4}
+    });
+    let input = dir.join("create_with_fixed_id.json");
+    fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+
+    let first = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(first.status.success(), "{:?}", first);
+
+    let second = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(!second.status.success());
+    assert!(String::from_utf8_lossy(&second.stderr).starts_with("DuplicateRequestId"));
+
+    let audit_log = dir.join(".semantic").join("hub").join("audit.log");
+    let contents = fs::read_to_string(&audit_log).expect("read audit.log");
+    let record_lines: Vec<&str> = contents
+        .lines()
+        .filter(|l| l.contains(request_id))
+        .collect();
+    assert_eq!(
+        record_lines.len(),
+        1,
+        "a rejected duplicate must not append a second audit record: {record_lines:?}"
+    );
+}
+
+#[test]
+fn reusing_a_request_id_with_an_unresolved_pending_marker_is_rejected() {
+    // Continuation of `audit_write_failure_leaves_a_pending_marker_and_the_
+    // mutation_still_applies`: once a request_id's audit write has failed
+    // and left a pending marker, retrying that SAME id must be rejected
+    // outright, not silently proceed and clear the marker -- clearing it
+    // would erase the only durable evidence that the earlier, still-
+    // unresolved invocation may already have applied its effect.
+    let dir = temp_dir("hub_cli_dup_pending");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+    invoke(&dir, "vector.index.insert", "valid_index_insert.json");
+
+    let audit_log = dir.join(".semantic").join("hub").join("audit.log");
+    fs::remove_file(&audit_log).unwrap();
+    fs::create_dir_all(&audit_log).unwrap(); // audit.log is now a directory: writes will fail
+
+    let request_id = "req-pending-then-reused";
+    let remove_req = serde_json::json!({
+        "request_id": request_id,
+        "capabilities": ["VectorIndexMutate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "fixture-docs", "ids": [102]}
+    });
+    let input = dir.join("remove_broken.json");
+    fs::write(&input, serde_json::to_vec(&remove_req).unwrap()).unwrap();
+
+    let broken = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.remove",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(!broken.status.success());
+    assert!(String::from_utf8_lossy(&broken.stderr).starts_with("AuditProvenanceFailure"));
+
+    fs::remove_dir_all(&audit_log).unwrap(); // restore audit.log so the retry can run at all
+
+    let retry = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.remove",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(!retry.status.success());
+    assert!(String::from_utf8_lossy(&retry.stderr).starts_with("DuplicateRequestId"));
+
+    let marker = dir
+        .join(".semantic")
+        .join("hub")
+        .join("pending")
+        .join(format!("{request_id}.json"));
+    assert!(
+        marker.is_file(),
+        "a rejected retry must not have cleared the still-unresolved pending marker"
+    );
+}

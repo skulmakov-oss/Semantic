@@ -452,6 +452,25 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
     let mut persisted_trail = load_audit_trail(&audit_path)?;
     hub.seed_next_sequence(persisted_trail.next_sequence());
 
+    // Reject a reused request_id before writing anything: `find_by_request`
+    // only ever returns the *first* matching record, so a second audited
+    // invocation under the same id would be silently unreachable by
+    // lookup; and reusing an id that still has an unresolved pending
+    // marker would let a retry's own `clear_pending_marker` erase the
+    // evidence that the *earlier*, still-unresolved invocation may have
+    // applied its effect.
+    if persisted_trail
+        .find_by_request(&request_id_for_marker)
+        .is_some()
+        || pending_marker_path(&request_id_for_marker).is_file()
+    {
+        return Err(format!(
+            "DuplicateRequestId: request_id '{}' was already used by a prior invocation \
+             (either audited or still unresolved) -- request ids must be unique",
+            request_id_for_marker.as_str()
+        ));
+    }
+
     // Durable evidence-of-attempt written BEFORE dispatch: see
     // `write_pending_marker`'s doc comment for why this exists.
     write_pending_marker(

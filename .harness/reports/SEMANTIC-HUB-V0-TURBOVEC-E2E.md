@@ -326,9 +326,105 @@ green (`cargo test --workspace --all-features`: 304 test result blocks,
 warnings`: 0 warnings; `cargo fmt --all --check`: clean; harness-check:
 ok).
 
+## Codex review, round 2 (PR #1554, commit `54bb441c`) -- 3 P1 + 1 P2 findings, all resolved
+
+A second automated review pass ran against the round-1 remediation commit
+itself and found 4 further real defects introduced or left open by that
+commit (none stylistic/speculative). All four are fixed in this same PR.
+
+1. **P1 -- CONFIRMED, SEVERE. `dispatch()` handed the adapter the caller's
+   raw, unsanitized `request.capability_context`.** Admission's
+   `check_capabilities` only verifies an operation's *required*
+   capabilities are present and non-sensitive -- it never strips a
+   sensitive capability the caller happened to grant *alongside* the
+   required ones. An admitted request could therefore still carry e.g.
+   `NetworkAccess`, and an adapter naively calling
+   `context.capability_context.allows(NetworkAccess)` would observe
+   `true` for something Hub structurally denies by design, defeating the
+   deny-by-default sensitive-capability model documented in
+   `docs/security/semantic_hub_threat_model_v0.md`. Fixed: added
+   `HubCapabilitySet::deny_sensitive(&self) -> Self` and `dispatch()` now
+   builds `RestrictedHubContext` from `request.capability_context.deny_sensitive()`
+   instead of the raw set. The unsanitized set is still exactly what the
+   audit record captures -- sanitization is a dispatch-boundary concern,
+   not an audit one. Regression test:
+   `a_sensitive_capability_granted_by_the_caller_is_not_visible_to_the_adapter`
+   (`crates/semantic-hub/src/runtime.rs`), using a new test-only
+   `test.report-network-access-visibility` operation on the fault-injection
+   tool that reports back what it observed through the restricted context.
+
+2. **P1 -- CONFIRMED. `resource_budget.wall_time_millis` was documented as
+   one of the 8 hard-enforced v0 resource dimensions but was never read
+   anywhere in `invoke`/`dispatch` -- declaring even a 1ms budget had zero
+   effect.** Fixed: `invoke()` now derives a deadline from
+   `started + Duration::from_millis(request.resource_budget.wall_time_millis)`,
+   combines it with any caller-supplied deadline (`.min()`, tighter wins),
+   and rejects with `DeadlineExceeded` before admission runs if already
+   past it. Honestly scoped, and documented as such in
+   `docs/spec/hub/hub_adapter_contract_v0.md` Section 9: this is checked
+   at dispatch entry only, not preemptive of a native adapter call already
+   in flight (no detached/interruptible execution in the v0 synchronous,
+   in-process architecture). One classification note: `HubFault::DeadlineExceeded`
+   is listed in the taxonomy as a post-dispatch fault
+   (`is_pre_dispatch_rejection() == false`), so this particular
+   entry-check produces a `HubReplyStatus::ToolFailed`, not `Rejected`,
+   even though it runs before `admit()` -- pre-existing classification
+   behavior, left unchanged since only the enforcement gap itself was the
+   confirmed finding. Regression test:
+   `a_tiny_wall_time_budget_produces_deadline_exceeded_before_dispatch`.
+
+3. **P1 -- CONFIRMED. Caller-supplied `request_id`s were accepted without
+   checking the persisted audit trail or the pending-marker directory for
+   reuse.** `HubAuditTrail::find_by_request` always returns the *first*
+   matching record, so replaying an id would append a second, permanently
+   unreachable-by-lookup record; and reusing an id that still had an
+   unresolved pending marker (from a prior failed audit write) would let
+   the retry's own success clear that marker, erasing the only durable
+   evidence that the earlier, still-unresolved invocation may already have
+   applied its effect. Fixed: `cmd_hub_invoke` now checks
+   `persisted_trail.find_by_request(&request_id)` and
+   `pending_marker_path(&request_id).is_file()` immediately after loading
+   the persisted trail and before writing any new pending marker or
+   dispatching, rejecting with a new `DuplicateRequestId` error if either
+   is true. Regression tests:
+   `a_reused_request_id_is_rejected_and_does_not_append_a_second_audit_record`
+   and `reusing_a_request_id_with_an_unresolved_pending_marker_is_rejected`
+   (`tests/hub_cli.rs`, the latter a direct continuation of the round-1
+   pending-marker test's failure scenario).
+
+4. **P2 -- CONFIRMED. `MAX_AUDIT_RECORD_BYTES` (8 KiB) was enforced only
+   on parse (`HubAuditRecord::from_canonical_line`), never on serialize
+   (`to_canonical_line`)**, so a sufficiently long unbounded input field
+   (tool `name` or `adapter_provenance`, both embedded verbatim/escaped
+   into every audit line for that tool) could produce a serialized record
+   the trail's own parser would then reject on the very next read --
+   corrupting the audit log with a self-inflicted, unrecoverable record.
+   Changing `to_canonical_line`'s signature to a fallible one was judged a
+   larger, more invasive change than the actual root cause warranted,
+   since the real problem is that these fields were unbounded at their
+   source. Fixed instead at that source: added
+   `descriptor::MAX_TOOL_NAME_LEN` (256) and
+   `MAX_ADAPTER_PROVENANCE_LEN` (2048) with a new
+   `DescriptorError::FieldTooLong` variant, checked in
+   `HubToolDescriptor::validate()` (which every tool registration already
+   goes through) -- these two ceilings keep every field that reaches
+   `to_canonical_line` well under `MAX_AUDIT_RECORD_BYTES` by construction.
+   Regression tests: `descriptor_with_oversized_name_is_rejected` /
+   `descriptor_with_oversized_adapter_provenance_is_rejected`.
+
+All fixes landed in one remediation commit on top of `54bb441c`, full
+local gates re-run and green (`cargo test --workspace --all-features`:
+zero failures across every crate; `cargo clippy --workspace --all-targets
+--all-features -- -D warnings`: 0 warnings after one lint fix
+[`needless_option_as_deref`]; `cargo fmt --all`: clean; harness-check:
+ok; `git diff --check`: clean).
+
 ## Remaining before merge
 
 - Push this remediation, confirm the new exact head goes green, resolve
-  the review threads (reply to each Codex comment with its
-  classification), then stop for explicit repository-owner merge
-  approval.
+  the round-2 review threads (reply to each Codex comment with its
+  classification), post `@codex review` to request a third pass, and
+  loop the fix/test/push/review cycle again if it surfaces further
+  confirmed findings.
+- Once a review pass converges (no new confirmed findings), stop for
+  explicit repository-owner merge approval before squash-merging.
