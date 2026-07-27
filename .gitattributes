@@ -2,3 +2,4 @@
 *.smc binary
 tests/golden_snapshots/** text eol=lf
 tests/fixtures/ui_frame_inspection/** text eol=lf
+tests/fixtures/hub/** text eol=lf

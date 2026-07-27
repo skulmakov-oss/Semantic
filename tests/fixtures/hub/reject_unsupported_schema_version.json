@@ -1,0 +1,5 @@
+{
+  "schema_version": 99,
+  "capabilities": ["VectorSearch", "PrivateStorageRead"],
+  "payload": {"index": "fixture-docs", "queries": [[0, 1, 0, 0, 0, 0, 0, 0]], "k": 3}
+}

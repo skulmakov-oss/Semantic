@@ -25,6 +25,7 @@ std = [
     "prom-audit/std",
     "prom-ui/std",
     "prom-ui-runtime/std",
+    "semantic-hub/std",
 ]
 profile-rust = ["sm-ir/profile-rust"]
 profile-logos = ["sm-ir/profile-logos"]
@@ -45,3 +46,7 @@ prom-cap = { path = "../prom-cap", default-features = false, features = ["std"] 
 prom-audit = { path = "../prom-audit", default-features = false, features = ["std"] }
 prom-ui = { path = "../prom-ui", default-features = false, features = ["std"] }
 prom-ui-runtime = { path = "../prom-ui-runtime", default-features = false, features = ["std"] }
+semantic-hub = { path = "../semantic-hub", default-features = false, features = ["std"] }
+semantic-hub-turbovec = { path = "../semantic-hub-turbovec" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

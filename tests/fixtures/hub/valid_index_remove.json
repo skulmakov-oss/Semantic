@@ -1,0 +1,4 @@
+{
+  "capabilities": ["VectorIndexMutate", "PrivateStorageRead", "PrivateStorageWrite"],
+  "payload": {"index": "fixture-docs", "ids": [102]}
+}

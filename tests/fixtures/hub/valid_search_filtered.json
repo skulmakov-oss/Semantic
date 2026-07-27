@@ -1,0 +1,9 @@
+{
+  "capabilities": ["VectorFilteredSearch", "PrivateStorageRead"],
+  "payload": {
+    "index": "fixture-docs",
+    "queries": [[0, 1, 0, 0, 0, 0, 0, 0]],
+    "k": 3,
+    "allowed_ids": [101, 103]
+  }
+}

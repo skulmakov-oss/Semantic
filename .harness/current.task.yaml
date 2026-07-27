@@ -1,65 +1,166 @@
 task:
-  id: SMC-LOOK-UI-FRAME-LF-FIX
-  title: "fix(cli): preserve canonical UI frame fixtures as LF"
-  type: bugfix
+  id: SEMANTIC-HUB-V0-TURBOVEC-E2E
+  title: "feat(hub): implement Semantic Hub v0 with TurboVec in one complete pass"
+  type: implementation
   mode: active
-  supersedes: SMC-LOOK-UI-FRAME-E2E
-  authorized_by: "repository owner direct instruction, Issue #1365 reopened"
+  supersedes: SMC-LOOK-UI-FRAME-LF-FIX
+  authorized_by: "repository owner direct instruction, Issue #1553 (owner implementation issue for architecture #1526; consumes policy issues #1371-#1374)"
 
 intent:
-  summary: "fix(cli): preserve canonical UI frame fixtures as LF"
+  summary: "feat(hub): complete Semantic Hub v0 with TurboVec"
 
 scope:
-  # Minimal follow-up to the merged #1551: a confirmed post-merge portability
-  # defect (Windows checkouts with core.autocrlf=true corrupt the strict
-  # canonical Frame Snapshot v0 / Event Script v0 fixtures to CRLF, which the
-  # decoders correctly reject). Fix is checkout policy only -- no parser,
-  # decoder, or CLI behavior changes.
+  # New governed execution boundary for external computational tools
+  # (Semantic Hub v0), with TurboVec (crates.io `turbovec` =0.9.0, MIT) as
+  # the first real reference adapter, wired end-to-end through a new
+  # `smc hub` CLI surface. Two new crates; smc-cli gains one new private
+  # module and two new dependencies; root Cargo.toml gains two workspace
+  # members. No existing crate's public API is modified.
   allowed_paths:
     - .harness/current.task.yaml
+    - .harness/reports/SEMANTIC-HUB-V0-TURBOVEC-E2E.md
+    - Cargo.toml
+    - Cargo.lock
+    - crates/semantic-hub/**
+    - crates/semantic-hub-turbovec/**
+    - crates/smc-cli/Cargo.toml
+    - crates/smc-cli/src/hub.rs
+    - crates/smc-cli/src/app.rs
+    - crates/smc-cli/src/lib.rs
+    - tests/public_api_contracts.rs
+    - tests/golden_snapshots/public_api/semantic_hub_lib.txt
+    - tests/golden_snapshots/public_api/semantic_hub_turbovec_lib.txt
+    - tests/hub_cli.rs
+    - tests/hub_fixture_line_ending_guard.rs
+    - tests/fixtures/hub/**
     - .gitattributes
-    - tests/ui_frame_fixture_line_ending_guard.rs
+    - docs/architecture/semantic_hub_v0.md
+    - docs/spec/hub/**
+    - docs/spec/cli.md
+    - docs/security/semantic_hub_threat_model_v0.md
+    - docs/privacy/semantic_hub_data_policy_v0.md
+    - .github/workflows/ci.yml
 
   forbidden_paths:
-    - crates/**
-    - docs/**
+    - crates/sm-front/**
+    - crates/sm-sema/**
+    - crates/sm-ir/**
+    - crates/sm-emit/**
+    - crates/sm-verify/**
+    - crates/sm-runtime-core/**
+    - crates/sm-vm/**
+    - crates/sm-profile/**
+    - crates/sm-format/**
+    - crates/ton618-core/**
+    - crates/prom-abi/**
+    - crates/prom-refs/**
+    - crates/prom-cap/**
+    - crates/prom-gates/**
+    - crates/prom-runtime/**
+    - crates/prom-state/**
+    - crates/prom-rules/**
+    - crates/prom-audit/**
+    - crates/prom-ui/**
+    - crates/prom-ui-runtime/**
+    - crates/prom-ui-backend-native/**
+    - crates/prom-ui-demo/**
+    - crates/core-lab/**
+    - crates/semantic-core-backend/**
+    - crates/semantic-core-bench/**
+    - crates/semantic-core-capsule/**
+    - crates/semantic-core-exec/**
+    - crates/semantic-core-quad/**
+    - crates/semantic-core-runtime/**
+    - crates/smc-cli/src/api_contract.rs
+    - crates/smc-cli/src/canonical_json.rs
+    - crates/smc-cli/src/config.rs
+    - crates/smc-cli/src/executable_bundle.rs
+    - crates/smc-cli/src/formatter.rs
+    - crates/smc-cli/src/incremental.rs
+    - crates/smc-cli/src/package_manifest.rs
+    - crates/smc-cli/src/schema_versioning.rs
+    - crates/smc-cli/src/ui_event_script.rs
+    - crates/smc-cli/src/ui_frame_inspect.rs
+    - crates/smc-cli/src/ui_frame_snapshot.rs
+    - crates/smc-cli/src/wire_contract.rs
+    - src/**
+    - apps/**
     - examples/**
     - experiments/**
-    - apps/**
-    - src/**
+    - ton618_legacy/**
+    - docs/roadmap/**
+    - docs/workbench/**
     - reports/**
-    - tests/fixtures/**
-    - tests/golden_snapshots/**
+    - tests/fixtures/ui_frame_inspection/**
     - tests/cli_look_ui_frame.rs
-    - tests/public_api_contracts.rs
+    - tests/ui_frame_fixture_line_ending_guard.rs
 
 authorization:
   rust_implementation: true
   rust_implementation_scope: >-
-    test-only: one narrow regression guard (tests/ui_frame_fixture_line_ending_guard.rs)
-    that verifies git attribute resolution for the strict canonical UI frame
-    fixture surface; no production Rust, no decoder/parser changes, no CLI
-    behavior changes.
-  checkout_policy_fix: true
-  regression_guard_addition: true
+    new production Rust: two new crates (semantic-hub generic contract/
+    runtime, semantic-hub-turbovec reference adapter over the real
+    turbovec dependency), one new smc-cli module (hub.rs) plus its
+    dispatch wiring in app.rs/lib.rs, plus tests/benches within the new
+    crates and one new repo-root integration test file
+    (tests/hub_cli.rs). No changes to compiler, verifier, VM, SemCode,
+    or any existing PROMETHEUS crate's public API.
+  new_external_dependency: true
+  new_external_dependency_detail: >-
+    turbovec = "=0.9.0" (crates.io, MIT license,
+    https://github.com/RyanCodrai/turbovec), pinned to an exact version.
+    Pulls in faer/gemm/nalgebra/rayon/rand as transitive build
+    dependencies of that crate; no new direct dependency of
+    semantic-hub itself beyond serde/serde_json (already present in the
+    workspace via the root package).
+  cli_command_implementation: true
+  test_addition: true
+  fixture_addition: true
+  benchmark_addition: true
+  documentation_addition: true
+  public_api_change: true
+  public_api_change_detail: >-
+    Two brand-new public library crates (semantic-hub,
+    semantic-hub-turbovec); registered with tests/public_api_contracts.rs
+    per the existing snapshot-guard mechanism. smc-cli's own public
+    surface (lib.rs re-exports) is unchanged -- the new hub.rs module is
+    private, matching the existing ui_frame_inspect.rs pattern.
+  dependency_lockfile_update: true
   owner_issue_lifecycle: true
-  workflow_changes: false
+  workflow_changes: true
+  workflow_changes_detail: >-
+    Narrow CI remediation, not a scope change: .github/workflows/ci.yml
+    gained one identical step ("Install system BLAS (required by the
+    turbovec Hub dependency on Linux)": apt-get install -y
+    libopenblas-dev) added to the 4 ubuntu-latest jobs that link a
+    default-features binary/test (boundary-enforcement, public-api-guard,
+    runtime-release-gates, test-std). Root cause, confirmed from the
+    actual failed CI run on this PR's exact head: turbovec's own
+    Cargo.toml unconditionally enables ndarray's "blas" feature on
+    target_os = "linux"/"macos", which requires linking against a system
+    BLAS library the GitHub Actions Ubuntu runner does not have
+    preinstalled ("rust-lld: error: unable to find library -lopenblas").
+    This cannot be fixed from semantic-hub-turbovec's own Cargo.toml
+    (Cargo feature unification is additive-only; a downstream crate
+    cannot un-enable a feature an upstream crate's own
+    target-conditional dependency turns on). No other workflow behavior,
+    trigger, or job was changed.
   roadmap_changes: false
   project_changes: false
-  # explicitly not authorized this round
-  decoder_or_parser_tolerance_widening: false
-  general_line_ending_refactor: false
-  new_test_framework: false
   workbench_implementation: false
   semantic_studio_implementation: false
   alm_changes: false
-  hub_changes: false
+  hub_changes: true
 
 constraints:
-  strict_canonical_decoder_must_not_be_weakened: true
-  crlf_input_must_remain_noncanonical_and_rejected: true
-  fix_belongs_in_checkout_policy_not_parser_tolerance: true
-  no_new_test_framework: true
-  no_general_line_ending_refactor: true
   one_branch_one_pr: true
   no_child_issues: true
+  no_unrelated_workbench_studio_alm_changes: true
+  hub_governs_execution_semantic_owns_meaning: true
+  no_subprocess_wasm_or_remote_execution_mode_in_v0: true
+  no_direct_turbovec_bypass_of_hub_admission: true
+  turbovec_output_is_untrusted_evidence_not_semantic_truth: true
+  sensitive_capabilities_denied_by_default: true
+  in_process_execution_is_not_process_isolation: true
+  determinism_class_measured_not_assumed: true
+  canonical_fixtures_get_gitattributes_lf_rule_and_regression_guard: true

@@ -28,6 +28,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install system BLAS (required by the turbovec Hub dependency on Linux)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
@@ -44,6 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install system BLAS (required by the turbovec Hub dependency on Linux)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
@@ -55,6 +59,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install system BLAS (required by the turbovec Hub dependency on Linux)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
@@ -93,6 +99,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - name: Install system BLAS (required by the turbovec Hub dependency on Linux)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1

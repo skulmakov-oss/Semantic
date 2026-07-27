@@ -109,6 +109,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "disasm" => cmd_disasm(&args[1..]),
         "work" => cmd_work(&args[1..]),
         "look" => crate::ui_frame_inspect::cmd_look(&args[1..]),
+        "hub" => crate::hub::cmd_hub(&args[1..]),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
             Ok(())
@@ -2664,6 +2665,10 @@ fn usage() -> String {
         "  smc disasm <input.smc>",
         "  smc look ui frame --from <snapshot> [--frame <n>] [--format text|draw-json] [--out <path>]",
         "  smc look ui frame <source-file> [--events <script>] [--frame <n>] [--format text|draw-json] [--out <path>]",
+        "  smc hub tools",
+        "  smc hub describe <tool-id>",
+        "  smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]",
+        "  smc hub audit --request <request-id>",
     ]
     .join("\n")
 }
