@@ -33,6 +33,36 @@ pub const TURBOVEC_DEPENDENCY_LICENSE: &str = "MIT";
 pub const TURBOVEC_DEPENDENCY_SOURCE: &str = "https://github.com/RyanCodrai/turbovec";
 pub const ADAPTER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Reads just enough of a `.tvim` file's header to learn its stored
+/// dimension, without reconstructing the full index (rotation matrix,
+/// codebook, packed codes, id table -- the ~250-300ms-for-a-cold-4096-dim
+/// -index cost measured in this crate's own benchmarks). Duplicates
+/// turbovec `=0.9.0`'s exact, documented on-disk layout for `.tvim`
+/// (4-byte `"TVIM"` magic + 1-byte format version + a 9-byte core header:
+/// `bit_width: u8`, `dim: u32` LE, `n_vectors: u32` LE) -- safe because
+/// the dependency is exact-pinned, so this layout cannot silently drift
+/// out from under this function. Exists purely so `load()` can reject an
+/// over-budget index *before* paying the full reconstruction cost, not
+/// after; `load()` still re-checks `index.dim()` against the same
+/// budget post-load as a correctness backstop, so a bug in this
+/// duplicated parsing can never let an over-budget index through --
+/// only, at worst, cost the reconstruction this function exists to
+/// avoid.
+fn peek_tvim_dim(path: &std::path::Path) -> std::io::Result<usize> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
+    let mut header = [0u8; 14]; // 4 (magic) + 1 (version) + 9 (core header)
+    f.read_exact(&mut header)?;
+    if &header[0..4] != b"TVIM" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "not a TVIM file: wrong magic",
+        ));
+    }
+    let dim = u32::from_le_bytes([header[6], header[7], header[8], header[9]]);
+    Ok(dim as usize)
+}
+
 fn op(id: &str) -> HubOperationId {
     HubOperationId::new(id).expect("operation ids declared in this module are valid")
 }
@@ -158,6 +188,24 @@ impl TurboVecAdapter {
             .storage
             .checked_index_path(name)
             .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
+        // Reject an over-budget index via a cheap header peek before
+        // paying for a full reconstruction that would only be discarded
+        // by the post-load check below -- see peek_tvim_dim's own doc
+        // comment for why this is safe to duplicate from turbovec's
+        // exact-pinned format. A peek failure (missing file, wrong
+        // magic, truncated header) is not itself the rejection reason;
+        // fall through to the real load, which reports it properly.
+        if let Ok(peeked_dim) = peek_tvim_dim(&path) {
+            if peeked_dim > max_dim {
+                return Err(HubToolError::new(
+                    "DimensionExceedsBudget",
+                    format!(
+                        "index {:?} has dimension {peeked_dim} which exceeds the admitted budget's vector_dimensions ceiling {max_dim}",
+                        name.as_str()
+                    ),
+                ));
+            }
+        }
         let index = turbovec::IdMapIndex::load(path).map_err(|e| {
             HubToolError::new(
                 "IndexLoadFailed",
@@ -560,6 +608,24 @@ mod tests {
 
     fn adapter(tag: &str) -> TurboVecAdapter {
         TurboVecAdapter::new(temp_dir(tag), HubResourceBudget::V0_CEILING)
+    }
+
+    #[test]
+    fn peek_tvim_dim_matches_the_real_index_dim_after_a_real_write() {
+        // Regression test for the header-peek's own correctness, not
+        // just its presence: writes a real turbovec index to disk and
+        // confirms peek_tvim_dim (this crate's own duplicated,
+        // format-locked parsing) agrees with the value the real
+        // IdMapIndex::load / .dim() reports for the same file.
+        let dir = temp_dir("peek-tvim-dim");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("probe.tvim");
+        let index = turbovec::IdMapIndex::new(16, 4).unwrap();
+        index.write(&path).unwrap();
+
+        assert_eq!(peek_tvim_dim(&path).unwrap(), 16);
+        let reloaded = turbovec::IdMapIndex::load(&path).unwrap();
+        assert_eq!(peek_tvim_dim(&path).unwrap(), reloaded.dim());
     }
 
     fn ctx<'a>(

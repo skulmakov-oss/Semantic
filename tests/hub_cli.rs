@@ -514,13 +514,15 @@ fn audit_write_failure_leaves_a_pending_marker_and_the_mutation_still_applies() 
     );
     assert!(String::from_utf8_lossy(&broken.stderr).starts_with("AuditProvenanceFailure"));
 
-    let marker = dir
-        .join(".semantic")
-        .join("hub")
-        .join("pending")
-        .join(format!("{request_id}.json"));
+    // The marker's filename is a digest of request_id, not the raw text
+    // (see pending_marker_path's own doc comment) -- check that the
+    // pending directory has a real file in it rather than trying to
+    // replicate the digest here.
+    let pending_dir = dir.join(".semantic").join("hub").join("pending");
     assert!(
-        marker.is_file(),
+        fs::read_dir(&pending_dir)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false),
         "a pending marker must remain on disk when the audit write fails"
     );
 
@@ -662,13 +664,13 @@ fn reusing_a_request_id_with_an_unresolved_pending_marker_is_rejected() {
     assert!(!retry.status.success());
     assert!(String::from_utf8_lossy(&retry.stderr).starts_with("DuplicateRequestId"));
 
-    let marker = dir
-        .join(".semantic")
-        .join("hub")
-        .join("pending")
-        .join(format!("{request_id}.json"));
+    // The marker's filename is a digest of request_id, not the raw text
+    // -- check the pending directory still has a real file in it.
+    let pending_dir = dir.join(".semantic").join("hub").join("pending");
     assert!(
-        marker.is_file(),
+        fs::read_dir(&pending_dir)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false),
         "a rejected retry must not have cleared the still-unresolved pending marker"
     );
 }
@@ -893,16 +895,57 @@ fn audit_lookup_rejects_a_symlinked_pending_marker_leaf() {
     // pending marker's own path must be rejected as a
     // ScopedStorageViolation, not silently followed and reported as a
     // misleading PendingUnresolved.
+    //
+    // The marker's filename is a digest of the request_id, not the raw
+    // text (see pending_marker_path's own doc comment), so this test
+    // lets a real broken-audit invocation create the marker first (same
+    // trick as audit_write_failure_leaves_a_pending_marker_and_the_
+    // mutation_still_applies) and discovers its real path by reading
+    // the pending directory, rather than trying to replicate the digest.
     let dir = temp_dir("hub_cli_audit_pending_leaf_symlink");
     invoke(&dir, "vector.index.create", "valid_index_create.json");
+    invoke(&dir, "vector.index.insert", "valid_index_insert.json");
+
+    let audit_log = dir.join(".semantic").join("hub").join("audit.log");
+    fs::remove_file(&audit_log).unwrap();
+    fs::create_dir_all(&audit_log).unwrap(); // audit.log is now a directory: writes will fail
+
+    let request_id = "req-pending-leaf-symlink";
+    let remove_req = serde_json::json!({
+        "request_id": request_id,
+        "capabilities": ["VectorIndexMutate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "fixture-docs", "ids": [102]}
+    });
+    let input = dir.join("remove_broken.json");
+    fs::write(&input, serde_json::to_vec(&remove_req).unwrap()).unwrap();
+    let broken = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.remove",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(!broken.status.success());
+    assert!(String::from_utf8_lossy(&broken.stderr).starts_with("AuditProvenanceFailure"));
+
+    fs::remove_dir_all(&audit_log).unwrap(); // restore audit.log so the audit lookup can run at all
 
     let pending_dir = dir.join(".semantic").join("hub").join("pending");
-    fs::create_dir_all(&pending_dir).unwrap();
-    let request_id = "req-pending-leaf-symlink";
-    let marker_path = pending_dir.join(format!("{request_id}.json"));
+    let marker_path = fs::read_dir(&pending_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .next()
+        .expect("a real pending marker must exist after the broken-audit invocation");
+
     let outside_target = temp_dir("hub_cli_audit_pending_leaf_symlink_target");
     let forged_marker = outside_target.join("forged.json");
     fs::write(&forged_marker, b"{}").unwrap();
+    fs::remove_file(&marker_path).unwrap();
     std::os::unix::fs::symlink(&forged_marker, &marker_path).unwrap();
 
     let output = smc_in(&dir, &["hub", "audit", "--request", request_id]);
@@ -912,4 +955,38 @@ fn audit_lookup_rejects_a_symlinked_pending_marker_leaf() {
         "{:?}",
         output
     );
+}
+
+#[test]
+fn invoke_succeeds_with_a_colon_containing_request_id() {
+    // Regression test: HubRequestId's own validation allows ':' (a
+    // legal handle character), but ':' is reserved in Windows
+    // filenames. Before pending_marker_path derived its filename from a
+    // digest instead of the raw request_id text, a request_id
+    // containing ':' would make write_pending_marker's file creation
+    // fail on Windows even though the request_id itself was perfectly
+    // valid -- directly reproducible on this platform, not a
+    // hypothetical.
+    let dir = temp_dir("hub_cli_colon_request_id");
+    let request_id = "req:with:colons";
+    let req = serde_json::json!({
+        "request_id": request_id,
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "fixture-docs", "dim": 8, "bit_width": 4}
+    });
+    let input = dir.join("create_colon_id.json");
+    fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+    let output = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(stdout_json(&output)["request_id"], request_id);
 }

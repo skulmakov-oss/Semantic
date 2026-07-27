@@ -21,9 +21,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use semantic_hub::runtime::Hub;
 use semantic_hub::{
-    HubApiVersion, HubAuditTrail, HubCallerIdentity, HubCapability, HubCapabilitySet,
-    HubOperationId, HubPrivacyClass, HubRequest, HubRequestId, HubResourceBudget, HubSessionId,
-    HubToolId, HUB_ENVELOPE_SCHEMA_VERSION,
+    content_digest, HubApiVersion, HubAuditTrail, HubCallerIdentity, HubCapability,
+    HubCapabilitySet, HubOperationId, HubPrivacyClass, HubRequest, HubRequestId, HubResourceBudget,
+    HubSessionId, HubToolId, HUB_ENVELOPE_SCHEMA_VERSION,
 };
 use semantic_hub_turbovec::TurboVecAdapter;
 
@@ -209,10 +209,25 @@ fn build_hub() -> Hub {
 /// never made it to disk. `smc hub audit` surfaces a stale marker
 /// distinctly from a truly-unknown request_id instead of silently
 /// reporting "unknown".
+/// Derives the marker's filename from a digest of `request_id`, never the
+/// raw id text. `HubRequestId`'s own validation allows `:` (a legal
+/// handle character in the Hub's ID model, and a legal filename
+/// character on Unix), but `:` is reserved on Windows (drive letters,
+/// alternate data streams) -- a colon-containing but otherwise
+/// perfectly valid request_id would make this filename creation fail
+/// there, and Windows' reserved device names (`CON`, `NUL`, `COM1`, ...)
+/// and case-insensitive collisions are the same class of problem. The
+/// digest (FNV-1a-64, already used elsewhere in this crate for
+/// correlation fingerprints -- not cryptographic, but not needed to be:
+/// this is an internal lookup key, not a security boundary) is always a
+/// plain lowercase-hex string, filesystem-safe on every platform. The
+/// real `request_id` is still recorded verbatim inside the marker's own
+/// JSON content by `write_pending_marker`.
 fn pending_marker_path(request_id: &HubRequestId) -> PathBuf {
+    let digest = content_digest(request_id.as_str().as_bytes());
     hub_data_root()
         .join(PENDING_DIR)
-        .join(format!("{}.json", request_id.as_str()))
+        .join(format!("{digest:016x}.json"))
 }
 
 fn write_pending_marker(
@@ -609,11 +624,21 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
     // lookup; and reusing an id that still has an unresolved pending
     // marker would let a retry's own `clear_pending_marker` erase the
     // evidence that the *earlier*, still-unresolved invocation may have
-    // applied its effect.
+    // applied its effect. Checked for symlinks the same way
+    // `write_pending_marker`/`cmd_hub_audit` are: without this, a
+    // pre-planted symlink at the pending directory or the marker leaf
+    // would be silently followed by `.is_file()`, reporting
+    // `DuplicateRequestId` based on a file outside the scoped Hub
+    // directory instead of the real `ScopedStorageViolation`.
+    let pending_marker_for_check = pending_marker_path(&request_id_for_marker);
+    if let Some(dir) = pending_marker_for_check.parent() {
+        check_dir_is_not_a_symlink(dir)?;
+    }
+    check_file_is_not_a_symlink(&pending_marker_for_check)?;
     if persisted_trail
         .find_by_request(&request_id_for_marker)
         .is_some()
-        || pending_marker_path(&request_id_for_marker).is_file()
+        || pending_marker_for_check.is_file()
     {
         return Err(format!(
             "DuplicateRequestId: request_id '{}' was already used by a prior invocation \
@@ -797,6 +822,29 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn pending_marker_path_is_filesystem_safe_for_a_colon_containing_request_id() {
+        // Regression test: HubRequestId's own validation allows ':' (a
+        // legal handle character in the Hub's ID model, and a legal
+        // Unix filename character), but ':' is reserved on Windows
+        // (drive letters, alternate data streams). Before this fix,
+        // the marker's filename embedded request_id.as_str() verbatim,
+        // so an otherwise perfectly valid request_id containing ':'
+        // would fail to create its marker file on Windows. The path is
+        // now derived from a digest, always a plain lowercase-hex
+        // string regardless of what characters the request_id itself
+        // contains.
+        let request_id = HubRequestId::new("req:with:colons").unwrap();
+        let path = pending_marker_path(&request_id);
+        let file_name = path.file_name().unwrap().to_str().unwrap();
+        assert!(
+            file_name
+                .strip_suffix(".json")
+                .is_some_and(|stem| !stem.is_empty() && stem.chars().all(|c| c.is_ascii_hexdigit())),
+            "marker filename must be a plain hex stem + .json, got {file_name:?}"
+        );
     }
 
     #[test]

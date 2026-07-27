@@ -1083,10 +1083,70 @@ clippy --workspace --all-targets --all-features -- -D warnings`: 0
 warnings; `cargo fmt --all`: clean; harness-check: ok; `git diff
 --check`: clean).
 
+## Codex review, round 12 (PR #1554, commit `d67cfea3`) -- 3 confirmed
+
+1. **P1 -- CONFIRMED, SEVERE. Check the stored dimension before loading
+   the index.** `load()`'s dimension-budget check ran *after*
+   `turbovec::IdMapIndex::load()` fully reconstructed the index (rotation
+   matrix, codebook, packed codes) -- the ~250-300ms-for-a-cold-4096-dim
+   -index cost this crate's own benchmarks already measured. A request
+   budgeted for e.g. 8 dimensions against an index actually stored at
+   4096 still paid that full cost before being rejected, defeating the
+   budget check's purpose as a resource-exhaustion guard. Fixed: added
+   `peek_tvim_dim`, reading just the `.tvim` format's stable 14-byte
+   header (4-byte `"TVIM"` magic + 1-byte version + a 9-byte core header
+   containing `bit_width`/`dim`/`n_vectors`) -- verified directly against
+   the vendored, exact-pinned (`=0.9.0`) turbovec source, so this
+   duplicated layout cannot silently drift. `load()` now rejects via this
+   peek *before* the full reconstruction; the original post-load
+   `index.dim() > max_dim` check is kept as a correctness backstop (a bug
+   in the duplicated peek parsing could at worst cost the reconstruction
+   it exists to avoid, never let an over-budget index through). Regression
+   test: `peek_tvim_dim_matches_the_real_index_dim_after_a_real_write`,
+   confirming the peek agrees with the real `IdMapIndex::load`/`.dim()`
+   for an actual written file.
+2. **P2 -- CONFIRMED. Validate the pending path before duplicate
+   lookup.** `cmd_hub_invoke`'s own duplicate-request-id check used a
+   bare `pending_marker_path(...).is_file()`, without the directory/leaf
+   symlink checks `write_pending_marker`/`cmd_hub_audit` already have --
+   a pre-planted symlink there would report a misleading
+   `DuplicateRequestId` instead of the real `ScopedStorageViolation`.
+   Fixed: added the same `check_dir_is_not_a_symlink`/
+   `check_file_is_not_a_symlink` pair before this specific lookup too.
+3. **P2 -- CONFIRMED. Encode request IDs before using them as
+   filenames.** `HubRequestId`'s own validation allows `:` (a legal
+   handle character), but `write_pending_marker` embedded the raw
+   `request_id` text verbatim as the marker's filename -- `:` is reserved
+   on Windows (drive letters, alternate data streams), so an otherwise
+   perfectly valid request_id containing it would make the marker file
+   creation fail there, directly reproduced on this Windows dev machine.
+   Fixed: `pending_marker_path` now derives its filename from
+   `content_digest` (the same FNV-1a-64 correlation-fingerprint mechanism
+   already used elsewhere in this crate, not cryptographic and not
+   needed to be -- this is an internal lookup key, not a security
+   boundary), always a plain lowercase-hex string regardless of what the
+   request_id itself contains; the real request_id is still recorded
+   verbatim inside the marker's own JSON content. This changed the
+   marker's on-disk filename convention, so two *existing* tests that
+   hard-coded the old raw-text filename to locate the marker were updated
+   to discover it by reading the pending directory instead. Regression
+   tests: `pending_marker_path_is_filesystem_safe_for_a_colon_containing_request_id`
+   (unit) and `invoke_succeeds_with_a_colon_containing_request_id`
+   (end-to-end, real `smc` subprocess -- this one failed outright on this
+   Windows machine before the fix, confirming it was not a hypothetical).
+
+All fixes verified by direct code reading, including reading the exact
+vendored turbovec source for fix 1 rather than assuming its format.
+Full local gates re-run and green (`cargo test --workspace
+--all-features`: zero failures, including the two existing tests
+updated for the new marker-filename convention; `cargo clippy
+--workspace --all-targets --all-features -- -D warnings`: 0 warnings;
+`cargo fmt --all`: clean; harness-check: ok; `git diff --check`: clean).
+
 ## Remaining before merge
 
 - Push this remediation, confirm CI goes green on the new head, reply to
-  all 3 round-11 review threads with classifications, and request
+  all 3 round-12 review threads with classifications, and request
   another review pass -- paginated REST queries and the GraphQL
   `reviewThreads` last-comment-authorship check together, every time,
   before declaring it clean.
