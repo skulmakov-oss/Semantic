@@ -1143,13 +1143,23 @@ updated for the new marker-filename convention; `cargo clippy
 --workspace --all-targets --all-features -- -D warnings`: 0 warnings;
 `cargo fmt --all`: clean; harness-check: ok; `git diff --check`: clean).
 
+## Codex review, round 13 (PR #1554, commit `7d050bd7`) -- 0 new findings
+
+Only one finding this round: the recurring PROMETHEUS-routing point,
+identical in substance to rounds 1/3/6, replied to with the same
+out-of-scope disposition (no code change). No other findings -- the
+first round since this loop began with zero new, actionable issues.
+This is the first real signal of convergence; requesting round 14 to
+confirm before treating the loop as done, per the standing plan to only
+stop once a pass (or two in a row) is genuinely clean.
+
 ## Remaining before merge
 
-- Push this remediation, confirm CI goes green on the new head, reply to
-  all 3 round-12 review threads with classifications, and request
-  another review pass -- paginated REST queries and the GraphQL
-  `reviewThreads` last-comment-authorship check together, every time,
-  before declaring it clean.
-- If that pass is genuinely clean, stop for explicit repository-owner
-  merge approval (already granted, conditional on a clean review pass)
-  before squash-merging.
+- Request round 14. If it also comes back with nothing but the same
+  standing PROMETHEUS repeat (or truly nothing), treat the loop as
+  converged and stop for explicit repository-owner merge approval
+  (already granted, conditional on a clean review pass) before
+  squash-merging.
+- Confirmed via paginated REST queries and the GraphQL `reviewThreads`
+  last-comment-authorship check together, every time -- not a single
+  unpaginated call -- before declaring any round clean.
