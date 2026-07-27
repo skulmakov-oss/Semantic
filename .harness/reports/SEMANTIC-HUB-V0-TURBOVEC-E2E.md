@@ -1153,13 +1153,57 @@ This is the first real signal of convergence; requesting round 14 to
 confirm before treating the loop as done, per the standing plan to only
 stop once a pass (or two in a row) is genuinely clean.
 
+## Codex review, round 14 (PR #1554, commit `7addf416`) -- 1 confirmed (repeat PROMETHEUS aside)
+
+Alongside the standing PROMETHEUS-routing repeat (same disposition as
+before, no code change), one genuinely new finding:
+
+1. **P1 -- CONFIRMED, SEVERE. Validate wall time before adding it to
+   `Instant`.** `Hub::invoke`'s deadline derivation used a plain
+   `started + Duration::from_millis(request.resource_budget.wall_time_millis)`.
+   `wall_time_millis` is a caller-supplied `u64`; on some platforms
+   (Windows specifically, per the finding and confirmed by direct
+   reproduction on this dev machine), `Instant`'s representable range is
+   narrower than `Duration`'s, so adding an extreme duration (e.g. from
+   `u64::MAX` milliseconds) panics instead of saturating. This ran
+   *before* `admit()`'s own ceiling check would have rejected the same
+   oversized budget with a typed `ResourceBudgetInvalid` -- and, through
+   `smc hub invoke`, after the pending marker was already written, so
+   the crash left an unresolved marker with no audit record. Fixed:
+   `started.checked_add(Duration::from_millis(...))`, with `None`
+   (overflow) treated as "no additional constraint from the budget,"
+   falling back to the caller-supplied deadline alone -- the oversized
+   budget is still correctly rejected moments later by `admit()`'s own
+   check, this fix only removes the panic that previously happened
+   first. Regression tests:
+   `a_wall_time_budget_of_u64_max_is_a_typed_rejection_not_a_panic`
+   (library) and `invoke_rejects_a_wall_time_budget_of_u64_max_instead_of_crashing`
+   (end-to-end, real `smc` subprocess -- this one failed outright with a
+   process crash on this Windows machine before the fix, confirming it
+   was not a hypothetical).
+
+All fixes verified by direct code reading and, for finding 1, by
+reproducing the crash on this Windows dev machine before fixing it and
+confirming the fix resolves it on the same machine. Full local gates
+re-run and green (`cargo test --workspace --all-features`: zero
+failures; `cargo clippy --workspace --all-targets --all-features -- -D
+warnings`: 0 warnings; `cargo fmt --all`: clean; harness-check: ok; `git
+diff --check`: clean).
+
 ## Remaining before merge
 
-- Request round 14. If it also comes back with nothing but the same
-  standing PROMETHEUS repeat (or truly nothing), treat the loop as
-  converged and stop for explicit repository-owner merge approval
-  (already granted, conditional on a clean review pass) before
-  squash-merging.
+- Push this remediation, confirm CI goes green on the new head, reply
+  to both round-14 review threads (the confirmed fix and the repeat
+  PROMETHEUS point) with classifications, and request round 15.
+- Two consecutive rounds with no new, actionable findings (only the
+  standing PROMETHEUS repeat, or nothing at all) is the convergence bar
+  for this loop -- round 13 was the first such round; round 14 broke
+  that streak with one real, now-fixed finding, so the count resets.
+  Keep looping until two rounds in a row are genuinely clean by that
+  standard.
 - Confirmed via paginated REST queries and the GraphQL `reviewThreads`
   last-comment-authorship check together, every time -- not a single
   unpaginated call -- before declaring any round clean.
+- Once genuinely converged, stop for explicit repository-owner merge
+  approval (already granted, conditional on a clean review pass) before
+  squash-merging.

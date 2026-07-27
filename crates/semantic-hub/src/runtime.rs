@@ -159,12 +159,26 @@ impl Hub {
         // in-process, synchronous-per-invocation v0 architecture supports.
         // See docs/spec/hub/hub_adapter_contract_v0.md for this limitation
         // stated explicitly.
-        let budget_deadline =
-            started + Duration::from_millis(request.resource_budget.wall_time_millis);
-        let effective_deadline = Some(match deadline {
-            Some(d) => d.min(budget_deadline),
-            None => budget_deadline,
-        });
+        // Checked, not a plain `+`: `wall_time_millis` is a caller-supplied
+        // u64, and on some platforms (observed on Windows) adding an
+        // extreme Duration (e.g. from u64::MAX milliseconds) to an
+        // `Instant` panics rather than saturating, since `Instant`'s own
+        // representable range is narrower there. A budget that large is
+        // already invalid and will be rejected moments later by
+        // `admit()`'s own ceiling check (`ResourceBudgetInvalid`,
+        // V0_CEILING's wall_time_millis = 30_000) -- this must not panic
+        // before that typed rejection ever gets to run. `None` here is
+        // treated as "no additional constraint from the budget," falling
+        // back to the caller-supplied deadline alone.
+        let budget_deadline = started.checked_add(Duration::from_millis(
+            request.resource_budget.wall_time_millis,
+        ));
+        let effective_deadline = match (deadline, budget_deadline) {
+            (Some(d), Some(bd)) => Some(d.min(bd)),
+            (Some(d), None) => Some(d),
+            (None, Some(bd)) => Some(bd),
+            (None, None) => None,
+        };
 
         if let Some(d) = effective_deadline {
             if Instant::now() > d {
@@ -808,6 +822,26 @@ mod tests {
         assert_eq!(
             hub.audit().records()[0].fault_code,
             Some("DeadlineExceeded")
+        );
+    }
+
+    #[test]
+    fn a_wall_time_budget_of_u64_max_is_a_typed_rejection_not_a_panic() {
+        // Regression test: on some platforms (observed on Windows),
+        // adding an extreme Duration to an Instant panics rather than
+        // saturating, since Instant's own representable range is
+        // narrower there. A caller-supplied wall_time_millis of
+        // u64::MAX previously reached that raw `+` before admission's
+        // own ceiling check (ResourceBudgetInvalid against
+        // V0_CEILING's wall_time_millis = 30_000) ever got to run.
+        let mut hub = hub_with_fault_injection_tool();
+        let mut request = request_for("test.succeed", granted());
+        request.resource_budget.wall_time_millis = u64::MAX;
+        let reply = hub.invoke(request, None);
+        assert!(matches!(reply.status, HubReplyStatus::Rejected(_)));
+        assert_eq!(
+            reply.status.fault().unwrap().code(),
+            "ResourceBudgetInvalid"
         );
     }
 

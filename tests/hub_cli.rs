@@ -990,3 +990,40 @@ fn invoke_succeeds_with_a_colon_containing_request_id() {
     assert!(output.status.success(), "{:?}", output);
     assert_eq!(stdout_json(&output)["request_id"], request_id);
 }
+
+#[test]
+fn invoke_rejects_a_wall_time_budget_of_u64_max_instead_of_crashing() {
+    // Regression test: on some platforms (observed on Windows), adding
+    // an extreme Duration to an Instant panics rather than saturating.
+    // A caller-supplied resource_budget.wall_time_millis of u64::MAX
+    // previously reached that raw addition inside Hub::invoke before
+    // admission's own ceiling check ever ran, crashing the whole smc
+    // process instead of producing a typed ResourceBudgetInvalid
+    // rejection -- directly reproducible on this dev machine, not a
+    // hypothetical.
+    let dir = temp_dir("hub_cli_wall_time_u64_max");
+    let req = serde_json::json!({
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "resource_budget": {"wall_time_millis": u64::MAX},
+        "payload": {"index": "fixture-docs", "dim": 8, "bit_width": 4}
+    });
+    let input = dir.join("create_wall_time_max.json");
+    fs::write(&input, serde_json::to_vec(&req).unwrap()).unwrap();
+    let output = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).starts_with("ResourceBudgetInvalid"),
+        "{:?}",
+        output
+    );
+}
