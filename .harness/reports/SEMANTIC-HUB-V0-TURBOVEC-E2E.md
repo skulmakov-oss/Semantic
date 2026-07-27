@@ -1245,3 +1245,114 @@ standing PROMETHEUS-routing repeat was raised again.
   no findings, merge is authorized"), explicitly re-confirmed after
   this result was reported, the review loop is now closed and this
   report proceeds to the merge and post-merge sections below.
+
+## Merge
+
+PR #1554 (`feat/semantic-hub-v0-turbovec-e2e` -> `main`) was squash-merged
+with explicit, twice-given repository-owner authorization. Final
+pre-merge state, verified directly rather than assumed:
+
+- Head SHA: `5d4a4658ca5bed19812a07c6dd05153747a11647`.
+- CI: both required jobs green (`gh run list`).
+- `gh pr view 1554`: `mergeStateStatus: CLEAN`, `mergeable: MERGEABLE`,
+  `state: OPEN`.
+- Pre-merge sanity: working tree clean, and the one pre-existing,
+  task-unrelated stash (`stash@{0}: On tooling/smc-look-ui-frame-e2e:
+  pre-existing uncommitted Source Style v0 example migration, unrelated
+  to #1365`) confirmed still present and untouched.
+
+Merge executed via `gh pr merge 1554 --squash`. Result, verified via
+`gh pr view`:
+
+- `state: MERGED`, `mergedAt: 2026-07-27T05:44:26Z`.
+- `mergeCommit.oid: 1190cf87785be34102cef2b953e324cdc2f4ecf0`.
+- `headRefOid` unchanged (`5d4a4658...`) -- confirms no last-second
+  commits landed on the PR branch between the last review round and
+  the merge.
+- Issue #1553 auto-closed by the merge: `state: CLOSED`,
+  `stateReason: COMPLETED`, `closedAt: 2026-07-27T05:44:27Z`.
+
+## Post-merge qualification
+
+Performed against the actual merged `main` (fast-forwarded local `main`
+to `origin/main` at `1190cf87`), not just re-checked on the feature
+branch:
+
+- **Post-merge CI on `main`**: run `30240607080` at head `1190cf87`,
+  `status: completed`, `conclusion: success`, all 8 jobs green
+  (`public-api-guard`, `pr-ready`, `release-bundle-process`,
+  `pcc-qualification-7hell`, `boundary-enforcement`,
+  `runtime-release-gates`, `check-no-std`, `test-std`) -- verified
+  directly via `gh run view --json`, not inferred from a watch exit
+  code.
+- **Full local test suite on merged `main`** (`cargo test --release -p
+  semantic_language -p semantic-hub -p semantic-hub-turbovec -p
+  smc-cli`): every `test result:` line in the run is `ok` with `0
+  failed` across all ~140 test binaries in the workspace, including
+  the Hub-specific ones: `semantic_hub` lib (52 tests), `semantic_hub_turbovec`
+  lib (159 tests -- note: line-range label from the log, actual count
+  logged per-binary), `determinism_qualification` (3 tests),
+  `hub_cli` (22 tests, including
+  `concurrent_invocations_against_the_same_project_do_not_lose_audit_records`
+  and `concurrent_inserts_against_the_same_index_do_not_lose_updates`),
+  `hub_fixture_line_ending_guard` (2 tests), `smc_cli` lib and bin
+  tests. Zero failures, zero panics, anywhere in the run.
+- **`core.autocrlf`**: reconfirmed `true` on this Windows dev machine,
+  consistent with the LF-only fixture/golden convention enforced by
+  `hub_fixture_line_ending_guard.rs`.
+- **CLI dogfooding on the merged-main binary** (`target/release/smc.exe`,
+  built from `1190cf87`, run from a fresh scratch project directory,
+  not the repo):
+  - `smc hub tools` -> lists `vector.turbovec 0.9.0 InProcess Registered`.
+  - `smc hub describe vector.turbovec` -> full descriptor, all 7
+    operations with correct capability requirements.
+  - `smc hub invoke vector.turbovec vector.index.create` with `dim: 4`
+    -> correctly rejected: `ToolDeclaredFailure: InvalidIndexParameters:
+    dim must be a positive multiple of 8, got 4` (real TurboVec
+    bit-packing constraint enforced end-to-end, not just in unit tests).
+  - Corrected to `dim: 8`: create succeeded; `vector.index.insert` of 3
+    vectors succeeded (`"inserted": 3, "len": 3`); `vector.search`
+    against an exact-match query returned the correct nearest-neighbor
+    ranking (`external_id: 1` rank 0 score ~1.0, `external_id: 2` rank 1
+    lower score); `smc hub audit --request <create-request-id>`
+    returned the full provenance record (FNV-1a-64 input/output
+    digests, execution mode, trust class, privacy class, worker state,
+    status) for the create invocation.
+  - This is a real, manually-driven, end-to-end pass through the
+    governed request/response/audit path on the actual merged
+    artifact -- not a re-run of the automated suite.
+- **Stash re-check**: `git stash list` after switching to and
+  fast-forwarding `main` still shows exactly the one pre-existing,
+  task-unrelated entry, untouched.
+- **Pre-existing unrelated CI failure noted, not acted on**: workflow
+  `7hell Full Qualification` failed on `8eaae2c5` (the `main` tip
+  immediately before this merge) with 3 failing tests
+  (`style_contract_examples_do_not_regress_to_verbose_pre_contract_shape`,
+  `canonical_pack_all_sm_files_are_fmt_clean_and_lexically_sound`,
+  `style_contract_examples_pass_fmt_check`). This predates and is
+  unrelated to #1553/Hub/TurboVec -- it concerns the separate Source
+  Style v0 canonical-examples migration (the same area the untouched
+  pre-existing stash belongs to) -- and is left out of scope for this
+  task per the repository owner's original instruction to keep this
+  branch's diff clean of unrelated work.
+
+## Outstanding, deliberately not closed by this task
+
+- Issue #1526 (architecture) is left OPEN. This task implemented only
+  the v0 in-process vertical slice with one reference tool
+  (TurboVec) -- the subprocess/WASM/remote execution modes and the
+  Workbench inspection surface that #1526 also scopes are not yet
+  built. Closing #1526 here would overstate what landed.
+- The pre-existing `7hell Full Qualification` failure on `main`
+  (Source Style v0 canonical examples) is unrelated to this task and
+  was left for its own owner/session to address.
+
+## Final status
+
+Semantic Hub v0 with the TurboVec reference adapter is merged to
+`main` (`1190cf87785be34102cef2b953e324cdc2f4ecf0`), post-merge CI is
+green, the full local test suite re-run against the merged commit is
+100% passing, a real CLI dogfooding round-trip against the merged
+binary succeeded end-to-end, the Windows-specific fixture/line-ending
+convention is reconfirmed, the pre-existing unrelated stash remains
+untouched, and issue #1553 is closed.
