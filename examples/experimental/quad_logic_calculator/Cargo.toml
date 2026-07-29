@@ -1,0 +1,17 @@
+[package]
+name = "quad_logic_calculator"
+version = "0.1.0"
+edition = "2021"
+authors = ["Said Kulmakov"]
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+prom-ui = { path = "../../../crates/prom-ui", default-features = false, features = ["std"] }
+prom-ui-runtime = { path = "../../../crates/prom-ui-runtime", default-features = false, features = ["std"] }
+prom-ui-backend-native = { path = "../../../crates/prom-ui-backend-native", default-features = false, features = ["std", "winit-backend"] }
+semantic-core-quad = { path = "../../../crates/semantic-core-quad", default-features = false, features = ["std"] }
+
+[[bin]]
+name = "quad_calc"
+path = "src/main.rs"

@@ -1,0 +1,17 @@
+projection v0 {
+    revision 0;
+    epoch 0;
+
+    surface 1 root 10 key 1;
+
+    node 10 role panel key 10 {
+        child 11 order 0;
+        child 12 order 1;
+    }
+
+    node 11 role numeric_readout key 11 {
+    }
+
+    node 12 role keypad key 12 {
+    }
+}
