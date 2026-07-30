@@ -4,9 +4,13 @@ Status: active stable asset validation baseline
 
 This document records the minimum smoke validation required against downloaded release assets, not just locally built binaries.
 
-## Current Validated Tag
+## Current validated published tag:
+- v1.1.1
 
-- `v1.1.1`
+## Pending prerelease candidate:
+- v1.2.0-beta.1
+- Local pre-publication asset smoke
+- Published downloaded-asset smoke: pending publication
 
 ## Validated Assets
 

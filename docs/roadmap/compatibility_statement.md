@@ -34,6 +34,10 @@ The published stable line is:
 
 - `v1.1.1`
 
+The new prerelease candidate is:
+
+- `v1.2.0-beta.1`
+
 Compatibility commitments at that layer apply only to what the stable line and
 its released assets actually promised.
 
