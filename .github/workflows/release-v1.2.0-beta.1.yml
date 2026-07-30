@@ -1,0 +1,51 @@
+name: Publish Semantic v1.2.0-beta.1
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/release-v1.2.0-beta.1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout release commit
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build Windows x64 binaries
+        shell: pwsh
+        run: |
+          cargo build --release --bin smc --bin svm
+
+      - name: Assemble release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item target/release/smc.exe dist/smc.exe
+          Copy-Item target/release/svm.exe dist/svm.exe
+          Compress-Archive -Path dist/smc.exe,dist/svm.exe -DestinationPath dist/semantic-language-windows-x64-v1.2.0-beta.1.zip -Force
+          Get-FileHash dist/* -Algorithm SHA256 | Format-Table -AutoSize
+
+      - name: Create GitHub prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          gh release create v1.2.0-beta.1 `
+            --target $env:GITHUB_SHA `
+            --title 'Semantic v1.2.0-beta.1' `
+            --notes-file docs/release/v1.2.0-beta.1_release_notes.md `
+            --prerelease `
+            dist/smc.exe `
+            dist/svm.exe `
+            dist/semantic-language-windows-x64-v1.2.0-beta.1.zip
