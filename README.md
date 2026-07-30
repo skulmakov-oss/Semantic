@@ -378,7 +378,33 @@ cargo run -p prom-ui-demo
   <img src="assets/readme/semantic-ui-demo-wgpu-native.png" alt="Semantic native WGPU UI demo" width="900">
 </p>
 
-This is a current-main development surface, not a stable public UI contract. The UI may request operations and display results, but it must not bypass verifier admission or become the owner of language/runtime semantics.
+### First native Semantic application
+
+On 2026-07-30, Semantic completed its first visible end-to-end native application proof: a dual-mode Arithmetic and Quad Logic Calculator.
+
+<p align="center">
+  <img src="docs/images/quad-logic-calculator-arithmetic.jpg" alt="Semantic Quad Logic Calculator in arithmetic mode" width="390">
+  <img src="docs/images/quad-logic-calculator-quad-mode.jpg" alt="Semantic Quad Logic Calculator in Quad Logic mode" width="390">
+</p>
+
+The application demonstrates a complete current-main path from Semantic-owned state transitions to a visible interactive native UI:
+
+```text
+Semantic source
+  -> compile to SemCode
+  -> verifier admission
+  -> typed VM function invocation
+  -> CalculatorState + CalculatorAction
+  -> returned CalculatorState
+  -> admitted projection update
+  -> native UI rendering
+```
+
+It provides standard arithmetic and native four-state logic over `N`, `F`, `T`, and `S`, with keyboard and pointer interaction, explicit evaluation state, error handling, and recovery.
+
+[Read the milestone report](docs/milestones/first-native-semantic-application.md).
+
+This is a current-main executable proof, not a stable public UI or application ABI promise. The UI may request operations and display results, but it must not bypass verifier admission or become the owner of language/runtime semantics.
 
 ## Current Explicit Limits
 
