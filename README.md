@@ -378,6 +378,12 @@ cargo run -p prom-ui-demo
   <img src="assets/readme/semantic-ui-demo-wgpu-native.png" alt="Semantic native WGPU UI demo" width="900">
 </p>
 
+Also included is a fully working Quad Logic Calculator prototype built on the Semantic VM and UI-DNA2:
+
+```bash
+cargo run -p quad_logic_calculator
+```
+
 This is a current-main development surface, not a stable public UI contract. The UI may request operations and display results, but it must not bypass verifier admission or become the owner of language/runtime semantics.
 
 ## Current Explicit Limits
