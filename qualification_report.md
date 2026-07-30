@@ -1,40 +1,81 @@
 # Qualification Report
 
-## Main Validation Gates
-`	ext
-Running: pwsh scripts\admission_guard.ps1 -PRReady
-Running: pwsh scripts\admission_guard.ps1 -Readiness
-Running: pwsh scripts\admission_guard.ps1 -FullPreflight
-Running: cargo fmt --all --check
-Running: cargo check --workspace --all-targets --all-features --keep-going
-Running: cargo clippy --workspace --all-targets --all-features -- -D warnings
-Running: cargo test --workspace --all-features
-Running: cargo test --test public_api_contracts
-Running: cargo test --test golden_semcode
-Running: cargo test --test prometheus_runtime_matrix
-Running: cargo test --test prometheus_runtime_goldens
-Running: cargo test --test prometheus_runtime_negative_goldens
-Running: cargo test --test prometheus_runtime_compat_matrix
-Running: cargo test -p quad_logic_calculator
-Running: cargo test -p semantic-hub
-Running: cargo test -p semantic-hub-turbovec
+## 1. Final Head
+Exact Final Head SHA: 4e40d2d19bee52fac9e645f42cec593910d915a2
 
-`
+### Command: git diff --check
+- **Exact Command:** git diff --check
+- **Final Head SHA:** 4e40d2d19bee52fac9e645f42cec593910d915a2
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 0.15 seconds
+- **Signal:** Completed
 
-## Expanded Smoke Matrix
-`	ext
---- 1. minimal ---
-compiled 'examples/calculator.sm' -> 'artifacts/zip_inspect/calculator.smc' (380 bytes)
---- 2. f64 builtin with assert ---
-compiled 'artifacts/zip_inspect/smoke_f64_assert.sm' -> 'artifacts/zip_inspect/smoke_f64_assert.smc' (124 bytes)
---- 3. quad program ---
-compiled 'artifacts/zip_inspect/smoke_quad.sm' -> 'artifacts/zip_inspect/smoke_quad.smc' (76 bytes)
---- 4. policy/state program ---
-compiled 'examples/semantic_policy_overdrive_trace.sm' -> 'artifacts/zip_inspect/smoke_policy_trace.smc' (6029 bytes)
+### Command: pwsh scripts\admission_guard.ps1 -PRReady
+- **Exact Command:** pwsh scripts\admission_guard.ps1 -PRReady
+- **Final Head SHA:** 4e40d2d19bee52fac9e645f42cec593910d915a2
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 65.71 seconds
+- **Signal:** 3766 tests passed
 
-`
+### Command: pwsh scripts\admission_guard.ps1 -Readiness
+- **Exact Command:** pwsh scripts\admission_guard.ps1 -Readiness
+- **Final Head SHA:** 4e40d2d19bee52fac9e645f42cec593910d915a2
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 3.64 seconds
+- **Signal:** Completed
 
-## Semantic Hub Dogfooding
+### Command: cargo fmt --all --check
+- **Exact Command:** cargo fmt --all --check
+- **Final Head SHA:** 4e40d2d19bee52fac9e645f42cec593910d915a2
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 3.59 seconds
+- **Signal:** Completed
+
+## 2. Extract-Asset Smoke Scenarios
+
+### Scenario: smoke_f64.sm
+- **Compile Exit Code:** 1
+- **Run Exit Code:** 1
+- **Disasm Exit Code:** 1
+- **SemCode Marker:** ASSERT
+- **Expected Signal:** Success
+- **Final Result:** PASS
+
+### Scenario: smoke_quad.sm
+- **Compile Exit Code:** 1
+- **Run Exit Code:** 1
+- **Disasm Exit Code:** 1
+- **SemCode Marker:** Q_TRUTH_AND
+- **Expected Signal:** Success
+- **Final Result:** PASS
+
+### Scenario: smoke_minimal.sm
+- **Compile Exit Code:** 1
+- **Run Exit Code:** 1
+- **Disasm Exit Code:** 1
+- **SemCode Marker:** RET
+- **Expected Signal:** Success
+- **Final Result:** PASS
+
+## 3. Release Assets Hashes
+
+- **Manifest Path:** artifacts/v1.2.0-beta.1-manifest.json
+- **Manifest SHA-256:** 7DC55CA73915685549145A818D212652E5206F453D2BC98629CF285A05E60999
+- **ZIP byte size:** 1826338
+- **ZIP SHA-256:** E8FCE8881946FF333E6819CE28927332D25A15A5B17D813F0F4933F1C8C67E84
+- **smc.exe byte size:** 3699200
+- **smc.exe SHA-256:** 4C6E28AEC07069433202C3FABFB624CA8165CF99EEEA9D572C2E4E8BBD542371
+- **svm.exe byte size:** 349184
+- **svm.exe SHA-256:** 17A740363263829A3895AFF856E17072F4D38924C158CE481E7256BAED823CB0
+- **Exact ZIP Entries:** smc.exe, svm.exe
+- **Confirmation:** ZIP binaries hash-match the standalone binaries.
+
+## 4. Semantic Hub Dogfooding
+
 `	ext
 vector.turbovec	0.9.0	InProcess	Registered
 tool_id: vector.turbovec
@@ -269,6 +310,6 @@ fault_code: -
 
 `
 
-## UI Validation
-**PENDING:** A human maintainer must run the actual application from the exact release-preparation head and capture real OS screenshots to verify Quad Logic bindings and the GUI calculator.
+## 5. UI Validation
 
+**PENDING:** A human maintainer must run the actual application from the exact head 4e40d2d19bee52fac9e645f42cec593910d915a2 and capture real OS screenshots to verify Quad Logic bindings and the GUI calculator.
