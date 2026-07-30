@@ -14,7 +14,6 @@ use prom_ui::SemanticIntent;
 
 use prom_ui_backend_native::NativeBackend;
 use prom_ui_runtime::reference_admission::{ReferenceActionInvocation, ReferenceContourAdmission};
-use prom_ui_runtime::reference_contour::ReferenceLayout;
 use prom_ui_runtime::shell_player::{
     create_shell_session, OrderedProjectionPatchBatchEnvelope,
     ProjectionPatchApplicationDisposition, ShellLifecycleCommand, ShellLifecycleStimulus,
@@ -23,7 +22,6 @@ use prom_ui_runtime::shell_player::{
 use prom_ui_runtime::{
     Color, DesktopSession, DrawFrame, InputEventKind, LoopControl, Rect, SessionState, WindowConfig,
 };
-use semantic_core_quad::logic_frame;
 use semantic_core_quad::QuadState;
 use sm_emit::compile_program_to_semcode;
 use sm_runtime_core::RecordCarrier;
@@ -37,18 +35,39 @@ pub const READOUT_NODE: u64 = 11;
 pub const TEXT_NODE: u64 = 12;
 pub const EVIDENCE_NODE: u64 = 13;
 
-pub const BTN_0: u64 = 20; pub const BTN_1: u64 = 21; pub const BTN_2: u64 = 22; pub const BTN_3: u64 = 23; pub const BTN_4: u64 = 24;
-pub const BTN_5: u64 = 25; pub const BTN_6: u64 = 26; pub const BTN_7: u64 = 27; pub const BTN_8: u64 = 28; pub const BTN_9: u64 = 29;
+pub const BTN_0: u64 = 20;
+pub const BTN_1: u64 = 21;
+pub const BTN_2: u64 = 22;
+pub const BTN_3: u64 = 23;
+pub const BTN_4: u64 = 24;
+pub const BTN_5: u64 = 25;
+pub const BTN_6: u64 = 26;
+pub const BTN_7: u64 = 27;
+pub const BTN_8: u64 = 28;
+pub const BTN_9: u64 = 29;
 
-pub const BTN_ADD: u64 = 30; pub const BTN_SUB: u64 = 31; pub const BTN_MUL: u64 = 32; pub const BTN_DIV: u64 = 33;
+pub const BTN_ADD: u64 = 30;
+pub const BTN_SUB: u64 = 31;
+pub const BTN_MUL: u64 = 32;
+pub const BTN_DIV: u64 = 33;
 
-pub const BTN_N: u64 = 40; pub const BTN_F: u64 = 41; pub const BTN_T: u64 = 42; pub const BTN_S: u64 = 43;
+pub const BTN_N: u64 = 40;
+pub const BTN_F: u64 = 41;
+pub const BTN_T: u64 = 42;
+pub const BTN_S: u64 = 43;
 
-pub const BTN_NOT: u64 = 50; pub const BTN_AND: u64 = 51; pub const BTN_OR: u64 = 52; 
-pub const BTN_IMP: u64 = 53; pub const BTN_EQ: u64 = 54; pub const BTN_NEQ: u64 = 55;
+pub const BTN_NOT: u64 = 50;
+pub const BTN_AND: u64 = 51;
+pub const BTN_OR: u64 = 52;
+pub const BTN_IMP: u64 = 53;
+pub const BTN_EQ: u64 = 54;
+pub const BTN_NEQ: u64 = 55;
 
-pub const BTN_CLEAR: u64 = 60; pub const BTN_BACKSPACE: u64 = 61; pub const BTN_EVAL: u64 = 62; 
-pub const BTN_MODE: u64 = 63; pub const BTN_RECOVER: u64 = 64;
+pub const BTN_CLEAR: u64 = 60;
+pub const BTN_BACKSPACE: u64 = 61;
+pub const BTN_EVAL: u64 = 62;
+pub const BTN_MODE: u64 = 63;
+pub const BTN_RECOVER: u64 = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CalcMode {
@@ -347,15 +366,41 @@ impl CalculatorApp {
         let semcode_bytes = compile_program_to_semcode(CALCULATOR_SEMANTIC_SOURCE)
             .map_err(|e| format!("Semantic compile failed: {e:?}"))?;
 
-        let mut admission_nodes = vec![
-            READOUT_NODE, TEXT_NODE, EVIDENCE_NODE,
-            BTN_0, BTN_1, BTN_2, BTN_3, BTN_4, BTN_5, BTN_6, BTN_7, BTN_8, BTN_9,
-            BTN_ADD, BTN_SUB, BTN_MUL, BTN_DIV,
-            BTN_N, BTN_F, BTN_T, BTN_S,
-            BTN_NOT, BTN_AND, BTN_OR, BTN_IMP, BTN_EQ, BTN_NEQ,
-            BTN_CLEAR, BTN_BACKSPACE, BTN_EVAL, BTN_MODE, BTN_RECOVER,
+        let admission_nodes = vec![
+            READOUT_NODE,
+            TEXT_NODE,
+            EVIDENCE_NODE,
+            BTN_0,
+            BTN_1,
+            BTN_2,
+            BTN_3,
+            BTN_4,
+            BTN_5,
+            BTN_6,
+            BTN_7,
+            BTN_8,
+            BTN_9,
+            BTN_ADD,
+            BTN_SUB,
+            BTN_MUL,
+            BTN_DIV,
+            BTN_N,
+            BTN_F,
+            BTN_T,
+            BTN_S,
+            BTN_NOT,
+            BTN_AND,
+            BTN_OR,
+            BTN_IMP,
+            BTN_EQ,
+            BTN_NEQ,
+            BTN_CLEAR,
+            BTN_BACKSPACE,
+            BTN_EVAL,
+            BTN_MODE,
+            BTN_RECOVER,
         ];
-        
+
         let admission = ReferenceContourAdmission::new(admission_nodes);
 
         Ok(Self {
@@ -396,7 +441,10 @@ impl CalculatorApp {
         }
         self.last_denied = false;
 
-        println!("[PROOF] InputEvent -> SemanticIntent (Action: {:?}) -> Admitted action", action);
+        println!(
+            "[PROOF] InputEvent -> SemanticIntent (Action: {:?}) -> Admitted action",
+            action
+        );
         println!("[PROOF] Current Semantic state: {:?}", self.state);
 
         // Structured Semantic VM execution: passes current state + action, receives next state record
@@ -473,7 +521,10 @@ impl CalculatorApp {
             sequence: self.sequence,
         };
 
-        println!("[PROOF] Projection patch generated for UI update: {:?}", envelope);
+        println!(
+            "[PROOF] Projection patch generated for UI update: {:?}",
+            envelope
+        );
 
         if let Ok(batch) = admit_projection_patch_batch(envelope, ops) {
             if let Ok(submission) = prepare_patch_submission(batch) {
@@ -508,63 +559,194 @@ impl CalculatorApp {
 
     fn get_buttons(&self) -> Vec<(u64, Rect, &'static str, Color, Action)> {
         let mut btns = Vec::new();
-        let start_x = 20; let start_y = 150; let width = 80; let height = 50; let spacing = 10;
+        let start_x = 20;
+        let start_y = 150;
+        let width = 80;
+        let height = 50;
+        let spacing = 10;
         let btn_color = Color::rgb(45, 50, 70);
         let action_color = Color::rgb(220, 80, 80);
         let op_color = Color::rgb(50, 150, 200);
         let quad_color = Color::rgb(180, 130, 50);
 
-        let r = |c: i32, r: i32, w_span: i32| Rect::new(start_x + c * (width + spacing), start_y + r * (height + spacing), (width * w_span + spacing * (w_span - 1)) as u32, height as u32);
+        let r = |c: i32, r: i32, w_span: i32| {
+            Rect::new(
+                start_x + c * (width + spacing),
+                start_y + r * (height + spacing),
+                (width * w_span + spacing * (w_span - 1)) as u32,
+                height as u32,
+            )
+        };
 
         let next_mode = match self.state.mode {
             CalcMode::Arithmetic => CalcMode::QuadLogic,
             CalcMode::QuadLogic => CalcMode::Arithmetic,
         };
-        btns.push((BTN_MODE, r(0, 0, 2), "MODE", action_color, Action::SwitchMode(next_mode)));
+        btns.push((
+            BTN_MODE,
+            r(0, 0, 2),
+            "MODE",
+            action_color,
+            Action::SwitchMode(next_mode),
+        ));
         btns.push((BTN_CLEAR, r(2, 0, 1), "C", action_color, Action::Clear));
-        btns.push((BTN_RECOVER, r(3, 0, 1), "REC", action_color, Action::Recover));
+        btns.push((
+            BTN_RECOVER,
+            r(3, 0, 1),
+            "REC",
+            action_color,
+            Action::Recover,
+        ));
 
         if self.state.mode == CalcMode::Arithmetic {
             btns.push((BTN_7, r(0, 1, 1), "7", btn_color, Action::Digit(7)));
             btns.push((BTN_8, r(1, 1, 1), "8", btn_color, Action::Digit(8)));
             btns.push((BTN_9, r(2, 1, 1), "9", btn_color, Action::Digit(9)));
-            btns.push((BTN_DIV, r(3, 1, 1), "/", op_color, Action::OpArith(ArithOp::Div)));
+            btns.push((
+                BTN_DIV,
+                r(3, 1, 1),
+                "/",
+                op_color,
+                Action::OpArith(ArithOp::Div),
+            ));
 
             btns.push((BTN_4, r(0, 2, 1), "4", btn_color, Action::Digit(4)));
             btns.push((BTN_5, r(1, 2, 1), "5", btn_color, Action::Digit(5)));
             btns.push((BTN_6, r(2, 2, 1), "6", btn_color, Action::Digit(6)));
-            btns.push((BTN_MUL, r(3, 2, 1), "*", op_color, Action::OpArith(ArithOp::Mul)));
+            btns.push((
+                BTN_MUL,
+                r(3, 2, 1),
+                "*",
+                op_color,
+                Action::OpArith(ArithOp::Mul),
+            ));
 
             btns.push((BTN_1, r(0, 3, 1), "1", btn_color, Action::Digit(1)));
             btns.push((BTN_2, r(1, 3, 1), "2", btn_color, Action::Digit(2)));
             btns.push((BTN_3, r(2, 3, 1), "3", btn_color, Action::Digit(3)));
-            btns.push((BTN_SUB, r(3, 3, 1), "-", op_color, Action::OpArith(ArithOp::Sub)));
+            btns.push((
+                BTN_SUB,
+                r(3, 3, 1),
+                "-",
+                op_color,
+                Action::OpArith(ArithOp::Sub),
+            ));
 
             btns.push((BTN_0, r(0, 4, 2), "0", btn_color, Action::Digit(0)));
             btns.push((BTN_EVAL, r(2, 4, 1), "=", action_color, Action::Evaluate));
-            btns.push((BTN_ADD, r(3, 4, 1), "+", op_color, Action::OpArith(ArithOp::Add)));
+            btns.push((
+                BTN_ADD,
+                r(3, 4, 1),
+                "+",
+                op_color,
+                Action::OpArith(ArithOp::Add),
+            ));
         } else {
             // Left operand
-            btns.push((BTN_N, r(0, 1, 1), "L: N", quad_color, Action::SelectQuadLeft(QuadState::N)));
-            btns.push((BTN_F, r(1, 1, 1), "L: F", quad_color, Action::SelectQuadLeft(QuadState::F)));
-            btns.push((BTN_T, r(2, 1, 1), "L: T", quad_color, Action::SelectQuadLeft(QuadState::T)));
-            btns.push((BTN_S, r(3, 1, 1), "L: S", quad_color, Action::SelectQuadLeft(QuadState::S)));
+            btns.push((
+                BTN_N,
+                r(0, 1, 1),
+                "L: N",
+                quad_color,
+                Action::SelectQuadLeft(QuadState::N),
+            ));
+            btns.push((
+                BTN_F,
+                r(1, 1, 1),
+                "L: F",
+                quad_color,
+                Action::SelectQuadLeft(QuadState::F),
+            ));
+            btns.push((
+                BTN_T,
+                r(2, 1, 1),
+                "L: T",
+                quad_color,
+                Action::SelectQuadLeft(QuadState::T),
+            ));
+            btns.push((
+                BTN_S,
+                r(3, 1, 1),
+                "L: S",
+                quad_color,
+                Action::SelectQuadLeft(QuadState::S),
+            ));
 
             // Operators
-            btns.push((BTN_NOT, r(0, 2, 1), "NOT", op_color, Action::SelectQuadOp(QuadOp::Not)));
-            btns.push((BTN_AND, r(1, 2, 1), "AND", op_color, Action::SelectQuadOp(QuadOp::And)));
-            btns.push((BTN_OR, r(2, 2, 1), "OR", op_color, Action::SelectQuadOp(QuadOp::Or)));
-            btns.push((BTN_IMP, r(3, 2, 1), "IMP", op_color, Action::SelectQuadOp(QuadOp::Imp)));
+            btns.push((
+                BTN_NOT,
+                r(0, 2, 1),
+                "NOT",
+                op_color,
+                Action::SelectQuadOp(QuadOp::Not),
+            ));
+            btns.push((
+                BTN_AND,
+                r(1, 2, 1),
+                "AND",
+                op_color,
+                Action::SelectQuadOp(QuadOp::And),
+            ));
+            btns.push((
+                BTN_OR,
+                r(2, 2, 1),
+                "OR",
+                op_color,
+                Action::SelectQuadOp(QuadOp::Or),
+            ));
+            btns.push((
+                BTN_IMP,
+                r(3, 2, 1),
+                "IMP",
+                op_color,
+                Action::SelectQuadOp(QuadOp::Imp),
+            ));
 
             // Right operand
-            btns.push((BTN_N, r(0, 3, 1), "R: N", quad_color, Action::SelectQuadRight(QuadState::N)));
-            btns.push((BTN_F, r(1, 3, 1), "R: F", quad_color, Action::SelectQuadRight(QuadState::F)));
-            btns.push((BTN_T, r(2, 3, 1), "R: T", quad_color, Action::SelectQuadRight(QuadState::T)));
-            btns.push((BTN_S, r(3, 3, 1), "R: S", quad_color, Action::SelectQuadRight(QuadState::S)));
+            btns.push((
+                BTN_N,
+                r(0, 3, 1),
+                "R: N",
+                quad_color,
+                Action::SelectQuadRight(QuadState::N),
+            ));
+            btns.push((
+                BTN_F,
+                r(1, 3, 1),
+                "R: F",
+                quad_color,
+                Action::SelectQuadRight(QuadState::F),
+            ));
+            btns.push((
+                BTN_T,
+                r(2, 3, 1),
+                "R: T",
+                quad_color,
+                Action::SelectQuadRight(QuadState::T),
+            ));
+            btns.push((
+                BTN_S,
+                r(3, 3, 1),
+                "R: S",
+                quad_color,
+                Action::SelectQuadRight(QuadState::S),
+            ));
 
             // More Ops & Eval
-            btns.push((BTN_EQ, r(0, 4, 1), "EQ", op_color, Action::SelectQuadOp(QuadOp::Eq)));
-            btns.push((BTN_NEQ, r(1, 4, 1), "NEQ", op_color, Action::SelectQuadOp(QuadOp::Neq)));
+            btns.push((
+                BTN_EQ,
+                r(0, 4, 1),
+                "EQ",
+                op_color,
+                Action::SelectQuadOp(QuadOp::Eq),
+            ));
+            btns.push((
+                BTN_NEQ,
+                r(1, 4, 1),
+                "NEQ",
+                op_color,
+                Action::SelectQuadOp(QuadOp::Neq),
+            ));
             btns.push((BTN_EVAL, r(2, 4, 2), "=", action_color, Action::Evaluate));
         }
         btns
@@ -615,7 +797,12 @@ impl CalculatorApp {
             CalcMode::Arithmetic => "ARITHMETIC",
             CalcMode::QuadLogic => "QUAD LOGIC",
         };
-        frame.draw_text(mode_str, display_rect.x + 10, display_rect.y + 20, Color::rgb(0, 220, 255));
+        frame.draw_text(
+            mode_str,
+            display_rect.x + 10,
+            display_rect.y + 20,
+            Color::rgb(0, 220, 255),
+        );
 
         let display_text = match self.state.mode {
             CalcMode::Arithmetic => format!("{}", self.state.current_input),
@@ -630,12 +817,29 @@ impl CalculatorApp {
                 }
             }
         };
-        frame.draw_text(&display_text, display_rect.x + 10, display_rect.y + 55, Color::WHITE);
+        frame.draw_text(
+            &display_text,
+            display_rect.x + 10,
+            display_rect.y + 55,
+            Color::WHITE,
+        );
 
         let err_str = self.state.error_state.as_deref().unwrap_or("OK");
-        let status_str = format!("Eval: {:?} | Status: {}", self.state.evaluation_state, err_str);
-        let status_color = if self.state.error_state.is_some() { Color::rgb(240, 60, 60) } else { Color::rgb(150, 150, 160) };
-        frame.draw_text(&status_str, display_rect.x + 10, display_rect.y + 85, status_color);
+        let status_str = format!(
+            "Eval: {:?} | Status: {}",
+            self.state.evaluation_state, err_str
+        );
+        let status_color = if self.state.error_state.is_some() {
+            Color::rgb(240, 60, 60)
+        } else {
+            Color::rgb(150, 150, 160)
+        };
+        frame.draw_text(
+            &status_str,
+            display_rect.x + 10,
+            display_rect.y + 85,
+            status_color,
+        );
 
         // Buttons
         for (_, rect, label, color, _) in self.get_buttons() {
@@ -660,7 +864,10 @@ fn main() {
         let mut app = CalculatorApp::new().unwrap();
         app.dispatch_action(Action::Digit(7)).unwrap();
         let frame = app.render_frame();
-        println!("[PROOF] Frame contains {} draw commands", frame.commands().len());
+        println!(
+            "[PROOF] Frame contains {} draw commands",
+            frame.commands().len()
+        );
         return;
     }
     println!("=== Quad Logic Calculator (Verifiable Local Application) ===");
@@ -673,7 +880,7 @@ fn main() {
         .expect("DesktopSession native creation must succeed");
     assert_eq!(session.state(), SessionState::Created);
 
-    let start = Instant::now();
+    let _start = Instant::now();
     let res = session.run(move |buf, out_frame| {
         let events = buf.drain();
         for event in &events {
@@ -695,7 +902,3 @@ fn main() {
     let _ = session.close();
     println!("Session completed cleanly.");
 }
-
-
-
-
