@@ -88,15 +88,20 @@ function Invoke-LocalCiMergePreflight {
         $WorktreeCreated = $false
 
         try {
-            git worktree add --detach $MergePreflightWorktree $BaseRef
+            git worktree add --detach --no-checkout $MergePreflightWorktree
             if ($LASTEXITCODE -ne 0) {
                 throw "failed to create merge preflight worktree at '$MergePreflightWorktree'"
             }
             $WorktreeCreated = $true
 
+            git -C $MergePreflightWorktree -c core.autocrlf=false reset --hard $BaseRef
+            if ($LASTEXITCODE -ne 0) {
+                throw "failed to materialize base commit in merge preflight worktree"
+            }
+
             Push-Location $MergePreflightWorktree
             try {
-                git merge --no-commit --no-ff $HeadSha
+                git -c core.autocrlf=false merge --no-ff -m "merge preflight" $HeadSha
                 if ($LASTEXITCODE -ne 0) {
                     throw "merge preflight failed: merging current HEAD into '$BaseRef' produced conflicts"
                 }
