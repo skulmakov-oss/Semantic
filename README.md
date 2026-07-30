@@ -382,10 +382,9 @@ cargo run -p prom-ui-demo
 
 On 2026-07-30, Semantic completed its first visible end-to-end native application proof: a dual-mode Arithmetic and Quad Logic Calculator.
 
-<p align="center">
-  <img src="docs/images/quad-logic-calculator-arithmetic.jpg" alt="Semantic Quad Logic Calculator in arithmetic mode" width="390">
-  <img src="docs/images/quad-logic-calculator-quad-mode.jpg" alt="Semantic Quad Logic Calculator in Quad Logic mode" width="390">
-</p>
+<img width="401" height="549" alt="Снимок экрана 2026-07-30 074453" src="https://github.com/user-attachments/assets/a78a4688-2d1e-4e72-bc0b-ca07a81de79e" />
+<img width="408" height="556" alt="Снимок экрана 2026-07-30 073436" src="https://github.com/user-attachments/assets/e26f0151-ae45-4813-bc30-249c698780ab" />
+
 
 The application demonstrates a complete current-main path from Semantic-owned state transitions to a visible interactive native UI:
 
