@@ -1441,15 +1441,21 @@ pub mod winit_placeholder {
                         if let Some(context) =
                             super::wgpu_integration::NativeBackendWgpuContext::new()
                         {
-                            if let Ok(surface) =
-                                super::wgpu_integration::NativeBackendPresentationSurface::new(
-                                    &context,
-                                    window_arc,
-                                    config.width,
-                                    config.height,
-                                )
-                            {
-                                self.presentation_surface = Some(surface);
+                            match super::wgpu_integration::NativeBackendPresentationSurface::new(
+                                &context,
+                                window_arc,
+                                config.width,
+                                config.height,
+                            ) {
+                                Ok(surface) => {
+                                    self.presentation_surface = Some(surface);
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "CRITICAL ERROR: Failed to create wgpu surface: {:?}",
+                                        e
+                                    );
+                                }
                             }
                             self.wgpu_context = Some(context);
                         }
@@ -1478,14 +1484,16 @@ pub mod winit_placeholder {
                             surface.resize(context, physical_size.width, physical_size.height);
                         }
                     }
-                    WindowEvent::RedrawRequested => {
+                    winit::event::WindowEvent::RedrawRequested => {
                         if let (Some(context), Some(surface)) =
                             (&self.wgpu_context, &mut self.presentation_surface)
                         {
-                            let _ = surface.present_semantic_commands(
+                            let _success = surface.present_semantic_commands(
                                 context,
                                 &self.backend.last_frame_commands,
                             );
+                        } else {
+                            // Suppress warnings when context/surface are uninitialized.
                         }
                     }
                     _ => {}
@@ -1934,7 +1942,7 @@ pub mod wgpu_integration {
     /// The fixed surface format used by both the quad pipeline and the
     /// glyph text pipeline. Chosen once at context-creation time, before
     /// any window surface exists.
-    const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+    const SURFACE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
     /// Encapsulates the core wgpu primitives, plus the glyphon text-shaping
     /// and glyph-rendering state (Issue #1543): `DrawCommand::DrawText`
@@ -2007,7 +2015,15 @@ pub mod wgpu_integration {
                     power_preference: wgpu::PowerPreference::default(),
                     force_fallback_adapter: false,
                     compatible_surface: None, // No surface yet
-                }))?;
+                }));
+
+            if adapter.is_none() {
+                eprintln!(
+                    "CRITICAL ERROR: Failed to find wgpu adapter without compatible_surface."
+                );
+                return None;
+            }
+            let adapter = adapter.unwrap();
 
             // Block on device request
             let (device, queue) = pollster::block_on(adapter.request_device(
@@ -2071,7 +2087,7 @@ pub mod wgpu_integration {
                     module: &shader,
                     entry_point: Some("fs_main"),
                     targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
                         blend: Some(wgpu::BlendState::REPLACE),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
@@ -2137,7 +2153,7 @@ pub mod wgpu_integration {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                format: wgpu::TextureFormat::Bgra8UnormSrgb,
                 usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                 view_formats: &[],
             });
@@ -2205,7 +2221,7 @@ pub mod wgpu_integration {
                 .get_default_config(&context.adapter, w, h)
                 .unwrap_or_else(|| wgpu::SurfaceConfiguration {
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
                     width: w,
                     height: h,
                     present_mode: wgpu::PresentMode::AutoVsync,
@@ -2215,7 +2231,7 @@ pub mod wgpu_integration {
                 });
             config.width = w;
             config.height = h;
-            config.format = wgpu::TextureFormat::Rgba8UnormSrgb;
+            config.format = wgpu::TextureFormat::Bgra8UnormSrgb;
             surface.configure(&context.device, &config);
 
             Ok(Self { surface, config })

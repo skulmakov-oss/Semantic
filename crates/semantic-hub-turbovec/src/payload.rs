@@ -163,6 +163,18 @@ pub struct ResetReply {
     pub bit_width: usize,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RecoverReply {
+    pub index: String,
+    /// One of `"NoTransaction"`, `"AlreadyCommitted"`,
+    /// `"RolledBackAbandonedCandidate"`, `"FinalizedCommit"`, or
+    /// `"Indeterminate"` -- see `crate::transaction::RecoveryOutcome`.
+    pub outcome: String,
+    pub artifact_digest: Option<String>,
+    /// Present only when `outcome == "Indeterminate"`.
+    pub reason: Option<String>,
+}
+
 /// Bound checks shared by insert/search request validation, run after JSON
 /// parsing succeeds and before any turbovec call or allocation proportional
 /// to attacker-controlled counts.

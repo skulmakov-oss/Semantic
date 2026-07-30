@@ -206,6 +206,23 @@ impl HubCapabilitySet {
     pub fn is_empty(&self) -> bool {
         self.granted.is_empty()
     }
+
+    /// Whether every capability in this set is permitted by `ceiling`.
+    pub fn is_subset_of(&self, ceiling: &Self) -> bool {
+        self.granted.is_subset(&ceiling.granted)
+    }
+
+    /// Deterministic, semicolon-joined canonical text of this set's
+    /// granted capability names (`BTreeSet` iteration is already stably
+    /// ordered) -- used to derive a stable provenance digest, independent
+    /// of insertion order.
+    pub fn canonical_text(&self) -> String {
+        self.granted
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>()
+            .join(";")
+    }
 }
 
 impl FromIterator<HubCapability> for HubCapabilitySet {
@@ -253,6 +270,18 @@ mod tests {
         let set = HubCapabilitySet::empty().grant(HubCapability::NetworkAccess);
         assert!(set.allows(HubCapability::NetworkAccess));
         assert!(!set.satisfies(&[HubCapability::NetworkAccess]));
+    }
+
+    #[test]
+    fn subset_check_rejects_capability_widening() {
+        let ceiling = HubCapabilitySet::empty().grant(HubCapability::VectorSearch);
+        assert!(HubCapabilitySet::empty().is_subset_of(&ceiling));
+        assert!(HubCapabilitySet::empty()
+            .grant(HubCapability::VectorSearch)
+            .is_subset_of(&ceiling));
+        assert!(!HubCapabilitySet::empty()
+            .grant(HubCapability::VectorIndexMutate)
+            .is_subset_of(&ceiling));
     }
 
     #[test]

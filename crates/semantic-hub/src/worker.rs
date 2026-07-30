@@ -60,7 +60,7 @@ impl HubWorkerState {
                 | (Busy, Degraded)
                 | (Busy, Quarantined)
                 | (Busy, Stopped)
-                | (Degraded, Ready)
+                | (Degraded, Busy)
                 | (Degraded, Restarting)
                 | (Degraded, Quarantined)
                 | (Degraded, Disabled)
@@ -180,6 +180,10 @@ impl HubWorkerHealth {
         self.transition(HubWorkerState::Busy)
     }
 
+    pub fn mark_degraded(&mut self) -> Result<(), IllegalWorkerTransition> {
+        self.transition(HubWorkerState::Degraded)
+    }
+
     /// Report a crash. Escalates to `Quarantined` once the configured
     /// threshold is reached instead of allowing an unbounded restart loop;
     /// otherwise returns to `Degraded` so the caller can decide whether to
@@ -281,6 +285,21 @@ mod tests {
         health.mark_busy().unwrap();
         health.report_protocol_violation().unwrap();
         assert_eq!(health.state(), HubWorkerState::Quarantined);
+    }
+
+    #[test]
+    fn degraded_worker_can_serve_a_read_without_becoming_falsely_ready() {
+        let mut health = HubWorkerHealth::new(HubSupervisionPolicy::conservative_default());
+        health.mark_starting().unwrap();
+        health.mark_ready().unwrap();
+        health.mark_busy().unwrap();
+        health.report_crash().unwrap();
+        assert_eq!(health.state(), HubWorkerState::Degraded);
+        assert!(health.mark_ready().is_err());
+
+        health.mark_busy().unwrap();
+        health.mark_degraded().unwrap();
+        assert_eq!(health.state(), HubWorkerState::Degraded);
     }
 
     #[test]

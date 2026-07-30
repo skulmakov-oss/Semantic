@@ -26,6 +26,8 @@ pub const MAX_INDEX_COUNT: usize = 256;
 pub enum ScopedStorageError {
     RootIsSymlink,
     IndexFileIsSymlink,
+    PrivateFileIsSymlink,
+    InvalidPrivateFileName,
     Io(String),
 }
 
@@ -40,6 +42,13 @@ impl std::fmt::Display for ScopedStorageError {
                 f,
                 "index file is a symlink or reparse point, which could resolve outside the scoped directory"
             ),
+            ScopedStorageError::PrivateFileIsSymlink => write!(
+                f,
+                "adapter-private file is a symlink or reparse point, which could resolve outside the scoped directory"
+            ),
+            ScopedStorageError::InvalidPrivateFileName => {
+                write!(f, "adapter-private file name is not a safe leaf name")
+            }
             ScopedStorageError::Io(msg) => write!(f, "{msg}"),
         }
     }
@@ -197,6 +206,34 @@ impl ScopedStorage {
         }
     }
 
+    /// Resolve one adapter-private leaf (for example a transaction record
+    /// or its candidate artifact) without following a pre-planted link.
+    /// The caller supplies a file name only; traversal and absolute paths
+    /// are rejected before joining it to the scoped root.
+    pub(crate) fn checked_private_file_path(
+        &self,
+        file_name: &str,
+    ) -> Result<PathBuf, ScopedStorageError> {
+        if file_name.is_empty()
+            || file_name == "."
+            || file_name == ".."
+            || file_name.contains('/')
+            || file_name.contains('\\')
+        {
+            return Err(ScopedStorageError::InvalidPrivateFileName);
+        }
+        self.check_root_is_not_a_symlink()?;
+        let path = self.root.join(file_name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                Err(ScopedStorageError::PrivateFileIsSymlink)
+            }
+            Ok(_) => Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(path),
+            Err(e) => Err(ScopedStorageError::Io(e.to_string())),
+        }
+    }
+
     /// Count of currently persisted indexes, for the bounded-index-count
     /// check. Best-effort: a read error is treated as zero rather than
     /// failing the caller, since this is only used as an admission ceiling
@@ -295,6 +332,17 @@ mod tests {
         assert!(storage.checked_index_path(&name).is_ok());
     }
 
+    #[test]
+    fn checked_private_file_path_rejects_non_leaf_names() {
+        let storage = ScopedStorage::new(temp_dir("private-name"));
+        for invalid in ["", ".", "..", "../outside", "sub/file", "sub\\file"] {
+            assert_eq!(
+                storage.checked_private_file_path(invalid).unwrap_err(),
+                ScopedStorageError::InvalidPrivateFileName
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn checked_index_path_rejects_a_symlinked_root() {
@@ -368,6 +416,24 @@ mod tests {
         assert_eq!(
             storage.checked_index_path(&name).unwrap_err(),
             ScopedStorageError::IndexFileIsSymlink
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_private_file_path_rejects_a_symlinked_leaf() {
+        let root = temp_dir("private-leaf-symlink-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = temp_dir("private-leaf-symlink-target");
+        std::fs::write(&target, b"outside").unwrap();
+        std::os::unix::fs::symlink(&target, root.join("docs.tvim.txn")).unwrap();
+
+        let storage = ScopedStorage::new(root);
+        assert_eq!(
+            storage
+                .checked_private_file_path("docs.tvim.txn")
+                .unwrap_err(),
+            ScopedStorageError::PrivateFileIsSymlink
         );
     }
 }

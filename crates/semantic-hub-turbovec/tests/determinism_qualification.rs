@@ -111,6 +111,7 @@ fn run_search(adapter: &mut TurboVecAdapter, query: &[f32], k: usize) -> Vec<u8>
             &ctx(&budget, &caps),
         )
         .unwrap()
+        .payload
 }
 
 #[test]

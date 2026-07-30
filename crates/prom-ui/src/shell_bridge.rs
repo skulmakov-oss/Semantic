@@ -945,10 +945,14 @@ pub fn compile_projection_source_to_bundle_v0(
     bundle_epoch: u64,
     compiler_identity: &str,
 ) -> Result<Vec<u8>, ProjectionBundleCompileError> {
-    let source_id =
-        SourceId::new(source_id).map_err(|_| ProjectionBundleCompileError::ParseOrCompile)?;
-    let document_id = StaticDocumentId::new(document_id)
-        .map_err(|_| ProjectionBundleCompileError::ParseOrCompile)?;
+    let source_id = SourceId::new(source_id).map_err(|e| {
+        println!("Parse Error: {:?}", e);
+        ProjectionBundleCompileError::ParseOrCompile
+    })?;
+    let document_id = StaticDocumentId::new(document_id).map_err(|e| {
+        println!("Parse Error: {:?}", e);
+        ProjectionBundleCompileError::ParseOrCompile
+    })?;
     let dictionary = RoleDictionary::current();
 
     let compiled = crate::projection_source_frontend::compile_projection_source_text_with_collection_anchors(
@@ -965,10 +969,17 @@ pub fn compile_projection_source_to_bundle_v0(
     })?;
 
     let binding_graph = BindingGraphDocument::build(Vec::new(), compiled.static_document())
-        .map_err(|_| ProjectionBundleCompileError::ParseOrCompile)?;
+        .map_err(|e| {
+            println!("Parse Error: {:?}", e);
+            ProjectionBundleCompileError::ParseOrCompile
+        })?;
     let action_ir =
-        crate::action_ir::ActionIrDocument::build(Vec::new(), compiled.static_document())
-            .map_err(|_| ProjectionBundleCompileError::ParseOrCompile)?;
+        crate::action_ir::ActionIrDocument::build(Vec::new(), compiled.static_document()).map_err(
+            |e| {
+                println!("Parse Error: {:?}", e);
+                ProjectionBundleCompileError::ParseOrCompile
+            },
+        )?;
 
     let bundle = crate::projection_bundle::ProjectionBundleV0::assemble(
         document_id,

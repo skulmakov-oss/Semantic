@@ -11,21 +11,25 @@
 
 pub mod payload;
 pub mod storage;
+pub mod transaction;
 
 use std::path::PathBuf;
 
-use semantic_hub::runtime::{HubTool, RestrictedHubContext};
+use semantic_hub::runtime::{HubTool, HubToolOutcome, RestrictedHubContext};
 use semantic_hub::{
-    HubCapability, HubDeterminismClass, HubExecutionMode, HubOperationDescriptor, HubOperationId,
-    HubResourceBudget, HubToolDescriptor, HubToolError, HubToolId, HubToolVersion, HubTrustClass,
+    HubArtifactProvenance, HubCapability, HubDeterminismClass, HubDigest, HubExecutionMode,
+    HubOperationDescriptor, HubOperationId, HubResourceBudget, HubToolDescriptor, HubToolError,
+    HubToolId, HubToolVersion, HubTrustClass,
 };
 
 use payload::{
     check_result_count_bounds, check_vector_batch_bounds, parse, to_bytes, CreateIndexReply,
     CreateIndexRequest, DescribeIndexReply, IndexNameOnlyRequest, InsertReply, InsertRequest,
-    RemoveReply, RemoveRequest, ResetReply, ResetRequest, SearchHit, SearchReply, SearchRequest,
+    RecoverReply, RemoveReply, RemoveRequest, ResetReply, ResetRequest, SearchHit, SearchReply,
+    SearchRequest,
 };
 use storage::{IndexName, ScopedStorage, MAX_INDEX_COUNT};
+use transaction::RecoveryOutcome;
 
 pub const TOOL_ID: &str = "vector.turbovec";
 pub const TURBOVEC_DEPENDENCY_VERSION: &str = "0.9.0";
@@ -153,6 +157,21 @@ pub fn descriptor(resource_ceiling: HubResourceBudget) -> HubToolDescriptor {
                 HubDeterminismClass::Deterministic,
                 true,
             ),
+            HubOperationDescriptor::new(
+                op("vector.index.recover"),
+                [
+                    HubCapability::VectorIndexMutate,
+                    HubCapability::PrivateStorageRead,
+                    HubCapability::PrivateStorageWrite,
+                ],
+                // The outcome depends on which files happen to exist on
+                // disk at call time, not purely on the request payload --
+                // honestly classified as environment-dependent rather than
+                // deterministic, even though it is idempotent once the
+                // underlying state stops changing.
+                HubDeterminismClass::EnvironmentDependent,
+                true,
+            ),
         ],
         resource_ceiling,
         adapter_provenance: adapter_provenance(),
@@ -183,7 +202,53 @@ impl TurboVecAdapter {
     /// this one function, so checking here (rather than per-caller)
     /// enforces the budget against an index that was created under a
     /// wider budget in an earlier, separate CLI invocation.
-    fn load(&self, name: &IndexName, max_dim: usize) -> Result<turbovec::IdMapIndex, HubToolError> {
+    fn transaction_error(error: transaction::TransactionError, default_code: &str) -> HubToolError {
+        match error {
+            transaction::TransactionError::ScopedStorage(message) => {
+                HubToolError::new("ScopedStorageViolation", message)
+            }
+            transaction::TransactionError::Unresolved(phase) => HubToolError::new(
+                "RecoveryRequired",
+                format!(
+                    "index has an unresolved transaction in phase {phase}; run vector.index.recover"
+                ),
+            ),
+            other => HubToolError::new(default_code, other.to_string()),
+        }
+    }
+
+    fn ensure_transaction_resolved(&self, name: &IndexName) -> Result<(), HubToolError> {
+        transaction::ensure_resolved(&self.storage, name)
+            .map_err(|error| Self::transaction_error(error, "RecoveryRequired"))
+    }
+
+    fn sync_file(path: &std::path::Path) -> std::io::Result<()> {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)?
+            .sync_all()
+    }
+
+    fn check_deadline(context: &RestrictedHubContext) -> Result<(), HubToolError> {
+        if context.deadline_exceeded() {
+            Err(HubToolError::new(
+                "DeadlineExceeded",
+                "operation deadline exceeded",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    fn load(
+        &self,
+        name: &IndexName,
+        max_dim: usize,
+        context: &RestrictedHubContext,
+    ) -> Result<turbovec::IdMapIndex, HubToolError> {
+        Self::check_deadline(context)?;
+        self.ensure_transaction_resolved(name)?;
         let path = self
             .storage
             .checked_index_path(name)
@@ -206,6 +271,7 @@ impl TurboVecAdapter {
                 ));
             }
         }
+        Self::check_deadline(context)?;
         let index = turbovec::IdMapIndex::load(path).map_err(|e| {
             HubToolError::new(
                 "IndexLoadFailed",
@@ -225,38 +291,125 @@ impl TurboVecAdapter {
         Ok(index)
     }
 
+    /// Write-ahead, recoverable commit of one index mutation. Follows the
+    /// intent -> candidate write -> validate/digest -> atomic rename ->
+    /// completion-record sequence documented in `transaction`'s module doc
+    /// comment, and returns the artifact provenance the caller embeds in
+    /// its `HubToolOutcome` -- the digest is always of the bytes actually
+    /// read back from the committed file, never the in-memory buffer that
+    /// was written.
     fn save_atomic(
         &self,
         name: &IndexName,
         index: &turbovec::IdMapIndex,
-    ) -> Result<(), HubToolError> {
+        operation: &str,
+        context: &RestrictedHubContext,
+    ) -> Result<HubArtifactProvenance, HubToolError> {
+        Self::check_deadline(context)?;
         self.storage.ensure_root_checked().map_err(|e| {
             HubToolError::new(
                 "StorageUnavailable",
                 format!("could not prepare scoped storage directory: {e}"),
             )
         })?;
+        self.storage
+            .checked_index_path(name)
+            .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
+
+        let txn_record = transaction::begin(&self.storage, name, operation)
+            .map_err(|error| Self::transaction_error(error, "PersistenceFailed"))?;
+        let tmp_path = transaction::checked_candidate_path(&self.storage, name, &txn_record)
+            .map_err(|error| Self::transaction_error(error, "PersistenceFailed"))?;
+
+        Self::check_deadline(context)?;
+        index.write(&tmp_path).map_err(|e| {
+            HubToolError::new("IndexWriteFailed", format!("could not write index: {e}"))
+        })?;
+        Self::sync_file(&tmp_path).map_err(|e| {
+            HubToolError::new(
+                "PersistenceFailed",
+                format!("could not sync candidate index: {e}"),
+            )
+        })?;
+        Self::check_deadline(context)?;
+        let validated = turbovec::IdMapIndex::load(&tmp_path).map_err(|e| {
+            HubToolError::new(
+                "CandidateValidationFailed",
+                format!("candidate index could not be loaded: {e}"),
+            )
+        })?;
+        if validated.dim() != index.dim()
+            || validated.bit_width() != index.bit_width()
+            || validated.len() != index.len()
+        {
+            return Err(HubToolError::new(
+                "CandidateValidationFailed",
+                "candidate index shape does not match the in-memory index",
+            ));
+        }
+        drop(validated);
+        Self::check_deadline(context)?;
+        let candidate_bytes = std::fs::read(&tmp_path).map_err(|e| {
+            HubToolError::new(
+                "PersistenceFailed",
+                format!("could not read back candidate index: {e}"),
+            )
+        })?;
+        let candidate_digest = HubDigest::of(&candidate_bytes);
+        Self::check_deadline(context)?;
+        let txn_record = transaction::prepare(&self.storage, name, txn_record, candidate_digest)
+            .map_err(|error| Self::transaction_error(error, "PersistenceFailed"))?;
+
+        // This is the last cooperative cancellation point before the
+        // externally visible atomic rename. Once rename starts, finish the
+        // transaction record even if the deadline expires meanwhile.
+        Self::check_deadline(context)?;
+        let tmp_path = transaction::checked_candidate_path(&self.storage, name, &txn_record)
+            .map_err(|error| Self::transaction_error(error, "PersistenceFailed"))?;
         let final_path = self
             .storage
             .checked_index_path(name)
             .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
-        let tmp_path = final_path.with_extension(format!(
-            "tvim.tmp.{}.{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        index.write(&tmp_path).map_err(|e| {
-            HubToolError::new("IndexWriteFailed", format!("could not write index: {e}"))
-        })?;
         std::fs::rename(&tmp_path, &final_path).map_err(|e| {
-            let _ = std::fs::remove_file(&tmp_path);
             HubToolError::new(
                 "IndexWriteFailed",
                 format!("could not finalize index write: {e}"),
             )
+        })?;
+        let final_path = self
+            .storage
+            .checked_index_path(name)
+            .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
+        Self::sync_file(&final_path).map_err(|e| {
+            HubToolError::new(
+                "PersistenceFailed",
+                format!("could not sync committed index: {e}"),
+            )
+        })?;
+
+        let committed_bytes = std::fs::read(&final_path).map_err(|e| {
+            HubToolError::new(
+                "PersistenceFailed",
+                format!("could not read back committed artifact for provenance: {e}"),
+            )
+        })?;
+        let digest = HubDigest::of(&committed_bytes);
+        if digest != candidate_digest {
+            return Err(HubToolError::new(
+                "PersistenceFailed",
+                "committed artifact does not match the prepared candidate",
+            ));
+        }
+
+        let transaction_id = txn_record.transaction_id.clone();
+        transaction::commit(&self.storage, name, txn_record, digest)
+            .map_err(|error| Self::transaction_error(error, "PersistenceFailed"))?;
+
+        Ok(HubArtifactProvenance {
+            kind: "turbovec.index".to_string(),
+            id: name.as_str().to_string(),
+            digest,
+            transaction_id: Some(transaction_id),
         })
     }
 
@@ -264,23 +417,26 @@ impl TurboVecAdapter {
         IndexName::new(raw).map_err(|e| HubToolError::new("InvalidIndexName", e.to_string()))
     }
 
-    fn handle_create(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
+    fn handle_create(
+        &self,
+        payload: &[u8],
+        max_dim: usize,
+        context: &RestrictedHubContext,
+    ) -> Result<HubToolOutcome, HubToolError> {
         let req: CreateIndexRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
-        // Validate the scoped root before either preflight read below:
-        // `exists()`/`index_count()` call the unchecked `ScopedStorage`
-        // methods directly (neither goes through `checked_index_path`),
-        // so a pre-planted symlink at the root would have both probes
-        // silently follow it -- `exists()` checking for a `.tvim` file
-        // outside the scoped directory, `index_count()` enumerating an
-        // external directory's contents -- before any symlink rejection
-        // ever ran. `ensure_root_checked()` performs the same check
-        // `save_atomic()` already relies on later.
+        // Validate the scoped root before the index-count preflight, then
+        // use the checked final leaf for the existence test below.
         self.storage
             .ensure_root_checked()
             .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
-        if self.storage.exists(&name) {
+        self.ensure_transaction_resolved(&name)?;
+        let index_path = self
+            .storage
+            .checked_index_path(&name)
+            .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
+        if index_path.is_file() {
             return Err(HubToolError::new(
                 "IndexAlreadyExists",
                 format!("index {:?} already exists", name.as_str()),
@@ -303,27 +459,38 @@ impl TurboVecAdapter {
                 format!("requested dim {} exceeds the admitted budget's vector_dimensions ceiling {max_dim}", req.dim),
             ));
         }
+        Self::check_deadline(context)?;
         let index = turbovec::IdMapIndex::new(req.dim, req.bit_width)
             .map_err(|e| HubToolError::new("InvalidIndexParameters", e.to_string()))?;
-        self.save_atomic(&name, &index)?;
-        Ok(to_bytes(&CreateIndexReply {
-            index: name.as_str().to_string(),
-            dim: req.dim,
-            bit_width: req.bit_width,
-        }))
+        let artifact = self.save_atomic(&name, &index, "create", context)?;
+        Ok(HubToolOutcome {
+            payload: to_bytes(&CreateIndexReply {
+                index: name.as_str().to_string(),
+                dim: req.dim,
+                bit_width: req.bit_width,
+            }),
+            artifact: Some(artifact),
+        })
     }
 
-    fn handle_describe(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
+    fn handle_describe(
+        &self,
+        payload: &[u8],
+        max_dim: usize,
+        context: &RestrictedHubContext,
+    ) -> Result<HubToolOutcome, HubToolError> {
         let req: IndexNameOnlyRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
-        let index = self.load(&name, max_dim)?;
-        Ok(to_bytes(&DescribeIndexReply {
-            index: name.as_str().to_string(),
-            dim: index.dim(),
-            bit_width: index.bit_width(),
-            len: index.len(),
-        }))
+        let index = self.load(&name, max_dim, context)?;
+        Ok(HubToolOutcome::payload_only(to_bytes(
+            &DescribeIndexReply {
+                index: name.as_str().to_string(),
+                dim: index.dim(),
+                bit_width: index.bit_width(),
+                len: index.len(),
+            },
+        )))
     }
 
     fn handle_insert(
@@ -331,7 +498,8 @@ impl TurboVecAdapter {
         payload: &[u8],
         max_vectors: usize,
         max_dim: usize,
-    ) -> Result<Vec<u8>, HubToolError> {
+        context: &RestrictedHubContext,
+    ) -> Result<HubToolOutcome, HubToolError> {
         let req: InsertRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
@@ -347,7 +515,7 @@ impl TurboVecAdapter {
                 ),
             ));
         }
-        let mut index = self.load(&name, max_dim)?;
+        let mut index = self.load(&name, max_dim, context)?;
         let dim = index.dim();
         for (i, v) in req.vectors.iter().enumerate() {
             if v.len() != dim {
@@ -360,18 +528,23 @@ impl TurboVecAdapter {
                 ));
             }
         }
+        Self::check_deadline(context)?;
         let flat: Vec<f32> = req.vectors.iter().flatten().copied().collect();
+        Self::check_deadline(context)?;
         index
             .add_with_ids_2d(&flat, dim, &req.ids)
             .map_err(|e| HubToolError::new("InsertRejected", e.to_string()))?;
         let inserted = req.ids.len();
         let len = index.len();
-        self.save_atomic(&name, &index)?;
-        Ok(to_bytes(&InsertReply {
-            index: name.as_str().to_string(),
-            inserted,
-            len,
-        }))
+        let artifact = self.save_atomic(&name, &index, "insert", context)?;
+        Ok(HubToolOutcome {
+            payload: to_bytes(&InsertReply {
+                index: name.as_str().to_string(),
+                inserted,
+                len,
+            }),
+            artifact: Some(artifact),
+        })
     }
 
     fn handle_remove(
@@ -379,15 +552,17 @@ impl TurboVecAdapter {
         payload: &[u8],
         max_vectors: usize,
         max_dim: usize,
-    ) -> Result<Vec<u8>, HubToolError> {
+        context: &RestrictedHubContext,
+    ) -> Result<HubToolOutcome, HubToolError> {
         let req: RemoveRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
         check_vector_batch_bounds(req.ids.len(), max_vectors)
             .map_err(|e| HubToolError::new("TooManyVectors", e.to_string()))?;
-        let mut index = self.load(&name, max_dim)?;
+        let mut index = self.load(&name, max_dim, context)?;
         let mut removed = Vec::new();
         let mut not_found = Vec::new();
+        Self::check_deadline(context)?;
         for id in req.ids {
             if index.remove(id) {
                 removed.push(id);
@@ -396,13 +571,16 @@ impl TurboVecAdapter {
             }
         }
         let len = index.len();
-        self.save_atomic(&name, &index)?;
-        Ok(to_bytes(&RemoveReply {
-            index: name.as_str().to_string(),
-            removed,
-            not_found,
-            len,
-        }))
+        let artifact = self.save_atomic(&name, &index, "remove", context)?;
+        Ok(HubToolOutcome {
+            payload: to_bytes(&RemoveReply {
+                index: name.as_str().to_string(),
+                removed,
+                not_found,
+                len,
+            }),
+            artifact: Some(artifact),
+        })
     }
 
     fn handle_search(
@@ -412,7 +590,8 @@ impl TurboVecAdapter {
         max_vectors: usize,
         filtered: bool,
         max_dim: usize,
-    ) -> Result<Vec<u8>, HubToolError> {
+        context: &RestrictedHubContext,
+    ) -> Result<HubToolOutcome, HubToolError> {
         let req: SearchRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
@@ -434,7 +613,7 @@ impl TurboVecAdapter {
             })?;
         check_result_count_bounds(total_results, max_results)
             .map_err(|e| HubToolError::new("TooManyResults", e.to_string()))?;
-        let index = self.load(&name, max_dim)?;
+        let index = self.load(&name, max_dim, context)?;
         let dim = index.dim();
         for (i, q) in req.queries.iter().enumerate() {
             if q.len() != dim {
@@ -447,6 +626,7 @@ impl TurboVecAdapter {
                 ));
             }
         }
+        Self::check_deadline(context)?;
         let flat: Vec<f32> = req.queries.iter().flatten().copied().collect();
         // turbovec::search / search_with_allowlist panic on non-finite
         // input; validate up front using turbovec's own exported check so
@@ -459,6 +639,7 @@ impl TurboVecAdapter {
             ));
         }
 
+        Self::check_deadline(context)?;
         let allowed_ids = if filtered {
             let ids = req.allowed_ids.clone().unwrap_or_default();
             if ids.is_empty() {
@@ -498,6 +679,7 @@ impl TurboVecAdapter {
             None
         };
 
+        Self::check_deadline(context)?;
         let (scores, ids) = index.search_with_allowlist(&flat, req.k, allowed_ids.as_deref());
         let nq = req.queries.len();
         let k = ids.len().checked_div(nq).unwrap_or(0);
@@ -514,31 +696,89 @@ impl TurboVecAdapter {
             }
             hits.push(row);
         }
-        Ok(to_bytes(&SearchReply {
+        Ok(HubToolOutcome::payload_only(to_bytes(&SearchReply {
             index: name.as_str().to_string(),
             index_version: 1,
             hits,
-        }))
+        })))
     }
 
-    fn handle_reset(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
+    fn handle_reset(
+        &self,
+        payload: &[u8],
+        max_dim: usize,
+        context: &RestrictedHubContext,
+    ) -> Result<HubToolOutcome, HubToolError> {
         let req: ResetRequest =
             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
         let name = Self::index_name(&req.index)?;
-        let existing = self.load(&name, max_dim)?;
+        let existing = self.load(&name, max_dim, context)?;
         let (dim, bit_width) = (existing.dim(), existing.bit_width());
         // turbovec has no in-place clear/truncate: a v0 "reset" is
         // constructing a fresh empty index with the same shape and
         // overwriting the persisted file, documented explicitly rather
         // than inventing an unsupported private truncation format.
+        Self::check_deadline(context)?;
         let fresh = turbovec::IdMapIndex::new(dim, bit_width)
             .map_err(|e| HubToolError::new("InvalidIndexParameters", e.to_string()))?;
-        self.save_atomic(&name, &fresh)?;
-        Ok(to_bytes(&ResetReply {
+        let artifact = self.save_atomic(&name, &fresh, "reset", context)?;
+        Ok(HubToolOutcome {
+            payload: to_bytes(&ResetReply {
+                index: name.as_str().to_string(),
+                dim,
+                bit_width,
+            }),
+            artifact: Some(artifact),
+        })
+    }
+
+    /// Inspect (and, where provably safe, resolve) the transaction state
+    /// for one index -- see `transaction::recover`'s own doc comment for
+    /// the exact recovery algorithm. Does not itself call `load()`: an
+    /// index with an unresolved `Intent` transaction is exactly the case
+    /// this operation exists to unblock, so it must not be gated by the
+    /// same check it is meant to resolve.
+    fn handle_recover(
+        &self,
+        payload: &[u8],
+        context: &RestrictedHubContext,
+    ) -> Result<HubToolOutcome, HubToolError> {
+        let req: IndexNameOnlyRequest =
+            parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
+        let name = Self::index_name(&req.index)?;
+        self.storage
+            .ensure_root_checked()
+            .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
+        Self::check_deadline(context)?;
+        let outcome = transaction::recover(&self.storage, &name)
+            .map_err(|error| Self::transaction_error(error, "PersistenceFailed"))?;
+        let (outcome_str, artifact_digest, reason) = match &outcome {
+            RecoveryOutcome::NoTransaction => ("NoTransaction", None, None),
+            RecoveryOutcome::AlreadyCommitted { artifact_digest } => {
+                ("AlreadyCommitted", artifact_digest.clone(), None)
+            }
+            RecoveryOutcome::RolledBackAbandonedCandidate { artifact_digest } => (
+                "RolledBackAbandonedCandidate",
+                artifact_digest.clone(),
+                None,
+            ),
+            RecoveryOutcome::FinalizedCommit { artifact_digest } => {
+                ("FinalizedCommit", Some(artifact_digest.clone()), None)
+            }
+            RecoveryOutcome::Indeterminate { reason } => {
+                let reason: String = reason.chars().take(256).collect();
+                return Err(HubToolError::new(
+                    "RecoveryRequired",
+                    format!("transaction remains indeterminate: {reason}"),
+                ));
+            }
+        };
+        Ok(HubToolOutcome::payload_only(to_bytes(&RecoverReply {
             index: name.as_str().to_string(),
-            dim,
-            bit_width,
-        }))
+            outcome: outcome_str.to_string(),
+            artifact_digest,
+            reason,
+        })))
     }
 }
 
@@ -552,22 +792,24 @@ impl HubTool for TurboVecAdapter {
         operation_id: &HubOperationId,
         payload: &[u8],
         context: &RestrictedHubContext,
-    ) -> Result<Vec<u8>, HubToolError> {
+    ) -> Result<HubToolOutcome, HubToolError> {
+        Self::check_deadline(context)?;
         let max_vectors = context.resource_budget.index_item_count as usize;
         let max_results = context.resource_budget.result_count as usize;
         let max_dim = context.resource_budget.vector_dimensions as usize;
         match operation_id.as_str() {
-            "vector.index.create" => self.handle_create(payload, max_dim),
-            "vector.index.describe" => self.handle_describe(payload, max_dim),
-            "vector.index.insert" => self.handle_insert(payload, max_vectors, max_dim),
-            "vector.index.remove" => self.handle_remove(payload, max_vectors, max_dim),
+            "vector.index.create" => self.handle_create(payload, max_dim, context),
+            "vector.index.describe" => self.handle_describe(payload, max_dim, context),
+            "vector.index.insert" => self.handle_insert(payload, max_vectors, max_dim, context),
+            "vector.index.remove" => self.handle_remove(payload, max_vectors, max_dim, context),
             "vector.search" => {
-                self.handle_search(payload, max_results, max_vectors, false, max_dim)
+                self.handle_search(payload, max_results, max_vectors, false, max_dim, context)
             }
             "vector.search.filtered" => {
-                self.handle_search(payload, max_results, max_vectors, true, max_dim)
+                self.handle_search(payload, max_results, max_vectors, true, max_dim, context)
             }
-            "vector.index.reset" => self.handle_reset(payload, max_dim),
+            "vector.index.reset" => self.handle_reset(payload, max_dim, context),
+            "vector.index.recover" => self.handle_recover(payload, context),
             other => Err(HubToolError::new(
                 "UnknownOperation",
                 format!("vector.turbovec has no operation {other:?}"),
@@ -662,7 +904,12 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .unwrap();
-        let create: CreateIndexReply = serde_json::from_slice(&create).unwrap();
+        assert!(create
+            .artifact
+            .as_ref()
+            .and_then(|artifact| artifact.transaction_id.as_deref())
+            .is_some_and(|id| id.starts_with("txn-")));
+        let create: CreateIndexReply = serde_json::from_slice(&create.payload).unwrap();
         assert_eq!(create.dim, 8);
 
         let describe = a
@@ -672,10 +919,142 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .unwrap();
-        let describe: DescribeIndexReply = serde_json::from_slice(&describe).unwrap();
+        let describe: DescribeIndexReply = serde_json::from_slice(&describe.payload).unwrap();
         assert_eq!(describe.dim, 8);
         assert_eq!(describe.bit_width, 4);
         assert_eq!(describe.len, 0);
+    }
+
+    #[test]
+    fn create_fails_closed_on_an_unresolved_or_malformed_transaction_record() {
+        let budget = HubResourceBudget::V0_CEILING;
+        let caps = HubCapabilitySet::empty();
+
+        let mut unresolved = adapter("create-unresolved-transaction");
+        unresolved.storage.ensure_root_checked().unwrap();
+        let name = IndexName::new("docs").unwrap();
+        transaction::begin(&unresolved.storage, &name, "create").unwrap();
+        let error = unresolved
+            .handle(
+                &op("vector.index.create"),
+                br#"{"index":"docs","dim":8,"bit_width":4}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "RecoveryRequired");
+
+        let mut malformed = adapter("create-malformed-transaction");
+        malformed.storage.ensure_root_checked().unwrap();
+        std::fs::write(
+            transaction::txn_path(&malformed.storage, &name),
+            b"{truncated",
+        )
+        .unwrap();
+        let error = malformed
+            .handle(
+                &op("vector.index.create"),
+                br#"{"index":"docs","dim":8,"bit_width":4}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "RecoveryRequired");
+    }
+
+    #[test]
+    fn indeterminate_transaction_blocks_both_load_and_create() {
+        let mut a = adapter("indeterminate-blocks");
+        let budget = HubResourceBudget::V0_CEILING;
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":8,"bit_width":4}"#,
+            &ctx(&budget, &caps),
+        )
+        .unwrap();
+
+        let name = IndexName::new("docs").unwrap();
+        let record = transaction::begin(&a.storage, &name, "insert").unwrap();
+        let candidate = transaction::checked_candidate_path(&a.storage, &name, &record).unwrap();
+        std::fs::write(&candidate, b"different bytes").unwrap();
+        transaction::prepare(&a.storage, &name, record, HubDigest::of(b"different bytes")).unwrap();
+        std::fs::remove_file(candidate).unwrap();
+        let recover_error = a
+            .handle(
+                &op("vector.index.recover"),
+                br#"{"index":"docs"}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(recover_error.code, "RecoveryRequired");
+        assert!(!recover_error
+            .message
+            .contains(&a.storage.root().display().to_string()));
+
+        let describe_error = a
+            .handle(
+                &op("vector.index.describe"),
+                br#"{"index":"docs"}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(describe_error.code, "RecoveryRequired");
+
+        let create_error = a
+            .handle(
+                &op("vector.index.create"),
+                br#"{"index":"docs","dim":8,"bit_width":4}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(create_error.code, "RecoveryRequired");
+    }
+
+    #[test]
+    fn committed_digest_mismatch_blocks_load_before_turbovec_parses_the_file() {
+        let mut a = adapter("committed-digest-mismatch");
+        let budget = HubResourceBudget::V0_CEILING;
+        let caps = HubCapabilitySet::empty();
+        a.handle(
+            &op("vector.index.create"),
+            br#"{"index":"docs","dim":8,"bit_width":4}"#,
+            &ctx(&budget, &caps),
+        )
+        .unwrap();
+
+        let name = IndexName::new("docs").unwrap();
+        std::fs::write(a.storage.index_path(&name), b"tampered").unwrap();
+        let error = a
+            .handle(
+                &op("vector.index.describe"),
+                br#"{"index":"docs"}"#,
+                &ctx(&budget, &caps),
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "RecoveryRequired");
+    }
+
+    #[test]
+    fn expired_deadline_is_a_typed_error_before_adapter_io() {
+        let mut a = adapter("deadline-before-io");
+        let budget = HubResourceBudget::V0_CEILING;
+        let caps = HubCapabilitySet::empty();
+        let expired = RestrictedHubContext {
+            resource_budget: &budget,
+            capability_context: &caps,
+            deadline: Some(std::time::Instant::now() - std::time::Duration::from_millis(1)),
+        };
+
+        let error = a
+            .handle(
+                &op("vector.index.create"),
+                br#"{"index":"docs","dim":8,"bit_width":4}"#,
+                &expired,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, "DeadlineExceeded");
+        let name = IndexName::new("docs").unwrap();
+        assert!(!transaction::txn_path(&a.storage, &name).exists());
+        assert!(!a.storage.index_path(&name).exists());
     }
 
     #[test]
@@ -894,7 +1273,7 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .unwrap();
-        let insert_reply: InsertReply = serde_json::from_slice(&insert_reply).unwrap();
+        let insert_reply: InsertReply = serde_json::from_slice(&insert_reply.payload).unwrap();
         assert_eq!(insert_reply.inserted, 4);
         assert_eq!(insert_reply.len, 4);
 
@@ -910,7 +1289,7 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .unwrap();
-        let search_reply: SearchReply = serde_json::from_slice(&search_reply).unwrap();
+        let search_reply: SearchReply = serde_json::from_slice(&search_reply.payload).unwrap();
         assert_eq!(search_reply.hits.len(), 1);
         assert_eq!(search_reply.hits[0][0].external_id, 20);
 
@@ -922,7 +1301,7 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .unwrap();
-        let remove_reply: RemoveReply = serde_json::from_slice(&remove_reply).unwrap();
+        let remove_reply: RemoveReply = serde_json::from_slice(&remove_reply.payload).unwrap();
         assert_eq!(remove_reply.removed, vec![20]);
         assert_eq!(remove_reply.len, 3);
 
@@ -933,7 +1312,7 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .unwrap();
-        let search_again: SearchReply = serde_json::from_slice(&search_again).unwrap();
+        let search_again: SearchReply = serde_json::from_slice(&search_again.payload).unwrap();
         assert!(!search_again.hits[0].iter().any(|h| h.external_id == 20));
     }
 
@@ -1362,7 +1741,7 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .unwrap();
-        let reset: ResetReply = serde_json::from_slice(&reset).unwrap();
+        let reset: ResetReply = serde_json::from_slice(&reset.payload).unwrap();
         assert_eq!(reset.dim, 8);
 
         let describe = a
@@ -1372,7 +1751,7 @@ mod tests {
                 &ctx(&budget, &caps),
             )
             .unwrap();
-        let describe: DescribeIndexReply = serde_json::from_slice(&describe).unwrap();
+        let describe: DescribeIndexReply = serde_json::from_slice(&describe.payload).unwrap();
         assert_eq!(describe.len, 0);
     }
 

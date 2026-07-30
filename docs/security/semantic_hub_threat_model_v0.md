@@ -1,6 +1,6 @@
 # Semantic Hub v0 Threat Model
 
-Status: draft v0 -- reference implementation on branch `feat/semantic-hub-v0-turbovec-e2e` (PR #1554), not yet landed on `main`
+Status: v0, landed on `main` (#1554, #1555) and extended by the v0-completion pass (session executor, transaction/recovery protocol -- see section 10)
 Track: Hub / execution boundary security
 Purpose: document the threat model for Semantic Hub v0 -- the governed
 execution boundary between the `smc` CLI and the `vector.turbovec` tool --
@@ -338,7 +338,54 @@ These are real, named gaps in v0, not merely theoretical future work:
   not a substitute for a real multi-tenant scheduler
 ```
 
-## 10. Relationship to #1371 / #1372
+## 10. Session executor and transaction protocol (v0-completion pass)
+
+The bounded multi-request session executor (`HubSession`, section 19 of
+`docs/architecture/semantic_hub_v0.md`) and the write-ahead transaction
+protocol (`transaction.rs`, section 20 of the same document) do not
+introduce a new trust boundary or a new attacker-reachable surface --
+both stay entirely within Hub v0's existing single-process, single-user
+CLI trust zone (section 2):
+
+```text
+- HubSession is a synchronous, in-process wrapper: every request it
+  submits still goes through the SAME admission/dispatch/audit pipeline
+  as a direct Hub::invoke call (crate-internal invariant enforced by the
+  type system, not merely documented -- see architecture doc section 4).
+  A session cannot admit anything a direct invoke could not
+- session ceiling attenuation (HubSessionCeiling) is a NARROWING control,
+  not a widening one: it can only make a request MORE likely to be
+  rejected relative to direct invoke, never less
+- cancellation is cooperative and pre-admission-only -- a caller cannot
+  use it to interrupt or corrupt an in-flight dispatch (there is no
+  in-flight dispatch to interrupt in v0's synchronous model)
+- the transaction/recovery protocol adds two new on-disk files per index
+  (<name>.tvim.txn and, transiently, a candidate .tvim.tmp.<txn-id>
+  file), both inside the SAME scoped storage root every other TurboVec
+  file already lives in -- no new directory, no new trust zone, and the
+  SAME symlink-confinement checks (ScopedStorage::checked_index_path,
+  section 7) apply to the transaction record path via the same
+  storage.root() the index file itself uses
+- vector.index.recover requires the SAME capabilities as any other
+  mutating operation (VectorIndexMutate, PrivateStorageRead,
+  PrivateStorageWrite) -- a caller cannot inspect or resolve a stuck
+  transaction without the same authority it would need to cause one
+- recovery never widens what was durably committed: it either finalizes
+  a commit that already fully happened (rename already completed) or
+  rolls back to the pre-transaction state (rename never happened) --
+  never fabricates a third, unproven outcome as if it were success (see
+  the Indeterminate case, architecture doc section 20)
+```
+
+Residual risk, honestly stated: a transaction record
+(`<name>.tvim.txn`) left in `phase=Intent` by an interrupted mutation
+blocks every further operation against that index (`load()`'s gate)
+until `vector.index.recover` runs. This is a deliberate availability
+trade-off -- refusing to guess at ambiguous state -- not an oversight;
+recovering is a single bounded operation, not a manual file-repair
+procedure.
+
+## 11. Relationship to #1371 / #1372
 
 This document consumes, and does not re-derive or duplicate, the
 vocabulary and design constraints proposed by issue #1371 (Semantic threat
@@ -357,7 +404,7 @@ referenced from `SECURITY.md`, not yet written as of this document) is the
 correct place for cross-component untrusted-project policy; this document
 stays scoped to Semantic Hub v0 alone.
 
-## 11. Update policy
+## 12. Update policy
 
 This document should be revised when either of the following happens:
 

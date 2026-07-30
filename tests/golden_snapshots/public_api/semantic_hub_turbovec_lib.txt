@@ -1,6 +1,7 @@
 source: crates/semantic-hub-turbovec/src/lib.rs
 pub mod payload;
 pub mod storage;
+pub mod transaction;
 pub const TOOL_ID: &str = "vector.turbovec";
 pub const TURBOVEC_DEPENDENCY_VERSION: &str = "0.9.0";
 pub const TURBOVEC_DEPENDENCY_LICENSE: &str = "MIT";

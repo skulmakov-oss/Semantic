@@ -1,22 +1,71 @@
 //! Single request-admission path. No convenience method may dispatch a
 //! request to a tool worker without going through [`admit`] first.
 
-use crate::capability::HubCapability;
+use crate::capability::{HubCapability, HubCapabilitySet};
 use crate::descriptor::{HubOperationDescriptor, HubToolDescriptor};
 use crate::envelope::{HubRequest, MAX_PAYLOAD_BYTES};
+use crate::execution::HubPrivacyClass;
 use crate::fault::HubFault;
+use crate::ids::HubCallerIdentity;
 use crate::registry::ToolRegistry;
-use crate::resource::HubResourceBudget;
+use crate::resource::{HubBudgetExceeded, HubResourceBudget, HubResourceKind};
 use crate::worker::HubWorkerState;
 
+/// The rolling, whole-session ceiling a `HubSession` (see `crate::session`)
+/// attenuates every admitted request's own per-request budget with.
+/// Distinct from `HubResourceBudget`, which is per-request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HubSessionCeiling {
+    pub max_request_count: u32,
+    pub max_cumulative_input_bytes: u64,
+    pub max_cumulative_output_bytes: u64,
+    pub max_cumulative_wall_time_millis: u64,
+    pub max_queue_depth: u32,
+    pub max_concurrent_requests: u32,
+}
+
+impl HubSessionCeiling {
+    /// A conservative default ceiling for one CLI-driven batch session --
+    /// generous enough for a large, legitimate batch while still bounding
+    /// runaway input (e.g. a malformed NDJSON file with millions of lines).
+    pub const V0_DEFAULT: HubSessionCeiling = HubSessionCeiling {
+        max_request_count: 10_000,
+        max_cumulative_input_bytes: 256 * 1024 * 1024,
+        max_cumulative_output_bytes: 256 * 1024 * 1024,
+        max_cumulative_wall_time_millis: 10 * 60 * 1000,
+        max_queue_depth: 1,
+        max_concurrent_requests: 1,
+    };
+}
+
+/// Session-scoped ambient state threaded into admission when a request is
+/// submitted through a `HubSession` rather than directly via `Hub::invoke`.
+/// `*_so_far` fields reflect state accumulated strictly BEFORE the request
+/// currently being admitted (never including it) -- `admit` itself decides
+/// whether adding this request would cross the ceiling.
+#[derive(Debug, Clone)]
+pub struct SessionAdmissionAmbient {
+    pub ceiling: HubSessionCeiling,
+    pub caller_identity: HubCallerIdentity,
+    pub capability_ceiling: HubCapabilitySet,
+    pub privacy_ceiling: HubPrivacyClass,
+    pub requests_submitted_so_far: u32,
+    pub cumulative_input_bytes_so_far: u64,
+    pub cumulative_output_bytes_so_far: u64,
+    pub cumulative_wall_time_millis_so_far: u64,
+}
+
 /// Ambient state the admission path needs beyond the registry and request
-/// itself: current queue occupancy and whether cancellation was already
-/// requested for this request id before admission ran.
-#[derive(Debug, Clone, Copy)]
+/// itself: current queue occupancy, whether cancellation was already
+/// requested for this request id before admission ran, and -- only when
+/// admission is running inside a `HubSession` -- the session's own
+/// cumulative ceiling state.
+#[derive(Debug, Clone)]
 pub struct AdmissionAmbient {
     pub current_queue_depth: u32,
     pub current_concurrent_requests: u32,
     pub already_cancelled: bool,
+    pub session: Option<SessionAdmissionAmbient>,
 }
 
 /// The result of successful admission: everything dispatch needs, resolved
@@ -70,13 +119,83 @@ pub fn admit(
             MAX_PAYLOAD_BYTES
         )));
     }
-    // The budget check below (step 5) only verifies the *requested budget
-    // itself* does not exceed the tool/global ceiling -- it does not check
-    // that the actual payload conforms to the caller's own declared
-    // input_bytes. Without this, a caller narrowing input_bytes below
-    // MAX_PAYLOAD_BYTES got no enforcement at all: any payload under the
-    // global ceiling was silently dispatched regardless of what budget was
-    // requested for it.
+    if ambient.already_cancelled {
+        return Err(HubFault::Cancelled);
+    }
+
+    // 2. A session fixes identity, capability, privacy, and cumulative
+    // ceilings before its first dispatch. A later request may narrow these
+    // values but may never widen or replace them.
+    if let Some(session) = &ambient.session {
+        macro_rules! session_check {
+            ($so_far:expr, $delta:expr, $limit:expr, $kind:expr) => {
+                let attempted =
+                    $so_far
+                        .checked_add($delta)
+                        .ok_or(HubFault::SessionLimitExceeded(HubBudgetExceeded {
+                            kind: $kind,
+                            limit: $limit as u64,
+                            attempted: u64::MAX,
+                        }))?;
+                if attempted > $limit as u64 {
+                    return Err(HubFault::SessionLimitExceeded(HubBudgetExceeded {
+                        kind: $kind,
+                        limit: $limit as u64,
+                        attempted,
+                    }));
+                }
+            };
+        }
+        session_check!(
+            session.requests_submitted_so_far as u64,
+            1u64,
+            session.ceiling.max_request_count,
+            HubResourceKind::SessionRequestCount
+        );
+        session_check!(
+            session.cumulative_input_bytes_so_far,
+            request.payload.len() as u64,
+            session.ceiling.max_cumulative_input_bytes,
+            HubResourceKind::SessionInputBytes
+        );
+        session_check!(
+            session.cumulative_output_bytes_so_far,
+            0u64,
+            session.ceiling.max_cumulative_output_bytes,
+            HubResourceKind::SessionOutputBytes
+        );
+        session_check!(
+            session.cumulative_wall_time_millis_so_far,
+            request.resource_budget.wall_time_millis,
+            session.ceiling.max_cumulative_wall_time_millis,
+            HubResourceKind::SessionWallTimeMillis
+        );
+
+        if request.caller_identity != session.caller_identity {
+            return Err(HubFault::InputRejected(
+                "request caller identity does not match the session caller identity".into(),
+            ));
+        }
+        if !request
+            .capability_context
+            .is_subset_of(&session.capability_ceiling)
+        {
+            return Err(HubFault::CapabilityDenied(
+                "request capability context exceeds the session capability ceiling".into(),
+            ));
+        }
+        if request.privacy_class > session.privacy_ceiling {
+            return Err(HubFault::InputRejected(format!(
+                "request privacy class {} exceeds session ceiling {}",
+                request.privacy_class, session.privacy_ceiling
+            )));
+        }
+    }
+
+    // The budget check below only verifies the requested budget itself;
+    // enforce the actual payload against the (possibly session-attenuated)
+    // per-request input budget too. Session cumulative input is checked
+    // first so exhausting that ceiling retains its distinct fault.
     if request.payload.len() as u64 > request.resource_budget.input_bytes {
         return Err(HubFault::InputRejected(format!(
             "payload {} bytes exceeds the request's own declared input_bytes budget {}",
@@ -84,11 +203,8 @@ pub fn admit(
             request.resource_budget.input_bytes
         )));
     }
-    if ambient.already_cancelled {
-        return Err(HubFault::Cancelled);
-    }
 
-    // 2. Registry lookup: unknown tool vs. unknown operation are distinct.
+    // 3. Registry lookup: unknown tool vs. unknown operation are distinct.
     let tool = registry
         .descriptor(&request.tool_id)
         .ok_or(HubFault::UnknownTool)?
@@ -98,21 +214,40 @@ pub fn admit(
         .ok_or(HubFault::UnknownOperation)?
         .clone();
 
-    // 3. Worker health/lifecycle gate.
+    // 4. Worker health/lifecycle gate. A mutating operation against a
+    // Degraded worker is rejected distinctly from one that only reads:
+    // supervision already tolerates a Degraded worker continuing to serve
+    // reads (see HubWorkerState::accepts_dispatch), but letting it keep
+    // mutating durable state while its own crash count is elevated widens
+    // the blast radius of whatever is making it unstable.
     match registry.worker_state(&request.tool_id) {
         Some(HubWorkerState::Disabled) => return Err(HubFault::ToolDisabled),
         Some(HubWorkerState::Quarantined) => return Err(HubFault::ToolQuarantined),
         Some(HubWorkerState::Stopped) => return Err(HubFault::ToolDisabled),
+        Some(HubWorkerState::Degraded) if operation.mutates_tool_state => {
+            return Err(HubFault::WorkerDegraded)
+        }
         _ => {}
     }
 
-    // 4. Capability policy: deny-by-default, checked before dispatch.
+    // 5. Capability policy: deny-by-default, checked before dispatch. A
+    // request carrying ANY sensitive capability in its own capability
+    // context is rejected outright, even if that capability is not
+    // required by the operation and would otherwise just be silently
+    // stripped by `deny_sensitive()` before the adapter ever saw it --
+    // asking for a capability Hub v0 structurally never grants to any
+    // tool is a caller error worth surfacing plainly, not absorbing.
+    if let Some(sensitive) = request.capability_context.iter().find(|c| c.is_sensitive()) {
+        return Err(HubFault::SensitiveCapabilityDenied(format!(
+            "request capability_context grants sensitive capability {sensitive}, which is denied by default and not supported by any Hub v0 tool"
+        )));
+    }
     check_capabilities(
         &request.capability_context,
         &operation.required_capabilities,
     )?;
 
-    // 5. Resource budget: immutable ceiling check, checked arithmetic only.
+    // 6. Resource budget: immutable ceiling check, checked arithmetic only.
     if let Some(violation) = request
         .resource_budget
         .first_violation(&tool.resource_ceiling)
@@ -125,7 +260,7 @@ pub fn admit(
         return Err(HubFault::ResourceBudgetInvalid(violation));
     }
 
-    // 6. Queue/concurrency admission.
+    // 7. Queue/concurrency admission.
     if ambient.current_queue_depth >= request.resource_budget.queue_depth {
         return Err(HubFault::QueueFull);
     }
@@ -153,6 +288,7 @@ mod tests {
             current_queue_depth: 0,
             current_concurrent_requests: 0,
             already_cancelled: false,
+            session: None,
         }
     }
 
@@ -312,5 +448,91 @@ mod tests {
             admit(&reg, &req, base_ambient()).unwrap_err(),
             HubFault::SchemaVersionUnsupported
         );
+    }
+
+    #[test]
+    fn a_request_granting_a_sensitive_capability_is_rejected_even_if_unrequired() {
+        let reg = registry_with_turbovec();
+        let req = base_request(
+            HubCapabilitySet::empty()
+                .grant(HubCapability::VectorSearch)
+                .grant(HubCapability::NetworkAccess),
+        );
+        assert!(matches!(
+            admit(&reg, &req, base_ambient()).unwrap_err(),
+            HubFault::SensitiveCapabilityDenied(_)
+        ));
+    }
+
+    fn registry_with_mutating_turbovec() -> ToolRegistry {
+        let mut reg = ToolRegistry::new(HubApiVersion::CURRENT);
+        reg.register(HubToolDescriptor {
+            tool_id: HubToolId::new("vector.turbovec").unwrap(),
+            name: "TurboVec".into(),
+            tool_version: HubToolVersion::new(0, 1, 0),
+            hub_api_version: HubApiVersion::CURRENT,
+            execution_mode: HubExecutionMode::InProcess,
+            trust_class: HubTrustClass::InProcessUnisolated,
+            operations: vec![
+                HubOperationDescriptor::new(
+                    HubOperationId::new("vector.search").unwrap(),
+                    [HubCapability::VectorSearch],
+                    HubDeterminismClass::Unknown,
+                    false,
+                ),
+                HubOperationDescriptor::new(
+                    HubOperationId::new("vector.index.insert").unwrap(),
+                    [HubCapability::VectorIndexMutate],
+                    HubDeterminismClass::Unknown,
+                    true,
+                ),
+            ],
+            resource_ceiling: HubResourceBudget::V0_CEILING,
+            adapter_provenance: "test".into(),
+        })
+        .unwrap();
+        reg
+    }
+
+    #[test]
+    fn a_mutating_operation_against_a_degraded_worker_is_rejected() {
+        let mut reg = registry_with_mutating_turbovec();
+        reg.health_mut(&HubToolId::new("vector.turbovec").unwrap())
+            .unwrap()
+            .mark_starting()
+            .unwrap();
+        reg.health_mut(&HubToolId::new("vector.turbovec").unwrap())
+            .unwrap()
+            .mark_ready()
+            .unwrap();
+        reg.health_mut(&HubToolId::new("vector.turbovec").unwrap())
+            .unwrap()
+            .mark_busy()
+            .unwrap();
+        reg.health_mut(&HubToolId::new("vector.turbovec").unwrap())
+            .unwrap()
+            .report_crash()
+            .unwrap(); // -> Degraded (first crash, under the conservative default's threshold of 3)
+
+        let mut req =
+            base_request(HubCapabilitySet::empty().grant(HubCapability::VectorIndexMutate));
+        req.operation_id = HubOperationId::new("vector.index.insert").unwrap();
+        assert_eq!(
+            admit(&reg, &req, base_ambient()).unwrap_err(),
+            HubFault::WorkerDegraded
+        );
+    }
+
+    #[test]
+    fn a_read_operation_against_a_degraded_worker_is_still_admitted() {
+        let mut reg = registry_with_mutating_turbovec();
+        let tool_id = HubToolId::new("vector.turbovec").unwrap();
+        reg.health_mut(&tool_id).unwrap().mark_starting().unwrap();
+        reg.health_mut(&tool_id).unwrap().mark_ready().unwrap();
+        reg.health_mut(&tool_id).unwrap().mark_busy().unwrap();
+        reg.health_mut(&tool_id).unwrap().report_crash().unwrap(); // -> Degraded
+
+        let req = base_request(HubCapabilitySet::empty().grant(HubCapability::VectorSearch));
+        assert!(admit(&reg, &req, base_ambient()).is_ok());
     }
 }

@@ -1,0 +1,57 @@
+projection v0 {
+    revision 1;
+    epoch 1;
+    surface 1 root 10 key 1;
+
+    node 10 role root key 10 {
+        child 11 order 0;
+        child 12 order 1;
+        child 13 order 2;
+        child 20 order 20; child 21 order 21; child 22 order 22; child 23 order 23; child 24 order 24;
+        child 25 order 25; child 26 order 26; child 27 order 27; child 28 order 28; child 29 order 29;
+        child 30 order 30; child 31 order 31; child 32 order 32; child 33 order 33;
+        child 40 order 40; child 41 order 41; child 42 order 42; child 43 order 43;
+        child 50 order 50; child 51 order 51; child 52 order 52; child 53 order 53; child 54 order 54; child 55 order 55;
+        child 60 order 60; child 61 order 61; child 62 order 62; child 63 order 63; child 64 order 64;
+    }
+
+    node 11 role numeric_readout key 11 {}
+    node 12 role text key 12 {}
+    node 13 role evidence_panel key 13 {}
+    
+    node 20 role fragment key 20 {}
+    node 21 role fragment key 21 {}
+    node 22 role fragment key 22 {}
+    node 23 role fragment key 23 {}
+    node 24 role fragment key 24 {}
+    node 25 role fragment key 25 {}
+    node 26 role fragment key 26 {}
+    node 27 role fragment key 27 {}
+    node 28 role fragment key 28 {}
+    node 29 role fragment key 29 {}
+    
+    node 30 role fragment key 30 {}
+    node 31 role fragment key 31 {}
+    node 32 role fragment key 32 {}
+    node 33 role fragment key 33 {}
+    
+    node 40 role fragment key 40 {}
+    node 41 role fragment key 41 {}
+    node 42 role fragment key 42 {}
+    node 43 role fragment key 43 {}
+    
+    node 50 role fragment key 50 {}
+    node 51 role fragment key 51 {}
+    node 52 role fragment key 52 {}
+    node 53 role fragment key 53 {}
+    node 54 role fragment key 54 {}
+    node 55 role fragment key 55 {}
+    
+    node 60 role fragment key 60 {}
+    node 61 role fragment key 61 {}
+    node 62 role fragment key 62 {}
+    node 63 role fragment key 63 {}
+    node 64 role fragment key 64 {}
+
+    collection_anchor 13;
+}
