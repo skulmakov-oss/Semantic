@@ -4,16 +4,19 @@ Status: active stable asset validation baseline
 
 This document records the minimum smoke validation required against downloaded release assets, not just locally built binaries.
 
-## Current Validated Tag
+## Current validated published tag:
+- v1.1.1
 
-- `v1.1.1` (stable)
-- `v1.2.0-beta.1` (prerelease candidate)
+## Pending prerelease candidate:
+- v1.2.0-beta.1
+- Local pre-publication asset smoke
+- Published downloaded-asset smoke: pending publication
 
 ## Validated Assets
 
 - `smc.exe`
 - `svm.exe`
-- `semantic-language-windows-x64-<tag>.zip`
+- `semantic-language-windows-x64-v1.1.1.zip`
 
 ## Current Smoke Matrix
 
@@ -25,7 +28,7 @@ This document records the minimum smoke validation required against downloaded r
 
 ## Current Validation Notes
 
-- downloaded stable `<tag>` assets were revalidated from the published
+- downloaded stable `v1.1.1` assets were revalidated from the published
   release, not only from the local build tree
 - release asset hashes are verified against GitHub release metadata before the
   smoke scenarios run
@@ -39,12 +42,12 @@ This document records the minimum smoke validation required against downloaded r
 
 Preferred command when the release assets are already downloaded locally:
 
-- `pwsh -File scripts/verify_release_assets.ps1 -Tag <tag> -AssetsDirectory <downloaded-assets-dir>`
+- `pwsh -File scripts/verify_release_assets.ps1 -Tag v1.1.1 -AssetsDirectory <downloaded-assets-dir>`
 
 Fallback command when the local environment can fetch GitHub release assets
 directly:
 
-- `pwsh -File scripts/verify_release_assets.ps1 -Tag <tag>`
+- `pwsh -File scripts/verify_release_assets.ps1 -Tag v1.1.1`
 
 ## Smoke Commands
 
