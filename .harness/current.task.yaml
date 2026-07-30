@@ -1,45 +1,47 @@
 task:
-  id: SEMANTIC-HUB-V0-TURBOVEC-E2E
-  title: "feat(hub): implement Semantic Hub v0 with TurboVec in one complete pass"
+  id: SEMANTIC-HUB-V0-COMPLETION
+  title: "feat(hub): complete bounded Semantic Hub v0 runtime"
   type: implementation
   mode: active
-  supersedes: SMC-LOOK-UI-FRAME-LF-FIX
-  authorized_by: "repository owner direct instruction, Issue #1553 (owner implementation issue for architecture #1526; consumes policy issues #1371-#1374)"
+  supersedes: SEMANTIC-HUB-V0-TURBOVEC-E2E
+  authorized_by: "repository owner direct instruction, Issue #1526 (architecture anchor, consumed by #1553/#1554/#1555, now completed to its own full acceptance criteria)"
 
 intent:
-  summary: "feat(hub): complete Semantic Hub v0 with TurboVec"
+  summary: "feat(hub): add a bounded persistent session executor, transactional intent/commit/recovery protocol, streaming audit reads, and a generic provenance envelope on top of the #1554/#1555 Semantic Hub v0 baseline, then close #1526"
 
 scope:
-  # New governed execution boundary for external computational tools
-  # (Semantic Hub v0), with TurboVec (crates.io `turbovec` =0.9.0, MIT) as
-  # the first real reference adapter, wired end-to-end through a new
-  # `smc hub` CLI surface. Two new crates; smc-cli gains one new private
-  # module and two new dependencies; root Cargo.toml gains two workspace
-  # members. No existing crate's public API is modified.
+  # #1554/#1555 landed a real single-request-per-process Hub v0 with
+  # TurboVec as the reference adapter. This task extends that baseline
+  # with the remaining #1526 acceptance-criteria gaps identified by
+  # direct line-by-line audit (2026-07-27): a bounded multi-request
+  # session executor with session-level ceiling attenuation, a
+  # recoverable write-ahead transaction protocol for durable TurboVec
+  # mutations, streaming (not full-materialize) audit reads, a generic
+  # Hub-level provenance envelope embedded in HubReply, an extended
+  # fault taxonomy (SensitiveCapabilityDenied, SessionLimitExceeded,
+  # WorkerBusy, WorkerDegraded, PersistenceFailed, RecoveryRequired),
+  # cooperative cancellation via a session-level cancel set, and one new
+  # `smc hub session --requests <path>` CLI command. No subprocess/WASM/
+  # remote execution mode. No Workbench/Studio/ALM work.
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/SEMANTIC-HUB-V0-TURBOVEC-E2E.md
+    - .harness/reports/SEMANTIC-HUB-V0-COMPLETION.md
     - Cargo.toml
     - Cargo.lock
     - crates/semantic-hub/**
     - crates/semantic-hub-turbovec/**
-    - crates/smc-cli/Cargo.toml
     - crates/smc-cli/src/hub.rs
-    - crates/smc-cli/src/app.rs
-    - crates/smc-cli/src/lib.rs
     - tests/public_api_contracts.rs
     - tests/golden_snapshots/public_api/semantic_hub_lib.txt
     - tests/golden_snapshots/public_api/semantic_hub_turbovec_lib.txt
     - tests/hub_cli.rs
     - tests/hub_fixture_line_ending_guard.rs
     - tests/fixtures/hub/**
-    - .gitattributes
     - docs/architecture/semantic_hub_v0.md
     - docs/spec/hub/**
-    - docs/spec/cli.md
     - docs/security/semantic_hub_threat_model_v0.md
     - docs/privacy/semantic_hub_data_policy_v0.md
-    - .github/workflows/ci.yml
+    - docs/spec/cli.md
 
   forbidden_paths:
     - crates/sm-front/**
@@ -98,53 +100,26 @@ scope:
 authorization:
   rust_implementation: true
   rust_implementation_scope: >-
-    new production Rust: two new crates (semantic-hub generic contract/
-    runtime, semantic-hub-turbovec reference adapter over the real
-    turbovec dependency), one new smc-cli module (hub.rs) plus its
-    dispatch wiring in app.rs/lib.rs, plus tests/benches within the new
-    crates and one new repo-root integration test file
-    (tests/hub_cli.rs). No changes to compiler, verifier, VM, SemCode,
-    or any existing PROMETHEUS crate's public API.
-  new_external_dependency: true
-  new_external_dependency_detail: >-
-    turbovec = "=0.9.0" (crates.io, MIT license,
-    https://github.com/RyanCodrai/turbovec), pinned to an exact version.
-    Pulls in faer/gemm/nalgebra/rayon/rand as transitive build
-    dependencies of that crate; no new direct dependency of
-    semantic-hub itself beyond serde/serde_json (already present in the
-    workspace via the root package).
+    Extends the two existing Hub crates and smc-cli's existing hub.rs
+    module. No new crates, no new external dependencies (turbovec stays
+    pinned at =0.9.0). No changes to compiler, verifier, VM, SemCode, or
+    any existing PROMETHEUS crate's public API.
+  new_external_dependency: false
   cli_command_implementation: true
   test_addition: true
   fixture_addition: true
-  benchmark_addition: true
   documentation_addition: true
   public_api_change: true
   public_api_change_detail: >-
-    Two brand-new public library crates (semantic-hub,
-    semantic-hub-turbovec); registered with tests/public_api_contracts.rs
+    semantic-hub's public surface grows (new session/transaction
+    modules, extended HubFault/HubReply/HubProvenance shapes,
+    HUB_ENVELOPE_SCHEMA_VERSION bump 1 -> 2 with backward-compatible
+    request-side defaulting); registered with tests/public_api_contracts.rs
     per the existing snapshot-guard mechanism. smc-cli's own public
-    surface (lib.rs re-exports) is unchanged -- the new hub.rs module is
-    private, matching the existing ui_frame_inspect.rs pattern.
-  dependency_lockfile_update: true
+    surface (lib.rs re-exports) is unchanged.
+  dependency_lockfile_update: false
   owner_issue_lifecycle: true
-  workflow_changes: true
-  workflow_changes_detail: >-
-    Narrow CI remediation, not a scope change: .github/workflows/ci.yml
-    gained one identical step ("Install system BLAS (required by the
-    turbovec Hub dependency on Linux)": apt-get install -y
-    libopenblas-dev) added to the 4 ubuntu-latest jobs that link a
-    default-features binary/test (boundary-enforcement, public-api-guard,
-    runtime-release-gates, test-std). Root cause, confirmed from the
-    actual failed CI run on this PR's exact head: turbovec's own
-    Cargo.toml unconditionally enables ndarray's "blas" feature on
-    target_os = "linux"/"macos", which requires linking against a system
-    BLAS library the GitHub Actions Ubuntu runner does not have
-    preinstalled ("rust-lld: error: unable to find library -lopenblas").
-    This cannot be fixed from semantic-hub-turbovec's own Cargo.toml
-    (Cargo feature unification is additive-only; a downstream crate
-    cannot un-enable a feature an upstream crate's own
-    target-conditional dependency turns on). No other workflow behavior,
-    trigger, or job was changed.
+  workflow_changes: false
   roadmap_changes: false
   project_changes: false
   workbench_implementation: false
@@ -164,3 +139,5 @@ constraints:
   in_process_execution_is_not_process_isolation: true
   determinism_class_measured_not_assumed: true
   canonical_fixtures_get_gitattributes_lf_rule_and_regression_guard: true
+  no_tokio_or_async_runtime_added: true
+  session_executor_is_synchronous_and_deterministic: true

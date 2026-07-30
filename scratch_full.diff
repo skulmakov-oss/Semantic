@@ -1,0 +1,983 @@
+diff --git a/crates/semantic-hub-turbovec/src/lib.rs b/crates/semantic-hub-turbovec/src/lib.rs
+index 7e372d51..6cef06d3 100644
+--- a/crates/semantic-hub-turbovec/src/lib.rs
++++ b/crates/semantic-hub-turbovec/src/lib.rs
+@@ -11,21 +11,25 @@
+ 
+ pub mod payload;
+ pub mod storage;
++pub mod transaction;
+ 
+ use std::path::PathBuf;
+ 
+-use semantic_hub::runtime::{HubTool, RestrictedHubContext};
++use semantic_hub::runtime::{HubTool, HubToolOutcome, RestrictedHubContext};
+ use semantic_hub::{
+-    HubCapability, HubDeterminismClass, HubExecutionMode, HubOperationDescriptor, HubOperationId,
+-    HubResourceBudget, HubToolDescriptor, HubToolError, HubToolId, HubToolVersion, HubTrustClass,
++    HubArtifactProvenance, HubCapability, HubDeterminismClass, HubDigest, HubExecutionMode,
++    HubOperationDescriptor, HubOperationId, HubResourceBudget, HubToolDescriptor, HubToolError,
++    HubToolId, HubToolVersion, HubTrustClass,
+ };
+ 
+ use payload::{
+     check_result_count_bounds, check_vector_batch_bounds, parse, to_bytes, CreateIndexReply,
+     CreateIndexRequest, DescribeIndexReply, IndexNameOnlyRequest, InsertReply, InsertRequest,
+-    RemoveReply, RemoveRequest, ResetReply, ResetRequest, SearchHit, SearchReply, SearchRequest,
++    RecoverReply, RemoveReply, RemoveRequest, ResetReply, ResetRequest, SearchHit, SearchReply,
++    SearchRequest,
+ };
+ use storage::{IndexName, ScopedStorage, MAX_INDEX_COUNT};
++use transaction::RecoveryOutcome;
+ 
+ pub const TOOL_ID: &str = "vector.turbovec";
+ pub const TURBOVEC_DEPENDENCY_VERSION: &str = "0.9.0";
+@@ -153,6 +157,21 @@ pub fn descriptor(resource_ceiling: HubResourceBudget) -> HubToolDescriptor {
+                 HubDeterminismClass::Deterministic,
+                 true,
+             ),
++            HubOperationDescriptor::new(
++                op("vector.index.recover"),
++                [
++                    HubCapability::VectorIndexMutate,
++                    HubCapability::PrivateStorageRead,
++                    HubCapability::PrivateStorageWrite,
++                ],
++                // The outcome depends on which files happen to exist on
++                // disk at call time, not purely on the request payload --
++                // honestly classified as environment-dependent rather than
++                // deterministic, even though it is idempotent once the
++                // underlying state stops changing.
++                HubDeterminismClass::EnvironmentDependent,
++                true,
++            ),
+         ],
+         resource_ceiling,
+         adapter_provenance: adapter_provenance(),
+@@ -184,6 +203,29 @@ impl TurboVecAdapter {
+     /// enforces the budget against an index that was created under a
+     /// wider budget in an earlier, separate CLI invocation.
+     fn load(&self, name: &IndexName, max_dim: usize) -> Result<turbovec::IdMapIndex, HubToolError> {
++        // Refuse to load an index with an unresolved (`Intent`) prior
++        // mutation transaction: the on-disk `.tvim` may or may not
++        // reflect that attempt, and proceeding as if it were simply the
++        // pre-transaction state would silently mask an interrupted write.
++        // A read-record failure here (I/O error, malformed record) is
++        // treated as "no known blocking transaction" -- best-effort, the
++        // same policy `ScopedStorage::index_count()` already uses for its
++        // own secondary/advisory check.
++        if let Ok(Some(record)) = transaction::read_record(&self.storage, name) {
++            if record.phase == transaction::TransactionPhase::Intent {
++                return Err(HubToolError::new(
++                    "RecoveryRequired",
++                    format!(
++                        "index {:?} has an unresolved transaction (id {}, operation {}) from a \
++                         prior interrupted mutation -- run vector.index.recover before using \
++                         this index",
++                        name.as_str(),
++                        record.transaction_id,
++                        record.operation
++                    ),
++                ));
++            }
++        }
+         let path = self
+             .storage
+             .checked_index_path(name)
+@@ -225,11 +267,19 @@ impl TurboVecAdapter {
+         Ok(index)
+     }
+ 
++    /// Write-ahead, recoverable commit of one index mutation. Follows the
++    /// intent -> candidate write -> validate/digest -> atomic rename ->
++    /// completion-record sequence documented in `transaction`'s module doc
++    /// comment, and returns the artifact provenance the caller embeds in
++    /// its `HubToolOutcome` -- the digest is always of the bytes actually
++    /// read back from the committed file, never the in-memory buffer that
++    /// was written.
+     fn save_atomic(
+         &self,
+         name: &IndexName,
+         index: &turbovec::IdMapIndex,
+-    ) -> Result<(), HubToolError> {
++        operation: &str,
++    ) -> Result<HubArtifactProvenance, HubToolError> {
+         self.storage.ensure_root_checked().map_err(|e| {
+             HubToolError::new(
+                 "StorageUnavailable",
+@@ -240,14 +290,11 @@ impl TurboVecAdapter {
+             .storage
+             .checked_index_path(name)
+             .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
+-        let tmp_path = final_path.with_extension(format!(
+-            "tvim.tmp.{}.{}",
+-            std::process::id(),
+-            std::time::SystemTime::now()
+-                .duration_since(std::time::UNIX_EPOCH)
+-                .map(|d| d.as_nanos())
+-                .unwrap_or(0)
+-        ));
++
++        let txn_record = transaction::begin(&self.storage, name, operation)
++            .map_err(|e| HubToolError::new("PersistenceFailed", e.to_string()))?;
++        let tmp_path = self.storage.root().join(&txn_record.candidate_file_name);
++
+         index.write(&tmp_path).map_err(|e| {
+             HubToolError::new("IndexWriteFailed", format!("could not write index: {e}"))
+         })?;
+@@ -257,6 +304,23 @@ impl TurboVecAdapter {
+                 "IndexWriteFailed",
+                 format!("could not finalize index write: {e}"),
+             )
++        })?;
++
++        let committed_bytes = std::fs::read(&final_path).map_err(|e| {
++            HubToolError::new(
++                "PersistenceFailed",
++                format!("could not read back committed artifact for provenance: {e}"),
++            )
++        })?;
++        let digest = HubDigest::of(&committed_bytes);
++
++        transaction::commit(&self.storage, name, txn_record, digest)
++            .map_err(|e| HubToolError::new("PersistenceFailed", e.to_string()))?;
++
++        Ok(HubArtifactProvenance {
++            kind: "turbovec.index".to_string(),
++            id: name.as_str().to_string(),
++            digest,
+         })
+     }
+ 
+@@ -264,7 +328,11 @@ impl TurboVecAdapter {
+         IndexName::new(raw).map_err(|e| HubToolError::new("InvalidIndexName", e.to_string()))
+     }
+ 
+-    fn handle_create(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
++    fn handle_create(
++        &self,
++        payload: &[u8],
++        max_dim: usize,
++    ) -> Result<HubToolOutcome, HubToolError> {
+         let req: CreateIndexRequest =
+             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
+         let name = Self::index_name(&req.index)?;
+@@ -305,25 +373,34 @@ impl TurboVecAdapter {
+         }
+         let index = turbovec::IdMapIndex::new(req.dim, req.bit_width)
+             .map_err(|e| HubToolError::new("InvalidIndexParameters", e.to_string()))?;
+-        self.save_atomic(&name, &index)?;
+-        Ok(to_bytes(&CreateIndexReply {
+-            index: name.as_str().to_string(),
+-            dim: req.dim,
+-            bit_width: req.bit_width,
+-        }))
++        let artifact = self.save_atomic(&name, &index, "create")?;
++        Ok(HubToolOutcome {
++            payload: to_bytes(&CreateIndexReply {
++                index: name.as_str().to_string(),
++                dim: req.dim,
++                bit_width: req.bit_width,
++            }),
++            artifact: Some(artifact),
++        })
+     }
+ 
+-    fn handle_describe(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
++    fn handle_describe(
++        &self,
++        payload: &[u8],
++        max_dim: usize,
++    ) -> Result<HubToolOutcome, HubToolError> {
+         let req: IndexNameOnlyRequest =
+             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
+         let name = Self::index_name(&req.index)?;
+         let index = self.load(&name, max_dim)?;
+-        Ok(to_bytes(&DescribeIndexReply {
+-            index: name.as_str().to_string(),
+-            dim: index.dim(),
+-            bit_width: index.bit_width(),
+-            len: index.len(),
+-        }))
++        Ok(HubToolOutcome::payload_only(to_bytes(
++            &DescribeIndexReply {
++                index: name.as_str().to_string(),
++                dim: index.dim(),
++                bit_width: index.bit_width(),
++                len: index.len(),
++            },
++        )))
+     }
+ 
+     fn handle_insert(
+@@ -331,7 +408,7 @@ impl TurboVecAdapter {
+         payload: &[u8],
+         max_vectors: usize,
+         max_dim: usize,
+-    ) -> Result<Vec<u8>, HubToolError> {
++    ) -> Result<HubToolOutcome, HubToolError> {
+         let req: InsertRequest =
+             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
+         let name = Self::index_name(&req.index)?;
+@@ -366,12 +443,15 @@ impl TurboVecAdapter {
+             .map_err(|e| HubToolError::new("InsertRejected", e.to_string()))?;
+         let inserted = req.ids.len();
+         let len = index.len();
+-        self.save_atomic(&name, &index)?;
+-        Ok(to_bytes(&InsertReply {
+-            index: name.as_str().to_string(),
+-            inserted,
+-            len,
+-        }))
++        let artifact = self.save_atomic(&name, &index, "insert")?;
++        Ok(HubToolOutcome {
++            payload: to_bytes(&InsertReply {
++                index: name.as_str().to_string(),
++                inserted,
++                len,
++            }),
++            artifact: Some(artifact),
++        })
+     }
+ 
+     fn handle_remove(
+@@ -379,7 +459,7 @@ impl TurboVecAdapter {
+         payload: &[u8],
+         max_vectors: usize,
+         max_dim: usize,
+-    ) -> Result<Vec<u8>, HubToolError> {
++    ) -> Result<HubToolOutcome, HubToolError> {
+         let req: RemoveRequest =
+             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
+         let name = Self::index_name(&req.index)?;
+@@ -396,13 +476,16 @@ impl TurboVecAdapter {
+             }
+         }
+         let len = index.len();
+-        self.save_atomic(&name, &index)?;
+-        Ok(to_bytes(&RemoveReply {
+-            index: name.as_str().to_string(),
+-            removed,
+-            not_found,
+-            len,
+-        }))
++        let artifact = self.save_atomic(&name, &index, "remove")?;
++        Ok(HubToolOutcome {
++            payload: to_bytes(&RemoveReply {
++                index: name.as_str().to_string(),
++                removed,
++                not_found,
++                len,
++            }),
++            artifact: Some(artifact),
++        })
+     }
+ 
+     fn handle_search(
+@@ -412,7 +495,7 @@ impl TurboVecAdapter {
+         max_vectors: usize,
+         filtered: bool,
+         max_dim: usize,
+-    ) -> Result<Vec<u8>, HubToolError> {
++    ) -> Result<HubToolOutcome, HubToolError> {
+         let req: SearchRequest =
+             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
+         let name = Self::index_name(&req.index)?;
+@@ -514,14 +597,14 @@ impl TurboVecAdapter {
+             }
+             hits.push(row);
+         }
+-        Ok(to_bytes(&SearchReply {
++        Ok(HubToolOutcome::payload_only(to_bytes(&SearchReply {
+             index: name.as_str().to_string(),
+             index_version: 1,
+             hits,
+-        }))
++        })))
+     }
+ 
+-    fn handle_reset(&self, payload: &[u8], max_dim: usize) -> Result<Vec<u8>, HubToolError> {
++    fn handle_reset(&self, payload: &[u8], max_dim: usize) -> Result<HubToolOutcome, HubToolError> {
+         let req: ResetRequest =
+             parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
+         let name = Self::index_name(&req.index)?;
+@@ -533,12 +616,55 @@ impl TurboVecAdapter {
+         // than inventing an unsupported private truncation format.
+         let fresh = turbovec::IdMapIndex::new(dim, bit_width)
+             .map_err(|e| HubToolError::new("InvalidIndexParameters", e.to_string()))?;
+-        self.save_atomic(&name, &fresh)?;
+-        Ok(to_bytes(&ResetReply {
++        let artifact = self.save_atomic(&name, &fresh, "reset")?;
++        Ok(HubToolOutcome {
++            payload: to_bytes(&ResetReply {
++                index: name.as_str().to_string(),
++                dim,
++                bit_width,
++            }),
++            artifact: Some(artifact),
++        })
++    }
++
++    /// Inspect (and, where provably safe, resolve) the transaction state
++    /// for one index -- see `transaction::recover`'s own doc comment for
++    /// the exact recovery algorithm. Does not itself call `load()`: an
++    /// index with an unresolved `Intent` transaction is exactly the case
++    /// this operation exists to unblock, so it must not be gated by the
++    /// same check it is meant to resolve.
++    fn handle_recover(&self, payload: &[u8]) -> Result<HubToolOutcome, HubToolError> {
++        let req: IndexNameOnlyRequest =
++            parse(payload).map_err(|e| HubToolError::new("MalformedInput", e.to_string()))?;
++        let name = Self::index_name(&req.index)?;
++        self.storage
++            .ensure_root_checked()
++            .map_err(|e| HubToolError::new("ScopedStorageViolation", e.to_string()))?;
++        let outcome = transaction::recover(&self.storage, &name)
++            .map_err(|e| HubToolError::new("PersistenceFailed", e.to_string()))?;
++        let (outcome_str, artifact_digest, reason) = match &outcome {
++            RecoveryOutcome::NoTransaction => ("NoTransaction", None, None),
++            RecoveryOutcome::AlreadyCommitted { artifact_digest } => {
++                ("AlreadyCommitted", artifact_digest.clone(), None)
++            }
++            RecoveryOutcome::RolledBackAbandonedCandidate { artifact_digest } => (
++                "RolledBackAbandonedCandidate",
++                artifact_digest.clone(),
++                None,
++            ),
++            RecoveryOutcome::FinalizedCommit { artifact_digest } => {
++                ("FinalizedCommit", Some(artifact_digest.clone()), None)
++            }
++            RecoveryOutcome::Indeterminate { reason } => {
++                ("Indeterminate", None, Some(reason.clone()))
++            }
++        };
++        Ok(HubToolOutcome::payload_only(to_bytes(&RecoverReply {
+             index: name.as_str().to_string(),
+-            dim,
+-            bit_width,
+-        }))
++            outcome: outcome_str.to_string(),
++            artifact_digest,
++            reason,
++        })))
+     }
+ }
+ 
+@@ -552,7 +678,7 @@ impl HubTool for TurboVecAdapter {
+         operation_id: &HubOperationId,
+         payload: &[u8],
+         context: &RestrictedHubContext,
+-    ) -> Result<Vec<u8>, HubToolError> {
++    ) -> Result<HubToolOutcome, HubToolError> {
+         let max_vectors = context.resource_budget.index_item_count as usize;
+         let max_results = context.resource_budget.result_count as usize;
+         let max_dim = context.resource_budget.vector_dimensions as usize;
+@@ -568,6 +694,7 @@ impl HubTool for TurboVecAdapter {
+                 self.handle_search(payload, max_results, max_vectors, true, max_dim)
+             }
+             "vector.index.reset" => self.handle_reset(payload, max_dim),
++            "vector.index.recover" => self.handle_recover(payload),
+             other => Err(HubToolError::new(
+                 "UnknownOperation",
+                 format!("vector.turbovec has no operation {other:?}"),
+@@ -662,7 +789,7 @@ mod tests {
+                 &ctx(&budget, &caps),
+             )
+             .unwrap();
+-        let create: CreateIndexReply = serde_json::from_slice(&create).unwrap();
++        let create: CreateIndexReply = serde_json::from_slice(&create.payload).unwrap();
+         assert_eq!(create.dim, 8);
+ 
+         let describe = a
+@@ -672,7 +799,7 @@ mod tests {
+                 &ctx(&budget, &caps),
+             )
+             .unwrap();
+-        let describe: DescribeIndexReply = serde_json::from_slice(&describe).unwrap();
++        let describe: DescribeIndexReply = serde_json::from_slice(&describe.payload).unwrap();
+         assert_eq!(describe.dim, 8);
+         assert_eq!(describe.bit_width, 4);
+         assert_eq!(describe.len, 0);
+@@ -894,7 +1021,7 @@ mod tests {
+                 &ctx(&budget, &caps),
+             )
+             .unwrap();
+-        let insert_reply: InsertReply = serde_json::from_slice(&insert_reply).unwrap();
++        let insert_reply: InsertReply = serde_json::from_slice(&insert_reply.payload).unwrap();
+         assert_eq!(insert_reply.inserted, 4);
+         assert_eq!(insert_reply.len, 4);
+ 
+@@ -910,7 +1037,7 @@ mod tests {
+                 &ctx(&budget, &caps),
+             )
+             .unwrap();
+-        let search_reply: SearchReply = serde_json::from_slice(&search_reply).unwrap();
++        let search_reply: SearchReply = serde_json::from_slice(&search_reply.payload).unwrap();
+         assert_eq!(search_reply.hits.len(), 1);
+         assert_eq!(search_reply.hits[0][0].external_id, 20);
+ 
+@@ -922,7 +1049,7 @@ mod tests {
+                 &ctx(&budget, &caps),
+             )
+             .unwrap();
+-        let remove_reply: RemoveReply = serde_json::from_slice(&remove_reply).unwrap();
++        let remove_reply: RemoveReply = serde_json::from_slice(&remove_reply.payload).unwrap();
+         assert_eq!(remove_reply.removed, vec![20]);
+         assert_eq!(remove_reply.len, 3);
+ 
+@@ -933,7 +1060,7 @@ mod tests {
+                 &ctx(&budget, &caps),
+             )
+             .unwrap();
+-        let search_again: SearchReply = serde_json::from_slice(&search_again).unwrap();
++        let search_again: SearchReply = serde_json::from_slice(&search_again.payload).unwrap();
+         assert!(!search_again.hits[0].iter().any(|h| h.external_id == 20));
+     }
+ 
+@@ -1362,7 +1489,7 @@ mod tests {
+                 &ctx(&budget, &caps),
+             )
+             .unwrap();
+-        let reset: ResetReply = serde_json::from_slice(&reset).unwrap();
++        let reset: ResetReply = serde_json::from_slice(&reset.payload).unwrap();
+         assert_eq!(reset.dim, 8);
+ 
+         let describe = a
+@@ -1372,7 +1499,7 @@ mod tests {
+                 &ctx(&budget, &caps),
+             )
+             .unwrap();
+-        let describe: DescribeIndexReply = serde_json::from_slice(&describe).unwrap();
++        let describe: DescribeIndexReply = serde_json::from_slice(&describe.payload).unwrap();
+         assert_eq!(describe.len, 0);
+     }
+ 
+diff --git a/docs/architecture/semantic_hub_v0.md b/docs/architecture/semantic_hub_v0.md
+index 0603b322..ecc2269b 100644
+--- a/docs/architecture/semantic_hub_v0.md
++++ b/docs/architecture/semantic_hub_v0.md
+@@ -1,8 +1,8 @@
+ # Semantic Hub v0 Architecture
+ 
+-Status: draft v0 -- reference implementation on branch `feat/semantic-hub-v0-turbovec-e2e` (PR #1554), not yet landed on `main`
++Status: v0, landed on `main` (#1554, #1555) and completed (this document's own completion pass, branch `feat/semantic-hub-v0-completion`) to the full acceptance criteria of architecture issue #1526
+ Track: Hub / execution boundary
+-Purpose: document the Semantic Hub v0 architecture -- a governed execution boundary for external computational tools -- closing issue #1553 and consuming architecture issue #1526
++Purpose: document the Semantic Hub v0 architecture -- a governed execution boundary for external computational tools -- closing issues #1553 and #1526
+ 
+ ## 1. Purpose
+ 
+@@ -319,23 +319,65 @@ only ask for less, never more, than either.
+ 
+ ## 10. Fault taxonomy
+ 
+-`HubFault` (`fault.rs`) has 21 variants, each with a stable `.code()` string
++`HubFault` (`fault.rs`) has 25 variants, each with a stable `.code()` string
+ independent of its human-readable message:
+ 
+ ```text
+ UnknownTool          UnknownOperation      ApiVersionUnsupported
+ SchemaVersionUnsupported  DescriptorIncompatible  InputRejected
+-CapabilityDenied     PrivacyDenied         ResourceBudgetInvalid
++CapabilityDenied     PrivacyDenied         SensitiveCapabilityDenied
++WorkerDegraded       SessionLimitExceeded  ResourceBudgetInvalid
+ QueueFull            ToolDisabled          ToolQuarantined
+ DeadlineExceeded     Cancelled             ResourceExhausted
+-ToolDeclaredFailure  WorkerPanicked        ProtocolViolation
+-OutputRejected       AuditProvenanceFailure  InternalHubFault
++WorkerBusy           ToolDeclaredFailure   WorkerPanicked
++ProtocolViolation    OutputRejected        AuditProvenanceFailure
++InternalHubFault
+ ```
+ 
+ The stable code string is what appears in the audit record's `fault_code`
+ field and in the CLI's non-zero-exit error string; the human-readable
+ message is not parsed by anything and may change freely.
+ 
++The four v0-completion additions, and why each is a distinct top-level
++`HubFault` variant rather than folded into an existing one:
++
++- **`SensitiveCapabilityDenied`**: a request whose `capability_context`
++  grants any sensitive capability (e.g. `NetworkAccess`) is now rejected
++  at admission outright, even when the target operation does not require
++  it. Before this pass, such a grant was silently accepted and stripped
++  before the adapter ever saw it (`HubCapabilitySet::deny_sensitive()`,
++  still applied at dispatch as defense-in-depth) -- distinct from
++  `CapabilityDenied`, which means a *required* capability was missing.
++- **`WorkerDegraded`**: a mutating operation targeting a `Degraded`
++  worker (elevated crash count, not yet quarantined or restarted) is
++  rejected; read-only operations still proceed against a degraded worker
++  (see `HubWorkerState::accepts_dispatch`). Limits how much further
++  damage a flaky worker can do before supervision resolves it, without
++  blocking reads unnecessarily.
++- **`SessionLimitExceeded`**: the *session-level*, cumulative ceiling
++  (request count, cumulative input/output bytes, cumulative wall time --
++  see section 20) was exceeded. Distinct from `ResourceBudgetInvalid`/
++  `ResourceExhausted`, which are per-request.
++- **`WorkerBusy`**: dispatch was attempted while the worker's own health
++  state was already `Busy`. Structurally unreachable through the public
++  `Hub::invoke`/`invoke_in_session` API under v0's synchronous,
++  single-owner (`&mut Hub`) execution model -- checked explicitly anyway,
++  so a future concurrent execution mode cannot silently re-enter a
++  worker mid-dispatch. (Previously, reaching this state -- impossible
++  today, but the code path existed -- was misreported as
++  `ToolQuarantined`; fixed as part of adding this variant.)
++
++`PersistenceFailed` and `RecoveryRequired`, named in early drafts of the
++v0-completion scope, deliberately do **not** exist as `HubFault` variants:
++repository truth is that CLI-level infrastructure failures (audit log I/O,
++scoped-storage violations, pending-marker bookkeeping) are reported as
++plain `"<Code>: <message>"` `Result<(), String>` errors from `smc-cli`'s
++own command functions -- following the *existing* convention already used
++for `AuditProvenanceFailure`, `ScopedStorageViolation`, and
++`DuplicateRequestId` -- not as `HubFault` enum variants, since they are not
++per-request admission/dispatch outcomes. See section 21 (transaction
++protocol) for where these actually surface.
++
+ ## 11. Audit and provenance
+ 
+ `crates/semantic-hub/src/audit.rs` and `provenance.rs` define
+@@ -366,11 +408,69 @@ not by unit tests in isolation, and fixed with a regression test that
+ reloads a persisted audit log containing a non-`Success` record.
+ 
+ Canonical serialization: magic header `semantic-hub.audit.v1`,
+-`format_version` (`u32`, currently 1), a declared record count (not inferred
+-from EOF), then one tab-delimited, field-escaped line per record (20 fields
+-per record). Reload performs strict round-trip validation and enforces that
+-sequence numbers are monotonically non-decreasing; a corrupt or hand-edited
+-log fails to load rather than silently accepting a gap or reordering.
++`format_version` (`u32`, currently 1), a declared record count OR the
++literal string `"unbounded"` (see below), then one tab-delimited,
++field-escaped line per record (20 fields per record). Reload performs
++strict round-trip validation and enforces that sequence numbers are
++monotonically non-decreasing; a corrupt or hand-edited log fails to load
++rather than silently accepting a gap or reordering.
++
++**Streaming reads and appends (v0-completion pass).** The pre-completion
++implementation re-read, fully parsed into a `Vec<HubAuditRecord>`, and fully
++re-wrote the entire audit history on every single `smc hub invoke` call and
++every `smc hub audit` lookup -- for one new/looked-up record. Three
++additions avoid this without changing the on-disk format for a reader that
++does not care:
++
++- `HubAuditTrail::find_by_request_streaming(text, id)` scans line-by-line
++  and returns as soon as a match is found, instead of parsing every record
++  into a `Vec` first. Used by `smc hub audit`.
++- `HubAuditTrail::next_sequence_streaming(text)` parses only the final
++  record line, not the whole history. Used by `smc hub invoke` and
++  `smc hub session` to seed `Hub::seed_next_sequence`.
++- `HubAuditTrail::append_records_to_file(path, records)` appends new
++  records directly (`OpenOptions::append`) instead of rewriting the whole
++  file, once the file's header already carries the `"unbounded"` sentinel
++  in place of an exact count (written by
++  `to_canonical_text_streaming()`). A file still in the older exact-count
++  form is migrated once -- a full read/rewrite, the same cost the
++  pre-completion path always paid, but only the *first* time a
++  v0-completion build touches that file; every append after that is
++  cheap. `smc hub invoke`'s `save_audit_trail` now always writes the
++  streaming form too, so a project stays migrated rather than
++  flip-flopping between the two header shapes.
++- `smc hub session` appends each admitted request's audit record
++  immediately after that request completes, not once at the end of the
++  batch -- so a crash partway through a large session batch loses at most
++  the not-yet-appended tail of the batch, never an already-reported
++  request's evidence. See section 20.
++
++`from_canonical_text`'s strict record-count check is unchanged (still an
++error) for any file using the older exact-count header; it is simply not
++applied when the header is `"unbounded"`, since an append-friendly file's
++true count is not knowable without a full scan and re-deriving it on every
++append would defeat the purpose.
++
++**Extended `HubReply`/`HubProvenance` (v0-completion pass).** `HubReply`
++(`envelope.rs`, `HUB_ENVELOPE_SCHEMA_VERSION` bumped 1 -> 2) gained
++`logical_sequence: u64` (equal to the audit record's own `sequence`),
++`provenance: HubProvenance`, and `warnings: Vec<String>` (always empty in
++v0 -- no warning-producing path exists yet, never backfilled just to be
++non-empty). `HubProvenance` (`provenance.rs`) grew from a TurboVec-shaped
++struct into a generic, Hub-owned envelope satisfying the "generic Hub
++provenance envelope" requirement of #1526's acceptance criteria: it now
++carries `schema_version`, `request_id`, `session_id`, `logical_sequence`,
++`caller_identity`, the same tool/adapter/execution/determinism/trust/
++privacy fields as before, `input_digest`/`output_digest`,
++`capability_context_digest`/`resource_budget_digest` (both derived from
++the same canonical-text encodings the audit trail's own packed columns
++use, via `HubCapabilitySet::canonical_text()` and
++`HubResourceBudget::canonical_text()` -- one shared encoding, not two that
++could drift), `worker_state_after`, an optional `artifact:
++HubArtifactProvenance` (kind/id/digest of a mutating operation's committed
++durable artifact -- `None` for a non-mutating operation), and `warnings`.
++`smc-cli`'s `build_cli_reply_json` surfaces all of this in the CLI's JSON
++output, not only the raw payload bytes.
+ 
+ ## 12. Tool registry
+ 
+@@ -398,15 +498,18 @@ In v0 that is exactly one entry: `vector.turbovec`.
+ stable `u64` external IDs over the positional `TurboQuantIndex`. Operations:
+ `vector.index.create`, `vector.index.describe`, `vector.index.insert`,
+ `vector.index.remove`, `vector.search`, `vector.search.filtered`,
+-`vector.index.reset`.
++`vector.index.reset`, `vector.index.recover` (v0-completion pass -- see
++section 21).
+ 
+ Persistence is implicit -- there is no separate save/load verb. Every
+-mutating operation loads the index from a scoped `.tvim` file, mutates it,
+-and atomically rewrites it (temp file + rename); read operations load the
+-current file fresh on every call. This follows from the process model: the
+-Hub CLI is one short-lived process per `smc hub invoke` call, with no
+-long-running Hub daemon holding state in memory across invocations in v0 --
+-the on-disk file is the source of truth between invocations.
++mutating operation loads the index from a scoped `.tvim` file, runs it
++through the write-ahead transaction protocol in section 21, and produces
++artifact provenance for the reply; read operations load the current file
++fresh on every call. This follows from the process model: the Hub CLI is
++one short-lived process per `smc hub invoke` call (or one short-lived
++process handling many requests for one `smc hub session` batch), with no
++long-running Hub daemon holding state in memory across separate CLI
++invocations in v0 -- the on-disk file is the source of truth between them.
+ 
+ `vector.index.reset` has no native TurboVec "clear" operation. It is
+ implemented as constructing a fresh empty index with the same dimension and
+@@ -486,11 +589,16 @@ TurboVec search results are candidates/evidence only -- never Semantic
+ smc hub tools
+ smc hub describe <tool-id>
+ smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]
++smc hub session --requests <file> [--out <file>] [--max-requests <n>]
+ smc hub audit --request <request-id>
+ ```
+ 
++There is no dedicated `smc hub recover` subcommand: recovery
++(`vector.index.recover`) is a bounded operation like any other, reachable
++through `invoke` or `session` -- see section 21.
++
+ `smc hub tools` lists registered tools in deterministic order (registry
+-iteration order, section 12).
++iteration order, section 12). `smc hub session` is detailed in section 20.
+ 
+ Persistent state lives under `.semantic/hub/` relative to the current
+ working directory, matching the project-local storage convention proposed by
+@@ -498,9 +606,13 @@ issue #1372:
+ 
+ ```text
+ .semantic/hub/
+-  vector.turbovec/<name>.tvim   one file per persisted index
+-  audit.log                     whole canonical audit trail,
+-                                 rewritten atomically each invocation
++  vector.turbovec/
++    <name>.tvim        one file per persisted index
++    <name>.tvim.txn    one write-ahead transaction record per index
++                        (section 21), always overwritten in place
++  audit.log             canonical audit trail; appended to directly once
++                         in streaming form (section 11), not rewritten
++                         whole on every invocation
+ ```
+ 
+ The request file passed via `--input` is JSON and requires an explicit
+@@ -535,6 +647,29 @@ result is external computational evidence a caller may choose to feed into
+ Semantic's own admission and verification paths later -- Hub itself does not
+ perform that step and does not shortcut it.
+ 
++**Relation to issue #1373 (Semantic extension and plugin boundary).** #1373
++defines what *extensions* (Workbench/Studio-facing UI extensions) may
++display, request, transform, and propose -- a caller-facing, UI-adjacent
++surface. Hub defines how *external computational tools* (TurboVec, a future
++SMT solver, ...) are admitted, isolated, invoked, supervised, budgeted, and
++audited -- a callee-facing execution boundary. The two are non-duplicative:
++an extension could, in principle, be one of the callers that eventually
++issues a `HubRequest` (through whatever caller-identity/session model the
++host application built on top of Hub uses), but Hub itself has no concept
++of an "extension," does not implement #1373's display/request/propose
++model, and #1373 does not implement admission, capability enforcement,
++resource budgets, or audit for external tool execution. Hub consumes
++neither #1373's rules nor is consumed by them; they govern adjacent,
++non-overlapping surfaces.
++
++**Tool-to-tool calls are forbidden in v0**, by construction, not only by
++policy: `HubTool::handle` receives a `&RestrictedHubContext` (resource
++budget, sanitized capabilities, deadline) and its own payload -- it has no
++reference to the `Hub` that dispatched it, no way to construct a new
++`HubRequest`, and no route back into admission. A tool cannot call another
++tool even if its implementation tried to; there is no API surface for it to
++call.
++
+ ## 18. Forbidden shortcuts
+ 
+ Future Hub work must not:
+@@ -553,16 +688,141 @@ skip an audit record for any dispatch outcome
+ conflate status_code and fault_code in the audit format
+ ```
+ 
+-## 19. Related documents
++## 20. Session model
++
++`crates/semantic-hub/src/session.rs` (`HubSession`) proves the property a
++single `Hub::invoke` call cannot: that one registered worker instance can
++safely process several ordered requests, with a rolling whole-session
++ceiling attenuating every individual request's own per-request budget.
++Full contract: `docs/spec/hub/hub_session_v0.md`.
++
++Key properties:
++
++```text
++synchronous, single-owner (&mut Hub) -- no Tokio, no threads, no async
++input order = admission order = execution order = reply order
++             = audit logical sequence order
++every session-submitted request still goes through Hub::invoke_in_session,
++  the SAME admission/dispatch/audit pipeline as a direct Hub::invoke call
++session ceiling (HubSessionCeiling): max_request_count,
++  max_cumulative_input_bytes, max_cumulative_output_bytes,
++  max_cumulative_wall_time_millis -- checked in admission::admit's own
++  step 7, using the SAME AdmissionAmbient mechanism the existing
++  queue/concurrency checks (step 6) already used, not a parallel path
++cancellation is cooperative and pre-admission-only: a request id marked
++  cancelled before HubSession::submit processes it is rejected with
++  Cancelled before dispatch; there is no mechanism to cancel a request
++  already admitted (v0 is synchronous -- by the time submit() returns,
++  the request has already fully completed or failed)
++```
++
++`smc hub session --requests <file> [--out <file>] [--max-requests <n>]`
++reads newline-delimited JSON: each line is either a request record (the
++same shape `smc hub invoke`'s `--input` file uses, but with `tool_id`/
++`operation_id` as required fields rather than positional CLI arguments,
++since a batch can target different operations line by line) or a control
++record `{"cancel": "<request_id>"}`. Output is NDJSON: one structured reply
++per admitted or rejected request, in submission order, followed by one
++final `{"session_summary": {...}}` line (requests submitted/admitted/
++rejected, cumulative input/output bytes, cumulative wall time, first/last
++logical sequence). Exit code is non-zero if any request in the batch did
++not reach `Success` (`SessionCompletedWithFailures`), matching `smc hub
++invoke`'s existing `Ok -> 0` / `Err -> 1` convention.
++
++Each admitted request's audit record is durably appended immediately after
++that request completes (see section 11's streaming-append description),
++not batched to the end -- a crash partway through a large batch loses at
++most the not-yet-appended tail. There is no per-request pending marker the
++way `smc hub invoke` has (see `write_pending_marker`'s doc comment):
++`smc hub session`'s immediate post-request audit append already gives the
++same "durable evidence before moving to the next request" property for the
++audit trail, and the underlying tool's own durable state (a TurboVec index)
++has its own independent recovery path (section 21) for the narrower window
++between a mutation's commit and this function's audit append. This is a
++deliberate v0 scope decision, not an oversight.
++
++## 21. Transaction and recovery protocol
++
++`crates/semantic-hub-turbovec/src/transaction.rs` adds a recoverable
++write-ahead protocol around every durable `.tvim` mutation, replacing
++`save_atomic`'s previous "write temp file, rename" with no durable trace of
++*intent*. Sequence, per mutation:
++
++```text
++1. begin(): durably write <name>.tvim.txn with phase=Intent, BEFORE the
++   candidate artifact write begins. The record's candidate_file_name is
++   what save_atomic then writes to.
++2. Candidate written to that scoped temp path.
++3. fs::rename to the final <name>.tvim path (atomic on both POSIX and
++   Windows via std::fs::rename's MoveFileEx/ReplaceFile semantics).
++4. The final path is read back (never the in-memory write buffer) and
++   digested -- proof of what is actually durable, not what was intended.
++5. commit(): durably rewrite the SAME <name>.tvim.txn with phase=Committed
++   and the verified digest. Success is reported to the caller only after
++   this write completes.
++```
++
++`<name>.tvim.txn` is always overwritten in place, one record per index --
++not an unbounded transaction log, matching the "at most one in-flight
++mutation per stateful tool instance" concurrency model Hub v0 already has.
++
++**Recovery** (`transaction::recover`, reachable via the
++`vector.index.recover` operation on any `smc hub invoke`/`session` call --
++no dedicated CLI subcommand) inspects a `phase=Intent` record left by an
++interrupted mutation and resolves it without guessing:
++
++```text
++candidate file still present   -> the rename never happened. Remove the
++                                   abandoned candidate; finalize the
++                                   record against whatever the final
++                                   artifact already durably holds (its
++                                   pre-transaction state).
++candidate gone, final present  -> fs::rename's atomicity means this state
++                                   is only reachable if the rename
++                                   completed; the crash window was between
++                                   that success and commit()'s own write.
++                                   Finalize as committed against the
++                                   final artifact's real digest.
++neither exists                 -> cannot prove either outcome (e.g. a
++                                   create() that crashed before the
++                                   candidate write even began). Marked
++                                   Indeterminate; the caller must not
++                                   treat the index as usable until a
++                                   human resolves it. Never silently
++                                   reported as success.
++```
++
++`TurboVecAdapter::load()` -- the entry point every read and every further
++mutation goes through -- refuses to proceed if an index's transaction
++record is still `phase=Intent`, returning a `RecoveryRequired`-coded
++`HubToolError` (surfaced as `ToolDeclaredFailure: RecoveryRequired: ...`
++in the reply, since adapter-declared errors have no route to a distinct
++top-level `HubFault` variant -- see section 10's note on why
++`RecoveryRequired` is not a `HubFault` variant). `handle_recover` is the
++only code path that inspects a transaction record without going through
++`load()`'s gate -- it would otherwise be gated by the exact condition it
++exists to resolve.
++
++Artifact provenance (`HubToolOutcome::artifact`, `HubProvenance::artifact`
++-- section 11) is the direct byproduct of step 4 above: every mutating
++operation's reply carries the verified digest of what it actually
++committed, not a value derived from the request payload or the in-memory
++write buffer.
++
++## 22. Related documents
+ 
+ ```text
+ docs/architecture/dependency_boundary_rules.md
+ docs/architecture/module_ownership_map.md
+ docs/architecture/svm_verified_execution_core.md
++docs/spec/hub/hub_session_v0.md
+ ```
+ 
+-Issue #1526 is the architecture-track issue this document is written under.
+-Issue #1553 is the implementation issue this document closes. Issue #1372
+-proposed the `.semantic/hub/` project-local storage convention this
+-implementation follows. Issue #1374 tracks the future cryptographic signing
+-chain that Hub audit digests do not yet provide.
++Issue #1526 is the architecture-track issue this document is written under
++and, as of this v0-completion pass, closes against its own full acceptance
++criteria. Issue #1553 is the original implementation issue (#1554, #1555)
++this document also closes. Issue #1373 is the extension/plugin boundary
++issue, related but non-duplicative -- see section 17. Issue #1372 proposed
++the `.semantic/hub/` project-local storage convention this implementation
++follows. Issue #1374 tracks the future cryptographic signing chain that Hub
++audit digests do not yet provide.
+diff --git a/docs/spec/hub/turbovec_adapter_v0.md b/docs/spec/hub/turbovec_adapter_v0.md
+index 933db6b9..8b80f046 100644
+--- a/docs/spec/hub/turbovec_adapter_v0.md
++++ b/docs/spec/hub/turbovec_adapter_v0.md
+@@ -1,6 +1,6 @@
+ # Semantic Hub v0 Reference Adapter: `vector.turbovec`
+ 
+-Status: draft v0
++Status: v0, landed and completed (v0-completion pass, issue #1526)
+ Owner crate: `semantic-hub-turbovec`
+ 
+ This document specifies the `vector.turbovec` Semantic Hub tool: a reference
+@@ -16,6 +16,7 @@ crates/semantic-hub-turbovec/
+   src/lib.rs             tool descriptor, HubTool impl, per-operation handlers
+   src/payload.rs         JSON request/reply types, bound checks
+   src/storage.rs         IndexName validation, ScopedStorage
++  src/transaction.rs     write-ahead transaction/recovery protocol (v0-completion)
+   tests/determinism_qualification.rs
+ ```
+ 
+@@ -53,7 +54,7 @@ anywhere in the dependency graph this adapter introduces.
+ 
+ ## 2. Supported operations
+ 
+-Seven operations, exact capability lists and determinism classes from the
++Eight operations, exact capability lists and determinism classes from the
+ tool descriptor in `src/lib.rs`:
+ 
+ | Operation | Required capabilities | Determinism class | Mutates state |
+@@ -65,13 +66,20 @@ tool descriptor in `src/lib.rs`:
+ | `vector.search` | `VectorSearch`, `PrivateStorageRead` | `DeterministicWithSeed` | no |
+ | `vector.search.filtered` | `VectorFilteredSearch`, `PrivateStorageRead` | `DeterministicWithSeed` | no |
+ | `vector.index.reset` | `VectorIndexMutate`, `PrivateStorageRead`, `PrivateStorageWrite` | `Deterministic` | yes |
++| `vector.index.recover` | `VectorIndexMutate`, `PrivateStorageRead`, `PrivateStorageWrite` | `EnvironmentDependent` | yes |
+ 
+ `DeterministicWithSeed` marks the three operations that run a turbovec
+ floating-point kernel (`insert`, `search`, `search.filtered`) -- see Section
+ 9 for what that classification does and does not claim.
+ `Deterministic` marks the four with no floating-point kernel involved.
+-Missing capabilities are rejected by the generic Hub admission path before
+-this adapter's handler code runs; the adapter does not re-check them.
++`vector.index.recover` (v0-completion pass) is honestly classified
++`EnvironmentDependent`: its outcome depends on which files happen to exist
++on disk at call time (candidate present vs. absent, final artifact present
++vs. absent -- see Section 10), not purely on the request payload, even
++though it is idempotent once the underlying filesystem state stops
++changing. Missing capabilities are rejected by the generic Hub admission
++path before this adapter's handler code runs; the adapter does not
++re-check them.
+ 
+ ## 3. Request and reply payloads
+ 
+@@ -311,20 +319,66 @@ cross-CPU-backend reproducibility claim.
+ 
+ There is no separate explicit save/load verb in the Hub-facing API. Every
+ mutating call (`create`, `insert`, `remove`, `reset`) loads-or-initializes
+-the `IdMapIndex`, mutates it in memory, and atomically rewrites the whole
+-index to `<data_dir>/vector.turbovec/<name>.tvim`: write to a temp file
+-(named with the process id and a nanosecond timestamp to avoid collisions),
+-then `fs::rename` over the final path, so a concurrent reader never observes
+-a partial or torn write. Read operations (`describe`, `search`,
+-`search.filtered`) load fresh from that file on every call.
++the `IdMapIndex`, mutates it in memory, and commits the whole index to
++`<data_dir>/vector.turbovec/<name>.tvim` through the write-ahead
++transaction protocol below (v0-completion pass) rather than a bare
++write-temp-then-rename. Read operations (`describe`, `search`,
++`search.filtered`) load fresh from that file on every call, after first
++checking that no transaction is left unresolved (below).
+ 
+ This follows directly from how the Hub CLI is used: one short-lived process
+-per `smc hub invoke`, with no in-memory cache surviving across invocations
+-in v0 -- the `.tvim` file on disk **is** the adapter's actual state between
+-invocations, not a mirror of some other source of truth. `.tvim` is
+-turbovec's own persistence format (quantized codes plus the id-map side
+-table), written and loaded through `IdMapIndex::write`/`IdMapIndex::load`,
+-and round-trips exactly.
++per `smc hub invoke` call (or one process handling many requests for one
++`smc hub session` batch), with no in-memory cache surviving across separate
++CLI invocations in v0 -- the `.tvim` file on disk **is** the adapter's
++actual state between invocations, not a mirror of some other source of
++truth. `.tvim` is turbovec's own persistence format (quantized codes plus
++the id-map side table), written and loaded through
++`IdMapIndex::write`/`IdMapIndex::load`, and round-trips exactly.
++
++### 10.1 Write-ahead transaction protocol (v0-completion pass)
++
++`crates/semantic-hub-turbovec/src/transaction.rs` closes a gap the plain
++temp-file-then-rename approach left: the rename step itself was already
++atomic, but nothing durably recorded *intent* before it, so a crash between
++the candidate write and the rename left only an orphaned, uninspected temp
++file. Full description, including the recovery algorithm's three cases:
++`docs/architecture/semantic_hub_v0.md` section 21.
++
++One additional file per index, `<data_dir>/vector.turbovec/<name>.tvim.txn`,
++always overwritten in place (never an unbounded log):
++
++```text
++sequence:
++  1. begin()   -- write <name>.tvim.txn, phase=Intent, BEFORE the
++                  candidate write starts
++  2. candidate written to the scoped temp path named in that record
++  3. fs::rename candidate -> <name>.tvim (atomic)
++  4. read the final path back and digest it (never the write buffer)
++  5. commit()  -- rewrite the SAME .tvim.txn, phase=Committed, with the
++                  verified digest -- success is reported to the Hub
++                  caller only once this write is durable
++```
++
++`load()` (the entry point every read and every further mutation goes
++through) refuses to proceed if the transaction record is still
++`phase=Intent`, returning a `RecoveryRequired`-coded `HubToolError`. The
++new `vector.index.recover` operation is the only code path that inspects a
++transaction record without going through `load()`'s gate.
++
++### 10.2 `vector.index.recover`
++
++```text
++request  { "index": string }
++reply    { "index": string, "outcome": string, "artifact_digest": string|null, "reason": string|null }
++```
++
++`outcome` is one of `NoTransaction`, `AlreadyCommitted`,
++`RolledBackAbandonedCandidate`, `FinalizedCommit`, `Indeterminate`. `reason`
++is populated only for `Indeterminate` (recovery could not prove either
++outcome -- see architecture doc section 21). Requires the same capabilities
++as any other mutating operation (`VectorIndexMutate`, `PrivateStorageRead`,
++`PrivateStorageWrite`); reachable through `smc hub invoke` or `smc hub
++session` like any other operation -- there is no dedicated CLI subcommand.
+ 
+ ## 11. CPU and backend assumptions
+ 

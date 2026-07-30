@@ -1,8 +1,8 @@
 # Semantic Hub v0 Architecture
 
-Status: draft v0 -- reference implementation on branch `feat/semantic-hub-v0-turbovec-e2e` (PR #1554), not yet landed on `main`
+Status: v0, landed on `main` (#1554, #1555) and completed (this document's own completion pass, branch `feat/semantic-hub-v0-completion`) to the full acceptance criteria of architecture issue #1526
 Track: Hub / execution boundary
-Purpose: document the Semantic Hub v0 architecture -- a governed execution boundary for external computational tools -- closing issue #1553 and consuming architecture issue #1526
+Purpose: document the Semantic Hub v0 architecture -- a governed execution boundary for external computational tools -- closing issues #1553 and #1526
 
 ## 1. Purpose
 
@@ -319,22 +319,64 @@ only ask for less, never more, than either.
 
 ## 10. Fault taxonomy
 
-`HubFault` (`fault.rs`) has 21 variants, each with a stable `.code()` string
+`HubFault` (`fault.rs`) has 25 variants, each with a stable `.code()` string
 independent of its human-readable message:
 
 ```text
 UnknownTool          UnknownOperation      ApiVersionUnsupported
 SchemaVersionUnsupported  DescriptorIncompatible  InputRejected
-CapabilityDenied     PrivacyDenied         ResourceBudgetInvalid
+CapabilityDenied     PrivacyDenied         SensitiveCapabilityDenied
+WorkerDegraded       SessionLimitExceeded  ResourceBudgetInvalid
 QueueFull            ToolDisabled          ToolQuarantined
 DeadlineExceeded     Cancelled             ResourceExhausted
-ToolDeclaredFailure  WorkerPanicked        ProtocolViolation
-OutputRejected       AuditProvenanceFailure  InternalHubFault
+WorkerBusy           ToolDeclaredFailure   WorkerPanicked
+ProtocolViolation    OutputRejected        AuditProvenanceFailure
+InternalHubFault
 ```
 
 The stable code string is what appears in the audit record's `fault_code`
 field and in the CLI's non-zero-exit error string; the human-readable
 message is not parsed by anything and may change freely.
+
+The four v0-completion additions, and why each is a distinct top-level
+`HubFault` variant rather than folded into an existing one:
+
+- **`SensitiveCapabilityDenied`**: a request whose `capability_context`
+  grants any sensitive capability (e.g. `NetworkAccess`) is now rejected
+  at admission outright, even when the target operation does not require
+  it. Before this pass, such a grant was silently accepted and stripped
+  before the adapter ever saw it (`HubCapabilitySet::deny_sensitive()`,
+  still applied at dispatch as defense-in-depth) -- distinct from
+  `CapabilityDenied`, which means a *required* capability was missing.
+- **`WorkerDegraded`**: a mutating operation targeting a `Degraded`
+  worker (elevated crash count, not yet quarantined or restarted) is
+  rejected; read-only operations still proceed against a degraded worker
+  (see `HubWorkerState::accepts_dispatch`). Limits how much further
+  damage a flaky worker can do before supervision resolves it, without
+  blocking reads unnecessarily.
+- **`SessionLimitExceeded`**: the *session-level*, cumulative ceiling
+  (request count, cumulative input/output bytes, cumulative wall time --
+  see section 19) was exceeded. Distinct from `ResourceBudgetInvalid`/
+  `ResourceExhausted`, which are per-request.
+- **`WorkerBusy`**: dispatch was attempted while the worker's own health
+  state was already `Busy`. Structurally unreachable through the public
+  `Hub::invoke`/`invoke_in_session` API under v0's synchronous,
+  single-owner (`&mut Hub`) execution model -- checked explicitly anyway,
+  so a future concurrent execution mode cannot silently re-enter a
+  worker mid-dispatch. (Previously, reaching this state -- impossible
+  today, but the code path existed -- was misreported as
+  `ToolQuarantined`; fixed as part of adding this variant.)
+
+`PersistenceFailed` and `RecoveryRequired`, named in early drafts of the
+v0-completion scope, deliberately do **not** exist as `HubFault` variants:
+repository truth is that CLI-level infrastructure failures (audit log I/O,
+scoped-storage violations, pending-marker bookkeeping) are reported as
+plain `"<Code>: <message>"` `Result<(), String>` errors from `smc-cli`'s
+own command functions -- following the *existing* convention already used
+for `AuditProvenanceFailure`, `ScopedStorageViolation`, and
+`DuplicateRequestId` -- not as `HubFault` enum variants, since they are not
+per-request admission/dispatch outcomes. See section 20 (transaction
+protocol) for where these actually surface.
 
 ## 11. Audit and provenance
 
@@ -366,11 +408,69 @@ not by unit tests in isolation, and fixed with a regression test that
 reloads a persisted audit log containing a non-`Success` record.
 
 Canonical serialization: magic header `semantic-hub.audit.v1`,
-`format_version` (`u32`, currently 1), a declared record count (not inferred
-from EOF), then one tab-delimited, field-escaped line per record (20 fields
-per record). Reload performs strict round-trip validation and enforces that
-sequence numbers are monotonically non-decreasing; a corrupt or hand-edited
-log fails to load rather than silently accepting a gap or reordering.
+`format_version` (`u32`, currently 1), a declared record count OR the
+literal string `"unbounded"` (see below), then one tab-delimited,
+field-escaped line per record (20 fields per record). Reload performs
+strict round-trip validation and enforces that sequence numbers are
+monotonically non-decreasing; a corrupt or hand-edited log fails to load
+rather than silently accepting a gap or reordering.
+
+**Streaming reads and appends (v0-completion pass).** The pre-completion
+implementation re-read, fully parsed into a `Vec<HubAuditRecord>`, and fully
+re-wrote the entire audit history on every single `smc hub invoke` call and
+every `smc hub audit` lookup -- for one new/looked-up record. Three
+additions avoid this without changing the on-disk format for a reader that
+does not care:
+
+- `HubAuditTrail::find_by_request_streaming(text, id)` scans line-by-line
+  and returns as soon as a match is found, instead of parsing every record
+  into a `Vec` first. Used by `smc hub audit`.
+- `HubAuditTrail::next_sequence_streaming(text)` parses only the final
+  record line, not the whole history. Used by `smc hub invoke` and
+  `smc hub session` to seed `Hub::seed_next_sequence`.
+- `HubAuditTrail::append_records_to_file(path, records)` appends new
+  records directly (`OpenOptions::append`) instead of rewriting the whole
+  file, once the file's header already carries the `"unbounded"` sentinel
+  in place of an exact count (written by
+  `to_canonical_text_streaming()`). A file still in the older exact-count
+  form is migrated once -- a full read/rewrite, the same cost the
+  pre-completion path always paid, but only the *first* time a
+  v0-completion build touches that file; every append after that is
+  cheap. `smc hub invoke`'s `save_audit_trail` now always writes the
+  streaming form too, so a project stays migrated rather than
+  flip-flopping between the two header shapes.
+- `smc hub session` appends each admitted request's audit record
+  immediately after that request completes, not once at the end of the
+  batch -- so a crash partway through a large session batch loses at most
+  the not-yet-appended tail of the batch, never an already-reported
+  request's evidence. See section 19.
+
+`from_canonical_text`'s strict record-count check is unchanged (still an
+error) for any file using the older exact-count header; it is simply not
+applied when the header is `"unbounded"`, since an append-friendly file's
+true count is not knowable without a full scan and re-deriving it on every
+append would defeat the purpose.
+
+**Extended `HubReply`/`HubProvenance` (v0-completion pass).** `HubReply`
+(`envelope.rs`, `HUB_ENVELOPE_SCHEMA_VERSION` bumped 1 -> 2) gained
+`logical_sequence: u64` (equal to the audit record's own `sequence`),
+`provenance: HubProvenance`, and `warnings: Vec<String>` (always empty in
+v0 -- no warning-producing path exists yet, never backfilled just to be
+non-empty). `HubProvenance` (`provenance.rs`) grew from a TurboVec-shaped
+struct into a generic, Hub-owned envelope satisfying the "generic Hub
+provenance envelope" requirement of #1526's acceptance criteria: it now
+carries `schema_version`, `request_id`, `session_id`, `logical_sequence`,
+`caller_identity`, the same tool/adapter/execution/determinism/trust/
+privacy fields as before, `input_digest`/`output_digest`,
+`capability_context_digest`/`resource_budget_digest` (both derived from
+the same canonical-text encodings the audit trail's own packed columns
+use, via `HubCapabilitySet::canonical_text()` and
+`HubResourceBudget::canonical_text()` -- one shared encoding, not two that
+could drift), `worker_state_after`, an optional `artifact:
+HubArtifactProvenance` (kind/id/digest of a mutating operation's committed
+durable artifact -- `None` for a non-mutating operation), and `warnings`.
+`smc-cli`'s `build_cli_reply_json` surfaces all of this in the CLI's JSON
+output, not only the raw payload bytes.
 
 ## 12. Tool registry
 
@@ -398,15 +498,18 @@ In v0 that is exactly one entry: `vector.turbovec`.
 stable `u64` external IDs over the positional `TurboQuantIndex`. Operations:
 `vector.index.create`, `vector.index.describe`, `vector.index.insert`,
 `vector.index.remove`, `vector.search`, `vector.search.filtered`,
-`vector.index.reset`.
+`vector.index.reset`, `vector.index.recover` (v0-completion pass -- see
+section 20).
 
 Persistence is implicit -- there is no separate save/load verb. Every
-mutating operation loads the index from a scoped `.tvim` file, mutates it,
-and atomically rewrites it (temp file + rename); read operations load the
-current file fresh on every call. This follows from the process model: the
-Hub CLI is one short-lived process per `smc hub invoke` call, with no
-long-running Hub daemon holding state in memory across invocations in v0 --
-the on-disk file is the source of truth between invocations.
+mutating operation loads the index from a scoped `.tvim` file, runs it
+through the write-ahead transaction protocol in section 20, and produces
+artifact provenance for the reply; read operations load the current file
+fresh on every call. This follows from the process model: the Hub CLI is
+one short-lived process per `smc hub invoke` call (or one short-lived
+process handling many requests for one `smc hub session` batch), with no
+long-running Hub daemon holding state in memory across separate CLI
+invocations in v0 -- the on-disk file is the source of truth between them.
 
 `vector.index.reset` has no native TurboVec "clear" operation. It is
 implemented as constructing a fresh empty index with the same dimension and
@@ -486,11 +589,16 @@ TurboVec search results are candidates/evidence only -- never Semantic
 smc hub tools
 smc hub describe <tool-id>
 smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]
+smc hub session --requests <file> [--out <file>] [--max-requests <n>]
 smc hub audit --request <request-id>
 ```
 
+There is no dedicated `smc hub recover` subcommand: recovery
+(`vector.index.recover`) is a bounded operation like any other, reachable
+through `invoke` or `session` -- see section 20.
+
 `smc hub tools` lists registered tools in deterministic order (registry
-iteration order, section 12).
+iteration order, section 12). `smc hub session` is detailed in section 19.
 
 Persistent state lives under `.semantic/hub/` relative to the current
 working directory, matching the project-local storage convention proposed by
@@ -498,9 +606,13 @@ issue #1372:
 
 ```text
 .semantic/hub/
-  vector.turbovec/<name>.tvim   one file per persisted index
-  audit.log                     whole canonical audit trail,
-                                 rewritten atomically each invocation
+  vector.turbovec/
+    <name>.tvim        one file per persisted index
+    <name>.tvim.txn    one write-ahead transaction record per index
+                        (section 20), always overwritten in place
+  audit.log             canonical audit trail; appended to directly once
+                         in streaming form (section 11), not rewritten
+                         whole on every invocation
 ```
 
 The request file passed via `--input` is JSON and requires an explicit
@@ -535,6 +647,29 @@ result is external computational evidence a caller may choose to feed into
 Semantic's own admission and verification paths later -- Hub itself does not
 perform that step and does not shortcut it.
 
+**Relation to issue #1373 (Semantic extension and plugin boundary).** #1373
+defines what *extensions* (Workbench/Studio-facing UI extensions) may
+display, request, transform, and propose -- a caller-facing, UI-adjacent
+surface. Hub defines how *external computational tools* (TurboVec, a future
+SMT solver, ...) are admitted, isolated, invoked, supervised, budgeted, and
+audited -- a callee-facing execution boundary. The two are non-duplicative:
+an extension could, in principle, be one of the callers that eventually
+issues a `HubRequest` (through whatever caller-identity/session model the
+host application built on top of Hub uses), but Hub itself has no concept
+of an "extension," does not implement #1373's display/request/propose
+model, and #1373 does not implement admission, capability enforcement,
+resource budgets, or audit for external tool execution. Hub consumes
+neither #1373's rules nor is consumed by them; they govern adjacent,
+non-overlapping surfaces.
+
+**Tool-to-tool calls are forbidden in v0**, by construction, not only by
+policy: `HubTool::handle` receives a `&RestrictedHubContext` (resource
+budget, sanitized capabilities, deadline) and its own payload -- it has no
+reference to the `Hub` that dispatched it, no way to construct a new
+`HubRequest`, and no route back into admission. A tool cannot call another
+tool even if its implementation tried to; there is no API surface for it to
+call.
+
 ## 18. Forbidden shortcuts
 
 Future Hub work must not:
@@ -553,16 +688,141 @@ skip an audit record for any dispatch outcome
 conflate status_code and fault_code in the audit format
 ```
 
-## 19. Related documents
+## 19. Session model
+
+`crates/semantic-hub/src/session.rs` (`HubSession`) proves the property a
+single `Hub::invoke` call cannot: that one registered worker instance can
+safely process several ordered requests, with a rolling whole-session
+ceiling attenuating every individual request's own per-request budget.
+Full contract: `docs/spec/hub/hub_session_v0.md`.
+
+Key properties:
+
+```text
+synchronous, single-owner (&mut Hub) -- no Tokio, no threads, no async
+input order = admission order = execution order = reply order
+             = audit logical sequence order
+every session-submitted request still goes through Hub::invoke_in_session,
+  the SAME admission/dispatch/audit pipeline as a direct Hub::invoke call
+session ceiling (HubSessionCeiling): max_request_count,
+  max_cumulative_input_bytes, max_cumulative_output_bytes,
+  max_cumulative_wall_time_millis -- checked in admission::admit's own
+  step 7, using the SAME AdmissionAmbient mechanism the existing
+  queue/concurrency checks (step 6) already used, not a parallel path
+cancellation is cooperative and pre-admission-only: a request id marked
+  cancelled before HubSession::submit processes it is rejected with
+  Cancelled before dispatch; there is no mechanism to cancel a request
+  already admitted (v0 is synchronous -- by the time submit() returns,
+  the request has already fully completed or failed)
+```
+
+`smc hub session --requests <file> [--out <file>] [--max-requests <n>]`
+reads newline-delimited JSON: each line is either a request record (the
+same shape `smc hub invoke`'s `--input` file uses, but with `tool_id`/
+`operation_id` as required fields rather than positional CLI arguments,
+since a batch can target different operations line by line) or a control
+record `{"cancel": "<request_id>"}`. Output is NDJSON: one structured reply
+per admitted or rejected request, in submission order, followed by one
+final `{"session_summary": {...}}` line (requests submitted/admitted/
+rejected, cumulative input/output bytes, cumulative wall time, first/last
+logical sequence). Exit code is non-zero if any request in the batch did
+not reach `Success` (`SessionCompletedWithFailures`), matching `smc hub
+invoke`'s existing `Ok -> 0` / `Err -> 1` convention.
+
+Each admitted request's audit record is durably appended immediately after
+that request completes (see section 11's streaming-append description),
+not batched to the end -- a crash partway through a large batch loses at
+most the not-yet-appended tail. There is no per-request pending marker the
+way `smc hub invoke` has (see `write_pending_marker`'s doc comment):
+`smc hub session`'s immediate post-request audit append already gives the
+same "durable evidence before moving to the next request" property for the
+audit trail, and the underlying tool's own durable state (a TurboVec index)
+has its own independent recovery path (section 20) for the narrower window
+between a mutation's commit and this function's audit append. This is a
+deliberate v0 scope decision, not an oversight.
+
+## 20. Transaction and recovery protocol
+
+`crates/semantic-hub-turbovec/src/transaction.rs` adds a recoverable
+write-ahead protocol around every durable `.tvim` mutation, replacing
+`save_atomic`'s previous "write temp file, rename" with no durable trace of
+*intent*. Sequence, per mutation:
+
+```text
+1. begin(): durably write <name>.tvim.txn with phase=Intent, BEFORE the
+   candidate artifact write begins. The record's candidate_file_name is
+   what save_atomic then writes to.
+2. Candidate written to that scoped temp path.
+3. fs::rename to the final <name>.tvim path (atomic on both POSIX and
+   Windows via std::fs::rename's MoveFileEx/ReplaceFile semantics).
+4. The final path is read back (never the in-memory write buffer) and
+   digested -- proof of what is actually durable, not what was intended.
+5. commit(): durably rewrite the SAME <name>.tvim.txn with phase=Committed
+   and the verified digest. Success is reported to the caller only after
+   this write completes.
+```
+
+`<name>.tvim.txn` is always overwritten in place, one record per index --
+not an unbounded transaction log, matching the "at most one in-flight
+mutation per stateful tool instance" concurrency model Hub v0 already has.
+
+**Recovery** (`transaction::recover`, reachable via the
+`vector.index.recover` operation on any `smc hub invoke`/`session` call --
+no dedicated CLI subcommand) inspects a `phase=Intent` record left by an
+interrupted mutation and resolves it without guessing:
+
+```text
+candidate file still present   -> the rename never happened. Remove the
+                                   abandoned candidate; finalize the
+                                   record against whatever the final
+                                   artifact already durably holds (its
+                                   pre-transaction state).
+candidate gone, final present  -> fs::rename's atomicity means this state
+                                   is only reachable if the rename
+                                   completed; the crash window was between
+                                   that success and commit()'s own write.
+                                   Finalize as committed against the
+                                   final artifact's real digest.
+neither exists                 -> cannot prove either outcome (e.g. a
+                                   create() that crashed before the
+                                   candidate write even began). Marked
+                                   Indeterminate; the caller must not
+                                   treat the index as usable until a
+                                   human resolves it. Never silently
+                                   reported as success.
+```
+
+`TurboVecAdapter::load()` -- the entry point every read and every further
+mutation goes through -- refuses to proceed if an index's transaction
+record is still `phase=Intent`, returning a `RecoveryRequired`-coded
+`HubToolError` (surfaced as `ToolDeclaredFailure: RecoveryRequired: ...`
+in the reply, since adapter-declared errors have no route to a distinct
+top-level `HubFault` variant -- see section 10's note on why
+`RecoveryRequired` is not a `HubFault` variant). `handle_recover` is the
+only code path that inspects a transaction record without going through
+`load()`'s gate -- it would otherwise be gated by the exact condition it
+exists to resolve.
+
+Artifact provenance (`HubToolOutcome::artifact`, `HubProvenance::artifact`
+-- section 11) is the direct byproduct of step 4 above: every mutating
+operation's reply carries the verified digest of what it actually
+committed, not a value derived from the request payload or the in-memory
+write buffer.
+
+## 21. Related documents
 
 ```text
 docs/architecture/dependency_boundary_rules.md
 docs/architecture/module_ownership_map.md
 docs/architecture/svm_verified_execution_core.md
+docs/spec/hub/hub_session_v0.md
 ```
 
-Issue #1526 is the architecture-track issue this document is written under.
-Issue #1553 is the implementation issue this document closes. Issue #1372
-proposed the `.semantic/hub/` project-local storage convention this
-implementation follows. Issue #1374 tracks the future cryptographic signing
-chain that Hub audit digests do not yet provide.
+Issue #1526 is the architecture-track issue this document is written under
+and, as of this v0-completion pass, closes against its own full acceptance
+criteria. Issue #1553 is the original implementation issue (#1554, #1555)
+this document also closes. Issue #1373 is the extension/plugin boundary
+issue, related but non-duplicative -- see section 17. Issue #1372 proposed
+the `.semantic/hub/` project-local storage convention this implementation
+follows. Issue #1374 tracks the future cryptographic signing chain that Hub
+audit digests do not yet provide.

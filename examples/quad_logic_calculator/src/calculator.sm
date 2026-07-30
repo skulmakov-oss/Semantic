@@ -1,0 +1,286 @@
+record CalculatorState {
+    mode: i32,
+    current_input: i32,
+    stored_operand: i32,
+    has_stored: bool,
+    pending_operator: i32,
+    has_pending: bool,
+    numeric_result: i32,
+    quad_left: quad,
+    quad_right: quad,
+    quad_operator: i32,
+    quad_result: quad,
+    evaluation_state: quad,
+    error_code: i32,
+    replace_input: bool,
+}
+
+record CalculatorAction {
+    kind: i32,
+    payload: i32,
+    quad_val: quad,
+}
+
+fn init_calculator_state() -> CalculatorState {
+    let st: CalculatorState = CalculatorState {
+        mode: 0,
+        current_input: 0,
+        stored_operand: 0,
+        has_stored: false,
+        pending_operator: 0,
+        has_pending: false,
+        numeric_result: 0,
+        quad_left: T,
+        quad_right: F,
+        quad_operator: 1,
+        quad_result: N,
+        evaluation_state: N,
+        error_code: 0,
+        replace_input: false,
+    };
+    return st;
+}
+
+fn quad_op_not(a: quad) -> quad {
+    let res: quad = !a;
+    return res;
+}
+
+fn quad_op_and(a: quad, b: quad) -> quad {
+    let res: quad = a && b;
+    return res;
+}
+
+fn quad_op_or(a: quad, b: quad) -> quad {
+    let res: quad = a || b;
+    return res;
+}
+
+fn quad_op_imp(a: quad, b: quad) -> quad {
+    let res: quad = a -> b;
+    return res;
+}
+
+fn quad_op_eq(a: quad, b: quad) -> quad {
+    let is_eq: bool = (a == b);
+    let mut res: quad = F;
+    if is_eq {
+        res = T;
+    }
+    return res;
+}
+
+fn quad_op_neq(a: quad, b: quad) -> quad {
+    let is_neq: bool = (a != b);
+    let mut res: quad = F;
+    if is_neq {
+        res = T;
+    }
+    return res;
+}
+
+fn evaluate_quad(op: i32, a: quad, b: quad) -> quad {
+    let mut res: quad = N;
+    if op == 0 {
+        res = quad_op_not(a);
+    }
+    if op == 1 {
+        res = quad_op_and(a, b);
+    }
+    if op == 2 {
+        res = quad_op_or(a, b);
+    }
+    if op == 3 {
+        res = quad_op_imp(a, b);
+    }
+    if op == 4 {
+        res = quad_op_eq(a, b);
+    }
+    if op == 5 {
+        res = quad_op_neq(a, b);
+    }
+    return res;
+}
+
+fn transition_digit(st: CalculatorState, digit: i32) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    if next.mode == 0 {
+        let mut cur: i32 = next.current_input;
+        if next.replace_input {
+            cur = digit;
+        } else {
+            cur = cur * 10 + digit;
+        }
+        next = next with { current_input: cur, replace_input: false, evaluation_state: N };
+    }
+    return next;
+}
+
+fn transition_op_arith(st: CalculatorState, op: i32) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    if next.mode == 0 {
+        let cur: i32 = next.current_input;
+        next = next with { stored_operand: cur, has_stored: true, pending_operator: op, has_pending: true, replace_input: true, evaluation_state: N };
+    }
+    return next;
+}
+
+fn transition_evaluate(st: CalculatorState) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    if next.mode == 0 {
+        if next.has_pending {
+            let a: i32 = next.stored_operand;
+            let b: i32 = next.current_input;
+            let op: i32 = next.pending_operator;
+
+            let mut res: i32 = 0;
+            let mut eval: quad = T;
+            let mut err: i32 = 0;
+
+            if op == 0 {
+                res = a + b;
+            }
+            if op == 1 {
+                res = a - b;
+            }
+            if op == 2 {
+                res = a * b;
+            }
+            if op == 3 {
+                if b == 0 {
+                    res = 0;
+                    eval = F;
+                    err = 1;
+                } else {
+                    res = a / b;
+                }
+            }
+            next = next with { numeric_result: res, current_input: res, evaluation_state: eval, error_code: err, replace_input: true };
+        } else {
+            next = next with { evaluation_state: N };
+        }
+    }
+    if next.mode == 1 {
+        let op_q: i32 = next.quad_operator;
+        let qa: quad = next.quad_left;
+        let qb: quad = next.quad_right;
+        let qr: quad = evaluate_quad(op_q, qa, qb);
+
+        next = next with { quad_result: qr, evaluation_state: T, error_code: 0 };
+    }
+    return next;
+}
+
+fn transition_clear() -> CalculatorState {
+    let st: CalculatorState = init_calculator_state();
+    return st;
+}
+
+fn transition_backspace(st: CalculatorState) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    if next.mode == 0 {
+        let val: i32 = next.current_input / 10;
+        next = next with { current_input: val, evaluation_state: N };
+    }
+    return next;
+}
+
+fn transition_switch_mode(st: CalculatorState, new_mode: i32) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    next = next with { mode: new_mode, evaluation_state: N, error_code: 0 };
+    return next;
+}
+
+fn transition_recover(st: CalculatorState) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    next = next with { error_code: 0, evaluation_state: T };
+    return next;
+}
+
+fn transition_contradiction(st: CalculatorState) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    next = next with { evaluation_state: S, error_code: 2 };
+    return next;
+}
+
+fn transition_quad_operand(st: CalculatorState, is_left: bool, val: quad) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    if is_left {
+        next = next with { quad_left: val, evaluation_state: N };
+    } else {
+        next = next with { quad_right: val, evaluation_state: N };
+    }
+    return next;
+}
+
+fn transition_quad_operator(st: CalculatorState, op: i32) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    next = next with { quad_operator: op, evaluation_state: N };
+    return next;
+}
+
+fn apply_action(st: CalculatorState, act: CalculatorAction) -> CalculatorState {
+    let mut next: CalculatorState = st;
+    let k: i32 = act.kind;
+    let p: i32 = act.payload;
+    let q: quad = act.quad_val;
+
+    if k == 0 {
+        next = transition_digit(st, p);
+    }
+    if k == 1 {
+        next = transition_op_arith(st, p);
+    }
+    if k == 2 {
+        next = transition_evaluate(st);
+    }
+    if k == 3 {
+        next = transition_clear();
+    }
+    if k == 4 {
+        next = transition_backspace(st);
+    }
+    if k == 5 {
+        next = transition_switch_mode(st, p);
+    }
+    if k == 6 {
+        next = transition_recover(st);
+    }
+    if k == 7 {
+        next = transition_contradiction(st);
+    }
+    if k == 8 {
+        next = transition_quad_operand(st, true, q);
+    }
+    if k == 9 {
+        next = transition_quad_operand(st, false, q);
+    }
+    if k == 10 {
+        next = transition_quad_operator(st, p);
+    }
+
+    return next;
+}
+
+fn main() {
+    let not_n: quad = !N;
+    let not_f: quad = !F;
+    let not_t: quad = !T;
+    let not_s: quad = !S;
+
+    assert(not_n == N);
+    assert(not_f == T);
+    assert(not_t == F);
+    assert(not_s == S);
+
+    assert((T && F) == N);
+    assert((T || F) == S);
+
+    let mut st: CalculatorState = init_calculator_state();
+    let act7: CalculatorAction = CalculatorAction { kind: 0, payload: 7, quad_val: N };
+    st = apply_action(st, act7);
+    assert(st.current_input == 7);
+
+    print("SEMANTIC_ENGINE_VERIFIED");
+    return;
+}

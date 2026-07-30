@@ -727,7 +727,7 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
     let mut bridge = PrometheusVmHost { host, capabilities };
     let mut observation = HelloObservationRuntime::discard();
-    exec_loop(&mut vm, &mut bridge, &mut observation)
+    exec_loop(&mut vm, &mut bridge, &mut observation).map(|_| ())
 }
 
 /// Canonical verified token execution path.
@@ -761,6 +761,46 @@ pub fn run_verified_entry_semcode_with_config(
         HelloObservationRuntime::discard(),
     )
     .map(|_| ())
+}
+
+/// Canonical verified function invocation path with arguments and structured return value.
+///
+/// Requires a `VerifiedEntrySemCode` token ensuring bytecode verification has passed.
+pub fn run_verified_function_semcode_with_args(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    func_name: &str,
+    args: Vec<Value>,
+) -> Result<Value, RuntimeError> {
+    run_verified_function_semcode_with_args_and_config(
+        token,
+        func_name,
+        args,
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+    )
+}
+
+pub fn run_verified_function_semcode_with_args_and_config(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    func_name: &str,
+    args: Vec<Value>,
+    config: ExecutionConfig,
+) -> Result<Value, RuntimeError> {
+    let program = prepare_verified_execution(token)?;
+    if !program.functions.contains_key(func_name) {
+        return Err(RuntimeError::UnknownFunction(func_name.to_string()));
+    }
+    let mut vm = VM {
+        functions: program.functions,
+        callstack: Vec::new(),
+        config,
+        effect_calls: 0,
+        symbols: program.runtime_symbols,
+        prng_state: 0,
+    };
+    push_frame(&mut vm, func_name, args, None)?;
+    let mut host = LegacyVmHost;
+    let mut observation = HelloObservationRuntime::discard();
+    exec_loop(&mut vm, &mut host, &mut observation)
 }
 
 /// Local opcode profiling path for verified token execution.
@@ -1479,7 +1519,7 @@ fn exec_loop<'a, H: VmHostBridge>(
     vm: &mut VM,
     host: &mut H,
     observation: &mut HelloObservationRuntime<'a>,
-) -> Result<(), RuntimeError> {
+) -> Result<Value, RuntimeError> {
     let mut profile = NoopOpcodeProfile;
     exec_loop_with_profile(vm, host, observation, &mut profile)
 }
@@ -1489,14 +1529,14 @@ fn exec_loop_with_profile<'a, H, P>(
     host: &mut H,
     observation: &mut HelloObservationRuntime<'a>,
     profile: &mut P,
-) -> Result<(), RuntimeError>
+) -> Result<Value, RuntimeError>
 where
     H: VmHostBridge,
     P: OpcodeProfileSink,
 {
     loop {
         let Some(frame_idx) = vm.callstack.len().checked_sub(1) else {
-            return Ok(());
+            return Ok(Value::Unit);
         };
         let func_name = vm.callstack[frame_idx].func.clone();
         let f = vm
@@ -2344,7 +2384,7 @@ where
                             trap: None,
                         });
                     }
-                    return Ok(());
+                    return Ok(ret_val);
                 }
                 continue;
             }

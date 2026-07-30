@@ -1,0 +1,9 @@
+[package]
+name = "proj_test"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+prom-ui = { path = "../crates/prom-ui" }

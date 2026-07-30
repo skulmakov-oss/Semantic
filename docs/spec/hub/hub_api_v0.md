@@ -1,6 +1,6 @@
 # Semantic Hub API v0 Specification
 
-Status: draft v0
+Status: v0, landed on `main` (#1554, #1555) and completed (#1526 completion pass -- see `docs/architecture/semantic_hub_v0.md` sections 10-11, 19-20 for what changed)
 Owner crate: `semantic-hub`
 
 This document defines the generic Semantic Hub v0 contract: identifiers,
