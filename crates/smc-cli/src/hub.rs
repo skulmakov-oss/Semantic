@@ -1,19 +1,30 @@
-//! `smc hub ...` -- CLI surface for Semantic Hub v0 (Issue #1553).
+//! `smc hub ...` -- CLI surface for Semantic Hub v0 (Issue #1553, #1526
+//! completion pass).
 //!
 //! ```text
 //! smc hub tools
 //! smc hub describe <tool-id>
 //! smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]
+//! smc hub session --requests <file> [--out <file>]
 //! smc hub audit --request <request-id>
 //! ```
 //!
-//! Every invocation goes through [`semantic_hub::runtime::Hub::invoke`] --
-//! there is no direct route from this module to `TurboVecAdapter` that
-//! bypasses admission, budgets, or audit. The Hub CLI is one short-lived
-//! process per invocation; persistent state (the TurboVec index files and
-//! the audit log) lives under `.semantic/hub/` relative to the current
-//! working directory and is reloaded by each invocation, matching the
+//! Every invocation goes through [`semantic_hub::runtime::Hub::invoke`] (or,
+//! for `smc hub session`, [`semantic_hub::runtime::Hub::invoke_in_session`]
+//! via [`semantic_hub::HubSession`]) -- there is no direct route from this
+//! module to `TurboVecAdapter` that bypasses admission, budgets, or audit.
+//! The Hub CLI is one short-lived process per invocation (a `session` call
+//! processes many requests within that one process, still exiting when the
+//! batch completes); persistent state (the TurboVec index files and the
+//! audit log) lives under `.semantic/hub/` relative to the current working
+//! directory and is reloaded by each invocation, matching the
 //! project-local storage convention proposed by issue #1372.
+//!
+//! There is no dedicated `smc hub recover` subcommand: recovery is just
+//! another bounded operation (`vector.index.recover`) on the same
+//! `vector.turbovec` tool, reachable through the existing generic `invoke`
+//! (or `session`) commands like any other operation -- see
+//! `docs/spec/hub/turbovec_adapter_v0.md`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,7 +34,7 @@ use semantic_hub::runtime::Hub;
 use semantic_hub::{
     content_digest, HubApiVersion, HubAuditTrail, HubCallerIdentity, HubCapability,
     HubCapabilitySet, HubOperationId, HubPrivacyClass, HubRequest, HubRequestId, HubResourceBudget,
-    HubSessionId, HubToolId, HUB_ENVELOPE_SCHEMA_VERSION,
+    HubSession, HubSessionCeiling, HubSessionId, HubToolId, HUB_ENVELOPE_SCHEMA_VERSION,
 };
 use semantic_hub_turbovec::TurboVecAdapter;
 
@@ -56,6 +67,7 @@ pub fn cmd_hub(args: &[String]) -> Result<(), String> {
         Some("tools") => cmd_hub_tools(&args[1..]),
         Some("describe") => cmd_hub_describe(&args[1..]),
         Some("invoke") => cmd_hub_invoke(&args[1..]),
+        Some("session") => cmd_hub_session(&args[1..]),
         Some("audit") => cmd_hub_audit(&args[1..]),
         _ => Err(format!("InvalidArguments: {}", hub_usage())),
     }
@@ -67,6 +79,7 @@ fn hub_usage() -> String {
         "  smc hub tools",
         "  smc hub describe <tool-id>",
         "  smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]",
+        "  smc hub session --requests <file> [--out <file>] [--max-requests <n>] [--session-id <id>]",
         "  smc hub audit --request <request-id>",
     ]
     .join("\n")
@@ -74,6 +87,102 @@ fn hub_usage() -> String {
 
 fn hub_data_root() -> PathBuf {
     PathBuf::from(HUB_DATA_DIR)
+}
+
+fn lexical_absolute(path: &Path) -> Result<PathBuf, String> {
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| format!("InternalHubFault: cannot resolve current directory: {e}"))?
+            .join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    return Err(format!(
+                        "InvalidArguments: output path '{}' escapes its filesystem root",
+                        path.display()
+                    ));
+                }
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    Ok(normalized)
+}
+
+/// Reject a caller-selected output file that aliases Hub-owned state.
+/// `--out` is written only after execution, so allowing it to target
+/// `.semantic/hub/audit.log`, a pending marker, or a TurboVec artifact
+/// would turn an otherwise successful command into self-corruption.
+fn validate_output_path(path: &Path) -> Result<(), String> {
+    let hub_root = lexical_absolute(&hub_data_root())?;
+    let output = lexical_absolute(path)?;
+    if path.file_name().is_none() || output.is_dir() {
+        return Err(format!(
+            "InvalidArguments: --out path '{}' must name a file",
+            path.display()
+        ));
+    }
+    if output.starts_with(&hub_root) {
+        return Err(format!(
+            "ScopedStorageViolation: --out path '{}' is inside Hub-owned data root '{}'",
+            path.display(),
+            hub_data_root().display()
+        ));
+    }
+
+    // Catch an existing symlink/alias whose lexical spelling is outside
+    // the root but whose resolved target is inside it.
+    if hub_root.exists() {
+        let resolved_root = fs::canonicalize(&hub_root).map_err(|e| {
+            format!(
+                "InternalHubFault: cannot resolve Hub-owned data root '{}': {e}",
+                hub_root.display()
+            )
+        })?;
+        let resolved_output = if output.exists() {
+            Some(fs::canonicalize(&output).map_err(|e| {
+                format!(
+                    "InvalidArguments: cannot resolve --out path '{}': {e}",
+                    path.display()
+                )
+            })?)
+        } else {
+            output
+                .parent()
+                .filter(|parent| parent.exists())
+                .map(|parent| {
+                    let file_name = output.file_name().ok_or_else(|| {
+                        format!(
+                            "InvalidArguments: --out path '{}' does not name a file",
+                            path.display()
+                        )
+                    })?;
+                    fs::canonicalize(parent)
+                        .map(|resolved| resolved.join(file_name))
+                        .map_err(|e| {
+                            format!(
+                                "InvalidArguments: cannot resolve --out parent '{}': {e}",
+                                parent.display()
+                            )
+                        })
+                })
+                .transpose()?
+        };
+        if resolved_output.is_some_and(|resolved| resolved.starts_with(&resolved_root)) {
+            return Err(format!(
+                "ScopedStorageViolation: --out path '{}' resolves inside Hub-owned data root '{}'",
+                path.display(),
+                hub_data_root().display()
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Reject a directory whose path contains a symlink/junction in any
@@ -359,7 +468,12 @@ fn save_audit_trail(path: &Path, trail: &HubAuditTrail) -> Result<(), String> {
         check_dir_is_not_a_symlink(dir)?;
     }
     check_file_is_not_a_symlink(path)?;
-    write_output_atomic(path, &trail.to_canonical_text())
+    // Streaming form (the "unbounded" header sentinel), not the exact-count
+    // form: once any Hub command touches a project's audit log, it stays
+    // in the append-friendly shape `smc hub session` needs for a cheap
+    // append, rather than flip-flopping back to exact-count on every
+    // single-invoke call.
+    write_output_atomic(path, &trail.to_canonical_text_streaming())
 }
 
 /// True if appending one more record (worst case
@@ -367,9 +481,11 @@ fn save_audit_trail(path: &Path, trail: &HubAuditTrail) -> Result<(), String> {
 /// canonical-text length is `current_text_len` would push it past
 /// `MAX_AUDIT_LOG_BYTES`. A pure function (no I/O) so the boundary can be
 /// unit-tested directly instead of via a multi-hundred-megabyte fixture.
-fn would_exceed_audit_log_cap(current_text_len: usize) -> bool {
-    current_text_len as u64 + semantic_hub::audit::MAX_AUDIT_RECORD_BYTES as u64
-        > MAX_AUDIT_LOG_BYTES
+fn would_exceed_audit_log_cap(current_text_len: u64, additional_records: usize) -> bool {
+    let projected = (additional_records as u64)
+        .checked_mul(semantic_hub::audit::MAX_AUDIT_RECORD_BYTES as u64)
+        .and_then(|delta| current_text_len.checked_add(delta));
+    projected.is_none_or(|bytes| bytes > MAX_AUDIT_LOG_BYTES)
 }
 
 // ---------------------------------------------------------------------
@@ -452,6 +568,16 @@ struct CliRequestFile {
     schema_version: u32,
     #[serde(default)]
     request_id: Option<String>,
+    /// Required for `smc hub session` (each line names its own tool);
+    /// left unset for `smc hub invoke`, which takes `<tool-id>` as a
+    /// positional CLI argument instead. Providing both is not an error --
+    /// the CLI argument always wins for `invoke`, this field is simply
+    /// ignored there.
+    #[serde(default)]
+    tool_id: Option<String>,
+    /// Same convention as `tool_id`, for `<operation-id>`.
+    #[serde(default)]
+    operation_id: Option<String>,
     #[serde(default = "default_session_id")]
     session_id: String,
     #[serde(default = "default_caller_identity")]
@@ -522,40 +648,41 @@ fn generate_request_id() -> String {
     format!("req-{}-{nanos}", std::process::id())
 }
 
-fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
-    if args.len() < 2 {
-        return Err(format!("InvalidArguments: {}", hub_usage()));
-    }
-    let tool_id_raw = &args[0];
-    let operation_id_raw = &args[1];
-    let mut input_path: Option<String> = None;
-    let mut out_path: Option<String> = None;
-    let mut i = 2;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--input" => input_path = Some(next_value(args, &mut i, "--input")?),
-            "--out" => out_path = Some(next_value(args, &mut i, "--out")?),
-            other => return Err(format!("InvalidArguments: unexpected argument '{other}'")),
-        }
-    }
-    let input_path =
-        input_path.ok_or_else(|| "InvalidArguments: missing --input <file>".to_string())?;
-
-    let tool_id =
-        HubToolId::new(tool_id_raw.as_str()).map_err(|e| format!("InvalidArguments: {e}"))?;
-    let operation_id = HubOperationId::new(operation_id_raw.as_str())
-        .map_err(|e| format!("InvalidArguments: {e}"))?;
-
-    let raw_input = read_bounded(&input_path, MAX_INPUT_BYTES)?;
-    let request_file: CliRequestFile = serde_json::from_slice(&raw_input)
-        .map_err(|e| format!("InputRejected: malformed request file: {e}"))?;
+/// Build a validated [`HubRequest`] from one parsed request file/line,
+/// shared by `smc hub invoke` (which supplies `tool_id`/`operation_id` as
+/// positional CLI arguments, via the `*_override` parameters) and
+/// `smc hub session` (which reads them from the request line itself).
+fn build_hub_request(
+    request_file: CliRequestFile,
+    tool_id_override: Option<HubToolId>,
+    operation_id_override: Option<HubOperationId>,
+) -> Result<HubRequest, String> {
     if request_file.schema_version != CLI_ENVELOPE_SCHEMA_VERSION {
         return Err(format!(
-            "SchemaVersionUnsupported: request file declares schema_version {}, this build supports {}",
+            "SchemaVersionUnsupported: request declares schema_version {}, this build supports {}",
             request_file.schema_version, CLI_ENVELOPE_SCHEMA_VERSION
         ));
     }
-
+    let tool_id = match tool_id_override {
+        Some(t) => t,
+        None => {
+            let raw = request_file
+                .tool_id
+                .as_deref()
+                .ok_or_else(|| "InvalidArguments: missing \"tool_id\" field".to_string())?;
+            HubToolId::new(raw).map_err(|e| format!("InvalidArguments: {e}"))?
+        }
+    };
+    let operation_id = match operation_id_override {
+        Some(o) => o,
+        None => {
+            let raw = request_file
+                .operation_id
+                .as_deref()
+                .ok_or_else(|| "InvalidArguments: missing \"operation_id\" field".to_string())?;
+            HubOperationId::new(raw).map_err(|e| format!("InvalidArguments: {e}"))?
+        }
+    };
     let request_id = match request_file.request_id {
         Some(id) => HubRequestId::new(id).map_err(|e| format!("InvalidArguments: {e}"))?,
         None => HubRequestId::new(generate_request_id())
@@ -581,11 +708,7 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
     let payload = serde_json::to_vec(&request_file.payload)
         .map_err(|e| format!("InputRejected: payload is not representable as JSON: {e}"))?;
 
-    let request_id_for_marker = request_id.clone();
-    let tool_id_for_marker = tool_id.clone();
-    let operation_id_for_marker = operation_id.clone();
-
-    let request = HubRequest {
+    Ok(HubRequest {
         schema_version: HUB_ENVELOPE_SCHEMA_VERSION,
         api_version: HubApiVersion::CURRENT,
         request_id,
@@ -597,7 +720,44 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
         privacy_class,
         resource_budget,
         payload,
-    };
+    })
+}
+
+fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
+    if args.len() < 2 {
+        return Err(format!("InvalidArguments: {}", hub_usage()));
+    }
+    let tool_id_raw = &args[0];
+    let operation_id_raw = &args[1];
+    let mut input_path: Option<String> = None;
+    let mut out_path: Option<String> = None;
+    let mut i = 2;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--input" => input_path = Some(next_value(args, &mut i, "--input")?),
+            "--out" => out_path = Some(next_value(args, &mut i, "--out")?),
+            other => return Err(format!("InvalidArguments: unexpected argument '{other}'")),
+        }
+    }
+    let input_path =
+        input_path.ok_or_else(|| "InvalidArguments: missing --input <file>".to_string())?;
+    if let Some(path) = out_path.as_deref() {
+        validate_output_path(Path::new(path))?;
+    }
+
+    let tool_id =
+        HubToolId::new(tool_id_raw.as_str()).map_err(|e| format!("InvalidArguments: {e}"))?;
+    let operation_id = HubOperationId::new(operation_id_raw.as_str())
+        .map_err(|e| format!("InvalidArguments: {e}"))?;
+
+    let raw_input = read_bounded(&input_path, MAX_INPUT_BYTES)?;
+    let request_file: CliRequestFile = serde_json::from_slice(&raw_input)
+        .map_err(|e| format!("InputRejected: malformed request file: {e}"))?;
+    let request = build_hub_request(request_file, Some(tool_id), Some(operation_id))?;
+
+    let request_id_for_marker = request.request_id.clone();
+    let tool_id_for_marker = request.tool_id.clone();
+    let operation_id_for_marker = request.operation_id.clone();
 
     let mut hub = build_hub();
     let audit_path = hub_data_root().join(AUDIT_LOG_FILE);
@@ -616,7 +776,7 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
          at u64::MAX) -- rotate or archive the audit log to continue"
             .to_string()
     })?;
-    hub.seed_next_sequence(next_sequence);
+    let _ = hub.seed_next_sequence(next_sequence);
 
     // Reject a reused request_id before writing anything: `find_by_request`
     // only ever returns the *first* matching record, so a second audited
@@ -656,7 +816,8 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
     // here, before the mutation runs, keeps the log itself always under
     // the cap and gives a clear, actionable error instead of a silent,
     // self-perpetuating outage discovered only on the next call.
-    if would_exceed_audit_log_cap(persisted_trail.to_canonical_text().len()) {
+    let current_audit_bytes = fs::metadata(&audit_path).map(|m| m.len()).unwrap_or(0);
+    if would_exceed_audit_log_cap(current_audit_bytes, 1) {
         return Err(format!(
             "AuditLogFull: appending this invocation's record would grow '{}' past the \
              {MAX_AUDIT_LOG_BYTES} byte cap -- rotate or delete the audit log to continue",
@@ -699,6 +860,343 @@ fn cmd_hub_invoke(args: &[String]) -> Result<(), String> {
     }
 }
 
+// ---------------------------------------------------------------------
+// smc hub session --requests <file> [--out <file>]
+// ---------------------------------------------------------------------
+
+/// Bound on the whole newline-delimited requests file for one `smc hub
+/// session` batch. Larger than `MAX_INPUT_BYTES` (sized for one
+/// single-invoke request) since a legitimate batch is many requests, but
+/// still a bound -- not "unbounded" -- to reject a pathologically huge or
+/// corrupted file before allocating.
+const MAX_SESSION_REQUESTS_FILE_BYTES: u64 = 64 * 1024 * 1024;
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CliCancelLine {
+    /// The `request_id` of an earlier or later line in the same batch to
+    /// treat as pre-cancelled. See `semantic_hub::HubSession`'s own doc
+    /// comment for the cooperative, pre-admission-only cancellation model
+    /// this implements.
+    cancel: String,
+}
+
+enum CliSessionLine {
+    Cancel(HubRequestId),
+    Request(Box<HubRequest>),
+}
+
+/// Parse and validate one NDJSON line from a session's requests file. A
+/// line is either a control record (`{"cancel": "<request_id>"}`) or a
+/// full request record (the same shape `smc hub invoke`'s `--input` file
+/// uses, but with `tool_id`/`operation_id` required fields rather than
+/// positional CLI arguments, since a batch can target different
+/// operations -- even different tools, once more than one is registered
+/// -- line by line).
+///
+/// Rejects a `request_id` that collides with an earlier line in this
+/// batch. Persisted-audit and pending-marker uniqueness are checked once
+/// for the fully parsed batch, under the project lock, before dispatch.
+fn parse_session_line(
+    raw_line: &str,
+    seen_in_batch: &mut std::collections::BTreeSet<HubRequestId>,
+) -> Result<CliSessionLine, String> {
+    if raw_line.len() as u64 > MAX_INPUT_BYTES {
+        return Err(format!(
+            "InputRejected: session request record is {} bytes, exceeding the per-record maximum {MAX_INPUT_BYTES} bytes",
+            raw_line.len()
+        ));
+    }
+    let value: serde_json::Value = serde_json::from_str(raw_line)
+        .map_err(|e| format!("InputRejected: malformed session line: {e}"))?;
+    if value.get("cancel").is_some() {
+        let cancel_line: CliCancelLine = serde_json::from_value(value)
+            .map_err(|e| format!("InputRejected: malformed cancel line: {e}"))?;
+        let id =
+            HubRequestId::new(cancel_line.cancel).map_err(|e| format!("InvalidArguments: {e}"))?;
+        return Ok(CliSessionLine::Cancel(id));
+    }
+
+    let request_file: CliRequestFile = serde_json::from_value(value)
+        .map_err(|e| format!("InputRejected: malformed session request line: {e}"))?;
+    let request = build_hub_request(request_file, None, None)?;
+
+    if !seen_in_batch.insert(request.request_id.clone()) {
+        return Err(format!(
+            "DuplicateRequestId: request_id '{}' appears more than once in this session batch",
+            request.request_id.as_str()
+        ));
+    }
+    Ok(CliSessionLine::Request(Box::new(request)))
+}
+
+/// Execute a bounded, ordered batch of requests through one
+/// [`semantic_hub::HubSession`] within this one CLI process, emitting one
+/// structured JSON reply per line (in submission order) plus a final
+/// `{"session_summary": {...}}` line, all as newline-delimited JSON
+/// (matching the input format). Every admitted request's audit record is
+/// durably appended (via [`HubAuditTrail::append_records_to_file`], a
+/// true streaming append after the first request in a project's history)
+/// immediately after that request completes -- before the next request in
+/// the batch is even submitted -- so a crash partway through a large
+/// batch loses at most the not-yet-appended tail, never a
+/// already-completed-and-reported request's evidence.
+///
+/// Each request gets the same durable pre-dispatch pending marker as
+/// `smc hub invoke`; it is cleared only after that request's audit record
+/// has been synced. Thus a crash between a tool commit and audit append is
+/// queryable as `PendingUnresolved`, never indistinguishable from an
+/// unknown request.
+fn cmd_hub_session(args: &[String]) -> Result<(), String> {
+    let mut requests_path: Option<String> = None;
+    let mut out_path: Option<String> = None;
+    let mut max_requests: Option<u32> = None;
+    let mut session_id_override: Option<String> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--requests" => requests_path = Some(next_value(args, &mut i, "--requests")?),
+            "--out" => out_path = Some(next_value(args, &mut i, "--out")?),
+            "--session-id" => session_id_override = Some(next_value(args, &mut i, "--session-id")?),
+            "--max-requests" => {
+                let raw = next_value(args, &mut i, "--max-requests")?;
+                max_requests = Some(raw.parse().map_err(|_| {
+                    format!("InvalidArguments: --max-requests value '{raw}' is not a u32")
+                })?);
+            }
+            other => return Err(format!("InvalidArguments: unexpected argument '{other}'")),
+        }
+    }
+    let requests_path =
+        requests_path.ok_or_else(|| "InvalidArguments: missing --requests <file>".to_string())?;
+    if let Some(path) = out_path.as_deref() {
+        validate_output_path(Path::new(path))?;
+    }
+    let ceiling = HubSessionCeiling {
+        max_request_count: max_requests.unwrap_or(HubSessionCeiling::V0_DEFAULT.max_request_count),
+        ..HubSessionCeiling::V0_DEFAULT
+    };
+
+    let raw = read_bounded(&requests_path, MAX_SESSION_REQUESTS_FILE_BYTES)?;
+    let text = String::from_utf8(raw)
+        .map_err(|e| format!("InputRejected: session requests file is not valid UTF-8: {e}"))?;
+
+    // Parse and validate the complete bounded batch before acquiring shared
+    // state or dispatching its first effect. A malformed or duplicate later
+    // line must not turn the batch into an unreported partial application.
+    let mut seen_in_batch = std::collections::BTreeSet::new();
+    let mut parsed_lines = Vec::new();
+    let mut request_count = 0usize;
+    for (line_no, raw_line) in text.lines().enumerate() {
+        let raw_line = raw_line.trim();
+        if raw_line.is_empty() {
+            continue;
+        }
+        let parsed = parse_session_line(raw_line, &mut seen_in_batch)
+            .map_err(|e| format!("{e} (session requests file line {})", line_no + 1))?;
+        if matches!(parsed, CliSessionLine::Request(_)) {
+            request_count = request_count.checked_add(1).ok_or_else(|| {
+                "SessionLimitExceeded: session request count overflowed".to_string()
+            })?;
+        }
+        parsed_lines.push(parsed);
+    }
+    if request_count > ceiling.max_request_count as usize {
+        return Err(format!(
+            "SessionLimitExceeded: batch contains {request_count} requests, exceeding --max-requests {}",
+            ceiling.max_request_count
+        ));
+    }
+    let mut session_caller: Option<HubCallerIdentity> = None;
+    let mut session_capabilities = HubCapabilitySet::empty();
+    let mut session_privacy = HubPrivacyClass::PublicSafe;
+    for parsed in &parsed_lines {
+        let CliSessionLine::Request(request) = parsed else {
+            continue;
+        };
+        match &session_caller {
+            Some(caller) if caller != &request.caller_identity => {
+                return Err(format!(
+                "InputRejected: session requests use multiple caller identities ('{}' and '{}')",
+                caller, request.caller_identity
+            ))
+            }
+            None => session_caller = Some(request.caller_identity.clone()),
+            _ => {}
+        }
+        for capability in request.capability_context.iter() {
+            session_capabilities = session_capabilities.grant(*capability);
+        }
+        session_privacy = session_privacy.max(request.privacy_class);
+    }
+    let session_caller = session_caller.unwrap_or_else(|| {
+        HubCallerIdentity::new(default_caller_identity())
+            .expect("the built-in CLI caller identity is valid")
+    });
+
+    let mut hub = build_hub();
+    let audit_path = hub_data_root().join(AUDIT_LOG_FILE);
+
+    // Held for the whole batch: see `acquire_project_lock`'s doc comment.
+    // A session batch is still exactly one logical unit of work against
+    // one project, same as a single `smc hub invoke` call -- it must not
+    // interleave with another `smc hub invoke`/`session` process's own
+    // load -> dispatch -> append sequence.
+    let _project_lock = acquire_project_lock()?;
+
+    if let Some(dir) = audit_path.parent() {
+        check_dir_is_not_a_symlink(dir)?;
+    }
+    check_file_is_not_a_symlink(&audit_path)?;
+    let existing_audit_text = if audit_path.is_file() {
+        let bytes = read_bounded(
+            audit_path
+                .to_str()
+                .ok_or("AuditProvenanceFailure: audit log path is not valid UTF-8")?,
+            MAX_AUDIT_LOG_BYTES,
+        )
+        .map_err(|e| e.replace("InputRejected", "AuditProvenanceFailure"))?;
+        String::from_utf8(bytes)
+            .map_err(|e| format!("AuditProvenanceFailure: audit log is not valid UTF-8: {e}"))?
+    } else {
+        String::new()
+    };
+
+    // Persisted and unresolved request-id uniqueness is checked for the
+    // entire parsed batch before the first dispatch.
+    for request_id in &seen_in_batch {
+        if !existing_audit_text.is_empty()
+            && HubAuditTrail::find_by_request_streaming(&existing_audit_text, request_id)
+                .map_err(|e| format!("AuditProvenanceFailure: corrupt audit log: {e}"))?
+                .is_some()
+        {
+            return Err(format!(
+                "DuplicateRequestId: request_id '{}' was already used by a prior invocation",
+                request_id.as_str()
+            ));
+        }
+        let marker_path = pending_marker_path(request_id);
+        if let Some(dir) = marker_path.parent() {
+            check_dir_is_not_a_symlink(dir)?;
+        }
+        check_file_is_not_a_symlink(&marker_path)?;
+        if marker_path.is_file() {
+            return Err(format!(
+                "DuplicateRequestId: request_id '{}' has an unresolved pending invocation",
+                request_id.as_str()
+            ));
+        }
+    }
+
+    let current_audit_bytes = fs::metadata(&audit_path).map(|m| m.len()).unwrap_or(0);
+    if would_exceed_audit_log_cap(current_audit_bytes, request_count) {
+        return Err(format!(
+            "AuditLogFull: appending {request_count} session records would grow '{}' past the \
+             {MAX_AUDIT_LOG_BYTES} byte cap -- rotate or archive the audit log to continue",
+            audit_path.display()
+        ));
+    }
+
+    let next_sequence = if existing_audit_text.is_empty() {
+        0u64
+    } else {
+        let seq = HubAuditTrail::next_sequence_streaming(&existing_audit_text)
+            .map_err(|e| format!("AuditProvenanceFailure: corrupt audit log: {e}"))?;
+        seq.ok_or_else(|| {
+            "AuditProvenanceFailure: audit sequence numbers exhausted (the last record is \
+             already at u64::MAX) -- rotate or archive the audit log to continue"
+                .to_string()
+        })?
+    };
+    let _ = hub.seed_next_sequence(next_sequence);
+
+    let session_id = match session_id_override {
+        Some(raw) => HubSessionId::new(raw).map_err(|e| format!("InvalidArguments: {e}"))?,
+        None => HubSessionId::new(format!("session-{}", generate_request_id()))
+            .expect("generated session id always satisfies the handle charset/length rules"),
+    };
+    let mut session = HubSession::new(
+        session_id,
+        session_caller,
+        session_capabilities,
+        session_privacy,
+        ceiling,
+    );
+
+    let mut output_lines: Vec<String> = Vec::new();
+    let mut had_failure = false;
+
+    // Control records apply to the batch before deterministic execution,
+    // including a cancellation line that appears after its target request.
+    for parsed in &parsed_lines {
+        if let CliSessionLine::Cancel(id) = parsed {
+            session.cancel(id.clone());
+        }
+    }
+    for parsed in parsed_lines {
+        let CliSessionLine::Request(request) = parsed else {
+            continue;
+        };
+        let request_id = request.request_id.clone();
+        write_pending_marker(&request_id, &request.tool_id, &request.operation_id)?;
+        let reply = session.submit(&mut hub, *request, None);
+        if !reply.status.is_success() {
+            had_failure = true;
+        }
+        let record = hub.audit().records().last().ok_or_else(|| {
+            "AuditProvenanceFailure: Hub produced no audit record for a completed request"
+                .to_string()
+        })?;
+        HubAuditTrail::append_records_to_file(&audit_path, std::slice::from_ref(record))
+            .map_err(|e| format!("AuditProvenanceFailure: {e}"))?;
+        clear_pending_marker(&request_id);
+
+        let reply_json = build_cli_reply_json(&reply);
+        output_lines.push(
+            serde_json::to_string(&reply_json)
+                .map_err(|e| format!("InternalHubFault: could not render reply: {e}"))?,
+        );
+    }
+
+    let summary = session.summary();
+    let summary_json = serde_json::json!({
+        "session_summary": {
+            "session_id": summary.session_id.as_str(),
+            "caller_identity": summary.caller_identity.as_str(),
+            "capability_ceiling": summary.capability_ceiling.iter().map(|cap| cap.as_str()).collect::<Vec<_>>(),
+            "privacy_ceiling": summary.privacy_ceiling.to_string(),
+            "requests_submitted": summary.requests_submitted,
+            "requests_admitted": summary.requests_admitted,
+            "requests_rejected_pre_dispatch": summary.requests_rejected_pre_dispatch,
+            "cumulative_input_bytes": summary.cumulative_input_bytes,
+            "cumulative_output_bytes": summary.cumulative_output_bytes,
+            "cumulative_wall_time_millis": summary.cumulative_wall_time_millis,
+            "first_logical_sequence": summary.first_logical_sequence,
+            "last_logical_sequence": summary.last_logical_sequence,
+        }
+    });
+    output_lines.push(
+        serde_json::to_string(&summary_json)
+            .map_err(|e| format!("InternalHubFault: could not render session summary: {e}"))?,
+    );
+
+    let output_text = output_lines.join("\n") + "\n";
+    match out_path {
+        Some(path) => write_output_atomic(Path::new(&path), &output_text)?,
+        None => print!("{output_text}"),
+    }
+
+    if had_failure {
+        Err(
+            "SessionCompletedWithFailures: one or more requests in this session did not \
+             succeed -- see the per-request replies above for fault codes"
+                .to_string(),
+        )
+    } else {
+        Ok(())
+    }
+}
+
 fn build_cli_reply_json(reply: &semantic_hub::HubReply) -> serde_json::Value {
     let payload_value = if reply.payload.is_empty() {
         serde_json::Value::Null
@@ -718,9 +1216,17 @@ fn build_cli_reply_json(reply: &semantic_hub::HubReply) -> serde_json::Value {
             )
         }
     };
+    let artifact = reply.provenance.artifact.as_ref().map(|a| {
+        serde_json::json!({
+            "kind": a.kind,
+            "id": a.id,
+            "digest": a.digest.to_string(),
+        })
+    });
     serde_json::json!({
         "schema_version": CLI_ENVELOPE_SCHEMA_VERSION,
         "request_id": reply.request_id.as_str(),
+        "logical_sequence": reply.logical_sequence,
         "tool_id": reply.tool_id.as_str(),
         "tool_version": reply.tool_version.to_string(),
         "operation_id": reply.operation_id.as_str(),
@@ -733,6 +1239,13 @@ fn build_cli_reply_json(reply: &semantic_hub::HubReply) -> serde_json::Value {
             "input_bytes": reply.resource_usage.input_bytes,
             "output_bytes": reply.resource_usage.output_bytes,
         },
+        "provenance": {
+            "input_digest": reply.provenance.input_digest.to_string(),
+            "output_digest": reply.provenance.output_digest.to_string(),
+            "worker_state_after": reply.provenance.worker_state_after.to_string(),
+            "artifact": artifact,
+        },
+        "warnings": reply.warnings,
     })
 }
 
@@ -754,9 +1267,38 @@ fn cmd_hub_audit(args: &[String]) -> Result<(), String> {
     let request_id =
         HubRequestId::new(request_id_raw.as_str()).map_err(|e| format!("InvalidArguments: {e}"))?;
 
+    // Serialize the lookup against invoke/session append or migration so a
+    // reader never observes an in-progress file replacement or tail write.
+    let _project_lock = acquire_project_lock()?;
     let audit_path = hub_data_root().join(AUDIT_LOG_FILE);
-    let trail = load_audit_trail(&audit_path)?;
-    let record = match trail.find_by_request(&request_id) {
+    if let Some(dir) = audit_path.parent() {
+        check_dir_is_not_a_symlink(dir)?;
+    }
+    check_file_is_not_a_symlink(&audit_path)?;
+    // Streamed lookup: parses only up to the matching record, not the
+    // whole history into a `Vec<HubAuditRecord>` just to linear-scan it
+    // for one id (what `load_audit_trail` + `HubAuditTrail::find_by_request`
+    // did before this completion pass).
+    let audit_text = if audit_path.is_file() {
+        let bytes = read_bounded(
+            audit_path
+                .to_str()
+                .ok_or("AuditProvenanceFailure: audit log path is not valid UTF-8")?,
+            MAX_AUDIT_LOG_BYTES,
+        )
+        .map_err(|e| e.replace("InputRejected", "AuditProvenanceFailure"))?;
+        String::from_utf8(bytes)
+            .map_err(|e| format!("AuditProvenanceFailure: audit log is not valid UTF-8: {e}"))?
+    } else {
+        String::new()
+    };
+    let found = if audit_text.is_empty() {
+        None
+    } else {
+        HubAuditTrail::find_by_request_streaming(&audit_text, &request_id)
+            .map_err(|e| format!("AuditProvenanceFailure: corrupt audit log: {e}"))?
+    };
+    let record = match &found {
         Some(record) => record,
         None => {
             // Distinguish "never attempted" from "attempted but never
@@ -961,12 +1503,18 @@ mod tests {
         // load_audit_trail's own read cap. Exercised as a pure function
         // rather than by writing a real multi-hundred-megabyte fixture.
         let per_record_max = semantic_hub::audit::MAX_AUDIT_RECORD_BYTES as u64;
-        assert!(!would_exceed_audit_log_cap(0));
+        assert!(!would_exceed_audit_log_cap(0, 1));
         assert!(!would_exceed_audit_log_cap(
-            (MAX_AUDIT_LOG_BYTES - per_record_max) as usize
+            MAX_AUDIT_LOG_BYTES - per_record_max,
+            1
         ));
         assert!(would_exceed_audit_log_cap(
-            (MAX_AUDIT_LOG_BYTES - per_record_max + 1) as usize
+            MAX_AUDIT_LOG_BYTES - per_record_max + 1,
+            1
+        ));
+        assert!(would_exceed_audit_log_cap(
+            MAX_AUDIT_LOG_BYTES - per_record_max,
+            2
         ));
     }
 

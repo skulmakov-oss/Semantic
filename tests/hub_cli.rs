@@ -95,7 +95,7 @@ fn tools_lists_vector_turbovec_deterministically() {
 }
 
 #[test]
-fn describe_reports_all_seven_operations() {
+fn describe_reports_all_eight_operations() {
     let dir = temp_dir("hub_cli_describe");
     let output = smc_in(&dir, &["hub", "describe", "vector.turbovec"]);
     assert!(output.status.success());
@@ -108,6 +108,7 @@ fn describe_reports_all_seven_operations() {
         "vector.search",
         "vector.search.filtered",
         "vector.index.reset",
+        "vector.index.recover",
     ] {
         assert!(text.contains(op), "describe output missing {op}:\n{text}");
     }
@@ -326,6 +327,49 @@ fn out_flag_writes_reply_atomically_and_matches_stdout_semantics() {
 }
 
 #[test]
+fn out_flag_cannot_overwrite_hub_owned_state() {
+    let dir = temp_dir("hub_cli_out_state_guard");
+    let internal_out = dir.join(".semantic/hub/audit.log");
+    let invoke_output = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            &fixture_path("valid_index_create.json"),
+            "--out",
+            internal_out.to_str().unwrap(),
+        ],
+    );
+    assert!(!invoke_output.status.success(), "{:?}", invoke_output);
+    assert!(
+        String::from_utf8_lossy(&invoke_output.stderr).starts_with("ScopedStorageViolation"),
+        "{:?}",
+        invoke_output
+    );
+    assert!(!dir
+        .join(".semantic/hub/vector.turbovec/fixture-docs.tvim")
+        .exists());
+
+    let session_output = session(
+        &dir,
+        "session_workflow.ndjson",
+        &["--out", internal_out.to_str().unwrap()],
+    );
+    assert!(!session_output.status.success(), "{:?}", session_output);
+    assert!(
+        String::from_utf8_lossy(&session_output.stderr).starts_with("ScopedStorageViolation"),
+        "{:?}",
+        session_output
+    );
+    assert!(!dir
+        .join(".semantic/hub/vector.turbovec/session-docs.tvim")
+        .exists());
+}
+
+#[test]
 fn same_request_repeated_produces_deterministic_search_ranking() {
     // CLI-level determinism check, complementing the adapter-level
     // qualification in crates/semantic-hub-turbovec/tests/determinism_qualification.rs:
@@ -416,11 +460,19 @@ fn payload_exceeding_the_requests_own_declared_input_budget_is_rejected() {
 }
 
 #[test]
-fn granting_a_sensitive_capability_survives_audit_round_trip() {
-    // Regression test: the audit writer previously could not parse back a
-    // sensitive capability name (e.g. NetworkAccess) that a caller granted
-    // (even though admission denies using it), corrupting the whole audit
-    // log for every subsequent invocation.
+fn granting_a_sensitive_capability_is_rejected_and_survives_audit_round_trip() {
+    // Regression test, updated for the v0-completion hardening pass: a
+    // request whose capability_context grants ANY sensitive capability
+    // (e.g. NetworkAccess) is now rejected outright at admission with
+    // SensitiveCapabilityDenied -- see semantic_hub::admission::admit --
+    // rather than silently succeeding with the grant just stripped before
+    // the adapter saw it. The audit writer must still durably record that
+    // rejection (including the sensitive capability that was asked for,
+    // as evidence) and remain readable for the *next* invocation
+    // afterward -- this is the original regression this test guarded:
+    // the audit writer previously could not parse back a sensitive
+    // capability name at all, corrupting the whole audit log for every
+    // subsequent invocation.
     let dir = temp_dir("hub_cli_sensitive_cap_audit");
     let req = serde_json::json!({
         "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite", "NetworkAccess"],
@@ -439,30 +491,40 @@ fn granting_a_sensitive_capability_survives_audit_round_trip() {
             input.to_str().unwrap(),
         ],
     );
-    assert!(first.status.success(), "{:?}", first);
+    assert!(
+        !first.status.success(),
+        "a request granting a sensitive capability must be rejected: {:?}",
+        first
+    );
+    assert!(String::from_utf8_lossy(&first.stderr).starts_with("SensitiveCapabilityDenied"));
 
-    // The audit log must still be readable afterward -- this is exactly
-    // the failure mode the earlier status_code/fault_code bug produced.
-    let describe_req = serde_json::json!({
-        "capabilities": ["VectorIndexRead", "PrivateStorageRead"],
-        "payload": {"index": "sensitive-cap-docs"}
+    // No index was ever created (admission rejected before dispatch) --
+    // confirm this by creating the SAME index name for real, without the
+    // sensitive grant, which would fail with IndexAlreadyExists if the
+    // rejected request had somehow still created it.
+    let clean_req = serde_json::json!({
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "sensitive-cap-docs", "dim": 8, "bit_width": 4}
     });
-    let describe_input = dir.join("describe_sensitive_cap_docs.json");
-    fs::write(&describe_input, serde_json::to_vec(&describe_req).unwrap()).unwrap();
+    let clean_input = dir.join("create_without_sensitive_cap.json");
+    fs::write(&clean_input, serde_json::to_vec(&clean_req).unwrap()).unwrap();
     let second = smc_in(
         &dir,
         &[
             "hub",
             "invoke",
             "vector.turbovec",
-            "vector.index.describe",
+            "vector.index.create",
             "--input",
-            describe_input.to_str().unwrap(),
+            clean_input.to_str().unwrap(),
         ],
     );
+    // The audit log must still be readable after a record containing a
+    // sensitive capability grant -- this is exactly the failure mode the
+    // earlier status_code/fault_code bug produced.
     assert!(
         second.status.success(),
-        "audit log must remain readable after a request granting a sensitive capability: {:?}",
+        "audit log must remain readable after a rejected request granting a sensitive capability: {:?}",
         second
     );
 }
@@ -1025,5 +1087,356 @@ fn invoke_rejects_a_wall_time_budget_of_u64_max_instead_of_crashing() {
         String::from_utf8_lossy(&output.stderr).starts_with("ResourceBudgetInvalid"),
         "{:?}",
         output
+    );
+}
+
+// ---- smc hub session (Semantic Hub v0 completion pass) ----------------
+
+fn stdout_ndjson_lines(output: &Output) -> Vec<serde_json::Value> {
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            serde_json::from_str(l).unwrap_or_else(|e| {
+                panic!(
+                    "expected NDJSON line, got parse error {e}: {l}\nfull stdout={:?}",
+                    output
+                )
+            })
+        })
+        .collect()
+}
+
+fn session(dir: &Path, requests_fixture: &str, extra_args: &[&str]) -> Output {
+    let mut args = vec![
+        "hub".to_string(),
+        "session".to_string(),
+        "--requests".to_string(),
+        fixture_path(requests_fixture),
+    ];
+    args.extend(extra_args.iter().map(|s| s.to_string()));
+    smc_in(dir, &args.iter().map(String::as_str).collect::<Vec<_>>())
+}
+
+#[test]
+fn session_processes_a_full_create_insert_search_remove_search_recover_workflow_in_one_batch() {
+    let dir = temp_dir("hub_cli_session_workflow");
+    let output = session(&dir, "session_workflow.ndjson", &[]);
+    assert!(output.status.success(), "{:?}", output);
+
+    let lines = stdout_ndjson_lines(&output);
+    assert_eq!(lines.len(), 7, "6 replies + 1 session_summary line");
+
+    let (replies, summary_lines): (Vec<_>, Vec<_>) = lines
+        .into_iter()
+        .partition(|l| l.get("session_summary").is_none());
+    assert_eq!(summary_lines.len(), 1);
+
+    // Every reply succeeded, in submission order, with strictly increasing
+    // logical_sequence.
+    let mut prev_seq: Option<u64> = None;
+    for reply in &replies {
+        assert_eq!(reply["status"], "Success", "{:?}", reply);
+        let seq = reply["logical_sequence"].as_u64().unwrap();
+        if let Some(p) = prev_seq {
+            assert!(seq > p, "logical_sequence must strictly increase");
+        }
+        prev_seq = Some(seq);
+    }
+
+    // The create's own artifact provenance is present and the search
+    // operations correctly reflect the insert/remove mutations: search
+    // before remove sees both id 101 and 102 in the top 2, search after
+    // removing 102 no longer includes it.
+    assert!(
+        replies[0]["provenance"]["artifact"].is_object(),
+        "{:?}",
+        replies[0]
+    );
+    let search_1_ids: Vec<u64> = replies[2]["payload"]["hits"][0]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["external_id"].as_u64().unwrap())
+        .collect();
+    assert!(search_1_ids.contains(&102), "{search_1_ids:?}");
+    let search_2_ids: Vec<u64> = replies[4]["payload"]["hits"][0]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["external_id"].as_u64().unwrap())
+        .collect();
+    assert!(!search_2_ids.contains(&102), "{search_2_ids:?}");
+
+    // The recover operation, run against a cleanly-committed index, reports
+    // AlreadyCommitted -- not an error, not Indeterminate.
+    assert_eq!(replies[5]["payload"]["outcome"], "AlreadyCommitted");
+
+    // Session summary reflects the whole batch accurately.
+    let summary = &summary_lines[0]["session_summary"];
+    assert_eq!(summary["requests_submitted"], 6);
+    assert_eq!(summary["requests_admitted"], 6);
+    assert_eq!(summary["requests_rejected_pre_dispatch"], 0);
+    assert_eq!(
+        summary["first_logical_sequence"],
+        replies[0]["logical_sequence"]
+    );
+    assert_eq!(
+        summary["last_logical_sequence"],
+        replies[5]["logical_sequence"]
+    );
+}
+
+#[test]
+fn session_mutations_persist_across_the_process_boundary_and_are_reloadable_via_plain_invoke() {
+    let dir = temp_dir("hub_cli_session_persist");
+    let batch = session(&dir, "session_workflow.ndjson", &[]);
+    assert!(batch.status.success(), "{:?}", batch);
+
+    // A completely separate `smc hub invoke` process (not part of the
+    // session) reloads the SAME index from disk and sees the mutations
+    // the session batch committed.
+    let describe_req = serde_json::json!({
+        "capabilities": ["VectorIndexRead", "PrivateStorageRead"],
+        "payload": {"index": "session-docs"}
+    });
+    let describe_input = dir.join("describe_session_docs.json");
+    fs::write(&describe_input, serde_json::to_vec(&describe_req).unwrap()).unwrap();
+    let describe = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.describe",
+            "--input",
+            describe_input.to_str().unwrap(),
+        ],
+    );
+    assert!(describe.status.success(), "{:?}", describe);
+    // 3 inserted, 1 removed -> 2 remain.
+    assert_eq!(stdout_json(&describe)["payload"]["len"], 2);
+}
+
+#[test]
+fn session_rejects_further_requests_once_max_requests_ceiling_is_reached() {
+    let dir = temp_dir("hub_cli_session_ceiling");
+    let output = session(&dir, "session_workflow.ndjson", &["--max-requests", "2"]);
+    assert!(!output.status.success(), "{:?}", output);
+    assert!(
+        String::from_utf8_lossy(&output.stderr).starts_with("SessionLimitExceeded"),
+        "{:?}",
+        output
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "a batch that exceeds its intake ceiling must be rejected before dispatch"
+    );
+    assert!(
+        !dir.join(".semantic/hub/vector.turbovec/session-docs.tvim")
+            .exists(),
+        "preflight rejection must not apply the first mutation"
+    );
+}
+
+#[test]
+fn session_rejects_a_non_numeric_max_requests_value() {
+    let dir = temp_dir("hub_cli_session_bad_max_requests");
+    let output = session(
+        &dir,
+        "session_workflow.ndjson",
+        &["--max-requests", "not-a-number"],
+    );
+    assert!(!output.status.success(), "{:?}", output);
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("InvalidArguments"));
+}
+
+#[test]
+fn session_cancel_line_rejects_the_named_later_request_with_cancelled() {
+    let dir = temp_dir("hub_cli_session_cancel");
+    let requests = dir.join("cancel_batch.ndjson");
+    fs::write(
+        &requests,
+        [
+            r#"{"request_id":"c-1","tool_id":"vector.turbovec","operation_id":"vector.index.create","capabilities":["VectorIndexCreate","PrivateStorageRead","PrivateStorageWrite"],"payload":{"index":"cancel-docs","dim":8,"bit_width":4}}"#,
+            r#"{"cancel":"c-2"}"#,
+            r#"{"request_id":"c-2","tool_id":"vector.turbovec","operation_id":"vector.index.describe","capabilities":["VectorIndexRead","PrivateStorageRead"],"payload":{"index":"cancel-docs"}}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+    let output = smc_in(
+        &dir,
+        &["hub", "session", "--requests", requests.to_str().unwrap()],
+    );
+    assert!(!output.status.success(), "{:?}", output);
+    let lines = stdout_ndjson_lines(&output);
+    assert_eq!(lines[0]["status"], "Success");
+    assert_eq!(lines[1]["status"], "Rejected");
+    assert_eq!(lines[1]["fault_code"], "Cancelled");
+}
+
+#[test]
+fn session_cancel_line_after_its_target_is_still_applied_before_dispatch() {
+    let dir = temp_dir("hub_cli_session_late_cancel");
+    let requests = dir.join("late_cancel_batch.ndjson");
+    fs::write(
+        &requests,
+        [
+            r#"{"request_id":"late-cancel","tool_id":"vector.turbovec","operation_id":"vector.index.create","capabilities":["VectorIndexCreate","PrivateStorageRead","PrivateStorageWrite"],"payload":{"index":"late-cancel-docs","dim":8,"bit_width":4}}"#,
+            r#"{"cancel":"late-cancel"}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+    let output = smc_in(
+        &dir,
+        &["hub", "session", "--requests", requests.to_str().unwrap()],
+    );
+    assert!(!output.status.success(), "{:?}", output);
+    let lines = stdout_ndjson_lines(&output);
+    assert_eq!(lines[0]["status"], "Rejected");
+    assert_eq!(lines[0]["fault_code"], "Cancelled");
+    assert!(!dir
+        .join(".semantic/hub/vector.turbovec/late-cancel-docs.tvim")
+        .exists());
+}
+
+#[test]
+fn session_rejects_a_duplicate_request_id_within_the_same_batch() {
+    let dir = temp_dir("hub_cli_session_dup_batch");
+    let requests = dir.join("dup_batch.ndjson");
+    fs::write(
+        &requests,
+        [
+            r#"{"request_id":"dup-1","tool_id":"vector.turbovec","operation_id":"vector.index.create","capabilities":["VectorIndexCreate","PrivateStorageRead","PrivateStorageWrite"],"payload":{"index":"dup-docs","dim":8,"bit_width":4}}"#,
+            r#"{"request_id":"dup-1","tool_id":"vector.turbovec","operation_id":"vector.index.describe","capabilities":["VectorIndexRead","PrivateStorageRead"],"payload":{"index":"dup-docs"}}"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+    let output = smc_in(
+        &dir,
+        &["hub", "session", "--requests", requests.to_str().unwrap()],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("DuplicateRequestId"));
+    assert!(output.stdout.is_empty());
+    assert!(
+        !dir.join(".semantic/hub/vector.turbovec/dup-docs.tvim")
+            .exists(),
+        "a duplicate later line must reject the complete batch before its first mutation"
+    );
+}
+
+#[test]
+fn session_rejects_a_request_id_already_used_by_a_prior_plain_invoke() {
+    let dir = temp_dir("hub_cli_session_dup_prior");
+    let create_req = serde_json::json!({
+        "request_id": "already-used",
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "prior-docs", "dim": 8, "bit_width": 4}
+    });
+    let input = dir.join("create_already_used.json");
+    fs::write(&input, serde_json::to_vec(&create_req).unwrap()).unwrap();
+    let first = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(first.status.success(), "{:?}", first);
+
+    let requests = dir.join("reuse_batch.ndjson");
+    fs::write(
+        &requests,
+        r#"{"request_id":"already-used","tool_id":"vector.turbovec","operation_id":"vector.index.describe","capabilities":["VectorIndexRead","PrivateStorageRead"],"payload":{"index":"prior-docs"}}"#,
+    )
+    .unwrap();
+    let output = smc_in(
+        &dir,
+        &["hub", "session", "--requests", requests.to_str().unwrap()],
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).starts_with("DuplicateRequestId"));
+}
+
+#[test]
+fn session_malformed_json_line_is_a_typed_rejection_naming_the_line_number() {
+    let dir = temp_dir("hub_cli_session_malformed");
+    let requests = dir.join("malformed_batch.ndjson");
+    fs::write(
+        &requests,
+        [
+            r#"{"request_id":"ok-1","tool_id":"vector.turbovec","operation_id":"vector.index.create","capabilities":["VectorIndexCreate","PrivateStorageRead","PrivateStorageWrite"],"payload":{"index":"malformed-docs","dim":8,"bit_width":4}}"#,
+            r#"{"tool_id": not valid json"#,
+        ]
+        .join("\n"),
+    )
+    .unwrap();
+    let output = smc_in(
+        &dir,
+        &["hub", "session", "--requests", requests.to_str().unwrap()],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.starts_with("InputRejected"), "{stderr}");
+    assert!(stderr.contains("line 2"), "{stderr}");
+    assert!(output.stdout.is_empty());
+    assert!(
+        !dir.join(".semantic/hub/vector.turbovec/malformed-docs.tvim")
+            .exists(),
+        "a malformed later line must reject the complete batch before its first mutation"
+    );
+}
+
+#[test]
+fn session_with_no_valid_lines_succeeds_with_an_empty_summary() {
+    let dir = temp_dir("hub_cli_session_empty");
+    let requests = dir.join("empty_batch.ndjson");
+    fs::write(&requests, "\n\n").unwrap();
+    let output = smc_in(
+        &dir,
+        &["hub", "session", "--requests", requests.to_str().unwrap()],
+    );
+    assert!(output.status.success(), "{:?}", output);
+    let lines = stdout_ndjson_lines(&output);
+    assert_eq!(lines.len(), 1);
+    let summary = &lines[0]["session_summary"];
+    assert_eq!(summary["requests_submitted"], 0);
+}
+
+#[test]
+fn recover_is_reachable_through_the_generic_invoke_command_not_a_dedicated_subcommand() {
+    let dir = temp_dir("hub_cli_recover_via_invoke");
+    invoke(&dir, "vector.index.create", "valid_index_create.json");
+    invoke(&dir, "vector.index.insert", "valid_index_insert.json");
+
+    let recover_req = serde_json::json!({
+        "capabilities": ["VectorIndexMutate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "fixture-docs"}
+    });
+    let input = dir.join("recover.json");
+    fs::write(&input, serde_json::to_vec(&recover_req).unwrap()).unwrap();
+    let output = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.recover",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(output.status.success(), "{:?}", output);
+    assert_eq!(
+        stdout_json(&output)["payload"]["outcome"],
+        "AlreadyCommitted"
     );
 }

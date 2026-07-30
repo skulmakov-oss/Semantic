@@ -1,6 +1,6 @@
 # Semantic Hub v0 Reference Adapter: `vector.turbovec`
 
-Status: draft v0
+Status: v0, landed and completed (v0-completion pass, issue #1526)
 Owner crate: `semantic-hub-turbovec`
 
 This document specifies the `vector.turbovec` Semantic Hub tool: a reference
@@ -16,6 +16,7 @@ crates/semantic-hub-turbovec/
   src/lib.rs             tool descriptor, HubTool impl, per-operation handlers
   src/payload.rs         JSON request/reply types, bound checks
   src/storage.rs         IndexName validation, ScopedStorage
+  src/transaction.rs     write-ahead transaction/recovery protocol (v0-completion)
   tests/determinism_qualification.rs
 ```
 
@@ -53,7 +54,7 @@ anywhere in the dependency graph this adapter introduces.
 
 ## 2. Supported operations
 
-Seven operations, exact capability lists and determinism classes from the
+Eight operations, exact capability lists and determinism classes from the
 tool descriptor in `src/lib.rs`:
 
 | Operation | Required capabilities | Determinism class | Mutates state |
@@ -65,13 +66,20 @@ tool descriptor in `src/lib.rs`:
 | `vector.search` | `VectorSearch`, `PrivateStorageRead` | `DeterministicWithSeed` | no |
 | `vector.search.filtered` | `VectorFilteredSearch`, `PrivateStorageRead` | `DeterministicWithSeed` | no |
 | `vector.index.reset` | `VectorIndexMutate`, `PrivateStorageRead`, `PrivateStorageWrite` | `Deterministic` | yes |
+| `vector.index.recover` | `VectorIndexMutate`, `PrivateStorageRead`, `PrivateStorageWrite` | `EnvironmentDependent` | yes |
 
 `DeterministicWithSeed` marks the three operations that run a turbovec
 floating-point kernel (`insert`, `search`, `search.filtered`) -- see Section
 9 for what that classification does and does not claim.
 `Deterministic` marks the four with no floating-point kernel involved.
-Missing capabilities are rejected by the generic Hub admission path before
-this adapter's handler code runs; the adapter does not re-check them.
+`vector.index.recover` (v0-completion pass) is honestly classified
+`EnvironmentDependent`: its outcome depends on which files happen to exist
+on disk at call time (candidate present vs. absent, final artifact present
+vs. absent -- see Section 10), not purely on the request payload, even
+though it is idempotent once the underlying filesystem state stops
+changing. Missing capabilities are rejected by the generic Hub admission
+path before this adapter's handler code runs; the adapter does not
+re-check them.
 
 ## 3. Request and reply payloads
 
@@ -311,20 +319,66 @@ cross-CPU-backend reproducibility claim.
 
 There is no separate explicit save/load verb in the Hub-facing API. Every
 mutating call (`create`, `insert`, `remove`, `reset`) loads-or-initializes
-the `IdMapIndex`, mutates it in memory, and atomically rewrites the whole
-index to `<data_dir>/vector.turbovec/<name>.tvim`: write to a temp file
-(named with the process id and a nanosecond timestamp to avoid collisions),
-then `fs::rename` over the final path, so a concurrent reader never observes
-a partial or torn write. Read operations (`describe`, `search`,
-`search.filtered`) load fresh from that file on every call.
+the `IdMapIndex`, mutates it in memory, and commits the whole index to
+`<data_dir>/vector.turbovec/<name>.tvim` through the write-ahead
+transaction protocol below (v0-completion pass) rather than a bare
+write-temp-then-rename. Read operations (`describe`, `search`,
+`search.filtered`) load fresh from that file on every call, after first
+checking that no transaction is left unresolved (below).
 
 This follows directly from how the Hub CLI is used: one short-lived process
-per `smc hub invoke`, with no in-memory cache surviving across invocations
-in v0 -- the `.tvim` file on disk **is** the adapter's actual state between
-invocations, not a mirror of some other source of truth. `.tvim` is
-turbovec's own persistence format (quantized codes plus the id-map side
-table), written and loaded through `IdMapIndex::write`/`IdMapIndex::load`,
-and round-trips exactly.
+per `smc hub invoke` call (or one process handling many requests for one
+`smc hub session` batch), with no in-memory cache surviving across separate
+CLI invocations in v0 -- the `.tvim` file on disk **is** the adapter's
+actual state between invocations, not a mirror of some other source of
+truth. `.tvim` is turbovec's own persistence format (quantized codes plus
+the id-map side table), written and loaded through
+`IdMapIndex::write`/`IdMapIndex::load`, and round-trips exactly.
+
+### 10.1 Write-ahead transaction protocol (v0-completion pass)
+
+`crates/semantic-hub-turbovec/src/transaction.rs` closes a gap the plain
+temp-file-then-rename approach left: the rename step itself was already
+atomic, but nothing durably recorded *intent* before it, so a crash between
+the candidate write and the rename left only an orphaned, uninspected temp
+file. Full description, including the recovery algorithm's three cases:
+`docs/architecture/semantic_hub_v0.md` section 20.
+
+One additional file per index, `<data_dir>/vector.turbovec/<name>.tvim.txn`,
+always overwritten in place (never an unbounded log):
+
+```text
+sequence:
+  1. begin()   -- write <name>.tvim.txn, phase=Intent, BEFORE the
+                  candidate write starts
+  2. candidate written to the scoped temp path named in that record
+  3. fs::rename candidate -> <name>.tvim (atomic)
+  4. read the final path back and digest it (never the write buffer)
+  5. commit()  -- rewrite the SAME .tvim.txn, phase=Committed, with the
+                  verified digest -- success is reported to the Hub
+                  caller only once this write is durable
+```
+
+`load()` (the entry point every read and every further mutation goes
+through) refuses to proceed if the transaction record is still
+`phase=Intent`, returning a `RecoveryRequired`-coded `HubToolError`. The
+new `vector.index.recover` operation is the only code path that inspects a
+transaction record without going through `load()`'s gate.
+
+### 10.2 `vector.index.recover`
+
+```text
+request  { "index": string }
+reply    { "index": string, "outcome": string, "artifact_digest": string|null, "reason": string|null }
+```
+
+`outcome` is one of `NoTransaction`, `AlreadyCommitted`,
+`RolledBackAbandonedCandidate`, `FinalizedCommit`, `Indeterminate`. `reason`
+is populated only for `Indeterminate` (recovery could not prove either
+outcome -- see architecture doc section 20). Requires the same capabilities
+as any other mutating operation (`VectorIndexMutate`, `PrivateStorageRead`,
+`PrivateStorageWrite`); reachable through `smc hub invoke` or `smc hub
+session` like any other operation -- there is no dedicated CLI subcommand.
 
 ## 11. CPU and backend assumptions
 

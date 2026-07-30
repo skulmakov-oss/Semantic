@@ -33,6 +33,44 @@ impl<'a> RestrictedHubContext<'a> {
     }
 }
 
+/// What one successful `HubTool::handle` call produced: the reply payload
+/// bytes, plus optional artifact provenance for a mutating operation that
+/// committed durable state (e.g. a TurboVec `.tvim` write). `artifact` is
+/// `None` for a non-mutating operation (search, describe) -- there is no
+/// durable artifact to bind provenance to.
+#[derive(Debug, Clone)]
+pub struct HubToolOutcome {
+    pub payload: Vec<u8>,
+    pub artifact: Option<crate::provenance::HubArtifactProvenance>,
+}
+
+impl HubToolOutcome {
+    /// Construct an outcome with no artifact -- the common case for every
+    /// non-mutating operation and for any mutating operation an adapter
+    /// has not yet been updated to report provenance for.
+    pub fn payload_only(payload: Vec<u8>) -> Self {
+        Self {
+            payload,
+            artifact: None,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct HubDispatchFailure {
+    fault: HubFault,
+    committed_artifact: Option<crate::provenance::HubArtifactProvenance>,
+}
+
+impl HubDispatchFailure {
+    fn without_artifact(fault: HubFault) -> Self {
+        Self {
+            fault,
+            committed_artifact: None,
+        }
+    }
+}
+
 /// The adapter contract every in-process Hub tool implements. `&mut self`
 /// gives the adapter private mutable state; it receives no reference to
 /// Semantic internals, the registry, or any other tool.
@@ -44,7 +82,7 @@ pub trait HubTool: Send {
         operation_id: &HubOperationId,
         payload: &[u8],
         context: &RestrictedHubContext,
-    ) -> Result<Vec<u8>, HubToolError>;
+    ) -> Result<HubToolOutcome, HubToolError>;
 
     /// Optional structural check on this tool's own reply shape, run after
     /// `handle` succeeds and before the reply is accepted. A `Err` here is
@@ -103,8 +141,12 @@ impl Hub {
     /// appends to on disk. The caller is responsible for reading that
     /// persisted log's next sequence number and seeding it here before the
     /// first `invoke`.
-    pub fn seed_next_sequence(&mut self, next: u64) {
+    pub fn seed_next_sequence(&mut self, next: u64) -> Result<(), HubFault> {
+        if next == u64::MAX {
+            return Err(HubFault::SequenceExhausted);
+        }
         self.next_sequence = next;
+        Ok(())
     }
 
     pub fn register_tool(&mut self, tool: Box<dyn HubTool>) -> Result<(), HubRegistrationError> {
@@ -129,21 +171,39 @@ impl Hub {
     /// drops evidence) -- rejection, tool failure, and crash are all
     /// represented as reply statuses with audit records, not exceptions.
     pub fn invoke(&mut self, request: HubRequest, deadline: Option<Instant>) -> HubReply {
+        self.invoke_impl(request, deadline, false, None)
+    }
+
+    /// Same admission -> dispatch -> validation -> audit path as
+    /// [`Self::invoke`], additionally attenuated by a
+    /// [`crate::admission::SessionAdmissionAmbient`] and an explicit
+    /// per-request cancellation flag -- the entry point [`crate::session::HubSession`]
+    /// uses so a session-submitted request goes through exactly the same
+    /// pipeline as a direct `invoke` call, never a parallel one.
+    pub fn invoke_in_session(
+        &mut self,
+        request: HubRequest,
+        deadline: Option<Instant>,
+        already_cancelled: bool,
+        session_ambient: crate::admission::SessionAdmissionAmbient,
+    ) -> HubReply {
+        self.invoke_impl(request, deadline, already_cancelled, Some(session_ambient))
+    }
+
+    fn invoke_impl(
+        &mut self,
+        request: HubRequest,
+        deadline: Option<Instant>,
+        already_cancelled: bool,
+        session_ambient: Option<crate::admission::SessionAdmissionAmbient>,
+    ) -> HubReply {
+        if self.next_sequence == u64::MAX {
+            return self.finish_pre_dispatch(request, u64::MAX, HubFault::SequenceExhausted);
+        }
         let sequence = self.next_sequence;
-        // Saturating, not plain `+= 1`: if seeded at `u64::MAX` (the
-        // legitimately-valid next sequence when a persisted trail's last
-        // record is at `u64::MAX - 1`), this invocation must still
-        // proceed and record its own evidence at `sequence == u64::MAX`
-        // -- a plain `+= 1` here panics (or wraps in a release build)
-        // one instruction after capturing `sequence` above, aborting the
-        // whole invocation before that correctly-captured sequence is
-        // ever used. A second `invoke` call on an already-exhausted `Hub`
-        // would then reuse `u64::MAX` again, but that residual case is
-        // already caught by `HubAuditTrail`'s own monotonic-sequence
-        // validation on the next load, and is unreachable through this
-        // crate's real usage (the CLI builds one fresh `Hub` and calls
-        // `invoke` exactly once per process).
-        self.next_sequence = self.next_sequence.saturating_add(1);
+        // `u64::MAX` is reserved for an explicit sequence-exhaustion
+        // sentinel reply and is never appended as an audit sequence.
+        self.next_sequence += 1;
         let started = Instant::now();
 
         // Derive a deadline from the admitted resource_budget.wall_time_millis
@@ -189,7 +249,8 @@ impl Hub {
         let ambient = AdmissionAmbient {
             current_queue_depth: 0,
             current_concurrent_requests: self.concurrent_requests,
-            already_cancelled: false,
+            already_cancelled,
+            session: session_ambient,
         };
 
         let admitted = match admit(&self.registry, &request, ambient) {
@@ -198,8 +259,14 @@ impl Hub {
         };
 
         self.concurrent_requests = self.concurrent_requests.saturating_add(1);
-        let result = self.dispatch(&request, &admitted.tool, effective_deadline, started);
+        let dispatch_result = self.dispatch(&request, &admitted.tool, effective_deadline, started);
         self.concurrent_requests = self.concurrent_requests.saturating_sub(1);
+
+        let committed_artifact = match &dispatch_result {
+            Ok(outcome) => outcome.artifact.clone(),
+            Err(failure) => failure.committed_artifact.clone(),
+        };
+        let dispatch_result = dispatch_result.map_err(|failure| failure.fault);
 
         // Recheck the same effective deadline after dispatch returns: the
         // entry check above only rejects a request whose budget was
@@ -216,15 +283,29 @@ impl Hub {
         // already committed before this check runs are not undone, the
         // same "effects happened but the reply reports failure" property
         // Hub already accepts for OutputRejected below.
-        let result = result.and_then(|bytes| {
-            if effective_deadline.is_some_and(|d| Instant::now() > d) {
+        let dispatch_result = dispatch_result.and_then(|outcome| {
+            if outcome.payload.len() as u64 > request.resource_budget.output_bytes {
+                Err(HubFault::OutputRejected(format!(
+                    "output {} bytes exceeds budgeted {} bytes",
+                    outcome.payload.len(),
+                    request.resource_budget.output_bytes
+                )))
+            } else if effective_deadline.is_some_and(|d| Instant::now() > d) {
                 Err(HubFault::DeadlineExceeded)
             } else {
-                Ok(bytes)
+                Ok(outcome)
             }
         });
 
-        self.record_and_reply(request, sequence, started, admitted.tool, result)
+        self.record_and_reply(
+            request,
+            sequence,
+            started,
+            admitted.tool,
+            dispatch_result,
+            committed_artifact,
+            true,
+        )
     }
 
     fn dispatch(
@@ -233,27 +314,52 @@ impl Hub {
         tool: &HubToolDescriptor,
         deadline: Option<Instant>,
         _started: Instant,
-    ) -> Result<Vec<u8>, HubFault> {
+    ) -> Result<HubToolOutcome, HubDispatchFailure> {
         let Some(health) = self.registry.health_mut(&tool.tool_id) else {
-            return Err(HubFault::InternalHubFault(
-                "worker health missing for registered tool".into(),
+            return Err(HubDispatchFailure::without_artifact(
+                HubFault::InternalHubFault("worker health missing for registered tool".into()),
             ));
         };
-        if !health.state().accepts_dispatch()
-            && health.state() != crate::worker::HubWorkerState::Registered
-        {
-            return Err(HubFault::ToolQuarantined);
+        // Busy is reported distinctly from Quarantined/Disabled: it is not
+        // a supervision-imposed rejection, it is the invariant "this worker
+        // is already mid-dispatch" -- structurally unreachable through
+        // ordinary Rust borrowing under Hub v0's synchronous, single-owner
+        // (`&mut Hub`) model, but checked explicitly rather than assumed,
+        // so a future concurrent execution mode cannot silently re-enter a
+        // worker and have that misreported as a supervision quarantine.
+        let was_degraded = health.state() == crate::worker::HubWorkerState::Degraded;
+        match health.state() {
+            crate::worker::HubWorkerState::Busy => {
+                return Err(HubDispatchFailure::without_artifact(HubFault::WorkerBusy))
+            }
+            s if s.accepts_dispatch() || s == crate::worker::HubWorkerState::Registered => {}
+            _ => {
+                return Err(HubDispatchFailure::without_artifact(
+                    HubFault::ToolQuarantined,
+                ))
+            }
         }
         // v0 lifecycle: a freshly registered worker starts on first dispatch.
         if health.state() == crate::worker::HubWorkerState::Registered {
-            let _ = health.mark_starting();
-            let _ = health.mark_ready();
+            health.mark_starting().map_err(|error| {
+                HubDispatchFailure::without_artifact(HubFault::InternalHubFault(error.to_string()))
+            })?;
+            health.mark_ready().map_err(|error| {
+                HubDispatchFailure::without_artifact(HubFault::InternalHubFault(error.to_string()))
+            })?;
         }
-        let _ = health.mark_busy();
+        health.mark_busy().map_err(|error| {
+            HubDispatchFailure::without_artifact(HubFault::InternalHubFault(error.to_string()))
+        })?;
 
         let Some(worker) = self.workers.get_mut(&tool.tool_id) else {
-            return Err(HubFault::InternalHubFault(
-                "worker instance missing for registered tool".into(),
+            let health = self
+                .registry
+                .health_mut(&tool.tool_id)
+                .expect("health present: checked above");
+            let _ = restore_worker_after_dispatch(health, was_degraded);
+            return Err(HubDispatchFailure::without_artifact(
+                HubFault::InternalHubFault("worker instance missing for registered tool".into()),
             ));
         };
 
@@ -263,8 +369,9 @@ impl Hub {
         // sensitive capability the caller happened to include alongside
         // them. An adapter naively calling `.allows(NetworkAccess)` on the
         // raw set could otherwise observe `true` for something Hub
-        // structurally denies. The unsanitized set is still what the audit
-        // record captures (via `request.capability_context` directly).
+        // structurally denies. Audit records preserve the raw set as
+        // `capabilities_requested` and this sanitized set as
+        // `capabilities_granted`.
         let sanitized_capabilities = request.capability_context.deny_sensitive();
         let context = RestrictedHubContext {
             resource_budget: &request.resource_budget,
@@ -274,7 +381,7 @@ impl Hub {
 
         let operation_id = request.operation_id.clone();
         let payload = request.payload.clone();
-        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+        let handle_result = panic::catch_unwind(AssertUnwindSafe(|| {
             worker.handle(&operation_id, &payload, &context)
         }));
 
@@ -283,16 +390,12 @@ impl Hub {
             .health_mut(&tool.tool_id)
             .expect("health present: checked above");
 
-        match outcome {
-            Ok(Ok(bytes)) => {
-                if bytes.len() as u64 > request.resource_budget.output_bytes {
-                    let _ = health.mark_ready();
-                    return Err(HubFault::OutputRejected(format!(
-                        "output {} bytes exceeds budgeted {} bytes",
-                        bytes.len(),
-                        request.resource_budget.output_bytes
-                    )));
-                }
+        match handle_result {
+            Ok(Ok(tool_outcome)) => {
+                let HubToolOutcome {
+                    payload: bytes,
+                    artifact,
+                } = tool_outcome;
                 let worker_ref = self.workers.get(&tool.tool_id).expect("worker present");
                 // `validate_reply` is adapter-overridable code, exactly
                 // like `handle` -- it must be panic-contained the same
@@ -307,28 +410,47 @@ impl Hub {
                 }));
                 match validation_outcome {
                     Ok(Ok(())) => {
-                        let _ = health.mark_ready();
-                        Ok(bytes)
+                        restore_worker_after_dispatch(health, was_degraded).map_err(|fault| {
+                            HubDispatchFailure {
+                                fault,
+                                committed_artifact: artifact.clone(),
+                            }
+                        })?;
+                        Ok(HubToolOutcome {
+                            payload: bytes,
+                            artifact,
+                        })
                     }
                     Ok(Err(reason)) => {
                         let _ = health.report_protocol_violation();
-                        Err(HubFault::ProtocolViolation(reason))
+                        Err(HubDispatchFailure {
+                            fault: HubFault::ProtocolViolation(reason),
+                            committed_artifact: artifact,
+                        })
                     }
                     Err(panic_payload) => {
                         let message = panic_message(&panic_payload);
                         let _ = health.report_crash();
-                        Err(HubFault::WorkerPanicked(message))
+                        Err(HubDispatchFailure {
+                            fault: HubFault::WorkerPanicked(message),
+                            committed_artifact: artifact,
+                        })
                     }
                 }
             }
             Ok(Err(tool_error)) => {
-                let _ = health.mark_ready();
-                Err(HubFault::ToolDeclaredFailure(tool_error.to_string()))
+                restore_worker_after_dispatch(health, was_degraded)
+                    .map_err(HubDispatchFailure::without_artifact)?;
+                Err(HubDispatchFailure::without_artifact(
+                    hub_fault_from_tool_error(tool_error),
+                ))
             }
             Err(panic_payload) => {
                 let message = panic_message(&panic_payload);
                 let _ = health.report_crash();
-                Err(HubFault::WorkerPanicked(message))
+                Err(HubDispatchFailure::without_artifact(
+                    HubFault::WorkerPanicked(message),
+                ))
             }
         }
     }
@@ -349,31 +471,42 @@ impl Hub {
             .descriptor(&request.tool_id)
             .cloned()
             .unwrap_or_else(placeholder_descriptor);
-        self.record_and_reply(request, sequence, Instant::now(), tool, Err(fault))
+        self.record_and_reply(
+            request,
+            sequence,
+            Instant::now(),
+            tool,
+            Err(fault),
+            None,
+            false,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record_and_reply(
         &mut self,
         request: HubRequest,
         sequence: u64,
         started: Instant,
         tool: HubToolDescriptor,
-        result: Result<Vec<u8>, HubFault>,
+        result: Result<HubToolOutcome, HubFault>,
+        committed_artifact: Option<crate::provenance::HubArtifactProvenance>,
+        was_dispatched: bool,
     ) -> HubReply {
         let elapsed_millis = started.elapsed().as_millis() as u64;
         let input_digest = HubDigest::of(&request.payload);
 
         let (status, payload, output_digest, worker_state_after, status_code, fault_code) =
             match result {
-                Ok(bytes) => {
-                    let digest = HubDigest::of(&bytes);
+                Ok(outcome) => {
+                    let digest = HubDigest::of(&outcome.payload);
                     let state = self
                         .registry
                         .worker_state(&request.tool_id)
                         .unwrap_or(crate::worker::HubWorkerState::Registered);
                     (
                         HubReplyStatus::Success,
-                        bytes,
+                        outcome.payload,
                         digest,
                         state,
                         "Success",
@@ -392,7 +525,7 @@ impl Hub {
                     } else {
                         match &fault {
                             HubFault::WorkerPanicked(_) => HubReplyStatus::Crashed(fault.clone()),
-                            HubFault::InternalHubFault(_) => {
+                            HubFault::InternalHubFault(_) | HubFault::SequenceExhausted => {
                                 HubReplyStatus::HubFault(fault.clone())
                             }
                             _ => HubReplyStatus::ToolFailed(fault.clone()),
@@ -423,42 +556,117 @@ impl Hub {
             ..HubResourceUsage::default()
         };
 
-        let record = HubAuditRecord {
-            sequence,
+        let determinism = tool
+            .operation(&request.operation_id)
+            .map(|op| op.determinism)
+            .unwrap_or(crate::execution::HubDeterminismClass::Unknown);
+
+        let capabilities_requested: Vec<_> = request.capability_context.iter().copied().collect();
+        let capabilities_granted = if was_dispatched {
+            request
+                .capability_context
+                .deny_sensitive()
+                .iter()
+                .copied()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let transaction_id = committed_artifact
+            .as_ref()
+            .and_then(|artifact| artifact.transaction_id.clone());
+        let audit_record_id =
+            (sequence != u64::MAX).then(|| format!("audit:{}:{sequence}", request.session_id));
+
+        if sequence != u64::MAX {
+            let record = HubAuditRecord {
+                sequence,
+                request_id: request.request_id.clone(),
+                session_id: request.session_id.clone(),
+                caller_identity: request.caller_identity.clone(),
+                tool_id: request.tool_id.clone(),
+                tool_version: tool.tool_version,
+                adapter_provenance: tool.adapter_provenance.clone(),
+                operation_id: request.operation_id.clone(),
+                execution_mode: tool.execution_mode,
+                determinism,
+                trust_class: tool.trust_class,
+                privacy_class: request.privacy_class,
+                capabilities_requested,
+                capabilities_granted,
+                input_digest,
+                output_digest,
+                transaction_id,
+                resource_budget: request.resource_budget,
+                resource_usage,
+                worker_state_after,
+                status_code,
+                fault_code,
+            };
+            self.audit.push(record);
+        }
+
+        let (result_kind, result_id, result_digest) =
+            if let Some(artifact) = committed_artifact.as_ref() {
+                (artifact.kind.clone(), artifact.id.clone(), artifact.digest)
+            } else {
+                (
+                    if status.is_success() {
+                        "hub.reply.payload"
+                    } else {
+                        "hub.reply.fault"
+                    }
+                    .to_string(),
+                    format!("reply:{}:{sequence}", request.request_id),
+                    output_digest,
+                )
+            };
+
+        let provenance = crate::provenance::HubProvenance {
+            schema_version: crate::provenance::HUB_PROVENANCE_SCHEMA_VERSION,
             request_id: request.request_id.clone(),
             session_id: request.session_id.clone(),
+            logical_sequence: sequence,
             caller_identity: request.caller_identity.clone(),
             tool_id: request.tool_id.clone(),
             tool_version: tool.tool_version,
             adapter_provenance: tool.adapter_provenance.clone(),
-            operation_id: request.operation_id.clone(),
+            hub_api_version: tool.hub_api_version,
             execution_mode: tool.execution_mode,
-            determinism: tool
-                .operation(&request.operation_id)
-                .map(|op| op.determinism)
-                .unwrap_or(crate::execution::HubDeterminismClass::Unknown),
+            operation_id: request.operation_id.clone(),
+            determinism,
             trust_class: tool.trust_class,
             privacy_class: request.privacy_class,
-            capabilities_granted: request.capability_context.iter().copied().collect(),
+            result_kind,
+            result_id,
+            result_digest,
             input_digest,
             output_digest,
-            resource_budget: request.resource_budget,
+            capability_context_digest: HubDigest::of(
+                request.capability_context.canonical_text().as_bytes(),
+            ),
+            resource_budget_digest: HubDigest::of(
+                request.resource_budget.canonical_text().as_bytes(),
+            ),
             resource_usage,
+            audit_record_id,
             worker_state_after,
-            status_code,
-            fault_code,
+            artifact: committed_artifact,
+            warnings: Vec::new(),
         };
-        self.audit.push(record);
 
         HubReply {
             schema_version: crate::envelope::HUB_ENVELOPE_SCHEMA_VERSION,
             request_id: request.request_id,
+            logical_sequence: sequence,
             tool_id: request.tool_id,
             tool_version: tool.tool_version,
             operation_id: request.operation_id,
             status,
             payload,
             resource_usage,
+            provenance,
+            warnings: Vec::new(),
         }
     }
 }
@@ -488,14 +696,29 @@ fn placeholder_descriptor() -> HubToolDescriptor {
     }
 }
 
-fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
-    if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_string()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
+fn restore_worker_after_dispatch(
+    health: &mut crate::worker::HubWorkerHealth,
+    was_degraded: bool,
+) -> Result<(), HubFault> {
+    let transition = if was_degraded {
+        health.mark_degraded()
     } else {
-        "worker panicked with a non-string payload".to_string()
+        health.mark_ready()
+    };
+    transition.map_err(|error| HubFault::InternalHubFault(error.to_string()))
+}
+
+fn hub_fault_from_tool_error(error: HubToolError) -> HubFault {
+    match error.code.as_str() {
+        "PersistenceFailed" => HubFault::PersistenceFailed(error.message),
+        "RecoveryRequired" => HubFault::RecoveryRequired(error.message),
+        "DeadlineExceeded" => HubFault::DeadlineExceeded,
+        _ => HubFault::ToolDeclaredFailure(error.to_string()),
     }
+}
+
+fn panic_message(_payload: &(dyn std::any::Any + Send)) -> String {
+    "in-process adapter panicked".to_string()
 }
 
 #[cfg(test)]
@@ -567,6 +790,36 @@ mod tests {
                         HubDeterminismClass::Deterministic,
                         false,
                     ),
+                    HubOperationDescriptor::new(
+                        HubOperationId::new("test.persistence-failed").unwrap(),
+                        [HubCapability::CpuCompute],
+                        HubDeterminismClass::Deterministic,
+                        false,
+                    ),
+                    HubOperationDescriptor::new(
+                        HubOperationId::new("test.recovery-required").unwrap(),
+                        [HubCapability::CpuCompute],
+                        HubDeterminismClass::Deterministic,
+                        false,
+                    ),
+                    HubOperationDescriptor::new(
+                        HubOperationId::new("test.deadline-error").unwrap(),
+                        [HubCapability::CpuCompute],
+                        HubDeterminismClass::Deterministic,
+                        false,
+                    ),
+                    HubOperationDescriptor::new(
+                        HubOperationId::new("test.artifact-too-large").unwrap(),
+                        [HubCapability::CpuCompute],
+                        HubDeterminismClass::Deterministic,
+                        false,
+                    ),
+                    HubOperationDescriptor::new(
+                        HubOperationId::new("test.artifact-slow").unwrap(),
+                        [HubCapability::CpuCompute],
+                        HubDeterminismClass::Deterministic,
+                        false,
+                    ),
                 ],
                 resource_ceiling: crate::resource::HubResourceBudget::V0_CEILING,
                 adapter_provenance: "test-only fault injection tool".into(),
@@ -585,30 +838,52 @@ mod tests {
             operation_id: &HubOperationId,
             _payload: &[u8],
             context: &RestrictedHubContext,
-        ) -> Result<Vec<u8>, HubToolError> {
+        ) -> Result<HubToolOutcome, HubToolError> {
             match operation_id.as_str() {
-                "test.succeed" => Ok(b"ok".to_vec()),
+                "test.succeed" => Ok(HubToolOutcome::payload_only(b"ok".to_vec())),
                 "test.fail" => Err(HubToolError::new(
                     "TestDeclaredFailure",
                     "intentional test failure",
                 )),
                 "test.panic" => panic!("intentional test panic"),
-                "test.protocol-violation" => Ok(b"not-json".to_vec()),
+                "test.protocol-violation" => Ok(HubToolOutcome::payload_only(b"not-json".to_vec())),
                 "test.report-network-access-visibility" => {
                     if context
                         .capability_context
                         .allows(HubCapability::NetworkAccess)
                     {
-                        Ok(b"leaked".to_vec())
+                        Ok(HubToolOutcome::payload_only(b"leaked".to_vec()))
                     } else {
-                        Ok(b"denied".to_vec())
+                        Ok(HubToolOutcome::payload_only(b"denied".to_vec()))
                     }
                 }
                 "test.slow" => {
                     std::thread::sleep(std::time::Duration::from_millis(50));
-                    Ok(b"ok".to_vec())
+                    Ok(HubToolOutcome::payload_only(b"ok".to_vec()))
                 }
-                "test.panic-in-validate" => Ok(b"ok".to_vec()),
+                "test.panic-in-validate" => Ok(HubToolOutcome::payload_only(b"ok".to_vec())),
+                "test.persistence-failed" => {
+                    Err(HubToolError::new("PersistenceFailed", "disk unavailable"))
+                }
+                "test.recovery-required" => Err(HubToolError::new(
+                    "RecoveryRequired",
+                    "unfinished transaction",
+                )),
+                "test.deadline-error" => Err(HubToolError::new(
+                    "DeadlineExceeded",
+                    "deadline reached before commit",
+                )),
+                "test.artifact-too-large" => Ok(HubToolOutcome {
+                    payload: b"oversized".to_vec(),
+                    artifact: Some(test_artifact()),
+                }),
+                "test.artifact-slow" => {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    Ok(HubToolOutcome {
+                        payload: b"ok".to_vec(),
+                        artifact: Some(test_artifact()),
+                    })
+                }
                 other => Err(HubToolError::new("UnknownOperation", other)),
             }
         }
@@ -634,6 +909,15 @@ mod tests {
         hub.register_tool(Box::new(FaultInjectionTool::new()))
             .unwrap();
         hub
+    }
+
+    fn test_artifact() -> crate::provenance::HubArtifactProvenance {
+        crate::provenance::HubArtifactProvenance {
+            kind: "test.artifact".into(),
+            id: "artifact-1".into(),
+            digest: HubDigest::of(b"committed"),
+            transaction_id: Some("txn-1".into()),
+        }
     }
 
     fn request_for(operation: &str, capabilities: HubCapabilitySet) -> HubRequest {
@@ -668,6 +952,21 @@ mod tests {
         assert_eq!(records[0].status_code, "Success");
         assert_eq!(records[0].fault_code, None);
         assert_eq!(records[0].tool_version, HubToolVersion::new(1, 2, 3));
+        assert_eq!(
+            reply.provenance.operation_id,
+            HubOperationId::new("test.succeed").unwrap()
+        );
+        assert_eq!(reply.provenance.hub_api_version, HubApiVersion::CURRENT);
+        assert_eq!(reply.provenance.result_kind, "hub.reply.payload");
+        assert_eq!(
+            reply.provenance.result_digest,
+            reply.provenance.output_digest
+        );
+        assert_eq!(
+            reply.provenance.audit_record_id.as_deref(),
+            Some("audit:sess-1:0")
+        );
+        assert_eq!(reply.provenance.resource_usage, reply.resource_usage);
     }
 
     #[test]
@@ -716,18 +1015,46 @@ mod tests {
     }
 
     #[test]
+    fn persistence_recovery_and_cooperative_deadline_codes_survive_adapter_mapping() {
+        let cases = [
+            ("test.persistence-failed", "PersistenceFailed"),
+            ("test.recovery-required", "RecoveryRequired"),
+            ("test.deadline-error", "DeadlineExceeded"),
+        ];
+        for (operation, expected_code) in cases {
+            let mut hub = hub_with_fault_injection_tool();
+            let reply = hub.invoke(request_for(operation, granted()), None);
+            assert!(matches!(reply.status, HubReplyStatus::ToolFailed(_)));
+            assert_eq!(reply.status.fault().unwrap().code(), expected_code);
+            assert_eq!(hub.audit().records()[0].fault_code, Some(expected_code));
+        }
+    }
+
+    #[test]
     fn worker_panic_is_contained_and_reported_as_crashed() {
         let mut hub = hub_with_fault_injection_tool();
         let reply = hub.invoke(request_for("test.panic", granted()), None);
         assert!(matches!(reply.status, HubReplyStatus::Crashed(_)));
+        let rendered_fault = reply.status.fault().unwrap().to_string();
+        assert_eq!(
+            rendered_fault,
+            "WorkerPanicked: in-process adapter panicked"
+        );
+        assert!(!rendered_fault.contains("intentional test panic"));
+        assert!(!hub
+            .audit()
+            .to_canonical_text()
+            .contains("intentional test panic"));
         assert_eq!(hub.audit().records()[0].status_code, "Crashed");
         assert_eq!(hub.audit().records()[0].fault_code, Some("WorkerPanicked"));
         // The panic must not have poisoned the Hub: a second, unrelated
         // invocation on a fresh operation still completes normally.
         let second = hub.invoke(request_for("test.succeed", granted()), None);
-        assert!(
-            matches!(second.status, HubReplyStatus::Success)
-                || matches!(second.status, HubReplyStatus::Rejected(_))
+        assert!(matches!(second.status, HubReplyStatus::Success));
+        assert_eq!(
+            hub.registry()
+                .worker_state(&HubToolId::new("test.fault-injection").unwrap()),
+            Some(crate::worker::HubWorkerState::Degraded)
         );
     }
 
@@ -756,49 +1083,82 @@ mod tests {
     #[test]
     fn seed_next_sequence_advances_subsequent_audit_sequence_numbers() {
         let mut hub = hub_with_fault_injection_tool();
-        hub.seed_next_sequence(41);
+        hub.seed_next_sequence(41).unwrap();
         hub.invoke(request_for("test.succeed", granted()), None);
         assert_eq!(hub.audit().records()[0].sequence, 41);
     }
 
     #[test]
-    fn an_invocation_seeded_at_u64_max_records_its_evidence_instead_of_panicking() {
-        // Regression test: `self.next_sequence += 1` previously panicked
-        // (or wrapped, in a release build) the instant this function ran
-        // past capturing `sequence`, when seeded at `u64::MAX` -- the
-        // legitimately valid next sequence when a persisted trail's last
-        // record is at `u64::MAX - 1`. That aborted the whole invocation
-        // before its own, correctly-captured `sequence == u64::MAX` was
-        // ever used to record its audit evidence.
+    fn u64_max_is_a_typed_sequence_exhaustion_sentinel_never_an_audit_record() {
         let mut hub = hub_with_fault_injection_tool();
-        hub.seed_next_sequence(u64::MAX);
-        let reply = hub.invoke(request_for("test.succeed", granted()), None);
-        assert!(reply.status.is_success());
-        assert_eq!(hub.audit().records()[0].sequence, u64::MAX);
+        assert_eq!(
+            hub.seed_next_sequence(u64::MAX).unwrap_err(),
+            HubFault::SequenceExhausted
+        );
+
+        hub.seed_next_sequence(u64::MAX - 1).unwrap();
+        let last = hub.invoke(request_for("test.succeed", granted()), None);
+        assert!(last.status.is_success());
+        assert_eq!(hub.audit().records()[0].sequence, u64::MAX - 1);
+
+        let exhausted = hub.invoke(request_for("test.succeed", granted()), None);
+        assert_eq!(exhausted.logical_sequence, u64::MAX);
+        assert_eq!(
+            exhausted.status.fault().unwrap().code(),
+            "SequenceExhausted"
+        );
+        assert_eq!(exhausted.provenance.audit_record_id, None);
+        assert_eq!(hub.audit().records().len(), 1);
+
+        let repeated = hub.invoke(request_for("test.succeed", granted()), None);
+        assert_eq!(repeated.status.fault().unwrap().code(), "SequenceExhausted");
+        assert_eq!(hub.audit().records().len(), 1);
     }
 
     #[test]
-    fn a_sensitive_capability_granted_by_the_caller_is_not_visible_to_the_adapter() {
-        // Regression test: `dispatch` previously handed the adapter the
-        // caller's raw, unsanitized capability set. An admitted request only
-        // needs its operation's *required* (non-sensitive) capabilities to
-        // satisfy admission -- it may still carry additional, sensitive
-        // capabilities alongside them, and the adapter must never observe
-        // those as granted.
+    fn a_request_granting_any_sensitive_capability_is_rejected_before_dispatch() {
+        // v0-completion hardening: admission now rejects a request outright
+        // if its capability_context carries ANY sensitive capability, even
+        // one the target operation does not require -- silently ignoring
+        // such a grant (the pre-completion behavior) hid a caller mistake
+        // instead of surfacing it. See `dispatch`'s own `deny_sensitive()`
+        // call for the still-retained defense-in-depth sanitization, kept
+        // in case a future caller of `dispatch` bypasses `admit`.
         let mut hub = hub_with_fault_injection_tool();
         let capabilities = granted().grant(HubCapability::NetworkAccess);
         let reply = hub.invoke(
             request_for("test.report-network-access-visibility", capabilities),
             None,
         );
+        assert!(matches!(reply.status, HubReplyStatus::Rejected(_)));
+        assert_eq!(
+            reply.status.fault().unwrap().code(),
+            "SensitiveCapabilityDenied"
+        );
+
+        // The raw, rejected grant is recorded as requested, never granted.
+        assert!(hub.audit().records()[0]
+            .capabilities_requested
+            .contains(&HubCapability::NetworkAccess));
+        assert!(hub.audit().records()[0].capabilities_granted.is_empty());
+    }
+
+    #[test]
+    fn dispatch_still_sanitizes_sensitive_capabilities_as_defense_in_depth() {
+        // Even though admission now rejects any sensitive grant outright
+        // (see the test above), `dispatch`'s own `deny_sensitive()` call is
+        // kept as a second, independent layer: an adapter must never
+        // observe a sensitive capability as granted regardless of how a
+        // request reached `dispatch`. Exercised directly against a request
+        // with no sensitive grant, confirming the plain non-sensitive path
+        // still resolves to "denied" from the adapter's point of view.
+        let mut hub = hub_with_fault_injection_tool();
+        let reply = hub.invoke(
+            request_for("test.report-network-access-visibility", granted()),
+            None,
+        );
         assert!(reply.status.is_success());
         assert_eq!(reply.payload, b"denied");
-
-        // The raw, unsanitized grant is still what the audit trail records
-        // -- sanitization is a dispatch-boundary concern, not an audit one.
-        assert!(hub.audit().records()[0]
-            .capabilities_granted
-            .contains(&HubCapability::NetworkAccess));
     }
 
     #[test]
@@ -860,6 +1220,29 @@ mod tests {
         let reply = hub.invoke(request, None);
         assert!(matches!(reply.status, HubReplyStatus::ToolFailed(_)));
         assert_eq!(reply.status.fault().unwrap().code(), "DeadlineExceeded");
+    }
+
+    #[test]
+    fn dispatch_rejects_re_entrant_call_against_an_already_busy_worker() {
+        // WorkerBusy is structurally unreachable through the public
+        // `invoke()` API under Hub v0's synchronous, single-owner model
+        // (dispatch() is the only code that ever sets Busy, and it always
+        // resolves synchronously before returning) -- so this test reaches
+        // into the same-crate-private `dispatch` method and `registry`
+        // field directly to prove the check itself is real, not dead code
+        // guarding an invariant nothing can ever violate today.
+        let mut hub = hub_with_fault_injection_tool();
+        let tool_id = HubToolId::new("test.fault-injection").unwrap();
+        {
+            let health = hub.registry.health_mut(&tool_id).unwrap();
+            health.mark_starting().unwrap();
+            health.mark_ready().unwrap();
+            health.mark_busy().unwrap();
+        }
+        let tool = hub.registry.descriptor(&tool_id).unwrap().clone();
+        let request = request_for("test.succeed", granted());
+        let result = hub.dispatch(&request, &tool, None, Instant::now());
+        assert_eq!(result.unwrap_err().fault, HubFault::WorkerBusy);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Semantic Hub Adapter Contract v0
 
-Status: draft v0
+Status: v0, landed on `main` (#1554, #1555) and completed (#1526 completion pass)
 Owner crate: `semantic-hub` (contract) / `semantic-hub-turbovec` (reference adapter)
 
 This document defines what a Hub v0 tool adapter may and may not do: the
@@ -139,13 +139,18 @@ trait HubTool: Send {
         operation_id: &HubOperationId,
         payload: &[u8],
         context: &RestrictedHubContext,
-    ) -> Result<Vec<u8>, HubToolError>;
+    ) -> Result<HubToolOutcome, HubToolError>;
 
     fn validate_reply(
         &self,
         operation_id: &HubOperationId,
         payload: &[u8],
     ) -> Result<(), String> { Ok(()) }
+}
+
+struct HubToolOutcome {
+    payload: Vec<u8>,
+    artifact: Option<HubArtifactProvenance>,
 }
 ```
 
@@ -159,6 +164,16 @@ a structural self-check on its own reply bytes (e.g. `vector.turbovec`
 checks that every reply is valid JSON) -- failure here is classified
 `ProtocolViolation`, never conflated with a tool-declared operation
 failure.
+
+`HubTool::handle`'s return type changed from `Result<Vec<u8>, HubToolError>`
+to `Result<HubToolOutcome, HubToolError>` in the v0-completion pass
+(`HubToolOutcome::payload_only(bytes)` for the common non-mutating case).
+This is the only channel an adapter has to report artifact provenance
+(`docs/architecture/semantic_hub_v0.md` section 11) for a mutating
+operation -- `dispatch()` threads `artifact` straight through to the
+`HubReply.provenance.artifact` field, untouched. A non-mutating operation,
+or a mutating one an adapter has not been updated to report provenance
+for, simply returns `None`.
 
 ## 7. Restricted context
 

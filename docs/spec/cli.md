@@ -42,6 +42,7 @@ The admitted `smc` command surface is currently:
 - `hub tools`
 - `hub describe`
 - `hub invoke`
+- `hub session`
 - `hub audit`
 
 Current accepted usage forms are:
@@ -71,6 +72,7 @@ Current accepted usage forms are:
 - `smc hub tools`
 - `smc hub describe <tool-id>`
 - `smc hub invoke <tool-id> <operation-id> --input <file> [--out <file>]`
+- `smc hub session --requests <file> [--out <file>] [--max-requests <n>]`
 - `smc hub audit --request <request-id>`
 
 This draft does not claim that every command is permanently frozen, but it defines the current public CLI surface that tooling may rely on.
@@ -96,6 +98,7 @@ The following commands expose persisted artifact, admission, or build-surface be
 - `smc run-smc`
 - `smc features`
 - `smc hub invoke`
+- `smc hub session`
 
 The following inspection commands are public workflow surface, but their plain-text rendering is not yet a frozen machine-readable format:
 
@@ -125,11 +128,13 @@ Current output rule:
 `smc hub` is the current CLI surface for the Semantic Hub v0 governed tool
 execution boundary (see `docs/architecture/semantic_hub_v0.md` for the full
 architecture). It exposes external computational tools -- currently one
-reference tool, `vector.turbovec`, supporting seven operations
+reference tool, `vector.turbovec`, supporting eight operations
 (`vector.index.create`, `vector.index.describe`, `vector.index.insert`,
 `vector.index.remove`, `vector.search`, `vector.search.filtered`,
-`vector.index.reset`) -- through a single typed request/reply path rather
-than ad hoc per-feature integration.
+`vector.index.reset`, `vector.index.recover`) -- through a single typed
+request/reply path rather than ad hoc per-feature integration. There is no
+dedicated `smc hub recover` subcommand: recovery is just another bounded
+operation, reachable through `invoke` or `session` like any other.
 
 Current command surface:
 
@@ -146,6 +151,13 @@ Current command surface:
   reads a JSON request file, admits it through the Hub, and writes a JSON
   reply to stdout or, atomically, to `--out <file>` (same write-temp-file,
   fsync, rename pattern as `smc look ui frame --out`)
+- `smc hub session --requests <file> [--out <file>] [--max-requests <n>]`
+  reads a newline-delimited JSON (NDJSON) file, admits each line in order
+  through one bounded `HubSession` against one persistent worker instance,
+  and writes one NDJSON reply per line plus a final `{"session_summary":
+  {...}}` line -- see `docs/spec/hub/hub_session_v0.md` for the full
+  contract (request-line shape, cancel-line control records, session
+  ceiling, exit-code policy)
 - `smc hub audit --request <request-id>` looks up one audit record by
   `request_id` and prints it as `key: value` lines; an unknown
   `request-id` produces `UnknownRequest: no audit record for request_id
@@ -184,11 +196,17 @@ Example request file for `vector.search`:
 }
 ```
 
-The reply JSON has the shape `{schema_version, request_id, tool_id,
-tool_version, operation_id, status, fault_code, fault_message, payload,
-resource_usage: {wall_time_millis, input_bytes, output_bytes}}`, where
-`status` is one of `Success`, `Rejected`, `ToolFailed`, `Crashed`,
-`HubFault`.
+The reply JSON has the shape `{schema_version, request_id,
+logical_sequence, tool_id, tool_version, operation_id, status, fault_code,
+fault_message, payload, resource_usage: {wall_time_millis, input_bytes,
+output_bytes}, provenance: {input_digest, output_digest,
+worker_state_after, artifact}, warnings}`, where `status` is one of
+`Success`, `Rejected`, `ToolFailed`, `Crashed`, `HubFault`. `provenance` is
+evidence of how the reply was produced, never a claim that its payload is
+true or safe to commit (see `docs/architecture/semantic_hub_v0.md` section
+4); `artifact` is `null` for a non-mutating operation, or
+`{kind, id, digest}` for a mutating one. `warnings` is always `[]` in v0 --
+no warning-producing path exists yet.
 
 Current admission rule:
 

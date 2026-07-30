@@ -24,6 +24,16 @@ pub enum HubResourceKind {
     StorageReadBytes,
     StorageWriteBytes,
     AuditBytes,
+
+    /// Session-scoped dimensions: a *cumulative*, whole-session ceiling,
+    /// distinct from the per-request dimensions above (e.g.
+    /// `InputBytes`). Only ever produced by session-level admission
+    /// checks (see `crate::session`), never by the single-request
+    /// `HubResourceBudget::first_violation` check.
+    SessionRequestCount,
+    SessionInputBytes,
+    SessionOutputBytes,
+    SessionWallTimeMillis,
 }
 
 impl HubResourceKind {
@@ -41,6 +51,10 @@ impl HubResourceKind {
             HubResourceKind::StorageReadBytes => "StorageReadBytes",
             HubResourceKind::StorageWriteBytes => "StorageWriteBytes",
             HubResourceKind::AuditBytes => "AuditBytes",
+            HubResourceKind::SessionRequestCount => "SessionRequestCount",
+            HubResourceKind::SessionInputBytes => "SessionInputBytes",
+            HubResourceKind::SessionOutputBytes => "SessionOutputBytes",
+            HubResourceKind::SessionWallTimeMillis => "SessionWallTimeMillis",
         }
     }
 
@@ -58,6 +72,10 @@ impl HubResourceKind {
                 | HubResourceKind::ResultCount
                 | HubResourceKind::QueueDepth
                 | HubResourceKind::ConcurrentRequests
+                | HubResourceKind::SessionRequestCount
+                | HubResourceKind::SessionInputBytes
+                | HubResourceKind::SessionOutputBytes
+                | HubResourceKind::SessionWallTimeMillis
         )
     }
 }
@@ -146,6 +164,28 @@ impl HubResourceBudget {
 
     pub const fn wall_time(&self) -> Duration {
         Duration::from_millis(self.wall_time_millis)
+    }
+
+    /// Deterministic canonical text of every field, in a fixed order --
+    /// the single shared encoding used both by the audit trail's packed
+    /// budget column and to derive a stable provenance digest, so the two
+    /// can never silently drift apart.
+    pub fn canonical_text(&self) -> String {
+        [
+            self.wall_time_millis.to_string(),
+            self.memory_bytes.to_string(),
+            self.input_bytes.to_string(),
+            self.output_bytes.to_string(),
+            self.index_item_count.to_string(),
+            self.vector_dimensions.to_string(),
+            self.result_count.to_string(),
+            self.queue_depth.to_string(),
+            self.concurrent_requests.to_string(),
+            self.storage_read_bytes.to_string(),
+            self.storage_write_bytes.to_string(),
+            self.audit_bytes.to_string(),
+        ]
+        .join(",")
     }
 }
 
