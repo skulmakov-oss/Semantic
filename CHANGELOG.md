@@ -2,41 +2,56 @@
 
 All notable changes to this project are documented in this file.
 
-## Unreleased
+## Semantic v1.2.0-beta.1
 
-### Added (post-v1.1.1 language-maturity subtracks)
+This is a prerelease candidate (v1.2.0-beta.1). The published stable line remains `v1.1.1`.
 
-- **D-wave baseline** (application-completeness program, D-wave):
-  - `Map(K, V)` persistent lookup tables — PR #404, 2026-05-03
-    - `map_empty()`, `map_contains`, `map_get`, `map_set` (functional update)
-    - admitted key types: `i32`, `u32`, `bool`, `text`, `quad`
-    - SemCode format `SEMCOD14`, capability `CAP_MAP_VALUES = 1 << 15`
-  - deterministic seeded PRNG — PR #405, 2026-05-03
-    - `random_seed(seed: i32)` — seeds the VM PRNG
-    - `random_next_i32(lo: i32, hi: i32) -> i32` — deterministic bounded value in `[lo, hi)`
-    - xorshift64 algorithm (period 2⁶⁴−1); range computed through `i64` to handle full `i32` span
-    - SemCode format `SEMCOD15`, capability `CAP_PRNG = 1 << 16`
+### Semantic application execution
 
-- **M9.4 Richer Pattern Surface**: five new pattern forms across owner layer, parser, and typecheck.
-  - `MatchPattern::Wildcard` — bare `_` matches any scrutinee, binds nothing
-  - `MatchPattern::Or(alts)` — pipe-separated alternatives `P1 | P2 | P3`
-  - `MatchPattern::IntRange(IntRangePattern)` — integer range `1..=5` / `1..5`; admitted for `i32`/`u32` scrutinees
-  - `TuplePatternItem::Nested(items)` — recursive tuple destructuring `let (a, (b, c)) = ...`
-  - `Expr::IfLet(IfLetExpr)` — `if let Pat = expr { } else { }` binding guard
-  - `TokenKind::Pipe` — bare `|` now lexes as a token (was error)
-  - exhaustiveness: Wildcard covers all variants; Or unwraps alternatives for variant coverage
-  - done-boundary: `M9.4 closes at owner layer + parser admission + typecheck for all five forms`
+* verified typed VM function invocation
+* structured function arguments and return values
+* persistent `State + Action -> State`
+* first visible end-to-end native Semantic application
+* dual-mode Arithmetic and Quad Logic Calculator
+* native four-state logic over `N`, `F`, `T`, and `S`
 
-- **M9.2 Traits (static)**: traits/impls now have full owner-layer representation,
-  parser admission, and static typecheck support.
-  - `trait` and `impl` declarations admitted at top level
-  - `TraitDecl`, `ImplDecl`, `TraitBound`, `TraitMethodSig` AST nodes
-  - `<T: TraitName>` bound syntax on generic function type parameters
-  - `validate_trait_coherence`: rejects duplicate `(trait, for_type)` impl pairs
-  - `validate_impl_conformance`: rejects impls with missing methods or wrong return types
-  - bound satisfaction check at generic call sites
-  - runtime dispatch, trait objects, specialization, and blanket impls remain deferred
-  - done-boundary: `M9.2 closes at static trait admission + coherence/conformance + bound satisfaction`
+### UI and Workbench
+
+* native UI/application boundary
+* projection-driven UI execution
+* deterministic UI inspection and evidence surfaces
+* calculator as a canonical executable example
+
+### Semantic Hub
+
+* Semantic Hub v0
+* TurboVec reference adapter
+* governed tool invocation
+* capability, resource, audit, and provenance boundaries
+
+### Other post-v1.1.1 work
+
+* **D-wave baseline**: `Map(K, V)` persistent lookup tables and deterministic seeded PRNG.
+* **M9.4 Richer Pattern Surface**: five new pattern forms across owner layer, parser, and typecheck.
+* **M9.2 Traits (static)**: traits/impls now have full owner-layer representation, parser admission, and static typecheck support.
+
+### Non-Claims
+
+This prerelease does not claim:
+* production readiness
+* stable UI ABI
+* stable application ABI
+* stable Hub or plugin ABI
+* stable binary ISA
+* unrestricted host I/O
+* package registry support
+* dependency solving
+* Linux binary artifacts
+* macOS binary artifacts
+* automatic stable promotion of all current-main features
+* cross-platform UI qualification
+* broad external-tool isolation
+* a separately packaged calculator executable (included as repository source and executable proof only)
 
 ## v1.1.1 - 2026-04-01
 

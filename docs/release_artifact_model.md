@@ -29,6 +29,10 @@ The current published stable line is:
 
 - `v1.1.1`
 
+The new prerelease candidate is:
+
+- `v1.2.0-beta.1`
+
 The currently published downloadable stable artifacts are:
 
 | Artifact | Kind | Platform scope | Role | Validation basis |

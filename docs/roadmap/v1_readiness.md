@@ -32,11 +32,15 @@ Current top-level reading:
 - current `main` contains wider landed work than the stable line and wider
   landed work than the current qualified contour
 
-## Published Stable
+## Published Stable and Candidates
 
 The published stable line remains:
 
 - `v1.1.1`
+
+The new prerelease candidate is:
+
+- `v1.2.0-beta.1`
 
 It should be read as the stable publication baseline, not as a complete
 description of everything already landed on current `main`.
