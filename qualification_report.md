@@ -1,63 +1,169 @@
 # Qualification Report
 
 ## 1. Final Head
-Exact Final Head SHA: 4e40d2d19bee52fac9e645f42cec593910d915a2
+**Qualification subject SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+**Evidence commit SHA:** [To be recorded in PR comment]
 
 ### Command: git diff --check
 - **Exact Command:** git diff --check
-- **Final Head SHA:** 4e40d2d19bee52fac9e645f42cec593910d915a2
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
 - **Exit Code:** 0
 - **Status:** PASS
-- **Duration:** 0.15 seconds
+- **Duration:** 0.13 seconds
 - **Signal:** Completed
 
 ### Command: pwsh scripts\admission_guard.ps1 -PRReady
 - **Exact Command:** pwsh scripts\admission_guard.ps1 -PRReady
-- **Final Head SHA:** 4e40d2d19bee52fac9e645f42cec593910d915a2
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
 - **Exit Code:** 0
 - **Status:** PASS
-- **Duration:** 65.71 seconds
+- **Duration:** 75.41 seconds
 - **Signal:** 3766 tests passed
 
 ### Command: pwsh scripts\admission_guard.ps1 -Readiness
 - **Exact Command:** pwsh scripts\admission_guard.ps1 -Readiness
-- **Final Head SHA:** 4e40d2d19bee52fac9e645f42cec593910d915a2
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 4.91 seconds
+- **Signal:** Completed
+
+### Command: pwsh scripts\admission_guard.ps1 -FullPreflight
+- **Exact Command:** pwsh scripts\admission_guard.ps1 -FullPreflight
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 1
+- **Status:** FAIL
+- **Duration:** 90.00 seconds
+- **Signal:** 3782 tests passed
+- **First Error:** test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+### Command: cargo fmt --all --check
+- **Exact Command:** cargo fmt --all --check
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 5.50 seconds
+- **Signal:** Completed
+
+### Command: cargo check --workspace --all-targets --all-features --keep-going
+- **Exact Command:** cargo check --workspace --all-targets --all-features --keep-going
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
 - **Exit Code:** 0
 - **Status:** PASS
 - **Duration:** 3.64 seconds
 - **Signal:** Completed
 
-### Command: cargo fmt --all --check
-- **Exact Command:** cargo fmt --all --check
-- **Final Head SHA:** 4e40d2d19bee52fac9e645f42cec593910d915a2
+### Command: cargo clippy --workspace --all-targets --all-features -- -D warnings
+- **Exact Command:** cargo clippy --workspace --all-targets --all-features -- -D warnings
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
 - **Exit Code:** 0
 - **Status:** PASS
-- **Duration:** 3.59 seconds
+- **Duration:** 2.91 seconds
 - **Signal:** Completed
+
+### Command: cargo test --workspace --all-features
+- **Exact Command:** cargo test --workspace --all-features
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 64.37 seconds
+- **Signal:** 3789 tests passed
+
+### Command: cargo test --test public_api_contracts
+- **Exact Command:** cargo test --test public_api_contracts
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 3.62 seconds
+- **Signal:** 4 tests passed
+
+### Command: cargo test --test golden_semcode
+- **Exact Command:** cargo test --test golden_semcode
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 0.80 seconds
+- **Signal:** 4 tests passed
+
+### Command: cargo test --test prometheus_runtime_matrix
+- **Exact Command:** cargo test --test prometheus_runtime_matrix
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 1.08 seconds
+- **Signal:** 1 tests passed
+
+### Command: cargo test --test prometheus_runtime_goldens
+- **Exact Command:** cargo test --test prometheus_runtime_goldens
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 1.40 seconds
+- **Signal:** 1 tests passed
+
+### Command: cargo test --test prometheus_runtime_negative_goldens
+- **Exact Command:** cargo test --test prometheus_runtime_negative_goldens
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 0.97 seconds
+- **Signal:** 3 tests passed
+
+### Command: cargo test --test prometheus_runtime_compat_matrix
+- **Exact Command:** cargo test --test prometheus_runtime_compat_matrix
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 0.70 seconds
+- **Signal:** 1 tests passed
+
+### Command: cargo test -p quad_logic_calculator
+- **Exact Command:** cargo test -p quad_logic_calculator
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 0.90 seconds
+- **Signal:** Completed
+
+### Command: cargo test -p semantic-hub
+- **Exact Command:** cargo test -p semantic-hub
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 0.72 seconds
+- **Signal:** 151 tests passed
+
+### Command: cargo test -p semantic-hub-turbovec
+- **Exact Command:** cargo test -p semantic-hub-turbovec
+- **Final Head SHA:** 7ea6cd786aa69801071b772e44f5d338b75c47fe
+- **Exit Code:** 0
+- **Status:** PASS
+- **Duration:** 6.17 seconds
+- **Signal:** 58 tests passed
 
 ## 2. Extract-Asset Smoke Scenarios
 
 ### Scenario: smoke_f64.sm
-- **Compile Exit Code:** 1
-- **Run Exit Code:** 1
-- **Disasm Exit Code:** 1
-- **SemCode Marker:** ASSERT
+- **Compile Exit Code:** 0
+- **Run Exit Code:** 0
+- **Disasm Exit Code:** 0
+- **SemCode Marker:** ASSERT (FOUND)
 - **Expected Signal:** Success
 - **Final Result:** PASS
 
 ### Scenario: smoke_quad.sm
-- **Compile Exit Code:** 1
-- **Run Exit Code:** 1
-- **Disasm Exit Code:** 1
-- **SemCode Marker:** Q_TRUTH_AND
+- **Compile Exit Code:** 0
+- **Run Exit Code:** 0
+- **Disasm Exit Code:** 0
+- **SemCode Marker:** Q_TRUTH_AND (FOUND)
 - **Expected Signal:** Success
 - **Final Result:** PASS
 
 ### Scenario: smoke_minimal.sm
-- **Compile Exit Code:** 1
-- **Run Exit Code:** 1
-- **Disasm Exit Code:** 1
-- **SemCode Marker:** RET
+- **Compile Exit Code:** 0
+- **Run Exit Code:** 0
+- **Disasm Exit Code:** 0
+- **SemCode Marker:** RET (FOUND)
 - **Expected Signal:** Success
 - **Final Result:** PASS
 
@@ -312,4 +418,4 @@ fault_code: -
 
 ## 5. UI Validation
 
-**PENDING:** A human maintainer must run the actual application from the exact head 4e40d2d19bee52fac9e645f42cec593910d915a2 and capture real OS screenshots to verify Quad Logic bindings and the GUI calculator.
+**PENDING:** A human maintainer must run the actual application from the exact head 7ea6cd786aa69801071b772e44f5d338b75c47fe and capture real OS screenshots to verify Quad Logic bindings and the GUI calculator.
