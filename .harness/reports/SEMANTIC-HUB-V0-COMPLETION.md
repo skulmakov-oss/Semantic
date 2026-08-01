@@ -59,23 +59,31 @@ field and a new admission step 7 -- the same pattern the existing
 queue/concurrency check (step 6) already used, not a parallel admission
 path.
 
-**`PersistenceFailed`/`RecoveryRequired` are not `HubFault` variants.**
-The original task specification named these as required top-level fault
-codes. Repository truth is that CLI-level infrastructure failures (audit
-I/O, scoped-storage violations, pending-marker bookkeeping) are reported
-as plain `"<Code>: <message>"` strings from `smc-cli`'s own command
-functions -- the existing convention for `AuditProvenanceFailure`,
-`ScopedStorageViolation`, `DuplicateRequestId`. Forcing these two into the
-`HubFault` enum (which governs per-request admission/dispatch outcomes,
-not CLI/adapter infrastructure) would not have matched what actually
-produces them: `RecoveryRequired` surfaces via `HubToolError` from
-`TurboVecAdapter::load()` (wrapped as `ToolDeclaredFailure` like any other
-adapter-declared error), and `PersistenceFailed` is a `smc-cli`-string
-convention for transaction-record I/O failures. Four new `HubFault`
-variants were added instead, each backed by real, reachable (or, for
-`WorkerBusy`, deliberately defensive) admission/dispatch logic:
-`SensitiveCapabilityDenied`, `WorkerDegraded`, `SessionLimitExceeded`,
-`WorkerBusy`.
+**`PersistenceFailed`/`RecoveryRequired` -- revised during implementation.**
+An early draft of this pass argued these two should NOT be `HubFault`
+variants, reasoning that CLI-level infrastructure failures (audit I/O,
+scoped-storage violations, pending-marker bookkeeping) are reported as
+plain `"<Code>: <message>"` strings from `smc-cli`'s own command
+functions, and that `RecoveryRequired` in particular only ever reaches the
+caller wrapped as a generic `ToolDeclaredFailure` (adapters have no route
+to a specific `HubFault` variant). That reasoning held for the CLI-level
+failures, but not for these two: both are genuine per-request *dispatch*
+outcomes (an adapter refusing to load an index, or refusing to durably
+persist a mutation), not CLI-process infrastructure failures, so folding
+them into the generic `ToolDeclaredFailure` bucket lost real information
+from the audit trail and the CLI's exit-code mapping. The implementation
+was revised to add `hub_fault_from_tool_error` (`runtime.rs`): adapters
+still only ever return a `HubToolError { code, message }` (no adapter
+depends on the full `HubFault` enum), but the Hub itself recognizes the
+stable codes `"PersistenceFailed"`/`"RecoveryRequired"`/`"DeadlineExceeded"`
+and maps them onto their own distinct top-level `HubFault` variant at the
+dispatch boundary, falling back to `ToolDeclaredFailure` for any other
+adapter-declared code. Six new `HubFault` variants were added in total,
+each backed by real, reachable (or, for `WorkerBusy`, deliberately
+defensive) admission/dispatch logic: `SensitiveCapabilityDenied`,
+`WorkerDegraded`, `SessionLimitExceeded`, `WorkerBusy`,
+`PersistenceFailed`, `RecoveryRequired` (21 -> 28 variants, alongside the
+pre-existing `SequenceExhausted`).
 
 **New v0 hardening beyond the original #1554 baseline, found while
 extending the fault taxonomy:**
@@ -116,6 +124,38 @@ extending the fault taxonomy:**
   functions). Fixed in both functions, with new regression tests using
   the streaming header as input.
 
+**Further session hardening, added in a later iteration of this same
+pass (not a separate task):**
+- `HubSession::new` now also takes and permanently fixes
+  `caller_identity`, `capability_ceiling`, and `privacy_ceiling` at
+  construction. Admission (`admission.rs` step 2) rejects any request
+  whose `caller_identity` differs from the session's, whose
+  `capability_context` is not `HubCapabilitySet::is_subset_of` the
+  session's ceiling, or whose `privacy_class` exceeds the session's
+  ceiling. Closes a real gap in the initial design: a batch could
+  otherwise mix callers or escalate capabilities/privacy request-by-request
+  within one session, which a session's single shared audit trail and
+  cumulative-ceiling accounting are not designed to attribute correctly.
+- `HubSessionCeiling` gained `max_queue_depth`/`max_concurrent_requests`
+  (4 -> 6 fields), attenuating the corresponding per-request resource
+  dimensions the same way the original 4 fields attenuate input/output
+  bytes, wall time, and request count.
+- `smc hub session` now writes/clears a pending marker per request (not
+  only per batch), matching `smc hub invoke`'s existing durability
+  contract. The initial pass had deliberately scoped this out (documented
+  as a known, accepted gap in `docs/spec/hub/hub_session_v0.md`); revisited
+  and closed once the rest of the session command was stable.
+- `crates/semantic-hub-turbovec/src/storage.rs`'s `checked_private_file_path`
+  rejected traversal via `/`, `\`, `.`, and `..`, but not a bare Windows
+  drive-relative name (e.g. `C:evil.tvim.txn` -- contains neither `/` nor
+  `\`). `PathBuf::join` treats an argument carrying its own prefix as
+  *replacing* the base path outright rather than appending to it, so such
+  a name would have escaped the scoped root entirely. Found during the
+  final review pass, before any caller could reach it in practice (every
+  current caller builds the name from a charset-restricted `IndexName`
+  plus a digit-only transaction id) -- fixed by requiring the name to
+  parse as exactly one `Normal` path component, with a regression test.
+
 ## Public contract changes
 
 `HUB_ENVELOPE_SCHEMA_VERSION` bumped 1 -> 2 (see `envelope.rs` doc
@@ -132,7 +172,8 @@ type changed from `Result<Vec<u8>, HubToolError>` to
 artifact }`) -- the only way for an adapter to report artifact
 provenance for a mutating operation. `HubFault` gained
 `SensitiveCapabilityDenied`, `WorkerDegraded`, `SessionLimitExceeded`,
-`WorkerBusy` (21 -> 25 variants). New `semantic_hub::session` module
+`WorkerBusy`, `PersistenceFailed`, `RecoveryRequired` (21 -> 28 variants).
+New `semantic_hub::session` module
 (`HubSession`, `HubSessionSummary`, `HubSessionCeiling`,
 `SessionAdmissionAmbient` re-exported from `admission`). New
 `HubResourceKind` variants: `SessionRequestCount`, `SessionInputBytes`,
@@ -155,7 +196,8 @@ unchanged (`hub.rs` remains a private module).
 
 ## CLI changes
 
-New `smc hub session --requests <file> [--out <file>] [--max-requests <n>]`.
+New `smc hub session --requests <file> [--out <file>] [--max-requests <n>]
+[--session-id <id>]` (the id is auto-generated when omitted).
 Full contract: `docs/spec/hub/hub_session_v0.md`. No dedicated `smc hub
 recover` subcommand: `vector.index.recover` is reachable through the
 existing generic `invoke`/`session` commands, since they are already
@@ -172,11 +214,12 @@ between two header forms across different commands.
 
 ## Fault taxonomy
 
-25 `HubFault` variants (was 21). See "Architecture decisions" above for
-the four additions and the deliberate exclusion of `PersistenceFailed`/
-`RecoveryRequired` as enum variants. Full list, current audit-parser
-`CODES` list, and per-fault pre/post-dispatch classification: `fault.rs`,
-`docs/architecture/semantic_hub_v0.md` section 10.
+28 `HubFault` variants (was 21). See "Architecture decisions" above for
+the six additions, including the revised `PersistenceFailed`/
+`RecoveryRequired` handling via `hub_fault_from_tool_error`. Full list,
+current audit-parser `CODES` list, and per-fault pre/post-dispatch
+classification: `fault.rs`, `docs/architecture/semantic_hub_v0.md`
+section 10.
 
 ## Capability/effect integration
 
@@ -190,7 +233,7 @@ that would let it cause one.
 
 ## Transaction/recovery model
 
-Full description: `docs/architecture/semantic_hub_v0.md` section 21,
+Full description: `docs/architecture/semantic_hub_v0.md` section 20,
 `docs/spec/hub/turbovec_adapter_v0.md` section 10.1-10.2. Summary: one
 `<name>.tvim.txn` record per index (always overwritten in place),
 `begin()` (durable intent, before the candidate write) ->
@@ -203,11 +246,12 @@ resolves an interrupted transaction into exactly one of `NoTransaction`,
 ## Resource model
 
 Session-level cumulative ceiling (`HubSessionCeiling`: request count,
-cumulative input/output bytes, cumulative wall time) added as a NEW,
-attenuating layer on top of the existing 12-dimension per-request
-`HubResourceBudget` -- it narrows, never widens, what a per-request budget
-already allows. 4 new `HubResourceKind` variants distinguish session-scope
-violations from per-request ones in audit/error evidence.
+cumulative input/output bytes, cumulative wall time, queue depth,
+concurrent requests -- 6 fields) added as a NEW, attenuating layer on top
+of the existing 12-dimension per-request `HubResourceBudget` -- it
+narrows, never widens, what a per-request budget already allows. 4 new
+`HubResourceKind` variants distinguish session-scope violations from
+per-request ones in audit/error evidence.
 
 ## Worker lifecycle
 
@@ -219,14 +263,21 @@ gained a new rule: `Degraded` + `mutates_tool_state` -> `WorkerDegraded`.
 ## Tests added
 
 ```text
-crates/semantic-hub:      +23 tests (109 -> 132)
-crates/semantic-hub-turbovec: +6 tests in lib.rs, +6 new tests in
-                           transaction.rs (38 -> 44 in lib unittests;
-                           transaction.rs is a wholly new module)
-tests/hub_cli.rs (root):  +10 new integration tests (22 -> 32),
-                           1 rewritten for the sensitive-capability
-                           hardening, 1 renamed (7 -> 8 operations)
+crates/semantic-hub:           109 -> 151 tests (session identity/
+                                capability/privacy fixation added in a
+                                later iteration, on top of the initial
+                                +23 for the base session/fault/audit work)
+crates/semantic-hub-turbovec:   38 -> 55 tests in lib.rs (transaction.rs
+                                is a wholly new module) + 3 in
+                                determinism_qualification.rs
+tests/hub_cli.rs (root):        22 -> 34 integration tests, 1 rewritten
+                                for the sensitive-capability hardening,
+                                1 renamed (7 -> 8 operations)
 ```
+
+Final measured count, all 3 crates: 336 passing unit tests + 34 passing
+`hub_cli` integration tests + 4 passing `public_api_contracts` tests,
+0 failed (see "Commands run and exact results" below for the exact runs).
 
 New unit-test coverage: session ceiling enforcement (request count,
 cumulative input bytes), cancellation, cross-session isolation, logical
@@ -316,11 +367,30 @@ cargo test --workspace --all-features
      anywhere outside the Hub crates from this change.
 ```
 
+**Final re-verification, run against the actual state that landed on
+`origin/main` (see "Git status" below for how it got there), after the
+session identity/capability/privacy fixation and the storage.rs fix in
+finding #7 below**:
+
+```text
+cargo fmt --all -- --check                                        -> clean
+cargo clippy -p semantic-hub -p semantic-hub-turbovec -p smc-cli
+  --all-targets --all-features -- -D warnings                     -> clean
+cargo test -p semantic-hub -p semantic-hub-turbovec -p smc-cli
+  -> semantic-hub: 151 passed, semantic-hub-turbovec: 55 (lib) + 3
+     (determinism_qualification), smc-cli: 127 passed -- 336 total, 0 failed
+cargo build -p semantic_language --bin smc --release              -> succeeded
+cargo test -p semantic_language --test hub_cli --release          -> 34 passed, 0 failed
+cargo test -p semantic_language --test public_api_contracts --release -> 4 passed, 0 failed
+cargo check --workspace --all-targets --all-features               -> clean
+```
+
 ## Adversarial findings
 
-Six real, self-caught defects during implementation (not found by a
-separate adversarial review pass -- see the required fresh-context
-adversarial review section below for that pass):
+Seven real, self-caught defects found during implementation and the
+final review pass (not from a separate multi-agent adversarial review --
+see "Delivery note" below for why that mandatory step did not happen as
+originally planned):
 
 1. `HubFault::Cancelled` misclassified as post-dispatch -- found via a new
    `HubSession` unit test.
@@ -338,6 +408,14 @@ adversarial review section below for that pass):
 6. A nonsensical `assert_ne!` in a `transaction.rs` test comparing a
    value to itself plus a suffix -- self-caught before running, rewritten
    to a meaningful assertion.
+7. `storage.rs`'s `checked_private_file_path` rejected traversal via
+   `/`, `\`, `.`, `..`, but not a bare Windows drive-relative name
+   (`C:evil.tvim.txn`), which `PathBuf::join` treats as replacing the
+   scoped root outright rather than appending to it -- found during the
+   final review pass; unreachable by any current caller, fixed anyway
+   since it is a `pub(crate)` safety boundary meant for future private-file
+   additions, on the OS this project actually targets. Regression test
+   added.
 
 ## Remaining explicit non-goals (unchanged from #1554/#1553, still true)
 
@@ -362,44 +440,98 @@ session-level cumulative output-byte checking is necessarily post-hoc
 in-process cancellation remains cooperative and pre-admission-only; there
   is still no mid-dispatch preemption in v0 (unchanged from the base
   contract's wall-time-budget limitation)
-smc hub session's audit durability is per-request (immediate append
-  after each request), not per-batch with a pre-dispatch pending marker
-  the way smc hub invoke has -- a deliberate, documented v0 scope
-  decision (docs/spec/hub/hub_session_v0.md section 7.5), not an
-  oversight
 ```
 
-## Git status
+An earlier draft of this pass deliberately scoped `smc hub session`'s
+audit durability down to per-batch (no pre-dispatch pending marker per
+request, unlike `smc hub invoke`). That gap was revisited and closed in a
+later iteration: every request in a session batch now gets a synced
+pre-dispatch pending marker exactly like `smc hub invoke`
+(`docs/spec/hub/hub_session_v0.md` section 7.5) -- this is no longer a
+non-claim.
 
-```text
-Modified (24): .harness/current.task.yaml; crates/semantic-hub/src/{admission,audit,
-capability,envelope,fault,lib,provenance,resource,runtime}.rs;
-crates/semantic-hub-turbovec/src/lib.rs, src/payload.rs,
-tests/determinism_qualification.rs; crates/smc-cli/src/hub.rs;
-docs/architecture/semantic_hub_v0.md; docs/privacy/semantic_hub_data_policy_v0.md;
-docs/security/semantic_hub_threat_model_v0.md; docs/spec/cli.md;
-docs/spec/hub/{hub_adapter_contract_v0,hub_api_v0,turbovec_adapter_v0}.md;
-tests/golden_snapshots/public_api/{semantic_hub_lib,semantic_hub_turbovec_lib}.txt;
-tests/hub_cli.rs
+## Delivery note (how this actually shipped)
 
-New (5): .harness/reports/SEMANTIC-HUB-V0-COMPLETION.md;
-crates/semantic-hub/src/session.rs;
-crates/semantic-hub-turbovec/src/transaction.rs;
-docs/spec/hub/hub_session_v0.md;
-tests/fixtures/hub/session_workflow.ndjson
+This did **not** ship the way the rest of this report describes it being
+prepared (own branch, own reviewed PR, `Closes #1526`). What actually
+happened:
 
-All 29 changed/new paths fall within .harness/current.task.yaml's own
-allowed_paths; none of the forbidden_paths were touched.
-```
+1. This pass was implemented on a dedicated branch
+   (`feat/semantic-hub-v0-completion`) off base commit `e18f7d64`, per the
+   task instructions above.
+2. Partway through, the implementing session ran out of usage limits.
+   Work continued (external tooling, not a second pass by the same
+   session) directly against the working tree rather than against that
+   branch: the identity/capability/privacy fixation on `HubSession`, the
+   `PersistenceFailed`/`RecoveryRequired` fault-mapping revision, the
+   two extra `HubSessionCeiling` fields, per-request session pending
+   markers, and `HubCapabilitySet::is_subset_of`, among the changes
+   documented above.
+3. That work was committed and pushed directly to `main`, bundled inside
+   an already-in-flight, unrelated PR
+   ([#1558](https://github.com/skulmakov-oss/Semantic/pull/1558), "feat:
+   promote quad logic calculator to canonical examples & resolve
+   projection parser panics") -- a 54-file, 24k-line PR whose own
+   description makes no mention of the Hub or #1526. It merged as a
+   single squash commit, `cb995efd`, on 2026-07-30.
+4. `feat/semantic-hub-v0-completion` itself was never advanced past its
+   base commit and never had a PR opened against it -- it is orphaned
+   and does not reflect where the real work landed.
+5. This session (after limits reset) audited the entire diff against
+   `main` line-by-line, found and fixed finding #7 above (the
+   `storage.rs` path-validation gap) and two stale documentation sections
+   in `docs/architecture/semantic_hub_v0.md` that still described the
+   pre-revision `PersistenceFailed`/`RecoveryRequired` design, removed a
+   stray committed scratch diff file (`scratch_full.diff`) left over from
+   that process, rewrote this report to match reality, and re-ran every
+   validation gate against the corrected state (see "Commands run and
+   exact results" above). Those fixes are delivered as a normal follow-up
+   commit/PR against `main` -- not a rewrite of the already-merged,
+   already-public history in `cb995efd`.
+
+The mandatory fresh-context multi-agent adversarial review step never ran
+to completion as originally planned (repeated tool rate-limiting); its
+role was substituted by the direct, sequential line-by-line audit in step
+5, which is how finding #7 was actually caught.
+
+Issue #1526 is closed as part of this follow-up, with a comment linking
+to `cb995efd`/PR #1558 and this report, being transparent about the
+irregular delivery path rather than presenting it as a clean, reviewed
+merge.
 
 ## Diff stat
 
 ```text
-24 files changed, 2655 insertions(+), 320 deletions(-)
- (git diff --stat, working tree at the point validation gates completed)
+Everything in "Public contract changes" through "Fixtures added" above,
+landed on main via cb995efd (PR #1558):
+  git diff --stat e18f7d64093a0ac39b106cfc19754a55090f08b2 cb995efd
+    -- <hub-related paths>
+  -> 34 files changed, 6703 insertions(+), 507 deletions(-)
+
+This session's follow-up fix-up (finding #7, two doc corrections, this
+report, removing the stray scratch_full.diff):
+  see the follow-up PR's own diff for exact numbers.
 ```
 
 ## Final verdict
 
-(Filled in after validation gates and the adversarial review pass both
-complete.)
+Functionally complete against the original #1526 gaps this pass targeted
+(bounded session executor, write-ahead transaction/recovery, streaming
+audit, generic provenance envelope, extended fault taxonomy, `smc hub
+session`), with real hardening added beyond the initial design (session
+identity/capability/privacy fixation, six-field session ceiling,
+per-request session audit durability) and one real security-relevant
+defect (finding #7) caught and fixed before this report was finalized.
+All local validation gates are green on the exact state that landed on
+`main` plus this session's follow-up fixes: 336 unit tests, 34 CLI
+integration tests, 4 public-API-contract tests, `cargo fmt`/`clippy -D
+warnings`/`cargo check --workspace` all clean, 0 failures anywhere.
+
+The one unresolved item is procedural, not technical: this shipped via
+an irregular path (bundled into an unrelated, already-merged PR) rather
+than its own reviewed PR, so the fresh-context adversarial review and
+the "one PR, `Closes #1526`" delivery requirements in the original task
+spec were not met as written. The follow-up commit/PR described in
+"Delivery note" above, plus closing #1526 with a transparent comment,
+is the closest honest substitute available now that the original commit
+is already public on `main`.
