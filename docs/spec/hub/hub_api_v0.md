@@ -298,7 +298,7 @@ the canonical audit decoder recognizes; see Section 10).
 
 ## 8. Fault taxonomy
 
-`HubFault` -- 21 variants. Every admitted-or-rejected invocation ends in
+`HubFault` -- 28 variants. Every admitted-or-rejected invocation ends in
 exactly one `HubReplyStatus` carrying at most one `HubFault`. `.code()`
 returns a stable machine-readable string independent of the variant's
 carried message text.
@@ -428,7 +428,7 @@ parsed, else `RecordTooLarge`). Field order:
 17. resource_usage         9 ","-joined values ("-" for None), same field order as HubResourceUsage
 18. worker_state_after     Display name of one of the 9 HubWorkerState values
 19. status_code            one of "Success"/"Rejected"/"ToolFailed"/"Crashed"/"HubFault"
-20. fault_code             one of the 21 fault codes in Section 8, or "-" for None
+20. fault_code             one of the 28 fault codes in Section 8, or "-" for None
 ```
 
 Escaping applies only to fields whose content is not a closed/controlled

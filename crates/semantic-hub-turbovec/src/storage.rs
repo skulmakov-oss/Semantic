@@ -219,18 +219,28 @@ impl ScopedStorage {
         // They alone are not enough on Windows: `PathBuf::join` treats an
         // argument that carries its own prefix (a drive-relative name like
         // `C:evil.tvim.txn`, containing neither `/` nor `\`) as replacing
-        // `self.root` outright rather than appending to it. Requiring the
-        // name to parse as exactly one `Normal` path component rejects any
-        // prefix/root/`..`/`.` component on every platform, closing that
-        // gap without weakening the separator checks.
+        // `self.root` outright rather than appending to it. `Path::components`
+        // only recognizes that prefix syntax when compiled for a Windows
+        // target, so a name like `C:evil.tvim.txn` parses as a single
+        // `Normal` component (and would be wrongly accepted) when this
+        // crate's tests run on a non-Windows CI host -- checking for the
+        // drive-prefix syntax explicitly, as a plain string pattern, keeps
+        // the rejection identical on every host regardless of which
+        // platform actually built the binary.
         let mut components = Path::new(file_name).components();
         let is_bare_leaf = matches!(components.next(), Some(std::path::Component::Normal(_)))
             && components.next().is_none();
+        let has_drive_prefix = file_name
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphabetic)
+            && file_name.as_bytes().get(1) == Some(&b':');
         if file_name.is_empty()
             || file_name == "."
             || file_name == ".."
             || file_name.contains('/')
             || file_name.contains('\\')
+            || has_drive_prefix
             || !is_bare_leaf
         {
             return Err(ScopedStorageError::InvalidPrivateFileName);

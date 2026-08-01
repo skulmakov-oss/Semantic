@@ -339,7 +339,7 @@ The stable code string is what appears in the audit record's `fault_code`
 field and in the CLI's non-zero-exit error string; the human-readable
 message is not parsed by anything and may change freely.
 
-The four v0-completion additions, and why each is a distinct top-level
+The six v0-completion additions, and why each is a distinct top-level
 `HubFault` variant rather than folded into an existing one:
 
 - **`SensitiveCapabilityDenied`**: a request whose `capability_context`
@@ -402,7 +402,7 @@ struct, packed), `resource_usage` (full struct, `Option<T>` fields -- `None`
 means "not measured", never a fabricated zero), `worker_state_after`,
 `status_code` (the reply-status discriminant: one of
 Success/Rejected/ToolFailed/Crashed/HubFault), and `fault_code`
-(`Option<one of the 21 HubFault codes>`).
+(`Option<one of the 28 HubFault codes>`).
 
 `HubDigest` is FNV-1a-64 plus byte length -- explicitly a non-cryptographic
 correlation fingerprint, not a security or integrity guarantee; there is no
@@ -413,7 +413,7 @@ claimed as done here.
 folded into one field. An earlier implementation bug conflated them and
 broke the canonical-text parser on reload, because `status_code`'s parser
 only recognizes the five reply-status names and cannot also parse one of the
-21 fault codes. This was caught by dogfooding through the built CLI binary,
+28 fault codes. This was caught by dogfooding through the built CLI binary,
 not by unit tests in isolation, and fixed with a regression test that
 reloads a persisted audit log containing a non-`Success` record.
 
