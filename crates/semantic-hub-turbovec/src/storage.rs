@@ -214,11 +214,24 @@ impl ScopedStorage {
         &self,
         file_name: &str,
     ) -> Result<PathBuf, ScopedStorageError> {
+        // `\` is not a separator to Rust's `Path` parser on non-Windows
+        // targets, so the explicit checks below are still needed there.
+        // They alone are not enough on Windows: `PathBuf::join` treats an
+        // argument that carries its own prefix (a drive-relative name like
+        // `C:evil.tvim.txn`, containing neither `/` nor `\`) as replacing
+        // `self.root` outright rather than appending to it. Requiring the
+        // name to parse as exactly one `Normal` path component rejects any
+        // prefix/root/`..`/`.` component on every platform, closing that
+        // gap without weakening the separator checks.
+        let mut components = Path::new(file_name).components();
+        let is_bare_leaf = matches!(components.next(), Some(std::path::Component::Normal(_)))
+            && components.next().is_none();
         if file_name.is_empty()
             || file_name == "."
             || file_name == ".."
             || file_name.contains('/')
             || file_name.contains('\\')
+            || !is_bare_leaf
         {
             return Err(ScopedStorageError::InvalidPrivateFileName);
         }
@@ -335,10 +348,25 @@ mod tests {
     #[test]
     fn checked_private_file_path_rejects_non_leaf_names() {
         let storage = ScopedStorage::new(temp_dir("private-name"));
-        for invalid in ["", ".", "..", "../outside", "sub/file", "sub\\file"] {
+        for invalid in [
+            "",
+            ".",
+            "..",
+            "../outside",
+            "sub/file",
+            "sub\\file",
+            // Regression: `PathBuf::join` treats an argument that carries
+            // its own prefix (a Windows drive-relative name) as replacing
+            // the base path outright rather than appending to it, even
+            // though this name contains neither `/` nor `\` and so passed
+            // the separator checks alone.
+            "C:evil.tvim.txn",
+            r"C:\evil.tvim.txn",
+        ] {
             assert_eq!(
                 storage.checked_private_file_path(invalid).unwrap_err(),
-                ScopedStorageError::InvalidPrivateFileName
+                ScopedStorageError::InvalidPrivateFileName,
+                "expected {invalid:?} to be rejected"
             );
         }
     }

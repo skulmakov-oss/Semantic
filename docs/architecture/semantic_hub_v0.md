@@ -319,7 +319,7 @@ only ask for less, never more, than either.
 
 ## 10. Fault taxonomy
 
-`HubFault` (`fault.rs`) has 25 variants, each with a stable `.code()` string
+`HubFault` (`fault.rs`) has 28 variants, each with a stable `.code()` string
 independent of its human-readable message:
 
 ```text
@@ -329,9 +329,10 @@ CapabilityDenied     PrivacyDenied         SensitiveCapabilityDenied
 WorkerDegraded       SessionLimitExceeded  ResourceBudgetInvalid
 QueueFull            ToolDisabled          ToolQuarantined
 DeadlineExceeded     Cancelled             ResourceExhausted
-WorkerBusy           ToolDeclaredFailure   WorkerPanicked
-ProtocolViolation    OutputRejected        AuditProvenanceFailure
-InternalHubFault
+WorkerBusy           ToolDeclaredFailure   PersistenceFailed
+RecoveryRequired     WorkerPanicked        ProtocolViolation
+OutputRejected       AuditProvenanceFailure  InternalHubFault
+SequenceExhausted
 ```
 
 The stable code string is what appears in the audit record's `fault_code`
@@ -367,16 +368,25 @@ The four v0-completion additions, and why each is a distinct top-level
   today, but the code path existed -- was misreported as
   `ToolQuarantined`; fixed as part of adding this variant.)
 
-`PersistenceFailed` and `RecoveryRequired`, named in early drafts of the
-v0-completion scope, deliberately do **not** exist as `HubFault` variants:
-repository truth is that CLI-level infrastructure failures (audit log I/O,
-scoped-storage violations, pending-marker bookkeeping) are reported as
-plain `"<Code>: <message>"` `Result<(), String>` errors from `smc-cli`'s
-own command functions -- following the *existing* convention already used
-for `AuditProvenanceFailure`, `ScopedStorageViolation`, and
-`DuplicateRequestId` -- not as `HubFault` enum variants, since they are not
-per-request admission/dispatch outcomes. See section 20 (transaction
-protocol) for where these actually surface.
+- **`PersistenceFailed`** / **`RecoveryRequired`**: distinct top-level
+  `HubFault` variants for the two adapter-declared failure classes the
+  transaction/recovery protocol (section 20) actually produces. An adapter
+  never constructs a `HubFault` directly -- it returns a `HubToolError`
+  with a stable `code` string, and `runtime.rs`'s `hub_fault_from_tool_error`
+  maps the known codes `"PersistenceFailed"` and `"RecoveryRequired"` (and
+  `"DeadlineExceeded"`) onto their own `HubFault` variant, falling back to
+  `ToolDeclaredFailure` for any other adapter-declared code. This keeps
+  adapters ignorant of the full Hub fault taxonomy while still giving these
+  two failure classes stable, distinct top-level codes in the audit trail
+  and the CLI's exit-code mapping, rather than leaving them indistinguishable
+  from an ordinary `ToolDeclaredFailure`. CLI-level infrastructure failures
+  that never reach dispatch at all (audit log I/O, scoped-storage
+  violations, pending-marker bookkeeping) remain plain `"<Code>: <message>"`
+  `Result<(), String>` errors from `smc-cli`'s own command functions, per
+  the existing convention -- that distinction (per-request dispatch outcome
+  vs. CLI-process-level infrastructure failure) is what actually decides
+  whether something is a `HubFault` variant, not the persistence/recovery
+  subject matter itself.
 
 ## 11. Audit and provenance
 
@@ -795,13 +805,12 @@ neither exists                 -> cannot prove either outcome (e.g. a
 `TurboVecAdapter::load()` -- the entry point every read and every further
 mutation goes through -- refuses to proceed if an index's transaction
 record is still `phase=Intent`, returning a `RecoveryRequired`-coded
-`HubToolError` (surfaced as `ToolDeclaredFailure: RecoveryRequired: ...`
-in the reply, since adapter-declared errors have no route to a distinct
-top-level `HubFault` variant -- see section 10's note on why
-`RecoveryRequired` is not a `HubFault` variant). `handle_recover` is the
-only code path that inspects a transaction record without going through
-`load()`'s gate -- it would otherwise be gated by the exact condition it
-exists to resolve.
+`HubToolError`. `runtime.rs`'s `hub_fault_from_tool_error` recognizes that
+code and surfaces it as the distinct `HubFault::RecoveryRequired` variant
+in the reply (see section 10), not the generic `ToolDeclaredFailure`.
+`handle_recover` is the only code path that inspects a transaction record
+without going through `load()`'s gate -- it would otherwise be gated by
+the exact condition it exists to resolve.
 
 Artifact provenance (`HubToolOutcome::artifact`, `HubProvenance::artifact`
 -- section 11) is the direct byproduct of step 4 above: every mutating
