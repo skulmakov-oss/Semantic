@@ -44,7 +44,7 @@ jobs:
         run: rm -f model_quantized.onnx
 
       - name: Open issue on mismatch
-        if: failure()
+        if: steps.compare.outcome == 'failure'
         uses: actions/github-script@v7
         with:
           script: |
