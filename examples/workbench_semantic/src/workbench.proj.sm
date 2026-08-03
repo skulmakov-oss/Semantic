@@ -1,0 +1,94 @@
+projection v0 {
+    revision 2;
+    epoch 1;
+    surface 1 root 10 key 1;
+
+    node 10 role root key 10 {
+        child 11 order 0;
+        child 12 order 1;
+        child 13 order 2;
+        child 14 order 3;
+        child 15 order 4;
+        child 16 order 5;
+        child 20 order 20; child 21 order 21; child 22 order 22; child 23 order 23;
+        child 24 order 24; child 25 order 25; child 26 order 26; child 27 order 27;
+        child 30 order 30; child 31 order 31; child 32 order 32; child 33 order 33;
+        child 34 order 34; child 35 order 35; child 36 order 36; child 37 order 37;
+        child 40 order 40;
+        child 70 order 70;
+        child 80 order 80;
+        child 90 order 90;
+        child 100 order 100;
+        child 130 order 130; child 131 order 131; child 132 order 132;
+        child 140 order 140; child 141 order 141; child 142 order 142;
+        child 143 order 143; child 144 order 144;
+        child 192 order 192; child 193 order 193; child 194 order 194;
+        child 50 order 50; child 51 order 51; child 52 order 52; child 53 order 53;
+        child 54 order 54; child 55 order 55; child 56 order 56; child 57 order 57;
+        child 58 order 58; child 59 order 59; child 60 order 60; child 61 order 61;
+    }
+
+    node 11 role text key 11 {}
+    node 12 role text key 12 {}
+    node 13 role evidence_panel key 13 {}
+    node 14 role evidence_panel key 14 {}
+    node 15 role evidence_panel key 15 {}
+    node 16 role evidence_panel key 16 {}
+
+    node 20 role danger_action key 20 {}
+    node 21 role danger_action key 21 {}
+    node 22 role danger_action key 22 {}
+    node 23 role danger_action key 23 {}
+    node 24 role danger_action key 24 {}
+    node 25 role danger_action key 25 {}
+    node 26 role danger_action key 26 {}
+    node 27 role danger_action key 27 {}
+
+    node 30 role fragment key 30 {}
+    node 31 role fragment key 31 {}
+    node 32 role fragment key 32 {}
+    node 33 role fragment key 33 {}
+    node 34 role fragment key 34 {}
+    node 35 role fragment key 35 {}
+    node 36 role fragment key 36 {}
+    node 37 role fragment key 37 {}
+
+    node 40 role recovery_outlet key 40 {}
+    node 70 role danger_action key 70 {}
+
+    node 80 role fragment key 80 {}
+    node 90 role fragment key 90 {}
+    node 100 role recovery_outlet key 100 {}
+
+    node 130 role recovery_outlet key 130 {}
+    node 131 role danger_action key 131 {}
+    node 132 role recovery_outlet key 132 {}
+
+    node 140 role fragment key 140 {}
+    node 141 role fragment key 141 {}
+    node 142 role fragment key 142 {}
+    node 143 role fragment key 143 {}
+    node 144 role fragment key 144 {}
+
+    node 192 role danger_action key 192 {}
+    node 193 role recovery_outlet key 193 {}
+    node 194 role recovery_outlet key 194 {}
+
+    node 50 role fragment key 50 {}
+    node 51 role fragment key 51 {}
+    node 52 role fragment key 52 {}
+    node 53 role fragment key 53 {}
+    node 54 role fragment key 54 {}
+    node 55 role fragment key 55 {}
+    node 56 role fragment key 56 {}
+    node 57 role fragment key 57 {}
+    node 58 role fragment key 58 {}
+    node 59 role fragment key 59 {}
+    node 60 role fragment key 60 {}
+    node 61 role fragment key 61 {}
+
+    collection_anchor 13;
+    collection_anchor 14;
+    collection_anchor 15;
+    collection_anchor 16;
+}

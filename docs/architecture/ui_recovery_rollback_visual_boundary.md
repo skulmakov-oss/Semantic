@@ -471,7 +471,7 @@ docs/spec/ui_recovery_rollback.md
 crates/prom-ui-recovery/
 crates/prom-ui-status/
 crates/prom-ui-components/
-apps/workbench recovery views
+apps/workbench_ts_tauri_legacy recovery views
 renderer recovery projection map
 ```
 

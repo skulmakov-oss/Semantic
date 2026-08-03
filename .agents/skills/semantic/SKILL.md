@@ -1,6 +1,6 @@
 ---
 name: semantic
-description: Use for the skulmakov-oss/Semantic repository when editing Semantic source, sm-front, sm-sema, sm-ir, sm-emit, sm-verify, sm-runtime-core, sm-vm, smc-cli, SemCode, verifier admission, deterministic VM execution, Quad Logic, runtime ownership, quotas, PROMETHEUS ABI/capability/gate/runtime/state/rules/audit crates, prom-ui*, prom-ui-runtime, prom-ui-backend-native, apps/workbench, UI ownership maps, UI admission boundaries, UI visual doctrine, UI interaction semantics, UI trace/audit projection, docs/spec, roadmap/status documents, tests, or PR planning. Do not use for unrelated generic Rust cleanup, generic UI styling, unrelated documentation edits, or non-Semantic projects.
+description: Use for the skulmakov-oss/Semantic repository when editing Semantic source, sm-front, sm-sema, sm-ir, sm-emit, sm-verify, sm-runtime-core, sm-vm, smc-cli, SemCode, verifier admission, deterministic VM execution, Quad Logic, runtime ownership, quotas, PROMETHEUS ABI/capability/gate/runtime/state/rules/audit crates, prom-ui*, prom-ui-runtime, prom-ui-backend-native, examples/workbench_semantic, apps/workbench_ts_tauri_legacy, UI ownership maps, UI admission boundaries, UI visual doctrine, UI interaction semantics, UI trace/audit projection, docs/spec, roadmap/status documents, tests, or PR planning. Do not use for unrelated generic Rust cleanup, generic UI styling, unrelated documentation edits, or non-Semantic projects.
 ---
 
 ROLE: conservative Semantic implementation agent.
@@ -101,10 +101,14 @@ UI_CRATES_AND_APPS:
   platform-neutral UI runtime orchestration.
 - prom-ui-backend-native:
   native backend facade and platform event bridge.
-- apps/workbench:
-  developer/operator tooling surface.
-  Workbench is not compiler/verifier/VM owner.
-  Workbench is not Semantic UI application contract owner.
+- examples/workbench_semantic:
+  canonical Workbench: native Semantic + Prom UI application
+  (developer/operator tooling surface). Workbench is not
+  compiler/verifier/VM owner. Workbench is not Semantic UI
+  application contract owner.
+- apps/workbench_ts_tauri_legacy:
+  archived React/TypeScript/Tauri Workbench, non-canonical,
+  reference only (not a logic or contract source).
 
 NAMING_RULE:
 - Semantic:

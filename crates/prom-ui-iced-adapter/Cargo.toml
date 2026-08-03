@@ -1,0 +1,27 @@
+[package]
+name = "prom-ui-iced-adapter"
+version = "0.1.0"
+edition = "2021"
+description = "Private Iced-backed native UI substrate for Prom UI. The only crate in this workspace authorized to depend on Iced directly -- see third_party/iced/UPSTREAM.md."
+license = "Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Pinned exact version -- never a caret/range. Bumping requires a real,
+# reviewed change to this line, not implicit drift. See
+# third_party/iced/UPSTREAM.md for the upstream record and update
+# procedure.
+# "smol" is required for `iced::time::every` (the real subscription
+# backing `PromApplication::on_tick`, see crate::app::run) -- a real,
+# already-shipped Iced feature flag, not a new external dependency: it
+# only turns on the lightweight `smol`/`async-io` executor family Iced
+# itself ships and picks between (the alternative is "tokio", a heavier
+# runtime this workspace has no other use for).
+iced = { version = "=0.14.0", features = ["advanced", "smol"] }
+
+[dev-dependencies]
+# Used only by tests/dependency_boundary.rs to prove workbench_semantic
+# has no direct Iced dependency (reads Cargo.lock/manifests, not a real
+# runtime dependency).

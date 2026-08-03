@@ -34,6 +34,7 @@ members = [
     "crates/prom-ui",
     "crates/prom-ui-runtime",
     "crates/prom-ui-backend-native",
+    "crates/prom-ui-iced-adapter",
     "crates/prom-ui-demo",
     "crates/core-lab",
     "crates/semantic-hub",
@@ -45,6 +46,7 @@ members = [
     "crates/semantic-core-quad",
     "crates/semantic-core-runtime",
     "examples/quad_logic_calculator",
+    "examples/workbench_semantic",
 ]
 resolver = "2"
 

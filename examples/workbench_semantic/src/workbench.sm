@@ -1,0 +1,705 @@
+record WorkbenchState {
+    screen: i32,
+    project_open: bool,
+    file_count: i32,
+    selected_file_index: i32,
+    queued_count: i32,
+    running_count: i32,
+    concurrency_limit: i32,
+    job_counter: i32,
+    last_job_id: i32,
+    last_job_status: i32,
+    last_job_exit_code: i32,
+    evaluation_state: quad,
+    error_code: i32,
+    tab_count: i32,
+    active_tab: i32,
+    pending_close_tab: i32,
+    tab_slot_0_open: bool,
+    tab_slot_1_open: bool,
+    tab_slot_2_open: bool,
+    tab_slot_3_open: bool,
+    tab_slot_4_open: bool,
+    tab_slot_5_open: bool,
+    tab_slot_0_dirty: bool,
+    tab_slot_1_dirty: bool,
+    tab_slot_2_dirty: bool,
+    tab_slot_3_dirty: bool,
+    tab_slot_4_dirty: bool,
+    tab_slot_5_dirty: bool,
+    diagnostics_selected: i32,
+    job_filter_kind: i32,
+    job_filter_status: i32,
+    selected_job_index: i32,
+    inspector_kind: i32,
+    spec_doc_open: bool,
+    readiness_running: bool,
+}
+
+record WorkbenchAction {
+    kind: i32,
+    payload: i32,
+}
+
+fn init_workbench_state() -> WorkbenchState {
+    let st: WorkbenchState = WorkbenchState {
+        screen: 0,
+        project_open: false,
+        file_count: 0,
+        selected_file_index: 0,
+        queued_count: 0,
+        running_count: 0,
+        concurrency_limit: 1,
+        job_counter: 0,
+        last_job_id: 0,
+        last_job_status: 0,
+        last_job_exit_code: 0,
+        evaluation_state: N,
+        error_code: 0,
+        tab_count: 0,
+        active_tab: -1,
+        pending_close_tab: -1,
+        tab_slot_0_open: false,
+        tab_slot_1_open: false,
+        tab_slot_2_open: false,
+        tab_slot_3_open: false,
+        tab_slot_4_open: false,
+        tab_slot_5_open: false,
+        tab_slot_0_dirty: false,
+        tab_slot_1_dirty: false,
+        tab_slot_2_dirty: false,
+        tab_slot_3_dirty: false,
+        tab_slot_4_dirty: false,
+        tab_slot_5_dirty: false,
+        diagnostics_selected: -1,
+        job_filter_kind: -1,
+        job_filter_status: -1,
+        selected_job_index: -1,
+        inspector_kind: 0,
+        spec_doc_open: false,
+        readiness_running: false,
+    };
+    return st;
+}
+
+// --- Fixed-slot (0..5) tab helpers. Six explicit fields rather than a
+// dynamic array/bitmask: array-shift-on-close and integer bit ops are both
+// unconfirmed constructs for this language surface, while six named bools
+// plus explicit if-chains use only fixture-confirmed syntax. ---
+
+fn get_tab_open(st: WorkbenchState, idx: i32) -> bool {
+    let mut result: bool = false;
+    if idx == 0 {
+        result = st.tab_slot_0_open;
+    }
+    if idx == 1 {
+        result = st.tab_slot_1_open;
+    }
+    if idx == 2 {
+        result = st.tab_slot_2_open;
+    }
+    if idx == 3 {
+        result = st.tab_slot_3_open;
+    }
+    if idx == 4 {
+        result = st.tab_slot_4_open;
+    }
+    if idx == 5 {
+        result = st.tab_slot_5_open;
+    }
+    return result;
+}
+
+fn set_tab_open(st: WorkbenchState, idx: i32, val: bool) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    if idx == 0 {
+        next = next with { tab_slot_0_open: val };
+    }
+    if idx == 1 {
+        next = next with { tab_slot_1_open: val };
+    }
+    if idx == 2 {
+        next = next with { tab_slot_2_open: val };
+    }
+    if idx == 3 {
+        next = next with { tab_slot_3_open: val };
+    }
+    if idx == 4 {
+        next = next with { tab_slot_4_open: val };
+    }
+    if idx == 5 {
+        next = next with { tab_slot_5_open: val };
+    }
+    return next;
+}
+
+fn get_tab_dirty(st: WorkbenchState, idx: i32) -> bool {
+    let mut result: bool = false;
+    if idx == 0 {
+        result = st.tab_slot_0_dirty;
+    }
+    if idx == 1 {
+        result = st.tab_slot_1_dirty;
+    }
+    if idx == 2 {
+        result = st.tab_slot_2_dirty;
+    }
+    if idx == 3 {
+        result = st.tab_slot_3_dirty;
+    }
+    if idx == 4 {
+        result = st.tab_slot_4_dirty;
+    }
+    if idx == 5 {
+        result = st.tab_slot_5_dirty;
+    }
+    return result;
+}
+
+fn set_tab_dirty(st: WorkbenchState, idx: i32, val: bool) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    if idx == 0 {
+        next = next with { tab_slot_0_dirty: val };
+    }
+    if idx == 1 {
+        next = next with { tab_slot_1_dirty: val };
+    }
+    if idx == 2 {
+        next = next with { tab_slot_2_dirty: val };
+    }
+    if idx == 3 {
+        next = next with { tab_slot_3_dirty: val };
+    }
+    if idx == 4 {
+        next = next with { tab_slot_4_dirty: val };
+    }
+    if idx == 5 {
+        next = next with { tab_slot_5_dirty: val };
+    }
+    return next;
+}
+
+fn find_free_tab_slot(st: WorkbenchState) -> i32 {
+    let mut slot: i32 = -1;
+    if !st.tab_slot_0_open {
+        slot = 0;
+    }
+    if slot == -1 {
+        if !st.tab_slot_1_open {
+            slot = 1;
+        }
+    }
+    if slot == -1 {
+        if !st.tab_slot_2_open {
+            slot = 2;
+        }
+    }
+    if slot == -1 {
+        if !st.tab_slot_3_open {
+            slot = 3;
+        }
+    }
+    if slot == -1 {
+        if !st.tab_slot_4_open {
+            slot = 4;
+        }
+    }
+    if slot == -1 {
+        if !st.tab_slot_5_open {
+            slot = 5;
+        }
+    }
+    return slot;
+}
+
+// --- Core screen / project / job transitions ---
+
+fn transition_select_screen(st: WorkbenchState, screen: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with { screen: screen, error_code: 0 };
+    return next;
+}
+
+fn transition_project_opened(st: WorkbenchState, file_count: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with {
+        project_open: true,
+        file_count: file_count,
+        selected_file_index: 0,
+        error_code: 0
+    };
+    return next;
+}
+
+fn transition_select_file(st: WorkbenchState, idx: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    if !next.project_open {
+        next = next with { error_code: 1 };
+        return next;
+    }
+    if idx < 0 {
+        next = next with { error_code: 4 };
+        return next;
+    }
+    if idx >= next.file_count {
+        next = next with { error_code: 4 };
+        return next;
+    }
+    next = next with { selected_file_index: idx, error_code: 0 };
+    return next;
+}
+
+// A request becomes a real queue entry immediately -- never rejected just
+// because something else is already running. Concurrency is enforced only
+// when a queued job is actually about to start (transition_job_started),
+// not at request time: this is what makes "at least one job stays visibly
+// queued while another runs" a real, observable state rather than a
+// rejection.
+fn transition_enqueue_job(st: WorkbenchState, job_kind: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    if !next.project_open {
+        next = next with { error_code: 1 };
+        return next;
+    }
+    let total_pending: i32 = next.queued_count + next.running_count;
+    if total_pending >= 20 {
+        next = next with { error_code: 8 };
+        return next;
+    }
+    let new_id: i32 = next.job_counter + 1;
+    let new_queued: i32 = next.queued_count + 1;
+    next = next with {
+        job_counter: new_id,
+        queued_count: new_queued,
+        last_job_id: new_id,
+        last_job_status: 0,
+        evaluation_state: N,
+        error_code: 0
+    };
+    return next;
+}
+
+// A queued job that is denied by the capability boundary before it ever
+// runs: it leaves the queue, but never touches running_count.
+fn transition_job_denied(st: WorkbenchState) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let new_queued: i32 = next.queued_count - 1;
+    next = next with {
+        queued_count: new_queued,
+        last_job_status: 4,
+        evaluation_state: S,
+        error_code: 3
+    };
+    return next;
+}
+
+// A queued job is admitted a real concurrency slot and actually spawned.
+fn transition_job_started(st: WorkbenchState) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let new_queued: i32 = next.queued_count - 1;
+    let new_running: i32 = next.running_count + 1;
+    next = next with {
+        queued_count: new_queued,
+        running_count: new_running,
+        last_job_status: 1,
+        evaluation_state: N,
+        error_code: 0
+    };
+    return next;
+}
+
+fn transition_job_succeeded(st: WorkbenchState) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let new_running: i32 = next.running_count - 1;
+    next = next with {
+        running_count: new_running,
+        last_job_status: 2,
+        last_job_exit_code: 0,
+        evaluation_state: T,
+        error_code: 0
+    };
+    return next;
+}
+
+fn transition_job_failed(st: WorkbenchState, exit_code: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let new_running: i32 = next.running_count - 1;
+    next = next with {
+        running_count: new_running,
+        last_job_status: 3,
+        last_job_exit_code: exit_code,
+        evaluation_state: F,
+        error_code: 0
+    };
+    return next;
+}
+
+// Cancelling a job still in the queue: it never starts, running_count is
+// never touched.
+fn transition_job_cancelled_queued(st: WorkbenchState) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let new_queued: i32 = next.queued_count - 1;
+    next = next with {
+        queued_count: new_queued,
+        last_job_status: 5,
+        evaluation_state: N,
+        error_code: 0
+    };
+    return next;
+}
+
+// Cancelling a job that is actually running: its concurrency slot is freed
+// for the next queued job.
+fn transition_job_cancelled_running(st: WorkbenchState) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let new_running: i32 = next.running_count - 1;
+    next = next with {
+        running_count: new_running,
+        last_job_status: 5,
+        evaluation_state: N,
+        error_code: 0
+    };
+    return next;
+}
+
+fn transition_set_concurrency_limit(st: WorkbenchState, limit: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    if limit < 1 {
+        next = next with { error_code: 9 };
+        return next;
+    }
+    next = next with { concurrency_limit: limit, error_code: 0 };
+    return next;
+}
+
+fn transition_clear_error(st: WorkbenchState) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with { error_code: 0 };
+    return next;
+}
+
+// --- Editor tab lifecycle ---
+
+fn transition_open_tab(st: WorkbenchState) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    if !next.project_open {
+        next = next with { error_code: 1 };
+        return next;
+    }
+    let slot: i32 = find_free_tab_slot(st);
+    if slot == -1 {
+        next = next with { error_code: 5 };
+        return next;
+    }
+    next = set_tab_open(next, slot, true);
+    let new_count: i32 = next.tab_count + 1;
+    next = next with { active_tab: slot, tab_count: new_count, screen: 3, error_code: 0 };
+    return next;
+}
+
+fn transition_select_tab(st: WorkbenchState, tab_idx: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    if tab_idx < 0 {
+        next = next with { error_code: 6 };
+        return next;
+    }
+    if tab_idx > 5 {
+        next = next with { error_code: 6 };
+        return next;
+    }
+    if !get_tab_open(next, tab_idx) {
+        next = next with { error_code: 6 };
+        return next;
+    }
+    next = next with { active_tab: tab_idx, error_code: 0 };
+    return next;
+}
+
+fn do_close_tab(st: WorkbenchState, tab_idx: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = set_tab_open(next, tab_idx, false);
+    next = set_tab_dirty(next, tab_idx, false);
+    let new_count: i32 = next.tab_count - 1;
+    let mut next_active: i32 = next.active_tab;
+    if next.active_tab == tab_idx {
+        next_active = -1;
+    }
+    next = next with {
+        tab_count: new_count,
+        active_tab: next_active,
+        pending_close_tab: -1,
+        error_code: 0
+    };
+    return next;
+}
+
+fn transition_close_tab_requested(st: WorkbenchState, tab_idx: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    if !get_tab_open(next, tab_idx) {
+        next = next with { error_code: 6 };
+        return next;
+    }
+    if get_tab_dirty(next, tab_idx) {
+        next = next with { pending_close_tab: tab_idx };
+        return next;
+    }
+    next = do_close_tab(next, tab_idx);
+    return next;
+}
+
+fn transition_close_tab_confirmed(st: WorkbenchState, tab_idx: i32) -> WorkbenchState {
+    return do_close_tab(st, tab_idx);
+}
+
+fn transition_close_tab_cancelled(st: WorkbenchState) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with { pending_close_tab: -1 };
+    return next;
+}
+
+fn transition_mark_dirty(st: WorkbenchState, tab_idx: i32) -> WorkbenchState {
+    return set_tab_dirty(st, tab_idx, true);
+}
+
+fn transition_mark_saved(st: WorkbenchState, tab_idx: i32) -> WorkbenchState {
+    return set_tab_dirty(st, tab_idx, false);
+}
+
+// --- Diagnostics / Jobs Ledger / Inspector / Spec / Readiness selectors ---
+
+fn transition_select_diagnostic(st: WorkbenchState, idx: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with { diagnostics_selected: idx };
+    return next;
+}
+
+fn transition_set_job_filter_kind(st: WorkbenchState, kind: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with { job_filter_kind: kind };
+    return next;
+}
+
+fn transition_set_job_filter_status(st: WorkbenchState, status: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with { job_filter_status: status };
+    return next;
+}
+
+fn transition_select_job(st: WorkbenchState, idx: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with { selected_job_index: idx };
+    return next;
+}
+
+fn transition_set_inspector(st: WorkbenchState, kind: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    next = next with { inspector_kind: kind };
+    return next;
+}
+
+fn transition_set_spec_doc_open(st: WorkbenchState, flag: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let mut is_open: bool = false;
+    if flag == 1 {
+        is_open = true;
+    }
+    next = next with { spec_doc_open: is_open };
+    return next;
+}
+
+fn transition_set_readiness_running(st: WorkbenchState, flag: i32) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let mut running: bool = false;
+    if flag == 1 {
+        running = true;
+    }
+    next = next with { readiness_running: running };
+    return next;
+}
+
+fn apply_action(st: WorkbenchState, act: WorkbenchAction) -> WorkbenchState {
+    let mut next: WorkbenchState = st;
+    let k: i32 = act.kind;
+    let p: i32 = act.payload;
+
+    if k == 0 {
+        next = transition_select_screen(st, p);
+    }
+    if k == 1 {
+        next = transition_project_opened(st, p);
+    }
+    if k == 2 {
+        next = transition_select_file(st, p);
+    }
+    if k == 3 {
+        next = transition_enqueue_job(st, p);
+    }
+    if k == 4 {
+        next = transition_job_denied(st);
+    }
+    if k == 5 {
+        next = transition_job_succeeded(st);
+    }
+    if k == 6 {
+        next = transition_job_failed(st, p);
+    }
+    if k == 7 {
+        next = transition_clear_error(st);
+    }
+    if k == 8 {
+        next = transition_open_tab(st);
+    }
+    if k == 9 {
+        next = transition_select_tab(st, p);
+    }
+    if k == 10 {
+        next = transition_close_tab_requested(st, p);
+    }
+    if k == 11 {
+        next = transition_close_tab_confirmed(st, p);
+    }
+    if k == 12 {
+        next = transition_close_tab_cancelled(st);
+    }
+    if k == 13 {
+        next = transition_mark_dirty(st, p);
+    }
+    if k == 14 {
+        next = transition_mark_saved(st, p);
+    }
+    if k == 15 {
+        next = transition_select_diagnostic(st, p);
+    }
+    if k == 16 {
+        next = transition_set_job_filter_kind(st, p);
+    }
+    if k == 17 {
+        next = transition_set_job_filter_status(st, p);
+    }
+    if k == 18 {
+        next = transition_select_job(st, p);
+    }
+    if k == 19 {
+        next = transition_job_cancelled_running(st);
+    }
+    if k == 20 {
+        next = transition_set_inspector(st, p);
+    }
+    if k == 21 {
+        next = transition_set_spec_doc_open(st, p);
+    }
+    if k == 22 {
+        next = transition_set_readiness_running(st, p);
+    }
+    if k == 23 {
+        next = transition_job_started(st);
+    }
+    if k == 24 {
+        next = transition_job_cancelled_queued(st);
+    }
+    if k == 25 {
+        next = transition_set_concurrency_limit(st, p);
+    }
+
+    return next;
+}
+
+fn main() {
+    let mut st: WorkbenchState = init_workbench_state();
+    assert(st.screen == 0);
+    assert(!st.project_open);
+    assert(st.active_tab == -1);
+
+    let open_act: WorkbenchAction = WorkbenchAction { kind: 1, payload: 3 };
+    st = apply_action(st, open_act);
+    assert(st.project_open);
+    assert(st.file_count == 3);
+
+    assert(st.concurrency_limit == 1);
+
+    let enqueue_act: WorkbenchAction = WorkbenchAction { kind: 3, payload: 0 };
+    st = apply_action(st, enqueue_act);
+    assert(st.queued_count == 1);
+    assert(st.running_count == 0);
+    assert(st.last_job_id == 1);
+
+    // A second request is never rejected -- it becomes a second real queue
+    // entry, not a "job already running" error. This is the core behavior
+    // change from the old single-flag design.
+    let enqueue_act2: WorkbenchAction = WorkbenchAction { kind: 3, payload: 1 };
+    st = apply_action(st, enqueue_act2);
+    assert(st.error_code == 0);
+    assert(st.queued_count == 2);
+    assert(st.last_job_id == 2);
+
+    let start_first: WorkbenchAction = WorkbenchAction { kind: 23, payload: 0 };
+    st = apply_action(st, start_first);
+    assert(st.queued_count == 1);
+    assert(st.running_count == 1);
+
+    let ok_act: WorkbenchAction = WorkbenchAction { kind: 5, payload: 0 };
+    st = apply_action(st, ok_act);
+    assert(st.running_count == 0);
+    assert(st.queued_count == 1);
+    assert(st.evaluation_state == T);
+
+    let start_second: WorkbenchAction = WorkbenchAction { kind: 23, payload: 0 };
+    st = apply_action(st, start_second);
+    assert(st.queued_count == 0);
+    assert(st.running_count == 1);
+
+    let cancel_running: WorkbenchAction = WorkbenchAction { kind: 19, payload: 0 };
+    st = apply_action(st, cancel_running);
+    assert(st.running_count == 0);
+    assert(st.evaluation_state == N);
+
+    let enqueue_act3: WorkbenchAction = WorkbenchAction { kind: 3, payload: 0 };
+    st = apply_action(st, enqueue_act3);
+    let cancel_queued: WorkbenchAction = WorkbenchAction { kind: 24, payload: 0 };
+    st = apply_action(st, cancel_queued);
+    assert(st.queued_count == 0);
+    assert(st.running_count == 0);
+
+    let set_limit: WorkbenchAction = WorkbenchAction { kind: 25, payload: 3 };
+    st = apply_action(st, set_limit);
+    assert(st.concurrency_limit == 3);
+
+    let open_tab_act: WorkbenchAction = WorkbenchAction { kind: 8, payload: 0 };
+    st = apply_action(st, open_tab_act);
+    assert(st.tab_count == 1);
+    assert(st.active_tab == 0);
+    assert(st.screen == 3);
+
+    let open_tab_act2: WorkbenchAction = WorkbenchAction { kind: 8, payload: 1 };
+    st = apply_action(st, open_tab_act2);
+    assert(st.tab_count == 2);
+    assert(st.active_tab == 1);
+
+    let dirty_act: WorkbenchAction = WorkbenchAction { kind: 13, payload: 1 };
+    st = apply_action(st, dirty_act);
+    assert(get_tab_dirty(st, 1));
+
+    let close_dirty_act: WorkbenchAction = WorkbenchAction { kind: 10, payload: 1 };
+    st = apply_action(st, close_dirty_act);
+    assert(st.pending_close_tab == 1);
+    assert(get_tab_open(st, 1));
+
+    let cancel_close_act: WorkbenchAction = WorkbenchAction { kind: 12, payload: 0 };
+    st = apply_action(st, cancel_close_act);
+    assert(st.pending_close_tab == -1);
+    assert(get_tab_open(st, 1));
+
+    let confirm_close_act: WorkbenchAction = WorkbenchAction { kind: 11, payload: 1 };
+    st = apply_action(st, confirm_close_act);
+    assert(!get_tab_open(st, 1));
+    assert(st.tab_count == 1);
+
+    let close_clean_act: WorkbenchAction = WorkbenchAction { kind: 10, payload: 0 };
+    st = apply_action(st, close_clean_act);
+    assert(!get_tab_open(st, 0));
+    assert(st.tab_count == 0);
+    assert(st.pending_close_tab == -1);
+
+    print("SEMANTIC_WORKBENCH_ENGINE_VERIFIED");
+    return;
+}

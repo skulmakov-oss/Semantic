@@ -1,0 +1,289 @@
+{
+  "capture_method": "iced::window::screenshot() real WGPU compositor texture readback (crates/prom-ui-iced-adapter/src/app.rs::run_headless_capture), NOT a Win32 screen copy -- verified to succeed with foreground focus deliberately stolen away during capture",
+  "source_revision": "9ce1edc6",
+  "source_revision_note": "working tree had uncommitted changes at capture time (this session's Iced substrate migration plus the WORKBENCH ICED MIGRATION -- FINAL CLOSURE pass adding real pane_grid-backed divider dragging) -- these screenshots reflect that uncommitted working tree, not literally commit 9ce1edc6 alone",
+  "run_identity": "fourth capture sweep, regenerated after SplitPane rendering moved from static row!/column! to a live-draggable iced::widget::pane_grid (crates/prom-ui-iced-adapter/src/convert.rs::split_pane) plus a nested split-min fix (examples/workbench_semantic/src/main.rs: main_and_inspector's split_min lowered from 160.0 to 64.0 so it always fits inside explorer_and_rest's 140.0 floor -- see drag-verification review). These 28 screenshots are all captured with default (undragged) split ratios, so appearance is expected to match prior sweeps pixel-for-pixel; drag-time behavior is covered separately by artifacts/workbench/drag-verification/.",
+  "png_encoder": "hand-rolled, uncompressed stored-DEFLATE, crates/prom-ui-iced-adapter/src/png_encode.rs (CRC32/Adler32 conformance-tested)",
+  "screenshots": [
+    {
+      "screen": "cockpit",
+      "viewport": "1280x720",
+      "scale_factor": 1.0,
+      "path": "cockpit_1280x720.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 3687468,
+      "sha256": "838041566a42362b6309e92f0c082c66b2dd859dd8354da4f5fd7cdc84f98ba0"
+    },
+    {
+      "screen": "cockpit",
+      "viewport": "1440x900",
+      "scale_factor": 1.0,
+      "path": "cockpit_1440x900.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 5185363,
+      "sha256": "8786f753eca0c08c9166ff5482f56e5424058a656d7805e9bd41a0217a8c2946"
+    },
+    {
+      "screen": "cockpit",
+      "viewport": "1920x1080",
+      "scale_factor": 1.0,
+      "path": "cockpit_1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 8296178,
+      "sha256": "2c5282ffeb3b5fd16e620ecbbb72d9a10cdf18934aea7738d836009ad8da7497"
+    },
+    {
+      "screen": "jobs",
+      "viewport": "1280x720",
+      "scale_factor": 1.0,
+      "path": "jobs_1280x720.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 3687468,
+      "sha256": "1811dd89beecd1b700c9b250e5e26f019a22fa802c7635fd0ae0d10c25cec7c2"
+    },
+    {
+      "screen": "jobs",
+      "viewport": "1440x900",
+      "scale_factor": 1.0,
+      "path": "jobs_1440x900.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 5185363,
+      "sha256": "c8a395d8f48f9af209552be8291854d97069e70f93f31b105e68a764e39831dd"
+    },
+    {
+      "screen": "jobs",
+      "viewport": "1920x1080",
+      "scale_factor": 1.0,
+      "path": "jobs_1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 8296178,
+      "sha256": "42d99bcb771dd803eb663bdffffe541c152c95546ad4e87f6974cd35efe13f97"
+    },
+    {
+      "screen": "diagnostics",
+      "viewport": "1280x720",
+      "scale_factor": 1.0,
+      "path": "diagnostics_1280x720.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 3687468,
+      "sha256": "f4bb89b888d0ef71fa690a8d7934ef939211852c9e8115e91c7ac7941279b1d5"
+    },
+    {
+      "screen": "diagnostics",
+      "viewport": "1440x900",
+      "scale_factor": 1.0,
+      "path": "diagnostics_1440x900.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 5185363,
+      "sha256": "2e4d4bf67d974c810439ad2fa3eb234d2d34e56eccf957c91f5cd3c606db172a"
+    },
+    {
+      "screen": "diagnostics",
+      "viewport": "1920x1080",
+      "scale_factor": 1.0,
+      "path": "diagnostics_1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 8296178,
+      "sha256": "44762796dff63a6fd129abe92fd6890938273cc18c23f8a436c886e8bf143f79"
+    },
+    {
+      "screen": "editor",
+      "viewport": "1280x720",
+      "scale_factor": 1.0,
+      "path": "editor_1280x720.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 3687468,
+      "sha256": "f72892ece18293fc9f9997f7bbfd30a6139871d751a7137dce625cb269b0f7df"
+    },
+    {
+      "screen": "editor",
+      "viewport": "1440x900",
+      "scale_factor": 1.0,
+      "path": "editor_1440x900.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 5185363,
+      "sha256": "4a15eb20fb2ebbfaeaa6570b7448533197e5a541380a82ebc50cc93d98a4dbd2"
+    },
+    {
+      "screen": "editor",
+      "viewport": "1920x1080",
+      "scale_factor": 1.0,
+      "path": "editor_1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 8296178,
+      "sha256": "24c93fc15c4f20c037e7c11738d37dfe32907b7072e963181d5c3295f055119e"
+    },
+    {
+      "screen": "explorer",
+      "viewport": "1280x720",
+      "scale_factor": 1.0,
+      "path": "explorer_1280x720.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 3687468,
+      "sha256": "5e04bfbfeeff3d48f0d2e482432a0fa4c27156d0b01578a7951bd6ae2dc1f7c5"
+    },
+    {
+      "screen": "explorer",
+      "viewport": "1440x900",
+      "scale_factor": 1.0,
+      "path": "explorer_1440x900.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 5185363,
+      "sha256": "38dcba562811180798e6edbb586e7403aceb1ac0a0f99344e3c2e88d7c3aa968"
+    },
+    {
+      "screen": "explorer",
+      "viewport": "1920x1080",
+      "scale_factor": 1.0,
+      "path": "explorer_1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 8296178,
+      "sha256": "cb6f9945d9e1bf38702ec9e96069f3f084120d345b9507841583fd0f2eeab3f7"
+    },
+    {
+      "screen": "spec",
+      "viewport": "1280x720",
+      "scale_factor": 1.0,
+      "path": "spec_1280x720.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 3687468,
+      "sha256": "36ee533496ce2766d301ceca945191943784f1cf15231afb037237c45ab3cee6"
+    },
+    {
+      "screen": "spec",
+      "viewport": "1440x900",
+      "scale_factor": 1.0,
+      "path": "spec_1440x900.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 5185363,
+      "sha256": "4c335407f16e4e8826ab37ff1ba909c21b8ad7d4cdbd7af6b26d15097aaeccdd"
+    },
+    {
+      "screen": "spec",
+      "viewport": "1920x1080",
+      "scale_factor": 1.0,
+      "path": "spec_1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 8296178,
+      "sha256": "303403cc5ac2e4766165da7164b9c07caee81d0c1dbed166cd7807657d099b5e"
+    },
+    {
+      "screen": "readiness",
+      "viewport": "1280x720",
+      "scale_factor": 1.0,
+      "path": "readiness_1280x720.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 3687468,
+      "sha256": "12bf216c2906e913b913db06953546c5b3c872753eb6853a70d69eb413ac15b9"
+    },
+    {
+      "screen": "readiness",
+      "viewport": "1440x900",
+      "scale_factor": 1.0,
+      "path": "readiness_1440x900.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 5185363,
+      "sha256": "9aadf42a2f09887cd4eb40ebc9d7b7ff80e8ec64c8f3acfd21b8f839996fff54"
+    },
+    {
+      "screen": "readiness",
+      "viewport": "1920x1080",
+      "scale_factor": 1.0,
+      "path": "readiness_1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 8296178,
+      "sha256": "698708ca02d1f88a72f10c968ec3c7bc00d1622c2d9eadfcce7ad4b1a5688159"
+    },
+    {
+      "screen": "settings",
+      "viewport": "1280x720",
+      "scale_factor": 1.0,
+      "path": "settings_1280x720.png",
+      "width": 1280,
+      "height": 720,
+      "bytes": 3687468,
+      "sha256": "4e68dac753c6b335d0250b6c6506c926aa5fd56e9bc2052d924d8d4ae3b593ab"
+    },
+    {
+      "screen": "settings",
+      "viewport": "1440x900",
+      "scale_factor": 1.0,
+      "path": "settings_1440x900.png",
+      "width": 1440,
+      "height": 900,
+      "bytes": 5185363,
+      "sha256": "d965a729aa152dc2f571c4f16265b9c04f7dff7c00139d465bab4c773998296b"
+    },
+    {
+      "screen": "settings",
+      "viewport": "1920x1080",
+      "scale_factor": 1.0,
+      "path": "settings_1920x1080.png",
+      "width": 1920,
+      "height": 1080,
+      "bytes": 8296178,
+      "sha256": "8f6bde86b22bdea831d99f91c47f6ed376d39440f8d25f8004f50cf86a17d9e5"
+    },
+    {
+      "screen": "cockpit",
+      "viewport": "960x640",
+      "scale_factor": 1.0,
+      "path": "cockpit_960x640.png",
+      "width": 960,
+      "height": 640,
+      "bytes": 2458493,
+      "sha256": "2ab472cec69c15999376def087229a77dbc95bb5f73f7277e3d03a48791f76af"
+    },
+    {
+      "screen": "jobs",
+      "viewport": "960x640",
+      "scale_factor": 1.0,
+      "path": "jobs_960x640.png",
+      "width": 960,
+      "height": 640,
+      "bytes": 2458493,
+      "sha256": "e46cc03b37c99cc9d5f9532e7f72085d11cba6fc8066bc32f4fd86f0ebe8b921"
+    },
+    {
+      "screen": "editor",
+      "viewport": "960x640",
+      "scale_factor": 1.0,
+      "path": "editor_960x640.png",
+      "width": 960,
+      "height": 640,
+      "bytes": 2458493,
+      "sha256": "2c2b1dc4a80623a472ab78ef7f6805e4bcabe919138da134f06fb30e0b98583b"
+    },
+    {
+      "screen": "spec",
+      "viewport": "960x640",
+      "scale_factor": 1.0,
+      "path": "spec_960x640.png",
+      "width": 960,
+      "height": 640,
+      "bytes": 2458493,
+      "sha256": "f5967e1aafab8b82d83e020ee9cc5fa75d292894119b39c8c8c2c686ff01ce30"
+    }
+  ]
+}

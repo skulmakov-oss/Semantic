@@ -240,22 +240,80 @@ pub mod winit_placeholder {
 
     /// Translate a selected winit physical key into the current Semantic key code space.
     ///
-    /// This is intentionally small. It is not a full keyboard layout or text-input model.
+    /// Letters and digits map to their unshifted-ASCII value (matches the
+    /// scheme the original small table already used: `KeyA` -> 65, `Digit0`
+    /// -> 48). Punctuation maps to its unshifted-ASCII glyph. Non-printable
+    /// navigation keys use a deliberate out-of-ASCII-range block (1000+) so
+    /// they never collide with a printable code. This is still not a full
+    /// keyboard layout or IME/text-input model: shift-state and layout are
+    /// the caller's responsibility (a raw physical key code, exactly as
+    /// delivered here, is not itself a typed character).
     pub const fn translate_winit_key_code(key_code: KeyCode) -> Option<u32> {
         match key_code {
             KeyCode::KeyA => Some(65),
             KeyCode::KeyB => Some(66),
             KeyCode::KeyC => Some(67),
             KeyCode::KeyD => Some(68),
-            KeyCode::KeyW => Some(87),
+            KeyCode::KeyE => Some(69),
+            KeyCode::KeyF => Some(70),
+            KeyCode::KeyG => Some(71),
+            KeyCode::KeyH => Some(72),
+            KeyCode::KeyI => Some(73),
+            KeyCode::KeyJ => Some(74),
+            KeyCode::KeyK => Some(75),
+            KeyCode::KeyL => Some(76),
+            KeyCode::KeyM => Some(77),
+            KeyCode::KeyN => Some(78),
+            KeyCode::KeyO => Some(79),
+            KeyCode::KeyP => Some(80),
+            KeyCode::KeyQ => Some(81),
+            KeyCode::KeyR => Some(82),
             KeyCode::KeyS => Some(83),
+            KeyCode::KeyT => Some(84),
+            KeyCode::KeyU => Some(85),
+            KeyCode::KeyV => Some(86),
+            KeyCode::KeyW => Some(87),
+            KeyCode::KeyX => Some(88),
+            KeyCode::KeyY => Some(89),
+            KeyCode::KeyZ => Some(90),
             KeyCode::Digit0 => Some(48),
             KeyCode::Digit1 => Some(49),
             KeyCode::Digit2 => Some(50),
+            KeyCode::Digit3 => Some(51),
+            KeyCode::Digit4 => Some(52),
+            KeyCode::Digit5 => Some(53),
+            KeyCode::Digit6 => Some(54),
+            KeyCode::Digit7 => Some(55),
+            KeyCode::Digit8 => Some(56),
+            KeyCode::Digit9 => Some(57),
             KeyCode::Enter => Some(13),
             KeyCode::Escape => Some(27),
             KeyCode::Space => Some(32),
             KeyCode::Tab => Some(9),
+            KeyCode::Backspace => Some(8),
+            KeyCode::Minus => Some(45),
+            KeyCode::Equal => Some(61),
+            KeyCode::BracketLeft => Some(91),
+            KeyCode::BracketRight => Some(93),
+            KeyCode::Semicolon => Some(59),
+            KeyCode::Quote => Some(39),
+            KeyCode::Comma => Some(44),
+            KeyCode::Period => Some(46),
+            KeyCode::Slash => Some(47),
+            KeyCode::Backslash => Some(92),
+            KeyCode::Backquote => Some(96),
+            KeyCode::ShiftLeft | KeyCode::ShiftRight => Some(1000),
+            KeyCode::ControlLeft | KeyCode::ControlRight => Some(1001),
+            KeyCode::AltLeft | KeyCode::AltRight => Some(1002),
+            KeyCode::ArrowLeft => Some(1010),
+            KeyCode::ArrowRight => Some(1011),
+            KeyCode::ArrowUp => Some(1012),
+            KeyCode::ArrowDown => Some(1013),
+            KeyCode::Delete => Some(1014),
+            KeyCode::Home => Some(1015),
+            KeyCode::End => Some(1016),
+            KeyCode::PageUp => Some(1017),
+            KeyCode::PageDown => Some(1018),
             _ => None,
         }
     }
@@ -320,8 +378,72 @@ pub mod winit_placeholder {
                 };
                 Some(prom_ui_runtime::InputEvent::new(kind))
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let (delta_x, delta_y) = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(x, y) => {
+                        (*x as f64 * 24.0, *y as f64 * 24.0)
+                    }
+                    winit::event::MouseScrollDelta::PixelDelta(pos) => (pos.x, pos.y),
+                };
+                Some(prom_ui_runtime::InputEvent::new(
+                    prom_ui_runtime::InputEventKind::Scroll { delta_x, delta_y },
+                ))
+            }
+            WindowEvent::Resized(physical_size) => Some(prom_ui_runtime::InputEvent::new(
+                prom_ui_runtime::InputEventKind::Resized {
+                    width: physical_size.width,
+                    height: physical_size.height,
+                },
+            )),
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                Some(prom_ui_runtime::InputEvent::new(
+                    prom_ui_runtime::InputEventKind::ScaleFactorChanged {
+                        scale_factor: *scale_factor,
+                    },
+                ))
+            }
             _ => None,
         }
+    }
+
+    /// Translate a winit `KeyboardInput` event's committed text (if any)
+    /// into a `TextInput` event -- separate from `translate_winit_window_event`
+    /// so a single winit `KeyboardInput` can yield both a `KeyDown` (physical
+    /// key, for shortcuts/navigation) and a `TextInput` (real layout-resolved
+    /// Unicode, for character insertion) without changing that function's
+    /// established one-event-in, one-event-out contract.
+    ///
+    /// Returns `None` for key releases, repeats-with-no-text, and control
+    /// characters winit sometimes reports as `text` (Enter/Backspace/Tab/Esc)
+    /// -- those are handled by physical key code, not as inserted text.
+    pub fn translate_winit_text_input(event: &WindowEvent) -> Option<prom_ui_runtime::InputEvent> {
+        let WindowEvent::KeyboardInput {
+            event: key_event, ..
+        } = event
+        else {
+            return None;
+        };
+        if key_event.state != ElementState::Pressed {
+            return None;
+        }
+        let text = key_event.text.as_ref()?;
+        let text: alloc::string::String = text.as_str().into();
+        if !is_insertable_text(&text) {
+            return None;
+        }
+        Some(prom_ui_runtime::InputEvent::new(
+            prom_ui_runtime::InputEventKind::TextInput { text },
+        ))
+    }
+
+    /// Whether `text` (winit's `KeyEvent.text`) represents real insertable
+    /// character content rather than a control character winit sometimes
+    /// still reports as text (Enter/Backspace/Tab/Esc carry `\r`/`\u{8}`/
+    /// `\t`/`\u{1b}` on some platforms) -- those stay physical-key-code
+    /// driven, not text-input-driven, so a shortcut is never also inserted
+    /// as a character.
+    pub fn is_insertable_text(text: &str) -> bool {
+        !text.is_empty() && !text.chars().any(|c| c.is_control())
     }
 
     /// Translate a selected winit physical key into `RawKeyCode`.
@@ -1521,6 +1643,9 @@ pub mod winit_placeholder {
                     if let Some(input_event) = translate_winit_window_event(&event, scale_factor) {
                         self.backend.pending_events.push(input_event);
                     }
+                    if let Some(text_event) = translate_winit_text_input(&event) {
+                        self.backend.pending_events.push(text_event);
+                    }
                     let events = core::mem::take(&mut self.backend.pending_events);
                     let mut frame = prom_ui_runtime::DrawFrame::new();
                     (self.on_event)(&events, prom_ui_runtime::LoopControl::Continue, &mut frame);
@@ -1690,6 +1815,9 @@ pub mod winit_placeholder {
                 }
 
                 self.backend.push_pending_event(input);
+            }
+            if let Some(text_event) = translate_winit_text_input(&event) {
+                self.backend.push_pending_event(text_event);
             }
         }
     }
