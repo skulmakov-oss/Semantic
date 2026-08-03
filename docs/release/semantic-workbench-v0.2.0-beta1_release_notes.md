@@ -79,6 +79,19 @@ Iced event
 → updated native view
 ```
 
+This route covers **UI action dispatch** -- a click/activation on a node
+carrying a `SemanticActionId`. It is a separate concern from **host
+process execution** (the Check/Compile/Verify/Run/disasm/fmt job
+commands, which shell out to `smc`/`svm`/`cargo`/`pwsh`): those are
+gated by Workbench's own `HostCapabilities::check_spawn`
+(`examples/workbench_semantic/src/host_capabilities.rs`) -- the only
+place in the application allowed to spawn a process, allowlisting
+exactly those four executables and requiring the resolved cwd to
+canonicalize inside the open project root -- not by verifier/VM
+admission. Both are real, tested boundaries; they are not the same
+boundary, and this document does not claim job/process execution
+routes through PROMETHEUS.
+
 ## Qualification
 
 Run from a clean worktree of the exact merged `main` commit
@@ -97,6 +110,17 @@ Run from a clean worktree of the exact merged `main` commit
 - `cargo build -p workbench_semantic --release` -- built and smoke
   tested (real window opens, Cockpit renders, navigation works, a
   divider drags, process exits cleanly).
+
+All of the above is freshly reproduced against the exact release
+commit. The screenshot evidence referenced under Source below is not:
+`artifacts/workbench/screenshots/manifest.json` records its own real
+source revision (`9ce1edc6`, captured from an uncommitted working tree
+during PR #1567's development, before this exact commit existed) and
+is not claimed as re-captured from `b7f2327b`. No Workbench rendering
+code changed between that capture and this release (the two post-open-
+review fixes were both backend-only: job-completion polling and a
+process-pipe drain), so the images remain representative, but they are
+disclosed as development-time evidence, not commit-reproducible proof.
 
 ## Supported release asset
 
