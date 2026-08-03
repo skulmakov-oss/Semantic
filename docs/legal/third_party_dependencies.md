@@ -99,6 +99,12 @@ Tauri appears both as an architectural influence and as an actual dependency sur
 | --- | --- | --- | --- | --- | --- | --- |
 | `winit` | `crates/prom-ui-backend-native/Cargo.toml` | runtime / adapter | native backend adapter | yes | pending verification | Optional feature-gated native backend dependency. This does not make renderer ownership part of Semantic UI. |
 
+### 4.7 Iced native UI substrate (owner directive 2026-08-02, Workbench Iced substrate migration)
+
+| Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `iced` (`=0.14.0`, `features = ["advanced"]`) | `crates/prom-ui-iced-adapter/Cargo.toml` | runtime | private Iced-backed Prom UI adapter | no | verified: MIT | Exact pinned crates.io release. Full upstream record (repository, version, license, features, local modifications: none, update procedure) in [`third_party/iced/UPSTREAM.md`](../../third_party/iced/UPSTREAM.md); verbatim upstream license text (fetched directly from the `iced-rs/iced` repository, not summarized) in [`third_party/iced/LICENSE-MIT`](../../third_party/iced/LICENSE-MIT). Transitively pulls `iced_winit ^0.14.0` and `wgpu 27.0.1` -- these coexist with, and do not replace, the pre-existing `winit`/optional-`wgpu` surface in `crates/prom-ui-backend-native` (row 4.5 above and `crates/quad_logic_calculator`'s own consumption of it are unaffected). Only `crates/prom-ui-iced-adapter` (and, transitively, its own lower platform crates) may depend on `iced` -- enforced by real, passing dependency-boundary tests: `crates/prom-ui-iced-adapter/tests/dependency_boundary.rs` and `examples/workbench_semantic/tests/no_iced_dependency.rs`. |
+
 ### 4.6 Internal workspace crates not third-party dependencies
 
 The following are workspace-owned crates and are not third-party dependency entries:

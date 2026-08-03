@@ -1,0 +1,21 @@
+[package]
+name = "prom-ui-iced-adapter"
+version = "0.1.0"
+edition = "2021"
+description = "Private Iced-backed native UI substrate for Prom UI. The only crate in this workspace authorized to depend on Iced directly -- see third_party/iced/UPSTREAM.md."
+license = "Apache-2.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Pinned exact version -- never a caret/range. Bumping requires a real,
+# reviewed change to this line, not implicit drift. See
+# third_party/iced/UPSTREAM.md for the upstream record and update
+# procedure.
+iced = { version = "=0.14.0", features = ["advanced"] }
+
+[dev-dependencies]
+# Used only by tests/dependency_boundary.rs to prove workbench_semantic
+# has no direct Iced dependency (reads Cargo.lock/manifests, not a real
+# runtime dependency).
