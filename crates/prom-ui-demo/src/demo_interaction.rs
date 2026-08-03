@@ -207,6 +207,10 @@ impl DemoInteraction {
             }
             InputEventKind::KeyDown { .. } => LoopControl::Continue,
             InputEventKind::KeyUp { .. } => LoopControl::Continue,
+            InputEventKind::Scroll { .. } => LoopControl::Continue,
+            InputEventKind::TextInput { .. } => LoopControl::Continue,
+            InputEventKind::Resized { .. } => LoopControl::Continue,
+            InputEventKind::ScaleFactorChanged { .. } => LoopControl::Continue,
         }
     }
 
@@ -255,6 +259,10 @@ impl DemoInteraction {
                 LoopControl::Continue
             }
             InputEventKind::KeyUp { .. } => LoopControl::Continue,
+            InputEventKind::Scroll { .. } => LoopControl::Continue,
+            InputEventKind::TextInput { .. } => LoopControl::Continue,
+            InputEventKind::Resized { .. } => LoopControl::Continue,
+            InputEventKind::ScaleFactorChanged { .. } => LoopControl::Continue,
         }
     }
 

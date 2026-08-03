@@ -442,9 +442,9 @@ Possible future shapes:
 
 ```text
 docs/spec/ui_workbench_consumption.md
-apps/workbench/docs/
-apps/workbench/src/views/
-apps/workbench/src/commands/
+apps/workbench_ts_tauri_legacy/docs/
+apps/workbench_ts_tauri_legacy/src/views/
+apps/workbench_ts_tauri_legacy/src/commands/
 crates/prom-ui-workbench-bridge/
 ```
 

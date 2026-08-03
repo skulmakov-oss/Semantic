@@ -307,7 +307,7 @@ Possible future shapes:
 docs/spec/ui_visual_tokens.md
 crates/prom-ui-style/
 crates/prom-ui-tokens/
-apps/workbench visual token map
+apps/workbench_ts_tauri_legacy visual token map
 renderer-local token resolver
 ```
 

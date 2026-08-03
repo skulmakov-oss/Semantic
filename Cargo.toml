@@ -46,6 +46,7 @@ members = [
     "crates/semantic-core-quad",
     "crates/semantic-core-runtime",
     "examples/quad_logic_calculator",
+    "examples/workbench_semantic",
 ]
 resolver = "2"
 

@@ -41,6 +41,7 @@ pub(crate) mod active_projection_target_catalog;
 pub mod adapter_boundary;
 pub mod admission_facade;
 pub mod boundary_registry;
+pub mod clip;
 pub mod component_metadata;
 pub mod intent_admission;
 pub mod intent_audit;
@@ -369,11 +370,56 @@ impl DesktopSession<InMemoryBackend> {
 /// Mouse, touch, and gamepad events are deferred to a future wave.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputEventKind {
-    KeyDown { key_code: u32 },
-    KeyUp { key_code: u32 },
-    PointerMoved { x: f64, y: f64 },
-    PointerDown { button: u32 },
-    PointerUp { button: u32 },
+    KeyDown {
+        key_code: u32,
+    },
+    KeyUp {
+        key_code: u32,
+    },
+    PointerMoved {
+        x: f64,
+        y: f64,
+    },
+    PointerDown {
+        button: u32,
+    },
+    PointerUp {
+        button: u32,
+    },
+    /// Generic mouse-wheel / trackpad scroll delta, logical units (not device
+    /// pixels). Positive `delta_y` scrolls content down. Added as a reusable
+    /// admitted capability (any panel may consume it), not a Workbench-only
+    /// special case.
+    Scroll {
+        delta_x: f64,
+        delta_y: f64,
+    },
+    /// Committed Unicode text for one key press, as resolved by the native
+    /// platform's own keyboard layout (accents, shift-state, non-US
+    /// layouts) -- distinct from `KeyDown`'s physical key code, which
+    /// carries no layout or Unicode information. A consumer that wants real
+    /// character input should prefer this event; `KeyDown`/`KeyUp` remain
+    /// the source for navigation and shortcut keys, which carry no text.
+    TextInput {
+        text: alloc::string::String,
+    },
+    /// The native window's real client-area size changed, in physical
+    /// pixels. A generic, reusable admitted capability -- any Prom UI
+    /// application that wants layout to track the actual window (rather
+    /// than a fixed size baked in at `WindowConfig` creation) consumes
+    /// this; it is not a Workbench-only concern.
+    Resized {
+        width: u32,
+        height: u32,
+    },
+    /// The native window moved to a display with a different DPI, or the
+    /// OS-level display scale changed. `scale_factor` is the same
+    /// physical-pixels-per-logical-pixel ratio winit reports (1.0 = 100%,
+    /// 1.5 = 150%, 2.0 = 200%). A generic, reusable admitted capability,
+    /// not a Workbench-only concern.
+    ScaleFactorChanged {
+        scale_factor: f64,
+    },
     CloseRequested,
 }
 

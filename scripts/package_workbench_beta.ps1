@@ -1,3 +1,8 @@
+# Packages the archived React/TypeScript/Tauri Workbench app
+# (apps/workbench_ts_tauri_legacy). This is NOT the canonical Workbench --
+# the canonical native Workbench is examples/workbench_semantic, which has
+# no Node/npm/Vite/React/Tauri/WebView dependency. This script is kept only
+# for historical packaging of the archived reference app.
 param(
     [string]$OutputRoot = "artifacts/workbench/beta-smoke",
     [int]$LaunchSmokeSeconds = 8
@@ -151,7 +156,7 @@ New-Directory $packageDirectory
 New-Directory $extractedDirectory
 New-Directory $tauriTargetDirectory
 
-$workbenchDirectory = Join-Path $repoRoot "apps/workbench"
+$workbenchDirectory = Join-Path $repoRoot "apps/workbench_ts_tauri_legacy"
 $tauriDirectory = Join-Path $workbenchDirectory "src-tauri"
 $workbenchReleaseDirectory = Join-Path $tauriTargetDirectory "release"
 $workbenchExePath = Join-Path $workbenchReleaseDirectory "semantic-workbench-app.exe"
@@ -164,7 +169,7 @@ $steps = [System.Collections.Generic.List[object]]::new()
 
 $steps.Add((Invoke-CapturedStep -Name "workbench lint" -FilePath "npm.cmd" -ArgumentList @("run", "lint") -WorkingDirectory $workbenchDirectory -LogsDirectory $logsDirectory))
 $steps.Add((Invoke-CapturedStep -Name "workbench build" -FilePath "npm.cmd" -ArgumentList @("run", "build") -WorkingDirectory $workbenchDirectory -LogsDirectory $logsDirectory))
-$steps.Add((Invoke-CapturedStep -Name "workbench tauri tests" -FilePath "cargo" -ArgumentList @("test", "--manifest-path", "apps/workbench/src-tauri/Cargo.toml") -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
+$steps.Add((Invoke-CapturedStep -Name "workbench tauri tests" -FilePath "cargo" -ArgumentList @("test", "--manifest-path", "apps/workbench_ts_tauri_legacy/src-tauri/Cargo.toml") -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $steps.Add((Invoke-CapturedStep -Name "semantic release binaries" -FilePath "cargo" -ArgumentList @("build", "--release", "--bin", "smc", "--bin", "svm") -WorkingDirectory $repoRoot -LogsDirectory $logsDirectory))
 $tauriBuildCommand = "`$env:CARGO_TARGET_DIR='$tauriTargetDirectory'; npm.cmd run tauri:build -- --no-bundle"
 $steps.Add((Invoke-CapturedStep -Name "workbench release build" -FilePath "pwsh" -ArgumentList @("-NoProfile", "-Command", $tauriBuildCommand) -WorkingDirectory $workbenchDirectory -LogsDirectory $logsDirectory))

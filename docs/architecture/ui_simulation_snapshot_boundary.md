@@ -379,8 +379,8 @@ docs/spec/ui_simulation_snapshot.md
 crates/prom-ui-snapshot/
 crates/prom-ui-simulation/
 crates/prom-ui-replay/
-apps/workbench snapshot/replay views
-apps/workbench simulation sandbox
+apps/workbench_ts_tauri_legacy snapshot/replay views
+apps/workbench_ts_tauri_legacy simulation sandbox
 ```
 
 Any implementation must preserve:

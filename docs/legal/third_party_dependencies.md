@@ -59,39 +59,39 @@ Tauri appears both as an architectural influence and as an actual dependency sur
 
 | Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| `tauri-build` | `apps/workbench/src-tauri/Cargo.toml` | build-time | Workbench backend | no | pending verification | Build dependency for the Tauri backend crate. |
-| `serde` | `apps/workbench/src-tauri/Cargo.toml` | serialization | Workbench backend | no | pending verification | Backend serialization dependency. |
-| `serde_json` | `apps/workbench/src-tauri/Cargo.toml` | serialization | Workbench backend | no | pending verification | Backend JSON serialization dependency. |
-| `log` | `apps/workbench/src-tauri/Cargo.toml` | logging | Workbench backend | no | pending verification | Logging dependency for backend diagnostics. |
-| `tauri` | `apps/workbench/src-tauri/Cargo.toml` | runtime | Workbench backend | no | pending verification | Actual Tauri runtime dependency for the Workbench shell. |
-| `tauri-plugin-log` | `apps/workbench/src-tauri/Cargo.toml` | runtime / logging | Workbench backend | no | pending verification | Tauri log plugin used by the backend shell. |
+| `tauri-build` | `apps/workbench_ts_tauri_legacy/src-tauri/Cargo.toml` | build-time | Workbench backend | no | pending verification | Build dependency for the Tauri backend crate. |
+| `serde` | `apps/workbench_ts_tauri_legacy/src-tauri/Cargo.toml` | serialization | Workbench backend | no | pending verification | Backend serialization dependency. |
+| `serde_json` | `apps/workbench_ts_tauri_legacy/src-tauri/Cargo.toml` | serialization | Workbench backend | no | pending verification | Backend JSON serialization dependency. |
+| `log` | `apps/workbench_ts_tauri_legacy/src-tauri/Cargo.toml` | logging | Workbench backend | no | pending verification | Logging dependency for backend diagnostics. |
+| `tauri` | `apps/workbench_ts_tauri_legacy/src-tauri/Cargo.toml` | runtime | Workbench backend | no | pending verification | Actual Tauri runtime dependency for the Workbench shell. |
+| `tauri-plugin-log` | `apps/workbench_ts_tauri_legacy/src-tauri/Cargo.toml` | runtime / logging | Workbench backend | no | pending verification | Tauri log plugin used by the backend shell. |
 
 ### 4.3 Workbench frontend runtime dependencies
 
 | Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| `@tauri-apps/api` | `apps/workbench/package.json` | runtime | Workbench frontend | no | pending verification | Frontend Tauri API bridge. |
-| `react` | `apps/workbench/package.json` | runtime | Workbench frontend | no | pending verification | UI runtime framework for the Workbench shell. |
-| `react-dom` | `apps/workbench/package.json` | runtime | Workbench frontend | no | pending verification | React DOM renderer for the Workbench shell. |
-| `react-router-dom` | `apps/workbench/package.json` | runtime | Workbench frontend | no | pending verification | Routing/runtime support for Workbench UI navigation. |
+| `@tauri-apps/api` | `apps/workbench_ts_tauri_legacy/package.json` | runtime | Workbench frontend | no | pending verification | Frontend Tauri API bridge. |
+| `react` | `apps/workbench_ts_tauri_legacy/package.json` | runtime | Workbench frontend | no | pending verification | UI runtime framework for the Workbench shell. |
+| `react-dom` | `apps/workbench_ts_tauri_legacy/package.json` | runtime | Workbench frontend | no | pending verification | React DOM renderer for the Workbench shell. |
+| `react-router-dom` | `apps/workbench_ts_tauri_legacy/package.json` | runtime | Workbench frontend | no | pending verification | Routing/runtime support for Workbench UI navigation. |
 
 ### 4.4 Workbench frontend tooling / dev dependencies
 
 | Dependency | Source manifest | Use class | Scope | Optional | License status | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| `@tauri-apps/cli` | `apps/workbench/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | CLI tooling for Tauri app development. |
-| `@vitejs/plugin-react` | `apps/workbench/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | Vite React plugin. |
-| `@eslint/js` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | ESLint JS config package. |
-| `@types/node` | `apps/workbench/package.json` | type definitions | Workbench frontend | no | pending verification | TypeScript type support. |
-| `@types/react` | `apps/workbench/package.json` | type definitions | Workbench frontend | no | pending verification | React type definitions. |
-| `@types/react-dom` | `apps/workbench/package.json` | type definitions | Workbench frontend | no | pending verification | React DOM type definitions. |
-| `eslint` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | Linting tool. |
-| `eslint-plugin-react-hooks` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | React hooks lint rules. |
-| `eslint-plugin-react-refresh` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | React refresh lint rules. |
-| `globals` | `apps/workbench/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | Shared global identifier definitions. |
-| `typescript` | `apps/workbench/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | TypeScript compiler and language tooling. |
-| `typescript-eslint` | `apps/workbench/package.json` | linting | Workbench frontend | no | pending verification | TypeScript-aware ESLint tooling. |
-| `vite` | `apps/workbench/package.json` | bundling | Workbench frontend | no | pending verification | Frontend bundler and dev server. |
+| `@tauri-apps/cli` | `apps/workbench_ts_tauri_legacy/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | CLI tooling for Tauri app development. |
+| `@vitejs/plugin-react` | `apps/workbench_ts_tauri_legacy/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | Vite React plugin. |
+| `@eslint/js` | `apps/workbench_ts_tauri_legacy/package.json` | linting | Workbench frontend | no | pending verification | ESLint JS config package. |
+| `@types/node` | `apps/workbench_ts_tauri_legacy/package.json` | type definitions | Workbench frontend | no | pending verification | TypeScript type support. |
+| `@types/react` | `apps/workbench_ts_tauri_legacy/package.json` | type definitions | Workbench frontend | no | pending verification | React type definitions. |
+| `@types/react-dom` | `apps/workbench_ts_tauri_legacy/package.json` | type definitions | Workbench frontend | no | pending verification | React DOM type definitions. |
+| `eslint` | `apps/workbench_ts_tauri_legacy/package.json` | linting | Workbench frontend | no | pending verification | Linting tool. |
+| `eslint-plugin-react-hooks` | `apps/workbench_ts_tauri_legacy/package.json` | linting | Workbench frontend | no | pending verification | React hooks lint rules. |
+| `eslint-plugin-react-refresh` | `apps/workbench_ts_tauri_legacy/package.json` | linting | Workbench frontend | no | pending verification | React refresh lint rules. |
+| `globals` | `apps/workbench_ts_tauri_legacy/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | Shared global identifier definitions. |
+| `typescript` | `apps/workbench_ts_tauri_legacy/package.json` | dev-only / tooling | Workbench frontend | no | pending verification | TypeScript compiler and language tooling. |
+| `typescript-eslint` | `apps/workbench_ts_tauri_legacy/package.json` | linting | Workbench frontend | no | pending verification | TypeScript-aware ESLint tooling. |
+| `vite` | `apps/workbench_ts_tauri_legacy/package.json` | bundling | Workbench frontend | no | pending verification | Frontend bundler and dev server. |
 
 ### 4.5 Optional native backend dependencies
 

@@ -16,3 +16,20 @@ Cargo.lock
 /examples/baseline/
 /lancedb/
 /models/
+
+# Local Workbench job evidence -- created by running the native
+# examples/workbench_semantic app against any project directory
+# (including this repo itself, e.g. during manual testing); per-machine
+# runtime output, not repo content.
+.workbench_evidence/
+
+# Full local Workbench screenshot/drag-verification capture sets. These
+# use the capture pipeline's deliberately uncompressed PNG encoder (see
+# crates/prom-ui-iced-adapter/src/png_encode.rs), so the complete local
+# sets run into the hundreds of MB -- far too large to commit. The
+# manifest/log and a small, real-DEFLATE-compressed representative
+# subset (artifacts/workbench/screenshots/representative/) ARE tracked;
+# only the bulk per-frame captures at the top level of each directory
+# are ignored here.
+/artifacts/workbench/screenshots/*.png
+/artifacts/workbench/drag-verification/*.png
