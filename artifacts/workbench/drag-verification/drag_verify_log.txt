@@ -1,0 +1,152 @@
+=== baseline at 960x640 split= ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 960x640 split_overrides=[] -> artifacts/workbench/drag-verification/baseline_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/baseline_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/drag-verification/baseline_960x640.png (2458493 bytes)
+=== div1_ledger_low at 960x640 split=1:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 960x640 split_overrides=[(NodeId(1), 0.15)] -> artifacts/workbench/drag-verification/div1_ledger_low_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div1_ledger_low_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/drag-verification/div1_ledger_low_960x640.png (2458493 bytes)
+=== div1_ledger_high at 960x640 split=1:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 960x640 split_overrides=[(NodeId(1), 0.85)] -> artifacts/workbench/drag-verification/div1_ledger_high_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div1_ledger_high_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/drag-verification/div1_ledger_high_960x640.png (2458493 bytes)
+=== div2_explorer_low at 960x640 split=2:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 960x640 split_overrides=[(NodeId(2), 0.15)] -> artifacts/workbench/drag-verification/div2_explorer_low_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div2_explorer_low_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/drag-verification/div2_explorer_low_960x640.png (2458493 bytes)
+=== div2_explorer_high at 960x640 split=2:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 960x640 split_overrides=[(NodeId(2), 0.85)] -> artifacts/workbench/drag-verification/div2_explorer_high_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div2_explorer_high_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/drag-verification/div2_explorer_high_960x640.png (2458493 bytes)
+=== div3_inspector_low at 960x640 split=3:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 960x640 split_overrides=[(NodeId(3), 0.15)] -> artifacts/workbench/drag-verification/div3_inspector_low_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div3_inspector_low_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/drag-verification/div3_inspector_low_960x640.png (2458493 bytes)
+=== div3_inspector_high at 960x640 split=3:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 960x640 split_overrides=[(NodeId(3), 0.85)] -> artifacts/workbench/drag-verification/div3_inspector_high_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div3_inspector_high_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/drag-verification/div3_inspector_high_960x640.png (2458493 bytes)
+=== baseline at 1440x900 split= ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1440x900 split_overrides=[] -> artifacts/workbench/drag-verification/baseline_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/baseline_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/drag-verification/baseline_1440x900.png (5185363 bytes)
+=== div1_ledger_low at 1440x900 split=1:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1440x900 split_overrides=[(NodeId(1), 0.15)] -> artifacts/workbench/drag-verification/div1_ledger_low_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div1_ledger_low_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/drag-verification/div1_ledger_low_1440x900.png (5185363 bytes)
+=== div1_ledger_high at 1440x900 split=1:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1440x900 split_overrides=[(NodeId(1), 0.85)] -> artifacts/workbench/drag-verification/div1_ledger_high_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div1_ledger_high_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/drag-verification/div1_ledger_high_1440x900.png (5185363 bytes)
+=== div2_explorer_low at 1440x900 split=2:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1440x900 split_overrides=[(NodeId(2), 0.15)] -> artifacts/workbench/drag-verification/div2_explorer_low_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div2_explorer_low_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/drag-verification/div2_explorer_low_1440x900.png (5185363 bytes)
+=== div2_explorer_high at 1440x900 split=2:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1440x900 split_overrides=[(NodeId(2), 0.85)] -> artifacts/workbench/drag-verification/div2_explorer_high_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div2_explorer_high_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/drag-verification/div2_explorer_high_1440x900.png (5185363 bytes)
+=== div3_inspector_low at 1440x900 split=3:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1440x900 split_overrides=[(NodeId(3), 0.15)] -> artifacts/workbench/drag-verification/div3_inspector_low_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div3_inspector_low_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/drag-verification/div3_inspector_low_1440x900.png (5185363 bytes)
+=== div3_inspector_high at 1440x900 split=3:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1440x900 split_overrides=[(NodeId(3), 0.85)] -> artifacts/workbench/drag-verification/div3_inspector_high_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div3_inspector_high_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/drag-verification/div3_inspector_high_1440x900.png (5185363 bytes)
+=== baseline at 1920x1080 split= ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1920x1080 split_overrides=[] -> artifacts/workbench/drag-verification/baseline_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/baseline_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/drag-verification/baseline_1920x1080.png (8296178 bytes)
+=== div1_ledger_low at 1920x1080 split=1:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1920x1080 split_overrides=[(NodeId(1), 0.15)] -> artifacts/workbench/drag-verification/div1_ledger_low_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div1_ledger_low_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/drag-verification/div1_ledger_low_1920x1080.png (8296178 bytes)
+=== div1_ledger_high at 1920x1080 split=1:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1920x1080 split_overrides=[(NodeId(1), 0.85)] -> artifacts/workbench/drag-verification/div1_ledger_high_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div1_ledger_high_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/drag-verification/div1_ledger_high_1920x1080.png (8296178 bytes)
+=== div2_explorer_low at 1920x1080 split=2:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1920x1080 split_overrides=[(NodeId(2), 0.15)] -> artifacts/workbench/drag-verification/div2_explorer_low_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div2_explorer_low_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/drag-verification/div2_explorer_low_1920x1080.png (8296178 bytes)
+=== div2_explorer_high at 1920x1080 split=2:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1920x1080 split_overrides=[(NodeId(2), 0.85)] -> artifacts/workbench/drag-verification/div2_explorer_high_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div2_explorer_high_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/drag-verification/div2_explorer_high_1920x1080.png (8296178 bytes)
+=== div3_inspector_low at 1920x1080 split=3:0.15 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1920x1080 split_overrides=[(NodeId(3), 0.15)] -> artifacts/workbench/drag-verification/div3_inspector_low_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div3_inspector_low_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/drag-verification/div3_inspector_low_1920x1080.png (8296178 bytes)
+=== div3_inspector_high at 1920x1080 split=3:0.85 ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1920x1080 split_overrides=[(NodeId(3), 0.85)] -> artifacts/workbench/drag-verification/div3_inspector_high_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/drag-verification/div3_inspector_high_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/drag-verification/div3_inspector_high_1920x1080.png (8296178 bytes)
+=== drag verification sweep complete ===
+total 109028
+drwxr-xr-x 1 said3 197609       0 Aug  3 06:54 .
+drwxr-xr-x 1 said3 197609       0 Aug  3 06:53 ..
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:14 baseline_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:14 baseline_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:13 baseline_960x640.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:14 div1_ledger_high_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:15 div1_ledger_high_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:13 div1_ledger_high_960x640.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:14 div1_ledger_low_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:15 div1_ledger_low_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:13 div1_ledger_low_960x640.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:14 div2_explorer_high_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:15 div2_explorer_high_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:13 div2_explorer_high_960x640.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:14 div2_explorer_low_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:15 div2_explorer_low_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:13 div2_explorer_low_960x640.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:14 div3_inspector_high_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:15 div3_inspector_high_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:13 div3_inspector_high_960x640.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:14 div3_inspector_low_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:15 div3_inspector_low_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:13 div3_inspector_low_960x640.png
+-rw-r--r-- 1 said3 197609   11636 Aug  3 07:15 drag_verify_log.txt

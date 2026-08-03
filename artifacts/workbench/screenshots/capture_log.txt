@@ -1,0 +1,202 @@
+=== capturing cockpit at 1280x720 (screen=0) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1280x720 split_overrides=[] -> artifacts/workbench/screenshots/cockpit_1280x720.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/cockpit_1280x720.png size=1280x720 scale=1
+OK: artifacts/workbench/screenshots/cockpit_1280x720.png (3687468 bytes)
+=== capturing jobs at 1280x720 (screen=1) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 1 at 1280x720 split_overrides=[] -> artifacts/workbench/screenshots/jobs_1280x720.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/jobs_1280x720.png size=1280x720 scale=1
+OK: artifacts/workbench/screenshots/jobs_1280x720.png (3687468 bytes)
+=== capturing diagnostics at 1280x720 (screen=2) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 2 at 1280x720 split_overrides=[] -> artifacts/workbench/screenshots/diagnostics_1280x720.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/diagnostics_1280x720.png size=1280x720 scale=1
+OK: artifacts/workbench/screenshots/diagnostics_1280x720.png (3687468 bytes)
+=== capturing editor at 1280x720 (screen=3) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 3 at 1280x720 split_overrides=[] -> artifacts/workbench/screenshots/editor_1280x720.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/editor_1280x720.png size=1280x720 scale=1
+OK: artifacts/workbench/screenshots/editor_1280x720.png (3687468 bytes)
+=== capturing explorer at 1280x720 (screen=4) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 4 at 1280x720 split_overrides=[] -> artifacts/workbench/screenshots/explorer_1280x720.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/explorer_1280x720.png size=1280x720 scale=1
+OK: artifacts/workbench/screenshots/explorer_1280x720.png (3687468 bytes)
+=== capturing spec at 1280x720 (screen=5) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 5 at 1280x720 split_overrides=[] -> artifacts/workbench/screenshots/spec_1280x720.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/spec_1280x720.png size=1280x720 scale=1
+OK: artifacts/workbench/screenshots/spec_1280x720.png (3687468 bytes)
+=== capturing readiness at 1280x720 (screen=6) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 6 at 1280x720 split_overrides=[] -> artifacts/workbench/screenshots/readiness_1280x720.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/readiness_1280x720.png size=1280x720 scale=1
+OK: artifacts/workbench/screenshots/readiness_1280x720.png (3687468 bytes)
+=== capturing settings at 1280x720 (screen=7) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 7 at 1280x720 split_overrides=[] -> artifacts/workbench/screenshots/settings_1280x720.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/settings_1280x720.png size=1280x720 scale=1
+OK: artifacts/workbench/screenshots/settings_1280x720.png (3687468 bytes)
+=== capturing cockpit at 1440x900 (screen=0) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1440x900 split_overrides=[] -> artifacts/workbench/screenshots/cockpit_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/cockpit_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/screenshots/cockpit_1440x900.png (5185363 bytes)
+=== capturing jobs at 1440x900 (screen=1) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 1 at 1440x900 split_overrides=[] -> artifacts/workbench/screenshots/jobs_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/jobs_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/screenshots/jobs_1440x900.png (5185363 bytes)
+=== capturing diagnostics at 1440x900 (screen=2) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 2 at 1440x900 split_overrides=[] -> artifacts/workbench/screenshots/diagnostics_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/diagnostics_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/screenshots/diagnostics_1440x900.png (5185363 bytes)
+=== capturing editor at 1440x900 (screen=3) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 3 at 1440x900 split_overrides=[] -> artifacts/workbench/screenshots/editor_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/editor_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/screenshots/editor_1440x900.png (5185363 bytes)
+=== capturing explorer at 1440x900 (screen=4) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 4 at 1440x900 split_overrides=[] -> artifacts/workbench/screenshots/explorer_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/explorer_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/screenshots/explorer_1440x900.png (5185363 bytes)
+=== capturing spec at 1440x900 (screen=5) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 5 at 1440x900 split_overrides=[] -> artifacts/workbench/screenshots/spec_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/spec_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/screenshots/spec_1440x900.png (5185363 bytes)
+=== capturing readiness at 1440x900 (screen=6) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 6 at 1440x900 split_overrides=[] -> artifacts/workbench/screenshots/readiness_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/readiness_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/screenshots/readiness_1440x900.png (5185363 bytes)
+=== capturing settings at 1440x900 (screen=7) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 7 at 1440x900 split_overrides=[] -> artifacts/workbench/screenshots/settings_1440x900.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/settings_1440x900.png size=1440x900 scale=1
+OK: artifacts/workbench/screenshots/settings_1440x900.png (5185363 bytes)
+=== capturing cockpit at 1920x1080 (screen=0) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 1920x1080 split_overrides=[] -> artifacts/workbench/screenshots/cockpit_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/cockpit_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/screenshots/cockpit_1920x1080.png (8296178 bytes)
+=== capturing jobs at 1920x1080 (screen=1) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 1 at 1920x1080 split_overrides=[] -> artifacts/workbench/screenshots/jobs_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/jobs_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/screenshots/jobs_1920x1080.png (8296178 bytes)
+=== capturing diagnostics at 1920x1080 (screen=2) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 2 at 1920x1080 split_overrides=[] -> artifacts/workbench/screenshots/diagnostics_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/diagnostics_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/screenshots/diagnostics_1920x1080.png (8296178 bytes)
+=== capturing editor at 1920x1080 (screen=3) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 3 at 1920x1080 split_overrides=[] -> artifacts/workbench/screenshots/editor_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/editor_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/screenshots/editor_1920x1080.png (8296178 bytes)
+=== capturing explorer at 1920x1080 (screen=4) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 4 at 1920x1080 split_overrides=[] -> artifacts/workbench/screenshots/explorer_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/explorer_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/screenshots/explorer_1920x1080.png (8296178 bytes)
+=== capturing spec at 1920x1080 (screen=5) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 5 at 1920x1080 split_overrides=[] -> artifacts/workbench/screenshots/spec_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/spec_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/screenshots/spec_1920x1080.png (8296178 bytes)
+=== capturing readiness at 1920x1080 (screen=6) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 6 at 1920x1080 split_overrides=[] -> artifacts/workbench/screenshots/readiness_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/readiness_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/screenshots/readiness_1920x1080.png (8296178 bytes)
+=== capturing settings at 1920x1080 (screen=7) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 7 at 1920x1080 split_overrides=[] -> artifacts/workbench/screenshots/settings_1920x1080.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/settings_1920x1080.png size=1920x1080 scale=1
+OK: artifacts/workbench/screenshots/settings_1920x1080.png (8296178 bytes)
+=== capturing cockpit at 960x640 (screen=0) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 0 at 960x640 split_overrides=[] -> artifacts/workbench/screenshots/cockpit_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/cockpit_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/screenshots/cockpit_960x640.png (2458493 bytes)
+=== capturing jobs at 960x640 (screen=1) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 1 at 960x640 split_overrides=[] -> artifacts/workbench/screenshots/jobs_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/jobs_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/screenshots/jobs_960x640.png (2458493 bytes)
+=== capturing editor at 960x640 (screen=3) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 3 at 960x640 split_overrides=[] -> artifacts/workbench/screenshots/editor_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/editor_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/screenshots/editor_960x640.png (2458493 bytes)
+=== capturing spec at 960x640 (screen=5) ===
+=== Semantic Workbench (Iced substrate) ===
+project root: \\?\C:\Users\said3\Desktop\EXOcode\Semantic_ui_dna2_3b_artifact_v1\examples\quad_logic_calculator\src
+=== Headless capture: screen 5 at 960x640 split_overrides=[] -> artifacts/workbench/screenshots/spec_960x640.png ===
+CAPTURE_DONE: artifacts/workbench/screenshots/spec_960x640.png size=960x640 scale=1
+OK: artifacts/workbench/screenshots/spec_960x640.png (2458493 bytes)
+=== capture sweep complete ===
+total 143832
+drwxr-xr-x 1 said3 197609       0 Aug  3 05:17 .
+drwxr-xr-x 1 said3 197609       0 Aug  3 06:53 ..
+-rw-r--r-- 1 said3 197609   13843 Aug  3 07:22 capture_log.txt
+-rw-r--r-- 1 said3 197609 3687468 Aug  3 07:20 cockpit_1280x720.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:21 cockpit_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:21 cockpit_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:22 cockpit_960x640.png
+-rw-r--r-- 1 said3 197609 3687468 Aug  3 07:20 diagnostics_1280x720.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:21 diagnostics_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:21 diagnostics_1920x1080.png
+-rw-r--r-- 1 said3 197609 3687468 Aug  3 07:20 editor_1280x720.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:21 editor_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:22 editor_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:22 editor_960x640.png
+-rw-r--r-- 1 said3 197609 3687468 Aug  3 07:20 explorer_1280x720.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:21 explorer_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:22 explorer_1920x1080.png
+-rw-r--r-- 1 said3 197609 3687468 Aug  3 07:20 jobs_1280x720.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:21 jobs_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:21 jobs_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:22 jobs_960x640.png
+-rw-r--r-- 1 said3 197609    7873 Aug  3 05:04 manifest.json
+-rw-r--r-- 1 said3 197609 3687468 Aug  3 07:20 readiness_1280x720.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:21 readiness_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:22 readiness_1920x1080.png
+-rw-r--r-- 1 said3 197609 3687468 Aug  3 07:20 settings_1280x720.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:21 settings_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:22 settings_1920x1080.png
+-rw-r--r-- 1 said3 197609 3687468 Aug  3 07:20 spec_1280x720.png
+-rw-r--r-- 1 said3 197609 5185363 Aug  3 07:21 spec_1440x900.png
+-rw-r--r-- 1 said3 197609 8296178 Aug  3 07:22 spec_1920x1080.png
+-rw-r--r-- 1 said3 197609 2458493 Aug  3 07:22 spec_960x640.png
