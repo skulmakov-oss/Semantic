@@ -1838,3 +1838,98 @@ above (legacy renderer removal, `Ellipsis`/`ScrollX` glyph/scroll,
 `CodeEditor` gutter, compact-mode collapse, non-persisted split
 ratios) still apply and are not re-litigated here.
 
+# PR #1567 PUBLICATION — REVIEW FINDINGS AND FIXES
+
+Automated code review (`chatgpt-codex-connector`) on PR #1567 raised
+three P1-priority threads. Each was independently verified against real
+source before any action, not accepted or dismissed on the review's
+word alone.
+
+## Finding 1 — job completion never reaches the live production window (CONFIRMED, FIXED)
+
+Verified by direct inspection: `crates/prom-ui-iced-adapter/src/app.rs`'s
+`run()` built `iced::application(boot, update, view)` with no
+`.subscription(..)` at all, and every real call site of
+`WorkbenchApp::poll_jobs()` (the sole consumer of the `job_rx` channel
+background job threads report completion on) was either the function's
+own definition or a manual, test-only polling loop
+(`native_adapter_boundary_click_navigation_and_dispatch_a_real_job` and
+similar). Nothing in the real production Elm-architecture loop ever
+called it. A real job dispatched in the live window would show
+"running" forever: concurrency slots would never free, queued jobs
+would never start, readiness/diagnostics/format results would never
+land. This is a real, severe regression this session's own earlier live
+verification did not catch (dispatch was confirmed live; completion was
+not watched for).
+
+Fixed with a generic, Workbench-agnostic hook: `PromApplication::
+on_tick()` (default no-op) plus a real `iced::time::every(100ms)`
+subscription in `run()` emitting `PromUiMessage::Tick`. The adapter
+itself stays ignorant of "jobs" -- it only offers a real, recurring
+callback. Workbench's own `on_tick()` calls the existing `poll_jobs()`.
+Required enabling Iced's own `smol` feature (not a new top-level
+dependency -- a feature flag on the already-authorized `iced` crate,
+needed for `iced::time::every`; see docs/legal/
+third_party_dependencies.md §4.7). All 63 pre-existing tests still
+pass unchanged.
+
+## Finding 2 — child process pipe deadlock (CONFIRMED, FIXED)
+
+Verified by direct inspection: `run_one_step` polled `child.try_wait()`
+in a loop without ever reading the piped stdout/stderr, then only
+called `wait_with_output()` after that loop observed exit. Any real job
+writing more than one OS pipe buffer's worth of output on either stream
+(routine for `cargo test`/`cargo check` with a normal amount of
+warning/error text -- this exact session produced such output
+repeatedly) blocks the child inside its own `write()` indefinitely,
+which means `try_wait()` polls a process that can never exit: a real,
+silent hang, not a contrived edge case.
+
+Fixed by taking the stdout/stderr handles and draining each on its own
+thread immediately after spawn (before the poll loop runs), joining
+those threads for the final bytes after the poll loop observes real
+exit or cancellation -- the same concurrent-read strategy
+`wait_with_output()` uses internally, applied by hand because the poll
+loop must run first here. Added a new, real regression test,
+`run_one_step_drains_large_stdout_and_stderr_without_deadlocking`,
+which spawns a real child writing >64KiB to both streams and asserts
+the complete output returns rather than the call hanging.
+
+## Finding 3 — route job processes through "PROMETHEUS capability gates" (EVALUATED, NOT IMPLEMENTED)
+
+Investigated, not accepted as written. AGENTS.md:L15's actual rule
+("Do not add direct external effects outside PROMETHEUS capability
+boundaries") governs Semantic *core* -- the verified capability model
+for **executing compiled .sm programs** via sm-verify/sm-vm -- not an
+independent Rust host application. Workbench's own process boundary
+already exists and is already tested:
+`examples/workbench_semantic/src/host_capabilities.rs`'s
+`HostCapabilities::check_spawn` is the *only* place in the application
+allowed to spawn a process, allowlists exactly `smc`/`svm`/`cargo`/
+`pwsh`, and requires the resolved cwd to canonicalize inside the open
+project root -- with dedicated denial tests
+(`capability_check_denies_unlisted_executable`,
+`capability_check_denies_cwd_outside_project_root`, both already
+passing). This is exactly the "process/CLI adapter" boundary issue
+#1369 (the roadmap anchor authorizing this whole implementation)
+specifies for Workbench, deliberately distinct from PROMETHEUS's own
+scope over verified Semantic program execution. Routing Workbench's
+host-level process launches through PROMETHEUS itself would be a real,
+non-trivial architecture change (new capability declarations, a new
+integration surface between a Rust host tool and the Semantic core
+capability system) -- well beyond publishing already-built, already-
+reviewed work, and this task's own instructions explicitly exclude
+"unrelated compiler or VM refactoring." Not implemented in this PR;
+resolved on the PR with this reasoning, not silently dismissed.
+
+## Qualification after these fixes
+
+- `cargo fmt --all --check` -- clean.
+- `cargo test -p prom-ui-iced-adapter -p workbench_semantic` -- 64
+  passed, 0 failed (the 63 from the closure pass + the 1 new pipe-drain
+  regression test).
+- `cargo clippy --workspace --all-targets -- -D warnings` -- 0 errors
+  (the same command CI's `pr-ready` check runs).
+- `cargo check --workspace` -- clean.
+- `scripts/harness-check.ps1` -- `[harness] ok`.
+

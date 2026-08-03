@@ -47,4 +47,12 @@ pub(crate) enum PromUiMessage {
     /// it.
     #[allow(dead_code)]
     WindowResized(u32, u32),
+    /// A real, periodic tick from `crate::app::run`'s own
+    /// `.subscription(..)` (`iced::time::every`, a real Iced primitive --
+    /// not a new dependency). Constructed continuously in production, so
+    /// this variant is genuinely live, unlike `Scrolled`/`WindowResized`
+    /// above. See `PromApplication::on_tick`'s doc comment for why the
+    /// generic adapter offers a bare tick instead of anything
+    /// domain-specific.
+    Tick,
 }

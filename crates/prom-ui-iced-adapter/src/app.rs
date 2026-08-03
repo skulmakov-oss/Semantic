@@ -75,6 +75,15 @@ pub trait PromApplication {
     fn on_window_resized(&mut self, width: u32, height: u32) {
         let _ = (width, height);
     }
+
+    /// A real, periodic tick from the adapter's own subscription (see
+    /// `run`'s `.subscription(..)`). Exists so a consumer can poll for
+    /// out-of-band async completion -- e.g. Workbench's background job
+    /// threads reporting results over a channel -- without the generic
+    /// adapter knowing anything about "jobs" itself; it only knows "give
+    /// the consumer a real, recurring opportunity to check." Default
+    /// no-op: most consumers have no such out-of-band source.
+    fn on_tick(&mut self) {}
 }
 
 /// A `CodeEditor` node's persistent, real Iced-owned editing buffer, plus
@@ -200,6 +209,7 @@ fn update<App: PromApplication>(state: &mut AdapterState<App>, message: PromUiMe
             state.app.on_splitter_moved(id, ratio);
         }
         PromUiMessage::WindowResized(width, height) => state.app.on_window_resized(width, height),
+        PromUiMessage::Tick => state.app.on_tick(),
     }
 }
 
@@ -267,6 +277,23 @@ where
     };
     iced::application(boot, update, view)
         .title(move |_state: &AdapterState<App>| title.clone())
+        // Real, always-on periodic tick (see `PromApplication::on_tick`'s
+        // own doc comment for why the generic adapter offers this instead
+        // of anything job/Workbench-specific): without it, a consumer
+        // with an out-of-band async completion source -- e.g. Workbench's
+        // background job threads reporting over a channel -- has no real
+        // opportunity to ever observe it, since nothing else in a plain
+        // Elm-architecture `update`/`view` loop runs on its own. 100ms is
+        // a real, deliberately-conservative interval: fast enough that a
+        // completed job's status reaches the screen within one human
+        // perception threshold, far below any rate that would make
+        // Workbench's own bounded job queue or its `try_recv` drain loop
+        // meaningfully more expensive than the render `view()` already
+        // happening every real frame.
+        .subscription(|_state: &AdapterState<App>| {
+            iced::time::every(std::time::Duration::from_millis(100))
+                .map(|_instant| PromUiMessage::Tick)
+        })
         .run()
         .map_err(|e| PromRunError(e.to_string()))
 }

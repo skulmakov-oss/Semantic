@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -764,13 +765,42 @@ fn run_one_step(
     job_id: i32,
     running: &Arc<Mutex<HashMap<i32, Child>>>,
 ) -> Result<(Option<i32>, String, String), String> {
-    let child = Command::new(exe)
+    let mut child = Command::new(exe)
         .args(args)
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("process spawn failed: {e}"))?;
+
+    // Drain stdout/stderr on their own threads *before* the poll loop
+    // below ever runs, not after it exits. The OS pipe backing each
+    // stream has a bounded capacity (commonly ~64KiB); once a real job
+    // (e.g. `cargo test`/`cargo check` on a workspace with any real
+    // amount of warning/error output -- routine in this repository, not
+    // a hypothetical) writes more than that without anything reading it,
+    // the child blocks inside its own `write()` call and never reaches
+    // exit. `try_wait()` then polls forever: a real, silent hang, not a
+    // race that only shows up occasionally. Reading concurrently here is
+    // the same fix `wait_with_output()` applies internally -- this just
+    // has to do it by hand because the poll loop needs to observe exit
+    // (or cancellation) before that call would otherwise run.
+    let stdout_handle = child.stdout.take();
+    let stderr_handle = child.stderr.take();
+    let stdout_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut h) = stdout_handle {
+            let _ = h.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let stderr_reader = thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut h) = stderr_handle {
+            let _ = h.read_to_end(&mut buf);
+        }
+        buf
+    });
 
     running.lock().unwrap().insert(job_id, child);
     // Re-borrow through the map for the rest of this step so `Cancel` (which
@@ -791,17 +821,23 @@ fn run_one_step(
     }
 
     let mut guard = running.lock().unwrap();
-    let Some(child) = guard.remove(&job_id) else {
+    let Some(mut child) = guard.remove(&job_id) else {
         return Err("job was cancelled".to_string());
     };
     drop(guard);
 
-    let output = child
-        .wait_with_output()
+    // stdout/stderr were already `take()`n above for the reader threads,
+    // so this only reaps the exit status -- it must not race the readers
+    // for the same pipes `wait_with_output()` would otherwise try to
+    // consume.
+    let status = child
+        .wait()
         .map_err(|e| format!("collect output failed: {e}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    Ok((output.status.code(), stdout, stderr))
+    let stdout_bytes = stdout_reader.join().unwrap_or_default();
+    let stderr_bytes = stderr_reader.join().unwrap_or_default();
+    let stdout = String::from_utf8_lossy(&stdout_bytes).to_string();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).to_string();
+    Ok((status.code(), stdout, stderr))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6941,6 +6977,18 @@ mod iced_shell {
                 let _ = self.dispatch_action(Action::MarkDirty(idx as i32));
             }
         }
+
+        /// Real, periodic drain of `job_rx`: background job threads report
+        /// completion over that channel, but nothing else in a plain
+        /// Elm-architecture `update`/`view` loop ever runs on its own to
+        /// receive it -- without this, a real dispatched job would show
+        /// "running" forever in the live production window (queued jobs
+        /// would never start, concurrency slots would never free). Reuses
+        /// `poll_jobs`, the exact same non-blocking `try_recv` drain the
+        /// native-adapter-boundary tests already exercise manually.
+        fn on_tick(&mut self) {
+            self.poll_jobs();
+        }
     }
 
     /// Real Iced-path native entry point. Reuses the exact same project-
@@ -7114,6 +7162,64 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Real regression coverage for a real, found-and-fixed deadlock:
+    /// `run_one_step` used to poll `try_wait()` in a loop without ever
+    /// reading the child's piped stdout/stderr, so a job that wrote more
+    /// than one OS pipe buffer's worth of output (any real `cargo test`/
+    /// `cargo check` with a normal amount of warning/error text -- not a
+    /// contrived case) would block the child inside its own `write()`
+    /// forever, and `try_wait()` would then poll a process that could
+    /// never exit. This spawns a real child that writes well past a
+    /// typical pipe buffer (64KiB) to both streams and asserts
+    /// `run_one_step` returns the *complete*, correct output rather than
+    /// hanging -- if the old poll-then-collect ordering regressed, this
+    /// test would hang instead of failing cleanly, which is still a real,
+    /// visible CI signal (a timed-out job), not a silent pass.
+    #[test]
+    fn run_one_step_drains_large_stdout_and_stderr_without_deadlocking() {
+        let pwsh = host_capabilities::resolve_on_path("pwsh")
+            .or_else(|| host_capabilities::resolve_on_path("powershell"))
+            .expect("pwsh or powershell must be on PATH for this test");
+        let running: Arc<Mutex<HashMap<i32, Child>>> = Arc::new(Mutex::new(HashMap::new()));
+        let cwd = env::current_dir().expect("current dir must resolve");
+        // ~150 lines * ~500 'x' chars each is comfortably past 64KiB on
+        // both stdout and stderr.
+        let script = "1..150 | ForEach-Object { \
+             $line = 'x' * 500; \
+             Write-Output $line; \
+             [Console]::Error.WriteLine($line) \
+         }";
+        let args = vec![
+            "-NoProfile".to_string(),
+            "-NonInteractive".to_string(),
+            "-Command".to_string(),
+            script.to_string(),
+        ];
+        let (exit_code, stdout, stderr) = run_one_step(&pwsh, &args, &cwd, 9001, &running)
+            .expect("a real, non-cancelled child must return real output, not an error");
+        assert_eq!(exit_code, Some(0), "script must exit cleanly");
+        assert!(
+            stdout.len() > 65536,
+            "stdout must be the real, complete output (>64KiB), not truncated by a stuck pipe: got {} bytes",
+            stdout.len()
+        );
+        assert!(
+            stderr.len() > 65536,
+            "stderr must be the real, complete output (>64KiB), not truncated by a stuck pipe: got {} bytes",
+            stderr.len()
+        );
+        assert_eq!(
+            stdout.lines().count(),
+            150,
+            "every real line the child wrote to stdout must be present"
+        );
+        assert_eq!(
+            stderr.lines().count(),
+            150,
+            "every real line the child wrote to stderr must be present"
+        );
     }
 
     /// The canonical Workbench must have zero Node/npm/Vite/React/Tauri/
