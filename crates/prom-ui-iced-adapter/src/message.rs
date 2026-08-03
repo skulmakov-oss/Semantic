@@ -23,6 +23,14 @@ pub(crate) enum PromUiMessage {
     /// real document truth, Iced only supplies the editing mechanics.
     CodeEdited(NodeId, text_editor::Action),
     /// A `ScrollView`/`TreeView`/`DataTable`'s scroll offset changed.
+    /// Handled in `crate::app::update` and part of the adapter's real
+    /// public contract (`PromApplication::on_scrolled`), but nothing
+    /// constructs it yet -- no widget/subscription wiring here currently
+    /// captures real scroll position. Reserved, not accidental dead code;
+    /// wiring it up is a real feature addition, out of scope for this
+    /// pass. `#[allow(dead_code)]` documents that deliberately rather than
+    /// silently deleting a designed contract variant.
+    #[allow(dead_code)]
     Scrolled(NodeId, f32),
     /// A real, live `SplitPane` divider drag reported a new ratio for one
     /// of its (possibly several, in a nested tree) real `pane_grid::Split`
@@ -33,6 +41,10 @@ pub(crate) enum PromUiMessage {
     /// `pane_grid::State` (see `crate::app::AdapterState::split_states`)
     /// should apply it.
     SplitResized(NodeId, pane_grid::Split, f32),
-    /// The native window's real size changed.
+    /// The native window's real size changed. Same status as `Scrolled`
+    /// above: a real, designed part of `PromApplication::on_window_resized`'s
+    /// contract, not yet wired to a real Iced subscription that constructs
+    /// it.
+    #[allow(dead_code)]
     WindowResized(u32, u32),
 }

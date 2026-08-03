@@ -27,17 +27,21 @@ use prom_ui::shell_bridge::{
 };
 use prom_ui::SemanticIntent;
 
-use prom_ui_backend_native::NativeBackend;
 use prom_ui_runtime::clip::{clip_fill_rect, clip_text_origin, ClipRect};
 use prom_ui_runtime::reference_admission::{ReferenceActionInvocation, ReferenceContourAdmission};
 use prom_ui_runtime::shell_player::{
     create_shell_session, OrderedProjectionPatchBatchEnvelope, ShellLifecycleCommand,
     ShellLifecycleStimulus, ShellSession, ShellSessionId, ShellSessionLimits, ShellTransitionInput,
 };
-use prom_ui_runtime::{
-    Color, DesktopSession, DrawCommand, DrawFrame, InputEventKind, LoopControl, Rect, SessionState,
-    WindowConfig,
-};
+use prom_ui_runtime::{Color, DrawCommand, DrawFrame, InputEventKind, LoopControl, Rect};
+// `DesktopSession`/`SessionState`/`WindowConfig` are used only by the
+// `#[cfg(test)]` native-adapter-boundary tests further down in this file
+// (see `mod tests` inside `mod iced_shell`) -- unused from the plain
+// production `bin` target's own perspective, where the legacy renderer
+// that also used them is unreachable from `fn main()`. Same status as the
+// rest of that legacy machinery (see its own `#[allow(dead_code)]` notes).
+#[allow(unused_imports)]
+use prom_ui_runtime::{DesktopSession, SessionState, WindowConfig};
 use semantic_core_quad::QuadState;
 use sm_emit::compile_program_to_semcode;
 use sm_runtime_core::RecordCarrier;
@@ -109,6 +113,7 @@ const INSPECTOR_TAB_COUNT: usize = 5;
 /// panel is only `MIN_INSPECTOR_WIDTH` (180px) wide at minimum, nowhere
 /// near enough for "VERIFY"/"DISASM"/"CAPABILITY" spelled out across 5
 /// tabs; abbreviated the same way the nav rail's `RAIL_LABELS_SHORT` is.
+#[allow(dead_code)]
 const INSPECTOR_TAB_LABELS: [&str; INSPECTOR_TAB_COUNT] = ["VER", "DIS", "RUN", "CAP", "RAW"];
 
 const BTN_READINESS_RUN: u64 = 192;
@@ -168,9 +173,12 @@ const DIAGNOSTIC_ROW_SLOT_COUNT: usize = 15;
 
 const MAX_TABS: usize = 6;
 const MAX_JOB_HISTORY: usize = 200;
+#[allow(dead_code)]
 const MAX_DIAGNOSTICS_HISTORY: usize = 400;
 const MAX_EXPLORER_NODES: usize = 2000;
+#[allow(dead_code)]
 const LINE_HEIGHT: i32 = 18;
+#[allow(dead_code)]
 const CHAR_WIDTH: i32 = 8;
 
 // Color palette lifted verbatim from the project owner's design reference
@@ -180,26 +188,42 @@ const CHAR_WIDTH: i32 = 8;
 // or animation -- so this reproduces the reference's color language
 // exactly while the reference's structural chrome (gradients, box-shadow,
 // border-radius, hover-lift, pulsing dots) has no DrawFrame equivalent.
+#[allow(dead_code)]
 const COLOR_BG: Color = Color::rgb(0x0b, 0x10, 0x16);
+#[allow(dead_code)]
 const COLOR_BG_DEEP: Color = Color::rgb(0x09, 0x0d, 0x12);
+#[allow(dead_code)]
 const COLOR_SURFACE: Color = Color::rgb(0x11, 0x18, 0x1f);
+#[allow(dead_code)]
 const COLOR_SURFACE_2: Color = Color::rgb(0x17, 0x21, 0x2b);
+#[allow(dead_code)]
 const COLOR_SURFACE_3: Color = Color::rgb(0x1b, 0x27, 0x33);
+#[allow(dead_code)]
 const COLOR_BORDER: Color = Color::rgb(0x28, 0x35, 0x42);
+#[allow(dead_code)]
 const COLOR_TEXT: Color = Color::rgb(0xdc, 0xe6, 0xee);
+#[allow(dead_code)]
 const COLOR_MUTED: Color = Color::rgb(0x86, 0x99, 0xa7);
+#[allow(dead_code)]
 const COLOR_TEAL: Color = Color::rgb(0x31, 0xc6, 0xb1);
+#[allow(dead_code)]
 const COLOR_BLUE: Color = Color::rgb(0x6e, 0xa8, 0xfe);
+#[allow(dead_code)]
 const COLOR_AMBER: Color = Color::rgb(0xd7, 0xa7, 0x46);
+#[allow(dead_code)]
 const COLOR_RED: Color = Color::rgb(0xe4, 0x6a, 0x76);
 
 /// The window size this app's fixed panel-size tokens (below) were tuned
 /// against. `ui_scale` is 1.0 exactly at this size and DPI, and scales
 /// bounded around it -- not an arbitrary magic number, the actual
 /// reference layout dimension.
+#[allow(dead_code)]
 const REFERENCE_WIDTH: f32 = 1280.0;
+#[allow(dead_code)]
 const REFERENCE_HEIGHT: f32 = 800.0;
+#[allow(dead_code)]
 const MIN_UI_SCALE: f32 = 0.75;
+#[allow(dead_code)]
 const MAX_UI_SCALE: f32 = 1.6;
 
 /// Responsive layout metrics, recomputed once per frame from the real
@@ -213,6 +237,7 @@ const MAX_UI_SCALE: f32 = 1.6;
 /// renderer capability this pass does not add (see the final report's
 /// KNOWN LIMITS).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 struct ResponsiveMetrics {
     ui_scale: f32,
     spacing_xs: i32,
@@ -228,6 +253,7 @@ struct ResponsiveMetrics {
     button_height: i32,
 }
 
+#[allow(dead_code)]
 impl ResponsiveMetrics {
     /// `window_width`/`window_height` are physical pixels (matching the
     /// wgpu surface / this renderer's coordinate space -- see
@@ -282,10 +308,15 @@ impl ResponsiveMetrics {
     }
 }
 
+#[allow(dead_code)]
 const MIN_MAIN_SURFACE_WIDTH: i32 = 360;
+#[allow(dead_code)]
 const MIN_EXPLORER_WIDTH: i32 = 140;
+#[allow(dead_code)]
 const MIN_INSPECTOR_WIDTH: i32 = 180;
+#[allow(dead_code)]
 const MIN_LEDGER_HEIGHT: i32 = 96;
+#[allow(dead_code)]
 const MAX_LEDGER_HEIGHT: i32 = 320;
 
 /// A real, user-dragged pane size that overrides `ResponsiveMetrics`'
@@ -317,6 +348,7 @@ enum DividerKind {
 /// button's clickable rect can never drift from where it was actually
 /// drawn (no independently-recomputed magic coordinates in either place).
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 struct WorkbenchLayout {
     metrics: ResponsiveMetrics,
     header: Rect,
@@ -327,6 +359,7 @@ struct WorkbenchLayout {
     ledger: Rect,
 }
 
+#[allow(dead_code)]
 impl WorkbenchLayout {
     fn compute(
         window_width: i32,
@@ -531,6 +564,7 @@ struct JobRecord {
 }
 
 enum HostEvent {
+    #[allow(dead_code)]
     JobCompleted(JobRecord),
 }
 
@@ -583,6 +617,7 @@ fn truncate_ascii(s: &str, max_chars: usize) -> String {
 /// `local_hit_targets`/`persistent_inspector_hit_targets` all call this
 /// rather than each hardcoding the same pitch, so a chip's clickable rect
 /// can never drift from where it's actually drawn.
+#[allow(dead_code)]
 fn chip_pitch(available_width: i32, count: usize, design_pitch: i32, min_pitch: i32) -> i32 {
     let count = count.max(1) as i32;
     let usable = (available_width - 20).max(min_pitch * count);
@@ -1220,6 +1255,7 @@ fn encode_semantic_action(action: &Action) -> Value {
 /// Physical key code (see `translate_winit_key_code`) + shift state -> typed
 /// character. Deliberately a small, explicit, testable table -- not a full
 /// keyboard-layout/IME model, but real enough to type ASCII Semantic source.
+#[allow(dead_code)]
 fn physical_key_to_char(code: u32, shift: bool) -> Option<char> {
     match code {
         65..=90 => {
@@ -1277,6 +1313,7 @@ struct EditorTab {
     external_change_detected: bool,
 }
 
+#[allow(dead_code)]
 impl EditorTab {
     fn open(path: PathBuf) -> Result<Self, String> {
         let content = fs::read_to_string(&path).map_err(|e| format!("read failed: {e}"))?;
@@ -1571,6 +1608,7 @@ impl EditorTab {
     }
 }
 
+#[allow(dead_code)]
 fn char_to_byte_idx(s: &str, char_idx: usize) -> usize {
     s.char_indices()
         .nth(char_idx)
@@ -1697,6 +1735,7 @@ fn collect_docs(dir: &Path, out: &mut Vec<PathBuf>, cap: usize) {
 
 // --- Application ---
 
+#[allow(dead_code)]
 struct WorkbenchApp {
     state: WorkbenchState,
     shell: ShellSession,
@@ -1792,6 +1831,7 @@ struct WorkbenchApp {
 /// shell -- so a command card's clickable rect can never drift from where
 /// it's actually drawn.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CockpitLayout {
     open_button: Rect,
     grid: Vec<Rect>,
@@ -1811,6 +1851,7 @@ struct CockpitLayout {
 /// (previously fixed at x up to 600, same problem). Shared by
 /// `render_editor`, `editor_point_to_line_col`, and `local_hit_targets`.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 struct EditorLayout {
     tab_pitch: i32,
     content_area: Rect,
@@ -1819,6 +1860,7 @@ struct EditorLayout {
     guard_buttons: [Rect; 3],
 }
 
+#[allow(dead_code)]
 impl WorkbenchApp {
     fn new(project_root: PathBuf) -> Result<Self, String> {
         let bundle_bytes = compile_projection_source_to_bundle_v0(
@@ -5160,12 +5202,14 @@ impl WorkbenchApp {
 /// rather than by hand-truncating geometry -- content that falls outside
 /// `clip` is genuinely never emitted (see clip.rs docs for why this is the
 /// canonical equivalent to a GPU scissor rect for this renderer).
+#[allow(dead_code)]
 fn draw_clipped_rect(frame: &mut DrawFrame, rect: Rect, color: Color, clip: ClipRect) {
     if let Some(visible) = clip_fill_rect(rect, clip) {
         frame.fill_rect(visible, color);
     }
 }
 
+#[allow(dead_code)]
 fn draw_clipped_text(
     frame: &mut DrawFrame,
     text: &str,
@@ -5179,6 +5223,7 @@ fn draw_clipped_text(
     }
 }
 
+#[allow(dead_code)]
 fn render_scrollable_lines(
     frame: &mut DrawFrame,
     lines: &[String],
@@ -5213,6 +5258,7 @@ fn render_scrollable_lines(
 /// construction -- it is recomputed fresh from `tab.scroll_offset` and
 /// `area` every frame, so there is no stale highlight to invalidate after a
 /// scroll.
+#[allow(dead_code)]
 fn render_selection_highlight(
     frame: &mut DrawFrame,
     tab: &EditorTab,
@@ -5296,6 +5342,7 @@ fn status_index(status: JobStatusKind) -> i32 {
     }
 }
 
+#[allow(dead_code)]
 fn job_status_label(status: i32) -> &'static str {
     match status {
         0 => "none",
@@ -5308,6 +5355,7 @@ fn job_status_label(status: i32) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn error_label(code: i32) -> &'static str {
     match code {
         1 => "no project open",
