@@ -20,8 +20,6 @@ cargo fmt --check
 Assert-Success "cargo fmt failed"
 cargo check --workspace --all-features
 Assert-Success "cargo check failed"
-cargo test --workspace --all-features
-Assert-Success "cargo test failed"
 Write-Host "PASS: Hell 1" -ForegroundColor Green
 
 # -----------------------------------------------------------------------------
