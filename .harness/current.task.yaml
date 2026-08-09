@@ -1,34 +1,32 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-00
-  title: "roadmap: freeze the Semantic Stable Foundation truth contour"
-  type: documentation_and_qualification
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-01
+  title: "language: freeze the Stable Foundation public source contract"
+  type: contract_qualification_and_bounded_implementation
   mode: active
-  supersedes: SEMANTIC-WORKBENCH-NATIVE-V0
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-00
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. Only SSF-00 is active until its exit gate is satisfied.
+    order. SSF-00 closed through PR #1585 at main commit
+    b3a5bf6dfaefdeb571578907419c0448eacc9061; only SSF-01 is now active.
 
 intent:
   summary: >-
-    Establish an evidence-backed inventory of current Semantic language,
-    tooling, verifier, runtime, project, package, diagnostics, release, and UI
-    projection claims; classify maturity without promotion; freeze the smallest
-    coherent Stable Foundation target contour; and record dependencies and
-    unresolved decisions for later SSF phases.
+    Freeze one coherent, versioned Rust-like public source-language contract
+    from SSF-TARGET-0; prove every included form end to end; classify excluded
+    forms explicitly; and repair only contract gaps demonstrated by the audit.
+    Hand Logos, stdlib, advanced type/ownership, package, and UI decisions to
+    their owning later phases without expanding this phase.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - pr_body_action_mapping.md
-    - pr_body_intent_admission_boundary.md
     - README.md
-    - ARCHITECTURE.md
     - CHANGELOG.md
     - docs/LANGUAGE.md
     - docs/examples_index.md
     - docs/getting_started.md
-    - docs/spec/index.md
+    - docs/spec/**
     - docs/status/feature_maturity_matrix.md
     - docs/roadmap/public_maturity_snapshot.md
     - docs/roadmap/public_status_model.md
@@ -36,21 +34,28 @@ scope:
     - docs/roadmap/stable_release_policy.md
     - docs/roadmap/compatibility_statement.md
     - docs/roadmap/stable_foundation/**
-    - tests/ssf_status_drift.rs
+    - examples/canonical/**
+    - examples/qualification/**
+    - tests/**
+    - crates/sm-front/**
+    - crates/sm-ir/**
+    - crates/sm-emit/**
+    - crates/sm-verify/**
+    - crates/sm-vm/**
+    - crates/sm-runtime-core/**
+    - crates/smc-cli/**
 
   forbidden_paths:
     - .github/**
     - apps/**
-    - crates/**
-    - examples/**
     - experiments/**
     - src/**
     - third_party/**
     - ton618_legacy/**
 
 authorization:
-  rust_implementation: false
-  language_implementation: false
+  rust_implementation: true
+  language_implementation: true
   documentation_addition: true
   documentation_correction: true
   test_addition: true
@@ -63,14 +68,20 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-00
-  issue: 1571
+  active_phase: SSF-01
+  issue: 1572
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
-  no_language_or_runtime_implementation: true
+  contract_audit_before_implementation: true
+  implementation_only_for_demonstrated_contract_gaps: true
+  no_convenience_feature_growth: true
+  preserve_verifier_first_execution: true
+  logos_decision_deferred_to_ssf_02: true
+  stdlib_expansion_deferred_to_ssf_03: true
+  advanced_type_and_ownership_decisions_deferred_to_ssf_07_and_ssf_08: true
   no_ui_product_expansion: true
   no_stable_release_claim: true
   no_historical_document_rewrite: true
