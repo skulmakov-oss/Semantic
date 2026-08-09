@@ -122,19 +122,20 @@ that wording drift; it does not delete or rewrite historical evidence.
 
 | Public feature | Owner layer | Status | Evidence and exact boundary | Foundation routing |
 |---|---|---|---|---|
-| Single-file fallback | C/F | **Qualified limited release** | Gate 1 explicitly admits single-file programs. | SSF-05. |
-| `semantic.toml` project root and entrypoint | C/F | **Landed and qualified on `main`** | PCC9 positive/negative/root-preference and command-route tests. | Canonical manifest decision in SSF-05. |
-| `Semantic.package` baseline | C/F | **Landed and qualified on `main`** | PCC9/project-manifest and local import evidence. | Relationship to `semantic.toml` in SSF-05/06. |
-| Source/module root resolution | C/F | **Landed and qualified on `main`** | PCC9 and import qualification include deterministic root behavior. | Freeze in SSF-05. |
-| Test/example discovery | C | **Roadmap** | Repository tests exist; no canonical project discovery contract or `smc test`. | SSF-05. |
-| Deterministic path normalization/root-escape rejection | C/F | **Landed and qualified on `main`** | Project/import negative fixtures cover escapes and missing paths. | Requalify contract in SSF-05/06. |
-| Project identity/content hashing boundary | C/D | **Landed but unqualified** | Hash routes exist, but the stable identity/provenance contract is not frozen. | SSF-05/10. |
+| Single-file fallback | C/F | **Landed and qualified on `main`** | Project Model v0 preserves direct `.sm` inputs; PCC9 exercises the full single-file CLI path. | Preserve through SSF-12. |
+| `semantic.toml` project root and entrypoint | C/F | **Landed and qualified on `main`** | `semantic.foundation.project/0.1`; PCC9 positive/negative/root-preference and command-route tests. | Preserve through SSF-12. |
+| `Semantic.package` baseline | C/F | **Landed and qualified on `main`** | Explicit compatibility/package input; `semantic.toml` wins when both exist. | SSF-06 owns its local-package contract. |
+| Source/module root resolution | C/F | **Landed and qualified on `main`** | Project Model v0 plus PCC9 import/root qualification. | Preserve through SSF-12. |
+| Test/example discovery | C | **Landed and qualified on `main`** | Sorted `tests/**/*.sm` execution and explicit `examples/**/*.sm` contract; SSF05 focused tests. | Preserve through SSF-12. |
+| Deterministic path normalization/root-escape rejection | C/F | **Landed and qualified on `main`** | Project/import escape fixtures plus link/reparse rejection in test discovery. | Requalify local dependencies in SSF-06. |
+| Project identity/content hashing boundary | C/D | **Landed and qualified on `main`** | Project Model v0 freezes descriptive name versus `hash-smc` content and SemCode epoch/revision boundaries; cryptographic provenance remains SSF-10. | Preserve boundary; SSF-10 owns trust policy. |
 | `smc check <project-root>` | C/F | **Landed and qualified on `main`** | PCC9 full project-root check path. | SSF-05. |
 | `smc compile <project-root>` | C/I | **Landed and qualified on `main`** | PCC9 compile and artifact command tests. | SSF-05. |
 | `smc verify <artifact>` | C/V | **Qualified limited release** | Core Gate 1 verified path and artifact diagnostics. | Preserve in SSF-05/10. |
+| `smc verify <project-root>` | C/F/V | **Landed and qualified on `main`** | Resolves the canonical entry, compiles in memory, and verifies without execution or artifact persistence. | Preserve through SSF-12. |
 | `smc run <project-root>` | C/V/R | **Landed and qualified on `main`** | PCC9 run path. | SSF-05. |
-| `smc test <project-root>` | C | **Roadmap** | Command is not part of the current canonical CLI. | SSF-05. |
-| `smc new` | C | **Roadmap** | Explicitly absent/non-required unless narrowly approved. | Optional SSF-05 decision. |
+| `smc test <project-root>` | C/F/V/R | **Landed and qualified on `main`** | Root-contained sorted discovery; every test compiles, verifies, and runs under the pure profile. | Preserve through SSF-12. |
+| `smc new` | C | **Out of scope** | Project Model v0 is manually creatable; scaffolding is not required. | Excluded from Stable Foundation. |
 | Package identity | C/F/D | **Landed but unqualified** | Package names/manifests exist; long-term identity contract is not frozen. | SSF-06. |
 | Local path dependencies | C/F | **Landed and qualified on `main`** | Deterministic local dependency loading and tests exist. | Requalify Foundation scope in SSF-06. |
 | Deterministic package graph and cycle diagnostics | C/F | **Landed and qualified on `main`** | Import/package cycle positives and negatives. | SSF-06. |

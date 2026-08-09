@@ -34,6 +34,7 @@ The admitted `smc` command surface is currently:
 - `explain`
 - `repl`
 - `verify`
+- `test`
 - `run`
 - `run-smc`
 - `disasm`
@@ -62,7 +63,8 @@ Current accepted usage forms are:
 - `smc features`
 - `smc explain <error-code|--list>`
 - `smc repl`
-- `smc verify <input.smc>`
+- `smc verify <input.smc|project-root>`
+- `smc test <project-root>`
 - `smc run <input.sm|project-root>`
 - `smc run-smc <input.smc>`
 - `smc disasm <input.smc>`
@@ -115,6 +117,7 @@ The following commands expose persisted artifact, admission, or build-surface be
 
 - `smc compile`
 - `smc verify`
+- `smc test`
 - `smc run-smc`
 - `smc features`
 - `smc hub invoke`
@@ -275,7 +278,8 @@ Current output rules:
 Current execution-facing commands follow this split:
 
 - `smc run <input.sm|project-root>` resolves source input, then compiles and executes the produced in-memory SemCode path
-- `smc verify <input.smc>` performs verifier admission without execution
+- `smc verify <input.smc|project-root>` performs verifier admission without execution; project roots compile the canonical entry in memory first
+- `smc test <project-root>` discovers and executes `tests/**/*.sm` in normalized relative-path order under the pure application profile
 - `smc run-smc <input.smc>` executes compiled SemCode through the verified artifact path
 
 Public rule:

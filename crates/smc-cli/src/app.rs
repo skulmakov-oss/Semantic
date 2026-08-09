@@ -108,6 +108,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "explain" => cmd_explain(&args[1..]),
         "repl" => cmd_repl(&args[1..]),
         "verify" => cmd_verify(&args[1..]),
+        "test" => cmd_test(&args[1..]),
         "run" => cmd_run(&args[1..]),
         "run-smc" => cmd_run_smc(&args[1..]),
         "disasm" => cmd_disasm(&args[1..]),
@@ -2720,11 +2721,18 @@ fn application_run_usage() -> String {
 
 fn cmd_verify(args: &[String]) -> Result<(), String> {
     if args.len() != 1 {
-        return Err("usage: smc verify <input.smc>".to_string());
+        return Err("usage: smc verify <input.smc|project-root>".to_string());
     }
     let input = args[0].as_str();
     reject_leading_unknown_flag(input)?;
-    let bytes = std::fs::read(input).map_err(|e| format!("failed to read '{}': {}", input, e))?;
+    let input_path = Path::new(input);
+    let bytes = if input_path.is_dir() {
+        let entry = resolve_project_root_check_entry(input_path)?;
+        let source = read_source_with_package_admission(&entry)?;
+        compile_program_to_semcode(&source).map_err(|error| error.to_string())?
+    } else {
+        std::fs::read(input).map_err(|e| format!("failed to read '{}': {}", input, e))?
+    };
     let verified = verify_semcode(&bytes).map_err(|report| report.to_string())?;
     println!(
         "verified '{}' ({} function(s), header={}, epoch={}.{})",
@@ -2735,6 +2743,142 @@ fn cmd_verify(args: &[String]) -> Result<(), String> {
         verified.header.rev
     );
     Ok(())
+}
+
+fn cmd_test(args: &[String]) -> Result<(), String> {
+    if args.len() != 1 {
+        return Err("usage: smc test <project-root>".to_string());
+    }
+    let input = args[0].as_str();
+    reject_leading_unknown_flag(input)?;
+    let project_root = Path::new(input);
+    if !project_root.is_dir() {
+        return Err("smc test requires a project root directory".to_string());
+    }
+
+    resolve_project_root_check_entry(project_root)?;
+    let project_root = project_root
+        .canonicalize()
+        .map_err(|error| format!("failed to resolve project root '{}': {error}", input))?;
+    let tests = discover_project_test_sources(&project_root)?;
+    if tests.is_empty() {
+        return Err(format!(
+            "project '{}' contains no tests/*.sm programs",
+            project_root.display()
+        ));
+    }
+
+    for test in &tests {
+        let source = std::fs::read_to_string(test)
+            .map_err(|error| format!("failed to read test '{}': {error}", test.display()))?;
+        let bytes = compile_program_to_semcode(&source)
+            .map_err(|error| format!("test '{}' failed to compile: {error}", test.display()))?;
+        let token = verify_semcode_token(&bytes)
+            .map_err(|error| format!("test '{}' failed verification: {error}", test.display()))?;
+        let entry = token
+            .require_entry("main")
+            .map_err(|error| format!("test '{}' has no main entry: {error}", test.display()))?;
+        let mut host = CliApplicationHost::new(&project_root, Vec::new(), None)?;
+        run_verified_entry_semcode_with_application_host_and_capabilities_and_config(
+            &entry,
+            &mut host,
+            &CapabilityManifest::for_application_profile(ApplicationCapabilityProfile::Pure),
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        )
+        .map_err(|error| format!("test '{}' failed: {error}", test.display()))?;
+        let relative = test
+            .strip_prefix(&project_root)
+            .expect("discovered test remains inside project root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        println!("ok {relative}");
+    }
+    println!("test result: ok. {} passed", tests.len());
+    Ok(())
+}
+
+fn discover_project_test_sources(project_root: &Path) -> Result<Vec<PathBuf>, String> {
+    fn is_link_or_reparse(metadata: &std::fs::Metadata) -> bool {
+        if metadata.file_type().is_symlink() {
+            return true;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+            metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        }
+        #[cfg(not(windows))]
+        false
+    }
+
+    fn visit(root: &Path, directory: &Path, tests: &mut Vec<PathBuf>) -> Result<(), String> {
+        let entries = std::fs::read_dir(directory).map_err(|error| {
+            format!(
+                "failed to read test directory '{}': {error}",
+                directory.display()
+            )
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                format!(
+                    "failed to inspect test directory '{}': {error}",
+                    directory.display()
+                )
+            })?;
+            let path = entry.path();
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| {
+                format!("failed to inspect test path '{}': {error}", path.display())
+            })?;
+            if is_link_or_reparse(&metadata) {
+                return Err(format!(
+                    "test discovery rejects symbolic link or reparse path '{}'",
+                    path.display()
+                ));
+            }
+            if metadata.is_dir() {
+                visit(root, &path, tests)?;
+            } else if metadata.is_file() && path.extension().is_some_and(|ext| ext == "sm") {
+                let canonical = path.canonicalize().map_err(|error| {
+                    format!(
+                        "failed to resolve test source '{}': {error}",
+                        path.display()
+                    )
+                })?;
+                canonical.strip_prefix(root).map_err(|_| {
+                    format!("test source '{}' escapes the project root", path.display())
+                })?;
+                tests.push(canonical);
+            }
+        }
+        Ok(())
+    }
+
+    let test_root = project_root.join("tests");
+    if !test_root.exists() {
+        return Ok(Vec::new());
+    }
+    let metadata = std::fs::symlink_metadata(&test_root).map_err(|error| {
+        format!(
+            "failed to inspect test directory '{}': {error}",
+            test_root.display()
+        )
+    })?;
+    if is_link_or_reparse(&metadata) || !metadata.is_dir() {
+        return Err(format!(
+            "project test root '{}' must be a real directory",
+            test_root.display()
+        ));
+    }
+    let mut tests = Vec::new();
+    visit(project_root, &test_root, &mut tests)?;
+    tests.sort_by_key(|path| {
+        path.strip_prefix(project_root)
+            .expect("discovered test remains inside project root")
+            .to_string_lossy()
+            .replace('\\', "/")
+    });
+    Ok(tests)
 }
 
 fn cmd_run_smc(args: &[String]) -> Result<(), String> {
@@ -2781,7 +2925,8 @@ fn usage() -> String {
         "  smc explain <error-code|--list>",
         "  smc repl",
         "  smc work <subject> <intent> [to <target>] [with <profile>]",
-        "  smc verify <input.smc>",
+        "  smc verify <input.smc|project-root>",
+        "  smc test <project-root>",
         "  smc run <input.sm|project-root>",
         "  smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [-- <application-args...>]",
         "  smc run-smc <input.smc>",

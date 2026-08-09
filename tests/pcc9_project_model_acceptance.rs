@@ -328,6 +328,17 @@ fn assert_artifact_only_command_rejects_project_root_input(
     }
 }
 
+fn assert_verify_accepts_project_root_input(dir: &std::path::Path, context: &str) {
+    let absolute = cli_command_project_root_output("verify", dir, context);
+    let dot = cli_command_project_root_output_dot("verify", dir, context);
+    assert!(
+        absolute.contains("header=SEMCODE0"),
+        "{context}: {absolute}"
+    );
+    assert!(dot.contains("header=SEMCODE0"), "{context}: {dot}");
+    assert_no_semcode_artifacts(dir, context);
+}
+
 fn cli_compile_project_root_err_no_overwrite(
     dir: &std::path::Path,
     out_name: &str,
@@ -679,16 +690,12 @@ fn pcc9_artifact_only_disasm_rejects_project_root_inputs_without_fallback() {
 }
 
 #[test]
-fn pcc9_artifact_only_verify_rejects_project_root_inputs_without_fallback() {
+fn pcc9_verify_accepts_project_root_inputs_without_persisting_artifacts() {
     let dir = mk_temp_dir("pcc9_artifact_only_verify_project_root");
     write_semantic_toml(&dir, Some("src/main.sm"));
     write_source(&dir.join("src").join("main.sm"));
 
-    assert_artifact_only_command_rejects_project_root_input(
-        "verify",
-        &dir,
-        "smc verify must reject project-root inputs",
-    );
+    assert_verify_accepts_project_root_input(&dir, "smc verify project-root input");
 
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -2898,18 +2905,14 @@ fn pcc9_project_root_smoke_fixture_remains_source_only_after_compile() {
 }
 
 #[test]
-fn pcc9_project_root_smoke_fixture_rejects_artifact_only_commands_on_project_root() {
+fn pcc9_project_root_smoke_fixture_preserves_artifact_command_boundaries() {
     let root = canonical_project_root_fixture();
     assert_artifact_only_command_rejects_project_root_input(
         "disasm",
         &root,
         "smc disasm must reject canonical project-root fixture input",
     );
-    assert_artifact_only_command_rejects_project_root_input(
-        "verify",
-        &root,
-        "smc verify must reject canonical project-root fixture input",
-    );
+    assert_verify_accepts_project_root_input(&root, "smc verify canonical project-root fixture");
     assert_artifact_only_command_rejects_project_root_input(
         "run-smc",
         &root,
@@ -3028,17 +3031,16 @@ fn pcc9_project_root_package_baseline_fixture_accepts_admitted_surface() {
 }
 
 #[test]
-fn pcc9_project_root_package_baseline_fixture_rejects_artifact_only_commands_on_project_root() {
+fn pcc9_project_root_package_baseline_fixture_preserves_artifact_command_boundaries() {
     let root = package_baseline_project_root_fixture();
     assert_artifact_only_command_rejects_project_root_input(
         "disasm",
         &root,
         "smc disasm must reject package baseline project-root fixture input",
     );
-    assert_artifact_only_command_rejects_project_root_input(
-        "verify",
+    assert_verify_accepts_project_root_input(
         &root,
-        "smc verify must reject package baseline project-root fixture input",
+        "smc verify package baseline project-root fixture",
     );
     assert_artifact_only_command_rejects_project_root_input(
         "run-smc",
@@ -3074,8 +3076,9 @@ fn pcc9_project_root_surface_inventory_guard() {
         "hash-ast",
         "hash-ir",
         "hash-smc",
+        "verify",
     ];
-    let artifact_only_commands = ["disasm", "verify", "run-smc"];
+    let artifact_only_commands = ["disasm", "run-smc"];
 
     assert_eq!(
         admitted_project_root_commands,
@@ -3089,12 +3092,13 @@ fn pcc9_project_root_surface_inventory_guard() {
             "hash-ast",
             "hash-ir",
             "hash-smc",
+            "verify",
         ],
         "admitted project-root command surface changed unexpectedly",
     );
     assert_eq!(
         artifact_only_commands,
-        ["disasm", "verify", "run-smc"],
+        ["disasm", "run-smc"],
         "artifact-only command boundary changed unexpectedly",
     );
 
