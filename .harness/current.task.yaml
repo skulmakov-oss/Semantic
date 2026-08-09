@@ -32,8 +32,10 @@ scope:
     - docs/status/feature_maturity_matrix.md
     - docs/roadmap/public_maturity_snapshot.md
     - docs/roadmap/public_status_model.md
+    - docs/roadmap/v1_readiness.md
+    - docs/roadmap/stable_release_policy.md
+    - docs/roadmap/compatibility_statement.md
     - docs/roadmap/stable_foundation/**
-    - scripts/ssf_status_drift_check.ps1
     - tests/ssf_status_drift.rs
 
   forbidden_paths:

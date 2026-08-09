@@ -14,9 +14,9 @@ This document should be read together with:
 
 ## Purpose
 
-This statement defines compatibility commitments honestly across three layers:
+This statement defines compatibility posture honestly across three layers:
 
-- the published stable line
+- a future published stable line (none currently evidenced)
 - the currently qualified limited-release contour
 - landed-on-`main` behavior that is not yet promoted
 
@@ -30,16 +30,17 @@ This statement defines compatibility commitments honestly across three layers:
 
 ## Published Stable Compatibility
 
-The published stable line is:
-
-- `v1.1.1`
+No current feature has an evidenced published-stable compatibility promise.
+The `v1.1.1` git tag remains an unresolved stable-tag checkpoint: its own
+version-cut decision left exact-tag downloaded-asset smoke blocking and there
+is no corresponding GitHub Release.
 
 The new prerelease candidate is:
 
 - `v1.2.0-beta.1`
 
-Compatibility commitments at that layer apply only to what the stable line and
-its released assets actually promised.
+Compatibility commitments at that layer will apply only to what an explicitly
+published stable line and its released assets actually promise.
 
 ## Qualified Limited-Release Compatibility
 
@@ -53,8 +54,7 @@ That qualified contour is narrower than current `main`.
 
 ## Landed On `main`, Not Yet Promised
 
-Current `main` contains widened behavior beyond both the stable line and the
-current qualified contour.
+Current `main` contains widened behavior beyond the current qualified contour.
 
 Those surfaces must be read as:
 
