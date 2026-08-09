@@ -189,6 +189,13 @@ pub mod winit_placeholder {
             builder.with_any_thread(true);
         }
 
+        #[cfg(target_os = "linux")]
+        {
+            use winit::platform::x11::EventLoopBuilderExtX11;
+
+            builder.with_any_thread(true);
+        }
+
         builder.build()
     }
 
