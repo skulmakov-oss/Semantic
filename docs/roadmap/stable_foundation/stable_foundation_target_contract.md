@@ -128,7 +128,7 @@ Andromeda, and broad permanent ABI/ISA promises.
 | Executable versus declarative Logos | SSF-02 | Resolved as Model B; Logos remains experimental and non-executable. |
 | Builtin-to-stdlib boundary and APIs | SSF-03 | Existing builtins may be wrapped, renamed, narrowed, or deferred. |
 | Capability names, grants, denial results, audit, replay profiles | SSF-04 | Existing `print` is evidence, not the finished boundary. |
-| Canonical manifest, project layout, discovery, and command shapes | SSF-05 | Both current manifests are evidence; neither wins by implication. |
+| Canonical manifest, project layout, discovery, and command shapes | SSF-05 | Resolved by `semantic.foundation.project/0.1`: `semantic.toml` is canonical; `Semantic.package` is an explicit compatibility/package input. |
 | Package identity, provenance, and lock record | SSF-06 | Local dependencies remain unpromoted. |
 | Numeric, text, collection, closure, generic, trait, and pattern limits | SSF-07 | Prefer the smallest ordinary-program contour. |
 | Ownership Position A or B | SSF-08 | Position A is the conservative candidate, not a pre-decided result. |

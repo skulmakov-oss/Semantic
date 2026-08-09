@@ -18,6 +18,8 @@ Current documents in this PR:
   source contract candidate and explicit experimental/deferred boundary
 - `foundation_stdlib_v0.md` - versioned language-owned Standard Library v0
   family index, deterministic semantics, and deferred APIs
+- `project_model_v0.md` - canonical manifest/layout, discovery, project command,
+  path-containment, and identity boundary
 - `syntax.md` - canonical Rust-like source syntax contract
 - `types.md` - source-level type contract and current type-family limits
 - `source_semantics.md` - source-level execution and binding semantics

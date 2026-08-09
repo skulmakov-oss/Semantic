@@ -272,7 +272,8 @@ The VM does not receive unrestricted authority over the host. Effects cross the 
 | `smc check <file.sm|project-root>` | Parse and semantically check source. |
 | `smc run <file.sm|project-root>` | Compile and execute from source through the standard route. |
 | `smc compile <input> -o app.smc` | Produce a SemCode artifact. |
-| `smc verify app.smc` | Admit or reject the artifact without running it. |
+| `smc verify <app.smc|project-root>` | Admit source-derived or persisted SemCode without running it. |
+| `smc test <project-root>` | Run discovered project tests in deterministic path order. |
 | `smc run-smc app.smc` | Execute a persisted artifact through the verified route. |
 | `smc disasm app.smc` | Inspect SemCode instructions. |
 | `smc dump-ast <input>` | Inspect the parsed source model. |
@@ -297,9 +298,13 @@ From a supported project root:
 smc check .
 smc run .
 smc compile . -o app.smc
+smc verify .
+smc test .
 ```
 
 This is not yet a complete package ecosystem. It does not claim a public registry, dependency solver, multi-package workspace manager, or `smc new` scaffolding.
+The canonical layout, deterministic discovery rules, and identity boundary are
+defined in [Project Model v0](docs/spec/project_model_v0.md).
 
 When running from this repository without installing the binaries, prefix commands with:
 
