@@ -443,6 +443,39 @@ fn authority_manifest_symlink_is_rejected_before_read() {
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
+#[cfg(unix)]
+#[test]
+fn dependency_authority_manifest_symlink_is_rejected_by_inspect() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_workspace("dependency_manifest_symlink");
+    let app = root.join("app");
+    let dependency = root.join("dependency");
+    let outside = root.join("outside");
+    write_package(
+        &app,
+        "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep dependency dependency ../dependency\n",
+        "fn main() { return; }\n",
+    );
+    std::fs::create_dir_all(&dependency).expect("dependency root");
+    write_package(
+        &outside,
+        "format 1\npackage dependency\nmanifest_dir .\nmodule_root src\n",
+        "fn helper() { return; }\n",
+    );
+    symlink(
+        outside.join("Semantic.package"),
+        dependency.join("Semantic.package"),
+    )
+    .expect("dependency manifest symlink");
+
+    let output = inspect(&app);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("symlink or reparse point"));
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
 #[test]
 fn capability_request_is_inventory_only_and_never_a_grant() {
     let root = temp_workspace("capability");

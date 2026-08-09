@@ -1603,6 +1603,7 @@ pub(crate) fn inspect_local_package_graph(root: &Path) -> Result<String, String>
 
 impl PackageGraphBuilder {
     fn visit(&mut self, manifest_path: &Path) -> Result<String, String> {
+        reject_reparse_path(manifest_path)?;
         let manifest_path = manifest_path.canonicalize().map_err(|error| {
             format!(
                 "failed to resolve dependency manifest '{}': {error}",
