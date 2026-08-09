@@ -13,4 +13,4 @@
 - expected output:
   - `check` fails
   - the diagnostic contains:
-    `top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2`
+    `top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports`

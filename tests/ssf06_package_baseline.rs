@@ -106,7 +106,7 @@ fn local_graph_record_is_checkout_independent_and_deterministic() {
         vec!["alpha", "app", "zeta"]
     );
     assert_eq!(packages[1]["capability_requests"][0], "stdout.write");
-    assert!(!String::from_utf8_lossy(&first.stdout).contains(&root.to_string_lossy().as_ref()));
+    assert!(!String::from_utf8_lossy(&first.stdout).contains(root.to_string_lossy().as_ref()));
 
     let app_arg = app.to_string_lossy();
     for command in ["check", "run"] {
