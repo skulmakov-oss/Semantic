@@ -390,6 +390,60 @@ fn authority_manifest_is_allowed_at_package_root_module_root() {
 }
 
 #[test]
+fn package_import_rejects_unfingerprinted_module_extension() {
+    let root = temp_workspace("module_extension");
+    let app = root.join("app");
+    let dependency = root.join("dependency");
+    write_package(
+        &dependency,
+        "format 1\npackage dependency\nmanifest_dir .\nmodule_root src\n",
+        "fn unused() { return; }\n",
+    );
+    std::fs::write(
+        dependency.join("src/helper.txt"),
+        "fn helper() -> i32 { return 1; }\n",
+    )
+    .expect("text extension module");
+    write_package(
+        &app,
+        "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep dependency dependency ../dependency\n",
+        "Import \"dependency::helper.txt\"\nfn main() { assert(helper() == 1); return; }\n",
+    );
+
+    let output = smc(&["check", &app.to_string_lossy()]);
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("must use a .sm or .exo module extension")
+    );
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[cfg(unix)]
+#[test]
+fn authority_manifest_symlink_is_rejected_before_read() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_workspace("manifest_symlink");
+    let package = root.join("app");
+    std::fs::create_dir_all(package.join("src")).expect("source root");
+    std::fs::write(package.join("src/main.sm"), "fn main() { return; }\n").expect("entry source");
+    let outside_manifest = root.join("outside.package");
+    std::fs::write(
+        &outside_manifest,
+        "format 1\npackage app\nmanifest_dir .\nmodule_root src\n",
+    )
+    .expect("outside manifest");
+    symlink(&outside_manifest, package.join("Semantic.package")).expect("manifest symlink");
+
+    let output = smc(&["check", &package.to_string_lossy()]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("symlink or reparse point"));
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
 fn capability_request_is_inventory_only_and_never_a_grant() {
     let root = temp_workspace("capability");
     write_package(

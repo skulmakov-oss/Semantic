@@ -194,6 +194,7 @@ pub enum PackageImportResolutionCode {
     DependencyPackageNameMismatch,
     DependencyManifestFingerprintMismatch,
     DependencyContentFingerprintMismatch,
+    UnsupportedModuleExtension,
     RelativeImportOutsideModuleRoot,
     DependencyImportOutsideModuleRoot,
 }
@@ -565,6 +566,10 @@ pub fn admit_package_entry_module(
         Some(path) => path,
         None => return Ok(None),
     };
+    reject_reparse_path(&manifest_path).map_err(|message| PackageModuleAdmissionError {
+        code: PackageModuleAdmissionCode::ManifestReadFailed,
+        message,
+    })?;
     reject_nested_manifest_authority(&manifest_path)?;
     let manifest = load_and_validate_manifest(&manifest_path)?;
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
@@ -763,6 +768,7 @@ pub fn resolve_package_import_path(
                 ),
             })?;
     if let Some((alias, module_spec)) = spec.split_once(PACKAGE_IMPORT_SEPARATOR) {
+        validate_package_import_extension(module_spec, spec)?;
         return resolve_dependency_import(&importer_canonical, alias, module_spec, spec);
     }
 
@@ -779,6 +785,7 @@ pub fn resolve_package_import_path(
             PackageImportResolutionCode::ImporterPackageRootResolutionFailed,
             PackageImportResolutionCode::ImporterModuleRootResolutionFailed,
         )?;
+        validate_package_import_extension(spec, spec)?;
         if resolved.strip_prefix(&importer_ctx.module_root).is_err() {
             return Err(PackageImportResolutionError {
                 code: PackageImportResolutionCode::RelativeImportOutsideModuleRoot,
@@ -791,6 +798,25 @@ pub fn resolve_package_import_path(
         }
     }
     Ok(resolved)
+}
+
+fn validate_package_import_extension(
+    module_spec: &str,
+    original_spec: &str,
+) -> Result<(), PackageImportResolutionError> {
+    match Path::new(module_spec)
+        .extension()
+        .and_then(|value| value.to_str())
+    {
+        None | Some("sm" | "exo") => Ok(()),
+        Some(_) => Err(PackageImportResolutionError {
+            code: PackageImportResolutionCode::UnsupportedModuleExtension,
+            message: format!(
+                "package import '{}' must use a .sm or .exo module extension",
+                original_spec
+            ),
+        }),
+    }
 }
 
 fn parse_error(

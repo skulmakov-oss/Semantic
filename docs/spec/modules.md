@@ -75,13 +75,15 @@ Current executable-path admission is narrower:
 - selected executable helper imports materialize only the requested public
   bindings plus the required local helper-function call closure before
   checking/lowering
+- package-qualified imports such as `Import "math::core.sm"` are admitted when
+  the dependency is declared by the local package baseline and the resolved
+  `.sm` or `.exo` module remains inside its package `module_root`
 
 The following executable import forms remain out of scope on current `main`:
 
 - explicit top-level alias imports
 - wildcard imports
 - public re-exports
-- package-qualified executable imports
 - namespace-qualified executable access such as `X.Foo`
 
 ## Name Resolution Order
