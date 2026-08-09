@@ -34,16 +34,12 @@ fn iterable_for_impl_out_of_scope_message() -> &'static str {
 }
 
 fn executable_import_wave2_out_of_scope_message() -> &'static str {
-    "top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2; alias, wildcard, re-export, and package-qualified import forms remain out of scope"
+    "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports; alias, wildcard, and re-export forms remain out of scope"
 }
 
 fn validate_executable_imports(program: &Program) -> Result<(), FrontendError> {
     for import in &program.imports {
-        if import.reexport
-            || import.wildcard
-            || import.alias.is_some()
-            || import.spec.contains("::")
-        {
+        if import.reexport || import.wildcard || import.alias.is_some() {
             return Err(FrontendError {
                 pos: 0,
                 message: executable_import_wave2_out_of_scope_message().to_string(),
@@ -3333,7 +3329,7 @@ mod tests {
     }
 
     #[test]
-    fn executable_package_qualified_import_rejects_as_wave2_out_of_scope() {
+    fn executable_package_qualified_import_typechecks_in_package_baseline() {
         let src = r#"
             Import "math::core.sm"
 
@@ -3342,11 +3338,7 @@ mod tests {
             }
         "#;
 
-        let err = typecheck_source(src)
-            .expect_err("package-qualified executable import must stay out of scope in wave2");
-        assert!(err
-            .message
-            .contains(executable_import_wave2_out_of_scope_message()));
+        typecheck_source(src).expect("package-qualified executable import should typecheck");
     }
 
     #[test]

@@ -107,12 +107,11 @@ fn executable_module_entry_helper_graph_compile_is_deterministic() {
 #[test]
 fn executable_module_entry_negative_out_of_scope_import_forms_report_wave2_boundary() {
     let wave2_boundary =
-        "top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2";
+        "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports";
     let cases = [
         "examples/qualification/executable_module_entry/negative_alias_import/src/main.sm",
         "examples/qualification/executable_module_entry/negative_wildcard_import/src/main.sm",
         "examples/qualification/executable_module_entry/negative_reexport_import/src/main.sm",
-        "examples/qualification/executable_module_entry/negative_package_qualified_import/src/main.sm",
     ];
 
     for rel in cases {
@@ -122,6 +121,17 @@ fn executable_module_entry_negative_out_of_scope_import_forms_report_wave2_bound
             "expected wave2 executable import boundary diagnostic for {rel}, got: {err}"
         );
     }
+}
+
+#[test]
+fn executable_module_entry_package_qualified_import_requires_declared_alias() {
+    let rel =
+        "examples/qualification/executable_module_entry/negative_package_qualified_import/src/main.sm";
+    let err = cli_err("check", rel);
+    assert!(
+        err.contains("does not declare dependency alias 'math'"),
+        "expected package alias diagnostic, got: {err}"
+    );
 }
 
 #[test]

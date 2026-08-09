@@ -1,5 +1,6 @@
 use std::error::Error;
 use std::fmt;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const PACKAGE_MANIFEST_BASELINE_VERSION: u32 = 1;
@@ -21,7 +22,33 @@ pub struct PackageIdentity {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PackageDependencySource {
-    LocalPath { path: String },
+    LocalPath {
+        path: String,
+    },
+    PinnedLocalPath {
+        path: String,
+        manifest_fingerprint: String,
+        content_fingerprint: String,
+    },
+}
+
+impl PackageDependencySource {
+    fn path(&self) -> &str {
+        match self {
+            Self::LocalPath { path } | Self::PinnedLocalPath { path, .. } => path,
+        }
+    }
+
+    fn expected_fingerprints(&self) -> (Option<&str>, Option<&str>) {
+        match self {
+            Self::LocalPath { .. } => (None, None),
+            Self::PinnedLocalPath {
+                manifest_fingerprint,
+                content_fingerprint,
+                ..
+            } => (Some(manifest_fingerprint), Some(content_fingerprint)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,6 +105,12 @@ pub enum PackageManifestValidationCode {
     DuplicateDependencyAlias,
     EmptyDependencyPackageName,
     EmptyLocalDependencyPath,
+    LocalDependencyPathMustBeRelative,
+    InvalidDependencyFingerprint,
+    PackageRootMustBeRelative,
+    PackageRootMustNotEscapeManifest,
+    ModuleRootMustBeRelative,
+    ModuleRootMustNotEscapePackage,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +187,8 @@ pub enum PackageImportResolutionCode {
     DependencyPackageRootResolutionFailed,
     DependencyModuleRootResolutionFailed,
     DependencyPackageNameMismatch,
+    DependencyManifestFingerprintMismatch,
+    DependencyContentFingerprintMismatch,
     DependencyImportOutsideModuleRoot,
 }
 
@@ -179,6 +214,7 @@ pub fn parse_package_manifest_baseline(
     let mut manifest_dir = None::<String>;
     let mut module_root = None::<String>;
     let mut dependencies = Vec::<PackageDependency>::new();
+    let mut capability_requests = std::collections::BTreeSet::<String>::new();
 
     for (index, raw_line) in source.lines().enumerate() {
         let line_no = index + 1;
@@ -239,20 +275,52 @@ pub fn parse_package_manifest_baseline(
                 module_root = Some(tokens[1].clone());
             }
             "dep" => {
-                if tokens.len() != 4 {
+                if tokens.len() != 4 && tokens.len() != 6 {
                     return Err(parse_error(
                         PackageManifestParseCode::InvalidDirective,
                         line_no,
-                        "dep directive must be: dep <alias> <package_name> <local_path>",
+                        "dep directive must be: dep <alias> <package_name> <local_path> [<manifest_fingerprint> <content_fingerprint>]",
                     ));
                 }
+                let source = if tokens.len() == 4 {
+                    PackageDependencySource::LocalPath {
+                        path: tokens[3].clone(),
+                    }
+                } else {
+                    PackageDependencySource::PinnedLocalPath {
+                        path: tokens[3].clone(),
+                        manifest_fingerprint: tokens[4].clone(),
+                        content_fingerprint: tokens[5].clone(),
+                    }
+                };
                 dependencies.push(PackageDependency {
                     alias: tokens[1].clone(),
                     package_name: tokens[2].clone(),
-                    source: PackageDependencySource::LocalPath {
-                        path: tokens[3].clone(),
-                    },
+                    source,
                 });
+            }
+            "capability" => {
+                if tokens.len() != 2 {
+                    return Err(parse_error(
+                        PackageManifestParseCode::InvalidDirective,
+                        line_no,
+                        "capability directive must be: capability <request-id>",
+                    ));
+                }
+                if tokens[1].trim().is_empty() {
+                    return Err(parse_error(
+                        PackageManifestParseCode::InvalidDirective,
+                        line_no,
+                        "capability request id must not be empty",
+                    ));
+                }
+                if !capability_requests.insert(tokens[1].clone()) {
+                    return Err(parse_error(
+                        PackageManifestParseCode::InvalidDirective,
+                        line_no,
+                        &format!("duplicate package capability request '{}'", tokens[1]),
+                    ));
+                }
             }
             other => {
                 return Err(parse_error(
@@ -332,6 +400,12 @@ pub fn validate_package_manifest_baseline(
             message: "package manifest_dir must not be empty".to_string(),
         });
     }
+    validate_contained_relative_path(
+        &manifest.package.root.manifest_dir,
+        PackageManifestValidationCode::PackageRootMustBeRelative,
+        PackageManifestValidationCode::PackageRootMustNotEscapeManifest,
+        "package manifest_dir",
+    )?;
 
     if manifest.package.root.module_root.trim().is_empty() {
         return Err(PackageManifestValidationError {
@@ -339,6 +413,12 @@ pub fn validate_package_manifest_baseline(
             message: "package module_root must not be empty".to_string(),
         });
     }
+    validate_contained_relative_path(
+        &manifest.package.root.module_root,
+        PackageManifestValidationCode::ModuleRootMustBeRelative,
+        PackageManifestValidationCode::ModuleRootMustNotEscapePackage,
+        "package module_root",
+    )?;
 
     let mut seen_aliases = std::collections::BTreeSet::new();
     for dependency in &manifest.dependencies {
@@ -360,21 +440,85 @@ pub fn validate_package_manifest_baseline(
                 message: "package dependency package_name must not be empty".to_string(),
             });
         }
-        match &dependency.source {
-            PackageDependencySource::LocalPath { path } if path.trim().is_empty() => {
+        let path = dependency.source.path();
+        if path.trim().is_empty() {
+            return Err(PackageManifestValidationError {
+                code: PackageManifestValidationCode::EmptyLocalDependencyPath,
+                message: format!(
+                    "package dependency '{}' requires a non-empty local path",
+                    dependency.alias
+                ),
+            });
+        }
+        if Path::new(path).is_absolute()
+            || Path::new(path)
+                .components()
+                .any(|component| matches!(component, std::path::Component::Prefix(_)))
+        {
+            return Err(PackageManifestValidationError {
+                code: PackageManifestValidationCode::LocalDependencyPathMustBeRelative,
+                message: format!(
+                    "package dependency '{}' local path '{}' must be relative",
+                    dependency.alias, path
+                ),
+            });
+        }
+        let (manifest_fingerprint, content_fingerprint) = dependency.source.expected_fingerprints();
+        for fingerprint in [manifest_fingerprint, content_fingerprint]
+            .into_iter()
+            .flatten()
+        {
+            if !is_valid_package_fingerprint(fingerprint) {
                 return Err(PackageManifestValidationError {
-                    code: PackageManifestValidationCode::EmptyLocalDependencyPath,
+                    code: PackageManifestValidationCode::InvalidDependencyFingerprint,
                     message: format!(
-                        "package dependency '{}' requires a non-empty local path",
-                        dependency.alias
+                        "package dependency '{}' has invalid fingerprint '{}'; expected fnv1a64:<16 lowercase hex digits>",
+                        dependency.alias, fingerprint
                     ),
                 });
             }
-            PackageDependencySource::LocalPath { .. } => {}
         }
     }
 
     Ok(())
+}
+
+fn validate_contained_relative_path(
+    value: &str,
+    absolute_code: PackageManifestValidationCode,
+    escape_code: PackageManifestValidationCode,
+    field: &str,
+) -> Result<(), PackageManifestValidationError> {
+    let path = Path::new(value);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::Prefix(_)))
+    {
+        return Err(PackageManifestValidationError {
+            code: absolute_code,
+            message: format!("{} '{}' must be relative", field, value),
+        });
+    }
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
+        return Err(PackageManifestValidationError {
+            code: escape_code,
+            message: format!("{} '{}' must not escape its declared root", field, value),
+        });
+    }
+    Ok(())
+}
+
+fn is_valid_package_fingerprint(value: &str) -> bool {
+    value.strip_prefix("fnv1a64:").is_some_and(|hex| {
+        hex.len() == 16
+            && hex
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    })
 }
 
 pub fn admit_package_entry_module(
@@ -394,10 +538,18 @@ pub fn admit_package_entry_module(
         Some(path) => path,
         None => return Ok(None),
     };
+    reject_reparse_path(entry).map_err(|message| PackageModuleAdmissionError {
+        code: PackageModuleAdmissionCode::EntryResolutionFailed,
+        message,
+    })?;
     let manifest = load_and_validate_manifest(&manifest_path)?;
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    let package_root = manifest_dir
-        .join(&manifest.package.root.manifest_dir)
+    let package_root = manifest_dir.join(&manifest.package.root.manifest_dir);
+    reject_reparse_path(&package_root).map_err(|message| PackageModuleAdmissionError {
+        code: PackageModuleAdmissionCode::PackageRootResolutionFailed,
+        message,
+    })?;
+    let package_root = package_root
         .canonicalize()
         .map_err(|e| PackageModuleAdmissionError {
             code: PackageModuleAdmissionCode::PackageRootResolutionFailed,
@@ -408,8 +560,12 @@ pub fn admit_package_entry_module(
                 e
             ),
         })?;
-    let module_root = package_root
-        .join(&manifest.package.root.module_root)
+    let module_root = package_root.join(&manifest.package.root.module_root);
+    reject_reparse_path(&module_root).map_err(|message| PackageModuleAdmissionError {
+        code: PackageModuleAdmissionCode::ModuleRootResolutionFailed,
+        message,
+    })?;
+    let module_root = module_root
         .canonicalize()
         .map_err(|e| PackageModuleAdmissionError {
             code: PackageModuleAdmissionCode::ModuleRootResolutionFailed,
@@ -420,6 +576,16 @@ pub fn admit_package_entry_module(
                 e
             ),
         })?;
+    if module_root.strip_prefix(&package_root).is_err() {
+        return Err(PackageModuleAdmissionError {
+            code: PackageModuleAdmissionCode::EntryOutsideModuleRoot,
+            message: format!(
+                "package module_root '{}' is outside package root '{}'",
+                module_root.display(),
+                package_root.display()
+            ),
+        });
+    }
     let module_relative =
         entry_canonical
             .strip_prefix(&module_root)
@@ -755,13 +921,17 @@ fn resolve_dependency_import(
             ),
         })?;
 
-    let dependency_path = match &dependency.source {
-        PackageDependencySource::LocalPath { path } => path,
-    };
+    let dependency_path = dependency.source.path();
     let dependency_manifest_path = importer_ctx
         .package_root
         .join(dependency_path)
         .join(PACKAGE_MANIFEST_FILE_NAME);
+    reject_reparse_path(&dependency_manifest_path).map_err(|message| {
+        PackageImportResolutionError {
+            code: PackageImportResolutionCode::DependencyManifestMissing,
+            message,
+        }
+    })?;
     if !dependency_manifest_path.is_file() {
         return Err(PackageImportResolutionError {
             code: PackageImportResolutionCode::DependencyManifestMissing,
@@ -791,6 +961,42 @@ fn resolve_dependency_import(
             ),
         });
     }
+    let (expected_manifest, expected_content) = dependency.source.expected_fingerprints();
+    if let Some(expected) = expected_manifest {
+        let actual = manifest_fingerprint(&dependency_manifest_path).map_err(|message| {
+            PackageImportResolutionError {
+                code: PackageImportResolutionCode::DependencyManifestReadFailed,
+                message,
+            }
+        })?;
+        if actual != expected {
+            return Err(PackageImportResolutionError {
+                code: PackageImportResolutionCode::DependencyManifestFingerprintMismatch,
+                message: format!(
+                    "dependency alias '{}' manifest fingerprint mismatch: expected '{}', found '{}'",
+                    alias, expected, actual
+                ),
+            });
+        }
+    }
+    if let Some(expected) = expected_content {
+        let actual =
+            package_content_fingerprint(&dependency_ctx.module_root).map_err(|message| {
+                PackageImportResolutionError {
+                    code: PackageImportResolutionCode::DependencyContentFingerprintMismatch,
+                    message,
+                }
+            })?;
+        if actual != expected {
+            return Err(PackageImportResolutionError {
+                code: PackageImportResolutionCode::DependencyContentFingerprintMismatch,
+                message: format!(
+                    "dependency alias '{}' content fingerprint mismatch: expected '{}', found '{}'",
+                    alias, expected, actual
+                ),
+            });
+        }
+    }
 
     let resolved = normalize_lexical(
         &dependency_ctx
@@ -818,6 +1024,10 @@ fn resolve_manifest_context(
     package_root_code: PackageImportResolutionCode,
     module_root_code: PackageImportResolutionCode,
 ) -> Result<ResolvedPackageContext, PackageImportResolutionError> {
+    reject_reparse_path(manifest_path).map_err(|message| PackageImportResolutionError {
+        code: read_code,
+        message,
+    })?;
     let source =
         std::fs::read_to_string(manifest_path).map_err(|e| PackageImportResolutionError {
             code: read_code,
@@ -834,8 +1044,12 @@ fn resolve_manifest_context(
     })?;
 
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
-    let package_root = manifest_dir
-        .join(&manifest.package.root.manifest_dir)
+    let package_root = manifest_dir.join(&manifest.package.root.manifest_dir);
+    reject_reparse_path(&package_root).map_err(|message| PackageImportResolutionError {
+        code: package_root_code,
+        message,
+    })?;
+    let package_root = package_root
         .canonicalize()
         .map_err(|e| PackageImportResolutionError {
             code: package_root_code,
@@ -846,8 +1060,12 @@ fn resolve_manifest_context(
                 e
             ),
         })?;
-    let module_root = package_root
-        .join(&manifest.package.root.module_root)
+    let module_root = package_root.join(&manifest.package.root.module_root);
+    reject_reparse_path(&module_root).map_err(|message| PackageImportResolutionError {
+        code: module_root_code,
+        message,
+    })?;
+    let module_root = module_root
         .canonicalize()
         .map_err(|e| PackageImportResolutionError {
             code: module_root_code,
@@ -858,6 +1076,16 @@ fn resolve_manifest_context(
                 e
             ),
         })?;
+    if module_root.strip_prefix(&package_root).is_err() {
+        return Err(PackageImportResolutionError {
+            code: module_root_code,
+            message: format!(
+                "package module_root '{}' resolves outside package root '{}'",
+                module_root.display(),
+                package_root.display()
+            ),
+        });
+    }
 
     Ok(ResolvedPackageContext {
         manifest,
@@ -1140,6 +1368,382 @@ fn normalize_relative_path(path: &Path) -> String {
     } else {
         value
     }
+}
+
+#[derive(Debug, Clone)]
+struct PackageGraphDependencyRecord {
+    alias: String,
+    package_name: String,
+    local_path: String,
+    expected_manifest_fingerprint: Option<String>,
+    expected_content_fingerprint: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PackageGraphNode {
+    name: String,
+    manifest_fingerprint: String,
+    content_fingerprint: String,
+    capability_requests: Vec<String>,
+    dependencies: Vec<PackageGraphDependencyRecord>,
+}
+
+#[derive(Default)]
+struct PackageGraphBuilder {
+    names: std::collections::BTreeMap<String, PathBuf>,
+    nodes: std::collections::BTreeMap<String, PackageGraphNode>,
+    visiting: Vec<(PathBuf, String)>,
+}
+
+pub(crate) fn inspect_local_package_graph(root: &Path) -> Result<String, String> {
+    let manifest_path = root.join(PACKAGE_MANIFEST_FILE_NAME);
+    if !manifest_path.is_file() {
+        return Err(format!(
+            "package inspect requires '{}' at '{}'",
+            PACKAGE_MANIFEST_FILE_NAME,
+            manifest_path.display()
+        ));
+    }
+    reject_reparse_path(&manifest_path)?;
+    let mut builder = PackageGraphBuilder::default();
+    let root_package = builder.visit(&manifest_path)?;
+
+    let mut graph_material = String::new();
+    let packages = builder
+        .nodes
+        .values()
+        .map(|node| {
+            graph_material.push_str(&node.name);
+            graph_material.push('\n');
+            graph_material.push_str(&node.manifest_fingerprint);
+            graph_material.push('\n');
+            graph_material.push_str(&node.content_fingerprint);
+            graph_material.push('\n');
+            for capability in &node.capability_requests {
+                graph_material.push_str("capability\t");
+                graph_material.push_str(capability);
+                graph_material.push('\n');
+            }
+            let dependencies = node
+                .dependencies
+                .iter()
+                .map(|dependency| {
+                    graph_material.push_str("dependency\t");
+                    graph_material.push_str(&dependency.alias);
+                    graph_material.push('\t');
+                    graph_material.push_str(&dependency.package_name);
+                    graph_material.push('\t');
+                    graph_material.push_str(&dependency.local_path);
+                    graph_material.push('\n');
+                    serde_json::json!({
+                        "alias": dependency.alias,
+                        "package": dependency.package_name,
+                        "local_path": dependency.local_path,
+                        "expected_manifest_fingerprint": dependency.expected_manifest_fingerprint,
+                        "expected_content_fingerprint": dependency.expected_content_fingerprint,
+                    })
+                })
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "name": node.name,
+                "manifest_fingerprint": node.manifest_fingerprint,
+                "content_fingerprint": node.content_fingerprint,
+                "capability_requests": node.capability_requests,
+                "dependencies": dependencies,
+            })
+        })
+        .collect::<Vec<_>>();
+    let graph_fingerprint = fingerprint(graph_material.as_bytes());
+    serde_json::to_string_pretty(&serde_json::json!({
+        "schema": "semantic.foundation.package.provenance/0.1",
+        "fingerprint_algorithm": "fnv1a64-non-cryptographic",
+        "root_package": root_package,
+        "graph_fingerprint": graph_fingerprint,
+        "packages": packages,
+    }))
+    .map_err(|error| format!("failed to serialize package provenance record: {error}"))
+}
+
+impl PackageGraphBuilder {
+    fn visit(&mut self, manifest_path: &Path) -> Result<String, String> {
+        let manifest_path = manifest_path.canonicalize().map_err(|error| {
+            format!(
+                "failed to resolve dependency manifest '{}': {error}",
+                manifest_path.display()
+            )
+        })?;
+        if let Some(index) = self
+            .visiting
+            .iter()
+            .position(|(path, _)| path == &manifest_path)
+        {
+            let mut cycle = self.visiting[index..]
+                .iter()
+                .map(|(_, name)| name.clone())
+                .collect::<Vec<_>>();
+            cycle.push(self.visiting[index].1.clone());
+            return Err(format!("package dependency cycle: {}", cycle.join(" -> ")));
+        }
+
+        let source = fs::read_to_string(&manifest_path)
+            .map_err(|error| format!("failed to read '{}': {error}", manifest_path.display()))?;
+        let manifest = parse_package_manifest_baseline(&source)
+            .map_err(|error| format!("failed to parse '{}': {error}", manifest_path.display()))?;
+        validate_package_manifest_baseline(&manifest).map_err(|error| {
+            format!("failed to validate '{}': {error}", manifest_path.display())
+        })?;
+        let package_name = manifest.package.name.clone();
+        if let Some(existing_path) = self.names.get(&package_name) {
+            if existing_path != &manifest_path {
+                return Err(format!(
+                    "duplicate package identity '{}': '{}' and '{}'",
+                    package_name,
+                    existing_path.display(),
+                    manifest_path.display()
+                ));
+            }
+            if self.nodes.contains_key(&package_name) {
+                return Ok(package_name);
+            }
+        } else {
+            self.names
+                .insert(package_name.clone(), manifest_path.clone());
+        }
+
+        let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+        let package_root_path = manifest_dir.join(&manifest.package.root.manifest_dir);
+        reject_reparse_path(&package_root_path)?;
+        let package_root = package_root_path.canonicalize().map_err(|error| {
+            format!(
+                "failed to resolve package root '{}' for '{}': {error}",
+                package_root_path.display(),
+                package_name
+            )
+        })?;
+        let module_root_path = package_root.join(&manifest.package.root.module_root);
+        reject_reparse_path(&module_root_path)?;
+        let module_root = module_root_path.canonicalize().map_err(|error| {
+            format!(
+                "failed to resolve module root '{}' for '{}': {error}",
+                module_root_path.display(),
+                package_name
+            )
+        })?;
+        if module_root.strip_prefix(&package_root).is_err() {
+            return Err(format!(
+                "package '{}' module_root '{}' escapes package root '{}'",
+                package_name,
+                module_root.display(),
+                package_root.display()
+            ));
+        }
+
+        self.visiting
+            .push((manifest_path.clone(), package_name.clone()));
+        let mut declared_dependencies = manifest.dependencies.clone();
+        declared_dependencies.sort_by(|left, right| {
+            left.alias
+                .cmp(&right.alias)
+                .then_with(|| left.package_name.cmp(&right.package_name))
+        });
+        let mut dependencies = Vec::with_capacity(declared_dependencies.len());
+        for dependency in declared_dependencies {
+            let local_path = dependency.source.path().to_string();
+            let (expected_manifest_fingerprint, expected_content_fingerprint) =
+                dependency.source.expected_fingerprints();
+            let dependency_root = package_root.join(&local_path);
+            reject_reparse_path(&dependency_root)?;
+            let dependency_manifest = dependency_root.join(PACKAGE_MANIFEST_FILE_NAME);
+            if !dependency_manifest.is_file() {
+                return Err(format!(
+                    "dependency alias '{}' expected {} at '{}'",
+                    dependency.alias,
+                    PACKAGE_MANIFEST_FILE_NAME,
+                    dependency_manifest.display()
+                ));
+            }
+            let resolved_name = self.visit(&dependency_manifest)?;
+            if resolved_name != dependency.package_name {
+                return Err(format!(
+                    "dependency alias '{}' expected package '{}' but manifest declares '{}'",
+                    dependency.alias, dependency.package_name, resolved_name
+                ));
+            }
+            let resolved = self
+                .nodes
+                .get(&resolved_name)
+                .ok_or_else(|| format!("internal package graph error for '{}'", resolved_name))?;
+            if let Some(expected) = expected_manifest_fingerprint {
+                if resolved.manifest_fingerprint != expected {
+                    return Err(format!(
+                        "dependency alias '{}' manifest fingerprint mismatch: expected '{}', found '{}'",
+                        dependency.alias, expected, resolved.manifest_fingerprint
+                    ));
+                }
+            }
+            if let Some(expected) = expected_content_fingerprint {
+                if resolved.content_fingerprint != expected {
+                    return Err(format!(
+                        "dependency alias '{}' content fingerprint mismatch: expected '{}', found '{}'",
+                        dependency.alias, expected, resolved.content_fingerprint
+                    ));
+                }
+            }
+            dependencies.push(PackageGraphDependencyRecord {
+                alias: dependency.alias,
+                package_name: dependency.package_name,
+                local_path: local_path.replace('\\', "/"),
+                expected_manifest_fingerprint: expected_manifest_fingerprint.map(str::to_string),
+                expected_content_fingerprint: expected_content_fingerprint.map(str::to_string),
+            });
+        }
+        let _ = self.visiting.pop();
+
+        let capability_requests = package_capability_requests(&source)?;
+        let node = PackageGraphNode {
+            name: package_name.clone(),
+            manifest_fingerprint: fingerprint(normalize_line_endings(&source).as_bytes()),
+            content_fingerprint: package_content_fingerprint(&module_root)?,
+            capability_requests,
+            dependencies,
+        };
+        self.nodes.insert(package_name.clone(), node);
+        Ok(package_name)
+    }
+}
+
+fn manifest_fingerprint(path: &Path) -> Result<String, String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read '{}': {error}", path.display()))?;
+    Ok(fingerprint(normalize_line_endings(&source).as_bytes()))
+}
+
+fn package_capability_requests(source: &str) -> Result<Vec<String>, String> {
+    let mut capabilities = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        let tokens = split_manifest_tokens(line, index + 1).map_err(|error| error.to_string())?;
+        if tokens.first().is_some_and(|token| token == "capability") {
+            capabilities.push(tokens[1].clone());
+        }
+    }
+    capabilities.sort();
+    Ok(capabilities)
+}
+
+fn package_content_fingerprint(module_root: &Path) -> Result<String, String> {
+    let mut files = Vec::<(String, Vec<u8>)>::new();
+    collect_package_files(module_root, module_root, &mut files)?;
+    files.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut material = Vec::new();
+    for (path, bytes) in files {
+        material.extend_from_slice(&(path.len() as u64).to_le_bytes());
+        material.extend_from_slice(path.as_bytes());
+        material.extend_from_slice(&(bytes.len() as u64).to_le_bytes());
+        material.extend_from_slice(&bytes);
+    }
+    Ok(fingerprint(&material))
+}
+
+fn collect_package_files(
+    module_root: &Path,
+    directory: &Path,
+    files: &mut Vec<(String, Vec<u8>)>,
+) -> Result<(), String> {
+    let mut entries = fs::read_dir(directory)
+        .map_err(|error| {
+            format!(
+                "failed to read package directory '{}': {error}",
+                directory.display()
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            format!(
+                "failed to enumerate package directory '{}': {error}",
+                directory.display()
+            )
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        if path_is_reparse(&path)? {
+            return Err(format!(
+                "package content path '{}' is a symlink or reparse point",
+                path.display()
+            ));
+        }
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect '{}': {error}", path.display()))?;
+        if file_type.is_dir() {
+            collect_package_files(module_root, &path, files)?;
+        } else if file_type.is_file()
+            && path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .is_some_and(|extension| matches!(extension, "sm" | "exo"))
+        {
+            let relative = path
+                .strip_prefix(module_root)
+                .map_err(|_| format!("package content '{}' escaped module root", path.display()))?;
+            let bytes = fs::read(&path)
+                .map_err(|error| format!("failed to read '{}': {error}", path.display()))?;
+            let bytes = match String::from_utf8(bytes) {
+                Ok(text) => normalize_line_endings(&text).into_bytes(),
+                Err(error) => error.into_bytes(),
+            };
+            files.push((normalize_relative_path(relative), bytes));
+        }
+    }
+    Ok(())
+}
+
+fn reject_reparse_path(path: &Path) -> Result<(), String> {
+    let mut current = PathBuf::new();
+    for component in path.components() {
+        current.push(component.as_os_str());
+        if current.exists() && path_is_reparse(&current)? {
+            return Err(format!(
+                "package path '{}' contains symlink or reparse point '{}'",
+                path.display(),
+                current.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn path_is_reparse(path: &Path) -> Result<bool, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "failed to inspect package path '{}': {error}",
+            path.display()
+        )
+    })?;
+    if metadata.file_type().is_symlink() {
+        return Ok(true);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        Ok(metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+    }
+    #[cfg(not(windows))]
+    Ok(false)
+}
+
+fn normalize_line_endings(source: &str) -> String {
+    source.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn fingerprint(bytes: &[u8]) -> String {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("fnv1a64:{hash:016x}")
 }
 
 #[cfg(test)]

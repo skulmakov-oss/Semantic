@@ -292,6 +292,12 @@ The complete current command contract is in [docs/spec/cli.md](docs/spec/cli.md)
 
 Current `main` supports a bounded project-root baseline using the existing `semantic.toml` or `Semantic.package` layouts represented by repository fixtures and tests.
 
+For the local-only package baseline, `smc package inspect <project-root>` emits
+a deterministic provenance record containing the declared dependency graph,
+manifest/content fingerprints, and capability-request inventory. It performs no
+remote fetch and grants no capability; see
+[`docs/spec/package_baseline_v0.md`](docs/spec/package_baseline_v0.md).
+
 From a supported project root:
 
 ```bash

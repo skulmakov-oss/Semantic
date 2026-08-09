@@ -5,7 +5,8 @@ use crate::incremental::{
     update_cache_index, CacheEvent, CacheReason, ModuleGraphSnapshot,
 };
 use crate::package_manifest::{
-    admit_package_entry_module, resolve_package_import_path, resolve_project_root_check_entry,
+    admit_package_entry_module, inspect_local_package_graph, resolve_package_import_path,
+    resolve_project_root_check_entry,
 };
 use crate::{format_path, FormatterMode};
 use prom_audit::hello_observation_audit::{
@@ -109,6 +110,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "repl" => cmd_repl(&args[1..]),
         "verify" => cmd_verify(&args[1..]),
         "test" => cmd_test(&args[1..]),
+        "package" => cmd_package(&args[1..]),
         "run" => cmd_run(&args[1..]),
         "run-smc" => cmd_run_smc(&args[1..]),
         "disasm" => cmd_disasm(&args[1..]),
@@ -121,6 +123,22 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         }
         other => Err(format!("unknown command '{}'\n\n{}", other, usage())),
     }
+}
+
+fn cmd_package(args: &[String]) -> Result<(), String> {
+    if args.len() != 2 || args[0] != "inspect" {
+        return Err("usage: smc package inspect <project-root>".to_string());
+    }
+    reject_leading_unknown_flag(&args[1])?;
+    let root = Path::new(&args[1]);
+    if !root.is_dir() {
+        return Err(format!(
+            "package inspect project root '{}' is not a directory",
+            root.display()
+        ));
+    }
+    println!("{}", inspect_local_package_graph(root)?);
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -2934,6 +2952,7 @@ fn usage() -> String {
         "  smc work <subject> <intent> [to <target>] [with <profile>]",
         "  smc verify <input.smc|project-root>",
         "  smc test <project-root>",
+        "  smc package inspect <project-root>",
         "  smc run <input.sm|project-root>",
         "  smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [-- <application-args...>]",
         "  smc run-smc <input.smc>",

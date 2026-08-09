@@ -136,14 +136,14 @@ that wording drift; it does not delete or rewrite historical evidence.
 | `smc run <project-root>` | C/V/R | **Landed and qualified on `main`** | PCC9 run path. | SSF-05. |
 | `smc test <project-root>` | C/F/V/R | **Landed and qualified on `main`** | Root-contained sorted discovery; every test compiles, verifies, and runs under the pure profile. | Preserve through SSF-12. |
 | `smc new` | C | **Out of scope** | Project Model v0 is manually creatable; scaffolding is not required. | Excluded from Stable Foundation. |
-| Package identity | C/F/D | **Landed but unqualified** | Package names/manifests exist; long-term identity contract is not frozen. | SSF-06. |
-| Local path dependencies | C/F | **Landed and qualified on `main`** | Deterministic local dependency loading and tests exist. | Requalify Foundation scope in SSF-06. |
-| Deterministic package graph and cycle diagnostics | C/F | **Landed and qualified on `main`** | Import/package cycle positives and negatives. | SSF-06. |
-| Package-qualified imports | C/F | **Landed but unqualified** | Landed beyond the Gate 1 executable import promise. | SSF-06. |
-| Manifest/content hashes | C/D | **Landed but unqualified** | Hash helpers/routes exist without stable provenance promise. | SSF-06/10. |
-| Capability-request inventory | C/V/R | **Roadmap** | Package metadata is not yet a complete explicit inventory contract. | SSF-06. |
-| Lock/provenance record | C/D | **Roadmap** | No canonical lockfile/equivalent reproducibility record. | SSF-06/10. |
-| Bounded workspaces | C/F | **Roadmap** | Not part of the current qualified package baseline. | SSF-06 only if examples require it. |
+| Package identity | C/F/D | **Landed and qualified on `main`** | `semantic.foundation.package/0.1`: name is descriptive; deterministic manifest/content/graph fingerprints carry reproducible identity, not trust. | Cryptographic trust remains SSF-10. |
+| Local path dependencies | C/F | **Landed and qualified on `main`** | Relative local-only dependency loading; absolute paths and undeclared root escape reject. | No remote fetch. |
+| Deterministic package graph and cycle diagnostics | C/F | **Landed and qualified on `main`** | Full declared graph is sorted; cycles, missing nodes, and duplicate identities reject deterministically. | SSF-06 closed contour. |
+| Package-qualified imports | C/F | **Landed and qualified on `main`** | `<alias>::<module>` remains contained by the dependency module root and may enforce pinned identity. | SSF-06 closed contour. |
+| Manifest/content hashes | C/D | **Landed and qualified on `main`** | Normalized `fnv1a64` fingerprints are deterministic change detectors and explicitly non-cryptographic. | Cryptographic artifacts remain SSF-10. |
+| Capability-request inventory | C/V/R | **Landed and qualified on `main`** | Sorted manifest inventory is recorded; request is proven not to grant or propagate capability authority. | Runtime grants remain SSF-04 authority. |
+| Lock/provenance record | C/D | **Landed and qualified on `main`** | Read-only `smc package inspect` emits canonical provenance-equivalent JSON and writes no lockfile. | Signing remains SSF-10. |
+| Bounded workspaces | C/F | **Out of scope** | Local package composition needs no second workspace model. | Reconsider only after Stable Foundation. |
 
 ## Runtime, tooling, compatibility, and onboarding
 

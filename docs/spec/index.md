@@ -20,6 +20,8 @@ Current documents in this PR:
   family index, deterministic semantics, and deferred APIs
 - `project_model_v0.md` - canonical manifest/layout, discovery, project command,
   path-containment, and identity boundary
+- `package_baseline_v0.md` - local-only dependency graph, deterministic
+  fingerprints/provenance record, root containment, and capability-request boundary
 - `syntax.md` - canonical Rust-like source syntax contract
 - `types.md` - source-level type contract and current type-family limits
 - `source_semantics.md` - source-level execution and binding semantics

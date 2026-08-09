@@ -44,8 +44,10 @@ Current rules:
   - top-level alias imports
   - wildcard imports
   - public re-exports
-  - package-qualified executable imports
   - namespace-qualified executable access
+- package-qualified bare imports are admitted only through an enclosing
+  `Semantic.package` dependency declaration and remain subject to SSF-06 root,
+  identity, and provenance checks
 - execution begins at `fn main()`
 - `main` must currently have signature `fn main()`
 - there is no dynamic entrypoint discovery or module-level executable code

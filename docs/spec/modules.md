@@ -177,6 +177,8 @@ package <name>
 manifest_dir <path>
 module_root <path>
 dep <alias> <package_name> <local_path>
+dep <alias> <package_name> <local_path> <manifest_fingerprint> <content_fingerprint>
+capability <request-id>
 ```
 
 Current `main` now also admits one first-wave package-qualified dependency
@@ -184,7 +186,7 @@ import form:
 
 ```sm
 Import "math::core.sm"
-Import "ui::widgets/button.sm" as Button
+Import "ui::widgets/button.sm"
 ```
 
 Current first-wave package loading rules:
@@ -202,8 +204,11 @@ Current package-baseline limits still remain:
 
 - no registries
 - no semver solving
-- no lockfiles
+- no writable lockfile (the read-only provenance-equivalent record is `smc package inspect`)
 - no publishing workflow
+
+The complete local baseline, fingerprint semantics, capability request boundary,
+and deterministic graph failures are defined in `package_baseline_v0.md`.
 
 ## Validation Evidence
 
