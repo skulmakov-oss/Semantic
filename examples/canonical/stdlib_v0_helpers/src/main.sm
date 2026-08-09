@@ -67,6 +67,43 @@ fn build_report(total: i32, score: i32) -> text {
     return prefix + to_text(total) + separator + to_text(score);
 }
 
+fn option_score(value: Option(i32)) -> i32 {
+    let score: i32 = match value {
+        Option::Some(item) => { item }
+        Option::None => { 0 }
+        _ => { -100 }
+    };
+    return score;
+}
+
+fn result_score(value: Result(i32, i32)) -> i32 {
+    let score: i32 = match value {
+        Result::Ok(item) => { item }
+        Result::Err(code) => { 0 - code }
+        _ => { -100 }
+    };
+    return score;
+}
+
+fn assert_quad_truth_maps() {
+    assert(qtruth_and(T, T) == T);
+    assert(qtruth_or(F, F) == F);
+    assert(qtruth_not(S) == S);
+    assert(qtruth_impl(T, T) == S);
+    return;
+}
+
+fn assert_seeded_random_replay() {
+    random_seed(7);
+    let first: i32 = random_next_i32(-100, 100);
+    let second: i32 = random_next_i32(-100, 100);
+
+    random_seed(7);
+    assert(random_next_i32(-100, 100) == first);
+    assert(random_next_i32(-100, 100) == second);
+    return;
+}
+
 fn main() {
     let values: Sequence(i32) = build_values();
     let flags: Map(i32, bool) = build_flags();
@@ -83,6 +120,11 @@ fn main() {
 
     assert(report == "stdlib-v0:10:10");
     assert(report != "");
-
-    print(report);
+    assert(option_score(Option::Some(5)) == 5);
+    assert(option_score(Option::None) == 0);
+    assert(result_score(Result::Ok(8)) == 8);
+    assert(result_score(Result::Err(3)) == -3);
+    assert_quad_truth_maps();
+    assert_seeded_random_replay();
+    return;
 }

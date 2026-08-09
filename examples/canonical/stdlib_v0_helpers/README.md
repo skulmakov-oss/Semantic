@@ -1,20 +1,22 @@
 # Canonical example: stdlib_v0_helpers
 
-This canonical example demonstrates the current Practical Core helper surface
-for Stdlib v0.
+This canonical example demonstrates `semantic.foundation.std/0.1`, the bounded
+Stable Foundation Standard Library v0 candidate.
 
 ## Purpose
 
 The example shows currently admitted helper functions used together in a small
 practical program.
 
-It does not define the final standard library architecture.
+The `std.*` family names are documentation identities. Foundation Source 1.0
+uses canonical language-owned builtins and standard forms rather than
+namespace-qualified imports.
 
 ## What this example covers
 
 - `assert`;
+- `qtruth_and`, `qtruth_or`, `qtruth_not`, `qtruth_impl`;
 - `to_text(...)`;
-- `print(text)`;
 - `Sequence(i32)` helpers:
   - `len`;
   - `is_empty`;
@@ -27,12 +29,16 @@ It does not define the final standard library architecture.
   - `map_set`;
   - `map_get`;
   - `map_contains`.
+- `Option::Some` / `Option::None` and match;
+- `Result::Ok` / `Result::Err` and match;
+- deterministic `random_seed` / `random_next_i32` replay.
 
 ## What this example does not cover
 
-- stdlib module layout;
-- `core.*`, `text.*`, `seq.*`, `map.*` namespacing;
-- import policy;
+- importable `std.*` namespace facades;
+- `std.math` APIs;
+- `std.serde` APIs or encodings;
+- `print(text)` or any other host effect;
 - formatting API;
 - debug/logging framework;
 - host ABI widening;
@@ -55,12 +61,13 @@ sum_values(build_values()) == 10
 pop_score() == 3
 score_flags(build_flags()) == 10
 build_report(10, 10) == "stdlib-v0:10:10"
+seeded random values replay exactly after reseeding
 ```
 
 ## Validation
 
 ```bash
-cargo run --bin smc -- check examples/canonical/stdlib_v0_helpers/src/main.sm
+cargo run --bin smc -- run examples/canonical/stdlib_v0_helpers/src/main.sm
 ```
 
 This example should also be included in:

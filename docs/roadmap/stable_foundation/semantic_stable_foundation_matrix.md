@@ -97,16 +97,16 @@ that wording drift; it does not delete or rewrite historical evidence.
 |---|---|---|---|---|
 | Rust-like executable profile | F/I/V/R/C/D | **Qualified limited release** | Gate 1 establishes a narrow executable contour. | Primary contract in SSF-01. |
 | Logos declarative profile | F/I/C/D | **Experimental** | SSF-02 selected Model B: `semantic.logos.declarative/0.1` supports parse, semantic analysis, and non-executable `LogosIrLaw` inspection; SemCode/VM paths reject it. | Preserve the boundary through SSF-09/11/12; no automatic promotion. |
-| `std.core` | F/I/V/R/D | **Roadmap** | Current helpers are builtins; no importable canonical module contract. | SSF-03. |
-| `std.quad` | F/I/V/R/D | **Roadmap** | Native quad exists, but the named module/API does not. | SSF-03. |
-| `std.math` | F/I/V/R/D | **Roadmap** | Math builtins exist; named module and compatibility contract do not. | SSF-03. |
-| `std.text` | F/I/V/R/D | **Roadmap** | Bounded text operations exist; named module/UTF-8 API is not frozen. | SSF-03/07. |
-| `std.seq` | F/I/V/R/D | **Roadmap** | Sequence helpers exist as language builtins, not a stable importable module. | SSF-03/07. |
-| `std.map` | F/I/V/R/D | **Roadmap** | Map helpers exist as language builtins, not a stable importable module. | SSF-03/07. |
-| `std.option` | F/I/V/R/D | **Roadmap** | Option is qualified; named module API is absent. | SSF-03. |
-| `std.result` | F/I/V/R/D | **Roadmap** | Result is qualified; named module API is absent. | SSF-03. |
-| `std.serde` | F/I/V/R/D | **Roadmap** | No canonical deterministic importable serialization family. | SSF-03. |
-| `std.rand` | F/I/V/R/D | **Roadmap** | Seeded PRNG builtins are qualified on main; named/versioned module is absent. | SSF-03/10. |
+| `std.core` | F/I/V/R/D | **Qualified limited release** | `semantic.foundation.std/0.1` selects language-owned `assert`; `std.*` is not an import namespace. | Preserve through SSF-12. |
+| `std.quad` | F/I/V/R/D | **Qualified limited release** | `semantic.foundation.std/0.1` selects explicit qtruth maps with N/S evidence preserved. | Preserve through SSF-12. |
+| `std.math` | F/I/V/R/D | **Roadmap** | SSF-03 selects no API; current f64 builtins remain experimental pending determinism policy. | SSF-07/10. |
+| `std.text` | F/I/V/R/D | **Qualified limited release** | Exact UTF-8 text equality/concat and bounded scalar `to_text`; no indexing/normalization. | Bound further in SSF-07. |
+| `std.seq` | F/I/V/R/D | **Qualified limited release** | Ordered persistent sequence helpers selected as language-owned equivalents. | Bound further in SSF-07. |
+| `std.map` | F/I/V/R/D | **Qualified limited release** | Persistent lookup/update helpers selected; no observable iteration/order API. | Bound further in SSF-07. |
+| `std.option` | F/I/V/R/D | **Qualified limited release** | Language-owned type/constructors/exhaustive match selected; no helper expansion. | Preserve through SSF-12. |
+| `std.result` | F/I/V/R/D | **Qualified limited release** | Language-owned type/constructors/exhaustive match selected; no helper expansion. | Preserve through SSF-12. |
+| `std.serde` | F/I/V/R/D | **Roadmap** | SSF-03 selects no API or encoding; JSON in Rust tooling is not Semantic stdlib. | Explicit future approval only. |
+| `std.rand` | F/I/V/R/D | **Qualified limited release** | Versioned xorshift64/13-7-17 seeded VM stream; no host entropy. | Compatibility window in SSF-10. |
 | `args.read` | V/R/C | **Roadmap** | No canonical admitted capability of this name. | SSF-04. |
 | `stdin.read_text` | V/R/C | **Roadmap** | No canonical admitted capability of this name. | SSF-04. |
 | `stdout.write` | V/R/C | **Roadmap** | Narrow `print(text)`/`CAP_STDOUT` exists, but the proposed structured capability does not. | SSF-04. |

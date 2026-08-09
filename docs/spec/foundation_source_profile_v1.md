@@ -223,5 +223,6 @@ the contract must not be preserved by documentation alone.
 ## Explicit non-claims
 
 This contract does not claim published stable status, production readiness, a
-stable ABI/ISA, a completed stdlib, a package ecosystem, broad host effects,
-Rust-equivalent ownership, executable Logos, or editor/tooling completion.
+stable ABI/ISA, a broad or comprehensive stdlib, a package ecosystem, broad
+host effects, Rust-equivalent ownership, executable Logos, or editor/tooling
+completion.

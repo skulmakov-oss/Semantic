@@ -58,7 +58,7 @@ changes.
 | 2 | `rule_state_decision` | Rust-like | record-oriented rule/state decision logic with explicit `Result(T, E)` handling | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
 | 3 | `data_audit_record_iterable` | Rust-like | data-heavy audit pass over direct-record `Iterable` dispatch | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
 | 4 | `text_collections_toolbox` | Rust-like | practical toolbox example for control flow, text, collections, and stdlib | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
-| 5 | `stdlib_v0_helpers` | Rust-like | practical helper-surface example for current PCC stdlib v0 | executable: `check`/`compile`/`verify`/`run` | pass | already compliant |
+| 5 | `stdlib_v0_helpers` | Rust-like | pure deterministic example for `semantic.foundation.std/0.1` language-owned equivalents | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
 | 6 | `collections_core` | Rust-like | standalone practical collections surface example | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
 | 7 | `text_core` | Rust-like | standalone practical `text` surface example | executable: `check`/`compile`/`verify`/`run` | pass | migrated |
 | 8 | `match_control_flow` | Rust-like | compact quad decision program; demonstrates Source Style v0 | executable: `check`/`compile`/`verify`/`run` | pass | migrated |

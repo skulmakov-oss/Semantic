@@ -36,7 +36,7 @@ rules.
 | [`rule_state_decision`](../examples/canonical/rule_state_decision/) | `cargo run --bin smc -- run examples/canonical/rule_state_decision/src/main.sm` |
 | [`data_audit_record_iterable`](../examples/canonical/data_audit_record_iterable/) | `cargo run --bin smc -- run examples/canonical/data_audit_record_iterable/src/main.sm` |
 | [`text_collections_toolbox`](../examples/canonical/text_collections_toolbox/) | `cargo run --bin smc -- run examples/canonical/text_collections_toolbox/src/main.sm` |
-| [`stdlib_v0_helpers`](../examples/canonical/stdlib_v0_helpers/) | `cargo run --bin smc -- check examples/canonical/stdlib_v0_helpers/src/main.sm` |
+| [`stdlib_v0_helpers`](../examples/canonical/stdlib_v0_helpers/) | `cargo run --bin smc -- run examples/canonical/stdlib_v0_helpers/src/main.sm` |
 | [`collections_core`](../examples/canonical/collections_core/) | `cargo run --bin smc -- run examples/canonical/collections_core/src/main.sm` |
 | [`text_core`](../examples/canonical/text_core/) | `cargo run --bin smc -- run examples/canonical/text_core/src/main.sm` |
 | [`match_control_flow`](../examples/canonical/match_control_flow/) | `cargo run --bin smc -- run examples/canonical/match_control_flow/src/main.sm` |
