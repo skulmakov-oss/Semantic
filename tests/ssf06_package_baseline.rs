@@ -304,6 +304,35 @@ fn package_entry_symlink_cannot_escape_before_manifest_lookup() {
 }
 
 #[test]
+fn dependency_relative_import_cannot_escape_module_root() {
+    let root = temp_workspace("dependency_import_escape");
+    let app = root.join("app");
+    let dependency = root.join("dependency");
+    write_package(
+        &dependency,
+        "format 1\npackage dependency\nmanifest_dir .\nmodule_root src\n",
+        "Import \"../../outside.sm\"\nfn value() -> i32 { return leaked(); }\n",
+    );
+    std::fs::write(
+        root.join("outside.sm"),
+        "fn leaked() -> i32 { return 1; }\n",
+    )
+    .expect("outside source");
+    write_package(
+        &app,
+        "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep dependency dependency ../dependency\n",
+        "Import \"dependency::main.sm\"\nfn main() { assert(value() == 1); return; }\n",
+    );
+
+    let output = smc(&["check", &app.to_string_lossy()]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("relative package import '../../outside.sm' escapes package module_root"));
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
 fn capability_request_is_inventory_only_and_never_a_grant() {
     let root = temp_workspace("capability");
     write_package(

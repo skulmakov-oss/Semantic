@@ -189,6 +189,7 @@ pub enum PackageImportResolutionCode {
     DependencyPackageNameMismatch,
     DependencyManifestFingerprintMismatch,
     DependencyContentFingerprintMismatch,
+    RelativeImportOutsideModuleRoot,
     DependencyImportOutsideModuleRoot,
 }
 
@@ -745,7 +746,28 @@ pub fn resolve_package_import_path(
     let base = importer_canonical
         .parent()
         .unwrap_or_else(|| Path::new("."));
-    Ok(resolve_relative_import_path(base, spec))
+    let resolved = resolve_relative_import_path(base, spec);
+    if let Some(manifest_path) = find_nearest_manifest(&importer_canonical) {
+        let importer_ctx = resolve_manifest_context(
+            &manifest_path,
+            PackageImportResolutionCode::ImporterManifestReadFailed,
+            PackageImportResolutionCode::ImporterManifestParseFailed,
+            PackageImportResolutionCode::ImporterManifestValidationFailed,
+            PackageImportResolutionCode::ImporterPackageRootResolutionFailed,
+            PackageImportResolutionCode::ImporterModuleRootResolutionFailed,
+        )?;
+        if resolved.strip_prefix(&importer_ctx.module_root).is_err() {
+            return Err(PackageImportResolutionError {
+                code: PackageImportResolutionCode::RelativeImportOutsideModuleRoot,
+                message: format!(
+                    "relative package import '{}' escapes package module_root '{}'",
+                    spec,
+                    importer_ctx.module_root.display()
+                ),
+            });
+        }
+    }
+    Ok(resolved)
 }
 
 fn parse_error(
@@ -1033,11 +1055,23 @@ fn resolve_manifest_context(
             code: read_code,
             message: format!("failed to read '{}': {}", manifest_path.display(), e),
         })?;
-    let manifest =
+    let manifest = if manifest_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name == SEMANTIC_TOML_FILE_NAME)
+    {
+        parse_semantic_toml_manifest(manifest_path, &source)
+            .map(|project_manifest| project_manifest.manifest)
+            .map_err(|e| PackageImportResolutionError {
+                code: parse_code,
+                message: format!("failed to parse '{}': {}", manifest_path.display(), e),
+            })?
+    } else {
         parse_package_manifest_baseline(&source).map_err(|e| PackageImportResolutionError {
             code: parse_code,
             message: format!("failed to parse '{}': {}", manifest_path.display(), e),
-        })?;
+        })?
+    };
     validate_package_manifest_baseline(&manifest).map_err(|e| PackageImportResolutionError {
         code: validate_code,
         message: format!("failed to validate '{}': {}", manifest_path.display(), e),
