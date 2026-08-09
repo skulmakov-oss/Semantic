@@ -1,22 +1,22 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-01
-  title: "language: freeze the Stable Foundation public source contract"
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-02
+  title: "language: resolve Rust-like and Logos coherence"
   type: contract_qualification_and_bounded_implementation
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-00
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-01
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-00 closed through PR #1585 at main commit
-    b3a5bf6dfaefdeb571578907419c0448eacc9061; only SSF-01 is now active.
+    order. SSF-01 closed through PR #1587 at main commit
+    549add21ace6d37af7783718781199411811571b; only SSF-02 is now active.
 
 intent:
   summary: >-
-    Freeze one coherent, versioned Rust-like public source-language contract
-    from SSF-TARGET-0; prove every included form end to end; classify excluded
-    forms explicitly; and repair only contract gaps demonstrated by the audit.
-    Hand Logos, stdlib, advanced type/ownership, package, and UI decisions to
-    their owning later phases without expanding this phase.
+    Use current repository evidence to select one authoritative relationship
+    between executable Rust-like Semantic and Logos; keep their maturity and
+    version status separate; synchronize CLI, specs, examples, and source
+    mapping; and implement only gaps required by the selected model. Do not
+    present parse or lowering support as qualified execution.
 
 scope:
   allowed_paths:
@@ -31,8 +31,6 @@ scope:
     - docs/roadmap/public_maturity_snapshot.md
     - docs/roadmap/public_status_model.md
     - docs/roadmap/v1_readiness.md
-    - docs/roadmap/stable_release_policy.md
-    - docs/roadmap/compatibility_statement.md
     - docs/roadmap/stable_foundation/**
     - examples/canonical/**
     - examples/qualification/**
@@ -68,20 +66,21 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-01
-  issue: 1572
+  active_phase: SSF-02
+  issue: 1573
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
-  contract_audit_before_implementation: true
-  implementation_only_for_demonstrated_contract_gaps: true
+  relationship_decision_before_implementation: true
+  implementation_only_for_demonstrated_model_gaps: true
   no_convenience_feature_growth: true
   preserve_verifier_first_execution: true
-  logos_decision_deferred_to_ssf_02: true
+  rust_like_remains_foundation_executable_profile: true
+  logos_execution_requires_full_path_evidence: true
+  separate_profile_maturity_and_version_status: true
   stdlib_expansion_deferred_to_ssf_03: true
-  advanced_type_and_ownership_decisions_deferred_to_ssf_07_and_ssf_08: true
   no_ui_product_expansion: true
   no_stable_release_claim: true
   no_historical_document_rewrite: true
