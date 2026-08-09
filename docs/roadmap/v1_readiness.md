@@ -14,39 +14,38 @@ reading for the repository.
 The repository currently spans four different factual layers:
 
 - `published stable`
-  - the stable line is `v1.1.1`
+  - no current feature meets this evidence test
 - `qualified limited release`
   - the current practical-programming verdict from the completed Gate 1 cycle
 - `landed on main, not yet promised`
   - widened surfaces present on current `main` but not yet promoted into either
-    the stable line or the qualified contour
+    a stable line or the qualified contour
 - `out of scope`
   - surfaces still intentionally excluded from the current qualified contour and
-    current stable promise
+    candidate Stable Foundation promise
 
 Current top-level reading:
 
 - Semantic is **not** currently positioned as `public release`
 - Semantic is currently qualified only for a **limited release** practical
   contour
-- current `main` contains wider landed work than the stable line and wider
-  landed work than the current qualified contour
+- current `main` contains wider landed work than the current qualified contour
 
 ## Published Stable and Candidates
 
-The published stable line remains:
+There is no currently evidenced published stable line. The repository has a
+`v1.1.1` git tag, but the decision stored at that tag describes a proposed
+stable-tag checkpoint, leaves downloaded-asset smoke for the exact tag as a
+blocker, and no corresponding GitHub Release exists.
 
-- `v1.1.1`
-
-The new prerelease candidate is:
+The current prerelease is:
 
 - `v1.2.0-beta.1`
 
-It should be read as the stable publication baseline, not as a complete
-description of everything already landed on current `main`.
+It should be read as prerelease evidence, not as a stable publication or a
+complete description of everything already landed on current `main`.
 
-The current published artifact set and platform scope for that stable line are
-defined in:
+The intended artifact model and platform-scope rules are defined in:
 
 - `docs/release_artifact_model.md`
 
@@ -99,10 +98,8 @@ The benchmark-qualified contour includes:
 
 ## Landed On `main`, Not Yet Promised
 
-Current `main` contains widened surfaces beyond both:
-
-- the published stable line
-- and the currently qualified practical-programming contour
+Current `main` contains widened surfaces beyond the currently qualified
+practical-programming contour.
 
 High-signal landed families include:
 

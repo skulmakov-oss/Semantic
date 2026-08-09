@@ -1,6 +1,6 @@
 # Semantic Stable Release Policy
 
-Status: release-governance policy for the published stable line
+Status: release-governance policy for a future published stable line
 
 Read this document using the canonical status vocabulary in:
 
@@ -12,7 +12,7 @@ Read this policy together with:
 
 This policy governs:
 
-- the published stable line
+- any future published stable line
 
 It does not automatically promote:
 
@@ -21,15 +21,19 @@ It does not automatically promote:
 
 ## Current Stable Reading
 
-The current published stable line is:
+No current feature meets the `Published Stable` evidence test. The repository
+has a `v1.1.1` git tag, but the version-cut decision stored at that tag calls it
+a candidate, leaves downloaded-asset smoke for the exact tag blocking, and no
+corresponding GitHub Release exists.
 
-- `v1.1.1`
+Therefore `v1.1.1` must be described as an unresolved stable-tag checkpoint,
+not as a published stable release.
 
 Current practical-programming qualification is separate and remains:
 
 - `qualified limited release`
 
-Those are distinct decisions.
+Qualification and stable publication remain distinct decisions.
 
 ## Scope Freeze Rule
 

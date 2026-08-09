@@ -35,7 +35,7 @@ Semantic compiles `.sm` source into a versioned `.smc` **SemCode** artifact, che
 ```
 
 > [!IMPORTANT]
-> Semantic is an active R&D platform, not a finished general-purpose language product. The published stable line is `v1.1.1`; a narrow practical contour is qualified for limited release; current `main` contains additional landed and benchmark-qualified work that is not yet part of the stable promise.
+> Semantic is an active R&D platform, not a finished general-purpose language product. A narrow practical contour is qualified for limited release; current `main` contains additional landed and benchmark-qualified work that is not release-promised. The `v1.1.1` git tag is not treated as published stable evidence because its own checkpoint left exact-tag asset smoke blocking and no corresponding GitHub Release exists.
 
 ## Why Semantic?
 
@@ -194,7 +194,8 @@ The repository contains more than a parser prototype. The following paths are im
 
 - schema and boundary-core work;
 - package-baseline widening beyond the bounded project-root contour;
-- first-wave closures and generics;
+- first-wave generics and broader closure forms beyond the qualified immutable
+  short-lambda slice;
 - first-wave UI/application boundary work;
 - broader module, iterable, and language-surface work beyond the admitted limited-release slice.
 
@@ -206,7 +207,7 @@ Semantic uses explicit status vocabulary so that implemented work is not silentl
 
 | Status | Meaning |
 |---|---|
-| **Published stable** | Promised by the published stable line, currently `v1.1.1`. |
+| **Published stable** | Promised by an explicitly published stable release and its validated assets. No current feature meets that evidence test. |
 | **Qualified limited release** | Proven in a bounded practical contour by qualification evidence. |
 | **Landed on current `main`, not yet promised** | Implemented or benchmark-qualified, but not promoted into the stable or qualified release promise. |
 | **Out of scope** | Deliberately excluded from the current release contour. |
@@ -215,7 +216,7 @@ Current top-level posture:
 
 - Semantic is **not** presented as production-ready;
 - Semantic is **not** yet a broad general-purpose ecosystem;
-- current `main` is wider than the published stable line;
+- current `main` is wider than the qualified limited-release contour;
 - UI and Workbench do not own compiler, verifier, VM, or runtime truth;
 - stable promotion requires an explicit release decision, matching specs, and evidence.
 
