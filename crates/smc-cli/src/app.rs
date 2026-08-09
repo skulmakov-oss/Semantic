@@ -29,10 +29,10 @@ use sm_ir::{compile_program_to_ir_with_options_and_profile, lower_logos_laws_to_
 use sm_runtime_core::hello_observation_sink::HelloObservationClass;
 use sm_runtime_core::{ExecutionConfig, ExecutionContext};
 use sm_sema::{check_file_with_provider_and_profile, check_source_with_profile, ModuleProvider};
-use sm_verify::verify_semcode;
+use sm_verify::{verify_semcode, verify_semcode_token};
 use sm_vm::{
     disasm_semcode, run_semcode_collecting_hello_observations,
-    run_verified_semcode_with_application_host_and_capabilities_and_config, RuntimeError,
+    run_verified_entry_semcode_with_application_host_and_capabilities_and_config, RuntimeError,
 };
 use std::collections::HashSet;
 use std::env;
@@ -2594,15 +2594,18 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     };
     let src = read_source_with_package_admission(&root)?;
     let bytes = compile_program_to_semcode(&src).map_err(|e| e.to_string())?;
+    let token = verify_semcode_token(&bytes).map_err(|error| error.to_string())?;
+    let entry = token
+        .require_entry("main")
+        .map_err(|error| error.to_string())?;
     let capabilities = CapabilityManifest::for_application_profile(options.profile);
     let mut host = CliApplicationHost::new(
         &options.root,
         options.application_args,
         options.duration_millis,
     )?;
-    let result = run_verified_semcode_with_application_host_and_capabilities_and_config(
-        &bytes,
-        "main",
+    let result = run_verified_entry_semcode_with_application_host_and_capabilities_and_config(
+        &entry,
         &mut host,
         &capabilities,
         ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
