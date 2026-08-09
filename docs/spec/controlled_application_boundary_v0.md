@@ -26,6 +26,11 @@ denies the exact capability, and only then may the host adapter act.
 The dotted names are capability identities. Foundation Source 1.0 remains
 flat and Rust-like, so they are not source namespaces.
 
+Every source builtin identifier in the capability catalog is reserved for the
+application boundary. A function declaration using one of these identifiers is
+rejected before lowering, so an ordinary local call cannot acquire host
+authority through a name collision.
+
 ## Profiles
 
 | Profile | Grants |
