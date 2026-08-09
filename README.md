@@ -226,6 +226,7 @@ Read the authoritative documents when status precision matters:
 - [Public Status Model](docs/roadmap/public_status_model.md)
 - [Public Maturity Snapshot](docs/roadmap/public_maturity_snapshot.md)
 - [Feature Maturity Matrix](docs/status/feature_maturity_matrix.md)
+- [Foundation Source Profile 1.0](docs/spec/foundation_source_profile_v1.md)
 
 ## How Execution Is Controlled
 
