@@ -333,6 +333,63 @@ fn dependency_relative_import_cannot_escape_module_root() {
 }
 
 #[test]
+fn nested_manifest_cannot_rebind_package_authority() {
+    let root = temp_workspace("nested_manifest");
+    let app = root.join("app");
+    let dependency = root.join("dependency");
+    write_package(
+        &dependency,
+        "format 1\npackage dependency\nmanifest_dir .\nmodule_root src\n",
+        "Import \"nested/helper.sm\"\nfn value() -> i32 { return helper(); }\n",
+    );
+    std::fs::create_dir_all(dependency.join("src/nested")).expect("nested source root");
+    std::fs::write(
+        dependency.join("src/nested/Semantic.package"),
+        "format 1\npackage nested\nmanifest_dir .\nmodule_root .\n",
+    )
+    .expect("nested manifest");
+    std::fs::write(
+        dependency.join("src/nested/helper.sm"),
+        "fn helper() -> i32 { return 1; }\n",
+    )
+    .expect("nested helper");
+    write_package(
+        &app,
+        "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep dependency dependency ../dependency\n",
+        "Import \"dependency::main.sm\"\nfn main() { assert(value() == 1); return; }\n",
+    );
+
+    let inspect_output = inspect(&dependency);
+    assert!(!inspect_output.status.success());
+    assert!(String::from_utf8_lossy(&inspect_output.stderr).contains("nested package manifest"));
+
+    let check_output = smc(&["check", &app.to_string_lossy()]);
+    assert!(!check_output.status.success());
+    assert!(String::from_utf8_lossy(&check_output.stderr).contains("nested package manifest"));
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
+fn authority_manifest_is_allowed_at_package_root_module_root() {
+    let root = temp_workspace("root_module_root");
+    write_package(
+        &root,
+        "format 1\npackage flat\nmanifest_dir .\nmodule_root .\n",
+        "fn main() { return; }\n",
+    );
+
+    let output = inspect(&root);
+    assert!(
+        output.status.success(),
+        "inspect failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
+#[test]
 fn capability_request_is_inventory_only_and_never_a_grant() {
     let root = temp_workspace("capability");
     write_package(

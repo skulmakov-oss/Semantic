@@ -63,6 +63,7 @@ pub struct PackageManifest {
     pub format_version: u32,
     pub package: PackageIdentity,
     pub dependencies: Vec<PackageDependency>,
+    pub capability_requests: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +108,8 @@ pub enum PackageManifestValidationCode {
     EmptyLocalDependencyPath,
     LocalDependencyPathMustBeRelative,
     InvalidDependencyFingerprint,
+    EmptyCapabilityRequest,
+    DuplicateCapabilityRequest,
     PackageRootMustBeRelative,
     PackageRootMustNotEscapeManifest,
     ModuleRootMustBeRelative,
@@ -133,6 +136,7 @@ impl PackageManifest {
             format_version: PACKAGE_MANIFEST_BASELINE_VERSION,
             package,
             dependencies,
+            capability_requests: Vec::new(),
         }
     }
 }
@@ -152,6 +156,7 @@ pub enum PackageModuleAdmissionCode {
     ManifestValidationFailed,
     PackageRootResolutionFailed,
     ModuleRootResolutionFailed,
+    NestedManifestInsideModuleRoot,
     EntryOutsideModuleRoot,
 }
 
@@ -372,6 +377,7 @@ pub fn parse_package_manifest_baseline(
             },
         },
         dependencies,
+        capability_requests: capability_requests.into_iter().collect(),
     })
 }
 
@@ -481,6 +487,22 @@ pub fn validate_package_manifest_baseline(
         }
     }
 
+    let mut seen_capabilities = std::collections::BTreeSet::new();
+    for capability in &manifest.capability_requests {
+        if capability.trim().is_empty() {
+            return Err(PackageManifestValidationError {
+                code: PackageManifestValidationCode::EmptyCapabilityRequest,
+                message: "package capability request must not be empty".to_string(),
+            });
+        }
+        if !seen_capabilities.insert(capability.as_str()) {
+            return Err(PackageManifestValidationError {
+                code: PackageManifestValidationCode::DuplicateCapabilityRequest,
+                message: format!("duplicate package capability request '{}'", capability),
+            });
+        }
+    }
+
     Ok(())
 }
 
@@ -543,6 +565,7 @@ pub fn admit_package_entry_module(
         Some(path) => path,
         None => return Ok(None),
     };
+    reject_nested_manifest_authority(&manifest_path)?;
     let manifest = load_and_validate_manifest(&manifest_path)?;
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let package_root = manifest_dir.join(&manifest.package.root.manifest_dir);
@@ -856,6 +879,61 @@ fn find_nearest_manifest(entry_canonical: &Path) -> Option<PathBuf> {
     None
 }
 
+fn reject_nested_manifest_authority(
+    manifest_path: &Path,
+) -> Result<(), PackageModuleAdmissionError> {
+    let manifest_canonical =
+        manifest_path
+            .canonicalize()
+            .map_err(|error| PackageModuleAdmissionError {
+                code: PackageModuleAdmissionCode::ManifestReadFailed,
+                message: format!(
+                    "failed to resolve package manifest '{}': {error}",
+                    manifest_path.display()
+                ),
+            })?;
+    let mut current = manifest_canonical
+        .parent()
+        .and_then(|directory| directory.parent());
+    while let Some(directory) = current {
+        let semantic_toml = directory.join(SEMANTIC_TOML_FILE_NAME);
+        let package_manifest = directory.join(PACKAGE_MANIFEST_FILE_NAME);
+        let outer_manifest = if semantic_toml.is_file() {
+            Some(semantic_toml)
+        } else if package_manifest.is_file() {
+            Some(package_manifest)
+        } else {
+            None
+        };
+        if let Some(outer_manifest) = outer_manifest {
+            let outer = resolve_manifest_context(
+                &outer_manifest,
+                PackageImportResolutionCode::ImporterManifestReadFailed,
+                PackageImportResolutionCode::ImporterManifestParseFailed,
+                PackageImportResolutionCode::ImporterManifestValidationFailed,
+                PackageImportResolutionCode::ImporterPackageRootResolutionFailed,
+                PackageImportResolutionCode::ImporterModuleRootResolutionFailed,
+            )
+            .map_err(|error| PackageModuleAdmissionError {
+                code: PackageModuleAdmissionCode::ManifestValidationFailed,
+                message: error.to_string(),
+            })?;
+            if manifest_canonical.strip_prefix(&outer.module_root).is_ok() {
+                return Err(PackageModuleAdmissionError {
+                    code: PackageModuleAdmissionCode::NestedManifestInsideModuleRoot,
+                    message: format!(
+                        "nested package manifest '{}' is inside outer package module_root '{}'",
+                        manifest_canonical.display(),
+                        outer.module_root.display()
+                    ),
+                });
+            }
+        }
+        current = directory.parent();
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 struct ResolvedPackageContext {
     manifest: PackageManifest,
@@ -1003,12 +1081,11 @@ fn resolve_dependency_import(
     }
     if let Some(expected) = expected_content {
         let actual =
-            package_content_fingerprint(&dependency_ctx.module_root).map_err(|message| {
-                PackageImportResolutionError {
+            package_content_fingerprint(&dependency_ctx.module_root, &dependency_manifest_path)
+                .map_err(|message| PackageImportResolutionError {
                     code: PackageImportResolutionCode::DependencyContentFingerprintMismatch,
                     message,
-                }
-            })?;
+                })?;
         if actual != expected {
             return Err(PackageImportResolutionError {
                 code: PackageImportResolutionCode::DependencyContentFingerprintMismatch,
@@ -1633,11 +1710,11 @@ impl PackageGraphBuilder {
         }
         let _ = self.visiting.pop();
 
-        let capability_requests = package_capability_requests(&source)?;
+        let capability_requests = manifest.capability_requests.clone();
         let node = PackageGraphNode {
             name: package_name.clone(),
             manifest_fingerprint: fingerprint(normalize_line_endings(&source).as_bytes()),
-            content_fingerprint: package_content_fingerprint(&module_root)?,
+            content_fingerprint: package_content_fingerprint(&module_root, &manifest_path)?,
             capability_requests,
             dependencies,
         };
@@ -1652,21 +1729,18 @@ fn manifest_fingerprint(path: &Path) -> Result<String, String> {
     Ok(fingerprint(normalize_line_endings(&source).as_bytes()))
 }
 
-fn package_capability_requests(source: &str) -> Result<Vec<String>, String> {
-    let mut capabilities = Vec::new();
-    for (index, line) in source.lines().enumerate() {
-        let tokens = split_manifest_tokens(line, index + 1).map_err(|error| error.to_string())?;
-        if tokens.first().is_some_and(|token| token == "capability") {
-            capabilities.push(tokens[1].clone());
-        }
-    }
-    capabilities.sort();
-    Ok(capabilities)
-}
-
-fn package_content_fingerprint(module_root: &Path) -> Result<String, String> {
+fn package_content_fingerprint(
+    module_root: &Path,
+    authority_manifest: &Path,
+) -> Result<String, String> {
     let mut files = Vec::<(String, Vec<u8>)>::new();
-    collect_package_files(module_root, module_root, &mut files)?;
+    let authority_manifest = authority_manifest.canonicalize().map_err(|error| {
+        format!(
+            "failed to resolve '{}': {error}",
+            authority_manifest.display()
+        )
+    })?;
+    collect_package_files(module_root, module_root, &authority_manifest, &mut files)?;
     files.sort_by(|left, right| left.0.cmp(&right.0));
     let mut material = Vec::new();
     for (path, bytes) in files {
@@ -1681,6 +1755,7 @@ fn package_content_fingerprint(module_root: &Path) -> Result<String, String> {
 fn collect_package_files(
     module_root: &Path,
     directory: &Path,
+    authority_manifest: &Path,
     files: &mut Vec<(String, Vec<u8>)>,
 ) -> Result<(), String> {
     let mut entries = fs::read_dir(directory)
@@ -1710,7 +1785,21 @@ fn collect_package_files(
             .file_type()
             .map_err(|error| format!("failed to inspect '{}': {error}", path.display()))?;
         if file_type.is_dir() {
-            collect_package_files(module_root, &path, files)?;
+            collect_package_files(module_root, &path, authority_manifest, files)?;
+        } else if file_type.is_file()
+            && path != authority_manifest
+            && path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name == PACKAGE_MANIFEST_FILE_NAME || name == SEMANTIC_TOML_FILE_NAME
+                })
+        {
+            return Err(format!(
+                "nested package manifest '{}' is inside package module_root '{}'",
+                path.display(),
+                module_root.display()
+            ));
         } else if file_type.is_file()
             && path
                 .extension()
@@ -1914,11 +2003,22 @@ manifest_dir "."
 module_root "src"
 dep math math "../math"
 dep ui ui "../ui"
+capability fs.read
+capability stdout.write
 "#,
         )
         .expect("parse");
         assert_eq!(manifest.package.name, "app");
         assert_eq!(manifest.dependencies.len(), 2);
+        assert_eq!(
+            manifest.capability_requests,
+            vec!["fs.read".to_string(), "stdout.write".to_string()]
+        );
+        let without_capabilities = parse_package_manifest_baseline(
+            "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep math math ../math\ndep ui ui ../ui\n",
+        )
+        .expect("parse without capabilities");
+        assert_ne!(manifest, without_capabilities);
         validate_package_manifest_baseline(&manifest).expect("validate");
     }
 

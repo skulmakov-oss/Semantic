@@ -22,8 +22,10 @@ capability fs.read
 ```
 
 Package-qualified imports retain the existing `<alias>::<module>` form. All
-resolved modules must remain under the dependency's admitted `module_root`.
-Absolute dependency paths, escaping `manifest_dir`/`module_root` values, and
+resolved modules and their relative imports must remain under the importing
+package's admitted `module_root`. A manifest found below another package's
+`module_root` is rejected rather than becoming a nested authority. Absolute
+dependency paths, escaping `manifest_dir`/`module_root` values, and
 symlink/reparse paths are rejected. Enumeration and diagnostics use sorted,
 normalized paths.
 
@@ -57,10 +59,10 @@ these inputs and never authorize verifier admission.
 
 ## Authority boundary
 
-`capability <id>` is inventory only. It does not construct or modify a runtime
-`CapabilityManifest`, does not propagate transitively, and cannot grant host
-authority. SemCode produced from package sources still passes through normal
-verifier admission before execution.
+`capability <id>` is preserved in the parsed manifest as sorted inventory only.
+It does not construct or modify a runtime `CapabilityManifest`, does not
+propagate transitively, and cannot grant host authority. SemCode produced from
+package sources still passes through normal verifier admission before execution.
 
 The inspector is read-only: it prints a provenance-equivalent record and writes
 no lockfile, source, cache, or package data. There is no network or registry
@@ -70,9 +72,9 @@ path in this contract.
 
 The baseline rejects missing dependency manifests, declared/actual package-name
 mismatch, duplicate package names at different roots, dependency cycles,
-invalid or stale fingerprints, root escape, and link/reparse traversal. Cycle
-diagnostics use logical names in deterministic edge order and contain no
-checkout-specific absolute path.
+invalid or stale fingerprints, root escape, nested manifests below a module
+root, and link/reparse traversal. Cycle diagnostics use logical names in
+deterministic edge order and contain no checkout-specific absolute path.
 
 ## Explicit deferrals
 
