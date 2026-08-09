@@ -1005,7 +1005,10 @@ fn resolve_dependency_import(
     module_spec: &str,
     original_spec: &str,
 ) -> Result<PathBuf, PackageImportResolutionError> {
-    if alias.trim().is_empty() || module_spec.trim().is_empty() {
+    if alias.trim().is_empty()
+        || module_spec.trim().is_empty()
+        || module_spec.contains(PACKAGE_IMPORT_SEPARATOR)
+    {
         return Err(PackageImportResolutionError {
             code: PackageImportResolutionCode::InvalidQualifiedImportSpec,
             message: format!(

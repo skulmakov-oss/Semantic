@@ -1,4 +1,6 @@
-use crate::package_manifest::{admit_package_entry_module, resolve_package_import_path};
+use crate::package_manifest::{
+    admit_package_entry_module, resolve_package_import_path, PACKAGE_IMPORT_SEPARATOR,
+};
 use sm_front::types::{
     AstArena, ExecutableImport, Expr, ExprId, Function, Stmt, StmtId, SymbolId, TokenKind, Type,
 };
@@ -210,7 +212,11 @@ fn validate_executable_bundle_import(
     importer: &Path,
     import: &ExecutableImport,
 ) -> Result<(), String> {
-    if import.reexport || import.wildcard || import.alias.is_some() {
+    if import.reexport
+        || import.wildcard
+        || import.alias.is_some()
+        || (import.spec.contains(PACKAGE_IMPORT_SEPARATOR) && !import.select_items.is_empty())
+    {
         return Err(format!(
             "{} in '{}'",
             executable_import_wave2_out_of_scope_message(),

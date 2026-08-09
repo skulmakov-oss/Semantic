@@ -419,6 +419,38 @@ fn package_import_rejects_unfingerprinted_module_extension() {
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
+#[test]
+fn package_import_surface_rejects_selected_and_multiple_separators() {
+    let root = temp_workspace("package_import_surface");
+    let dependency = root.join("dependency");
+    let app = root.join("app");
+    write_package(
+        &dependency,
+        "format 1\npackage dependency\nmanifest_dir .\nmodule_root src\n",
+        "fn helper() -> i32 { return 1; }\n",
+    );
+    write_package(
+        &app,
+        "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep dependency dependency ../dependency\n",
+        "Import \"dependency::main.sm\" { helper }\nfn main() { return; }\n",
+    );
+
+    let selected = smc(&["check", &app.to_string_lossy()]);
+    assert!(!selected.status.success());
+    assert!(String::from_utf8_lossy(&selected.stderr).contains("remain out of scope"));
+
+    std::fs::write(
+        app.join("src/main.sm"),
+        "Import \"dependency::core::util.sm\"\nfn main() { return; }\n",
+    )
+    .expect("multiple-separator import");
+    let multiple = smc(&["check", &app.to_string_lossy()]);
+    assert!(!multiple.status.success());
+    assert!(String::from_utf8_lossy(&multiple.stderr).contains("must be '<alias>::<module_path>'"));
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
 #[cfg(unix)]
 #[test]
 fn authority_manifest_symlink_is_rejected_before_read() {

@@ -39,7 +39,11 @@ fn executable_import_wave2_out_of_scope_message() -> &'static str {
 
 fn validate_executable_imports(program: &Program) -> Result<(), FrontendError> {
     for import in &program.imports {
-        if import.reexport || import.wildcard || import.alias.is_some() {
+        if import.reexport
+            || import.wildcard
+            || import.alias.is_some()
+            || (import.spec.contains("::") && !import.select_items.is_empty())
+        {
             return Err(FrontendError {
                 pos: 0,
                 message: executable_import_wave2_out_of_scope_message().to_string(),
@@ -3339,6 +3343,23 @@ mod tests {
         "#;
 
         typecheck_source(src).expect("package-qualified executable import should typecheck");
+    }
+
+    #[test]
+    fn executable_package_qualified_selected_import_stays_out_of_scope() {
+        let src = r#"
+            Import "math::core.sm" { helper }
+
+            fn main() {
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("package-qualified selected import must stay out of scope");
+        assert!(err
+            .message
+            .contains(executable_import_wave2_out_of_scope_message()));
     }
 
     #[test]
