@@ -1410,6 +1410,21 @@ entry = "../escape.sm"
 
     #[test]
     fn parse_semantic_toml_manifest_reports_structured_error_codes() {
+        let abs_entry_path = if cfg!(windows) {
+            "C:/abs/main.sm"
+        } else {
+            "/abs/main.sm"
+        };
+        let abs_entry_source = format!(
+            r#"
+[package]
+name = "app"
+
+[project]
+entry = "{abs_entry_path}"
+"#
+        );
+
         let cases: &[(&str, SemanticTomlManifestErrorCode, &str)] = &[
             (
                 r#"
@@ -1484,13 +1499,7 @@ entry = ""
                 "has empty [project].entry",
             ),
             (
-                r#"
-[package]
-name = "app"
-
-[project]
-entry = "C:/abs/main.sm"
-"#,
+                &abs_entry_source,
                 SemanticTomlManifestErrorCode::ProjectEntryMustBeRelative,
                 "must be relative",
             ),

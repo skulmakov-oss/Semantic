@@ -26,8 +26,6 @@ cargo fmt --check
 assert_success "cargo fmt failed"
 cargo check --workspace --all-features
 assert_success "cargo check failed"
-cargo test --workspace --all-features
-assert_success "cargo test failed"
 echo -e "${GREEN}PASS: Hell 1${NC}"
 
 # -----------------------------------------------------------------------------

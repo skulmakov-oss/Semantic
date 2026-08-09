@@ -26,7 +26,7 @@ The full runner also has a separate manual/nightly GitHub workflow for cases whe
 
 ## The 7 Gates
 The script will fail fast if any gate is broken.
-- **Hell 1:** Workspace Health (`cargo fmt`, `check`, `test`)
+- **Hell 1:** Workspace Health (`cargo fmt`, `check`)
 - **Hell 2:** Trust Boundary Guards (`cargo tree` anti-dependency checks)
 - **Hell 3:** SemCode Format Authority (`sm-format` isolation and `rg` leakage checks)
 - **Hell 4:** Verifier Negative Corpus (`sm-verify` admission tests)

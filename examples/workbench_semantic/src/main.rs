@@ -7317,10 +7317,12 @@ mod tests {
     /// whichever attempt actually lands mid-flight, it does not weaken what
     /// is being proven.
     fn dispatch_and_cancel_a_genuinely_running_job(app: &mut WorkbenchApp) -> bool {
-        for attempt in 0..8 {
+        for attempt in 0..15 {
             app.dispatch_job(7); // CargoTest
             let job_id = app.state.last_job_id;
-            std::thread::sleep(Duration::from_millis(50 + attempt * 50));
+            if attempt > 0 {
+                std::thread::sleep(Duration::from_millis(attempt * 10));
+            }
             let still_registered = app.running_children.lock().unwrap().contains_key(&job_id);
             if !still_registered {
                 // Lost the race this attempt: the real process already
