@@ -1,22 +1,23 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-02
-  title: "language: resolve Rust-like and Logos coherence"
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-03
+  title: "stdlib: freeze minimal deterministic Standard Library v0"
   type: contract_qualification_and_bounded_implementation
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-01
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-02
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-01 closed through PR #1587 at main commit
-    549add21ace6d37af7783718781199411811571b; only SSF-02 is now active.
+    order. SSF-02 closed through PR #1589 at main commit
+    bd6f8aab6c0cef73df20c5e3adf2484c2a5a6aeb; only SSF-03 is now active.
 
 intent:
   summary: >-
-    Use current repository evidence to select one authoritative relationship
-    between executable Rust-like Semantic and Logos; keep their maturity and
-    version status separate; synchronize CLI, specs, examples, and source
-    mapping; and implement only gaps required by the selected model. Do not
-    present parse or lowering support as qualified execution.
+    Inventory existing builtins, helpers, and module behavior; define one
+    versioned language-owned Standard Library v0 boundary for the smallest
+    deterministic APIs required by Foundation Source 1.0; freeze observable
+    text, collection, serialization, seeded-random, and quad semantics; and
+    implement only demonstrated gaps without duplicating current authority or
+    hiding host effects behind pure library names.
 
 scope:
   allowed_paths:
@@ -35,7 +36,9 @@ scope:
     - examples/canonical/**
     - examples/qualification/**
     - tests/**
+    - crates/semantic-core-quad/**
     - crates/sm-front/**
+    - crates/sm-sema/**
     - crates/sm-ir/**
     - crates/sm-emit/**
     - crates/sm-verify/**
@@ -66,21 +69,22 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-02
-  issue: 1573
+  active_phase: SSF-03
+  issue: 1574
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
-  relationship_decision_before_implementation: true
-  implementation_only_for_demonstrated_model_gaps: true
+  builtin_and_helper_inventory_before_api_design: true
+  semantics_before_public_wrappers: true
+  implementation_only_for_demonstrated_stdlib_gaps: true
+  no_duplicate_language_authority: true
   no_convenience_feature_growth: true
-  preserve_verifier_first_execution: true
-  rust_like_remains_foundation_executable_profile: true
-  logos_execution_requires_full_path_evidence: true
-  separate_profile_maturity_and_version_status: true
-  stdlib_expansion_deferred_to_ssf_03: true
+  deterministic_utf8_ordering_encoding_and_prng_identity: true
+  preserve_quad_evidence_without_normalization: true
+  host_effects_deferred_to_ssf_04: true
+  project_and_package_expansion_deferred_to_ssf_05_and_ssf_06: true
   no_ui_product_expansion: true
   no_stable_release_claim: true
   no_historical_document_rewrite: true
