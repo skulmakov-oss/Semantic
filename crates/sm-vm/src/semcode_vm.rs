@@ -3,7 +3,9 @@ use crate::semcode_format::{
     SemcodeHeaderSpec,
 };
 use crate::QuadVal;
-use prom_abi::{AbiError, AbiValue, HostCallId, PrometheusHostAbi};
+use prom_abi::{
+    AbiError, AbiFailureKind, AbiValue, ApplicationHostAbi, HostCallId, PrometheusHostAbi,
+};
 use prom_cap::{CapabilityChecker, CapabilityDenied};
 use semantic_core_quad::{QuadState, QuadroReg32};
 use sm_runtime_core::hello_observation_sink::{
@@ -701,6 +703,28 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config<
     )
 }
 
+pub fn run_verified_semcode_with_application_host_and_capabilities_and_config<
+    H: ApplicationHostAbi,
+    C: CapabilityChecker,
+>(
+    bytes: &[u8],
+    entry: &str,
+    host: &mut H,
+    capabilities: &C,
+    config: ExecutionConfig,
+) -> Result<(), RuntimeError> {
+    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let entry_token = token.require_entry(entry).map_err(|err| match err {
+        EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
+    })?;
+    run_verified_entry_semcode_with_application_host_and_capabilities_and_config(
+        &entry_token,
+        host,
+        capabilities,
+        config,
+    )
+}
+
 /// Canonical verified token execution path.
 ///
 /// This is the canonical and preferred path for internal verified execution.
@@ -726,6 +750,34 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config<
     };
     push_frame(&mut vm, token.entry(), Vec::new(), None)?;
     let mut bridge = PrometheusVmHost { host, capabilities };
+    let mut observation = HelloObservationRuntime::discard();
+    exec_loop(&mut vm, &mut bridge, &mut observation).map(|_| ())
+}
+
+pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_config<
+    H: ApplicationHostAbi,
+    C: CapabilityChecker,
+>(
+    token: &VerifiedEntrySemCode<'_, '_>,
+    host: &mut H,
+    capabilities: &C,
+    config: ExecutionConfig,
+) -> Result<(), RuntimeError> {
+    let program = prepare_verified_execution(token)?;
+    let mut vm = VM {
+        functions: program.functions,
+        callstack: Vec::new(),
+        config,
+        effect_calls: 0,
+        symbols: program.runtime_symbols,
+        prng_state: 0,
+    };
+    push_frame(&mut vm, token.entry(), Vec::new(), None)?;
+    let mut bridge = ApplicationVmHost {
+        host,
+        capabilities,
+        observed: false,
+    };
     let mut observation = HelloObservationRuntime::discard();
     exec_loop(&mut vm, &mut bridge, &mut observation).map(|_| ())
 }
@@ -1407,6 +1459,38 @@ trait VmHostBridge {
     fn state_update(&mut self, key: &str, value: Value) -> Result<(), RuntimeError>;
     fn event_post(&mut self, signal: &str) -> Result<(), RuntimeError>;
     fn clock_read(&mut self) -> Result<Value, RuntimeError>;
+    fn args_read(&mut self, _index: u32) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::ArgsRead))
+    }
+    fn stdin_read_text(&mut self) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::StdinReadText))
+    }
+    fn stdout_write(&mut self, _text: &str) -> Result<(), RuntimeError> {
+        Err(unavailable_host_call(HostCallId::StdoutWrite))
+    }
+    fn stderr_write(&mut self, _text: &str) -> Result<(), RuntimeError> {
+        Err(unavailable_host_call(HostCallId::StderrWrite))
+    }
+    fn path_inspect(&mut self, _path: &str) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::PathInspect))
+    }
+    fn fs_read_text(&mut self, _path: &str) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::FsRead))
+    }
+    fn fs_write_text(&mut self, _path: &str, _text: &str) -> Result<(), RuntimeError> {
+        Err(unavailable_host_call(HostCallId::FsWrite))
+    }
+    fn time_duration_millis(&mut self) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::TimeDuration))
+    }
+}
+
+fn unavailable_host_call(call: HostCallId) -> RuntimeError {
+    RuntimeError::HostAbi(AbiError::new(
+        call,
+        AbiFailureKind::Unavailable,
+        "host boundary does not provide this application operation",
+    ))
 }
 
 struct LegacyVmHost;
@@ -1512,6 +1596,131 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
             .clock_read()
             .map(Value::U32)
             .map_err(RuntimeError::HostAbi)
+    }
+}
+
+struct ApplicationVmHost<'a, H: ApplicationHostAbi, C: CapabilityChecker> {
+    host: &'a mut H,
+    capabilities: &'a C,
+    observed: bool,
+}
+
+impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> ApplicationVmHost<'a, H, C> {
+    fn require(&self, call: HostCallId) -> Result<(), RuntimeError> {
+        self.capabilities
+            .require_call(call)
+            .map_err(RuntimeError::CapabilityDenied)
+    }
+
+    fn require_observation(&self, call: HostCallId) -> Result<(), RuntimeError> {
+        if self.observed {
+            Ok(())
+        } else {
+            Err(RuntimeError::HostAbi(AbiError::new(
+                call,
+                AbiFailureKind::InvalidInput,
+                "application writes require a preceding captured observation",
+            )))
+        }
+    }
+}
+
+impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> VmHostBridge for ApplicationVmHost<'a, H, C> {
+    fn gate_read(&mut self, _device_id: u16, _port: u16) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::GateRead))
+    }
+
+    fn gate_write(
+        &mut self,
+        _device_id: u16,
+        _port: u16,
+        _value: Value,
+    ) -> Result<(), RuntimeError> {
+        Err(unavailable_host_call(HostCallId::GateWrite))
+    }
+
+    fn pulse_emit(&mut self, _signal: &str) -> Result<(), RuntimeError> {
+        Err(unavailable_host_call(HostCallId::PulseEmit))
+    }
+
+    fn state_query(&mut self, _key: &str) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::StateQuery))
+    }
+
+    fn state_update(&mut self, _key: &str, _value: Value) -> Result<(), RuntimeError> {
+        Err(unavailable_host_call(HostCallId::StateUpdate))
+    }
+
+    fn event_post(&mut self, _signal: &str) -> Result<(), RuntimeError> {
+        Err(unavailable_host_call(HostCallId::EventPost))
+    }
+
+    fn clock_read(&mut self) -> Result<Value, RuntimeError> {
+        Err(unavailable_host_call(HostCallId::ClockRead))
+    }
+
+    fn args_read(&mut self, index: u32) -> Result<Value, RuntimeError> {
+        self.require(HostCallId::ArgsRead)?;
+        let value = self.host.args_read(index).map_err(RuntimeError::HostAbi)?;
+        self.observed = true;
+        Ok(Value::Text(value))
+    }
+
+    fn stdin_read_text(&mut self) -> Result<Value, RuntimeError> {
+        self.require(HostCallId::StdinReadText)?;
+        let value = self.host.stdin_read_text().map_err(RuntimeError::HostAbi)?;
+        self.observed = true;
+        Ok(Value::Text(value))
+    }
+
+    fn stdout_write(&mut self, text: &str) -> Result<(), RuntimeError> {
+        self.require(HostCallId::StdoutWrite)?;
+        self.require_observation(HostCallId::StdoutWrite)?;
+        self.host.stdout_write(text).map_err(RuntimeError::HostAbi)
+    }
+
+    fn stderr_write(&mut self, text: &str) -> Result<(), RuntimeError> {
+        self.require(HostCallId::StderrWrite)?;
+        self.require_observation(HostCallId::StderrWrite)?;
+        self.host.stderr_write(text).map_err(RuntimeError::HostAbi)
+    }
+
+    fn path_inspect(&mut self, path: &str) -> Result<Value, RuntimeError> {
+        self.require(HostCallId::PathInspect)?;
+        let value = self
+            .host
+            .path_inspect(path)
+            .map_err(RuntimeError::HostAbi)?;
+        self.observed = true;
+        Ok(Value::Bool(value))
+    }
+
+    fn fs_read_text(&mut self, path: &str) -> Result<Value, RuntimeError> {
+        self.require(HostCallId::FsRead)?;
+        let value = self
+            .host
+            .fs_read_text(path)
+            .map_err(RuntimeError::HostAbi)?;
+        self.observed = true;
+        Ok(Value::Text(value))
+    }
+
+    fn fs_write_text(&mut self, path: &str, text: &str) -> Result<(), RuntimeError> {
+        self.require(HostCallId::FsWrite)?;
+        self.require_observation(HostCallId::FsWrite)?;
+        self.host
+            .fs_write_text(path, text)
+            .map_err(RuntimeError::HostAbi)
+    }
+
+    fn time_duration_millis(&mut self) -> Result<Value, RuntimeError> {
+        self.require(HostCallId::TimeDuration)?;
+        let value = self
+            .host
+            .time_duration_millis()
+            .map_err(RuntimeError::HostAbi)?;
+        self.observed = true;
+        Ok(Value::U32(value))
     }
 }
 
@@ -2253,7 +2462,7 @@ where
                     let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                     args.push(get_reg(vm, frame_idx, r)?);
                 }
-                if let Some(result) = try_eval_builtin_call(observation, &callee, &args)? {
+                if let Some(result) = try_eval_builtin_call(host, observation, &callee, &args)? {
                     if has_dst {
                         set_reg(vm, frame_idx, dst, result)?;
                     }
@@ -2826,7 +3035,8 @@ fn value_eq(a: &Value, b: &Value) -> Result<bool, RuntimeError> {
     }
 }
 
-fn try_eval_builtin_call<'a>(
+fn try_eval_builtin_call<'a, H: VmHostBridge>(
+    host: &mut H,
     observation: &mut HelloObservationRuntime<'a>,
     name: &str,
     args: &[Value],
@@ -2861,9 +3071,95 @@ fn try_eval_builtin_call<'a>(
             observation.record_controlled_text_observation(text)?;
             Value::Unit
         }
+        "args_read" => {
+            let index = expect_builtin_u32(name, args)?;
+            host.args_read(index)?
+        }
+        "stdin_read_text" => {
+            expect_builtin_arity(name, args, 0)?;
+            host.stdin_read_text()?
+        }
+        "stdout_write" => {
+            let text = expect_builtin_text(name, args, 1)?;
+            host.stdout_write(text)?;
+            Value::Unit
+        }
+        "stderr_write" => {
+            let text = expect_builtin_text(name, args, 1)?;
+            host.stderr_write(text)?;
+            Value::Unit
+        }
+        "path_inspect" => {
+            let path = expect_builtin_text(name, args, 1)?;
+            host.path_inspect(path)?
+        }
+        "fs_read_text" => {
+            let path = expect_builtin_text(name, args, 1)?;
+            host.fs_read_text(path)?
+        }
+        "fs_write_text" => {
+            expect_builtin_arity(name, args, 2)?;
+            let path = match &args[0] {
+                Value::Text(value) => value.as_str(),
+                _ => {
+                    return Err(RuntimeError::TypeMismatchRuntime(format!(
+                        "builtin '{name}' expects text path"
+                    )))
+                }
+            };
+            let text = match &args[1] {
+                Value::Text(value) => value.as_str(),
+                _ => {
+                    return Err(RuntimeError::TypeMismatchRuntime(format!(
+                        "builtin '{name}' expects text payload"
+                    )))
+                }
+            };
+            host.fs_write_text(path, text)?;
+            Value::Unit
+        }
+        "time_duration_ms" => {
+            expect_builtin_arity(name, args, 0)?;
+            host.time_duration_millis()?
+        }
         _ => return Ok(None),
     };
     Ok(Some(value))
+}
+
+fn expect_builtin_arity(name: &str, args: &[Value], expected: usize) -> Result<(), RuntimeError> {
+    if args.len() == expected {
+        Ok(())
+    } else {
+        Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin '{name}' expects {expected} arguments, got {}",
+            args.len()
+        )))
+    }
+}
+
+fn expect_builtin_u32(name: &str, args: &[Value]) -> Result<u32, RuntimeError> {
+    expect_builtin_arity(name, args, 1)?;
+    match args[0] {
+        Value::U32(value) => Ok(value),
+        ref other => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin '{name}' expects u32, got {other:?}"
+        ))),
+    }
+}
+
+fn expect_builtin_text<'a>(
+    name: &str,
+    args: &'a [Value],
+    expected: usize,
+) -> Result<&'a str, RuntimeError> {
+    expect_builtin_arity(name, args, expected)?;
+    match &args[0] {
+        Value::Text(value) => Ok(value.as_str()),
+        _ => Err(RuntimeError::TypeMismatchRuntime(format!(
+            "builtin '{name}' expects text"
+        ))),
+    }
 }
 
 fn decode_text_literal(raw: &str) -> String {
@@ -5049,12 +5345,18 @@ mod tests {
     fn vm_builtin_print_rejects_non_text_values_without_implicit_conversion() {
         let mut observation = HelloObservationRuntime::discard();
 
-        let err = try_eval_builtin_call(&mut observation, "print", &[Value::I32(10)])
+        let mut host = LegacyVmHost;
+        let err = try_eval_builtin_call(&mut host, &mut observation, "print", &[Value::I32(10)])
             .expect_err("i32 must fail");
         assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
 
-        let err = try_eval_builtin_call(&mut observation, "print", &[Value::Quad(QuadVal::T)])
-            .expect_err("quad must fail");
+        let err = try_eval_builtin_call(
+            &mut host,
+            &mut observation,
+            "print",
+            &[Value::Quad(QuadVal::T)],
+        )
+        .expect_err("quad must fail");
         assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
     }
 

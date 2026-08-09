@@ -26,6 +26,7 @@ pub kind: AbiFailureKind,
 pub message: String,
 pub fn new(call: HostCallId, kind: AbiFailureKind, message: impl Into<String>) -> Self {
 pub trait PrometheusHostAbi {
+pub trait ApplicationHostAbi {
 #[derive(Debug, Default)]
 pub struct RecordingHostAbi {
 pub reads: alloc::vec::Vec<(u16, u16)>,

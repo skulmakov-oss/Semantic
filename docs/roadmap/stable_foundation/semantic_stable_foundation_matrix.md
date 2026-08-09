@@ -107,15 +107,15 @@ that wording drift; it does not delete or rewrite historical evidence.
 | `std.result` | F/I/V/R/D | **Qualified limited release** | Language-owned type/constructors/exhaustive match selected; no helper expansion. | Preserve through SSF-12. |
 | `std.serde` | F/I/V/R/D | **Roadmap** | SSF-03 selects no API or encoding; JSON in Rust tooling is not Semantic stdlib. | Explicit future approval only. |
 | `std.rand` | F/I/V/R/D | **Qualified limited release** | Versioned xorshift64/13-7-17 seeded VM stream; no host entropy. | Compatibility window in SSF-10. |
-| `args.read` | V/R/C | **Roadmap** | No canonical admitted capability of this name. | SSF-04. |
-| `stdin.read_text` | V/R/C | **Roadmap** | No canonical admitted capability of this name. | SSF-04. |
-| `stdout.write` | V/R/C | **Roadmap** | Narrow `print(text)`/`CAP_STDOUT` exists, but the proposed structured capability does not. | SSF-04. |
-| `stderr.write` | V/R/C | **Roadmap** | No canonical admitted capability of this name. | SSF-04. |
-| `path.inspect` | V/R/C | **Roadmap** | Project path validation exists in tooling, not as a program capability. | SSF-04. |
-| `fs.read` | V/R/C | **Roadmap** | No admitted source-language file-read boundary. | SSF-04. |
-| `fs.write` | V/R/C | **Roadmap** | No admitted source-language file-write boundary. | SSF-04. |
-| bounded duration/time input | V/R/C | **Roadmap** | No replay-safe application time contract. | SSF-04. |
-| `Pure`, `CliReadOnly`, `CliFileTransform`, `UiBounded` profiles | V/R/C/D | **Roadmap** | Proposed profiles are not yet canonical runtime contracts. | SSF-04. |
+| `args.read` | V/R/C | **Landed and qualified on `main`** | `args_read(u32)` is verifier- and manifest-gated, captured, hashed, and replay-order tested. | Preserve through SSF-12. |
+| `stdin.read_text` | V/R/C | **Landed and qualified on `main`** | `stdin_read_text()` is an explicit captured UTF-8 observation; never ambient by default. | Preserve through SSF-12. |
+| `stdout.write` | V/R/C | **Landed and qualified on `main`** | `stdout_write(text)` is a distinct explicit host write; it is not `print(text)`. | Preserve through SSF-12. |
+| `stderr.write` | V/R/C | **Landed and qualified on `main`** | `stderr_write(text)` is independently capability-gated and audited. | Preserve through SSF-12. |
+| `path.inspect` | V/R/C | **Landed and qualified on `main`** | Relative root-contained inspection with traversal/symlink/reparse denial. | Preserve through SSF-12. |
+| `fs.read` | V/R/C | **Landed and qualified on `main`** | `fs_read_text` admits existing UTF-8 files only inside the canonical root. | Consume in SSF-05/06/11. |
+| `fs.write` | V/R/C | **Landed and qualified on `main`** | `fs_write_text` requires an explicit grant and a prior captured observation; root escape is denied before write. | Consume in SSF-05/06/11. |
+| bounded duration/time input | V/R/C | **Landed and qualified on `main`** | `time_duration_ms()` uses explicit `--duration-ms`; no wall-clock read exists. | Preserve through SSF-12. |
+| `Pure`, `CliReadOnly`, `CliFileTransform`, `UiBounded` profiles | V/R/C/D | **Landed and qualified on `main`** | Exact deny-by-default manifests are frozen by `semantic.foundation.application/0.1`; `UiBounded` is catalogued, not a CLI mode. | Preserve through SSF-12. |
 | Narrow `print(text)` / `CAP_STDOUT` observation | V/R/C | **Landed and qualified on `main`** | Capability-gated/audited benchmark path; not general stdout. | Input to SSF-04, not its completion. |
 
 ## Project and package surface
@@ -154,7 +154,7 @@ that wording drift; it does not delete or rewrite historical evidence.
 | OWN0 tuple/direct-record paths | V/R | **Landed and qualified on `main`** | Frozen tuple+record spec and ownership goldens. | Public Position A/B decision in SSF-08. |
 | ADT/schema/sequence/map indirect ownership paths | V/R | **Landed but unqualified** | Some value-family tests exist; no complete stable path model. | SSF-08. |
 | Partial move/release and inter-frame ownership | V/R | **Roadmap** | Explicit gap beyond OWN0. | SSF-08 may defer under Position A. |
-| Capability and audit boundary | V/R/C | **Landed and qualified on `main`** | Narrow controlled observation evidence only. | Expand only through SSF-04. |
+| Capability and audit boundary | V/R/C | **Landed and qualified on `main`** | Controlled observation plus SSF-04 application capabilities; request/manifest distinction, structured denial, hashed audit, and replay-order evidence. | Preserve through SSF-12. |
 | Human-readable diagnostics and source spans | F/I/V/C | **Landed and qualified on `main`** | PCC negative suites and CLI diagnostic parity tests. | Machine contract in SSF-09. |
 | Stable machine-readable diagnostics | F/I/V/C | **Roadmap** | No single frozen JSON/protocol taxonomy across phases. | SSF-09/10. |
 | Canonical formatter | C | **Landed and qualified on `main`** | Formatter idempotence, on-disk and canonical style tests. | Freeze contract in SSF-09. |

@@ -57,7 +57,9 @@ pub fn run_verified_semcode_with_entry(bytes: &[u8], entry: &str) -> Result<(), 
 pub fn run_verified_semcode_with_entry_and_config( bytes: &[u8], entry: &str, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_semcode_with_host_and_capabilities< H: PrometheusHostAbi, C: CapabilityChecker, >( bytes: &[u8], host: &mut H, capabilities: &C, ) -> Result<(), RuntimeError> {
 pub fn run_verified_semcode_with_host_and_capabilities_and_config< H: PrometheusHostAbi, C: CapabilityChecker, >( bytes: &[u8], entry: &str, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
+pub fn run_verified_semcode_with_application_host_and_capabilities_and_config< H: ApplicationHostAbi, C: CapabilityChecker, >( bytes: &[u8], entry: &str, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config< H: PrometheusHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
+pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_config< H: ApplicationHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode( token: &VerifiedEntrySemCode<'_, '_>, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_with_config( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_function_semcode_with_args( token: &VerifiedEntrySemCode<'_, '_>, func_name: &str, args: Vec<Value>, ) -> Result<Value, RuntimeError> {

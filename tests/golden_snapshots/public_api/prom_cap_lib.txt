@@ -2,6 +2,7 @@ source: crates/prom-cap/src/lib.rs
 pub mod hello_observation_capability;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityKind {
+pub const fn id(self) -> &'static str {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilityLookupEntry {
 pub const fn new(reference: CapabilityRef, kind: CapabilityKind) -> Self {
@@ -19,6 +20,8 @@ pub const fn required_capability_for_call(call: HostCallId) -> CapabilityKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilitySurfaceClass {
 pub const fn capability_surface_class(kind: CapabilityKind) -> CapabilitySurfaceClass {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplicationCapabilityProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityManifestVersion {
 pub const fn as_str(self) -> &'static str {
@@ -55,3 +58,4 @@ pub fn allows(&self, capability: CapabilityKind) -> bool {
 pub fn metadata(&self) -> CapabilityManifestMetadata {
 pub fn validate(&self) -> Result<(), ManifestValidationReport> {
 pub fn gate_surface() -> Self {
+pub fn for_application_profile(profile: ApplicationCapabilityProfile) -> Self {

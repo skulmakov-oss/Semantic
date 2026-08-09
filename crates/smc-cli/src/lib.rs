@@ -10,6 +10,8 @@ mod api_contract;
 #[cfg(feature = "std")]
 mod app;
 #[cfg(feature = "std")]
+mod application_host;
+#[cfg(feature = "std")]
 mod canonical_json;
 #[cfg(feature = "std")]
 mod config;

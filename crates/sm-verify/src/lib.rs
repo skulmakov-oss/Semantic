@@ -6,10 +6,12 @@ extern crate std;
 #[cfg(feature = "std")]
 use sm_format::semcode_format::{
     read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
-    SemcodeHeaderSpec, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS, CAP_EVENT_POST,
-    CAP_F64_MATH, CAP_FX_MATH, CAP_FX_VALUES, CAP_GATE_SURFACE, CAP_MAP_VALUES,
-    CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS, CAP_PRNG, CAP_SEQUENCE_ITERATION,
-    CAP_SEQUENCE_VALUES, CAP_STATE_QUERY, CAP_STATE_UPDATE, CAP_STDOUT, CAP_TEXT_VALUES,
+    SemcodeHeaderSpec, CAP_ARGS_READ, CAP_CLOCK_READ, CAP_CLOSURE_VALUES, CAP_DEBUG_SYMBOLS,
+    CAP_EVENT_POST, CAP_F64_MATH, CAP_FS_READ, CAP_FS_WRITE, CAP_FX_MATH, CAP_FX_VALUES,
+    CAP_GATE_SURFACE, CAP_MAP_VALUES, CAP_OWNERSHIP_FIELD_PATHS, CAP_OWNERSHIP_PATHS,
+    CAP_PATH_INSPECT, CAP_PRNG, CAP_SEQUENCE_ITERATION, CAP_SEQUENCE_VALUES, CAP_STATE_QUERY,
+    CAP_STATE_UPDATE, CAP_STDERR_WRITE, CAP_STDIN_READ_TEXT, CAP_STDOUT, CAP_STDOUT_WRITE,
+    CAP_TEXT_VALUES, CAP_TIME_DURATION,
 };
 use sm_runtime_core::RuntimeQuotas;
 use std::collections::HashSet;
@@ -1152,6 +1154,14 @@ fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
         "sin" | "cos" | "tan" | "sqrt" | "abs" | "pow" => Some(CAP_F64_MATH),
         "to_text" => Some(CAP_TEXT_VALUES),
         "print" => Some(CAP_STDOUT),
+        "args_read" => Some(CAP_ARGS_READ),
+        "stdin_read_text" => Some(CAP_STDIN_READ_TEXT),
+        "stdout_write" => Some(CAP_STDOUT_WRITE),
+        "stderr_write" => Some(CAP_STDERR_WRITE),
+        "path_inspect" => Some(CAP_PATH_INSPECT),
+        "fs_read_text" => Some(CAP_FS_READ),
+        "fs_write_text" => Some(CAP_FS_WRITE),
+        "time_duration_ms" => Some(CAP_TIME_DURATION),
         _ => None,
     }
 }
