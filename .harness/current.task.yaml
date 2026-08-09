@@ -1,22 +1,22 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-05
-  title: "tooling: complete Semantic Project Model v0"
-  type: project_model_contract_qualification_and_bounded_implementation
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-06
+  title: "tooling: complete local Package Baseline v0"
+  type: package_baseline_contract_qualification_and_bounded_implementation
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-04
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-05
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-04 closed through PR #1593 at main commit
-    3e71356fbad7720ec150fa895b940b55a0b7b5ac; only SSF-05 is now active.
+    order. SSF-05 closed through PR #1595 at main commit
+    99758c63a57d9c280f311db24ddd87169558d93a; only SSF-06 is now active.
 
 intent:
   summary: >-
-    Inventory existing manifest, project-root, module, entrypoint, CLI, and
-    identity behavior; select one canonical Semantic Project Model v0; freeze
-    deterministic root-contained path and unsupported-field rules; preserve
-    single-file compatibility; and prove a manually creatable project through
-    the admitted check, compile, verify, run, and test command contour.
+    Inventory the existing Semantic.package/local-dependency/import graph before
+    widening it; freeze the minimum local-only package identity, deterministic
+    graph, root-containment, hash/provenance-record, and capability-request
+    boundaries; prove multi-package composition without registry, remote fetch,
+    build hooks, implicit grants, workspace expansion, or verifier bypass.
 
 scope:
   allowed_paths:
@@ -67,26 +67,29 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-05
-  issue: 1576
+  active_phase: SSF-06
+  issue: 1577
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
-  manifest_project_module_entrypoint_cli_identity_inventory_first: true
-  one_canonical_semantic_toml_manifest: true
-  single_file_fallback_remains_explicit_and_compatible: true
-  deterministic_project_root_and_entrypoint_resolution: true
-  source_module_test_and_example_discovery_is_versioned: true
-  path_normalization_and_root_containment_before_widening: true
-  unknown_or_unsupported_manifest_fields_fail_deterministically: true
-  manifest_metadata_is_not_capability_or_runtime_authority: true
-  project_identity_and_toolchain_metadata_are_reproducible: true
-  check_compile_verify_run_and_test_agree_on_project_model: true
-  no_registry_remote_solver_build_scripts_or_install_hooks: true
-  no_broad_workspace_model: true
-  package_model_expansion_deferred_to_ssf_06: true
+  local_package_identity_graph_import_and_hash_inventory_first: true
+  project_model_v0_boundary_is_preserved: true
+  package_name_and_version_are_labels_not_trust: true
+  local_path_dependencies_only: true
+  dependency_order_and_cycle_diagnostics_are_deterministic: true
+  dependency_roots_are_explicit_and_root_contained: true
+  package_qualified_imports_use_canonical_compiler_authority: true
+  content_manifest_graph_and_capability_inventory_hashes_are_reproducible: true
+  provenance_record_is_minimal_local_and_inspectable: true
+  capability_request_is_not_grant: true
+  package_identity_never_bypasses_verifier_admission: true
+  no_registry_remote_fetch_solver_publish_or_install: true
+  no_build_scripts_or_install_hooks: true
+  no_implicit_transitive_capability_grants: true
+  no_broad_workspace_model_without_demonstrated_need: true
+  type_and_abstraction_expansion_deferred_to_ssf_07: true
   no_ui_product_expansion: true
   no_stable_release_claim: true
   no_historical_document_rewrite: true
