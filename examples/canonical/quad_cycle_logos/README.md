@@ -4,7 +4,7 @@
   `Entity` state/prop fields, and priority-ordered `Law`/`When` rules
 - language profile: **Logos declarative surface** (`docs/spec/logos.md`) — this
   is not the Rust-like executable surface and is not combined with one in this
-  file
+  file; contract identifier: `semantic.logos.declarative/0.1`
 - supported status: **parse-qualified and IR-lowering-qualified only**. It is
   explicitly **not** `check`/`compile`/`verify`/`run`-qualified: those commands
   target the Rust-like SemCode/VM path, which does not accept Logos source.

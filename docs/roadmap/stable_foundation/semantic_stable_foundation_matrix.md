@@ -96,7 +96,7 @@ that wording drift; it does not delete or rewrite historical evidence.
 | Public feature | Owner layer | Status | Evidence and exact boundary | Foundation routing |
 |---|---|---|---|---|
 | Rust-like executable profile | F/I/V/R/C/D | **Qualified limited release** | Gate 1 establishes a narrow executable contour. | Primary contract in SSF-01. |
-| Logos declarative profile | F/I/C/D | **Experimental** | Canonical example supports `dump-ast`/Logos IR only; `check` and `run` honestly reject it. | Select Model A or B in SSF-02. |
+| Logos declarative profile | F/I/C/D | **Experimental** | SSF-02 selected Model B: `semantic.logos.declarative/0.1` supports parse, semantic analysis, and non-executable `LogosIrLaw` inspection; SemCode/VM paths reject it. | Preserve the boundary through SSF-09/11/12; no automatic promotion. |
 | `std.core` | F/I/V/R/D | **Roadmap** | Current helpers are builtins; no importable canonical module contract. | SSF-03. |
 | `std.quad` | F/I/V/R/D | **Roadmap** | Native quad exists, but the named module/API does not. | SSF-03. |
 | `std.math` | F/I/V/R/D | **Roadmap** | Math builtins exist; named module and compatibility contract do not. | SSF-03. |

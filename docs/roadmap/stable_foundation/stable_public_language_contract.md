@@ -42,7 +42,7 @@ is implemented by this phase.
 | `requires`/`ensures`/`invariant` | Experimental | bounded parser/typecheck/lowering evidence | no complete public full-path qualification contour |
 | Measured numeric forms | Experimental | narrow frontend/carrier evidence | measured `fx` arithmetic remains an explicit gap |
 | Broader module/package imports | Deferred | landed current-main package/module evidence | owned by SSF-05/SSF-06 |
-| Logos | Deferred | parse and Logos-IR canonical example | product/execution decision owned by SSF-02 |
+| Logos | Experimental declarative profile | parse, semantic analysis, and non-executable Logos-IR canonical example | Model B selected by SSF-02; outside this executable contract |
 
 ## Contract audit result
 
@@ -111,5 +111,6 @@ SSF-02 may start only after:
 4. issue #1572 records the exact merge commit and closes;
 5. a separate governance update activates only #1573.
 
-SSF-02 owns the Rust-like/Logos relationship and may not silently widen the
-Rust-like contract selected here.
+SSF-02 selected the declarative Model B relationship without widening the
+Rust-like contract selected here. The separate Logos contract is
+`semantic.logos.declarative/0.1`.

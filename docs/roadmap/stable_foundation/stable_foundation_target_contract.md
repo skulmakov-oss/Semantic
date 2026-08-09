@@ -58,10 +58,11 @@ contract but may not silently widen it.
 
 ### Profile coherence
 
-Rust-like Semantic is the executable-profile candidate. Logos remains
-experimental until SSF-02 selects and implements either executable lowering or
-an explicitly declarative profile with honest tool behavior. SSF-00 does not
-preselect that product decision.
+Rust-like Semantic is the executable-profile candidate. SSF-02 selected Model B:
+Logos is the separate experimental declarative profile
+`semantic.logos.declarative/0.1`, with parse/semantic/inspection support and no
+SemCode/verifier/VM execution path. The decision record is
+`rustlike_logos_coherence_decision.md`.
 
 ### Minimal deterministic library
 
@@ -124,7 +125,7 @@ Andromeda, and broad permanent ABI/ISA promises.
 | Decision | Owning phase | Entry assumption |
 |---|---|---|
 | Exact stable source grammar/profile and included feature subsets | SSF-01 | Start from the candidate core above; do not inherit all of current `main`. |
-| Executable versus declarative Logos | SSF-02 | Logos remains experimental. |
+| Executable versus declarative Logos | SSF-02 | Resolved as Model B; Logos remains experimental and non-executable. |
 | Builtin-to-stdlib boundary and APIs | SSF-03 | Existing builtins may be wrapped, renamed, narrowed, or deferred. |
 | Capability names, grants, denial results, audit, replay profiles | SSF-04 | Existing `print` is evidence, not the finished boundary. |
 | Canonical manifest, project layout, discovery, and command shapes | SSF-05 | Both current manifests are evidence; neither wins by implication. |
