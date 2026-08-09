@@ -7,6 +7,8 @@ execution contract.
 
 The versioned Stable Foundation source-language candidate is the narrower
 [`foundation_source_profile_v1.md`](foundation_source_profile_v1.md) overlay.
+Its bounded Standard Library v0 companion is
+[`foundation_stdlib_v0.md`](foundation_stdlib_v0.md).
 Component specs below describe current implementation and draft contracts; they
 do not widen that selected public contour by implication.
 
@@ -14,6 +16,8 @@ Current documents in this PR:
 
 - `foundation_source_profile_v1.md` - versioned Stable Foundation Rust-like
   source contract candidate and explicit experimental/deferred boundary
+- `foundation_stdlib_v0.md` - versioned language-owned Standard Library v0
+  family index, deterministic semantics, and deferred APIs
 - `syntax.md` - canonical Rust-like source syntax contract
 - `types.md` - source-level type contract and current type-family limits
 - `source_semantics.md` - source-level execution and binding semantics
@@ -80,9 +84,10 @@ versioning, and release-facing validation specifications.
 
 Contract precedence:
 
-1. `foundation_source_profile_v1.md` selects the versioned public
-   stable-candidate source contour; the remaining `docs/spec/*` files define
-   its referenced component behavior and current implementation contracts.
+1. `foundation_source_profile_v1.md` and `foundation_stdlib_v0.md` select the
+   versioned public stable-candidate source and library contours; the remaining
+   `docs/spec/*` files define their referenced component behavior and current
+   implementation contracts.
 2. Code must implement that contract.
 3. Architecture and roadmap documents constrain ownership and sequencing around
    that contract.

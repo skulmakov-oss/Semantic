@@ -30,10 +30,10 @@ until the preceding exit gate is accepted.
 
 | Phase | Inputs from prior phase | Owns | Exit evidence | Current state |
 |---|---|---|---|---|
-| SSF-00 / #1571 | Umbrella #1569 and live repository/release evidence | Canonical matrix, target `SSF-TARGET-0`, dependency map, status drift correction | Three accepted documents, drift guard, exact merge evidence | **Active** |
-| SSF-01 / #1572 | Accepted target and source rows | Versioned Rust-like public language contract, included/deferred source features | End-to-end positive/negative contract evidence | Blocked by SSF-00 |
-| SSF-02 / #1573 | Frozen executable contract | Rust-like/Logos Model A or B, diagnostics and package interaction | Honest profile behavior and examples | Blocked by SSF-01 |
-| SSF-03 / #1574 | Frozen language/profile contract | Minimal importable stdlib APIs and builtin boundary | Positive, negative, compatibility tests and index | Blocked by SSF-02 |
+| SSF-00 / #1571 | Umbrella #1569 and live repository/release evidence | Canonical matrix, target `SSF-TARGET-0`, dependency map, status drift correction | Three accepted documents, drift guard, exact merge evidence | Completed |
+| SSF-01 / #1572 | Accepted target and source rows | Versioned Rust-like public language contract, included/deferred source features | End-to-end positive/negative contract evidence | Completed |
+| SSF-02 / #1573 | Frozen executable contract | Rust-like/Logos Model A or B, diagnostics and package interaction | Honest profile behavior and examples | Completed: Model B |
+| SSF-03 / #1574 | Frozen language/profile contract | Versioned language-owned stdlib equivalents and builtin boundary | Positive, negative, compatibility tests and canonical index | **Active** |
 | SSF-04 / #1575 | Stable value/library carriers | Capabilities, profiles, denial/audit/replay contract | Canonical deterministic file-transform path | Blocked by SSF-03 |
 | SSF-05 / #1576 | Language, stdlib, and effect contracts | Canonical manifest/project layout/commands/path identity | Reproducible project fixtures including `smc test` | Blocked by SSF-04 |
 | SSF-06 / #1577 | Canonical project model | Local package graph, provenance/lock, capability inventory | Multi-package reproducibility and root-security evidence | Blocked by SSF-05 |
