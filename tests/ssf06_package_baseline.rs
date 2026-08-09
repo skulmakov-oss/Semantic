@@ -278,6 +278,31 @@ fn package_content_symlink_is_rejected() {
     std::fs::remove_dir_all(root).expect("cleanup");
 }
 
+#[cfg(unix)]
+#[test]
+fn package_entry_symlink_cannot_escape_before_manifest_lookup() {
+    use std::os::unix::fs::symlink;
+
+    let root = temp_workspace("entry_symlink");
+    let package = root.join("app");
+    write_package(
+        &package,
+        "format 1\npackage app\nmanifest_dir .\nmodule_root src\n",
+        "fn main() { return; }\n",
+    );
+    let entry = package.join("src/main.sm");
+    std::fs::remove_file(&entry).expect("remove real entry");
+    let outside = root.join("outside.sm");
+    std::fs::write(&outside, "fn main() { return; }\n").expect("outside source");
+    symlink(&outside, &entry).expect("create entry symlink");
+
+    let output = smc(&["check", &package.to_string_lossy()]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("symlink or reparse point"));
+
+    std::fs::remove_dir_all(root).expect("cleanup");
+}
+
 #[test]
 fn capability_request_is_inventory_only_and_never_a_grant() {
     let root = temp_workspace("capability");

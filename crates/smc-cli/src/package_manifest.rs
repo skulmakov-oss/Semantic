@@ -524,6 +524,10 @@ fn is_valid_package_fingerprint(value: &str) -> bool {
 pub fn admit_package_entry_module(
     entry: &Path,
 ) -> Result<Option<PackageModuleAdmission>, PackageModuleAdmissionError> {
+    reject_reparse_path(entry).map_err(|message| PackageModuleAdmissionError {
+        code: PackageModuleAdmissionCode::EntryResolutionFailed,
+        message,
+    })?;
     let entry_canonical = entry
         .canonicalize()
         .map_err(|e| PackageModuleAdmissionError {
@@ -538,10 +542,6 @@ pub fn admit_package_entry_module(
         Some(path) => path,
         None => return Ok(None),
     };
-    reject_reparse_path(entry).map_err(|message| PackageModuleAdmissionError {
-        code: PackageModuleAdmissionCode::EntryResolutionFailed,
-        message,
-    })?;
     let manifest = load_and_validate_manifest(&manifest_path)?;
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let package_root = manifest_dir.join(&manifest.package.root.manifest_dir);
