@@ -1,23 +1,22 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-03
-  title: "stdlib: freeze minimal deterministic Standard Library v0"
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-04
+  title: "runtime: freeze Controlled Application Boundary v0"
   type: contract_qualification_and_bounded_implementation
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-02
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-03
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-02 closed through PR #1589 at main commit
-    bd6f8aab6c0cef73df20c5e3adf2484c2a5a6aeb; only SSF-03 is now active.
+    order. SSF-03 closed through PR #1591 at main commit
+    8ae1e2ae5b7496764d82029197ba079c0e066fd9; only SSF-04 is now active.
 
 intent:
   summary: >-
-    Inventory existing builtins, helpers, and module behavior; define one
-    versioned language-owned Standard Library v0 boundary for the smallest
-    deterministic APIs required by Foundation Source 1.0; freeze observable
-    text, collection, serialization, seeded-random, and quad semantics; and
-    implement only demonstrated gaps without duplicating current authority or
-    hiding host effects behind pure library names.
+    Inventory existing capability, ABI, verifier, runtime, audit, and CLI
+    authority; define one deny-by-default Controlled Application Boundary v0;
+    select only effects required by the Stable Foundation application contour;
+    freeze structured denial, path containment, audit, and replay semantics;
+    and prove one bounded CLI file-transform flow without capability bypasses.
 
 scope:
   allowed_paths:
@@ -36,7 +35,10 @@ scope:
     - examples/canonical/**
     - examples/qualification/**
     - tests/**
-    - crates/semantic-core-quad/**
+    - crates/prom-abi/**
+    - crates/prom-audit/**
+    - crates/prom-cap/**
+    - crates/sm-format/**
     - crates/sm-front/**
     - crates/sm-sema/**
     - crates/sm-ir/**
@@ -69,21 +71,24 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-03
-  issue: 1574
+  active_phase: SSF-04
+  issue: 1575
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
-  builtin_and_helper_inventory_before_api_design: true
-  semantics_before_public_wrappers: true
-  implementation_only_for_demonstrated_stdlib_gaps: true
-  no_duplicate_language_authority: true
-  no_convenience_feature_growth: true
-  deterministic_utf8_ordering_encoding_and_prng_identity: true
-  preserve_quad_evidence_without_normalization: true
-  host_effects_deferred_to_ssf_04: true
+  capability_abi_verifier_runtime_audit_inventory_first: true
+  capability_ids_and_profiles_before_effect_implementation: true
+  request_or_manifest_metadata_is_never_a_grant: true
+  verifier_and_runtime_remain_effect_authority: true
+  deny_by_default_with_structured_results: true
+  path_root_containment_before_file_access: true
+  replay_safe_host_observation_contract: true
+  audit_without_unnecessary_payload_leakage: true
+  observation_before_write_effects: true
+  no_network_process_or_ambient_environment_access: true
+  no_hidden_stdlib_or_ui_host_effects: true
   project_and_package_expansion_deferred_to_ssf_05_and_ssf_06: true
   no_ui_product_expansion: true
   no_stable_release_claim: true
