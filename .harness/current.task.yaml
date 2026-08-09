@@ -1,199 +1,74 @@
 task:
-  id: SEMANTIC-WORKBENCH-NATIVE-V0
-  title: "feat(workbench): implement Semantic Workbench as a native Semantic + Prom UI application"
-  type: implementation
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-00
+  title: "roadmap: freeze the Semantic Stable Foundation truth contour"
+  type: documentation_and_qualification
   mode: active
-  supersedes: SEMANTIC-HUB-V0-COMPLETION
-  authorized_by: "repository owner direct instruction (chat, 2026-08-01): narrow owner override authorizing local Workbench implementation per issue #1369 (\"Workbench before Semantic Studio\"). Semantic Studio implementation, ALM integration, and GitHub governance changes remain explicitly out of scope."
+  supersedes: SEMANTIC-WORKBENCH-NATIVE-V0
+  authorized_by: >-
+    Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
+    umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
+    order. Only SSF-00 is active until its exit gate is satisfied.
 
 intent:
   summary: >-
-    Build the canonical Semantic Workbench (developer/operator Evidence
-    Console + project opener + source authoring shell + canonical command
-    bus + deterministic Jobs Ledger + diagnostics projection + inspectors +
-    spec navigator + readiness/release evidence view) as a Semantic-owned
-    application: .sm application state/logic + a Grammar v0 Projection
-    Source UI definition, rendered through the existing real prom-ui /
-    prom-ui-runtime / prom-ui-backend-native native pipeline (the same
-    pipeline already proven end-to-end by examples/quad_logic_calculator),
-    with a narrow Rust host limited to filesystem, process execution,
-    persistence, and native window/renderer effects. The obsolete
-    React/TypeScript/Tauri app (archived at apps/workbench_ts_tauri_legacy,
-    formerly apps/workbench) is a non-authoritative reference only (IA/visual
-    ideas), not a logic or contract source.
-
-status_note: >-
-  SEMANTIC-HUB-V0-COMPLETION closed 2026-08-01: Issue #1526 closed,
-  final follow-up landed via PR #1566 (commit 9ce1edc6) on top of the
-  irregular PR #1558 delivery documented in
-  .harness/reports/SEMANTIC-HUB-V0-COMPLETION.md. This file was left
-  declaring that task "active" after it actually finished; superseding
-  it here rather than leaving stale state pointing at a closed task.
-
-owner_directive_2026_08_02: >-
-  "WORKBENCH ICED SUBSTRATE MIGRATION" (repository owner, chat,
-  2026-08-02), issued after this task's own prior FAIL verdict on the
-  "WORKBENCH VISUAL ARCHITECTURE COMPLETION PASS" identified three
-  unmet requirements (no generic component library, no real typography/
-  text-measurement, zero screenshot artifacts). The owner explicitly
-  authorized crossing the narrow-host-bridge boundary that previously
-  blocked closing those gaps: pin Iced 0.14 as a private native UI
-  substrate behind a new `prom-ui-iced-adapter` crate, modify the Prom UI
-  renderer/runtime/native backend as needed, migrate all 8 Workbench
-  screens onto it, and implement deterministic frame capture. Semantic
-  remains authoritative for Workbench application meaning; Iced is
-  infrastructure behind the adapter boundary, never a direct Workbench
-  dependency. This directive explicitly forbids reporting the harness,
-  a missing primitive, or component/typography/capture infrastructure
-  as an external blocker for this task.
-
-status_note_2026_08_03: >-
-  "WORKBENCH ICED SUBSTRATE MIGRATION" pass result: FAIL, for one specific,
-  named reason (see .harness/reports/SEMANTIC-WORKBENCH-NATIVE-V0.md's
-  "WORKBENCH ICED SUBSTRATE MIGRATION" section, VERDICT). Iced 0.14.0 is
-  pinned, the dependency boundary holds under real tests, Semantic
-  authority is preserved, all 8 screens are migrated onto a real 26-role
-  PromNode contract via a real Iced adapter, the production binary is
-  unconditionally Iced-only (the WORKBENCH_ICED flag is removed), real
-  deterministic headless frame capture works and was proven independent
-  of foreground focus, and 28 reviewed screenshots plus a manifest exist.
-  The FAIL reason: crates/prom-ui-iced-adapter/src/convert.rs's SplitPane
-  renders correct static proportions but implements no pointer capture /
-  live divider dragging, a capability owner directive section 19 names
-  explicitly and section 29 treats as PASS-disqualifying when absent.
-  Everything else required is real and verified; this is the one concrete
-  remaining item, reported as fact per this task's standing instruction
-  not to propose another pass.
-
-status_note_2026_08_03_closure: >-
-  "WORKBENCH ICED MIGRATION -- FINAL CLOSURE" pass result: PASS (see
-  .harness/reports/SEMANTIC-WORKBENCH-NATIVE-V0.md's "WORKBENCH ICED
-  MIGRATION -- FINAL CLOSURE" section). Real pointer-driven divider
-  dragging is implemented for all three Workbench SplitPane dividers via
-  iced::widget::pane_grid (an existing shipped Iced widget, not a new
-  dependency), closing the one named gap from the prior FAIL. Live
-  drag-verification screenshots (extreme ratios on all 3 dividers at
-  960x640/1440x900/1920x1080) surfaced one real regression this pass
-  introduced: dragging explorer_and_rest (divider 2) toward its high
-  extreme could squeeze the nested main_and_inspector split (divider 3)
-  below its own two-sided minimum, driving the Cockpit content pane to a
-  negative/invisible width -- an "inaccessible panel" violation, only
-  reachable now that dragging exists. Fixed in
-  examples/workbench_semantic/src/main.rs by lowering
-  main_and_inspector's split_min from 160.0 to 64.0 so it always fits
-  inside explorer_and_rest's 140.0 floor; both dividers' own default
-  (undragged) ratios are unaffected. All 21 drag-verification
-  screenshots re-reviewed after the fix and confirmed clean. 63 tests
-  pass (15 in prom-ui-iced-adapter incl. 7 new drag tests, 48 in
-  workbench_semantic), cargo fmt --check/clippy/cargo check
-  --workspace/harness-check all pass.
+    Establish an evidence-backed inventory of current Semantic language,
+    tooling, verifier, runtime, project, package, diagnostics, release, and UI
+    projection claims; classify maturity without promotion; freeze the smallest
+    coherent Stable Foundation target contour; and record dependencies and
+    unresolved decisions for later SSF phases.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - .harness/reports/SEMANTIC-WORKBENCH-NATIVE-V0.md
-    - Cargo.toml
-    - Cargo.lock
-    - apps/workbench-semantic/**
-    - apps/workbench_ts_tauri_legacy/**
-    - apps/workbench/**
-    - crates/prom-ui/**
-    - crates/prom-ui-runtime/**
-    - crates/prom-ui-backend-native/**
-    - crates/prom-ui-iced-adapter/**
-    - crates/prom-ui-demo/**
-    - crates/prom-ui-workbench-host/**
-    - examples/workbench_semantic/**
-    - tests/workbench/**
-    - tests/fixtures/workbench/**
-    - third_party/iced/**
-    - docs/workbench/**
-    - docs/spec/ui/**
-    - docs/dna/SEMANTIC_UI_DNA.md
-    - docs/dna/SEMANTIC_UI_DNA_v2.md
-    - docs/architecture/ui_*.md
-    - docs/legal/third_party_dependencies.md
+    - pr_body_action_mapping.md
+    - pr_body_intent_admission_boundary.md
+    - README.md
+    - ARCHITECTURE.md
+    - CHANGELOG.md
+    - docs/LANGUAGE.md
+    - docs/examples_index.md
+    - docs/getting_started.md
+    - docs/spec/index.md
     - docs/status/feature_maturity_matrix.md
-    - .agents/skills/semantic/SKILL.md
-    - scripts/package_workbench_beta.ps1
-    - scripts/workbench_native_launch_smoke.ps1
-    - scripts/harness-check.ps1
-    - artifacts/workbench/native-launch-smoke/**
-    - artifacts/workbench/responsive-layout-evidence/**
-    - artifacts/workbench/screenshots/**
-    - artifacts/workbench/drag-verification/**
-    - .gitignore
+    - docs/roadmap/public_maturity_snapshot.md
+    - docs/roadmap/public_status_model.md
+    - docs/roadmap/stable_foundation/**
+    - scripts/ssf_status_drift_check.ps1
+    - tests/ssf_status_drift.rs
 
   forbidden_paths:
-    - crates/sm-front/**
-    - crates/sm-sema/**
-    - crates/sm-ir/**
-    - crates/sm-emit/**
-    - crates/sm-verify/**
-    - crates/sm-runtime-core/**
-    - crates/sm-vm/**
-    - crates/sm-profile/**
-    - crates/sm-format/**
-    - crates/ton618-core/**
-    - crates/semantic-hub/**
-    - crates/semantic-hub-turbovec/**
-    - crates/semantic-core-backend/**
-    - crates/semantic-core-bench/**
-    - crates/semantic-core-capsule/**
-    - crates/semantic-core-exec/**
-    - crates/semantic-core-quad/**
-    - crates/semantic-core-runtime/**
-    - crates/core-lab/**
-    - ton618_legacy/**
-    - docs/roadmap/**
     - .github/**
+    - apps/**
+    - crates/**
+    - examples/**
+    - experiments/**
+    - src/**
+    - third_party/**
+    - ton618_legacy/**
 
 authorization:
-  rust_implementation: true
-  rust_implementation_scope: >-
-    Narrow host bridges (filesystem, process execution, persistence,
-    native window/renderer effects) inside prom-ui-backend-native and a
-    new minimal prom-ui-workbench-host crate where an existing crate
-    cannot cleanly own the capability, PLUS (per
-    owner_directive_2026_08_02) a new prom-ui-iced-adapter crate that may
-    depend on Iced directly to implement generic UI mechanics (layout,
-    text shaping/measurement, rendering, clipping, scrolling, focus,
-    pointer capture, DPI handling, window integration, WGPU presentation)
-    behind a public, Iced-free Prom UI component contract. Application/
-    domain logic (Workbench screen hierarchy, labels, actions, selection,
-    N/F/T/S meaning) goes in .sm source / existing Semantic-owned
-    WorkbenchApp state, not Rust or Iced, wherever the current
-    architecture supports it.
-  new_external_dependency: >-
-    minimal_only, EXCEPT Iced 0.14.0 (MIT, pinned exact version) is
-    explicitly authorized per owner_directive_2026_08_02 as the private
-    native UI substrate behind prom-ui-iced-adapter -- see
-    third_party/iced/UPSTREAM.md.
-  cli_command_implementation: false
-  test_addition: true
-  fixture_addition: true
+  rust_implementation: false
+  language_implementation: false
   documentation_addition: true
-  public_api_change: true
-  dependency_lockfile_update: true
-  owner_issue_lifecycle: false
+  documentation_correction: true
+  test_addition: true
   workflow_changes: false
-  roadmap_changes: false
-  project_changes: false
-  workbench_implementation: true
-  semantic_studio_implementation: false
-  alm_changes: false
-  hub_changes: false
+  dependency_changes: false
+  github_issue_lifecycle: true
+  git_commit_push_pr: true
+  merge_after_review_and_checks: true
+  stable_promotion: false
 
 constraints:
-  one_branch_one_pr: true
-  branch: feat/semantic-workbench-native-v0
-  no_child_issues: true
-  no_github_workflow_actions: true
-  no_pr_no_push_no_merge: true
-  no_semantic_studio_or_alm_scope_widening: true
-  semantic_owns_application_logic_prom_ui_owns_ui_contract_rust_is_narrow_host: true
-  no_invented_sm_syntax_fixture_and_spec_first: true
-  no_flattening_quad_states: true
-  ui_projections_route_through_existing_projection_source_grammar_v0: true
-  old_ts_workbench_is_reference_only_not_logic_source: true
-  no_telemetry_no_analytics_no_cloud_requirement: true
+  one_active_ssf_phase: true
+  active_phase: SSF-00
+  issue: 1571
+  umbrella_issue: 1569
+  base_branch: main
+  one_logical_change_per_pr: true
+  evidence_before_claims: true
+  current_main_is_not_stable: true
+  no_language_or_runtime_implementation: true
+  no_ui_product_expansion: true
+  no_stable_release_claim: true
+  no_historical_document_rewrite: true
