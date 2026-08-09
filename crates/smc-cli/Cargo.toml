@@ -34,6 +34,7 @@ simd = []
 bench = []
 
 [dependencies]
+prom-abi = { path = "../prom-abi", default-features = false, features = ["std"] }
 ton618-core = { path = "../ton618-core", default-features = false, features = ["alloc"] }
 sm-front = { path = "../sm-front", default-features = false, features = ["std"] }
 sm-ir = { path = "../sm-ir", default-features = false, features = ["std"] }

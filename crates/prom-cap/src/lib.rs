@@ -19,6 +19,37 @@ pub enum CapabilityKind {
     StateUpdate,
     EventPost,
     ClockRead,
+    ArgsRead,
+    StdinReadText,
+    StdoutWrite,
+    StderrWrite,
+    PathInspect,
+    FsRead,
+    FsWrite,
+    TimeDuration,
+}
+
+impl CapabilityKind {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::GateRead => "gate.read",
+            Self::GateWrite => "gate.write",
+            Self::PulseEmit => "pulse.emit",
+            Self::ControlledObservationSink => "observation.controlled",
+            Self::StateQuery => "state.query",
+            Self::StateUpdate => "state.update",
+            Self::EventPost => "event.post",
+            Self::ClockRead => "clock.read",
+            Self::ArgsRead => "args.read",
+            Self::StdinReadText => "stdin.read_text",
+            Self::StdoutWrite => "stdout.write",
+            Self::StderrWrite => "stderr.write",
+            Self::PathInspect => "path.inspect",
+            Self::FsRead => "fs.read",
+            Self::FsWrite => "fs.write",
+            Self::TimeDuration => "time.duration",
+        }
+    }
 }
 
 /// A non-authoritative lookup record for one exact capability reference.
@@ -142,12 +173,21 @@ pub const fn required_capability_for_call(call: HostCallId) -> CapabilityKind {
         HostCallId::StateUpdate => CapabilityKind::StateUpdate,
         HostCallId::EventPost => CapabilityKind::EventPost,
         HostCallId::ClockRead => CapabilityKind::ClockRead,
+        HostCallId::ArgsRead => CapabilityKind::ArgsRead,
+        HostCallId::StdinReadText => CapabilityKind::StdinReadText,
+        HostCallId::StdoutWrite => CapabilityKind::StdoutWrite,
+        HostCallId::StderrWrite => CapabilityKind::StderrWrite,
+        HostCallId::PathInspect => CapabilityKind::PathInspect,
+        HostCallId::FsRead => CapabilityKind::FsRead,
+        HostCallId::FsWrite => CapabilityKind::FsWrite,
+        HostCallId::TimeDuration => CapabilityKind::TimeDuration,
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilitySurfaceClass {
     StableV1,
+    FoundationApplicationV0,
     PlannedPostStable,
 }
 
@@ -161,7 +201,23 @@ pub const fn capability_surface_class(kind: CapabilityKind) -> CapabilitySurface
         CapabilityKind::StateUpdate => CapabilitySurfaceClass::PlannedPostStable,
         CapabilityKind::EventPost => CapabilitySurfaceClass::PlannedPostStable,
         CapabilityKind::ClockRead => CapabilitySurfaceClass::PlannedPostStable,
+        CapabilityKind::ArgsRead
+        | CapabilityKind::StdinReadText
+        | CapabilityKind::StdoutWrite
+        | CapabilityKind::StderrWrite
+        | CapabilityKind::PathInspect
+        | CapabilityKind::FsRead
+        | CapabilityKind::FsWrite
+        | CapabilityKind::TimeDuration => CapabilitySurfaceClass::FoundationApplicationV0,
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplicationCapabilityProfile {
+    Pure,
+    CliReadOnly,
+    CliFileTransform,
+    UiBounded,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -350,6 +406,35 @@ impl CapabilityManifest {
         manifest.allow(CapabilityKind::PulseEmit);
         manifest
     }
+
+    pub fn for_application_profile(profile: ApplicationCapabilityProfile) -> Self {
+        let mut manifest = Self::new();
+        match profile {
+            ApplicationCapabilityProfile::Pure => {}
+            ApplicationCapabilityProfile::CliReadOnly
+            | ApplicationCapabilityProfile::CliFileTransform => {
+                for capability in [
+                    CapabilityKind::ArgsRead,
+                    CapabilityKind::StdinReadText,
+                    CapabilityKind::StdoutWrite,
+                    CapabilityKind::StderrWrite,
+                    CapabilityKind::PathInspect,
+                    CapabilityKind::FsRead,
+                    CapabilityKind::TimeDuration,
+                ] {
+                    manifest.allow(capability);
+                }
+                if profile == ApplicationCapabilityProfile::CliFileTransform {
+                    manifest.allow(CapabilityKind::FsWrite);
+                }
+            }
+            ApplicationCapabilityProfile::UiBounded => {
+                manifest.allow(CapabilityKind::ControlledObservationSink);
+                manifest.allow(CapabilityKind::TimeDuration);
+            }
+        }
+        manifest
+    }
 }
 
 impl Default for CapabilityManifest {
@@ -476,5 +561,34 @@ mod tests {
             .expect_err("must deny");
         assert_eq!(denied.call, Some(HostCallId::PulseEmit));
         assert_eq!(denied.capability, CapabilityKind::PulseEmit);
+    }
+
+    #[test]
+    fn application_capability_ids_are_exact() {
+        assert_eq!(CapabilityKind::ArgsRead.id(), "args.read");
+        assert_eq!(CapabilityKind::StdinReadText.id(), "stdin.read_text");
+        assert_eq!(CapabilityKind::StdoutWrite.id(), "stdout.write");
+        assert_eq!(CapabilityKind::StderrWrite.id(), "stderr.write");
+        assert_eq!(CapabilityKind::PathInspect.id(), "path.inspect");
+        assert_eq!(CapabilityKind::FsRead.id(), "fs.read");
+        assert_eq!(CapabilityKind::FsWrite.id(), "fs.write");
+        assert_eq!(CapabilityKind::TimeDuration.id(), "time.duration");
+    }
+
+    #[test]
+    fn application_profiles_are_deny_by_default_and_write_is_narrow() {
+        let pure = CapabilityManifest::for_application_profile(ApplicationCapabilityProfile::Pure);
+        assert!(!pure.allows(CapabilityKind::ArgsRead));
+
+        let read_only =
+            CapabilityManifest::for_application_profile(ApplicationCapabilityProfile::CliReadOnly);
+        assert!(read_only.allows(CapabilityKind::FsRead));
+        assert!(!read_only.allows(CapabilityKind::FsWrite));
+
+        let transform = CapabilityManifest::for_application_profile(
+            ApplicationCapabilityProfile::CliFileTransform,
+        );
+        assert!(transform.allows(CapabilityKind::FsRead));
+        assert!(transform.allows(CapabilityKind::FsWrite));
     }
 }

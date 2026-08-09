@@ -1,8 +1,8 @@
 use super::*;
 use crate::semcode_format::{
     write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC10,
-    MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6,
-    MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+    MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17, MAGIC2, MAGIC3, MAGIC4, MAGIC5,
+    MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
@@ -1079,7 +1079,10 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // require_ownership_section: whenever the chosen header includes CAP_OWNERSHIP_PATHS,
     // every function must have an OWN0 section (even if empty) so the verifier check passes.
     let require_ownership_section;
-    if has_v16_stdout_instr(funcs) {
+    if has_v17_application_instr(funcs) {
+        out.extend_from_slice(&MAGIC17);
+        require_ownership_section = true;
+    } else if has_v16_stdout_instr(funcs) {
         out.extend_from_slice(&MAGIC16);
         require_ownership_section = true;
     } else if has_v15_prng_instr(funcs) {
@@ -1866,6 +1869,28 @@ fn has_v16_stdout_instr(funcs: &[IrFunction]) -> bool {
         f.instrs
             .iter()
             .any(|i| matches!(i, IrInstr::Call { name, .. } if name == "print"))
+    })
+}
+
+fn has_v17_application_instr(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.instrs.iter().any(|i| {
+            matches!(
+                i,
+                IrInstr::Call { name, .. }
+                    if matches!(
+                        name.as_str(),
+                        "args_read"
+                            | "stdin_read_text"
+                            | "stdout_write"
+                            | "stderr_write"
+                            | "path_inspect"
+                            | "fs_read_text"
+                            | "fs_write_text"
+                            | "time_duration_ms"
+                    )
+            )
+        })
     })
 }
 

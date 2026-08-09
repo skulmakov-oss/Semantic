@@ -801,6 +801,14 @@ fn display_capability_kind(kind: CapabilityKind) -> &'static str {
         CapabilityKind::StateUpdate => "StateUpdate",
         CapabilityKind::EventPost => "EventPost",
         CapabilityKind::ClockRead => "ClockRead",
+        CapabilityKind::ArgsRead => "ArgsRead",
+        CapabilityKind::StdinReadText => "StdinReadText",
+        CapabilityKind::StdoutWrite => "StdoutWrite",
+        CapabilityKind::StderrWrite => "StderrWrite",
+        CapabilityKind::PathInspect => "PathInspect",
+        CapabilityKind::FsRead => "FsRead",
+        CapabilityKind::FsWrite => "FsWrite",
+        CapabilityKind::TimeDuration => "TimeDuration",
     }
 }
 
@@ -825,6 +833,14 @@ fn parse_capability_kind(raw: &str) -> Result<CapabilityKind, AuditReplayArchive
         "StateUpdate" => Ok(CapabilityKind::StateUpdate),
         "EventPost" => Ok(CapabilityKind::EventPost),
         "ClockRead" => Ok(CapabilityKind::ClockRead),
+        "ArgsRead" => Ok(CapabilityKind::ArgsRead),
+        "StdinReadText" => Ok(CapabilityKind::StdinReadText),
+        "StdoutWrite" => Ok(CapabilityKind::StdoutWrite),
+        "StderrWrite" => Ok(CapabilityKind::StderrWrite),
+        "PathInspect" => Ok(CapabilityKind::PathInspect),
+        "FsRead" => Ok(CapabilityKind::FsRead),
+        "FsWrite" => Ok(CapabilityKind::FsWrite),
+        "TimeDuration" => Ok(CapabilityKind::TimeDuration),
         _ => Err(AuditReplayArchiveFormatError::new(
             "unknown capability kind in archive",
         )),

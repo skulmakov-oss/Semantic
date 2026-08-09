@@ -15,6 +15,7 @@ pub const MAGIC13: [u8; 8] = *b"SEMCOD13";
 pub const MAGIC14: [u8; 8] = *b"SEMCOD14";
 pub const MAGIC15: [u8; 8] = *b"SEMCOD15";
 pub const MAGIC16: [u8; 8] = *b"SEMCOD16";
+pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -34,6 +35,14 @@ pub const CAP_SEQUENCE_ITERATION: u32 = 1 << 14;
 pub const CAP_MAP_VALUES: u32 = 1 << 15;
 pub const CAP_PRNG: u32 = 1 << 16;
 pub const CAP_STDOUT: u32 = 1 << 17;
+pub const CAP_ARGS_READ: u32 = 1 << 18;
+pub const CAP_STDIN_READ_TEXT: u32 = 1 << 19;
+pub const CAP_STDOUT_WRITE: u32 = 1 << 20;
+pub const CAP_STDERR_WRITE: u32 = 1 << 21;
+pub const CAP_PATH_INSPECT: u32 = 1 << 22;
+pub const CAP_FS_READ: u32 = 1 << 23;
+pub const CAP_FS_WRITE: u32 = 1 << 24;
+pub const CAP_TIME_DURATION: u32 = 1 << 25;
 
 pub const OWNERSHIP_SECTION_TAG: [u8; 4] = *b"OWN0";
 pub const OWNERSHIP_EVENT_KIND_BORROW: u8 = 0;
@@ -313,11 +322,26 @@ pub const HEADER_V16: SemcodeHeaderSpec = SemcodeHeaderSpec {
         | CAP_STDOUT,
 };
 
+pub const HEADER_V17: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC17,
+    epoch: 0,
+    rev: 18,
+    capabilities: HEADER_V16.capabilities
+        | CAP_ARGS_READ
+        | CAP_STDIN_READ_TEXT
+        | CAP_STDOUT_WRITE
+        | CAP_STDERR_WRITE
+        | CAP_PATH_INSPECT
+        | CAP_FS_READ
+        | CAP_FS_WRITE
+        | CAP_TIME_DURATION,
+};
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
-        HEADER_V15, HEADER_V16,
+        HEADER_V15, HEADER_V16, HEADER_V17,
     ]
 }
 

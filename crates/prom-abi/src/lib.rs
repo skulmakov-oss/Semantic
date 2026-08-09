@@ -14,6 +14,14 @@ pub enum HostCallId {
     StateUpdate,
     EventPost,
     ClockRead,
+    ArgsRead,
+    StdinReadText,
+    StdoutWrite,
+    StderrWrite,
+    PathInspect,
+    FsRead,
+    FsWrite,
+    TimeDuration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +40,7 @@ pub enum DeterminismClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostCallStability {
     StableV1,
+    FoundationApplicationV0,
     PlannedPostStable,
 }
 
@@ -95,6 +104,26 @@ pub const fn descriptor_for_call(id: HostCallId) -> HostCallDescriptor {
             returns_value: true,
             stability: HostCallStability::PlannedPostStable,
         },
+        HostCallId::ArgsRead
+        | HostCallId::StdinReadText
+        | HostCallId::PathInspect
+        | HostCallId::FsRead
+        | HostCallId::TimeDuration => HostCallDescriptor {
+            id,
+            effect: EffectClass::HostQuery,
+            determinism: DeterminismClass::HostBound,
+            returns_value: true,
+            stability: HostCallStability::FoundationApplicationV0,
+        },
+        HostCallId::StdoutWrite | HostCallId::StderrWrite | HostCallId::FsWrite => {
+            HostCallDescriptor {
+                id,
+                effect: EffectClass::HostWrite,
+                determinism: DeterminismClass::HostBound,
+                returns_value: false,
+                stability: HostCallStability::FoundationApplicationV0,
+            }
+        }
     }
 }
 
@@ -154,6 +183,23 @@ pub trait PrometheusHostAbi {
     fn state_update(&mut self, key: &str, value: AbiValue) -> Result<(), AbiError>;
     fn event_post(&mut self, signal: &str) -> Result<(), AbiError>;
     fn clock_read(&mut self) -> Result<u32, AbiError>;
+}
+
+/// Explicit host boundary for Foundation application programs.
+///
+/// A source request and a capability manifest are not grants. The runtime must
+/// check the matching capability before invoking any method on this trait.
+/// Read results are host-bound observations and must be captured by a replay
+/// layer before a later write is admitted.
+pub trait ApplicationHostAbi {
+    fn args_read(&mut self, index: u32) -> Result<String, AbiError>;
+    fn stdin_read_text(&mut self) -> Result<String, AbiError>;
+    fn stdout_write(&mut self, text: &str) -> Result<(), AbiError>;
+    fn stderr_write(&mut self, text: &str) -> Result<(), AbiError>;
+    fn path_inspect(&mut self, path: &str) -> Result<bool, AbiError>;
+    fn fs_read_text(&mut self, path: &str) -> Result<String, AbiError>;
+    fn fs_write_text(&mut self, path: &str, text: &str) -> Result<(), AbiError>;
+    fn time_duration_millis(&mut self) -> Result<u32, AbiError>;
 }
 
 #[derive(Debug, Default)]
@@ -256,6 +302,14 @@ mod tests {
             HostCallStability::PlannedPostStable
         );
         assert!(descriptor_for_call(HostCallId::ClockRead).returns_value);
+        assert_eq!(
+            descriptor_for_call(HostCallId::FsWrite).stability,
+            HostCallStability::FoundationApplicationV0
+        );
+        assert_eq!(
+            descriptor_for_call(HostCallId::ArgsRead).effect,
+            EffectClass::HostQuery
+        );
     }
 
     #[test]

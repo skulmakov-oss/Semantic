@@ -1,0 +1,8 @@
+fn main() {
+    let input_path: text = args_read(0u32);
+    let output_path: text = args_read(1u32);
+    let input: text = fs_read_text(input_path);
+    fs_write_text(output_path, input + "\nsemantic.foundation.application/0.1\n");
+    stdout_write("transform complete\n");
+    return;
+}

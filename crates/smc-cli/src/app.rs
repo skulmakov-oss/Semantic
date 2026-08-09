@@ -1,3 +1,4 @@
+use crate::application_host::CliApplicationHost;
 use crate::executable_bundle::read_source_with_package_admission;
 use crate::incremental::{
     emit_trace, module_graph_fingerprint, module_graph_module_count, read_graph_hash,
@@ -17,7 +18,7 @@ use prom_cap::{
         require_hello_observation_sink_capability, HelloObservationCapabilityContext,
         HelloObservationCapabilityDecision,
     },
-    CapabilityKind, CapabilityManifest,
+    ApplicationCapabilityProfile, CapabilityKind, CapabilityManifest,
 };
 use sm_emit::{
     compile_program_to_semcode, compile_program_to_semcode_with_options_debug, CompileProfile,
@@ -26,10 +27,13 @@ use sm_emit::{
 use sm_front::{lex, parse_logos_program_with_profile, parse_program_with_profile, ParserProfile};
 use sm_ir::{compile_program_to_ir_with_options_and_profile, lower_logos_laws_to_ir};
 use sm_runtime_core::hello_observation_sink::HelloObservationClass;
-use sm_runtime_core::ExecutionContext;
+use sm_runtime_core::{ExecutionConfig, ExecutionContext};
 use sm_sema::{check_file_with_provider_and_profile, check_source_with_profile, ModuleProvider};
-use sm_verify::verify_semcode;
-use sm_vm::{disasm_semcode, run_semcode_collecting_hello_observations};
+use sm_verify::{verify_semcode, verify_semcode_token};
+use sm_vm::{
+    disasm_semcode, run_semcode_collecting_hello_observations,
+    run_verified_entry_semcode_with_application_host_and_capabilities_and_config, RuntimeError,
+};
 use std::collections::HashSet;
 use std::env;
 use std::io::{self, Write};
@@ -2576,10 +2580,52 @@ fn render_controlled_observation_envelope(
 }
 
 fn cmd_run(args: &[String]) -> Result<(), String> {
-    if args.len() != 1 {
-        return Err("usage: smc run <input.sm|project-root>".to_string());
+    if args.len() == 1 {
+        return cmd_run_controlled_observation(&args[0]);
     }
-    let input = args[0].as_str();
+    let options = parse_application_run_options(args)?;
+    let input = options.input.as_str();
+    reject_leading_unknown_flag(input)?;
+    let input_path = Path::new(input);
+    let root = if input_path.is_dir() {
+        resolve_project_root_check_entry(input_path)?
+    } else {
+        input_path.to_path_buf()
+    };
+    let src = read_source_with_package_admission(&root)?;
+    let bytes = compile_program_to_semcode(&src).map_err(|e| e.to_string())?;
+    let token = verify_semcode_token(&bytes).map_err(|error| error.to_string())?;
+    let entry = token
+        .require_entry("main")
+        .map_err(|error| error.to_string())?;
+    let capabilities = CapabilityManifest::for_application_profile(options.profile);
+    let mut host = CliApplicationHost::new(
+        &options.root,
+        options.application_args,
+        options.duration_millis,
+    )?;
+    let result = run_verified_entry_semcode_with_application_host_and_capabilities_and_config(
+        &entry,
+        &mut host,
+        &capabilities,
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+    );
+    match &result {
+        Err(RuntimeError::CapabilityDenied(denied)) => {
+            if let Some(call) = denied.call {
+                host.record_denied(call);
+            }
+        }
+        Err(RuntimeError::HostAbi(denied)) => host.record_denied(denied.call),
+        _ => {}
+    }
+    for record in host.audit() {
+        eprintln!("{}", record.render());
+    }
+    result.map_err(|error| error.to_string())
+}
+
+fn cmd_run_controlled_observation(input: &str) -> Result<(), String> {
     reject_leading_unknown_flag(input)?;
     let input_path = Path::new(input);
     let root = if input_path.is_dir() {
@@ -2594,6 +2640,82 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         println!("{line}");
     }
     Ok(())
+}
+
+struct ApplicationRunOptions {
+    input: String,
+    profile: ApplicationCapabilityProfile,
+    root: PathBuf,
+    duration_millis: Option<u32>,
+    application_args: Vec<String>,
+}
+
+fn parse_application_run_options(args: &[String]) -> Result<ApplicationRunOptions, String> {
+    if args.is_empty() {
+        return Err(application_run_usage());
+    }
+    let input = args[0].clone();
+    let mut profile = None;
+    let mut root = None;
+    let mut duration_millis = None;
+    let mut application_args = Vec::new();
+    let mut index = 1;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--profile" => {
+                index += 1;
+                let value = args.get(index).ok_or_else(application_run_usage)?;
+                profile =
+                    Some(match value.as_str() {
+                        "pure" => ApplicationCapabilityProfile::Pure,
+                        "cli-read-only" => ApplicationCapabilityProfile::CliReadOnly,
+                        "cli-file-transform" => ApplicationCapabilityProfile::CliFileTransform,
+                        "ui-bounded" => return Err(
+                            "ui-bounded is a catalogued profile and is not a CLI execution mode"
+                                .to_string(),
+                        ),
+                        _ => return Err(format!("unknown application profile '{value}'")),
+                    });
+            }
+            "--root" => {
+                index += 1;
+                root = Some(PathBuf::from(
+                    args.get(index).ok_or_else(application_run_usage)?,
+                ));
+            }
+            "--duration-ms" => {
+                index += 1;
+                duration_millis = Some(
+                    args.get(index)
+                        .ok_or_else(application_run_usage)?
+                        .parse::<u32>()
+                        .map_err(|_| "--duration-ms must be a u32 value".to_string())?,
+                );
+            }
+            "--" => {
+                application_args.extend_from_slice(&args[index + 1..]);
+                break;
+            }
+            other => {
+                return Err(format!(
+                    "unknown run option '{other}'\n{}",
+                    application_run_usage()
+                ))
+            }
+        }
+        index += 1;
+    }
+    Ok(ApplicationRunOptions {
+        input,
+        profile: profile.ok_or_else(application_run_usage)?,
+        root: root.ok_or_else(application_run_usage)?,
+        duration_millis,
+        application_args,
+    })
+}
+
+fn application_run_usage() -> String {
+    "usage: smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [-- <application-args...>]".to_string()
 }
 
 fn cmd_verify(args: &[String]) -> Result<(), String> {
@@ -2661,6 +2783,7 @@ fn usage() -> String {
         "  smc work <subject> <intent> [to <target>] [with <profile>]",
         "  smc verify <input.smc>",
         "  smc run <input.sm|project-root>",
+        "  smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [-- <application-args...>]",
         "  smc run-smc <input.smc>",
         "  smc disasm <input.smc>",
         "  smc look ui frame --from <snapshot> [--frame <n>] [--format text|draw-json] [--out <path>]",
