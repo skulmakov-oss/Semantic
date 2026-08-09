@@ -1,6 +1,7 @@
 # Logos Surface Specification
 
-Status: draft v0
+Status: experimental declarative profile v0.1
+Contract identifier: `semantic.logos.declarative/0.1`
 Primary frontend owners: `sm-front`, `sm-sema`
 
 ## Purpose
@@ -9,6 +10,20 @@ This document defines the current declarative Logos-oriented source surface used
 for system, entity, and law descriptions inside Semantic.
 
 It complements the Rust-like executable surface described in `syntax.md`.
+
+## Authoritative Relationship
+
+SSF-02 selects **Model B: declarative Logos profile**.
+
+- Rust-like Semantic owns executable behavior and the SemCode/verifier/VM path.
+- Logos describes systems, entities, laws, and policy-shaped `When` fragments.
+- Logos parsing, semantic analysis, and `LogosIrLaw` projection do not imply
+  executable lowering.
+- No tool may reinterpret Logos text fragments as Rust-like expressions or
+  bypass verifier-first execution.
+
+The decision evidence and rejected Model A alternative are recorded in
+`../roadmap/stable_foundation/rustlike_logos_coherence_decision.md`.
 
 ## Current Top-Level Forms
 
@@ -94,6 +109,48 @@ Current rule:
 This behavior is part of the current public source contract and should not be
 changed silently.
 
+## Tool and Projection Contract
+
+The admitted Logos workflow is inspection-only:
+
+| Stage | Current status |
+|---|---|
+| Parse to `LogosProgram` | implemented and qualified |
+| Semantic analysis | implemented with Logos diagnostics |
+| Project laws to `LogosIrLaw` | implemented and qualified |
+| Lower to Rust-like function IR or SemCode | unsupported |
+| Verifier/VM execution | unsupported because no Logos SemCode is produced |
+
+`LogosLaw` and `LogosWhen` retain source marks in the frontend model. The
+current `LogosIrLaw` projection contains only law name, priority, and `When`
+count. It is an inspection summary, not a generated executable or a source-map
+promise for future binding.
+
+Current CLI support is `dump-ast`, `dump-ir --profile logos`, and
+`hash-ir --profile logos`. SemCode-producing and execution commands reject
+Logos input before artifact emission.
+
+## Files, Modules, and Packages
+
+- one source file belongs to one surface for the current tool invocation;
+- Rust-like items and Logos declarations may not be mixed in one admitted file;
+- Logos has no Stable Foundation package/module or cross-profile import model;
+- Rust-like package behavior remains owned by SSF-05 and SSF-06;
+- any future binding must be an explicit versioned validated artifact, not an
+  implicit import or a second execution authority.
+
+## Maturity and Version Policy
+
+`semantic.logos.declarative/0.1` is **Experimental**. The identifier versions
+the declarative grammar, semantic checks, and inspection projection described
+here; it is not a stable compatibility or execution promise. Incompatible
+changes require a new contract identifier version and updated fixtures.
+
+This status is separate from Rust-like
+`semantic.foundation.source/1.0`, which is the qualified-limited executable
+Stable Foundation candidate. The shared parser-profile version is an admission
+envelope and must not be used to collapse these maturity states.
+
 ## Policy Rule
 
 The Logos surface is policy-gated:
@@ -109,6 +166,8 @@ The current Logos contract does not yet claim stable support for:
 - rich user-defined statement semantics inside `When` beyond the current
   text-fragment contract
 - broad legacy directives as first-class long-term source features
+- executable lowering, SemCode production, verifier admission, or VM execution
+- mixed Rust-like/Logos files or implicit cross-profile imports
 
 ## Contract Rule
 

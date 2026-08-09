@@ -42,7 +42,8 @@ spelling.
 - The bounded Gate 1 contour remains **Qualified limited release**.
 - Current `main` contains wider qualified and unqualified implementation that
   remains unpromoted.
-- Logos remains an experimental declarative profile until SSF-02.
+- Logos is the separate experimental declarative profile selected by SSF-02;
+  it does not produce SemCode or share Rust-like execution authority.
 - Named `std.*` modules, the controlled application capability set, lock and
   provenance records, a canonical language server, and Foundation migration
   tooling remain roadmap work.

@@ -322,7 +322,7 @@ Law "CheckSignal" [priority 10]:
   `priority`, not by source order (`logos.md`).
 - `System` parameters use `name = value` (the current parser's accepted form —
   `logos.md`'s illustrative `param: type` spelling is not what
-  `parse_logos_system` accepts; this document reflects the executable
+  `parse_logos_system` accepts; this document reflects the implemented
   parser).
 
 ## C. Permitted Alternative Author Style

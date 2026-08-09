@@ -1,0 +1,6 @@
+fn main() -> i32 {
+    return 0;
+}
+
+Law "MixedAuthority" [priority 1]:
+    When T -> T

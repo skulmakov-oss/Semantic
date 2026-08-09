@@ -257,7 +257,7 @@ fn cmd_work_seal(frame: &WorkControlFrame) -> Result<(), String> {
 fn cmd_compile(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "usage: smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]"
+            "usage: smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust] [--opt-level O0|O1] [--debug-symbols] [--metrics]"
                 .to_string(),
         );
     }
@@ -265,7 +265,7 @@ fn cmd_compile(args: &[String]) -> Result<(), String> {
     reject_leading_unknown_flag(input)?;
     if args.len() < 3 {
         return Err(
-            "usage: smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]"
+            "usage: smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust] [--opt-level O0|O1] [--debug-symbols] [--metrics]"
                 .to_string(),
         );
     }
@@ -1121,7 +1121,7 @@ fn cmd_dump_ir(args: &[String]) -> Result<(), String> {
 fn cmd_dump_bytecode(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "usage: smc dump-bytecode <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]"
+            "usage: smc dump-bytecode <input.sm|project-root> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols]"
                 .to_string(),
         );
     }
@@ -1890,7 +1890,7 @@ fn cmd_hash_ir(args: &[String]) -> Result<(), String> {
 fn cmd_hash_smc(args: &[String]) -> Result<(), String> {
     if args.is_empty() {
         return Err(
-            "usage: smc hash-smc <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--trace-cache]"
+            "usage: smc hash-smc <input.sm|project-root> [--profile auto|rust] [--opt-level O0|O1|--opt] [--trace-cache]"
                 .to_string(),
         );
     }
@@ -2643,17 +2643,17 @@ fn cmd_disasm(args: &[String]) -> Result<(), String> {
 fn usage() -> String {
     [
         "Semantic Language toolchain v0",
-        "  smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1] [--debug-symbols] [--metrics]",
+        "  smc compile <input.sm|project-root> -o <out.smc> [--profile auto|rust] [--opt-level O0|O1] [--debug-symbols] [--metrics]",
         "  smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]",
         "  smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]",
         "  smc watch <input.sm> [--metrics] [--color auto|always|never]",
         "  smc fmt [--check] <path>",
         "  smc dump-ast <input.sm>",
         "  smc dump-ir <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
-        "  smc dump-bytecode <input.sm> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
+        "  smc dump-bytecode <input.sm> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols]",
         "  smc hash-ast <input.sm|project-root>",
         "  smc hash-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]",
-        "  smc hash-smc <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]",
+        "  smc hash-smc <input.sm|project-root> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols]",
         "  smc snapshots [--update]",
         "  smc features",
         "  smc explain <error-code|--list>",

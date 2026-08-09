@@ -47,17 +47,17 @@ The admitted `smc` command surface is currently:
 
 Current accepted usage forms are:
 
-- `smc compile <input.sm|project-root> -o|--out <out.smc> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--metrics]`
+- `smc compile <input.sm|project-root> -o|--out <out.smc> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols] [--metrics]`
 - `smc check <input.sm|project-root> [--no-cache] [--trace-cache] [--metrics] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc lint <input.sm> [--no-cache] [--trace-cache] [--deny warnings|<CODE>] [--color auto|always|never]`
 - `smc watch <input.sm> [--metrics] [--color auto|always|never]`
 - `smc fmt [--check] <path>`
 - `smc dump-ast <input.sm|project-root>`
 - `smc dump-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]`
-- `smc dump-bytecode <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols]`
+- `smc dump-bytecode <input.sm|project-root> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols]`
 - `smc hash-ast <input.sm|project-root>`
 - `smc hash-ir <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt]`
-- `smc hash-smc <input.sm|project-root> [--profile auto|rust|logos] [--opt-level O0|O1|--opt] [--debug-symbols] [--trace-cache]`
+- `smc hash-smc <input.sm|project-root> [--profile auto|rust] [--opt-level O0|O1|--opt] [--debug-symbols] [--trace-cache]`
 - `smc snapshots [--update]`
 - `smc features`
 - `smc explain <error-code|--list>`
@@ -76,6 +76,26 @@ Current accepted usage forms are:
 - `smc hub audit --request <request-id>`
 
 This draft does not claim that every command is permanently frozen, but it defines the current public CLI surface that tooling may rely on.
+
+## Rust-like / Logos Profile Boundary
+
+Rust-like Semantic is the only source profile admitted to SemCode-producing and
+execution commands. Logos is the separate experimental declarative profile
+defined by `semantic.logos.declarative/0.1`.
+
+- `dump-ast` accepts either source surface for inspection.
+- `dump-ir --profile logos` and `hash-ir --profile logos` expose the
+  non-executable `LogosIrLaw` projection.
+- `compile`, `dump-bytecode`, `hash-smc`, `verify`, `run`, and `run-smc` do not
+  form a Logos execution path.
+- Explicit or auto-detected Logos input reaching a SemCode-producing path is
+  rejected before artifact emission with the existing Logos/SemCode boundary
+  diagnostic.
+- A file that mixes Rust-like items with Logos declarations is unsupported and
+  is rejected; tools do not split it into two hidden compilation units.
+
+The shared `ParserProfile::foundation_default()` admission envelope does not
+give the two source profiles equal maturity or execution authority.
 
 ## Not In The Current Surface
 
