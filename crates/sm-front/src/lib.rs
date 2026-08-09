@@ -143,6 +143,17 @@ pub type RecordTable = BTreeMap<SymbolId, RecordDecl>;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub type AdtTable = BTreeMap<SymbolId, AdtDecl>;
 
+const APPLICATION_BUILTIN_NAMES: &[&str] = &[
+    "args_read",
+    "stdin_read_text",
+    "stdout_write",
+    "stderr_write",
+    "path_inspect",
+    "fs_read_text",
+    "fs_write_text",
+    "time_duration_ms",
+];
+
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub type SchemaTable = BTreeMap<SymbolId, SchemaDecl>;
 
@@ -472,13 +483,17 @@ pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
     let adt_table = build_adt_table(program)?;
     let mut out = BTreeMap::new();
     for f in &program.functions {
+        let name = resolve_symbol_name(&program.arena, f.name)?;
+        if APPLICATION_BUILTIN_NAMES.contains(&name) {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!("function name '{name}' is reserved for the application boundary"),
+            });
+        }
         if out.contains_key(&f.name) {
             return Err(FrontendError {
                 pos: 0,
-                message: format!(
-                    "duplicate function '{}'",
-                    resolve_symbol_name(&program.arena, f.name)?
-                ),
+                message: format!("duplicate function '{name}'"),
             });
         }
         out.insert(

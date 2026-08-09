@@ -23,6 +23,17 @@ fn main() {
 }
 "#;
 
+const ORDINARY_LOCAL_CALL: &str = r#"
+fn local_echo(value: text) -> text {
+    return value;
+}
+
+fn main() {
+    assert(local_echo("local") == "local");
+    return;
+}
+"#;
+
 #[test]
 fn published_contract_and_example_name_the_exact_boundary() {
     let contract = include_str!("../docs/spec/controlled_application_boundary_v0.md");
@@ -41,9 +52,49 @@ fn published_contract_and_example_name_the_exact_boundary() {
     }
     assert!(contract.contains("semantic.foundation.application/0.1"));
     assert!(contract.contains("Network, child process, ambient environment"));
+    assert!(contract.contains("rejected before lowering"));
     assert!(example.contains("args_read"));
     assert!(example.contains("fs_read_text"));
     assert!(example.contains("fs_write_text"));
+}
+
+#[test]
+fn application_builtin_names_cannot_be_declared_as_user_functions() {
+    for (name, source) in [
+        (
+            "fs_write_text",
+            r#"
+fn fs_write_text(path: text, value: text) {
+    return;
+}
+
+fn main() {
+    fs_write_text("local", "payload");
+    return;
+}
+"#,
+        ),
+        (
+            "args_read",
+            r#"
+fn args_read(index: u32) -> text {
+    return "local";
+}
+
+fn main() {
+    assert(args_read(0u32) == "local");
+    return;
+}
+"#,
+        ),
+    ] {
+        let error = compile_program_to_semcode(source)
+            .expect_err("application builtin name must reject before lowering");
+        assert_eq!(
+            error.message,
+            format!("function name '{name}' is reserved for the application boundary")
+        );
+    }
 }
 
 #[derive(Default)]
@@ -134,6 +185,38 @@ fn args_read_transform_write_is_exact_and_replay_deterministic() {
         first.writes,
         vec![("output.txt".to_string(), "payload!".to_string())]
     );
+}
+
+#[test]
+fn ordinary_user_function_still_dispatches_locally() {
+    let bytes = compile_program_to_semcode(ORDINARY_LOCAL_CALL).expect("compile local call");
+    let mut host = MemoryApplicationHost::default();
+    run_verified_semcode_with_application_host_and_capabilities_and_config(
+        &bytes,
+        "main",
+        &mut host,
+        &CapabilityManifest::for_application_profile(ApplicationCapabilityProfile::Pure),
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+    )
+    .expect("ordinary local call must run under Pure");
+    assert!(host.calls.is_empty());
+}
+
+#[test]
+fn pure_profile_denies_application_builtin_before_host_dispatch() {
+    let mut host = MemoryApplicationHost {
+        args: vec!["input.txt".to_string(), "output.txt".to_string()],
+        input: "payload".to_string(),
+        ..MemoryApplicationHost::default()
+    };
+    let error = run_flow(&mut host, ApplicationCapabilityProfile::Pure)
+        .expect_err("Pure must deny application builtins");
+    let RuntimeError::CapabilityDenied(denied) = error else {
+        panic!("unexpected error: {error:?}");
+    };
+    assert_eq!(denied.capability, CapabilityKind::ArgsRead);
+    assert_eq!(denied.call, Some(HostCallId::ArgsRead));
+    assert!(host.calls.is_empty());
 }
 
 #[test]
