@@ -36,6 +36,10 @@ The target is deliberately narrower than current `main`.
 
 ### Language core
 
+SSF-01 resolves this candidate into the narrower versioned contract in
+`docs/spec/foundation_source_profile_v1.md`. Later phases may consume that
+contract but may not silently widen it.
+
 - one versioned Rust-like executable profile;
 - functions and an explicit program entrypoint;
 - immutable and mutable bindings with deterministic assignment rules;
