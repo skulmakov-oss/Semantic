@@ -45,6 +45,7 @@ Current supported header family:
 - `SEMCOD11`
 - `SEMCOD12`
 - `SEMCOD13`
+- `SEMCOD14`
 
 Observed runtime support in the current toolchain:
 
@@ -62,6 +63,7 @@ Observed runtime support in the current toolchain:
 - `SEMCOD11`: epoch `0`, revision `12`
 - `SEMCOD12`: epoch `0`, revision `13`
 - `SEMCOD13`: epoch `0`, revision `14`
+- `SEMCOD14`: epoch `0`, revision `15`
 
 Header responsibilities:
 
@@ -211,6 +213,18 @@ Discipline rules:
 - does not claim executable user-defined `Iterable` impl dispatch, ADT payload
   iteration, schema iteration, or non-frame-local iterator state
 
+`SEMCOD14`
+
+- promoted contract used when emitted program usage requires the deterministic
+  functional `Map(K, V)` empty/get/set/contains operations
+- keeps `SEMCOD13` fixed for artifacts that do not use `Map(K, V)`
+- uses the fixed-width 8-byte header magic form `SEMCOD14`
+- adds the deterministic execution opcodes `MAP_EMPTY`, `MAP_CONTAINS`,
+  `MAP_GET`, and `MAP_SET`
+- requires `CAP_MAP_VALUES` when any of those opcodes is present
+- does not claim mutable in-place map update, iteration, or non-frame-local
+  map state beyond the admitted functional empty/get/set/contains contour
+
 Important rule:
 
 - header selection is derived from actual emitted usage, not from profile
@@ -243,6 +257,7 @@ Current canonical capability families:
 - `CAP_CLOSURE_VALUES`
 - `CAP_OWNERSHIP_PATHS`
 - `CAP_OWNERSHIP_FIELD_PATHS`
+- `CAP_MAP_VALUES`
 - `CAP_DEBUG_SYMBOLS`
 
 Contract rule:
