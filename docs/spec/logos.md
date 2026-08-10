@@ -41,13 +41,15 @@ they are not the primary long-term public contract for the Logos surface.
 Current `System` form:
 
 ```sm
-System Name(param: type, ...)
+System Name(param = value, ...)
 ```
 
 Current rule:
 
 - `System` declares one top-level system descriptor
-- parameters are explicit and typed
+- parameters are `name = value` pairs (an identifier or numeric-literal value),
+  not typed parameter declarations; `parse_logos_system` in `sm-front` admits
+  `name`/`=`/value, not `name`/`:`/type
 
 ## Entity
 
