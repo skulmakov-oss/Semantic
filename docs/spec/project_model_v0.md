@@ -45,6 +45,11 @@ change verifier admission.
   recursively, in normalized relative-path order. Each file is a standalone
   program with `fn main()`, compiled, verified, and executed under the `pure`
   application profile. Empty test sets fail explicitly.
+- Discovered test source paths must be valid UTF-8 relative to the project
+  root; a non-UTF-8 path is rejected deterministically at discovery, before
+  sorting. Ordering is computed from the exact UTF-8 relative path, never from
+  a lossy Unicode conversion, so distinct non-UTF-8 paths can never be
+  conflated into the same sort position.
 - Symbolic-link/reparse discovery paths and paths resolving outside the project
   root are rejected. Filesystem enumeration order is never observable.
 - A direct `.sm` input remains the single-file form and needs no manifest.

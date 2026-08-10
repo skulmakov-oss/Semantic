@@ -2845,9 +2845,15 @@ fn discover_project_test_sources(project_root: &Path) -> Result<Vec<PathBuf>, St
                         path.display()
                     )
                 })?;
-                canonical.strip_prefix(root).map_err(|_| {
+                let relative = canonical.strip_prefix(root).map_err(|_| {
                     format!("test source '{}' escapes the project root", path.display())
                 })?;
+                if relative.to_str().is_none() {
+                    return Err(format!(
+                        "test source '{}' is not valid UTF-8; project test paths must be UTF-8",
+                        path.display()
+                    ));
+                }
                 tests.push(canonical);
             }
         }
@@ -2875,7 +2881,8 @@ fn discover_project_test_sources(project_root: &Path) -> Result<Vec<PathBuf>, St
     tests.sort_by_key(|path| {
         path.strip_prefix(project_root)
             .expect("discovered test remains inside project root")
-            .to_string_lossy()
+            .to_str()
+            .expect("test source path validated as UTF-8 during discovery")
             .replace('\\', "/")
     });
     Ok(tests)
