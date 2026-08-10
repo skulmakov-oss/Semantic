@@ -8816,6 +8816,12 @@ fn check_builtin_assert_stmt(
     if !is_builtin_assert_name(*name, arena, table)? {
         return Ok(false);
     }
+    if args.iter().any(|a| a.name.is_some()) {
+        return Err(FrontendError {
+            pos: 0,
+            message: "assert builtin takes exactly one positional argument".to_string(),
+        });
+    }
     if args.len() != 1 {
         return Err(FrontendError {
             pos: 0,
