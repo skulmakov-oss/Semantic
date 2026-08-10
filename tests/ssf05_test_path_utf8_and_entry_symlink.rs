@@ -100,9 +100,12 @@ fn non_utf8_test_source_paths_reject_deterministically() {
     std::fs::remove_dir_all(root).expect("remove project");
 }
 
-// Verifies the shared project-entry admission authority (admit_package_entry_module,
-// used by resolve_project_root_check_entry's callers) already rejects a project entry
-// that resolves outside the package module root, across check/compile/run.
+// resolve_project_root_check_entry_structured rejects a symlinked/reparse project
+// entry deterministically, before it is ever read, across check/compile/run --
+// regardless of whether the symlink target happens to fall under some other
+// package's manifest scope (which admit_package_entry_module's containment check
+// alone does not cover, since it only applies when a manifest is found above the
+// resolved target).
 #[cfg(unix)]
 #[test]
 fn project_entry_symlink_escaping_the_module_root_is_rejected_across_check_compile_run() {
@@ -134,7 +137,7 @@ fn project_entry_symlink_escaping_the_module_root_is_rejected_across_check_compi
         );
         assert!(
             String::from_utf8_lossy(&output.stderr)
-                .contains("outside admitted package module_root"),
+                .contains("must not be a symlink or reparse point"),
             "'{command}' unexpected stderr: {}",
             String::from_utf8_lossy(&output.stderr)
         );
