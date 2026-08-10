@@ -23,27 +23,29 @@ This document answers four release-facing questions explicitly:
 - what is promised by those artifacts
 - what is not yet promised even if it exists on current `main`
 
-## Current Published Stable Artifact Set
+## Stable-Tag Checkpoint Artifact Set
 
-The current published stable line is:
-
-- `v1.1.1`
+There is no currently evidenced published stable line. The `v1.1.1` git tag
+remains an unresolved stable-tag checkpoint: its own version-cut decision left
+exact-tag downloaded-asset smoke blocking, and no corresponding GitHub Release
+exists. It must not be described as a published stable release.
 
 The new prerelease candidate is:
 
 - `v1.2.0-beta.1`
 
-The currently published downloadable stable artifacts are:
+The downloadable artifacts prepared for the `v1.1.1` checkpoint are:
 
 | Artifact | Kind | Platform scope | Role | Validation basis |
 | --- | --- | --- | --- | --- |
-| `smc.exe` | standalone executable | Windows x64 | packaged Semantic compiler / CLI entrypoint for the published stable line | included in release bundle verification and downloaded-asset smoke validation |
-| `svm.exe` | standalone executable | Windows x64 | packaged SemCode VM / disassembler for the published stable line | included in release bundle verification and downloaded-asset smoke validation |
-| `semantic-language-windows-x64-v1.1.1.zip` | packaged archive | Windows x64 | convenience bundle containing the published `smc.exe` and `svm.exe` pair | zip contents and hashes are verified against the standalone assets |
+| `smc.exe` | standalone executable | Windows x64 | packaged Semantic compiler / CLI entrypoint prepared for the `v1.1.1` checkpoint | included in release bundle verification and downloaded-asset smoke validation |
+| `svm.exe` | standalone executable | Windows x64 | packaged SemCode VM / disassembler prepared for the `v1.1.1` checkpoint | included in release bundle verification and downloaded-asset smoke validation |
+| `semantic-language-windows-x64-v1.1.1.zip` | packaged archive | Windows x64 | convenience bundle containing the `smc.exe` and `svm.exe` pair prepared for the checkpoint | zip contents and hashes are verified against the standalone assets |
 
 ## Supported Platform Scope
 
-The published downloadable artifact promise is currently:
+If and when a stable line is published, the downloadable artifact promise is
+scoped to:
 
 - Windows x64 only
 
@@ -58,7 +60,7 @@ the same thing as a published binary-artifact promise.
 
 ## What A User Downloads
 
-For the published stable line today:
+For the `v1.1.1` stable-tag checkpoint today (not published stable):
 
 - download `smc.exe` when the standalone compiler / CLI entrypoint is needed
 - download `svm.exe` when the standalone VM / disassembler is needed
@@ -68,12 +70,13 @@ For the published stable line today:
 The release-facing meaning of those assets comes from the repository docs named
 above, not from the binary filenames alone.
 
-## What These Artifacts Currently Promise
+## What These Artifacts Currently Represent
 
-The published stable artifact set currently promises:
+The `v1.1.1` checkpoint artifact set currently represents:
 
-- the exact tagged stable line `v1.1.1`
-- the Windows x64 packaged `smc.exe` / `svm.exe` tool pair
+- the unresolved stable-tag checkpoint `v1.1.1`, not a published stable line
+- the Windows x64 packaged `smc.exe` / `svm.exe` tool pair prepared for that
+  checkpoint
 - release bundle verification through `scripts/verify_release_bundle.ps1`
 - downloaded-asset smoke validation through `scripts/verify_release_assets.ps1`
 - the current release-facing reading in:
@@ -88,8 +91,8 @@ The currently validated downloaded-asset smoke path is explicitly grounded in:
 - `svm.exe run <source>.smc`
 - `svm.exe disasm <source>.smc`
 
-That smoke baseline proves the published asset pair is packaging-valid for the
-current stable line.
+That smoke baseline proves the checkpoint asset pair is packaging-valid; it
+does not by itself make `v1.1.1` a published stable line.
 
 ## Validation Artifacts Versus User-Facing Artifacts
 
@@ -104,13 +107,15 @@ Current release-governance artifacts include:
 - release asset smoke reports emitted by `scripts/verify_release_assets.ps1`
 - the checklist and smoke matrix docs that define what those scripts must prove
 
-These artifacts exist to validate the published assets, not to widen the
+These artifacts exist to validate the checkpoint assets, not to widen any
 stable promise.
 
 ## What Is Not Yet Promised
 
-The following must not be inferred from the current published stable artifacts:
+The following must not be inferred from the current `v1.1.1` checkpoint
+artifacts:
 
+- a published stable line (none currently evidenced)
 - landed-on-`main` widenings that are not explicitly promoted
 - broader practical-programming scope beyond the current qualified contour
 - broader executable-module authoring beyond the currently qualified slice
@@ -119,8 +124,8 @@ The following must not be inferred from the current published stable artifacts:
 - Workbench beta packaging or beta smoke evidence as part of the core stable
   artifact set
 
-Current-`main` behavior and current stable artifacts are related, but they are
-not the same promise surface.
+Current-`main` behavior and the current checkpoint artifacts are related, but
+they are not the same promise surface.
 
 ## Authority And Drift Rule
 

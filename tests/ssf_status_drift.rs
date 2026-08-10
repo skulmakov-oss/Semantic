@@ -56,6 +56,8 @@ fn ssf_00_status_authorities_do_not_drift() {
         "docs/roadmap/stable_release_policy.md",
         "docs/roadmap/compatibility_statement.md",
         "docs/status/feature_maturity_matrix.md",
+        "docs/release_artifact_model.md",
+        "docs/wiki/current_status.md",
     ] {
         let current_facing = read(root, relative)
             .replace("\r\n", "\n")
@@ -63,7 +65,9 @@ fn ssf_00_status_authorities_do_not_drift() {
         assert!(
             !current_facing.contains("published stable line is `v1.1.1`")
                 && !current_facing.contains("published stable line remains:\n\n- `v1.1.1`")
-                && !current_facing.contains("current published stable line is:\n\n- `v1.1.1`"),
+                && !current_facing.contains("current published stable line is:\n\n- `v1.1.1`")
+                && !current_facing
+                    .contains("published stable line is currently:\n\n```text\nv1.1.1\n```"),
             "stale published-stable assertion remains in {relative}"
         );
     }

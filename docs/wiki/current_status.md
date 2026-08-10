@@ -38,7 +38,7 @@ audit records controlled effects where supported
 UI displays but does not become authority
 ```
 
-Semantic is not presented as a finished general-purpose ecosystem or a production-ready replacement for mainstream languages. It is a serious R&D platform with a real executable pipeline, a published stable line, a qualified limited-release contour, and additional work already landed on current `main`.
+Semantic is not presented as a finished general-purpose ecosystem or a production-ready replacement for mainstream languages. It is a serious R&D platform with a real executable pipeline, an unresolved `v1.1.1` stable-tag checkpoint (not yet published stable), a qualified limited-release contour, and additional work already landed on current `main`.
 
 ---
 
@@ -193,11 +193,10 @@ Semantic uses four explicit status families. These must not be blurred together.
 | **Landed on current `main`, not yet promised** | Implemented or benchmark-qualified, but not promoted into the stable or qualified release promise. |
 | **Out of scope** | Deliberately excluded from the current release contour. |
 
-The published stable line is currently:
-
-```text
-v1.1.1
-```
+There is no currently evidenced published stable line. The `v1.1.1` git tag
+remains an unresolved stable-tag checkpoint: its own version-cut decision left
+exact-tag downloaded-asset smoke blocking, and no corresponding GitHub Release
+exists.
 
 The key rule is:
 
