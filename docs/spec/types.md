@@ -357,7 +357,7 @@ Current honest limits:
 - implicit conversions between unit symbols are not part of the contract
 - compound unit algebra such as `m/s`, `N*m`, or exponent notation is not part
   of the first-wave surface
-- `*` and `/` on unit-carrying values are intentionally rejected in the
+- `*`, `/`, and `%` on unit-carrying values are intentionally rejected in the
   first-wave contract
 - `+`/`-` on unit-carrying `i32`/`u32` values are intentionally rejected; SSF-07
   selected this as the current boundary rather than leaving it undecided, and

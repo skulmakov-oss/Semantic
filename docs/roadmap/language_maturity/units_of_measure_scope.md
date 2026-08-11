@@ -3,6 +3,15 @@
 Status: completed first-wave baseline history
 Related issue: `#118`
 
+SSF-07 narrowing note: the original `+`/`-` inclusion below was written
+generically over "the same numeric base type." SSF-07 (issue #1578) has since
+selected a narrower boundary: binary and unary `+`/`-` are admitted only for
+measured `f64`; measured `fx` reports an explicit narrow-slice gap, and
+measured `i32`/`u32` are rejected as unsupported operators. `docs/spec/types.md`
+and `docs/spec/source_semantics.md` are the current canonical source for this
+narrower contract; this document's bullets below are preserved as first-wave
+baseline history and are not the up-to-date operator boundary.
+
 ## Goal
 
 Define a narrow, executable first-wave units-of-measure contract for `v0.2`
@@ -66,7 +75,7 @@ where the bracket payload is a single unit symbol.
   unit-carrying only through typed positions
 - `+`, `-`, `==`, and `!=` preserve the declared unit when both sides match
   exactly
-- `*` and `/` on unit-carrying values are rejected in the first wave
+- `*`, `/`, and `%` on unit-carrying values are rejected in the first wave
 - unannotated numeric values do not implicitly coerce to annotated numeric types
 - different unit symbols with the same numeric carrier are still mismatched
   types
