@@ -4423,6 +4423,26 @@ mod tests {
     }
 
     #[test]
+    fn vm_traps_on_i32_modulo_min_by_negative_one() {
+        let src = r#"
+            fn main() {
+                let min_val: i32 = 0 - 2147483647 - 1;
+                let neg_one: i32 = 0 - 1;
+                let bad: i32 = min_val % neg_one;
+                assert(bad == min_val);
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let err =
+            run_semcode(&bytes).expect_err("i32::MIN % -1 should trap with overflow, not wrap");
+        assert!(matches!(
+            err,
+            RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow)
+        ));
+    }
+
+    #[test]
     fn vm_traps_on_i32_division_by_zero() {
         let src = r#"
             fn main() {
