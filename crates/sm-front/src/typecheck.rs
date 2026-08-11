@@ -3573,7 +3573,7 @@ mod tests {
     }
 
     #[test]
-    fn measured_arithmetic_rejects_mul_div_mod() {
+    fn measured_arithmetic_rejects_mul() {
         let src = r#"
             fn main() {
                 let x: f64[m] = 2.0;
@@ -3585,6 +3585,48 @@ mod tests {
 
         let err = typecheck_source(src).expect_err(
             "mul on a measured operand must be rejected in the first-wave units surface",
+        );
+        assert!(
+            err.message.contains("first-wave units surface") || err.message.contains("unsupported"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_arithmetic_rejects_div() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 6.0;
+                let y: f64[m] = 3.0;
+                let quotient: f64[m] = x / y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err(
+            "div on a measured operand must be rejected in the first-wave units surface",
+        );
+        assert!(
+            err.message.contains("first-wave units surface") || err.message.contains("unsupported"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_arithmetic_rejects_mod() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 7.0;
+                let y: f64[m] = 3.0;
+                let remainder: f64[m] = x % y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err(
+            "mod on a measured operand must be rejected in the first-wave units surface",
         );
         assert!(
             err.message.contains("first-wave units surface") || err.message.contains("unsupported"),
@@ -3637,6 +3679,24 @@ mod tests {
 
         let err =
             typecheck_source(src).expect_err("unary minus on a measured i32 must be rejected");
+        assert!(
+            !err.message.is_empty(),
+            "expected an operator-unsupported error"
+        );
+    }
+
+    #[test]
+    fn measured_u32_unary_minus_rejects() {
+        let src = r#"
+            fn main() {
+                let x: u32[m] = 1;
+                let negated: u32[m] = -x;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("unary minus on a measured u32 must be rejected");
         assert!(
             !err.message.is_empty(),
             "expected an operator-unsupported error"

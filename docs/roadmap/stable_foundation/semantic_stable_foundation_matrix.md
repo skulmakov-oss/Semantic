@@ -89,7 +89,7 @@ that wording drift; it does not delete or rewrite historical evidence.
 | `f64` arithmetic/math | F/I/V/R | **Landed and qualified on `main`** | Numeric surface qualification and SemCode/VM math path. | Exact deterministic promise in SSF-01/07. |
 | `fx` fixed-point | F/I/V/R | **Landed and qualified on `main`** | Focused numeric qualification; cross-family/measured gaps remain. | Bound in SSF-01/07. |
 | `unit` | F/I/V/R | **Qualified limited release** | Admitted primitive/value family. | Core candidate; SSF-01. |
-| measured numeric forms | F/I | **Experimental** | Narrow carriers/type semantics exist; the excluded-arithmetic boundary (fx `+`/`-`, mul/div/mod, mismatched units, `i32`/`u32` unary) is pinned by `measured_fx_addition_still_reports_narrow_slice_gap` and five sibling tests in `crates/sm-front/src/typecheck.rs`; matching same-unit `f64` addition typechecks. | Boundary pinned in SSF-07; widening remains a later decision. |
+| measured numeric forms | F/I | **Experimental** | Narrow carriers/type semantics exist; the excluded-arithmetic boundary is pinned per-operator in `crates/sm-front/src/typecheck.rs`: fx `+`/`-` (`measured_fx_addition_still_reports_narrow_slice_gap`, `measured_fx_subtraction_reports_narrow_slice_gap`), `*`/`/`/`%` (`measured_arithmetic_rejects_mul`, `_div`, `_mod`), mismatched units (`measured_arithmetic_rejects_mismatched_units`), and unary `+`/`-` on `i32`/`u32` (`measured_i32_unary_minus_rejects`, `measured_u32_unary_minus_rejects`); matching same-unit `f64` addition typechecks (`measured_f64_addition_typechecks`). | Boundary pinned in SSF-07; widening remains a later decision. |
 
 ## Profiles, standard library, and application boundary
 
