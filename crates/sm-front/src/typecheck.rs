@@ -3548,6 +3548,101 @@ mod tests {
             .contains("unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"));
     }
 
+    // SSF-07 (issue #1578) closes the "cross-family and measured arithmetic
+    // remain excluded" decision as already made and enforced, not still
+    // pending -- these pin the remaining measured/fx combinations that
+    // `measured_fx_addition_still_reports_narrow_slice_gap` above doesn't
+    // cover. Each is expected to pass immediately against unmodified code;
+    // this is a coverage freeze, not a bugfix.
+    #[test]
+    fn measured_fx_subtraction_reports_narrow_slice_gap() {
+        let src = r#"
+            fn main() {
+                let x: fx[m] = 2.0fx;
+                let y: fx[m] = 1.0fx;
+                let diff: fx[m] = x - y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("measured fx subtraction must stay outside the first slice");
+        assert!(err
+            .message
+            .contains("unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"));
+    }
+
+    #[test]
+    fn measured_arithmetic_rejects_mul_div_mod() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 2.0;
+                let y: f64[m] = 3.0;
+                let product: f64[m] = x * y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err(
+            "mul on a measured operand must be rejected in the first-wave units surface",
+        );
+        assert!(
+            err.message.contains("first-wave units surface") || err.message.contains("unsupported"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_arithmetic_rejects_mismatched_units() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 1.0;
+                let y: f64[s] = 1.0;
+                let sum: f64[m] = x + y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err(
+            "addition of measured operands with different unit symbols must be rejected",
+        );
+        assert!(!err.message.is_empty(), "expected a type-mismatch error");
+    }
+
+    #[test]
+    fn measured_f64_addition_typechecks() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 1.0;
+                let y: f64[m] = 2.0;
+                let sum: f64[m] = x + y;
+                return;
+            }
+        "#;
+
+        typecheck_source(src)
+            .expect("addition of two measured f64 values with matching units should typecheck");
+    }
+
+    #[test]
+    fn measured_i32_unary_minus_rejects() {
+        let src = r#"
+            fn main() {
+                let x: i32[m] = 1;
+                let negated: i32[m] = -x;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("unary minus on a measured i32 must be rejected");
+        assert!(
+            !err.message.is_empty(),
+            "expected an operator-unsupported error"
+        );
+    }
+
     #[test]
     fn text_literal_and_equality_surface_typechecks() {
         let src = r#"

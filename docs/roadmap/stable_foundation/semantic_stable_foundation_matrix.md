@@ -89,7 +89,7 @@ that wording drift; it does not delete or rewrite historical evidence.
 | `f64` arithmetic/math | F/I/V/R | **Landed and qualified on `main`** | Numeric surface qualification and SemCode/VM math path. | Exact deterministic promise in SSF-01/07. |
 | `fx` fixed-point | F/I/V/R | **Landed and qualified on `main`** | Focused numeric qualification; cross-family/measured gaps remain. | Bound in SSF-01/07. |
 | `unit` | F/I/V/R | **Qualified limited release** | Admitted primitive/value family. | Core candidate; SSF-01. |
-| measured numeric forms | F/I | **Experimental** | Narrow carriers/type semantics exist; measured `fx` arithmetic reports an explicit gap. | Decide/defer in SSF-01/07. |
+| measured numeric forms | F/I | **Experimental** | Narrow carriers/type semantics exist; the excluded-arithmetic boundary (fx `+`/`-`, mul/div/mod, mismatched units, `i32`/`u32` unary) is pinned by `measured_fx_addition_still_reports_narrow_slice_gap` and five sibling tests in `crates/sm-front/src/typecheck.rs`; matching same-unit `f64` addition typechecks. | Boundary pinned in SSF-07; widening remains a later decision. |
 
 ## Profiles, standard library, and application boundary
 
