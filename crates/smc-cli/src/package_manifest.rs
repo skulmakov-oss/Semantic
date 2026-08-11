@@ -444,6 +444,7 @@ enum ProjectRootResolutionCode {
     SemanticTomlReadFailed,
     SemanticTomlManifest(SemanticTomlManifestErrorCode),
     SemanticTomlEntryMissing,
+    EntrySymlinkOrReparse,
     MissingProjectManifest,
 }
 
@@ -469,6 +470,38 @@ fn project_root_resolution_error(
     }
 }
 
+fn entry_is_symlink_or_reparse(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    false
+}
+
+fn require_entry_not_symlink_or_reparse(
+    entry_path: &Path,
+) -> Result<(), ProjectRootResolutionError> {
+    if entry_is_symlink_or_reparse(entry_path) {
+        return Err(project_root_resolution_error(
+            ProjectRootResolutionCode::EntrySymlinkOrReparse,
+            format!(
+                "project entry '{}' must not be a symlink or reparse point",
+                entry_path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 fn resolve_project_root_check_entry_structured(
     root: &Path,
 ) -> Result<PathBuf, ProjectRootResolutionError> {
@@ -488,6 +521,7 @@ fn resolve_project_root_check_entry_structured(
                 )
             })?;
         let entry_path = root.join(&project_manifest.entry);
+        require_entry_not_symlink_or_reparse(&entry_path)?;
         if !entry_path.is_file() {
             return Err(project_root_resolution_error(
                 ProjectRootResolutionCode::SemanticTomlEntryMissing,
@@ -504,7 +538,9 @@ fn resolve_project_root_check_entry_structured(
 
     let package_manifest = root.join(PACKAGE_MANIFEST_FILE_NAME);
     if package_manifest.is_file() {
-        return Ok(root.join("src/main.sm"));
+        let entry_path = root.join("src/main.sm");
+        require_entry_not_symlink_or_reparse(&entry_path)?;
+        return Ok(entry_path);
     }
 
     Err(project_root_resolution_error(
