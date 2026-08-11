@@ -1502,7 +1502,15 @@ fn normalize_relative_path(path: &Path) -> Result<String, String> {
     let text = path
         .to_str()
         .ok_or_else(|| format!("package path '{}' is not valid UTF-8", path.display()))?;
-    let normalized = text.replace('\\', "/");
+    // `\` is only a path separator on Windows -- on Unix it is an ordinary filename
+    // character, so folding it into `/` unconditionally would collapse a real
+    // subdirectory path (`dir/helper.sm`) and a file literally named `dir\helper.sm`
+    // onto the same normalized string.
+    let normalized = if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.to_string()
+    };
     let normalized = normalized.strip_prefix("//?/").unwrap_or(&normalized);
     Ok(if normalized.is_empty() {
         ".".to_string()
@@ -2718,5 +2726,55 @@ module_root src
         assert!(err.contains("not valid UTF-8"), "unexpected error: {err}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // On Unix, `\` is an ordinary filename character, not a separator. Blindly replacing
+    // `\` with `/` when normalizing a relative path therefore collapses a real subdirectory
+    // path (`dir/helper.sm`) and a single file literally named `dir\helper.sm` onto the same
+    // fingerprint key, so renaming between those two forms while keeping the bytes unchanged
+    // would leave `content_fingerprint` unchanged too. Only fold `\` into `/` on Windows,
+    // where it is the actual path separator.
+    #[cfg(unix)]
+    #[test]
+    fn package_content_fingerprint_does_not_collapse_literal_backslash_with_separator() {
+        let content = "fn main() { return; }\n";
+
+        let real_dir = mk_temp_dir("package_content_fingerprint_backslash_real");
+        let real_module_root = real_dir.join("src");
+        std::fs::create_dir_all(real_module_root.join("dir")).expect("mkdir src/dir");
+        let real_manifest = real_dir.join(PACKAGE_MANIFEST_FILE_NAME);
+        std::fs::write(
+            &real_manifest,
+            "format 1\npackage app\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write manifest");
+        std::fs::write(real_module_root.join("dir").join("helper.sm"), content)
+            .expect("write dir/helper.sm");
+        let real_fingerprint = package_content_fingerprint(&real_module_root, &real_manifest)
+            .expect("real subdirectory path must fingerprint");
+
+        let literal_dir = mk_temp_dir("package_content_fingerprint_backslash_literal");
+        let literal_module_root = literal_dir.join("src");
+        std::fs::create_dir_all(&literal_module_root).expect("mkdir src");
+        let literal_manifest = literal_dir.join(PACKAGE_MANIFEST_FILE_NAME);
+        std::fs::write(
+            &literal_manifest,
+            "format 1\npackage app\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write manifest");
+        std::fs::write(literal_module_root.join("dir\\helper.sm"), content)
+            .expect("write literal dir\\helper.sm");
+        let literal_fingerprint =
+            package_content_fingerprint(&literal_module_root, &literal_manifest)
+                .expect("literal backslash filename must fingerprint");
+
+        assert_ne!(
+            real_fingerprint, literal_fingerprint,
+            "a real dir/helper.sm subdirectory path and a file literally named \
+             dir\\helper.sm must not collapse onto the same content fingerprint"
+        );
+
+        let _ = std::fs::remove_dir_all(&real_dir);
+        let _ = std::fs::remove_dir_all(&literal_dir);
     }
 }
