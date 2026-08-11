@@ -71,13 +71,14 @@ pub use config::{
 pub use formatter::{format_path, format_source_text, FormatterMode, FormatterSummary};
 #[cfg(feature = "std")]
 pub use package_manifest::{
-    admit_package_entry_module, parse_package_manifest_baseline, resolve_package_import_path,
-    validate_package_manifest_baseline, PackageDependency, PackageDependencySource,
-    PackageIdentity, PackageImportResolutionCode, PackageImportResolutionError, PackageManifest,
-    PackageManifestParseCode, PackageManifestParseError, PackageManifestValidationCode,
-    PackageManifestValidationError, PackageModuleAdmission, PackageModuleAdmissionCode,
-    PackageModuleAdmissionError, PackageRoot, PACKAGE_IMPORT_SEPARATOR,
-    PACKAGE_MANIFEST_BASELINE_VERSION, PACKAGE_MANIFEST_FILE_NAME,
+    admit_package_entry_module, parse_package_manifest_baseline,
+    reset_declared_dependency_graph_cache, reset_pinned_dependency_fingerprint_cache,
+    resolve_package_import_path, validate_package_manifest_baseline, PackageDependency,
+    PackageDependencySource, PackageIdentity, PackageImportResolutionCode,
+    PackageImportResolutionError, PackageManifest, PackageManifestParseCode,
+    PackageManifestParseError, PackageManifestValidationCode, PackageManifestValidationError,
+    PackageModuleAdmission, PackageModuleAdmissionCode, PackageModuleAdmissionError, PackageRoot,
+    PACKAGE_IMPORT_SEPARATOR, PACKAGE_MANIFEST_BASELINE_VERSION, PACKAGE_MANIFEST_FILE_NAME,
 };
 #[cfg(feature = "std")]
 pub use schema_versioning::{

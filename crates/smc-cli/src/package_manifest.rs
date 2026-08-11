@@ -994,7 +994,9 @@ fn select_manifest_in_directory(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-fn find_nearest_manifest(entry_canonical: &Path) -> Option<PathBuf> {
+/// Crate-visible so `incremental.rs`'s `collect_module_graph` can fold the governing
+/// manifest's own content into its cheap watch-mode change fingerprint (see DL-023).
+pub(crate) fn find_nearest_manifest(entry_canonical: &Path) -> Option<PathBuf> {
     let mut current = entry_canonical.parent();
     while let Some(dir) = current {
         if let Some(manifest) = select_manifest_in_directory(dir) {
