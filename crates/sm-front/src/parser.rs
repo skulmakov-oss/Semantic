@@ -6498,6 +6498,68 @@ trait Display {
         assert_eq!(method.ret, Type::I32);
     }
 
+    // SSF-07 (issue #1578) explicitly defers default methods in trait bodies as
+    // a non-goal. A method body in the trait declaration itself (rather than a
+    // bare `;`-terminated signature) is already a deterministic parse error
+    // via parse_trait_method_sig's `expect(Semi, ...)` -- pin that behavior.
+    #[test]
+    fn default_method_in_trait_body_is_rejected() {
+        let src = r#"
+trait Greet {
+    fn hello(self: i32) -> i32 {
+        return 1;
+    }
+}
+"#;
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("a trait method with a default body must be rejected");
+        assert!(
+            err.message.contains("';'") || err.message.contains("Semi"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    // SSF-07 explicitly defers trait objects (`dyn Trait`) as a non-goal. `dyn`
+    // is not a reserved keyword, so it lexes as a plain identifier and is
+    // parsed as an ordinary (nonexistent) nominal type named `dyn`, leaving
+    // the following type name dangling -- a deterministic parse error, though
+    // an incidental one rather than a purpose-built diagnostic. Pin the
+    // current behavior rather than invent dedicated `dyn` handling for a
+    // feature this phase explicitly does not support.
+    #[test]
+    fn dyn_trait_object_syntax_is_rejected() {
+        let src = r#"
+trait Show {
+    fn show(self: i32, other: dyn Show) -> i32;
+}
+"#;
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("`dyn Trait` trait-object syntax must be rejected");
+        assert!(!err.message.is_empty(), "expected a parse error");
+    }
+
+    // SSF-07 explicitly defers associated types as a non-goal. `type Item;`
+    // inside a trait body is already a deterministic parse error, since
+    // parse_trait_decl's body loop unconditionally requires `fn` -- pin that
+    // behavior.
+    #[test]
+    fn associated_type_in_trait_is_rejected() {
+        let src = r#"
+trait Container {
+    type Item;
+    fn get(self: i32) -> i32;
+}
+"#;
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("an associated type declaration in a trait must be rejected");
+        assert!(
+            err.message.contains("'fn'") || err.message.contains("KwFn"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
     #[test]
     fn trait_decl_with_multiple_method_sigs_is_parsed() {
         let src = r#"
