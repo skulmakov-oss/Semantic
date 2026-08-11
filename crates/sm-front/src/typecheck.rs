@@ -3573,6 +3573,23 @@ mod tests {
     }
 
     #[test]
+    fn measured_fx_unary_minus_reports_narrow_slice_gap() {
+        let src = r#"
+            fn main() {
+                let x: fx[m] = 1.0fx;
+                let negated: fx[m] = -x;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("measured fx unary minus must stay outside the first slice");
+        assert!(err
+            .message
+            .contains("unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"));
+    }
+
+    #[test]
     fn measured_arithmetic_rejects_mul() {
         let src = r#"
             fn main() {
@@ -3668,6 +3685,19 @@ mod tests {
     }
 
     #[test]
+    fn measured_f64_unary_minus_typechecks() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 1.0;
+                let negated: f64[m] = -x;
+                return;
+            }
+        "#;
+
+        typecheck_source(src).expect("unary minus on a measured f64 value should typecheck");
+    }
+
+    #[test]
     fn measured_i32_unary_minus_rejects() {
         let src = r#"
             fn main() {
@@ -3680,16 +3710,25 @@ mod tests {
         let err =
             typecheck_source(src).expect_err("unary minus on a measured i32 must be rejected");
         assert!(
-            !err.message.is_empty(),
-            "expected an operator-unsupported error"
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
         );
     }
 
+    // The u32 fixtures below must initialize with a `u32`-suffixed literal
+    // (`1u32`, not `1`): match_unit_lift only lifts a literal into a measured
+    // binding when the literal's own inferred type equals the measured base,
+    // and a bare numeric literal infers as i32. An unsuffixed `let x: u32[m]
+    // = 1;` fails at that let-binding lift with a type-mismatch error before
+    // the operator under test is ever reached, so the assertion also checks
+    // for the specific "unsupported" operator message rather than accepting
+    // any error, to keep that class of false pass from recurring.
     #[test]
     fn measured_u32_unary_minus_rejects() {
         let src = r#"
             fn main() {
-                let x: u32[m] = 1;
+                let x: u32[m] = 1u32;
                 let negated: u32[m] = -x;
                 return;
             }
@@ -3698,8 +3737,9 @@ mod tests {
         let err =
             typecheck_source(src).expect_err("unary minus on a measured u32 must be rejected");
         assert!(
-            !err.message.is_empty(),
-            "expected an operator-unsupported error"
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
         );
     }
 
@@ -3715,8 +3755,9 @@ mod tests {
 
         let err = typecheck_source(src).expect_err("unary plus on a measured i32 must be rejected");
         assert!(
-            !err.message.is_empty(),
-            "expected an operator-unsupported error"
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
         );
     }
 
@@ -3724,7 +3765,7 @@ mod tests {
     fn measured_u32_unary_plus_rejects() {
         let src = r#"
             fn main() {
-                let x: u32[m] = 1;
+                let x: u32[m] = 1u32;
                 let same: u32[m] = +x;
                 return;
             }
@@ -3732,8 +3773,9 @@ mod tests {
 
         let err = typecheck_source(src).expect_err("unary plus on a measured u32 must be rejected");
         assert!(
-            !err.message.is_empty(),
-            "expected an operator-unsupported error"
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
         );
     }
 
@@ -3751,8 +3793,9 @@ mod tests {
         let err =
             typecheck_source(src).expect_err("binary addition on measured i32 must be rejected");
         assert!(
-            !err.message.is_empty(),
-            "expected an operator-unsupported error"
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
         );
     }
 
@@ -3770,8 +3813,9 @@ mod tests {
         let err =
             typecheck_source(src).expect_err("binary subtraction on measured i32 must be rejected");
         assert!(
-            !err.message.is_empty(),
-            "expected an operator-unsupported error"
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
         );
     }
 
@@ -3779,8 +3823,8 @@ mod tests {
     fn measured_u32_binary_addition_rejects() {
         let src = r#"
             fn main() {
-                let x: u32[m] = 1;
-                let y: u32[m] = 2;
+                let x: u32[m] = 1u32;
+                let y: u32[m] = 2u32;
                 let sum: u32[m] = x + y;
                 return;
             }
@@ -3789,8 +3833,9 @@ mod tests {
         let err =
             typecheck_source(src).expect_err("binary addition on measured u32 must be rejected");
         assert!(
-            !err.message.is_empty(),
-            "expected an operator-unsupported error"
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
         );
     }
 
@@ -3798,8 +3843,8 @@ mod tests {
     fn measured_u32_binary_subtraction_rejects() {
         let src = r#"
             fn main() {
-                let x: u32[m] = 2;
-                let y: u32[m] = 1;
+                let x: u32[m] = 2u32;
+                let y: u32[m] = 1u32;
                 let diff: u32[m] = x - y;
                 return;
             }
@@ -3808,8 +3853,9 @@ mod tests {
         let err =
             typecheck_source(src).expect_err("binary subtraction on measured u32 must be rejected");
         assert!(
-            !err.message.is_empty(),
-            "expected an operator-unsupported error"
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
         );
     }
 
