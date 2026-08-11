@@ -3590,6 +3590,23 @@ mod tests {
     }
 
     #[test]
+    fn measured_fx_unary_plus_reports_narrow_slice_gap() {
+        let src = r#"
+            fn main() {
+                let x: fx[m] = 1.0fx;
+                let same: fx[m] = +x;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("measured fx unary plus must stay outside the first slice");
+        assert!(err
+            .message
+            .contains("unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"));
+    }
+
+    #[test]
     fn measured_arithmetic_rejects_mul() {
         let src = r#"
             fn main() {
@@ -3682,6 +3699,34 @@ mod tests {
 
         typecheck_source(src)
             .expect("addition of two measured f64 values with matching units should typecheck");
+    }
+
+    #[test]
+    fn measured_f64_binary_subtraction_typechecks() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 2.0;
+                let y: f64[m] = 1.0;
+                let diff: f64[m] = x - y;
+                return;
+            }
+        "#;
+
+        typecheck_source(src)
+            .expect("subtraction of two measured f64 values with matching units should typecheck");
+    }
+
+    #[test]
+    fn measured_f64_unary_plus_typechecks() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 1.0;
+                let same: f64[m] = +x;
+                return;
+            }
+        "#;
+
+        typecheck_source(src).expect("unary plus on a measured f64 value should typecheck");
     }
 
     #[test]
