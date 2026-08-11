@@ -21,7 +21,7 @@ fn ssf_01_language_contract_keeps_its_version_and_evidence_map() {
         "Experimental but currently accepted extensions",
         "Deterministically unsupported forms",
         "Source-to-SemCode relationship",
-        "SEMCODE0` through `SEMCOD13",
+        "SEMCODE0` through `SEMCOD14",
         "not published stable",
     ] {
         assert!(

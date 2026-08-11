@@ -81,7 +81,7 @@ working experimental research merely to keep the stable contour small.
 - source contract: `semantic.foundation.source/1.0`;
 - parser acceptance envelope: `semantic.foundation` / `1.0`;
 - SemCode: capability-derived supported header, currently `SEMCODE0` through
-  `SEMCOD13`, never chosen solely from profile permission;
+  `SEMCOD14`, never chosen solely from profile permission;
 - verifier: mandatory admission before standard execution;
 - compatibility retention window: deferred to SSF-10;
 - promotion: deferred to SSF-12 plus explicit human decision.
