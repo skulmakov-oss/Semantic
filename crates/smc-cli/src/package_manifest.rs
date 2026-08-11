@@ -1322,7 +1322,17 @@ fn parse_semantic_toml_manifest(
                 format!("project entry '{}' must not escape the project root", entry),
             ));
         }
-        Ok(path.to_string_lossy().replace('\\', "/"))
+        // `entry` is already a valid-UTF-8 `&str` (parsed from semantic.toml text), so
+        // `to_string_lossy` never loses information here; only fold '\' into '/' on
+        // Windows, where it is the actual separator -- on Unix it is an ordinary filename
+        // character and folding it unconditionally would change which file this entry
+        // names (same defect class as DL-012/DL-014).
+        let text = path.to_string_lossy();
+        Ok(if cfg!(windows) {
+            text.replace('\\', "/")
+        } else {
+            text.into_owned()
+        })
     }
 
     let mut parsed = ParsedSemanticTomlFields::default();
@@ -1441,7 +1451,14 @@ fn parse_semantic_toml_manifest(
     let module_root = entry_path
         .parent()
         .map(|parent| {
-            let value = parent.to_string_lossy().replace('\\', "/");
+            // `entry` is already valid UTF-8 text; only fold '\' into '/' on Windows, for
+            // the same reason as normalize_project_entry above (DL-012/DL-014 shape).
+            let text = parent.to_string_lossy();
+            let value = if cfg!(windows) {
+                text.replace('\\', "/")
+            } else {
+                text.into_owned()
+            };
             if value.is_empty() {
                 ".".to_string()
             } else {
@@ -1496,7 +1513,14 @@ fn normalize_lexical(path: &Path) -> PathBuf {
 }
 
 fn normalize_path(path: &Path) -> String {
-    let normalized = path.to_string_lossy().replace('\\', "/");
+    // Only fold '\' into '/' on Windows, where it is the actual path separator (same
+    // reasoning as normalize_relative_path's DL-012 fix); Unix keeps the raw text.
+    let text = path.to_string_lossy();
+    let normalized = if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text.into_owned()
+    };
     normalized
         .strip_prefix("//?/")
         .unwrap_or(&normalized)
@@ -2400,6 +2424,28 @@ entry = "\rooted\main.sm"
         assert!(err.message.contains("must be relative"));
     }
 
+    // normalize_project_entry and the module_root-from-entry-parent step both used to
+    // fold '\' into '/' unconditionally. On Unix '\' is an ordinary filename character in
+    // the entry text (this manifest parser does not interpret TOML escapes; see
+    // parse_toml_string), so a literal backslash there must survive unchanged instead of
+    // being folded into a directory separator that changes which file/directory it names
+    // (same defect class as DL-012/DL-014, found by self-review while closing DL-014).
+    #[cfg(unix)]
+    #[test]
+    fn parse_semantic_toml_manifest_preserves_literal_backslash_in_project_entry_on_unix() {
+        let source = r#"
+[package]
+name = "app"
+
+[project]
+entry = "a\b/main.sm"
+"#;
+        let parsed = parse_semantic_toml_manifest(Path::new("semantic.toml"), source)
+            .expect("literal backslash entry must parse on Unix");
+        assert_eq!(parsed.entry, "a\\b/main.sm");
+        assert_eq!(parsed.manifest.package.root.module_root, "a\\b");
+    }
+
     #[cfg(windows)]
     #[test]
     fn validate_contained_relative_path_rejects_rooted_path_without_drive_prefix() {
@@ -2879,5 +2925,14 @@ module_root src
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // normalize_path (used for the PackageModuleAdmission.manifest_path display field) had
+    // the same unconditional backslash-fold bug as the other normalize_* helpers in this
+    // file; only Windows actually uses '\' as a separator.
+    #[cfg(unix)]
+    #[test]
+    fn normalize_path_preserves_literal_backslash_on_unix() {
+        assert_eq!(normalize_path(Path::new("dir\\file.sm")), "dir\\file.sm");
     }
 }
