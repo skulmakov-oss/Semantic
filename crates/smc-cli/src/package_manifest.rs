@@ -23,10 +23,16 @@ thread_local! {
     static PINNED_DEPENDENCY_CONTENT_VERIFIED: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
 }
 
-/// Clears the pinned-dependency content-fingerprint cache. Must be called by any
-/// long-lived caller (currently only `smc watch`, see `cmd_watch` in `app.rs`) before each
-/// rebuild pass; one-shot commands never need to call this.
-pub(crate) fn reset_pinned_dependency_fingerprint_cache() {
+/// Clears the pinned-dependency content-fingerprint cache. `smc watch` (see `cmd_watch` in
+/// `app.rs`) calls this at the top of every loop iteration, unconditionally, since a change
+/// to a declared-but-unimported dependency does not affect `module_graph_fingerprint` (see
+/// DL-022) and so cannot be relied on to gate the reset. Public so any long-lived library
+/// consumer that calls `admit_package_entry_module` or `CliPipeline::semantic_check_file`
+/// (or the `compile`/`run` equivalents) more than once on the same thread can invalidate
+/// this cache between calls too -- it was `pub(crate)` and reachable only from `cmd_watch`
+/// until DL-022 fixed that gap. One-shot commands never need to call this, since a fresh
+/// process already starts empty.
+pub fn reset_pinned_dependency_fingerprint_cache() {
     PINNED_DEPENDENCY_CONTENT_VERIFIED.with(|cache| cache.borrow_mut().clear());
 }
 
@@ -40,10 +46,9 @@ thread_local! {
         RefCell::new(HashSet::new());
 }
 
-/// Clears the declared-dependency-graph validation cache. Must be called by any long-lived
-/// caller (currently only `smc watch`) before each rebuild pass; one-shot commands never
-/// need to call this.
-pub(crate) fn reset_declared_dependency_graph_cache() {
+/// Clears the declared-dependency-graph validation cache. Same reset discipline and same
+/// visibility reasoning as `reset_pinned_dependency_fingerprint_cache` above (DL-022).
+pub fn reset_declared_dependency_graph_cache() {
     DECLARED_DEPENDENCY_GRAPH_VALIDATED.with(|cache| cache.borrow_mut().clear());
 }
 

@@ -681,18 +681,21 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
     let mut last_fp: Option<u64> = None;
     let mut last_snapshot: Option<String> = None;
     loop {
+        // Reset unconditionally, every iteration, BEFORE computing the fingerprint below --
+        // not only when a change is detected. module_graph_fingerprint tracks source Import
+        // edges only (see collect_module_graph in incremental.rs), so a change to a
+        // declared-but-unimported dependency (exactly what DL-021's admission-side
+        // validation exists to catch) never changes `fp` and would never reach a
+        // conditional reset gated on `last_fp != Some(fp)`. Resetting here is cheap (an
+        // empty-cache clear costs nothing on ticks where nothing changed) and guarantees
+        // admission never depends on a prior tick's cached answer (DL-022).
+        reset_pinned_dependency_fingerprint_cache();
+        reset_declared_dependency_graph_cache();
         match module_graph_fingerprint(&root, CACHE_SCHEMA_VERSION) {
             Ok(fp) => {
                 if last_fp != Some(fp) {
                     let t0 = Instant::now();
                     last_fp = Some(fp);
-                    // smc watch is a long-lived process, so any pinned-dependency
-                    // content-fingerprint cache must be reset before each rebuild pass or
-                    // a dependency change made between passes could go undetected
-                    // (DL-020). Same reasoning applies to the declared-dependency-graph
-                    // validation cache (DL-021).
-                    reset_pinned_dependency_fingerprint_cache();
-                    reset_declared_dependency_graph_cache();
                     let src = match read_source_with_package_admission(&root) {
                         Ok(s) => s,
                         Err(e) => {
