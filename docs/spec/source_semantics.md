@@ -859,8 +859,10 @@ Current first-wave units operator rules:
 - binary and unary `+`/`-` preserve a unit annotation only for measured `f64`
   operands when both operands have the same measured type; measured `fx`
   binary `+`/`-` reports an explicit narrow-slice gap, and measured
-  `i32`/`u32` binary and unary `+`/`-` are rejected as unsupported operators
-  pending a cross-family measured-arithmetic decision (SSF-07)
+  `i32`/`u32` binary and unary `+`/`-` are rejected as unsupported operators;
+  SSF-07 selected this as the current boundary rather than leaving it
+  undecided, and any future widening to measured `i32`/`u32` arithmetic is a
+  later decision
 - `==` and `!=` are valid on unit-carrying values of any base type only when
   both sides have the same measured type
 - `*` and `/` on unit-carrying values are rejected in the first-wave surface

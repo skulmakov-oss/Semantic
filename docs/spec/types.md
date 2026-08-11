@@ -359,8 +359,9 @@ Current honest limits:
   of the first-wave surface
 - `*` and `/` on unit-carrying values are intentionally rejected in the
   first-wave contract
-- `+`/`-` on unit-carrying `i32`/`u32` values are intentionally rejected
-  pending a cross-family measured-arithmetic decision (SSF-07)
+- `+`/`-` on unit-carrying `i32`/`u32` values are intentionally rejected; SSF-07
+  selected this as the current boundary rather than leaving it undecided, and
+  any future widening to measured `i32`/`u32` arithmetic is a later decision
 
 ## QVec
 
