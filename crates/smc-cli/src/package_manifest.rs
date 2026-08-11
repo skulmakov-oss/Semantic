@@ -625,8 +625,11 @@ pub fn admit_package_entry_module(
     // A nested manifest inside module_root is rejected regardless of whether any module
     // actually imports from it -- `package inspect` already rejects it via
     // package_content_fingerprint's tree walk, so admission must reject it too, or
-    // `check`/`compile`/`run` would silently accept a tree that `inspect` rejects.
-    package_content_fingerprint(&module_root, &manifest_path).map_err(|message| {
+    // `check`/`compile`/`run` would silently accept a tree that `inspect` rejects. Uses the
+    // lightweight, memoized reject_nested_manifests rather than the full content-hashing
+    // walk, since admission (called once per imported module) doesn't need file content,
+    // only the structural nested-manifest fact (see DL-016).
+    reject_nested_manifests(&module_root, &manifest_path).map_err(|message| {
         PackageModuleAdmissionError {
             code: PackageModuleAdmissionCode::NestedManifestInsideModuleRoot,
             message,
@@ -765,6 +768,13 @@ pub fn resolve_package_import_path(
     if let Some((alias, module_spec)) = spec.split_once(PACKAGE_IMPORT_SEPARATOR) {
         validate_package_import_extension(module_spec, spec)?;
         return resolve_dependency_import(&importer_canonical, alias, module_spec, spec);
+    }
+
+    if is_rooted_import_spec(spec) {
+        return Err(PackageImportResolutionError {
+            code: PackageImportResolutionCode::RelativeImportOutsideModuleRoot,
+            message: format!("relative package import '{}' must be relative", spec),
+        });
     }
 
     let base = importer_canonical
@@ -1478,6 +1488,25 @@ fn parse_semantic_toml_manifest(
     );
     Ok(ParsedSemanticTomlManifest { manifest, entry })
 }
+// Same check DL-010 added to `validate_contained_relative_path` et al.: a Windows
+// root-relative spec like `\outside` has a `RootDir` component but no `Prefix`, so
+// `Path::is_absolute()` reports it as NOT absolute -- joining it to `base` resets to the
+// current drive's root (`PathBuf::push`'s documented Windows semantics), escaping
+// containment. `is_absolute()` alone also isn't enough on its own: a fully absolute spec
+// (`C:\outside` or, on Unix, `/outside`) previously resolved straight through with no
+// containment check at all when the importer had no enclosing manifest (see DL-017). A
+// relative `Import` spec must never be rooted or absolute, manifest or not.
+fn is_rooted_import_spec(spec: &str) -> bool {
+    let path = Path::new(spec);
+    path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::Prefix(_) | std::path::Component::RootDir
+            )
+        })
+}
+
 fn resolve_relative_import_path(base: &Path, spec: &str) -> PathBuf {
     let path = append_default_module_extension(spec);
     if path.is_absolute() {
@@ -1870,13 +1899,7 @@ fn collect_package_files(
         if file_type.is_dir() {
             collect_package_files(module_root, &path, authority_manifest, files)?;
         } else if file_type.is_file()
-            && path != authority_manifest
-            && path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| {
-                    name == PACKAGE_MANIFEST_FILE_NAME || name == SEMANTIC_TOML_FILE_NAME
-                })
+            && path_is_disallowed_nested_manifest(&path, authority_manifest)
         {
             return Err(format!(
                 "nested package manifest '{}' is inside package module_root '{}'",
@@ -1899,6 +1922,94 @@ fn collect_package_files(
                 Err(error) => error.into_bytes(),
             };
             files.push((normalize_relative_path(relative)?, bytes));
+        }
+    }
+    Ok(())
+}
+
+/// A manifest is only "nested" (forbidden) when it sits in a directory below the authority
+/// manifest's own directory. A manifest of the other type co-located in the exact same
+/// directory as the authority manifest is a permitted compatibility pairing
+/// (`docs/spec/project_model_v0.md`: `semantic.toml` wins when both are present), not
+/// nested content -- a pre-existing bug in the original nested-manifest check, exposed
+/// once admission started exercising this same check (see DL-016).
+fn path_is_disallowed_nested_manifest(path: &Path, authority_manifest: &Path) -> bool {
+    path.parent() != authority_manifest.parent()
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| {
+                name == PACKAGE_MANIFEST_FILE_NAME || name == SEMANTIC_TOML_FILE_NAME
+            })
+}
+
+/// Lightweight counterpart to `package_content_fingerprint`'s tree walk, used by admission
+/// (`check`/`compile`/`run`) purely to reject a nested manifest. It never reads `.sm`/`.exo`
+/// file bytes, and memoizes per canonicalized `module_root` for the life of the process, so
+/// a package with many imported modules is scanned once rather than once per admitted
+/// module (see DL-016). Safe under the same single-process, static-filesystem assumption
+/// the rest of this admission/resolution pipeline already relies on (e.g. canonicalize()
+/// results are never re-validated against concurrent filesystem changes either).
+fn reject_nested_manifests(module_root: &Path, authority_manifest: &Path) -> Result<(), String> {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static VALIDATED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    let cache = VALIDATED.get_or_init(|| Mutex::new(HashSet::new()));
+    if cache.lock().unwrap().contains(module_root) {
+        return Ok(());
+    }
+    let authority_manifest = authority_manifest.canonicalize().map_err(|error| {
+        format!(
+            "failed to resolve '{}': {error}",
+            authority_manifest.display()
+        )
+    })?;
+    reject_nested_manifests_under(module_root, module_root, &authority_manifest)?;
+    cache.lock().unwrap().insert(module_root.to_path_buf());
+    Ok(())
+}
+
+fn reject_nested_manifests_under(
+    module_root: &Path,
+    directory: &Path,
+    authority_manifest: &Path,
+) -> Result<(), String> {
+    let mut entries = fs::read_dir(directory)
+        .map_err(|error| {
+            format!(
+                "failed to read package directory '{}': {error}",
+                directory.display()
+            )
+        })?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            format!(
+                "failed to enumerate package directory '{}': {error}",
+                directory.display()
+            )
+        })?;
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let path = entry.path();
+        if path_is_reparse(&path)? {
+            return Err(format!(
+                "package content path '{}' is a symlink or reparse point",
+                path.display()
+            ));
+        }
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect '{}': {error}", path.display()))?;
+        if file_type.is_dir() {
+            reject_nested_manifests_under(module_root, &path, authority_manifest)?;
+        } else if file_type.is_file()
+            && path_is_disallowed_nested_manifest(&path, authority_manifest)
+        {
+            return Err(format!(
+                "nested package manifest '{}' is inside package module_root '{}'",
+                path.display(),
+                module_root.display()
+            ));
         }
     }
     Ok(())
@@ -2620,6 +2731,78 @@ module_root src
             err.code,
             PackageModuleAdmissionCode::NestedManifestInsideModuleRoot
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // docs/spec/project_model_v0.md permits `semantic.toml` and `Semantic.package` to
+    // co-exist in the same directory for compatibility, with `semantic.toml` winning as
+    // the authority manifest. The DL-013 fix above wrongly treated the losing, co-located
+    // manifest as forbidden "nested" content and rejected it -- found by @codex review
+    // (DL-016). A manifest is only nested when it sits *below* the authority manifest's
+    // own directory, not when it merely sits beside it.
+    #[test]
+    fn admit_package_entry_module_permits_co_located_semantic_toml_and_package_manifest() {
+        let dir = mk_temp_dir("pkg_admit_co_located_manifests");
+        std::fs::write(
+            dir.join(SEMANTIC_TOML_FILE_NAME),
+            "[package]\nname = \"app\"\n\n[project]\nentry = \"main.sm\"\n",
+        )
+        .expect("write semantic.toml");
+        std::fs::write(
+            dir.join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage app\nmanifest_dir .\nmodule_root .\n",
+        )
+        .expect("write co-located Semantic.package");
+        let entry = dir.join("main.sm");
+        std::fs::write(&entry, "fn main() { return; }").expect("write entry");
+
+        let admitted = admit_package_entry_module(&entry)
+            .expect("admission must not error")
+            .expect("semantic.toml manifest must exist");
+        assert_eq!(admitted.package_name, "app");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // reject_nested_manifests memoizes per canonicalized module_root so a package with
+    // many imported modules is scanned once rather than once per admitted module -- found
+    // as a performance issue in the same DL-013 fix by @codex review (DL-016). Prove the
+    // memoization actually takes effect: admit one module to populate the cache, then
+    // introduce a genuinely nested manifest into the same module_root and admit a second,
+    // different module in that tree -- it must still succeed because the structural scan
+    // is cached, not re-run against the now-changed tree.
+    #[test]
+    fn admit_package_entry_module_memoizes_nested_manifest_scan_per_module_root() {
+        let dir = mk_temp_dir("pkg_admit_memoized_scan");
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).expect("mkdir src");
+        std::fs::write(
+            dir.join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage memoized_scan_app\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write manifest");
+        let first_entry = src_dir.join("first.sm");
+        std::fs::write(&first_entry, "fn first() { return; }").expect("write first entry");
+        admit_package_entry_module(&first_entry)
+            .expect("first admission must not error")
+            .expect("manifest must exist");
+
+        std::fs::create_dir_all(src_dir.join("later_nested")).expect("mkdir later_nested");
+        std::fs::write(
+            src_dir
+                .join("later_nested")
+                .join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage later_nested\nmanifest_dir .\nmodule_root .\n",
+        )
+        .expect("write later nested manifest");
+
+        let second_entry = src_dir.join("second.sm");
+        std::fs::write(&second_entry, "fn second() { return; }").expect("write second entry");
+        let admitted = admit_package_entry_module(&second_entry)
+            .expect("second admission must not error")
+            .expect("manifest must exist");
+        assert_eq!(admitted.package_name, "memoized_scan_app");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
