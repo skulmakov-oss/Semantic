@@ -3682,7 +3682,8 @@ mod tests {
     use super::*;
     use crate::semcode_format::read_utf8;
     use sm_emit::{
-        compile_program_to_semcode, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+        compile_program_to_semcode, compile_program_to_semcode_with_options, CompileProfile,
+        OptLevel, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
         OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
         OWNERSHIP_SECTION_TAG,
     };
@@ -4354,6 +4355,34 @@ mod tests {
     // written as a literal directly (parse_i32_literal parses unsigned digit
     // text before unary negation applies), hence the `0 - 2147483647 - 1`
     // construction throughout.
+    // The i32 overflow contract has two independent implementations of the
+    // same wrap/trap policy: the VM's runtime opcodes (semcode_vm.rs) used at
+    // O0, and crystalfold.rs's O1 constant-folding rewrites, which duplicate
+    // the same wrapping_*/checked_* calls at compile time. Nothing forces
+    // those two to stay in sync, so every case below runs under both O0 and
+    // O1 rather than only the O0 default `compile_program_to_semcode` uses.
+    fn assert_wraps_under_all_opt_levels(src: &str, msg: &str) {
+        for opt in [OptLevel::O0, OptLevel::O1] {
+            let bytes = compile_program_to_semcode_with_options(src, CompileProfile::RustLike, opt)
+                .unwrap_or_else(|e| panic!("compile failed under {opt:?}: {e:?}"));
+            run_semcode(&bytes).unwrap_or_else(|e| panic!("{msg} (opt={opt:?}): {e:?}"));
+        }
+    }
+
+    fn assert_traps_under_all_opt_levels(src: &str, msg: &str, expected: RuntimeTrap) {
+        for opt in [OptLevel::O0, OptLevel::O1] {
+            let bytes = compile_program_to_semcode_with_options(src, CompileProfile::RustLike, opt)
+                .unwrap_or_else(|e| panic!("compile failed under {opt:?}: {e:?}"));
+            let err = run_semcode(&bytes)
+                .err()
+                .unwrap_or_else(|| panic!("{msg} (opt={opt:?}) should trap"));
+            assert!(
+                matches!(&err, RuntimeError::Trap(t) if *t == expected),
+                "{msg} (opt={opt:?}): expected trap {expected:?}, got {err:?}"
+            );
+        }
+    }
+
     #[test]
     fn vm_wraps_i32_addition_past_max() {
         let src = r#"
@@ -4366,8 +4395,7 @@ mod tests {
                 return;
             }
         "#;
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        run_semcode(&bytes).expect("i32 addition must wrap past i32::MAX, not trap");
+        assert_wraps_under_all_opt_levels(src, "i32 addition must wrap past i32::MAX, not trap");
     }
 
     #[test]
@@ -4382,8 +4410,7 @@ mod tests {
                 return;
             }
         "#;
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        run_semcode(&bytes).expect("i32 subtraction must wrap past i32::MIN, not trap");
+        assert_wraps_under_all_opt_levels(src, "i32 subtraction must wrap past i32::MIN, not trap");
     }
 
     #[test]
@@ -4398,8 +4425,10 @@ mod tests {
                 return;
             }
         "#;
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        run_semcode(&bytes).expect("i32 multiplication must wrap per two's-complement, not trap");
+        assert_wraps_under_all_opt_levels(
+            src,
+            "i32 multiplication must wrap per two's-complement, not trap",
+        );
     }
 
     #[test]
@@ -4412,9 +4441,10 @@ mod tests {
                 return;
             }
         "#;
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        run_semcode(&bytes)
-            .expect("unary negation of i32::MIN lowers through SubI32 and must wrap, not trap");
+        assert_wraps_under_all_opt_levels(
+            src,
+            "unary negation of i32::MIN lowers through SubI32 and must wrap, not trap",
+        );
     }
 
     #[test]
@@ -4428,13 +4458,11 @@ mod tests {
                 return;
             }
         "#;
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        let err =
-            run_semcode(&bytes).expect_err("i32::MIN / -1 should trap with overflow, not wrap");
-        assert!(matches!(
-            err,
-            RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow)
-        ));
+        assert_traps_under_all_opt_levels(
+            src,
+            "i32::MIN / -1 should trap with overflow, not wrap",
+            RuntimeTrap::ArithmeticOverflow,
+        );
     }
 
     #[test]
@@ -4448,13 +4476,11 @@ mod tests {
                 return;
             }
         "#;
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        let err =
-            run_semcode(&bytes).expect_err("i32::MIN % -1 should trap with overflow, not wrap");
-        assert!(matches!(
-            err,
-            RuntimeError::Trap(RuntimeTrap::ArithmeticOverflow)
-        ));
+        assert_traps_under_all_opt_levels(
+            src,
+            "i32::MIN % -1 should trap with overflow, not wrap",
+            RuntimeTrap::ArithmeticOverflow,
+        );
     }
 
     #[test]
@@ -4468,12 +4494,11 @@ mod tests {
                 return;
             }
         "#;
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        let err = run_semcode(&bytes).expect_err("i32 division by zero should trap");
-        assert!(matches!(
-            err,
-            RuntimeError::Trap(RuntimeTrap::DivisionByZero)
-        ));
+        assert_traps_under_all_opt_levels(
+            src,
+            "i32 division by zero should trap",
+            RuntimeTrap::DivisionByZero,
+        );
     }
 
     #[test]
@@ -4487,12 +4512,11 @@ mod tests {
                 return;
             }
         "#;
-        let bytes = compile_program_to_semcode(src).expect("compile");
-        let err = run_semcode(&bytes).expect_err("i32 modulo by zero should trap");
-        assert!(matches!(
-            err,
-            RuntimeError::Trap(RuntimeTrap::DivisionByZero)
-        ));
+        assert_traps_under_all_opt_levels(
+            src,
+            "i32 modulo by zero should trap",
+            RuntimeTrap::DivisionByZero,
+        );
     }
 
     #[cfg(feature = "disasm")]
