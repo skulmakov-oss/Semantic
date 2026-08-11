@@ -639,6 +639,7 @@ enum ProjectRootResolutionCode {
     SemanticTomlReadFailed,
     SemanticTomlManifest(SemanticTomlManifestErrorCode),
     SemanticTomlEntryMissing,
+    EntrySymlinkOrReparse,
     MissingProjectManifest,
 }
 
@@ -683,6 +684,9 @@ fn resolve_project_root_check_entry_structured(
                 )
             })?;
         let entry_path = root.join(&project_manifest.entry);
+        reject_reparse_path(&entry_path).map_err(|message| {
+            project_root_resolution_error(ProjectRootResolutionCode::EntrySymlinkOrReparse, message)
+        })?;
         if !entry_path.is_file() {
             return Err(project_root_resolution_error(
                 ProjectRootResolutionCode::SemanticTomlEntryMissing,
@@ -699,7 +703,11 @@ fn resolve_project_root_check_entry_structured(
 
     let package_manifest = root.join(PACKAGE_MANIFEST_FILE_NAME);
     if package_manifest.is_file() {
-        return Ok(root.join("src/main.sm"));
+        let entry_path = root.join("src/main.sm");
+        reject_reparse_path(&entry_path).map_err(|message| {
+            project_root_resolution_error(ProjectRootResolutionCode::EntrySymlinkOrReparse, message)
+        })?;
+        return Ok(entry_path);
     }
 
     Err(project_root_resolution_error(

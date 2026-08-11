@@ -100,13 +100,16 @@ fn non_utf8_test_source_paths_reject_deterministically() {
     std::fs::remove_dir_all(root).expect("remove project");
 }
 
-// admit_package_entry_module's reject_reparse_path(entry) rejects a symlinked/reparse
-// project entry deterministically, before it is ever read, across check/compile/run --
-// unconditionally, before any manifest lookup, so it does not depend on whether the
-// symlink target happens to fall under some other package's manifest scope.
+// resolve_project_root_check_entry_structured calls reject_reparse_path(entry) directly,
+// so every caller -- including cmd_test, which discards resolve_project_root_check_entry's
+// return value and never routes the entry through admit_package_entry_module -- still
+// rejects a symlinked/reparse project entry deterministically, before it is ever read,
+// across check/compile/run/test. (A prior version of this fix relied solely on
+// admit_package_entry_module's reject_reparse_path call, which cmd_test never reaches;
+// see #1598 DL-009.)
 #[cfg(unix)]
 #[test]
-fn project_entry_symlink_escaping_the_module_root_is_rejected_across_check_compile_run() {
+fn project_entry_symlink_escaping_the_module_root_is_rejected_across_check_compile_run_and_test() {
     use std::os::unix::fs::symlink;
 
     let root = project("entry_symlink");
@@ -122,7 +125,7 @@ fn project_entry_symlink_escaping_the_module_root_is_rejected_across_check_compi
     symlink(&outside, &entry).expect("symlink entry outside module root");
     let root_arg = root.to_string_lossy().replace('\\', "/");
 
-    for command in ["check", "compile", "run"] {
+    for command in ["check", "compile", "run", "test"] {
         let args: Vec<&str> = if command == "compile" {
             vec![command, &root_arg, "-o", "/dev/null"]
         } else {
