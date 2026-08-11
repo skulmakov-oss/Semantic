@@ -459,9 +459,12 @@ pub fn validate_package_manifest_baseline(
             });
         }
         if Path::new(path).is_absolute()
-            || Path::new(path)
-                .components()
-                .any(|component| matches!(component, std::path::Component::Prefix(_)))
+            || Path::new(path).components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::Prefix(_) | std::path::Component::RootDir
+                )
+            })
         {
             return Err(PackageManifestValidationError {
                 code: PackageManifestValidationCode::LocalDependencyPathMustBeRelative,
@@ -515,9 +518,12 @@ fn validate_contained_relative_path(
 ) -> Result<(), PackageManifestValidationError> {
     let path = Path::new(value);
     if path.is_absolute()
-        || path
-            .components()
-            .any(|component| matches!(component, std::path::Component::Prefix(_)))
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::Prefix(_) | std::path::Component::RootDir
+            )
+        })
     {
         return Err(PackageManifestValidationError {
             code: absolute_code,
@@ -1277,7 +1283,14 @@ fn parse_semantic_toml_manifest(
 
     fn normalize_project_entry(entry: &str) -> Result<String, SemanticTomlManifestError> {
         let path = Path::new(entry);
-        if path.is_absolute() {
+        if path.is_absolute()
+            || path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::Prefix(_) | std::path::Component::RootDir
+                )
+            })
+        {
             return Err(semantic_toml_error(
                 SemanticTomlManifestErrorCode::ProjectEntryMustBeRelative,
                 format!("project entry '{}' must be relative", entry),
@@ -2318,6 +2331,46 @@ name "app"
                 err.message
             );
         }
+    }
+
+    // A Windows root-relative path such as `\rooted\main.sm` has a `RootDir` component
+    // but no `Prefix`, so `Path::is_absolute()` reports it as NOT absolute. Joining it to
+    // a canonical base resets to the current drive's root, escaping containment. This
+    // must be rejected the same as a fully absolute (drive-prefixed) path.
+    #[cfg(windows)]
+    #[test]
+    fn parse_semantic_toml_manifest_rejects_rooted_project_entry_without_drive_prefix() {
+        let source = r#"
+[package]
+name = "app"
+
+[project]
+entry = "\rooted\main.sm"
+"#;
+        let err = parse_semantic_toml_manifest(Path::new("semantic.toml"), source)
+            .expect_err("rooted entry without a drive prefix must reject");
+        assert_eq!(
+            err.code,
+            SemanticTomlManifestErrorCode::ProjectEntryMustBeRelative
+        );
+        assert!(err.message.contains("must be relative"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn validate_contained_relative_path_rejects_rooted_path_without_drive_prefix() {
+        let err = validate_contained_relative_path(
+            r"\rooted\dep",
+            PackageManifestValidationCode::PackageRootMustBeRelative,
+            PackageManifestValidationCode::PackageRootMustNotEscapeManifest,
+            "package root",
+        )
+        .expect_err("rooted path without a drive prefix must reject");
+        assert_eq!(
+            err.code,
+            PackageManifestValidationCode::PackageRootMustBeRelative
+        );
+        assert!(err.message.contains("must be relative"));
     }
 
     #[test]
