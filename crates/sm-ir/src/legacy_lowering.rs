@@ -8732,6 +8732,12 @@ fn lower_expr_stmt_with_parts(
     let expr = arena.expr(expr_id);
     if let Expr::Call(name, args) = expr {
         if is_builtin_assert_name(*name, arena, fn_table)? {
+            if args.iter().any(|a| a.name.is_some()) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "assert builtin takes exactly one positional argument".to_string(),
+                });
+            }
             if args.len() != 1 {
                 return Err(FrontendError {
                     pos: 0,
