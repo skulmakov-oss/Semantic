@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashSet;
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -7,6 +9,70 @@ pub const PACKAGE_MANIFEST_BASELINE_VERSION: u32 = 1;
 pub const PACKAGE_MANIFEST_FILE_NAME: &str = "Semantic.package";
 pub const SEMANTIC_TOML_FILE_NAME: &str = "semantic.toml";
 pub const PACKAGE_IMPORT_SEPARATOR: &str = "::";
+
+thread_local! {
+    /// Memoizes which pinned dependency manifests have already had their content
+    /// fingerprint verified, so a dependency imported through many package-qualified
+    /// modules is hashed once per bundle pass instead of once per import (DL-020).
+    /// `smc watch` (a long-lived process) must clear this via
+    /// `reset_pinned_dependency_fingerprint_cache` before each rebuild pass, since the
+    /// filesystem can change between passes; one-shot commands (check/compile/run) never
+    /// need to, since a fresh process already starts empty (same reasoning as DL-017's
+    /// nested-manifest admission cache, which was a `static` and unsafe for exactly this
+    /// reason -- this one is explicitly resettable instead).
+    static PINNED_DEPENDENCY_CONTENT_VERIFIED: RefCell<HashSet<PathBuf>> = RefCell::new(HashSet::new());
+}
+
+/// Clears the pinned-dependency content-fingerprint cache. Must be called by any
+/// long-lived caller (currently only `smc watch`, see `cmd_watch` in `app.rs`) before each
+/// rebuild pass; one-shot commands never need to call this.
+pub(crate) fn reset_pinned_dependency_fingerprint_cache() {
+    PINNED_DEPENDENCY_CONTENT_VERIFIED.with(|cache| cache.borrow_mut().clear());
+}
+
+thread_local! {
+    /// Memoizes which manifests have already had their full DECLARED dependency graph
+    /// validated (missing/cyclic/name-mismatched/stale-pinned), so admitting many modules
+    /// from the same manifest only walks that graph once per bundle pass (DL-021). Same
+    /// reset discipline as `PINNED_DEPENDENCY_CONTENT_VERIFIED` above: `smc watch` must
+    /// clear it before each rebuild pass via `reset_declared_dependency_graph_cache`.
+    static DECLARED_DEPENDENCY_GRAPH_VALIDATED: RefCell<HashSet<PathBuf>> =
+        RefCell::new(HashSet::new());
+}
+
+/// Clears the declared-dependency-graph validation cache. Must be called by any long-lived
+/// caller (currently only `smc watch`) before each rebuild pass; one-shot commands never
+/// need to call this.
+pub(crate) fn reset_declared_dependency_graph_cache() {
+    DECLARED_DEPENDENCY_GRAPH_VALIDATED.with(|cache| cache.borrow_mut().clear());
+}
+
+/// `smc package inspect` rejects a missing/cyclic/name-mismatched/stale-pinned dependency
+/// declared anywhere in a package's graph, regardless of whether any module actually
+/// imports it, by walking the full graph via `PackageGraphBuilder::visit`. Reuse that same
+/// walk here so admission (`check`/`compile`/`run`) enforces the identical contract instead
+/// of only validating dependencies lazily as they happen to be imported (DL-021).
+fn validate_declared_dependency_graph(
+    manifest_path: &Path,
+) -> Result<(), PackageModuleAdmissionError> {
+    let canonical = manifest_path
+        .canonicalize()
+        .map_err(|error| PackageModuleAdmissionError {
+            code: PackageModuleAdmissionCode::DeclaredDependencyGraphInvalid,
+            message: format!("failed to resolve '{}': {error}", manifest_path.display()),
+        })?;
+    if DECLARED_DEPENDENCY_GRAPH_VALIDATED.with(|cache| cache.borrow().contains(&canonical)) {
+        return Ok(());
+    }
+    PackageGraphBuilder::default()
+        .visit(manifest_path)
+        .map_err(|message| PackageModuleAdmissionError {
+            code: PackageModuleAdmissionCode::DeclaredDependencyGraphInvalid,
+            message,
+        })?;
+    DECLARED_DEPENDENCY_GRAPH_VALIDATED.with(|cache| cache.borrow_mut().insert(canonical));
+    Ok(())
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageRoot {
@@ -159,6 +225,7 @@ pub enum PackageModuleAdmissionCode {
     NestedManifestInsideModuleRoot,
     EntryOutsideModuleRoot,
     NonUtf8ModulePath,
+    DeclaredDependencyGraphInvalid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -653,6 +720,17 @@ pub fn admit_package_entry_module(
             message,
         }
     })?;
+    // `smc package inspect` walks the FULL declared dependency graph via
+    // PackageGraphBuilder::visit, regardless of which modules are actually imported, and
+    // rejects a missing/cyclic/name-mismatched/stale-pinned dependency deterministically
+    // (docs/spec/package_baseline_v0.md:71-77). Admission previously validated dependencies
+    // only lazily, as each one was actually resolved through an import -- so `check`,
+    // `compile`, and `run` could accept and execute a package with an unused-but-invalid
+    // declared dependency that `inspect` would reject on the same tree. Run the same
+    // full-graph walk here too, last, so a more specific failure already caught above
+    // (e.g. a nested manifest, which this walk would also encounter while hashing content)
+    // reports under its own precise error code rather than this broader one (see DL-021).
+    validate_declared_dependency_graph(&manifest_path)?;
     Ok(Some(PackageModuleAdmission {
         manifest_path: normalize_path(&manifest_path),
         package_name: manifest.package.name,
@@ -894,16 +972,28 @@ fn split_manifest_tokens(
     Ok(out)
 }
 
+/// `semantic.toml` wins over a co-located `Semantic.package` in the same directory
+/// (`docs/spec/project_model_v0.md`). Shared by `find_nearest_manifest`'s upward search
+/// and `inspect_local_package_graph`'s root selection so both apply the same precedence
+/// (see DL-019 -- `package inspect` used to always select `Semantic.package` directly,
+/// disagreeing with what `check`/`compile`/`run` would admit for the same directory).
+fn select_manifest_in_directory(dir: &Path) -> Option<PathBuf> {
+    let semantic_toml = dir.join(SEMANTIC_TOML_FILE_NAME);
+    if semantic_toml.is_file() {
+        return Some(semantic_toml);
+    }
+    let package_manifest = dir.join(PACKAGE_MANIFEST_FILE_NAME);
+    if package_manifest.is_file() {
+        return Some(package_manifest);
+    }
+    None
+}
+
 fn find_nearest_manifest(entry_canonical: &Path) -> Option<PathBuf> {
     let mut current = entry_canonical.parent();
     while let Some(dir) = current {
-        let semantic_toml = dir.join(SEMANTIC_TOML_FILE_NAME);
-        if semantic_toml.is_file() {
-            return Some(semantic_toml);
-        }
-        let package_manifest = dir.join(PACKAGE_MANIFEST_FILE_NAME);
-        if package_manifest.is_file() {
-            return Some(package_manifest);
+        if let Some(manifest) = select_manifest_in_directory(dir) {
+            return Some(manifest);
         }
         current = dir.parent();
     }
@@ -1114,19 +1204,45 @@ fn resolve_dependency_import(
         }
     }
     if let Some(expected) = expected_content {
-        let actual =
-            package_content_fingerprint(&dependency_ctx.module_root, &dependency_manifest_path)
-                .map_err(|message| PackageImportResolutionError {
+        let canonical_dependency_manifest =
+            dependency_manifest_path.canonicalize().map_err(|error| {
+                PackageImportResolutionError {
                     code: PackageImportResolutionCode::DependencyContentFingerprintMismatch,
-                    message,
-                })?;
-        if actual != expected {
-            return Err(PackageImportResolutionError {
-                code: PackageImportResolutionCode::DependencyContentFingerprintMismatch,
-                message: format!(
-                    "dependency alias '{}' content fingerprint mismatch: expected '{}', found '{}'",
-                    alias, expected, actual
-                ),
+                    message: format!(
+                        "failed to resolve '{}': {error}",
+                        dependency_manifest_path.display()
+                    ),
+                }
+            })?;
+        // A pinned dependency imported through multiple package-qualified modules would
+        // otherwise re-read and re-hash its entire content tree once per import -- O(N*M)
+        // for N importing modules and M dependency files. Cache per dependency manifest
+        // for the life of this thread-local, scoped the same way DL-017 scoped the
+        // nested-manifest admission cache: `smc watch`'s loop explicitly clears it via
+        // reset_pinned_dependency_fingerprint_cache before each rebuild pass, since that
+        // command is long-lived and the filesystem can change between passes; one-shot
+        // commands never need to clear it, since a fresh process already starts empty
+        // (see DL-020).
+        let already_verified = PINNED_DEPENDENCY_CONTENT_VERIFIED
+            .with(|cache| cache.borrow().contains(&canonical_dependency_manifest));
+        if !already_verified {
+            let actual =
+                package_content_fingerprint(&dependency_ctx.module_root, &dependency_manifest_path)
+                    .map_err(|message| PackageImportResolutionError {
+                        code: PackageImportResolutionCode::DependencyContentFingerprintMismatch,
+                        message,
+                    })?;
+            if actual != expected {
+                return Err(PackageImportResolutionError {
+                    code: PackageImportResolutionCode::DependencyContentFingerprintMismatch,
+                    message: format!(
+                        "dependency alias '{}' content fingerprint mismatch: expected '{}', found '{}'",
+                        alias, expected, actual
+                    ),
+                });
+            }
+            PINNED_DEPENDENCY_CONTENT_VERIFIED.with(|cache| {
+                cache.borrow_mut().insert(canonical_dependency_manifest);
             });
         }
     }
@@ -1608,14 +1724,14 @@ struct PackageGraphBuilder {
 }
 
 pub(crate) fn inspect_local_package_graph(root: &Path) -> Result<String, String> {
-    let manifest_path = root.join(PACKAGE_MANIFEST_FILE_NAME);
-    if !manifest_path.is_file() {
-        return Err(format!(
-            "package inspect requires '{}' at '{}'",
+    let manifest_path = select_manifest_in_directory(root).ok_or_else(|| {
+        format!(
+            "package inspect requires '{}' or '{}' at '{}'",
+            SEMANTIC_TOML_FILE_NAME,
             PACKAGE_MANIFEST_FILE_NAME,
-            manifest_path.display()
-        ));
-    }
+            root.display()
+        )
+    })?;
     reject_reparse_path(&manifest_path)?;
     let mut builder = PackageGraphBuilder::default();
     let root_package = builder.visit(&manifest_path)?;
@@ -1700,8 +1816,26 @@ impl PackageGraphBuilder {
 
         let source = fs::read_to_string(&manifest_path)
             .map_err(|error| format!("failed to read '{}': {error}", manifest_path.display()))?;
-        let manifest = parse_package_manifest_baseline(&source)
-            .map_err(|error| format!("failed to parse '{}': {error}", manifest_path.display()))?;
+        // Dispatch by filename, matching load_and_validate_manifest's rule for
+        // check/compile/run: semantic.toml wins when both manifest kinds are present in
+        // the same directory (docs/spec/project_model_v0.md). `visit` used to always parse
+        // via the Semantic.package line format regardless of which file was selected --
+        // fixed together with inspect_local_package_graph's selection below (DL-019).
+        let manifest = if manifest_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == SEMANTIC_TOML_FILE_NAME)
+        {
+            parse_semantic_toml_manifest(&manifest_path, &source)
+                .map(|project_manifest| project_manifest.manifest)
+                .map_err(|error| {
+                    format!("failed to parse '{}': {error}", manifest_path.display())
+                })?
+        } else {
+            parse_package_manifest_baseline(&source).map_err(|error| {
+                format!("failed to parse '{}': {error}", manifest_path.display())
+            })?
+        };
         validate_package_manifest_baseline(&manifest).map_err(|error| {
             format!("failed to validate '{}': {error}", manifest_path.display())
         })?;
@@ -1945,28 +2079,23 @@ fn path_is_disallowed_nested_manifest(path: &Path, authority_manifest: &Path) ->
 
 /// Lightweight counterpart to `package_content_fingerprint`'s tree walk, used by admission
 /// (`check`/`compile`/`run`) purely to reject a nested manifest. It never reads `.sm`/`.exo`
-/// file bytes, and memoizes per canonicalized `module_root` for the life of the process, so
-/// a package with many imported modules is scanned once rather than once per admitted
-/// module (see DL-016). Safe under the same single-process, static-filesystem assumption
-/// the rest of this admission/resolution pipeline already relies on (e.g. canonicalize()
-/// results are never re-validated against concurrent filesystem changes either).
+/// file bytes -- the dominant cost the original DL-016 finding cited -- so a package with
+/// many imported modules pays only repeated cheap directory listings, not repeated full
+/// content reads. DL-016 also added a process-lifetime memoization cache here, but that is
+/// unsafe for `smc watch` (a genuinely long-lived process, see `cmd_watch` in `app.rs`):
+/// once a module_root was scanned, a nested manifest added later would never be
+/// re-detected for the life of the watch process. Deliberately NOT re-added -- see
+/// DL-017. A future caller that specifically needs cross-call memoization within one
+/// bounded bundle operation (not a whole process) should thread an explicit cache
+/// parameter through that operation instead of reintroducing global state here.
 fn reject_nested_manifests(module_root: &Path, authority_manifest: &Path) -> Result<(), String> {
-    use std::collections::HashSet;
-    use std::sync::{Mutex, OnceLock};
-    static VALIDATED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
-    let cache = VALIDATED.get_or_init(|| Mutex::new(HashSet::new()));
-    if cache.lock().unwrap().contains(module_root) {
-        return Ok(());
-    }
     let authority_manifest = authority_manifest.canonicalize().map_err(|error| {
         format!(
             "failed to resolve '{}': {error}",
             authority_manifest.display()
         )
     })?;
-    reject_nested_manifests_under(module_root, module_root, &authority_manifest)?;
-    cache.lock().unwrap().insert(module_root.to_path_buf());
-    Ok(())
+    reject_nested_manifests_under(module_root, module_root, &authority_manifest)
 }
 
 fn reject_nested_manifests_under(
@@ -2681,7 +2810,6 @@ format 1
 package app
 manifest_dir .
 module_root src
-dep math math ../math
 "#,
         )
         .expect("write manifest");
@@ -2735,6 +2863,94 @@ module_root src
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // `smc package inspect` rejects a package whose declared dependency graph is invalid
+    // (missing/cyclic/name-mismatched/stale-pinned) regardless of whether any module
+    // actually imports the broken dependency, by walking the full graph via
+    // PackageGraphBuilder::visit. Admission used to validate dependencies only lazily, as
+    // each was actually resolved through an import, so `check`/`compile`/`run` accepted
+    // and executed a package with an unused-but-missing declared dependency that `inspect`
+    // would reject on the identical tree -- found by @codex review (DL-021).
+    #[test]
+    fn admit_package_entry_module_rejects_unused_missing_declared_dependency() {
+        let dir = mk_temp_dir("pkg_admit_missing_unused_dep");
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(&src_dir).expect("mkdir src");
+        std::fs::write(
+            dir.join(PACKAGE_MANIFEST_FILE_NAME),
+            r#"
+format 1
+package app
+manifest_dir .
+module_root src
+dep math math ../math
+"#,
+        )
+        .expect("write manifest");
+        let entry = src_dir.join("main.sm");
+        std::fs::write(&entry, "fn main() { return; }").expect("write entry");
+        // Deliberately do not create ../math -- the declared dependency is missing, and
+        // nothing in `entry` actually imports it.
+
+        let err = admit_package_entry_module(&entry)
+            .expect_err("an unused but missing declared dependency must still be rejected");
+        assert_eq!(
+            err.code,
+            PackageModuleAdmissionCode::DeclaredDependencyGraphInvalid
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The declared-dependency-graph validation is cached per manifest so admitting many
+    // modules from the same manifest only walks the graph once per bundle pass. Prove the
+    // cache is real (a dependency removed after the first admission is NOT caught by a
+    // second admission against the same cache) and that
+    // reset_declared_dependency_graph_cache correctly re-enables detection, mirroring
+    // DL-020's proof for the sibling pinned-content cache.
+    #[test]
+    fn admit_package_entry_module_declared_dependency_graph_cache_is_resettable() {
+        let dir = mk_temp_dir("pkg_admit_dep_graph_cache");
+        let app_src = dir.join("app").join("src");
+        let math_src = dir.join("math").join("src");
+        std::fs::create_dir_all(&app_src).expect("mkdir app src");
+        std::fs::create_dir_all(&math_src).expect("mkdir math src");
+        std::fs::write(
+            dir.join("math").join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage math\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write math manifest");
+        std::fs::write(
+            dir.join("app").join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage dep_graph_cache_app\nmanifest_dir .\nmodule_root src\ndep math math ../math\n",
+        )
+        .expect("write app manifest");
+        let first_entry = app_src.join("first.sm");
+        let second_entry = app_src.join("second.sm");
+        std::fs::write(&first_entry, "fn first() { return; }").expect("write first entry");
+        std::fs::write(&second_entry, "fn second() { return; }").expect("write second entry");
+
+        reset_declared_dependency_graph_cache();
+        admit_package_entry_module(&first_entry)
+            .expect("first admission must succeed and populate the cache")
+            .expect("manifest must exist");
+
+        let _ = std::fs::remove_dir_all(dir.join("math"));
+
+        admit_package_entry_module(&second_entry)
+            .expect("second admission must succeed from the cache despite the removed dependency")
+            .expect("manifest must exist");
+
+        reset_declared_dependency_graph_cache();
+        let err = admit_package_entry_module(&second_entry)
+            .expect_err("after reset, the missing dependency must be re-detected");
+        assert_eq!(
+            err.code,
+            PackageModuleAdmissionCode::DeclaredDependencyGraphInvalid
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // docs/spec/project_model_v0.md permits `semantic.toml` and `Semantic.package` to
     // co-exist in the same directory for compatibility, with `semantic.toml` winning as
     // the authority manifest. The DL-013 fix above wrongly treated the losing, co-located
@@ -2765,21 +2981,22 @@ module_root src
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // reject_nested_manifests memoizes per canonicalized module_root so a package with
-    // many imported modules is scanned once rather than once per admitted module -- found
-    // as a performance issue in the same DL-013 fix by @codex review (DL-016). Prove the
-    // memoization actually takes effect: admit one module to populate the cache, then
-    // introduce a genuinely nested manifest into the same module_root and admit a second,
-    // different module in that tree -- it must still succeed because the structural scan
-    // is cached, not re-run against the now-changed tree.
+    // DL-016 originally memoized the nested-manifest scan per module_root for the life of
+    // the process. `smc watch` (see `cmd_watch` in app.rs) is a genuinely long-lived
+    // process that re-admits the same module_root repeatedly as files change, so that
+    // cache would have permanently hidden a nested manifest added after the first scan --
+    // found by @codex review and fixed in DL-017 by removing the process-wide cache.
+    // Prove there is no stale caching: a nested manifest added between two admissions of
+    // the same module_root must be detected on the second call, not silently accepted
+    // because the first call already "validated" that module_root.
     #[test]
-    fn admit_package_entry_module_memoizes_nested_manifest_scan_per_module_root() {
-        let dir = mk_temp_dir("pkg_admit_memoized_scan");
+    fn admit_package_entry_module_detects_nested_manifest_added_after_prior_admission() {
+        let dir = mk_temp_dir("pkg_admit_no_stale_cache");
         let src_dir = dir.join("src");
         std::fs::create_dir_all(&src_dir).expect("mkdir src");
         std::fs::write(
             dir.join(PACKAGE_MANIFEST_FILE_NAME),
-            "format 1\npackage memoized_scan_app\nmanifest_dir .\nmodule_root src\n",
+            "format 1\npackage no_stale_cache_app\nmanifest_dir .\nmodule_root src\n",
         )
         .expect("write manifest");
         let first_entry = src_dir.join("first.sm");
@@ -2799,10 +3016,12 @@ module_root src
 
         let second_entry = src_dir.join("second.sm");
         std::fs::write(&second_entry, "fn second() { return; }").expect("write second entry");
-        let admitted = admit_package_entry_module(&second_entry)
-            .expect("second admission must not error")
-            .expect("manifest must exist");
-        assert_eq!(admitted.package_name, "memoized_scan_app");
+        let err = admit_package_entry_module(&second_entry)
+            .expect_err("nested manifest added after a prior admission must still be caught");
+        assert_eq!(
+            err.code,
+            PackageModuleAdmissionCode::NestedManifestInsideModuleRoot
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2982,6 +3201,75 @@ module_root src
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // A pinned dependency imported through multiple package-qualified modules would
+    // otherwise be re-read and re-hashed on every single import -- O(N*M) for N importing
+    // modules and M dependency files -- found by @codex review as a direct consequence of
+    // DL-016's admission-side memoization fix. Cache the content-fingerprint verification
+    // per dependency manifest, but (learning DL-017's lesson: a process-lifetime cache is
+    // unsafe for `smc watch`) make it explicitly resettable rather than a bare `static`,
+    // and prove both halves: the cache is real (a tamper made after the first resolution
+    // is NOT caught by a second resolution against the same cache), and reset correctly
+    // re-enables detection (DL-020).
+    #[test]
+    fn resolve_package_import_path_caches_pinned_dependency_content_verification() {
+        let dir = mk_temp_dir("pkg_import_pinned_cache");
+        let app_src = dir.join("app").join("src");
+        let math_src = dir.join("math").join("src");
+        std::fs::create_dir_all(&app_src).expect("mkdir app src");
+        std::fs::create_dir_all(&math_src).expect("mkdir math src");
+        let math_manifest_path = dir.join("math").join(PACKAGE_MANIFEST_FILE_NAME);
+        std::fs::write(
+            &math_manifest_path,
+            "format 1\npackage math\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write math manifest");
+        std::fs::write(math_src.join("core.sm"), "fn core() { return; }\n")
+            .expect("write dep content");
+
+        let manifest_fp = manifest_fingerprint(&math_manifest_path).expect("manifest fp");
+        let content_fp =
+            package_content_fingerprint(&math_src, &math_manifest_path).expect("content fp");
+        std::fs::write(
+            dir.join("app").join(PACKAGE_MANIFEST_FILE_NAME),
+            format!(
+                "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep math math ../math {manifest_fp} {content_fp}\n"
+            ),
+        )
+        .expect("write app manifest");
+        let importer = app_src.join("main.sm");
+        std::fs::write(
+            &importer,
+            "Import \"math::core.sm\"\nfn main() { return; }\n",
+        )
+        .expect("write importer");
+
+        reset_pinned_dependency_fingerprint_cache();
+        resolve_package_import_path(&importer, "math::core.sm")
+            .expect("first resolution must succeed and populate the cache");
+
+        std::fs::write(
+            math_src.join("core.sm"),
+            "fn core() { return; } // tampered\n",
+        )
+        .expect("tamper dep content without updating the pin");
+
+        resolve_package_import_path(&importer, "math::core.sm").expect(
+            "second resolution must succeed from the cache despite the tampered content \
+             -- this is the caching behavior under test, not a security hole: the pin was \
+             already verified once this pass",
+        );
+
+        reset_pinned_dependency_fingerprint_cache();
+        let err = resolve_package_import_path(&importer, "math::core.sm")
+            .expect_err("after an explicit reset, the tampered content must be re-detected");
+        assert_eq!(
+            err.code,
+            PackageImportResolutionCode::DependencyContentFingerprintMismatch
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // A lossy relative-path conversion would let two distinct non-UTF-8 filenames
     // collapse onto the same fingerprint key, so renaming between them while keeping
     // file bytes unchanged would leave the content fingerprint unchanged too --
@@ -3062,6 +3350,34 @@ module_root src
 
         let _ = std::fs::remove_dir_all(&real_dir);
         let _ = std::fs::remove_dir_all(&literal_dir);
+    }
+
+    // `smc check`/`compile`/`run` select `semantic.toml` over a co-located `Semantic.package`
+    // (docs/spec/project_model_v0.md:18-20), but `inspect_local_package_graph` used to
+    // always select `Semantic.package` directly, so its provenance record could describe a
+    // different package identity/module_root/dependency graph than the code the project
+    // commands actually admit -- found by @codex review (DL-019).
+    #[test]
+    fn inspect_local_package_graph_honors_semantic_toml_precedence_over_package_manifest() {
+        let dir = mk_temp_dir("pkg_inspect_semantic_toml_precedence");
+        std::fs::write(
+            dir.join(SEMANTIC_TOML_FILE_NAME),
+            "[package]\nname = \"winner_from_semantic_toml\"\n\n[project]\nentry = \"main.sm\"\n",
+        )
+        .expect("write semantic.toml");
+        std::fs::write(
+            dir.join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage loser_from_package_manifest\nmanifest_dir .\nmodule_root .\n",
+        )
+        .expect("write co-located Semantic.package");
+        std::fs::write(dir.join("main.sm"), "fn main() { return; }\n").expect("write entry");
+
+        let provenance = inspect_local_package_graph(&dir).expect("inspect must succeed");
+        let value: serde_json::Value =
+            serde_json::from_str(&provenance).expect("provenance must be valid JSON");
+        assert_eq!(value["root_package"], "winner_from_semantic_toml");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // Same defect class as the content-fingerprint collision above, but for the

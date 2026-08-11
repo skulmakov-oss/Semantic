@@ -111,7 +111,18 @@ impl ModuleProvider for CliFsProvider {
 
     fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String> {
         package_manifest::resolve_package_import_path(Path::new(importer_module_id), spec)
-            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .map(|path| {
+                let text = path.to_string_lossy();
+                // Only fold '\' into '/' on Windows -- on Unix it is an ordinary filename
+                // character, and resolve_package_import_path already preserves it, so
+                // folding it here would make this module_id identify a different file
+                // than the one that was actually resolved (same class as DL-012/DL-016).
+                if cfg!(windows) {
+                    text.replace('\\', "/")
+                } else {
+                    text.into_owned()
+                }
+            })
             .map_err(|e| e.to_string())
     }
 }
@@ -235,6 +246,35 @@ Law "L" [priority 1]:
 
         let report = CliPipeline::semantic_check_file(&entry).expect("check");
         assert_eq!(report.scheduled_laws.len(), 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // CliFsProvider::resolve_import folded '\' into '/' unconditionally, even though
+    // resolve_package_import_path (which it wraps) already preserves a literal backslash
+    // on Unix (that fix landed earlier in this same repair chain -- see
+    // docs/spec/project_model_v0.md-adjacent DL entries in issue #1598). On Unix a
+    // resolved import whose path contains a literal '\' must come back unchanged from
+    // this provider method too, or CliPipeline::semantic_check_file (and compile/run)
+    // would try to read a different or nonexistent module than the one actually
+    // resolved (DL-018).
+    #[cfg(unix)]
+    #[test]
+    fn cli_fs_provider_resolve_import_preserves_literal_backslash_on_unix() {
+        let dir = mk_temp_dir("cli_fs_provider_backslash_import");
+        let importer = dir.join("main.sm");
+        std::fs::write(&importer, "fn main() { return; }\n").expect("write importer");
+        std::fs::write(dir.join("dep\\lib.sm"), "fn dep() { return; }\n")
+            .expect("write literal-backslash dependency");
+
+        let provider = CliFsProvider;
+        let resolved = provider
+            .resolve_import(importer.to_str().expect("importer utf8"), "dep\\lib.sm")
+            .expect("resolve");
+        assert!(
+            resolved.ends_with("dep\\lib.sm"),
+            "resolved module_id must preserve the literal backslash, got: {resolved}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
