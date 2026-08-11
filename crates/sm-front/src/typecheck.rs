@@ -6826,6 +6826,39 @@ mod tests {
 
     // M9.2 Wave 3 — trait coherence, conformance, and bound satisfaction
 
+    // SSF-07 explicitly defers blanket/generic impls (`impl<T> Trait for T`) --
+    // ImplDecl.type_params is documented as "Empty in first-wave canonical form"
+    // but nothing previously enforced that, so a blanket-shaped impl silently
+    // typechecked as an ordinary impl for a nominal type literally named `T`.
+    // Reject any impl with non-empty type_params deterministically instead.
+    #[test]
+    fn blanket_impl_with_type_params_is_rejected() {
+        let src = r#"
+            trait Show {
+                fn show(self: MyType) -> i32;
+            }
+
+            record MyType { x: i32 }
+
+            impl<T> Show for MyType {
+                fn show(self: MyType) -> i32 {
+                    return 0;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("blanket/generic impl with type_params must be rejected");
+        assert!(
+            err.message.contains("generic") || err.message.contains("type param"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
     #[test]
     fn duplicate_impl_same_trait_and_type_is_rejected() {
         let src = r#"
@@ -9285,10 +9318,29 @@ fn check_loop_expr_stmt(
     }
 }
 
-/// Coherence check: at most one impl per (trait_name, for_type) pair.
+/// Coherence check: at most one impl per (trait_name, for_type) pair, and no
+/// generic/blanket impls. `ImplDecl.type_params` is documented as "Empty in
+/// first-wave canonical form" (see its doc comment in types.rs), but nothing
+/// previously enforced that -- a blanket-shaped impl such as
+/// `impl<T> Trait for T` or an impl declaring an unused type parameter both
+/// silently typechecked. Trait objects, associated types, blanket impls,
+/// specialization, and default methods are explicit SSF-07 non-goals
+/// (docs/spec/foundation_source_profile_v1.md); this is the enforcement point
+/// for the blanket-impl/specialization carve-out specifically.
 fn validate_trait_coherence(impls: &[ImplDecl], arena: &AstArena) -> Result<(), FrontendError> {
     let mut seen: BTreeSet<(SymbolId, SymbolId)> = BTreeSet::new();
     for imp in impls {
+        if !imp.type_params.is_empty() {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "impl of trait '{}' for type '{}' declares type parameters; \
+                     generic/blanket impls are not supported",
+                    resolve_symbol_name(arena, imp.trait_name)?,
+                    resolve_symbol_name(arena, imp.for_type)?,
+                ),
+            });
+        }
         let key = (imp.trait_name, imp.for_type);
         if !seen.insert(key) {
             return Err(FrontendError {
