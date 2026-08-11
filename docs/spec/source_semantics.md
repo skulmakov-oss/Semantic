@@ -313,7 +313,9 @@ Current first-wave units-of-measure semantics:
 - `fx` should be read as a stable value-transport and equality family inside the
   current line; binary arithmetic on `fx` remains outside the current contract
 - unary `+` / unary `-` for `fx` remain limited to literal formation, not
-  general `fx` expression rewriting
+  general `fx` expression rewriting; on a measured `fx` value this surfaces
+  as the same explicit narrow-slice-gap rejection as measured `fx` binary
+  `+`/`-`
 - binary and unary `+`/`-` are admitted only for measured `f64`; measured
   `i32`/`u32` binary and unary `+`/`-` are rejected as unsupported operators
   (see "Operator Meaning" below for the full per-family breakdown and test
@@ -863,7 +865,7 @@ Current first-wave units operator rules:
 
 - binary and unary `+`/`-` preserve a unit annotation only for measured `f64`
   operands when both operands have the same measured type; measured `fx`
-  binary `+`/`-` reports an explicit narrow-slice gap, and measured
+  binary and unary `+`/`-` report an explicit narrow-slice gap, and measured
   `i32`/`u32` binary and unary `+`/`-` are rejected as unsupported operators;
   SSF-07 selected this as the current boundary rather than leaving it
   undecided, and any future widening to measured `i32`/`u32` arithmetic is a
