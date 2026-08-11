@@ -1,22 +1,30 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-06
-  title: "tooling: complete local Package Baseline v0"
-  type: package_baseline_contract_qualification_and_bounded_implementation
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-07
+  title: "language: close or bound numeric/text/collection/closure/generic/trait/pattern abstractions"
+  type: type_and_abstraction_closure_contract_qualification_and_bounded_implementation
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-05
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-06
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-05 closed through PR #1595 at main commit
-    99758c63a57d9c280f311db24ddd87169558d93a; only SSF-06 is now active.
+    order. SSF-06 closed through PR #1597 at merge commit
+    92be6c0412140a3547cdd9627e0f9a8971965855, after an eleven-pass repair cycle
+    documented in issue #1598 (Decision Log DL-009 through DL-023); only
+    SSF-07 is now active.
 
 intent:
   summary: >-
-    Inventory the existing Semantic.package/local-dependency/import graph before
-    widening it; freeze the minimum local-only package identity, deterministic
-    graph, root-containment, hash/provenance-record, and capability-request
-    boundaries; prove multi-package composition without registry, remote fetch,
-    build hooks, implicit grants, workspace expansion, or verifier bypass.
+    Read SSF-00...06 outputs and build a gap table only for abstractions
+    already selected by the frozen Stable Foundation target; separate
+    contract gaps from implementation bugs. Freeze numeric overflow/
+    conversion policy, UTF-8 text semantics, collection equality/ordering/
+    mutability, first-wave closure capture semantics, generic/trait
+    monomorphisation and coherence, and pattern alignment across the
+    parser/typechecker/exhaustiveness/lowering/ownership/diagnostics
+    pipeline, each before implementing it. Add positive end-to-end tests and
+    deterministic negative cases for every included abstraction; give every
+    deferred form an explicit non-goal and a deterministic rejection
+    diagnostic instead of leaving it silently unsupported.
 
 scope:
   allowed_paths:
@@ -67,29 +75,30 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-06
-  issue: 1577
+  active_phase: SSF-07
+  issue: 1578
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
-  local_package_identity_graph_import_and_hash_inventory_first: true
-  project_model_v0_boundary_is_preserved: true
-  package_name_and_version_are_labels_not_trust: true
-  local_path_dependencies_only: true
-  dependency_order_and_cycle_diagnostics_are_deterministic: true
-  dependency_roots_are_explicit_and_root_contained: true
-  package_qualified_imports_use_canonical_compiler_authority: true
-  content_manifest_graph_and_capability_inventory_hashes_are_reproducible: true
-  provenance_record_is_minimal_local_and_inspectable: true
-  capability_request_is_not_grant: true
-  package_identity_never_bypasses_verifier_admission: true
-  no_registry_remote_fetch_solver_publish_or_install: true
-  no_build_scripts_or_install_hooks: true
-  no_implicit_transitive_capability_grants: true
-  no_broad_workspace_model_without_demonstrated_need: true
-  type_and_abstraction_expansion_deferred_to_ssf_07: true
-  no_ui_product_expansion: true
+  gap_table_scoped_to_already_selected_abstractions_only: true
+  contract_gaps_separated_from_implementation_bugs: true
+  no_new_abstraction_added_merely_because_convenient: true
+  numeric_overflow_and_conversion_policy_frozen_before_implementation: true
+  text_utf8_semantics_frozen_before_implementation: true
+  collections_equality_ordering_mutability_iteration_frozen_before_implementation: true
+  closures_first_wave_capture_and_invocation_semantics_frozen_before_implementation: true
+  generics_traits_deterministic_monomorphisation_and_coherence_required: true
+  patterns_aligned_across_parser_typechecker_exhaustiveness_lowering_ownership_diagnostics: true
+  positive_and_deterministic_negative_tests_required_per_included_abstraction: true
+  deferred_forms_have_explicit_non_goals_and_deterministic_rejection: true
+  no_global_refactor_unless_invariant_cannot_be_preserved_otherwise: true
+  no_stable_abstraction_depends_on_unstable_internal_crate_apis: true
+  no_async_await: true
+  no_broad_dynamic_dispatch_or_reflection: true
+  no_macro_system: true
+  no_gc_object_runtime: true
+  no_systems_language_claims_beyond_evidence: true
   no_stable_release_claim: true
   no_historical_document_rewrite: true
