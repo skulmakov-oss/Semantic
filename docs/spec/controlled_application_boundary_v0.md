@@ -73,6 +73,16 @@ audit stream. A denied operation has `decision=deny`, no payload hashes, and is
 also returned as a structured runtime or ABI error. Records for any preceding
 admitted operations are still emitted.
 
+Application-controlled `stderr_write` payload and the CLI's own audit records
+share process stderr, so untrusted application text is never written raw.
+Every physical line the application writes to stderr is prefixed with
+`application| ` and always newline-terminated, regardless of whether the
+application's own text ended in a newline. Audit records always start with
+`schema=` and are never prefixed that way. This keeps the two evidence
+classes unambiguous even if application text embeds newlines or literally
+contains audit-schema-looking text, and prevents an unterminated application
+write from concatenating onto a following audit line.
+
 ## CLI contour
 
 The existing one-argument `smc run <input>` behavior remains the controlled

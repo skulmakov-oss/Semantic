@@ -8,6 +8,24 @@ pub(crate) const APPLICATION_AUDIT_SCHEMA: &str = "semantic.foundation.applicati
 const MAX_APPLICATION_TEXT_BYTES: usize = 16 * 1024 * 1024;
 const MAX_APPLICATION_PATH_BYTES: usize = 4096;
 
+/// Every physical stderr line written on behalf of the application carries this
+/// prefix. Trusted audit lines (rendered separately by the CLI, see
+/// `ApplicationAuditRecord::render`) always start with `schema=` and never with
+/// this prefix, so a payload that embeds literal audit-schema-looking text still
+/// renders as unambiguously application-controlled, and cannot concatenate onto
+/// a following trusted line since every framed line is newline-terminated here
+/// regardless of whether the application's own text was.
+const APPLICATION_STDERR_LINE_PREFIX: &str = "application| ";
+
+fn write_framed_application_stderr<W: Write>(writer: &mut W, text: &str) -> io::Result<()> {
+    for line in text.lines() {
+        writer.write_all(APPLICATION_STDERR_LINE_PREFIX.as_bytes())?;
+        writer.write_all(line.as_bytes())?;
+        writer.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ApplicationAuditRecord {
     sequence: u64,
@@ -327,7 +345,7 @@ impl ApplicationHostAbi for CliApplicationHost {
     fn stderr_write(&mut self, text: &str) -> Result<(), AbiError> {
         self.require_observation(HostCallId::StderrWrite)?;
         self.ensure_text_limit(HostCallId::StderrWrite, text.len())?;
-        io::stderr().write_all(text.as_bytes()).map_err(|error| {
+        write_framed_application_stderr(&mut io::stderr(), text).map_err(|error| {
             self.error(
                 HostCallId::StderrWrite,
                 AbiFailureKind::HostFault,
@@ -519,5 +537,49 @@ mod tests {
             .expect("symlink root must fail");
         assert!(error.contains("symlink or reparse point"));
         fs::remove_file(link).expect("cleanup");
+    }
+
+    #[test]
+    fn framed_stderr_prefixes_every_line_and_always_newline_terminates() {
+        let mut out = Vec::new();
+        write_framed_application_stderr(&mut out, "first\nsecond").expect("write");
+        assert_eq!(
+            String::from_utf8(out).expect("utf8"),
+            "application| first\napplication| second\n"
+        );
+    }
+
+    #[test]
+    fn framed_stderr_cannot_impersonate_a_trusted_audit_line() {
+        // A payload that embeds a literal audit-schema-looking line must still render
+        // with the application prefix, never bare, so it can never be confused with a
+        // genuine ApplicationAuditRecord::render() line (which always starts with `schema=`
+        // and is never framed this way).
+        let forged = "schema=semantic.foundation.application.audit/0.1 seq=0 capability=fs.write decision=allow bytes=0 path_hash=- payload_hash=-";
+        let mut out = Vec::new();
+        write_framed_application_stderr(&mut out, forged).expect("write");
+        let rendered = String::from_utf8(out).expect("utf8");
+        assert_eq!(
+            rendered,
+            format!("{APPLICATION_STDERR_LINE_PREFIX}{forged}\n")
+        );
+        assert!(!rendered.starts_with("schema="));
+    }
+
+    #[test]
+    fn framed_stderr_of_an_unterminated_payload_cannot_merge_onto_a_following_line() {
+        let mut out = Vec::new();
+        write_framed_application_stderr(&mut out, "no trailing newline").expect("write");
+        // The framed output always ends in `\n`, so anything written to the same stream
+        // immediately afterward (such as a trusted audit line) starts on a fresh line
+        // rather than concatenating onto the application's payload.
+        assert!(out.ends_with(b"\n"));
+    }
+
+    #[test]
+    fn framed_stderr_of_empty_text_writes_nothing() {
+        let mut out = Vec::new();
+        write_framed_application_stderr(&mut out, "").expect("write");
+        assert!(out.is_empty());
     }
 }
