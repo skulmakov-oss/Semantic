@@ -3738,6 +3738,82 @@ mod tests {
     }
 
     #[test]
+    fn measured_i32_binary_addition_rejects() {
+        let src = r#"
+            fn main() {
+                let x: i32[m] = 1;
+                let y: i32[m] = 2;
+                let sum: i32[m] = x + y;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("binary addition on measured i32 must be rejected");
+        assert!(
+            !err.message.is_empty(),
+            "expected an operator-unsupported error"
+        );
+    }
+
+    #[test]
+    fn measured_i32_binary_subtraction_rejects() {
+        let src = r#"
+            fn main() {
+                let x: i32[m] = 2;
+                let y: i32[m] = 1;
+                let diff: i32[m] = x - y;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("binary subtraction on measured i32 must be rejected");
+        assert!(
+            !err.message.is_empty(),
+            "expected an operator-unsupported error"
+        );
+    }
+
+    #[test]
+    fn measured_u32_binary_addition_rejects() {
+        let src = r#"
+            fn main() {
+                let x: u32[m] = 1;
+                let y: u32[m] = 2;
+                let sum: u32[m] = x + y;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("binary addition on measured u32 must be rejected");
+        assert!(
+            !err.message.is_empty(),
+            "expected an operator-unsupported error"
+        );
+    }
+
+    #[test]
+    fn measured_u32_binary_subtraction_rejects() {
+        let src = r#"
+            fn main() {
+                let x: u32[m] = 2;
+                let y: u32[m] = 1;
+                let diff: u32[m] = x - y;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("binary subtraction on measured u32 must be rejected");
+        assert!(
+            !err.message.is_empty(),
+            "expected an operator-unsupported error"
+        );
+    }
+
+    #[test]
     fn text_literal_and_equality_surface_typechecks() {
         let src = r#"
             fn id(message: text) -> text {
