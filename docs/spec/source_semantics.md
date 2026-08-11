@@ -856,10 +856,13 @@ Current operator meaning:
 
 Current first-wave units operator rules:
 
-- `+` and `-` preserve a unit annotation only when both operands have the same
-  measured type
-- `==` and `!=` are valid on unit-carrying values only when both sides have the
-  same measured type
+- binary and unary `+`/`-` preserve a unit annotation only for measured `f64`
+  operands when both operands have the same measured type; measured `fx`
+  binary `+`/`-` reports an explicit narrow-slice gap, and measured
+  `i32`/`u32` binary and unary `+`/`-` are rejected as unsupported operators
+  pending a cross-family measured-arithmetic decision (SSF-07)
+- `==` and `!=` are valid on unit-carrying values of any base type only when
+  both sides have the same measured type
 - `*` and `/` on unit-carrying values are rejected in the first-wave surface
 - after unit validation, lowering reuses the existing numeric execution opcodes
   rather than widening the runtime operator family

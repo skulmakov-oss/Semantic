@@ -3704,6 +3704,40 @@ mod tests {
     }
 
     #[test]
+    fn measured_i32_unary_plus_rejects() {
+        let src = r#"
+            fn main() {
+                let x: i32[m] = 1;
+                let same: i32[m] = +x;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("unary plus on a measured i32 must be rejected");
+        assert!(
+            !err.message.is_empty(),
+            "expected an operator-unsupported error"
+        );
+    }
+
+    #[test]
+    fn measured_u32_unary_plus_rejects() {
+        let src = r#"
+            fn main() {
+                let x: u32[m] = 1;
+                let same: u32[m] = +x;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("unary plus on a measured u32 must be rejected");
+        assert!(
+            !err.message.is_empty(),
+            "expected an operator-unsupported error"
+        );
+    }
+
+    #[test]
     fn text_literal_and_equality_surface_typechecks() {
         let src = r#"
             fn id(message: text) -> text {
