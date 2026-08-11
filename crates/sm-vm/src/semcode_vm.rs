@@ -4403,6 +4403,21 @@ mod tests {
     }
 
     #[test]
+    fn vm_wraps_i32_unary_negation_of_min() {
+        let src = r#"
+            fn main() {
+                let min_val: i32 = 0 - 2147483647 - 1;
+                let negated: i32 = -min_val;
+                assert(negated == min_val);
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        run_semcode(&bytes)
+            .expect("unary negation of i32::MIN lowers through SubI32 and must wrap, not trap");
+    }
+
+    #[test]
     fn vm_traps_on_i32_division_min_by_negative_one() {
         let src = r#"
             fn main() {
