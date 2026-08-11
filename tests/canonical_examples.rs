@@ -109,7 +109,7 @@ fn canonical_boundary_example_reports_current_alias_limit() {
     );
     assert!(
         err.contains(
-            "top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2"
+            "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports"
         ),
         "expected executable alias boundary diagnostic, got: {err}"
     );

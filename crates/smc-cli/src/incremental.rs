@@ -1,4 +1,6 @@
-use crate::package_manifest::{admit_package_entry_module, resolve_package_import_path};
+use crate::package_manifest::{
+    admit_package_entry_module, find_nearest_manifest, resolve_package_import_path,
+};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -279,7 +281,24 @@ fn collect_module_graph(
     }
     let source = std::fs::read_to_string(&canonical)
         .map_err(|e| format!("read '{}': {}", canonical.display(), e))?;
-    let source_hash = fnv1a64(source.as_bytes());
+    let mut source_hash = fnv1a64(source.as_bytes());
+    // Fold the governing manifest's own (small, single-file) content into the module's
+    // change fingerprint. Without this, module_graph_fingerprint -- the cheap signal
+    // `smc watch` polls every ~600ms to decide whether to rebuild -- has no way to see a
+    // change to a declared-but-unimported dependency (added/removed/re-pinned), so admission's
+    // full declared-dependency-graph validation (see admit_package_entry_module) would need
+    // to run on every idle tick just to catch that case, not only on real rebuilds. Reading
+    // one small manifest file is cheap enough to do unconditionally every tick; the full
+    // graph walk stays gated on an actual fingerprint change (DL-023).
+    if let Some(manifest_path) = find_nearest_manifest(&canonical) {
+        if let Ok(manifest_source) = std::fs::read_to_string(&manifest_path) {
+            let manifest_hash = fnv1a64(manifest_source.as_bytes());
+            let mut combined = Vec::with_capacity(16);
+            combined.extend_from_slice(&source_hash.to_le_bytes());
+            combined.extend_from_slice(&manifest_hash.to_le_bytes());
+            source_hash = fnv1a64(&combined);
+        }
+    }
     let mut deps = Vec::new();
     for spec in parse_import_specs(&source) {
         let child = resolve_package_import_path(&canonical, &spec).map_err(|e| e.to_string())?;
@@ -423,6 +442,61 @@ Law "Core2" [priority 2]:
         .expect("rewrite child");
         let fp2 = module_graph_fingerprint(&root, 2).expect("fp2");
         assert_ne!(fp1, fp2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // `smc watch` polls module_graph_fingerprint every ~600ms to decide whether to
+    // rebuild, and only resets admission's declared-dependency-graph cache when the
+    // fingerprint actually changes (see cmd_watch in app.rs). Before this fix, the
+    // fingerprint tracked source Import edges only, so adding/removing a declared-but-
+    // unimported dependency in the entry's own manifest left `fp` unchanged -- meaning
+    // `smc watch` would never notice or re-validate that change. collect_module_graph now
+    // folds the governing manifest's own content into each module's hash, so this must
+    // change `fp` even though `root.sm` never imports the added dependency (DL-023).
+    #[test]
+    fn module_graph_fingerprint_changes_on_unused_declared_dependency_edit() {
+        let dir = mk_temp_dir("smc_module_graph_fp_unused_dep");
+        let app_src = dir.join("app").join("src");
+        std::fs::create_dir_all(&app_src).expect("mkdir app src");
+        std::fs::write(
+            dir.join("app").join("Semantic.package"),
+            "format 1\npackage app\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write app manifest without a dependency");
+        let root = app_src.join("main.sm");
+        std::fs::write(
+            &root,
+            r#"
+Law "Root" [priority 1]:
+    When true -> System.recovery()
+"#,
+        )
+        .expect("write root");
+        let fp1 = module_graph_fingerprint(&root, 2).expect("fp1");
+
+        // Declare an unused dependency -- root.sm still imports nothing. The dependency
+        // must actually exist (DL-021 rejects a missing declared dependency outright,
+        // regardless of usage, and module_graph_fingerprint now admits the entry as part
+        // of computing the fingerprint).
+        let math_src = dir.join("math").join("src");
+        std::fs::create_dir_all(&math_src).expect("mkdir math src");
+        std::fs::write(
+            dir.join("math").join("Semantic.package"),
+            "format 1\npackage math\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write math manifest");
+        std::fs::write(math_src.join("core.sm"), "fn core() { return; }\n")
+            .expect("write math source");
+        std::fs::write(
+            dir.join("app").join("Semantic.package"),
+            "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep math math ../math\n",
+        )
+        .expect("rewrite app manifest with an unused dependency");
+        let fp2 = module_graph_fingerprint(&root, 2).expect("fp2");
+        assert_ne!(
+            fp1, fp2,
+            "adding a declared-but-unimported dependency must change the watch fingerprint"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1960,6 +1960,9 @@ fn pcc9_package_manifest_local_dependency_inventory_is_deterministic() {
         PackageDependencySource::LocalPath { path } => {
             assert_eq!(path, "../math");
         }
+        PackageDependencySource::PinnedLocalPath { .. } => {
+            panic!("fixture declares an unpinned local dependency")
+        }
     }
 }
 

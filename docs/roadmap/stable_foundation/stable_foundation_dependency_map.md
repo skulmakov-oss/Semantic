@@ -35,8 +35,8 @@ until the preceding exit gate is accepted.
 | SSF-02 / #1573 | Frozen executable contract | Rust-like/Logos Model A or B, diagnostics and package interaction | Honest profile behavior and examples | Completed: Model B |
 | SSF-03 / #1574 | Frozen language/profile contract | Versioned language-owned stdlib equivalents and builtin boundary | Positive, negative, compatibility tests and canonical index | Completed |
 | SSF-04 / #1575 | Stable value/library carriers | Capabilities, profiles, denial/audit/replay contract | Canonical deterministic file-transform path | Completed |
-| SSF-05 / #1576 | Language, stdlib, and effect contracts | Canonical manifest/project layout/commands/path identity | Reproducible project fixtures including `smc test` | **Active: candidate exit** |
-| SSF-06 / #1577 | Canonical project model | Local package graph, provenance/lock, capability inventory | Multi-package reproducibility and root-security evidence | Blocked by SSF-05 |
+| SSF-05 / #1576 | Language, stdlib, and effect contracts | Canonical manifest/project layout/commands/path identity | Reproducible project fixtures including `smc test` | Completed |
+| SSF-06 / #1577 | Canonical project model | Local package graph, provenance-equivalent record, capability inventory | Multi-package reproducibility and root-security evidence | **Active: candidate exit** |
 | SSF-07 / #1578 | Stable project/package usage needs | Numeric/text/collections/closures/generics/traits/pattern bounds | Ordinary programs without undocumented workarounds | Blocked by SSF-06 |
 | SSF-08 / #1579 | Selected abstraction surface | Ownership Position A/B, value paths, frames, host ownership, quotas | Positive/negative ownership and deterministic failure suite | Blocked by SSF-07 |
 | SSF-09 / #1580 | Canonical diagnostics and project symbols | Diagnostic schema, formatter, LSP/editor baseline | CLI/LSP parity, idempotence, protocol fixtures | Blocked by SSF-08 |

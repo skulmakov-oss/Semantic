@@ -296,6 +296,7 @@ Current rule:
 - source-reading commands inherit the current executable bundle admission boundary
 - project-root `smc compile` uses the bounded project entry resolution, then writes the SemCode artifact only to the requested `-o|--out` path
 - `smc check` also accepts a bounded admitted project-root entrypoint through `Semantic.package` + `src/main.sm`
+- `smc package inspect <project-root>` prints the deterministic, read-only local package provenance record defined by `semantic.foundation.package/0.1`
 - project-root `smc check` also resolves a minimal `semantic.toml` manifest when present
 - project-root `smc run` uses the same bounded project entry resolution, then follows the existing verifier-first source execution route
 - project-root `smc dump-ast`, `smc dump-ir`, and `smc dump-bytecode` use the same bounded project entry resolution, then emit the existing dump output for the resolved source

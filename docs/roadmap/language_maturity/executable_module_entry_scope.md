@@ -129,8 +129,9 @@ silently widening into a general package or registry system.
   semantic path through deterministic bundling
 - admit direct local-path selected helper imports only for the current
   function-only helper slice
-- keep top-level alias, wildcard, re-export, and package-qualified executable
-  import forms explicitly out of scope
+- keep top-level alias, wildcard, and re-export forms explicitly out of scope;
+  package-qualified executable imports were later admitted by the bounded
+  SSF-06 local package contract
 
 ### Wave 3 — Lowering / CLI / End-To-End
 

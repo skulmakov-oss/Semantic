@@ -55,13 +55,13 @@ fn g1_top_level_alias_module_program_remains_out_of_scope() {
     let check_err = cli_err("check", rel);
     assert!(
         check_err.contains(
-            "top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2"
+            "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports"
         )
     );
     let run_err = cli_err("run", rel);
     assert!(
         run_err.contains(
-            "top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2"
+            "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports"
         )
     );
 }

@@ -31,7 +31,7 @@ fn g1_frontend_negative_suite_reports_expected_diagnostics() {
     let cases = [
         (
             "examples/qualification/g1_frontend_trust/negative_top_level_import/src/main.sm",
-            "top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2",
+            "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports",
         ),
         (
             "examples/qualification/g1_frontend_trust/negative_iterable_contract/src/main.sm",

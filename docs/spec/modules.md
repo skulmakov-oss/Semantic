@@ -75,13 +75,15 @@ Current executable-path admission is narrower:
 - selected executable helper imports materialize only the requested public
   bindings plus the required local helper-function call closure before
   checking/lowering
+- package-qualified imports such as `Import "math::core.sm"` are admitted when
+  the dependency is declared by the local package baseline and the resolved
+  `.sm` or `.exo` module remains inside its package `module_root`
 
 The following executable import forms remain out of scope on current `main`:
 
 - explicit top-level alias imports
 - wildcard imports
 - public re-exports
-- package-qualified executable imports
 - namespace-qualified executable access such as `X.Foo`
 
 ## Name Resolution Order
@@ -177,6 +179,8 @@ package <name>
 manifest_dir <path>
 module_root <path>
 dep <alias> <package_name> <local_path>
+dep <alias> <package_name> <local_path> <manifest_fingerprint> <content_fingerprint>
+capability <request-id>
 ```
 
 Current `main` now also admits one first-wave package-qualified dependency
@@ -184,7 +188,7 @@ import form:
 
 ```sm
 Import "math::core.sm"
-Import "ui::widgets/button.sm" as Button
+Import "ui::widgets/button.sm"
 ```
 
 Current first-wave package loading rules:
@@ -202,8 +206,11 @@ Current package-baseline limits still remain:
 
 - no registries
 - no semver solving
-- no lockfiles
+- no writable lockfile (the read-only provenance-equivalent record is `smc package inspect`)
 - no publishing workflow
+
+The complete local baseline, fingerprint semantics, capability request boundary,
+and deterministic graph failures are defined in `package_baseline_v0.md`.
 
 ## Validation Evidence
 

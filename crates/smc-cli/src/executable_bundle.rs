@@ -1,4 +1,6 @@
-use crate::package_manifest::{admit_package_entry_module, resolve_package_import_path};
+use crate::package_manifest::{
+    admit_package_entry_module, resolve_package_import_path, PACKAGE_IMPORT_SEPARATOR,
+};
 use sm_front::types::{
     AstArena, ExecutableImport, Expr, ExprId, Function, Stmt, StmtId, SymbolId, TokenKind, Type,
 };
@@ -7,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 pub(crate) fn executable_import_wave2_out_of_scope_message() -> &'static str {
-    "top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2; alias, wildcard, re-export, and package-qualified import forms remain out of scope"
+    "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports; alias, wildcard, and re-export forms remain out of scope"
 }
 
 pub(crate) fn read_source_with_package_admission(path: &Path) -> Result<String, String> {
@@ -210,7 +212,11 @@ fn validate_executable_bundle_import(
     importer: &Path,
     import: &ExecutableImport,
 ) -> Result<(), String> {
-    if import.reexport || import.wildcard || import.alias.is_some() || import.spec.contains("::") {
+    if import.reexport
+        || import.wildcard
+        || import.alias.is_some()
+        || (import.spec.contains(PACKAGE_IMPORT_SEPARATOR) && !import.select_items.is_empty())
+    {
         return Err(format!(
             "{} in '{}'",
             executable_import_wave2_out_of_scope_message(),

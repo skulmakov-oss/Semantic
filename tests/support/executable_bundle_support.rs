@@ -220,9 +220,9 @@ fn validate_executable_bundle_import(
     importer: &Path,
     import: &ExecutableImport,
 ) -> Result<(), String> {
-    if import.reexport || import.wildcard || import.alias.is_some() || import.spec.contains("::") {
+    if import.reexport || import.wildcard || import.alias.is_some() {
         return Err(format!(
-            "top-level executable Import currently admits direct local-path helper-module imports plus selected imports in wave2; alias, wildcard, re-export, and package-qualified import forms remain out of scope in '{}'",
+            "top-level executable Import admits direct local-path and package-qualified helper modules plus selected local imports; alias, wildcard, and re-export forms remain out of scope in '{}'",
             importer.display()
         ));
     }

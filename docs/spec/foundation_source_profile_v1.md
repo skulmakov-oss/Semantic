@@ -110,12 +110,13 @@ specialization, and default methods are experimental or deferred to SSF-07.
 - single-file programs;
 - direct local-path bare helper imports;
 - direct local-path selected imports over the qualified helper-module contour;
+- package-qualified bare helper imports declared by the SSF-06 local package contract;
 - deterministic missing-file, duplicate-symbol, and cycle rejection.
 
 Alias imports, wildcard imports, public re-exports, namespace-qualified access,
-package-qualified executable imports, and broad package graphs are not included
-in this source contract. Project and package contracts are owned by SSF-05 and
-SSF-06.
+and remote/broad package ecosystems are not included in this source contract.
+Project and package identity, containment, and provenance remain owned by
+SSF-05 and SSF-06 rather than by the parser/typechecker.
 
 ### Scalar families
 

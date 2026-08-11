@@ -5,7 +5,9 @@ use crate::incremental::{
     update_cache_index, CacheEvent, CacheReason, ModuleGraphSnapshot,
 };
 use crate::package_manifest::{
-    admit_package_entry_module, resolve_package_import_path, resolve_project_root_check_entry,
+    admit_package_entry_module, inspect_local_package_graph, reset_declared_dependency_graph_cache,
+    reset_pinned_dependency_fingerprint_cache, resolve_package_import_path,
+    resolve_project_root_check_entry,
 };
 use crate::{format_path, FormatterMode};
 use prom_audit::hello_observation_audit::{
@@ -54,7 +56,18 @@ impl ModuleProvider for CliFsModuleProvider {
 
     fn resolve_import(&self, importer_module_id: &str, spec: &str) -> Result<String, String> {
         resolve_package_import_path(Path::new(importer_module_id), spec)
-            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .map(|path| {
+                let text = path.to_string_lossy();
+                // Only fold '\' into '/' on Windows -- on Unix it is an ordinary filename
+                // character, and resolve_package_import_path already preserves it, so
+                // folding it here would make this module_id identify a different file
+                // than the one that was actually resolved (same class as DL-012/DL-016).
+                if cfg!(windows) {
+                    text.replace('\\', "/")
+                } else {
+                    text.into_owned()
+                }
+            })
             .map_err(|e| e.to_string())
     }
 }
@@ -109,6 +122,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "repl" => cmd_repl(&args[1..]),
         "verify" => cmd_verify(&args[1..]),
         "test" => cmd_test(&args[1..]),
+        "package" => cmd_package(&args[1..]),
         "run" => cmd_run(&args[1..]),
         "run-smc" => cmd_run_smc(&args[1..]),
         "disasm" => cmd_disasm(&args[1..]),
@@ -121,6 +135,22 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         }
         other => Err(format!("unknown command '{}'\n\n{}", other, usage())),
     }
+}
+
+fn cmd_package(args: &[String]) -> Result<(), String> {
+    if args.len() != 2 || args[0] != "inspect" {
+        return Err("usage: smc package inspect <project-root>".to_string());
+    }
+    reject_leading_unknown_flag(&args[1])?;
+    let root = Path::new(&args[1]);
+    if !root.is_dir() {
+        return Err(format!(
+            "package inspect project root '{}' is not a directory",
+            root.display()
+        ));
+    }
+    println!("{}", inspect_local_package_graph(root)?);
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -655,6 +685,16 @@ fn cmd_watch(args: &[String]) -> Result<(), String> {
             Ok(fp) => {
                 if last_fp != Some(fp) {
                     let t0 = Instant::now();
+                    // Reset only when the fingerprint actually changed, not on every idle
+                    // tick: `module_graph_fingerprint` now folds each module's governing
+                    // manifest content into its hash (see collect_module_graph in
+                    // incremental.rs), so a change to a declared dependency in that
+                    // manifest already changes `fp` and reaches this branch -- the
+                    // unconditional-every-tick reset DL-022 introduced was itself a real
+                    // regression (rehashing every declared package's full content on every
+                    // idle tick, not just real rebuilds). See DL-023.
+                    reset_pinned_dependency_fingerprint_cache();
+                    reset_declared_dependency_graph_cache();
                     last_fp = Some(fp);
                     let src = match read_source_with_package_admission(&root) {
                         Ok(s) => s,
@@ -2017,6 +2057,32 @@ Import "c.sm" as Core
         assert_eq!(specs, vec!["a.sm", "b.sm", "c.sm"]);
     }
 
+    // CliFsModuleProvider::resolve_import folded '\' into '/' unconditionally, even though
+    // resolve_package_import_path (which it wraps) already preserves a literal backslash
+    // on Unix. On Unix a resolved import whose path contains a literal '\' must come back
+    // unchanged from this provider method too, or check/compile/run would try to read a
+    // different or nonexistent module than the one actually resolved (DL-018).
+    #[cfg(unix)]
+    #[test]
+    fn cli_fs_module_provider_resolve_import_preserves_literal_backslash_on_unix() {
+        let dir = mk_temp_dir("cli_fs_module_provider_backslash_import");
+        let importer = dir.join("main.sm");
+        std::fs::write(&importer, "fn main() { return; }\n").expect("write importer");
+        std::fs::write(dir.join("dep\\lib.sm"), "fn dep() { return; }\n")
+            .expect("write literal-backslash dependency");
+
+        let provider = CliFsModuleProvider;
+        let resolved = provider
+            .resolve_import(importer.to_str().expect("importer utf8"), "dep\\lib.sm")
+            .expect("resolve");
+        assert!(
+            resolved.ends_with("dep\\lib.sm"),
+            "resolved module_id must preserve the literal backslash, got: {resolved}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn executable_bundle_includes_direct_local_helper_modules() {
         let dir = mk_temp_dir("smc_exec_bundle_local_helper");
@@ -2934,6 +3000,7 @@ fn usage() -> String {
         "  smc work <subject> <intent> [to <target>] [with <profile>]",
         "  smc verify <input.smc|project-root>",
         "  smc test <project-root>",
+        "  smc package inspect <project-root>",
         "  smc run <input.sm|project-root>",
         "  smc run <input.sm|project-root> --profile <pure|cli-read-only|cli-file-transform> --root <directory> [--duration-ms <u32>] [-- <application-args...>]",
         "  smc run-smc <input.smc>",
