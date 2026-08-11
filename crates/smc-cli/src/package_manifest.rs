@@ -622,6 +622,16 @@ pub fn admit_package_entry_module(
             ),
         });
     }
+    // A nested manifest inside module_root is rejected regardless of whether any module
+    // actually imports from it -- `package inspect` already rejects it via
+    // package_content_fingerprint's tree walk, so admission must reject it too, or
+    // `check`/`compile`/`run` would silently accept a tree that `inspect` rejects.
+    package_content_fingerprint(&module_root, &manifest_path).map_err(|message| {
+        PackageModuleAdmissionError {
+            code: PackageModuleAdmissionCode::NestedManifestInsideModuleRoot,
+            message,
+        }
+    })?;
     let module_relative =
         entry_canonical
             .strip_prefix(&module_root)
@@ -1739,10 +1749,20 @@ impl PackageGraphBuilder {
                     ));
                 }
             }
+            // Only fold '\' into '/' on Windows, where it is the actual path separator --
+            // on Unix it is an ordinary filename character, so an unconditional replacement
+            // would let the provenance record identify a different real directory than the
+            // one that was actually loaded (same defect class fixed for content
+            // fingerprinting; see DL-012).
+            let provenance_local_path = if cfg!(windows) {
+                local_path.replace('\\', "/")
+            } else {
+                local_path
+            };
             dependencies.push(PackageGraphDependencyRecord {
                 alias: dependency.alias,
                 package_name: dependency.package_name,
-                local_path: local_path.replace('\\', "/"),
+                local_path: provenance_local_path,
                 expected_manifest_fingerprint: expected_manifest_fingerprint.map(str::to_string),
                 expected_content_fingerprint: expected_content_fingerprint.map(str::to_string),
             });
@@ -2521,6 +2541,43 @@ dep math math ../math
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // `package inspect` already rejects a nested manifest anywhere under module_root via
+    // package_content_fingerprint's tree walk, regardless of whether any module imports
+    // from it. Admission (used by check/compile/run) must reject the same tree instead of
+    // silently accepting it just because nothing happens to import the nested package.
+    #[test]
+    fn admit_package_entry_module_rejects_unused_nested_manifest() {
+        let dir = mk_temp_dir("pkg_admit_unused_nested");
+        let src_dir = dir.join("src");
+        std::fs::create_dir_all(src_dir.join("nested")).expect("mkdir src/nested");
+        std::fs::write(
+            dir.join(PACKAGE_MANIFEST_FILE_NAME),
+            r#"
+format 1
+package app
+manifest_dir .
+module_root src
+"#,
+        )
+        .expect("write manifest");
+        std::fs::write(
+            src_dir.join("nested").join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage nested\nmanifest_dir .\nmodule_root .\n",
+        )
+        .expect("write nested manifest");
+        let entry = src_dir.join("main.sm");
+        std::fs::write(&entry, "fn main() { return; }").expect("write entry");
+
+        let err = admit_package_entry_module(&entry)
+            .expect_err("unused nested manifest must be rejected");
+        assert_eq!(
+            err.code,
+            PackageModuleAdmissionCode::NestedManifestInsideModuleRoot
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn admit_package_entry_module_rejects_entry_outside_module_root() {
         let dir = mk_temp_dir("pkg_admit_outside");
@@ -2776,5 +2833,51 @@ module_root src
 
         let _ = std::fs::remove_dir_all(&real_dir);
         let _ = std::fs::remove_dir_all(&literal_dir);
+    }
+
+    // Same defect class as the content-fingerprint collision above, but for the
+    // dependency-edge provenance record: on Unix a declared local dependency path is not a
+    // separator-delimited OS path, it is raw manifest text, so a literal '\' in it must be
+    // preserved rather than folded into '/' when emitted into the provenance JSON.
+    #[cfg(unix)]
+    #[test]
+    fn inspect_local_package_graph_preserves_literal_backslash_in_dependency_local_path() {
+        let dir = mk_temp_dir("pkg_inspect_backslash_dep_path");
+        let app_dir = dir.join("app");
+        let app_src = app_dir.join("src");
+        std::fs::create_dir_all(&app_src).expect("mkdir app src");
+        let dep_dir = dir.join("dep\\lib");
+        std::fs::create_dir_all(&dep_dir).expect("mkdir literal-backslash dep dir");
+        std::fs::write(
+            dep_dir.join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage libx\nmanifest_dir .\nmodule_root .\n",
+        )
+        .expect("write dependency manifest");
+        std::fs::write(
+            app_dir.join(PACKAGE_MANIFEST_FILE_NAME),
+            "format 1\npackage app\nmanifest_dir .\nmodule_root src\ndep libx libx ../dep\\lib\n",
+        )
+        .expect("write app manifest");
+        std::fs::write(app_src.join("main.sm"), "fn main() { return; }\n").expect("write entry");
+
+        let provenance = inspect_local_package_graph(&app_dir).expect("inspect must succeed");
+        let value: serde_json::Value =
+            serde_json::from_str(&provenance).expect("provenance must be valid JSON");
+        let app_node = value["packages"]
+            .as_array()
+            .expect("packages array")
+            .iter()
+            .find(|node| node["name"] == "app")
+            .expect("app node present");
+        let local_path = app_node["dependencies"][0]["local_path"]
+            .as_str()
+            .expect("local_path string");
+        assert_eq!(
+            local_path, "../dep\\lib",
+            "a literal backslash in a declared dependency path must survive into provenance \
+             unchanged on Unix, not be folded into a separator"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
