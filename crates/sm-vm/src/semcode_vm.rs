@@ -777,6 +777,8 @@ pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_con
         host,
         capabilities,
         observed: false,
+        quotas: vm.config.quotas,
+        effect_calls: 0,
     };
     let mut observation = HelloObservationRuntime::discard();
     exec_loop(&mut vm, &mut bridge, &mut observation).map(|_| ())
@@ -1603,6 +1605,8 @@ struct ApplicationVmHost<'a, H: ApplicationHostAbi, C: CapabilityChecker> {
     host: &'a mut H,
     capabilities: &'a C,
     observed: bool,
+    quotas: RuntimeQuotas,
+    effect_calls: usize,
 }
 
 impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> ApplicationVmHost<'a, H, C> {
@@ -1622,6 +1626,16 @@ impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> ApplicationVmHost<'a, H, C
                 "application writes require a preceding captured observation",
             )))
         }
+    }
+
+    /// Charges one effect-call quota unit for an application host operation that
+    /// already passed its capability check. Must run after `require`/`require_observation`
+    /// and before the actual host dispatch, so quota exhaustion blocks the effect itself.
+    fn bump_effect_calls(&mut self) -> Result<(), RuntimeError> {
+        let next = self.effect_calls + 1;
+        enforce_quota(&self.quotas, QuotaKind::EffectCalls, next)?;
+        self.effect_calls = next;
+        Ok(())
     }
 }
 
@@ -1661,6 +1675,7 @@ impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> VmHostBridge for Applicati
 
     fn args_read(&mut self, index: u32) -> Result<Value, RuntimeError> {
         self.require(HostCallId::ArgsRead)?;
+        self.bump_effect_calls()?;
         let value = self.host.args_read(index).map_err(RuntimeError::HostAbi)?;
         self.observed = true;
         Ok(Value::Text(value))
@@ -1668,6 +1683,7 @@ impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> VmHostBridge for Applicati
 
     fn stdin_read_text(&mut self) -> Result<Value, RuntimeError> {
         self.require(HostCallId::StdinReadText)?;
+        self.bump_effect_calls()?;
         let value = self.host.stdin_read_text().map_err(RuntimeError::HostAbi)?;
         self.observed = true;
         Ok(Value::Text(value))
@@ -1676,17 +1692,20 @@ impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> VmHostBridge for Applicati
     fn stdout_write(&mut self, text: &str) -> Result<(), RuntimeError> {
         self.require(HostCallId::StdoutWrite)?;
         self.require_observation(HostCallId::StdoutWrite)?;
+        self.bump_effect_calls()?;
         self.host.stdout_write(text).map_err(RuntimeError::HostAbi)
     }
 
     fn stderr_write(&mut self, text: &str) -> Result<(), RuntimeError> {
         self.require(HostCallId::StderrWrite)?;
         self.require_observation(HostCallId::StderrWrite)?;
+        self.bump_effect_calls()?;
         self.host.stderr_write(text).map_err(RuntimeError::HostAbi)
     }
 
     fn path_inspect(&mut self, path: &str) -> Result<Value, RuntimeError> {
         self.require(HostCallId::PathInspect)?;
+        self.bump_effect_calls()?;
         let value = self
             .host
             .path_inspect(path)
@@ -1697,6 +1716,7 @@ impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> VmHostBridge for Applicati
 
     fn fs_read_text(&mut self, path: &str) -> Result<Value, RuntimeError> {
         self.require(HostCallId::FsRead)?;
+        self.bump_effect_calls()?;
         let value = self
             .host
             .fs_read_text(path)
@@ -1708,6 +1728,7 @@ impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> VmHostBridge for Applicati
     fn fs_write_text(&mut self, path: &str, text: &str) -> Result<(), RuntimeError> {
         self.require(HostCallId::FsWrite)?;
         self.require_observation(HostCallId::FsWrite)?;
+        self.bump_effect_calls()?;
         self.host
             .fs_write_text(path, text)
             .map_err(RuntimeError::HostAbi)
@@ -1715,6 +1736,7 @@ impl<'a, H: ApplicationHostAbi, C: CapabilityChecker> VmHostBridge for Applicati
 
     fn time_duration_millis(&mut self) -> Result<Value, RuntimeError> {
         self.require(HostCallId::TimeDuration)?;
+        self.bump_effect_calls()?;
         let value = self
             .host
             .time_duration_millis()
