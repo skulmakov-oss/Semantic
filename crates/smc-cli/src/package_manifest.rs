@@ -158,6 +158,7 @@ pub enum PackageModuleAdmissionCode {
     ModuleRootResolutionFailed,
     NestedManifestInsideModuleRoot,
     EntryOutsideModuleRoot,
+    NonUtf8ModulePath,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -633,10 +634,16 @@ pub fn admit_package_entry_module(
                 ),
             })?;
 
+    let module_path = normalize_relative_path(module_relative).map_err(|message| {
+        PackageModuleAdmissionError {
+            code: PackageModuleAdmissionCode::NonUtf8ModulePath,
+            message,
+        }
+    })?;
     Ok(Some(PackageModuleAdmission {
         manifest_path: normalize_path(&manifest_path),
         package_name: manifest.package.name,
-        module_path: normalize_relative_path(module_relative),
+        module_path,
     }))
 }
 
@@ -1486,13 +1493,22 @@ fn normalize_path(path: &Path) -> String {
         .to_string()
 }
 
-fn normalize_relative_path(path: &Path) -> String {
-    let value = normalize_path(path);
-    if value.is_empty() {
+/// Unlike `normalize_path`, this is used to key package content/provenance by relative
+/// path (module paths fed into content fingerprinting, admitted module identity), where
+/// a lossy conversion could let two distinct non-UTF-8 filenames collapse onto the same
+/// key -- silently hiding a real path/content change behind an unchanged fingerprint.
+/// Reject non-UTF-8 relative paths outright instead.
+fn normalize_relative_path(path: &Path) -> Result<String, String> {
+    let text = path
+        .to_str()
+        .ok_or_else(|| format!("package path '{}' is not valid UTF-8", path.display()))?;
+    let normalized = text.replace('\\', "/");
+    let normalized = normalized.strip_prefix("//?/").unwrap_or(&normalized);
+    Ok(if normalized.is_empty() {
         ".".to_string()
     } else {
-        value
-    }
+        normalized.to_string()
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1830,7 +1846,7 @@ fn collect_package_files(
                 Ok(text) => normalize_line_endings(&text).into_bytes(),
                 Err(error) => error.into_bytes(),
             };
-            files.push((normalize_relative_path(relative), bytes));
+            files.push((normalize_relative_path(relative)?, bytes));
         }
     }
     Ok(())
@@ -2668,6 +2684,38 @@ module_root src
             err.code,
             PackageImportResolutionCode::DependencyPackageNameMismatch
         );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // A lossy relative-path conversion would let two distinct non-UTF-8 filenames
+    // collapse onto the same fingerprint key, so renaming between them while keeping
+    // file bytes unchanged would leave the content fingerprint unchanged too --
+    // silently hiding a real source-tree change from a pinned dependency's provenance
+    // record. Reject non-UTF-8 relative paths outright instead of hashing a lossy
+    // string.
+    #[cfg(unix)]
+    #[test]
+    fn package_content_fingerprint_rejects_non_utf8_module_paths() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = mk_temp_dir("package_content_fingerprint_non_utf8");
+        let module_root = dir.join("src");
+        std::fs::create_dir_all(&module_root).expect("mkdir src");
+        let manifest = dir.join(PACKAGE_MANIFEST_FILE_NAME);
+        std::fs::write(
+            &manifest,
+            "format 1\npackage app\nmanifest_dir .\nmodule_root src\n",
+        )
+        .expect("write manifest");
+        let invalid_name = OsStr::from_bytes(&[0xffu8, b'.', b's', b'm']);
+        std::fs::write(module_root.join(invalid_name), "fn main() { return; }\n")
+            .expect("write non-utf8 module");
+
+        let err = package_content_fingerprint(&module_root, &manifest)
+            .expect_err("non-UTF-8 module path must reject");
+        assert!(err.contains("not valid UTF-8"), "unexpected error: {err}");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
