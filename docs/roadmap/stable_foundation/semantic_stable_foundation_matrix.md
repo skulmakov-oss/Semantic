@@ -83,7 +83,7 @@ that wording drift; it does not delete or rewrite historical evidence.
 | `bool` | F/I/V/R | **Qualified limited release** | Gate 1 admitted control/value family. | Core candidate; SSF-01. |
 | `text`, concatenation, `to_text` | F/I/V/R | **Landed and qualified on `main`** | PCC3 and application benchmark; no general formatting/indexing promise. | SSF-01/03/07. |
 | `i32` values and comparisons | F/I/V/R | **Qualified limited release** | Gate 1/current matrix and focused numeric evidence. | Core candidate; SSF-01/07. |
-| same-family `i32` arithmetic | F/I/V/R | **Landed and qualified on `main`** | PCC2 and application benchmark. | Overflow contract in SSF-07. |
+| same-family `i32` arithmetic | F/I/V/R | **Landed and qualified on `main`** | PCC2 and application benchmark; overflow contract frozen and pinned by `vm_wraps_i32_*`/`vm_traps_on_i32_*` tests in `crates/sm-vm/src/semcode_vm.rs`. | Overflow contract closed in SSF-07. |
 | `u32` values/equality | F/I/V/R | **Qualified limited release** | Primitive/value qualification is present. | Narrow role or arithmetic decision in SSF-01/07. |
 | general `u32` arithmetic and overflow policy | F/I/V/R | **Roadmap** | No complete source/runtime arithmetic and overflow contract. | SSF-07. |
 | `f64` arithmetic/math | F/I/V/R | **Landed and qualified on `main`** | Numeric surface qualification and SemCode/VM math path. | Exact deterministic promise in SSF-01/07. |

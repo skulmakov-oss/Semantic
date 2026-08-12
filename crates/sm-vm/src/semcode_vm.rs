@@ -3682,7 +3682,8 @@ mod tests {
     use super::*;
     use crate::semcode_format::read_utf8;
     use sm_emit::{
-        compile_program_to_semcode, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+        compile_program_to_semcode, compile_program_to_semcode_with_options, CompileProfile,
+        OptLevel, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
         OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
         OWNERSHIP_SECTION_TAG,
     };
@@ -4342,6 +4343,180 @@ mod tests {
             err,
             RuntimeError::Trap(RuntimeTrap::DivisionByZero)
         ));
+    }
+
+    // SSF-07 (issue #1578) freezes i32's existing overflow contract: AddI32/
+    // SubI32/MulI32 wrap silently (wrapping_add/sub/mul), while DivI32/ModI32
+    // trap on the i32::MIN/-1 overflow edge case and on division/modulo by
+    // zero (checked_div/checked_rem, i32_div_raw/i32_mod_raw). This behavior
+    // already exists; these tests turn implicit behavior into a guarded
+    // contract that would fail loudly if a future change accidentally
+    // switched wrapping to panicking (or vice versa). i32::MIN cannot be
+    // written as a literal directly (parse_i32_literal parses unsigned digit
+    // text before unary negation applies), hence the `0 - 2147483647 - 1`
+    // construction throughout.
+    // The i32 overflow contract has two independent implementations of the
+    // same wrap/trap policy: the VM's runtime opcodes (semcode_vm.rs) used at
+    // O0, and crystalfold.rs's O1 constant-folding rewrites, which duplicate
+    // the same wrapping_*/checked_* calls at compile time. Nothing forces
+    // those two to stay in sync, so every case below runs under both O0 and
+    // O1 rather than only the O0 default `compile_program_to_semcode` uses.
+    fn assert_wraps_under_all_opt_levels(src: &str, msg: &str) {
+        for opt in [OptLevel::O0, OptLevel::O1] {
+            let bytes = compile_program_to_semcode_with_options(src, CompileProfile::RustLike, opt)
+                .unwrap_or_else(|e| panic!("compile failed under {opt:?}: {e:?}"));
+            run_semcode(&bytes).unwrap_or_else(|e| panic!("{msg} (opt={opt:?}): {e:?}"));
+        }
+    }
+
+    fn assert_traps_under_all_opt_levels(src: &str, msg: &str, expected: RuntimeTrap) {
+        for opt in [OptLevel::O0, OptLevel::O1] {
+            let bytes = compile_program_to_semcode_with_options(src, CompileProfile::RustLike, opt)
+                .unwrap_or_else(|e| panic!("compile failed under {opt:?}: {e:?}"));
+            let err = run_semcode(&bytes)
+                .err()
+                .unwrap_or_else(|| panic!("{msg} (opt={opt:?}) should trap"));
+            assert!(
+                matches!(&err, RuntimeError::Trap(t) if *t == expected),
+                "{msg} (opt={opt:?}): expected trap {expected:?}, got {err:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn vm_wraps_i32_addition_past_max() {
+        let src = r#"
+            fn main() {
+                let max_val: i32 = 2147483647;
+                let one: i32 = 1;
+                let wrapped: i32 = max_val + one;
+                let min_val: i32 = 0 - 2147483647 - 1;
+                assert(wrapped == min_val);
+                return;
+            }
+        "#;
+        assert_wraps_under_all_opt_levels(src, "i32 addition must wrap past i32::MAX, not trap");
+    }
+
+    #[test]
+    fn vm_wraps_i32_subtraction_past_min() {
+        let src = r#"
+            fn main() {
+                let min_val: i32 = 0 - 2147483647 - 1;
+                let one: i32 = 1;
+                let wrapped: i32 = min_val - one;
+                let max_val: i32 = 2147483647;
+                assert(wrapped == max_val);
+                return;
+            }
+        "#;
+        assert_wraps_under_all_opt_levels(src, "i32 subtraction must wrap past i32::MIN, not trap");
+    }
+
+    #[test]
+    fn vm_wraps_i32_multiplication_past_max() {
+        let src = r#"
+            fn main() {
+                let max_val: i32 = 2147483647;
+                let two: i32 = 2;
+                let wrapped: i32 = max_val * two;
+                let expected: i32 = 0 - 2;
+                assert(wrapped == expected);
+                return;
+            }
+        "#;
+        assert_wraps_under_all_opt_levels(
+            src,
+            "i32 multiplication must wrap per two's-complement, not trap",
+        );
+    }
+
+    #[test]
+    fn vm_wraps_i32_unary_negation_of_min() {
+        let src = r#"
+            fn main() {
+                let min_val: i32 = 0 - 2147483647 - 1;
+                let negated: i32 = -min_val;
+                assert(negated == min_val);
+                return;
+            }
+        "#;
+        assert_wraps_under_all_opt_levels(
+            src,
+            "unary negation of i32::MIN lowers through SubI32 and must wrap, not trap",
+        );
+    }
+
+    #[test]
+    fn vm_traps_on_i32_division_min_by_negative_one() {
+        let src = r#"
+            fn main() {
+                let min_val: i32 = 0 - 2147483647 - 1;
+                let neg_one: i32 = 0 - 1;
+                let bad: i32 = min_val / neg_one;
+                assert(bad == min_val);
+                return;
+            }
+        "#;
+        assert_traps_under_all_opt_levels(
+            src,
+            "i32::MIN / -1 should trap with overflow, not wrap",
+            RuntimeTrap::ArithmeticOverflow,
+        );
+    }
+
+    #[test]
+    fn vm_traps_on_i32_modulo_min_by_negative_one() {
+        let src = r#"
+            fn main() {
+                let min_val: i32 = 0 - 2147483647 - 1;
+                let neg_one: i32 = 0 - 1;
+                let bad: i32 = min_val % neg_one;
+                assert(bad == min_val);
+                return;
+            }
+        "#;
+        assert_traps_under_all_opt_levels(
+            src,
+            "i32::MIN % -1 should trap with overflow, not wrap",
+            RuntimeTrap::ArithmeticOverflow,
+        );
+    }
+
+    #[test]
+    fn vm_traps_on_i32_division_by_zero() {
+        let src = r#"
+            fn main() {
+                let a: i32 = 10;
+                let b: i32 = 0;
+                let bad: i32 = a / b;
+                assert(bad == a);
+                return;
+            }
+        "#;
+        assert_traps_under_all_opt_levels(
+            src,
+            "i32 division by zero should trap",
+            RuntimeTrap::DivisionByZero,
+        );
+    }
+
+    #[test]
+    fn vm_traps_on_i32_modulo_by_zero() {
+        let src = r#"
+            fn main() {
+                let a: i32 = 10;
+                let b: i32 = 0;
+                let bad: i32 = a % b;
+                assert(bad == a);
+                return;
+            }
+        "#;
+        assert_traps_under_all_opt_levels(
+            src,
+            "i32 modulo by zero should trap",
+            RuntimeTrap::DivisionByZero,
+        );
     }
 
     #[cfg(feature = "disasm")]

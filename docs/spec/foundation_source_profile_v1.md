@@ -125,15 +125,16 @@ SSF-05 and SSF-06 rather than by the parser/typechecker.
 | `quad` | Native `N`, `F`, `T`, `S`; equality and explicit evidence-aware control. No implicit normalization to `bool`. |
 | `bool` | Literals, equality, boolean conditions, and admitted logic. |
 | `text` | UTF-8 literal carrier, equality, concatenation, and explicit `to_text` for admitted scalar families. Indexing/slicing and general formatting are not included. |
-| `i32` | Literals, equality/order, unary minus, and same-family `+`, `-`, `*`, `/`, `%`. Cross-family implicit conversion is excluded. |
+| `i32` | Literals, equality/order, unary minus, and same-family `+`, `-`, `*`, `/`, `%`. Cross-family implicit conversion is excluded. Overflow policy is frozen: `+`, `-`, `*` wrap silently on two's-complement overflow (no trap); unary minus lowers through the same `-` (`SubI32`) path and wraps identically, so `-i32::MIN` evaluates to `i32::MIN` rather than trapping; `/` and `%` trap deterministically on division/modulo by zero and on the `i32::MIN / -1` (and `i32::MIN % -1`) overflow edge case. See `crates/sm-vm/src/semcode_vm.rs`'s `vm_wraps_i32_*`/`vm_traps_on_i32_*` tests for the frozen contract evidence; each case runs under both `OptLevel::O0` (runtime opcodes) and `OptLevel::O1` (`crystalfold.rs` constant folding) via the shared `assert_wraps_under_all_opt_levels`/`assert_traps_under_all_opt_levels` helpers, since the two are independent implementations of the same policy. |
 | `u32` | Literals and equality only. General arithmetic, conversions, and overflow policy are deferred to SSF-07. |
 | `f64` | Literals and same-family arithmetic/order. Cross-family coercion is excluded. Transcendental math builtins remain experimental until their cross-platform compatibility/determinism policy is qualified. |
 | `fx` | Explicit fixed-point literals, equality/order, and the qualified same-family arithmetic contour. Cross-family and measured arithmetic remain excluded. |
 | `unit` | Function/result unit value and `return;`. |
 
-Measured numeric forms remain experimental. Exact overflow, conversion, UTF-8
-indexing, collection ordering, and advanced abstraction decisions remain owned
-by SSF-07; this contract does not fill those gaps by implication.
+`i32` overflow policy is now frozen (see the table row above). u32 arithmetic
+policy, cross-family conversion, measured numeric forms, UTF-8 indexing,
+collection ordering, and advanced abstraction decisions remain owned by
+SSF-07; this contract does not fill those gaps by implication.
 
 ## Experimental but currently accepted extensions
 
