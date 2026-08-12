@@ -75,14 +75,16 @@ involved and is cross-platform bit-exact for every `f64` input, including
 `sqrt` as one of the operations required to be correctly rounded, so the
 result is bit-exact and uniquely determined across every conformant
 platform for this domain, matching Rust `f64::sqrt`'s existing behavior.
-For `x < 0.0`, `sqrt` returns `NaN` (matching current behavior, not a new
-choice), but the compatibility surface only promises the semantic property
-that the result is `NaN` (observable as `sqrt(x) != sqrt(x)`) — the exact
-`NaN` bit pattern (payload and sign bit) is explicitly **not** part of the
-frozen contract, since IEEE 754 does not mandate a specific `NaN` payload
-and different platforms/architectures can legitimately produce different
-bit patterns for the same operation. Programs must not depend on `NaN`
-bit-pattern stability.
+For every other admitted `f64` input — `x < 0.0`, and `x` itself already
+`NaN` (reachable via a nested call such as `sqrt(sqrt(0.0 - 1.0))`) — `sqrt`
+returns `NaN` (matching current behavior, not a new choice), but the
+compatibility surface only promises the semantic property that the result
+is `NaN` (observable as `sqrt(x) != sqrt(x)`) — the exact `NaN` bit pattern
+(payload and sign bit) is explicitly **not** part of the frozen contract,
+since IEEE 754 does not mandate a specific `NaN` payload and different
+platforms/architectures can legitimately produce different bit patterns for
+the same operation, including when propagating an already-`NaN` input.
+Programs must not depend on `NaN` bit-pattern stability.
 
 Neither performs a host effect or consults VM quota state.
 

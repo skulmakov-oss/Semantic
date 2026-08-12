@@ -4,11 +4,13 @@ fn main() {
     let magnitude: f64 = abs(0.0 - 3.5);
     let magnitude_positive: f64 = abs(3.5);
     let negative_root: f64 = sqrt(0.0 - 1.0);
+    let nested_root: f64 = sqrt(negative_root);
     assert(root == 2.0);
     assert(root == root_repeat);
     assert(sqrt(9.0) == 3.0);
     assert(magnitude == 3.5);
     assert(magnitude_positive == 3.5);
     assert(negative_root != negative_root);
+    assert(nested_root != nested_root);
     return;
 }
