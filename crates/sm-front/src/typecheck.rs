@@ -3548,6 +3548,362 @@ mod tests {
             .contains("unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"));
     }
 
+    // SSF-07 (issue #1578) closes the "cross-family and measured arithmetic
+    // remain excluded" decision as already made and enforced, not still
+    // pending -- these pin the remaining measured/fx combinations that
+    // `measured_fx_addition_still_reports_narrow_slice_gap` above doesn't
+    // cover. Each is expected to pass immediately against unmodified code;
+    // this is a coverage freeze, not a bugfix.
+    #[test]
+    fn measured_fx_subtraction_reports_narrow_slice_gap() {
+        let src = r#"
+            fn main() {
+                let x: fx[m] = 2.0fx;
+                let y: fx[m] = 1.0fx;
+                let diff: fx[m] = x - y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("measured fx subtraction must stay outside the first slice");
+        assert!(err
+            .message
+            .contains("unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"));
+    }
+
+    #[test]
+    fn measured_fx_unary_minus_reports_narrow_slice_gap() {
+        let src = r#"
+            fn main() {
+                let x: fx[m] = 1.0fx;
+                let negated: fx[m] = -x;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("measured fx unary minus must stay outside the first slice");
+        assert!(err
+            .message
+            .contains("unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"));
+    }
+
+    #[test]
+    fn measured_fx_unary_plus_reports_narrow_slice_gap() {
+        let src = r#"
+            fn main() {
+                let x: fx[m] = 1.0fx;
+                let same: fx[m] = +x;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("measured fx unary plus must stay outside the first slice");
+        assert!(err
+            .message
+            .contains("unit-carrying fx arithmetic is not part of the first post-stable fx arithmetic slice yet"));
+    }
+
+    #[test]
+    fn measured_arithmetic_rejects_mul() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 2.0;
+                let y: f64[m] = 3.0;
+                let product: f64[m] = x * y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err(
+            "mul on a measured operand must be rejected in the first-wave units surface",
+        );
+        assert!(
+            err.message.contains("first-wave units surface") || err.message.contains("unsupported"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_arithmetic_rejects_div() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 6.0;
+                let y: f64[m] = 3.0;
+                let quotient: f64[m] = x / y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err(
+            "div on a measured operand must be rejected in the first-wave units surface",
+        );
+        assert!(
+            err.message.contains("first-wave units surface") || err.message.contains("unsupported"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_arithmetic_rejects_mod() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 7.0;
+                let y: f64[m] = 3.0;
+                let remainder: f64[m] = x % y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err(
+            "mod on a measured operand must be rejected in the first-wave units surface",
+        );
+        assert!(
+            err.message.contains("first-wave units surface") || err.message.contains("unsupported"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_arithmetic_rejects_mismatched_units() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 1.0;
+                let y: f64[s] = 1.0;
+                let sum: f64[m] = x + y;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err(
+            "addition of measured operands with different unit symbols must be rejected",
+        );
+        assert!(!err.message.is_empty(), "expected a type-mismatch error");
+    }
+
+    #[test]
+    fn measured_f64_addition_typechecks() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 1.0;
+                let y: f64[m] = 2.0;
+                let sum: f64[m] = x + y;
+                return;
+            }
+        "#;
+
+        typecheck_source(src)
+            .expect("addition of two measured f64 values with matching units should typecheck");
+    }
+
+    #[test]
+    fn measured_f64_binary_subtraction_typechecks() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 2.0;
+                let y: f64[m] = 1.0;
+                let diff: f64[m] = x - y;
+                return;
+            }
+        "#;
+
+        typecheck_source(src)
+            .expect("subtraction of two measured f64 values with matching units should typecheck");
+    }
+
+    #[test]
+    fn measured_f64_unary_plus_typechecks() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 1.0;
+                let same: f64[m] = +x;
+                return;
+            }
+        "#;
+
+        typecheck_source(src).expect("unary plus on a measured f64 value should typecheck");
+    }
+
+    #[test]
+    fn measured_f64_unary_minus_typechecks() {
+        let src = r#"
+            fn main() {
+                let x: f64[m] = 1.0;
+                let negated: f64[m] = -x;
+                return;
+            }
+        "#;
+
+        typecheck_source(src).expect("unary minus on a measured f64 value should typecheck");
+    }
+
+    #[test]
+    fn measured_i32_unary_minus_rejects() {
+        let src = r#"
+            fn main() {
+                let x: i32[m] = 1;
+                let negated: i32[m] = -x;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("unary minus on a measured i32 must be rejected");
+        assert!(
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
+        );
+    }
+
+    // The u32 fixtures below must initialize with a `u32`-suffixed literal
+    // (`1u32`, not `1`): match_unit_lift only lifts a literal into a measured
+    // binding when the literal's own inferred type equals the measured base,
+    // and a bare numeric literal infers as i32. An unsuffixed `let x: u32[m]
+    // = 1;` fails at that let-binding lift with a type-mismatch error before
+    // the operator under test is ever reached, so the assertion also checks
+    // for the specific "unsupported" operator message rather than accepting
+    // any error, to keep that class of false pass from recurring.
+    #[test]
+    fn measured_u32_unary_minus_rejects() {
+        let src = r#"
+            fn main() {
+                let x: u32[m] = 1u32;
+                let negated: u32[m] = -x;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("unary minus on a measured u32 must be rejected");
+        assert!(
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_i32_unary_plus_rejects() {
+        let src = r#"
+            fn main() {
+                let x: i32[m] = 1;
+                let same: i32[m] = +x;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("unary plus on a measured i32 must be rejected");
+        assert!(
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_u32_unary_plus_rejects() {
+        let src = r#"
+            fn main() {
+                let x: u32[m] = 1u32;
+                let same: u32[m] = +x;
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src).expect_err("unary plus on a measured u32 must be rejected");
+        assert!(
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_i32_binary_addition_rejects() {
+        let src = r#"
+            fn main() {
+                let x: i32[m] = 1;
+                let y: i32[m] = 2;
+                let sum: i32[m] = x + y;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("binary addition on measured i32 must be rejected");
+        assert!(
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_i32_binary_subtraction_rejects() {
+        let src = r#"
+            fn main() {
+                let x: i32[m] = 2;
+                let y: i32[m] = 1;
+                let diff: i32[m] = x - y;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("binary subtraction on measured i32 must be rejected");
+        assert!(
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_u32_binary_addition_rejects() {
+        let src = r#"
+            fn main() {
+                let x: u32[m] = 1u32;
+                let y: u32[m] = 2u32;
+                let sum: u32[m] = x + y;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("binary addition on measured u32 must be rejected");
+        assert!(
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn measured_u32_binary_subtraction_rejects() {
+        let src = r#"
+            fn main() {
+                let x: u32[m] = 2u32;
+                let y: u32[m] = 1u32;
+                let diff: u32[m] = x - y;
+                return;
+            }
+        "#;
+
+        let err =
+            typecheck_source(src).expect_err("binary subtraction on measured u32 must be rejected");
+        assert!(
+            err.message.contains("unsupported"),
+            "expected an operator-unsupported error, got: {}",
+            err.message
+        );
+    }
+
     #[test]
     fn text_literal_and_equality_surface_typechecks() {
         let src = r#"

@@ -342,8 +342,12 @@ Current rules:
   elements, record fields, `Option(T)`, and `Result(T, E)` payload positions
 - assignment, call, return, and pattern-binding transport require exact base
   type and exact unit-symbol equality
-- `+`, `-`, `==`, and `!=` are valid only when both operands have the same
-  measured type
+- `==` and `!=` are valid on any measured type (any base) when both operands
+  have the same base type and the same unit symbol
+- binary and unary `+`/`-` currently typecheck only for measured `f64` with
+  matching operands; measured `fx` binary and unary `+`/`-` report an
+  explicit narrow-slice gap, and measured `i32`/`u32` binary and unary `+`/`-`
+  are rejected as unsupported operators in the first-wave surface
 - lowering erases the unit annotation after semantic validation and reuses the
   existing numeric execution carrier
 
@@ -353,8 +357,11 @@ Current honest limits:
 - implicit conversions between unit symbols are not part of the contract
 - compound unit algebra such as `m/s`, `N*m`, or exponent notation is not part
   of the first-wave surface
-- `*` and `/` on unit-carrying values are intentionally rejected in the
+- `*`, `/`, and `%` on unit-carrying values are intentionally rejected in the
   first-wave contract
+- `+`/`-` on unit-carrying `i32`/`u32` values are intentionally rejected; SSF-07
+  selected this as the current boundary rather than leaving it undecided, and
+  any future widening to measured `i32`/`u32` arithmetic is a later decision
 
 ## QVec
 

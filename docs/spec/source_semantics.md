@@ -313,7 +313,13 @@ Current first-wave units-of-measure semantics:
 - `fx` should be read as a stable value-transport and equality family inside the
   current line; binary arithmetic on `fx` remains outside the current contract
 - unary `+` / unary `-` for `fx` remain limited to literal formation, not
-  general `fx` expression rewriting
+  general `fx` expression rewriting; on a measured `fx` value this surfaces
+  as the same explicit narrow-slice-gap rejection as measured `fx` binary
+  `+`/`-`
+- binary and unary `+`/`-` are admitted only for measured `f64`; measured
+  `i32`/`u32` binary and unary `+`/`-` are rejected as unsupported operators
+  (see "Operator Meaning" below for the full per-family breakdown and test
+  evidence)
 
 Current v0 limits:
 
@@ -321,7 +327,8 @@ Current v0 limits:
 - implicit conversion between unit symbols is not part of the stable contract
 - compound unit algebra, conversion tables, and inference from untyped numeric
   literals are not part of the first-wave surface
-- `*` and `/` on unit-carrying values are rejected in the first-wave contract
+- `*`, `/`, and `%` on unit-carrying values are rejected in the first-wave
+  contract
 
 ## Range Literal
 
@@ -856,11 +863,16 @@ Current operator meaning:
 
 Current first-wave units operator rules:
 
-- `+` and `-` preserve a unit annotation only when both operands have the same
-  measured type
-- `==` and `!=` are valid on unit-carrying values only when both sides have the
-  same measured type
-- `*` and `/` on unit-carrying values are rejected in the first-wave surface
+- binary and unary `+`/`-` preserve a unit annotation only for measured `f64`
+  operands when both operands have the same measured type; measured `fx`
+  binary and unary `+`/`-` report an explicit narrow-slice gap, and measured
+  `i32`/`u32` binary and unary `+`/`-` are rejected as unsupported operators;
+  SSF-07 selected this as the current boundary rather than leaving it
+  undecided, and any future widening to measured `i32`/`u32` arithmetic is a
+  later decision
+- `==` and `!=` are valid on unit-carrying values of any base type only when
+  both sides have the same measured type
+- `*`, `/`, and `%` on unit-carrying values are rejected in the first-wave surface
 - after unit validation, lowering reuses the existing numeric execution opcodes
   rather than widening the runtime operator family
 
