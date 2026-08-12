@@ -104,15 +104,10 @@ source contract pending SSF-08.
 Captureful, mutable, or multi-argument closures, broad generic functions, broad
 trait/protocol dispatch, trait objects, associated types, blanket impls,
 specialization, and default methods are experimental or deferred to SSF-07.
-
-Static impl-declaration conformance checking is frozen as of SSF-07: an impl
-must implement exactly the trait's declared method set with matching
-arity/parameter/return types (no fewer, no more methods), and one impl per
-(trait, type) pair, with no blanket/generic impls. This is a compile-time
-declaration check only; it does not admit general trait method dispatch or
-UFCS call resolution. Outside the built-in Iterable `next()` for-loop
-desugaring, impl methods have no invocation syntax at all — general dispatch
-remains deferred.
+Broad trait/impl support itself remains an experimental, unqualified surface
+(see "Experimental but currently accepted extensions" below); within that
+still-experimental surface, SSF-07 has deterministically closed the
+impl-declaration conformance check specifically, described there.
 
 ### Modules
 
@@ -161,6 +156,18 @@ Foundation 1.0 compatibility promises:
 
 Tooling and examples must call these **experimental** or **current-main only**.
 Their acceptance is not a silent contract expansion.
+
+Within the still-experimental broad generics/trait surface, SSF-07 has
+deterministically closed one specific compile-time check:
+`validate_impl_conformance` (`crates/sm-front/src/typecheck.rs`) now rejects
+an impl whenever its method set doesn't exactly match its trait's declared
+method set — no fewer, no more methods per (trait, type) pair — with matching
+arity/parameter/return types, and rejects blanket/generic impls and duplicate
+(trait, type) impls. This is a compile-time declaration check only, not a
+compatibility promise for the broader trait/protocol surface: impl methods
+have no invocation syntax anywhere in the language outside the hardcoded
+Iterable `next()` for-loop desugaring, so general trait method dispatch and
+UFCS call resolution remain deferred and experimental.
 
 ## Deterministically unsupported forms
 
