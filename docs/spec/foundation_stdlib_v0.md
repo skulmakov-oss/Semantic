@@ -67,12 +67,23 @@ operations. They are not aliases for this family.
 
 ### `std.math`
 
-`sqrt` and `abs` are `f64 -> f64` and IEEE-754 exact: `sqrt` is
-correctly-rounded per IEEE-754 (`sqrt(x) < 0.0` never holds for `x >= 0.0`,
-and `sqrt` of a negative input returns `NaN`, matching Rust `f64::sqrt`'s
-existing behavior — this documents current behavior, not a new choice), and
-`abs` is a sign-bit clear with no rounding involved. Both are already
-cross-platform bit-exact today, unlike the transcendental builtins below.
+`sqrt` and `abs` are `f64 -> f64`. `abs` is a sign-bit clear with no rounding
+involved and is cross-platform bit-exact for every `f64` input, including
+`NaN` and infinities.
+
+`sqrt` is correctly-rounded per IEEE-754 for `x >= 0.0`: IEEE 754 mandates
+`sqrt` as one of the operations required to be correctly rounded, so the
+result is bit-exact and uniquely determined across every conformant
+platform for this domain, matching Rust `f64::sqrt`'s existing behavior.
+For `x < 0.0`, `sqrt` returns `NaN` (matching current behavior, not a new
+choice), but the compatibility surface only promises the semantic property
+that the result is `NaN` (observable as `sqrt(x) != sqrt(x)`) — the exact
+`NaN` bit pattern (payload and sign bit) is explicitly **not** part of the
+frozen contract, since IEEE 754 does not mandate a specific `NaN` payload
+and different platforms/architectures can legitimately produce different
+bit patterns for the same operation. Programs must not depend on `NaN`
+bit-pattern stability.
+
 Neither performs a host effect or consults VM quota state.
 
 `sin`, `cos`, `tan`, and `pow` remain Deferred (see "Deferred families"
