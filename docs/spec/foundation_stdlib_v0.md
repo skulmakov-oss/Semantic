@@ -121,6 +121,18 @@ Records and collections are rejected. `print` is deliberately excluded: its
 controlled observation/capability boundary is an SSF-04 input, not a pure text
 helper.
 
+SSF-07 froze this boundary with test evidence covering every non-text
+operand family against `+`: `i32`, `u32`, `bool`, `quad`, `Map`, and
+`Record` operands all reject with the same "text concatenation currently
+admits only text + text operands" message, while a `Sequence` operand is
+rejected earlier by the unrelated ordered-sequence operator gate with a
+distinct message ("ordered sequence values are not part of the current
+M8.3 Wave 1 operator surface") — both paths are pinned as distinct cases in
+`tests/ssf07_text_family_freeze.rs`, along with `to_text`'s existing
+record/map/sequence/arity rejections. `std.seq` and `std.map` (including
+whether `Sequence(T)` indexing belongs inside the `std.seq` family
+boundary) remain open for a follow-up slice.
+
 ### `std.seq`
 
 Sequences have observable left-to-right index and iteration order.
