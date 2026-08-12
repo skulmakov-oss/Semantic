@@ -7338,6 +7338,91 @@ mod tests {
     }
 
     #[test]
+    fn impl_extra_method_not_in_trait_is_rejected() {
+        let src = r#"
+            trait Counter {
+                fn count(self: Cnt) -> i32;
+            }
+
+            record Cnt { n: i32 }
+
+            impl Counter for Cnt {
+                fn count(self: Cnt) -> i32 {
+                    return 0;
+                }
+                fn reset(self: Cnt) -> i32 {
+                    return 0;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("impl method not declared by the trait must be rejected");
+        assert!(
+            err.message.contains("reset") || err.message.contains("not declared"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn impl_duplicate_method_name_within_impl_is_rejected() {
+        let src = r#"
+            trait Counter {
+                fn count(self: Cnt) -> i32;
+            }
+
+            record Cnt { n: i32 }
+
+            impl Counter for Cnt {
+                fn count(self: Cnt) -> i32 {
+                    return 0;
+                }
+                fn count(self: Cnt) -> i32 {
+                    return 1;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("duplicate method name within one impl must be rejected");
+        assert!(
+            err.message.contains("duplicate") || err.message.contains("count"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn impl_of_unknown_trait_is_rejected() {
+        let src = r#"
+            record Cnt { n: i32 }
+
+            impl Missing for Cnt {
+                fn count(self: Cnt) -> i32 {
+                    return 0;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("impl of an unknown trait must be rejected");
+        assert!(
+            err.message.contains("unknown trait") || err.message.contains("Missing"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
     fn trait_self_contract_allows_multiple_impl_targets() {
         let src = r#"
             trait Iterable {
@@ -9806,6 +9891,19 @@ fn validate_impl_conformance(
                         });
                     }
                 }
+            }
+        }
+        for method in &imp.methods {
+            if !trait_decl.methods.iter().any(|tm| tm.name == method.name) {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "impl of trait '{}' for '{}' defines method '{}' not declared by the trait",
+                        resolve_symbol_name(arena, imp.trait_name)?,
+                        resolve_symbol_name(arena, imp.for_type)?,
+                        resolve_symbol_name(arena, method.name)?,
+                    ),
+                });
             }
         }
     }
