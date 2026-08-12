@@ -4408,6 +4408,43 @@ fn main() {
     }
 
     #[test]
+    fn rustlike_parser_rejects_multi_arg_short_lambda() {
+        let src = r#"
+fn main() {
+    let value: f64 = (x, y) => x + y;
+    return;
+}
+"#;
+
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("multi-argument short lambda must reject");
+        assert_eq!(
+            err.message, "expected ';'",
+            "`(x, y)` fails starts_short_lambda_head() (next token after `x` is `,`, not `=>`), \
+             so it falls through to ordinary tuple-expression parsing and fails with this \
+             generic, non-closure-specific message rather than a dedicated diagnostic"
+        );
+    }
+
+    #[test]
+    fn rustlike_parser_rejects_multi_arg_closure_type_annotation() {
+        let src = r#"
+fn apply(f: Closure(f64, f64 -> f64)) -> f64 {
+    return 0.0;
+}
+fn main() {
+    return;
+}
+"#;
+
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("multi-parameter Closure type annotation must reject");
+        assert!(err
+            .message
+            .contains("expected '->' between Closure parameter and return types"));
+    }
+
+    #[test]
     fn rustlike_parser_rejects_pipeline_without_call_target() {
         let src = r#"
 fn main() {
