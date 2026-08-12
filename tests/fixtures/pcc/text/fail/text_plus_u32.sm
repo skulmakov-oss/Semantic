@@ -1,0 +1,5 @@
+fn main() {
+    let count: u32 = 7u32;
+    let message: text = "count=" + count;
+    print(message);
+}

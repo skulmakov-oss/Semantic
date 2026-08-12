@@ -121,6 +121,26 @@ Records and collections are rejected. `print` is deliberately excluded: its
 controlled observation/capability boundary is an SSF-04 input, not a pure text
 helper.
 
+SSF-07 froze this boundary with test evidence against `+`: `i32`, `u32`,
+`bool`, `quad`, `Map`, and `Record` operands are tested as representative
+cases and all reject with the same "text concatenation currently admits
+only text + text operands" message, while a `Sequence` operand is rejected
+earlier by the unrelated ordered-sequence operator gate with a distinct
+message ("ordered sequence values are not part of the current M8.3 Wave 1
+operator surface") — both paths are pinned as distinct cases in
+`tests/ssf07_text_family_freeze.rs`. The remaining admitted families
+(`f64`, `fx`, `unit`, tuples, `Option`, `Result`) are not separately
+tested: the `if lt == Type::Text || rt == Type::Text` check in
+`typecheck.rs` is unconditional on the other operand's type, so any of
+them would exercise the identical source line as the tested cases, not a
+different one — confirmed empirically (`text + f64`, `text + (i32, i32)`,
+and `text + <unit-returning call>` were checked against the actual `smc`
+CLI and all produced the same message) rather than assumed. `to_text`'s
+existing record/map/sequence/arity rejections are also pinned in
+`tests/ssf07_text_family_freeze.rs`. `std.seq` and `std.map` (including
+whether `Sequence(T)` indexing belongs inside the `std.seq` family
+boundary) remain open for a follow-up slice.
+
 ### `std.seq`
 
 Sequences have observable left-to-right index and iteration order.
