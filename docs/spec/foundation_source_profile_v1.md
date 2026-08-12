@@ -102,8 +102,17 @@ source contract pending SSF-08.
 - direct-record user-defined `Iterable` static dispatch in the Gate 1 contour.
 
 Captureful, mutable, or multi-argument closures, broad generic functions, broad
-trait/protocol conformance, trait objects, associated types, blanket impls,
+trait/protocol dispatch, trait objects, associated types, blanket impls,
 specialization, and default methods are experimental or deferred to SSF-07.
+
+Static impl-declaration conformance checking is frozen as of SSF-07: an impl
+must implement exactly the trait's declared method set with matching
+arity/parameter/return types (no fewer, no more methods), and one impl per
+(trait, type) pair, with no blanket/generic impls. This is a compile-time
+declaration check only; it does not admit general trait method dispatch or
+UFCS call resolution. Outside the built-in Iterable `next()` for-loop
+desugaring, impl methods have no invocation syntax at all — general dispatch
+remains deferred.
 
 ### Modules
 
