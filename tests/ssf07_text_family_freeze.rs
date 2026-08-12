@@ -132,6 +132,21 @@ fn std_text_to_text_rejects_every_unadmitted_input() {
             path: "tests/fixtures/pcc8_stdlib_diagnostics/negative_to_text_map.sm",
             expected_markers: &["E0201", "builtin 'to_text' currently supports"],
         },
+        NegativeFixture {
+            path: "tests/fixtures/pcc/text/fail/to_text_sequence.sm",
+            expected_markers: &[
+                "E0201",
+                "builtin 'to_text' currently supports",
+                "got Sequence",
+            ],
+        },
+        NegativeFixture {
+            path: "tests/fixtures/pcc8_stdlib_diagnostics/negative_to_text_wrong_arity.sm",
+            expected_markers: &[
+                "E0201",
+                "builtin 'to_text' takes exactly one positional argument",
+            ],
+        },
     ];
 
     for fixture in fixtures {
