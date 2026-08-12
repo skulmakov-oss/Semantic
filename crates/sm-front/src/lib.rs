@@ -154,6 +154,16 @@ const APPLICATION_BUILTIN_NAMES: &[&str] = &[
     "time_duration_ms",
 ];
 
+/// `std.math` Selected-surface builtin names (SSF-07). A user-defined
+/// function sharing one of these names would typecheck (call analysis
+/// prefers the user signature), but `try_eval_builtin_call` in
+/// `crates/sm-vm/src/semcode_vm.rs` intercepts these names by bare string
+/// match before function-frame dispatch, so the builtin would silently run
+/// instead of the user's function body. Reserved here so that collision is
+/// a deterministic compile-time rejection instead of silent runtime
+/// shadowing, matching APPLICATION_BUILTIN_NAMES's pattern above.
+const STDLIB_MATH_BUILTIN_NAMES: &[&str] = &["sqrt", "abs"];
+
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub type SchemaTable = BTreeMap<SymbolId, SchemaDecl>;
 
@@ -488,6 +498,14 @@ pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
             return Err(FrontendError {
                 pos: 0,
                 message: format!("function name '{name}' is reserved for the application boundary"),
+            });
+        }
+        if STDLIB_MATH_BUILTIN_NAMES.contains(&name) {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "function name '{name}' is reserved for the std.math standard library surface"
+                ),
             });
         }
         if out.contains_key(&f.name) {
@@ -1235,6 +1253,51 @@ mod tests {
             }
             AstBundle::Logos(_) => panic!("expected rustlike bundle"),
         }
+    }
+
+    #[test]
+    fn build_fn_table_rejects_math_builtin_name_collision() {
+        let src = r#"
+fn sqrt(x: f64) -> f64 {
+    return 42.0;
+}
+fn main() {
+    return;
+}
+"#;
+        let program = match parse_rustlike(src).expect("parse") {
+            AstBundle::RustLike(p) => p,
+            AstBundle::Logos(_) => panic!("expected rustlike bundle"),
+        };
+        let err = build_fn_table(&program).expect_err("user function named sqrt must be rejected");
+        assert!(
+            err.message.contains("sqrt") && err.message.contains("reserved"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_fn_table_rejects_application_builtin_name_collision() {
+        let src = r#"
+fn stdout_write(text: text) {
+    return;
+}
+fn main() {
+    return;
+}
+"#;
+        let program = match parse_rustlike(src).expect("parse") {
+            AstBundle::RustLike(p) => p,
+            AstBundle::Logos(_) => panic!("expected rustlike bundle"),
+        };
+        let err = build_fn_table(&program)
+            .expect_err("user function named stdout_write must be rejected");
+        assert!(
+            err.message.contains("stdout_write") && err.message.contains("reserved"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]

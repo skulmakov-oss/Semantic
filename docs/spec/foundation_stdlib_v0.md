@@ -86,6 +86,16 @@ bit-pattern stability.
 
 Neither performs a host effect or consults VM quota state.
 
+`sqrt` and `abs` are reserved function names: a top-level program function
+sharing either name is rejected deterministically at typecheck time
+(`function name '...' is reserved for the std.math standard library
+surface`, mirroring how host-boundary builtins like `stdout_write` are
+already reserved). Without this, a user-defined `fn sqrt(...)` would
+typecheck but be silently shadowed at runtime by the builtin, since VM call
+dispatch intercepts these names by bare string match before function-frame
+dispatch — promoting these names to a compatibility promise requires ruling
+that failure mode out, not just documenting the intended behavior.
+
 `sin`, `cos`, `tan`, and `pow` remain Deferred (see "Deferred families"
 below): their bit-exact output depends on the underlying platform/libm
 transcendental implementation, so their cross-platform determinism policy is
