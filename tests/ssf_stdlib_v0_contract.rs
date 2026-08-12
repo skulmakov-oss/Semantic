@@ -29,7 +29,7 @@ fn ssf_03_contract_freezes_selected_and_deferred_families() {
         "`std.serde`",
         "`std.rand`",
         "`std.*` source spellings remain reserved",
-        "`std.math` selects no API",
+        "`std.math` selects only `sqrt` and `abs`",
         "`std.serde` selects no API",
         "`print` is deliberately excluded",
         "xorshift64/13-7-17",
@@ -90,10 +90,17 @@ fn ssf_03_contract_points_at_real_implementation_and_test_authority() {
     }
 
     let builtin_sigs = read(root, "crates/sm-front/src/lib.rs");
-    for builtin in ["qtruth_and", "qtruth_or", "qtruth_not", "qtruth_impl"] {
+    for builtin in [
+        "qtruth_and",
+        "qtruth_or",
+        "qtruth_not",
+        "qtruth_impl",
+        "sqrt",
+        "abs",
+    ] {
         assert!(
             builtin_sigs.contains(&format!("\"{builtin}\"")),
-            "frontend is missing selected quad builtin {builtin}"
+            "frontend is missing selected builtin {builtin}"
         );
     }
 
@@ -134,6 +141,8 @@ fn canonical_example_uses_every_selected_language_owned_family() {
         "qtruth_not(",
         "qtruth_impl(",
         "to_text(",
+        "sqrt(",
+        "abs(",
         "len(",
         "map_empty(",
         "Option::Some(",

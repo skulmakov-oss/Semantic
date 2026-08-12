@@ -35,3 +35,8 @@ fn pcc8_to_text_basic_types_fixture_passes_full_cli_path() {
 fn pcc8_text_helpers_basic_fixture_passes_full_cli_path() {
     check_run_compile_verify("tests/fixtures/pcc8_stdlib/positive_text_helpers_basic.sm");
 }
+
+#[test]
+fn pcc8_math_basic_fixture_passes_full_cli_path() {
+    check_run_compile_verify("tests/fixtures/pcc8_stdlib/positive_math_basic.sm");
+}

@@ -93,6 +93,14 @@ fn assert_quad_truth_maps() {
     return;
 }
 
+fn assert_math_helpers() {
+    assert(sqrt(4.0) == 2.0);
+    assert(sqrt(9.0) == 3.0);
+    assert(abs(0.0 - 3.5) == 3.5);
+    assert(abs(3.5) == 3.5);
+    return;
+}
+
 fn assert_seeded_random_replay() {
     random_seed(7);
     let first: i32 = random_next_i32(-100, 100);
@@ -125,6 +133,7 @@ fn main() {
     assert(result_score(Result::Ok(8)) == 8);
     assert(result_score(Result::Err(3)) == -3);
     assert_quad_truth_maps();
+    assert_math_helpers();
     assert_seeded_random_replay();
     return;
 }
