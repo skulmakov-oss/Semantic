@@ -99,7 +99,7 @@ that wording drift; it does not delete or rewrite historical evidence.
 | Logos declarative profile | F/I/C/D | **Experimental** | SSF-02 selected Model B: `semantic.logos.declarative/0.1` supports parse, semantic analysis, and non-executable `LogosIrLaw` inspection; SemCode/VM paths reject it. | Preserve the boundary through SSF-09/11/12; no automatic promotion. |
 | `std.core` | F/I/V/R/D | **Qualified limited release** | `semantic.foundation.std/0.1` selects language-owned `assert`; `std.*` is not an import namespace. | Preserve through SSF-12. |
 | `std.quad` | F/I/V/R/D | **Qualified limited release** | `semantic.foundation.std/0.1` selects explicit qtruth maps with N/S evidence preserved. | Preserve through SSF-12. |
-| `std.math` | F/I/V/R/D | **Roadmap** | SSF-03 selects no API; current f64 builtins remain experimental pending determinism policy. | SSF-07/10. |
+| `std.math` | F/I/V/R/D | **Qualified limited release (`sqrt`/`abs`); Roadmap (`sin`/`cos`/`tan`/`pow`)** | SSF-07 promotes `sqrt`/`abs` to Selected — both are IEEE-754 exact and already cross-platform bit-exact; `sin`/`cos`/`tan`/`pow` remain experimental pending transcendental determinism policy. | `sqrt`/`abs` closed in SSF-07; transcendental subset routed to SSF-07/10. |
 | `std.text` | F/I/V/R/D | **Qualified limited release** | Exact UTF-8 text equality/concat and bounded scalar `to_text`; no indexing/normalization. | Bound further in SSF-07. |
 | `std.seq` | F/I/V/R/D | **Qualified limited release** | Ordered persistent sequence helpers selected as language-owned equivalents. | Bound further in SSF-07. |
 | `std.map` | F/I/V/R/D | **Qualified limited release** | Persistent lookup/update helpers selected; no observable iteration/order API. | Bound further in SSF-07. |

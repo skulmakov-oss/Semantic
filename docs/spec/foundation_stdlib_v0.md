@@ -27,7 +27,7 @@ this authority rather than copy it.
 |---|---|---|
 | `std.core` | Selected | statement-only `assert(bool)` |
 | `std.quad` | Selected | `qtruth_and`, `qtruth_or`, `qtruth_not`, `qtruth_impl` |
-| `std.math` | Deferred | no selected API; arithmetic stays language-operator owned |
+| `std.math` | Selected | `sqrt`, `abs` |
 | `std.text` | Selected | `text + text`, text equality, `to_text(text|bool|i32|u32|quad)` |
 | `std.seq` | Selected | `len`, `is_empty`, `contains`, `push`, `prepend`, `pop` over `Sequence(T)` |
 | `std.map` | Selected | `map_empty`, `map_contains`, `map_get`, `map_set` over `Map(K, V)` |
@@ -64,6 +64,21 @@ For operands `a = (a.t, a.f)` and `b = (b.t, b.f)`, the exact maps are:
 
 The legacy quad operators and their lattice semantics are separate language
 operations. They are not aliases for this family.
+
+### `std.math`
+
+`sqrt` and `abs` are `f64 -> f64` and IEEE-754 exact: `sqrt` is
+correctly-rounded per IEEE-754 (`sqrt(x) < 0.0` never holds for `x >= 0.0`,
+and `sqrt` of a negative input returns `NaN`, matching Rust `f64::sqrt`'s
+existing behavior — this documents current behavior, not a new choice), and
+`abs` is a sign-bit clear with no rounding involved. Both are already
+cross-platform bit-exact today, unlike the transcendental builtins below.
+Neither performs a host effect or consults VM quota state.
+
+`sin`, `cos`, `tan`, and `pow` remain Deferred (see "Deferred families"
+below): their bit-exact output depends on the underlying platform/libm
+transcendental implementation, so their cross-platform determinism policy is
+not yet qualified.
 
 ### `std.text`
 
@@ -135,10 +150,11 @@ requires a new contract version and migration decision in SSF-10.
 
 ## Deferred families
 
-`std.math` selects no API. Current `sin`, `cos`, `tan`, `sqrt`, `abs`, and
-`pow` builtins remain current-main/experimental because their exact
-cross-platform determinism and compatibility policy is not qualified.
-Foundation numeric operators remain governed by the source contract and
+`std.math` selects only `sqrt` and `abs` (see "Selected API semantics"
+above); its `sin`, `cos`, `tan`, and `pow` builtins remain
+current-main/experimental because their exact cross-platform determinism and
+compatibility policy is not qualified. Foundation numeric operators remain
+governed by the source contract and
 SSF-07.
 
 `std.serde` selects no API and therefore no wire encoding. JSON use inside the

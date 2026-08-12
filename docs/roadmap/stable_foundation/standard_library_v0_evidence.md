@@ -17,6 +17,7 @@ owned end to end.
 |---|---|---|---|
 | `std.core` | `tests/pcc8_stdlib_acceptance.rs` | `tests/pcc8_stdlib_diagnostics.rs` | CTF-E1/CTF-E3 stdlib trace and trap fixtures |
 | `std.quad` | qtruth frontend/lowering/VM unit matrices in `crates/sm-front`, `crates/sm-ir`, and `crates/sm-vm` | quad type mismatch and opcode truncation/rejection unit tests | distinct QTruth opcode-byte tests and canonical `semantic-core-quad` truth maps |
+| `std.math` | `tests/pcc8_stdlib_acceptance.rs` (`positive_math_basic.sm`) | selected surface is `f64 -> f64` only; type/arity mismatches reject via the existing generic builtin-call diagnostics | `sqrt`/`abs` call straight into Rust `f64::sqrt`/`f64::abs`, unmetered and host-effect-free, per `crates/sm-vm/src/semcode_vm.rs` |
 | `std.text` | `tests/pcc3_text_core_gate.rs`, `tests/pcc8_stdlib_acceptance.rs` | `tests/pcc_stdlib_negative.rs`, `tests/pcc8_stdlib_diagnostics.rs` | PCC3 lowering stability and CTF stdlib traces |
 | `std.seq` | `tests/pcc7_sequence_acceptance.rs` | `tests/pcc7_collections_diagnostics.rs` | `tests/sequence_ownership_golden.rs` plus compile/verify paths |
 | `std.map` | `tests/pcc7_map_acceptance.rs` | `tests/pcc7_collections_diagnostics.rs` | `tests/collections_map_surface_qualification.rs` plus compile/verify paths |
@@ -24,8 +25,11 @@ owned end to end.
 | `std.result` | `tests/pcc6_result_acceptance.rs` | `tests/pcc6_option_result_diagnostics.rs` | `tests/pcc6_option_result_ownership_golden.rs` |
 | `std.rand` | seeded cases in `tests/snake_benchmark_gap_matrix.rs` | invalid-range case in `tests/snake_benchmark_gap_matrix.rs` | exact xorshift64 fixture replay and SemCode compile/verify path |
 
-`std.math` and `std.serde` are Deferred, so they have no selected API to
-qualify. Their absence is protected by the contract drift guard.
+`std.math` selects only `sqrt`/`abs`; its `sin`/`cos`/`tan`/`pow` remain
+Deferred pending cross-platform transcendental determinism policy.
+`std.serde` is fully Deferred, so it has no selected API to qualify. Both
+absences (and `std.math`'s partial one) are protected by the contract drift
+guard.
 
 ## Implementation authority
 
@@ -47,7 +51,8 @@ admission, quotas, or runtime traps.
 - `std.*` is a documentation identity, not an import namespace in Foundation
   Source 1.0.
 - `print(text)` is excluded and routed into SSF-04.
-- current f64 math builtins are not promoted into `std.math`.
+- only `sqrt`/`abs` are promoted into `std.math`; `sin`/`cos`/`tan`/`pow`
+  remain outside the compatibility surface.
 - no Semantic source serialization API or encoding is claimed.
 - map iteration/order and text indexing/normalization are not claimed.
 - seeded PRNG is deterministic versioned VM state, not host entropy.
