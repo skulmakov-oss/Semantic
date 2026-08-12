@@ -158,14 +158,16 @@ Tooling and examples must call these **experimental** or **current-main only**.
 Their acceptance is not a silent contract expansion.
 
 Within the still-experimental broad generics/trait surface, SSF-07 has
-deterministically closed one specific compile-time check:
-`validate_impl_conformance` (`crates/sm-front/src/typecheck.rs`) now rejects
-an impl whenever its method set doesn't exactly match its trait's declared
-method set — no fewer, no more methods per (trait, type) pair — with matching
-arity/parameter/return types, and rejects blanket/generic impls and duplicate
-(trait, type) impls. This is a compile-time declaration check only, not a
-compatibility promise for the broader trait/protocol surface: impl methods
-have no invocation syntax anywhere in the language outside the hardcoded
+deterministically closed one specific compile-time check, split across two
+validators in `crates/sm-front/src/typecheck.rs`: `validate_trait_coherence`
+rejects blanket/generic impls and duplicate (trait, type) impls (pre-existing
+from SSF-07's earlier blanket-impl slice), and `validate_impl_conformance`
+now additionally rejects an impl whenever its method set doesn't exactly
+match its trait's declared method set — no fewer, no more methods — with
+matching arity/parameter/return types. This is a compile-time declaration
+check only, not a compatibility promise for the broader trait/protocol
+surface: impl methods have no invocation syntax anywhere in the language
+outside the hardcoded
 Iterable `next()` for-loop desugaring, so general trait method dispatch and
 UFCS call resolution remain deferred and experimental.
 
