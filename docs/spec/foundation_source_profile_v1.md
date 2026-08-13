@@ -96,11 +96,19 @@ only by the Logos profile and is not executable under this contract.
   patterns (`i32`/`u32` scrutinees only) are not part of that exhaustiveness
   algorithm, but an incomplete range match without a wildcard `_` arm is
   still rejected deterministically through the same "match requires default
-  arm '_'" check every non-exhaustive match falls back to (SSF-07). There is
-  no tuple match-arm pattern at all — tuples are already excluded from the
-  scrutinee allowlist above, and tuple destructuring is the separate,
-  `let`/assignment-only mechanism already covered by the tuple bullet
-  earlier in this list, not a `match`-arm concept;
+  arm '_'" check every non-exhaustive match falls back to (SSF-07). A
+  single-value range arm (`5..=5`) is Included and executable: it lowers as
+  a literal-equality match. A genuine multi-value range arm (`1..=5`)
+  typechecks but is **not** part of the Included executable surface — it is
+  a known M9.4 Wave 1 boundary, rejected deterministically at the lowering
+  phase with "integer range match pattern lowering is not yet implemented
+  in the IR backend" (`crates/sm-ir/src/legacy_lowering.rs`), confirmed
+  empirically to fail `compile`/`run` while `check` passes; see
+  "Deterministically unsupported forms" below. There is no tuple match-arm
+  pattern at all — tuples are already excluded from the scrutinee allowlist
+  above, and tuple destructuring is the separate, `let`/assignment-only
+  mechanism already covered by the tuple bullet earlier in this list, not a
+  `match`-arm concept;
 - `Sequence(T)` values, indexing, iteration, length/emptiness, contains,
   persistent push/prepend/pop operations;
 - `Map(K, V)` deterministic functional empty/get/set/contains operations for
@@ -208,6 +216,10 @@ must not be ignored, guessed, or reinterpreted. This includes:
   nominal enums/ADTs, `Option(T)`, `Result(T, E)`, `i32`, `u32`) — for
   example `text`, `bool`, tuple, or record scrutinees;
 - non-exhaustive included-pattern matches and type-incompatible arms;
+- a genuine multi-value integer range match arm (`1..=5`, as opposed to a
+  single-value arm like `5..=5`) — typechecks, then is rejected
+  deterministically at the lowering phase (M9.4 Wave 1 boundary), not the
+  Included executable surface;
 - malformed or unsupported SemCode headers at verifier admission.
 
 The canonical diagnostic taxonomy remains `docs/spec/diagnostics.md`. SSF-09
