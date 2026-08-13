@@ -2,8 +2,14 @@
 
 Status: SSF-01 evidence and closure record
 Normative contract: `docs/spec/foundation_source_profile_v1.md`
-Contract identifier: `semantic.foundation.source/1.0`
+Contract identifier: `semantic.foundation.source/1.1`
 Base commit: `4de0b6eb1cd5d8e5dc37989e9b9b95a5a8e07e57`
+
+The contract identifier above tracks the current version of the normative
+profile document; it is not frozen to the base commit, which records only
+when the underlying SSF-01 evidence was gathered. SSF-07 bumped the profile
+to `1.1` (a backward-compatible clarification, no evidence re-audit
+required); this record was updated in the same PR to keep the two in sync.
 
 ## Decision
 
@@ -78,7 +84,7 @@ working experimental research merely to keep the stable contour small.
 
 ## Version and compatibility relationship
 
-- source contract: `semantic.foundation.source/1.0`;
+- source contract: `semantic.foundation.source/1.1`;
 - parser acceptance envelope: `semantic.foundation` / `1.0`;
 - SemCode: capability-derived supported header, currently `SEMCODE0` through
   `SEMCOD14`, never chosen solely from profile permission;
@@ -103,7 +109,7 @@ Skipped checks cannot count as pass.
 
 SSF-02 may start only after:
 
-1. `semantic.foundation.source/1.0` and this evidence map are reviewed and
+1. `semantic.foundation.source/1.1` and this evidence map are reviewed and
    merged;
 2. all included rows remain green through exact-head CI;
 3. experimental/deferred rows remain explicitly unpromoted in current-facing

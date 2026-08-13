@@ -5,6 +5,23 @@ fn read(root: &Path, relative: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {relative}: {error}"))
 }
 
+/// Extracts the value of a `Label: \`value\`` field. Used to cross-check that
+/// the normative profile and its evidence map agree on the contract
+/// identifier, instead of independently pinning the same literal in two
+/// places (which let them silently drift during the SSF-07 1.0 -> 1.1 bump).
+fn extract_backtick_field<'a>(doc: &'a str, label: &str) -> &'a str {
+    let marker = format!("{label}: `");
+    let start = doc
+        .find(&marker)
+        .unwrap_or_else(|| panic!("missing '{label}:' field"))
+        + marker.len();
+    let rest = &doc[start..];
+    let end = rest
+        .find('`')
+        .unwrap_or_else(|| panic!("unterminated '{label}:' field"));
+    &rest[..end]
+}
+
 #[test]
 fn ssf_01_language_contract_keeps_its_version_and_evidence_map() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -42,6 +59,14 @@ fn ssf_01_language_contract_keeps_its_version_and_evidence_map() {
             "SSF-01 evidence map is missing {required}"
         );
     }
+
+    let profile_contract_id = extract_backtick_field(&profile, "Contract identifier");
+    let evidence_contract_id = extract_backtick_field(&evidence, "Contract identifier");
+    assert_eq!(
+        profile_contract_id, evidence_contract_id,
+        "the normative profile and its SSF-01 evidence map disagree on the \
+         contract identifier -- one was bumped without the other"
+    );
 
     for relative in [
         "tests/practical_surface_execution_qualification.rs",

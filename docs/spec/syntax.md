@@ -250,8 +250,9 @@ Current statement rules:
 - `ensures(condition)` is currently a function-level contract clause only
 - `invariant(condition)` is currently a function-level contract clause only
 - `if` conditions must be `bool`
-- `match` currently accepts `quad` scrutinees, nominal enum scrutinees, and
-  the standard-form `Option(T)` / `Result(T, E)` families
+- `match` currently accepts `quad`, nominal enum, `Option(T)`, `Result(T, E)`,
+  `i32`, and `u32` scrutinees; every other scrutinee type is rejected
+  deterministically (SSF-07)
 - `quad` `match` requires an explicit default arm `_ => { ... }`
 - enum `match` may omit `_ => { ... }` only when explicit unguarded variant
   coverage is exhaustive
@@ -673,7 +674,8 @@ Current `quad` model values are:
 Current source restrictions:
 
 - `if quad_expr` is forbidden; users must write an explicit comparison
-- `match` currently accepts only `quad` scrutinees
+- `quad` is one of the admitted `match` scrutinee types (see the `match`
+  bullet under "## Statements" above for the full allowlist)
 - `when` is an expression-level surface form for explicit boolean selection
 - `is` is a readable alias for explicit quad comparison, not a truthiness
   coercion

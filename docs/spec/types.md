@@ -139,8 +139,9 @@ Current rule:
 Current rules:
 
 - `quad` participates in equality and implication
-- `match` currently operates on `quad`, nominal enum scrutinees, and the
-  standard-form `Option(T)` / `Result(T, E)` families
+- `match` currently operates on `quad`, nominal enum, `Option(T)`,
+  `Result(T, E)`, `i32`, and `u32` scrutinees; every other scrutinee type is
+  rejected deterministically (SSF-07)
 - `quad` is not accepted directly as an `if` condition
 - the user-facing quad predicate vocabulary is documented in
   [`docs/language/quad_language_design.md`](../language/quad_language_design.md)

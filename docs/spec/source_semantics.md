@@ -772,7 +772,9 @@ Current `guard` semantics:
 
 Current `match` semantics:
 
-- `match` currently accepts `quad` scrutinees and nominal enum scrutinees
+- `match` currently accepts `quad`, nominal enum, `Option(T)`, `Result(T, E)`,
+  `i32`, and `u32` scrutinees; every other scrutinee type is rejected
+  deterministically (SSF-07)
 - `quad` arms match only the literal patterns `N`, `F`, `T`, `S`
 - enum arms currently use explicit nominal patterns `Enum::Variant` or
   `Enum::Variant(name, _)`
