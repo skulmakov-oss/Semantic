@@ -1,0 +1,14 @@
+fn classify(x: i32) -> quad {
+    let out: quad = match x {
+        5..=5 => { T }
+        _ => { F }
+    };
+    return out;
+}
+
+fn main() {
+    assert(classify(5) == T);
+    assert(classify(4) == F);
+    assert(classify(6) == F);
+    return;
+}

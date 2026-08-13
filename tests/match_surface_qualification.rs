@@ -90,6 +90,7 @@ fn match_surface_positive_fixtures_run_end_to_end() {
         "examples/qualification/match_surface/positive_option_result_match/src/main.sm",
         "examples/qualification/match_surface/positive_match_guard_bool/src/main.sm",
         "examples/qualification/match_surface/positive_nested_match/src/main.sm",
+        "examples/qualification/match_surface/positive_i32_singleton_range_match/src/main.sm",
     ];
 
     for rel in positive_cases {
