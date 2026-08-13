@@ -382,7 +382,10 @@ Current equality and control rules:
 
 - `==` and `!=` require meaningful same-family comparisons
 - `if` requires `bool`
-- `match` requires `quad`, nominal enum, `Option(T)`, or `Result(T, E)`
+- `match` requires `quad`, nominal enum, `Option(T)`, `Result(T, E)`, `i32`,
+  or `u32` at typecheck time; `u32` is typecheck-only and does not execute
+  correctly (see "Quad" above and
+  `docs/spec/foundation_source_profile_v1.md`'s "Data and patterns" section)
 
 ## Function Typing Rules
 
