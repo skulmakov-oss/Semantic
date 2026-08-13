@@ -140,8 +140,12 @@ Current rules:
 
 - `quad` participates in equality and implication
 - `match` currently operates on `quad`, nominal enum, `Option(T)`,
-  `Result(T, E)`, `i32`, and `u32` scrutinees; every other scrutinee type is
-  rejected deterministically (SSF-07)
+  `Result(T, E)`, `i32`, and `u32` scrutinees at typecheck time; every other
+  scrutinee type is rejected deterministically (SSF-07). `u32` is
+  typecheck-only: no literal or range match arm over a `u32` scrutinee
+  currently executes correctly (see
+  `docs/spec/foundation_source_profile_v1.md`'s "Data and patterns" section
+  for the confirmed failure modes)
 - `quad` is not accepted directly as an `if` condition
 - the user-facing quad predicate vocabulary is documented in
   [`docs/language/quad_language_design.md`](../language/quad_language_design.md)

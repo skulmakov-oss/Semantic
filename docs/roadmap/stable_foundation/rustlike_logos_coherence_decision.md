@@ -51,7 +51,7 @@ and bypass the frozen Rust-like contract.
 
 ## Profiles, Maturity, and Versions
 
-- Rust-like contract: `semantic.foundation.source/1.0`;
+- Rust-like contract: `semantic.foundation.source/1.1`;
   **Qualified limited release**, still not Published Stable.
 - Logos contract: `semantic.logos.declarative/0.1`; **Experimental**.
 - Parser admission envelope: `semantic.foundation` / `1.0`; this shared policy

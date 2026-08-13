@@ -49,7 +49,7 @@ admission, quotas, or runtime traps.
 ## Boundary decisions
 
 - `std.*` is a documentation identity, not an import namespace in Foundation
-  Source 1.0.
+  Source 1.1.
 - `print(text)` is excluded and routed into SSF-04.
 - only `sqrt`/`abs` are promoted into `std.math`; `sin`/`cos`/`tan`/`pow`
   remain outside the compatibility surface.

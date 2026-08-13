@@ -87,10 +87,24 @@ only by the Logos profile and is not executable under this contract.
 - `Option(T)` and `Result(T, E)` standard variants and exhaustive match flow;
 - bounded patterns and destructuring already covered by record, tuple, enum,
   Option, and Result qualification;
-- `match` scrutinees are admitted only for `quad`, nominal enums/ADTs,
-  `Option(T)`, `Result(T, E)`, `i32`, and `u32`; every other scrutinee type
-  (including `text`, `bool`, tuples, and records) is rejected deterministically
-  at typecheck time (SSF-07);
+- `match` scrutinees are admitted at typecheck time for `quad`, nominal
+  enums/ADTs, `Option(T)`, `Result(T, E)`, `i32`, and `u32`; every other
+  scrutinee type (including `text`, `bool`, tuples, and records) is
+  rejected deterministically at typecheck time (SSF-07). Of these, **`u32`
+  is typecheck-only and not part of the Included executable surface**:
+  confirmed empirically that every literal or range match arm over a `u32`
+  scrutinee fails — a plain literal arm (`5 => { ... }`) and a range arm
+  (`5..=5 => { ... }`) both compile successfully and then trap at runtime
+  with an internal "runtime type mismatch: CmpEq/CmpNe operands must have
+  same runtime type" error, and a large-value arm (e.g. `u32::MAX`) instead
+  fails to lower at all ("integer match pattern literal is outside i32
+  range") because the pattern-bound conversion in
+  `crates/sm-ir/src/legacy_lowering.rs` unconditionally goes through
+  `i32::try_from` regardless of scrutinee type. No known safe subset of
+  `u32` match arms exists today (a `u32` match with only a wildcard `_` arm
+  compiles and runs, but provides no actual matching capability). `i32`,
+  `quad`, enum/ADT, `Option(T)`, and `Result(T, E)` scrutinees are
+  unaffected by this gap;
 - exhaustiveness checking over sum-family scrutinees (enum/ADT, `Option(T)`,
   `Result(T, E)`) at typecheck time covers wildcard and or-pattern
   expansion, but **or-pattern arms (`A | B`) are typecheck-only and not
@@ -99,32 +113,18 @@ only by the Logos profile and is not executable under this contract.
   arm) that lowering rejects them deterministically — `compile` itself
   fails, not just `run` — with a lowering-side re-check that cannot expand
   an or-pattern, producing a confusing "non-exhaustive match" diagnostic
-  even though `check` already accepted the program as exhaustive; see
-  "Deterministically unsupported forms" below;
-- integer range match arms are typecheck-only for `i32`/`u32` scrutinees at
-  the same allowlist above, but lowering support is narrower still and
-  differs by scrutinee family (SSF-07, confirmed empirically against the
-  actual CLI for each case below — none of this is assumed):
-  - `i32` scrutinee, single-value range (`5..=5`): Included and executable;
-    lowers as a literal-equality match;
-  - `i32` scrutinee, genuine multi-value range (`1..=5`): typecheck-only —
-    a known M9.4 Wave 1 boundary, rejected deterministically at the
-    lowering phase ("integer range match pattern lowering is not yet
-    implemented in the IR backend", `crates/sm-ir/src/legacy_lowering.rs`);
-  - `u32` scrutinee, any range (single- or multi-value): typecheck-only and
-    **not currently safe to rely on** — a small-value range (`5..=5`)
-    compiles successfully but then traps unpredictably at runtime with an
-    internal "runtime type mismatch: CmpEq/CmpNe operands must have same
-    runtime type" error rather than a deterministic rejection at any
-    earlier phase; a large-value range (e.g. `u32::MAX..=u32::MAX`) does
-    fail deterministically, but only because the pattern-bound conversion
-    unconditionally goes through `i32::try_from` regardless of scrutinee
-    type ("integer match pattern literal is outside i32 range");
-  - an incomplete range match without a wildcard `_` arm is still rejected
-    deterministically at typecheck time through the same "match requires
-    default arm '_'" check every non-exhaustive match falls back to,
-    independent of the lowering gaps above.
-  There is no tuple match-arm
+  even though `check` already accepted the program as exhaustive;
+- integer range match arms over an `i32` scrutinee: a single-value range
+  (`5..=5`) is Included and executable, lowering as a literal-equality
+  match; a genuine multi-value range (`1..=5`) is typecheck-only — a known
+  M9.4 Wave 1 boundary, rejected deterministically at the lowering phase
+  ("integer range match pattern lowering is not yet implemented in the IR
+  backend"); see "Deterministically unsupported forms" below for both this
+  and the or-pattern case. An incomplete range match without a wildcard `_`
+  arm is still rejected deterministically at typecheck time through the
+  same "match requires default arm '_'" check every non-exhaustive match
+  falls back to, independent of the lowering gaps above. There is no tuple
+  match-arm
   pattern at all — tuples are already excluded from the scrutinee allowlist
   above, and tuple destructuring is the separate, `let`/assignment-only
   mechanism already covered by the tuple bullet earlier in this list, not a
@@ -244,12 +244,15 @@ must not be ignored, guessed, or reinterpreted. This includes:
   single-value arm like `5..=5`) over an `i32` scrutinee — typechecks, then
   is rejected deterministically at the lowering phase (M9.4 Wave 1
   boundary), not the Included executable surface;
-- any integer range match arm over a `u32` scrutinee — typechecks, then
-  either fails to lower (large values) or, more concerning, compiles
-  successfully but traps at runtime with an internal type-mismatch error
-  (small values) rather than a deterministic rejection; not the Included
-  executable surface pending a proper fix;
 - malformed or unsupported SemCode headers at verifier admission.
+
+Not listed above because it is **not** a deterministic pre-execution
+rejection (this section's own definition): any literal or range match arm
+over a `u32` scrutinee typechecks and often compiles, then fails
+unpredictably at a later phase (runtime trap for small values, a lowering
+error only for large ones) instead of a clean up-front diagnostic. See
+"Data and patterns" above for the precise, empirically-confirmed behavior;
+this is a known gap pending a proper fix, not a documented rejection form.
 
 The canonical diagnostic taxonomy remains `docs/spec/diagnostics.md`. SSF-09
 owns a stable machine-readable schema; SSF-01 freezes deterministic rejection
