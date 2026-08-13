@@ -96,9 +96,11 @@ only by the Logos profile and is not executable under this contract.
   scrutinee fails — a plain literal arm (`5 => { ... }`) and a range arm
   (`5..=5 => { ... }`) both compile successfully and then trap at runtime
   with an internal "runtime type mismatch: CmpEq/CmpNe operands must have
-  same runtime type" error, and a large-value arm (e.g. `u32::MAX`) instead
-  fails to lower at all ("integer match pattern literal is outside i32
-  range") because the pattern-bound conversion in
+  same runtime type" error, and a large-value arm (e.g. `4294967295`, the
+  literal spelling of `u32::MAX` — this language has no `Type::MAX`
+  associated-constant syntax) instead fails to lower at all ("integer match
+  pattern literal is outside i32 range") because the pattern-bound
+  conversion in
   `crates/sm-ir/src/legacy_lowering.rs` unconditionally goes through
   `i32::try_from` regardless of scrutinee type. No known safe subset of
   `u32` match arms exists today (a `u32` match with only a wildcard `_` arm
@@ -115,9 +117,14 @@ only by the Logos profile and is not executable under this contract.
   an or-pattern, producing a confusing "non-exhaustive match" diagnostic
   even though `check` already accepted the program as exhaustive;
 - integer range match arms over an `i32` scrutinee: an **inclusive**
-  single-value range (`5..=5`) is Included and executable, lowering as a
-  literal-equality match; a genuine multi-value range (`1..=5` inclusive or
-  `1..5` exclusive) is typecheck-only — a known M9.4 Wave 1 boundary,
+  single-value range with a **nonnegative literal bound** (`5..=5`) is
+  Included and executable, lowering as a literal-equality match. A negative
+  bound (`-5..=-5`) is not part of this claim and does not even parse —
+  confirmed empirically to fail at the parser (`E0000: expected match
+  pattern`) before typecheck, since range-pattern parsing requires the
+  current token to be a bare `Num` literal and does not admit a leading
+  unary `-`. A genuine multi-value range (`1..=5` inclusive or `1..5`
+  exclusive) is typecheck-only — a known M9.4 Wave 1 boundary,
   rejected deterministically at the lowering phase ("integer range match
   pattern lowering is not yet implemented in the IR backend"); see
   "Deterministically unsupported forms" below for both this and the
