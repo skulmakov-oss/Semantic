@@ -15,7 +15,7 @@ fn ssf_01_language_contract_keeps_its_version_and_evidence_map() {
     );
 
     for required in [
-        "semantic.foundation.source/1.0",
+        "semantic.foundation.source/1.1",
         "semantic.foundation`/`1.0",
         "Included executable surface",
         "Experimental but currently accepted extensions",

@@ -4,7 +4,7 @@ Status: SSF-03 candidate contract; not published stable
 
 Contract ID: `semantic.foundation.std/0.1`
 
-Base source contract: `semantic.foundation.source/1.0`
+Base source contract: `semantic.foundation.source/1.1`
 
 This document is the canonical Standard Library v0 index for the Stable
 Foundation contour. It freezes the smallest already-implemented library

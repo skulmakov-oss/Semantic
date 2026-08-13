@@ -1,9 +1,14 @@
-# Semantic Foundation Source Profile 1.0
+# Semantic Foundation Source Profile 1.1
 
 Status: stable-candidate source contract; not published stable
-Contract identifier: `semantic.foundation.source/1.0`
+Contract identifier: `semantic.foundation.source/1.1`
 Evidence base: `main` at `4de0b6eb1cd5d8e5dc37989e9b9b95a5a8e07e57`
 Parser acceptance envelope: `semantic.foundation` profile version `1.0`
+
+Version `1.1` is a backward-compatible clarification per the version policy
+below: it documents the already-enforced `match` scrutinee allowlist and
+range-pattern exhaustiveness carve-out (SSF-07), with no grammar, semantic,
+or rejection-behavior change from `1.0`.
 
 ## Authority
 
@@ -20,7 +25,7 @@ executable qualification != published stable
 Only forms listed as **Included** below belong to this contract. A form marked
 **Experimental** may still be accepted by current-main tooling, but receives no
 Foundation compatibility promise. A form marked **Deferred** is owned by a
-later phase or roadmap and is not required for Foundation 1.0.
+later phase or roadmap and is not required for Foundation Source 1.1.
 
 The Rust-like surface is the only executable profile governed here. Logos
 remains a separate experimental declarative profile pending SSF-02.
@@ -87,11 +92,15 @@ only by the Logos profile and is not executable under this contract.
   (including `text`, `bool`, tuples, and records) is rejected deterministically
   at typecheck time (SSF-07);
 - exhaustiveness checking over sum-family scrutinees (enum/ADT, `Option(T)`,
-  `Result(T, E)`) covers wildcard and or-pattern expansion; range and tuple
-  patterns are not part of the exhaustiveness algorithm itself, but an
-  incomplete range or tuple match without a wildcard `_` arm is still
-  rejected deterministically through the same "match requires default arm
-  '_'" check every non-exhaustive match falls back to (SSF-07);
+  `Result(T, E)`) covers wildcard and or-pattern expansion; integer range
+  patterns (`i32`/`u32` scrutinees only) are not part of that exhaustiveness
+  algorithm, but an incomplete range match without a wildcard `_` arm is
+  still rejected deterministically through the same "match requires default
+  arm '_'" check every non-exhaustive match falls back to (SSF-07). There is
+  no tuple match-arm pattern at all — tuples are already excluded from the
+  scrutinee allowlist above, and tuple destructuring is the separate,
+  `let`/assignment-only mechanism already covered by the tuple bullet
+  earlier in this list, not a `match`-arm concept;
 - `Sequence(T)` values, indexing, iteration, length/emptiness, contains,
   persistent push/prepend/pop operations;
 - `Map(K, V)` deterministic functional empty/get/set/contains operations for
@@ -153,7 +162,7 @@ SSF-07; this contract does not fill those gaps by implication.
 ## Experimental but currently accepted extensions
 
 The following may parse, typecheck, or execute on current `main`, but are not
-Foundation 1.0 compatibility promises:
+Foundation Source 1.1 compatibility promises:
 
 - Rust-like `when`;
 - schemas and schema migration forms;
@@ -207,7 +216,7 @@ behavior and existing diagnostic categories, not a new transport format.
 
 ### Diagnostic expectations
 
-| Rejection owner | Foundation 1.0 expectation |
+| Rejection owner | Foundation Source 1.1 expectation |
 |---|---|
 | Lexer/parser | Return `FrontendErrorKind::Syntax` with a source span; Logos parser families retain `E0200` through the documented `E0237` range. |
 | Profile policy | Return `FrontendErrorKind::PolicyViolation`; never reinterpret a disabled surface as another grammar form. |
@@ -225,14 +234,14 @@ diagnostic-code compatibility remain SSF-09/SSF-10 work.
 Source contract version and SemCode header are separate dimensions:
 
 ```text
-semantic.foundation.source/1.0
+semantic.foundation.source/1.1
   -> compile using ParserProfile semantic.foundation/1.0
   -> select the oldest sufficient supported SemCode header from actual emitted use
   -> verify exact header, capabilities, structure, and instruction contract
   -> execute only after verifier admission
 ```
 
-Foundation Source 1.0 does not mandate one universal SemCode header. Current
+Foundation Source 1.1 does not mandate one universal SemCode header. Current
 qualified programs may select a member of the documented supported family from
 `SEMCODE0` through `SEMCOD14` according to actual emitted features — `SEMCOD14`
 is the header selected when a program actually uses the included `Map(K, V)`
