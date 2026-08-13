@@ -116,14 +116,15 @@ only by the Logos profile and is not executable under this contract.
   arm) that lowering rejects them deterministically — `compile` itself
   fails, not just `run` — with a lowering-side re-check that cannot expand
   an or-pattern, producing a confusing "non-exhaustive match" diagnostic
-  even though `check` already accepted the program as exhaustive. `quad`
-  and `i32` scrutinees typecheck an or-pattern arm the same way and then
-  fail to lower it too, each with its own distinct diagnostic instead of
-  the sum-family one: a `quad` or-pattern (`N | F => { ... }`) fails with
-  "wildcard/or/range match pattern lowering is not yet implemented in the
-  IR backend", and an `i32` or-pattern (`1 | 2 => { ... }`) fails with
-  "wildcard/or/quad match pattern lowering is not yet implemented in the
-  IR backend" — both confirmed empirically at the `compile` step;
+  even though `check` already accepted the program as exhaustive. `quad`,
+  `i32`, and `u32` scrutinees typecheck an or-pattern arm the same way and
+  then fail to lower it too, each with its own distinct diagnostic instead
+  of the sum-family one: a `quad` or-pattern (`N | F => { ... }`) fails
+  with "wildcard/or/range match pattern lowering is not yet implemented in
+  the IR backend", and an `i32` or a `u32` or-pattern (`1 | 2 => { ... }`)
+  both fail with the identical "wildcard/or/quad match pattern lowering is
+  not yet implemented in the
+  IR backend" — all three confirmed empirically at the `compile` step;
 - integer range match arms over an `i32` scrutinee: an **inclusive**
   single-value range whose literal bound is in `0..=2147483647`
   (`i32::MAX`) (`5..=5`) is Included and executable, lowering as a
@@ -268,14 +269,15 @@ must not be ignored, guessed, or reinterpreted. This includes:
   example `text`, `bool`, tuple, or record scrutinees;
 - non-exhaustive included-pattern matches and type-incompatible arms;
 - an or-pattern match arm (`A | B`) over any admitted scrutinee family —
-  enum/ADT, `Option(T)`/`Result(T, E)`, `quad`, or `i32` — typechecks
-  (including as sole exhaustiveness coverage for the sum-family case), then
-  is rejected deterministically at the lowering phase regardless of whether
-  a wildcard arm is also present, not the Included executable surface. The
-  sum-family case surfaces as a "non-exhaustive match" diagnostic; `quad`
-  surfaces as "wildcard/or/range match pattern lowering is not yet
-  implemented in the IR backend"; `i32` surfaces as "wildcard/or/quad match
-  pattern lowering is not yet implemented in the IR backend";
+  enum/ADT, `Option(T)`/`Result(T, E)`, `quad`, `i32`, or `u32` —
+  typechecks (including as sole exhaustiveness coverage for the sum-family
+  case), then is rejected deterministically at the lowering phase
+  regardless of whether a wildcard arm is also present, not the Included
+  executable surface. The sum-family case surfaces as a "non-exhaustive
+  match" diagnostic; `quad` surfaces as "wildcard/or/range match pattern
+  lowering is not yet implemented in the IR backend"; `i32` and `u32`
+  both surface the identical "wildcard/or/quad match pattern lowering is
+  not yet implemented in the IR backend";
 - a genuine multi-value integer range match arm (`1..=5`, as opposed to a
   single-value arm like `5..=5`) over an `i32` scrutinee — typechecks, then
   is rejected deterministically at the lowering phase (M9.4 Wave 1

@@ -6,9 +6,33 @@ fn classify(x: i32) -> quad {
     return out;
 }
 
+fn classify_zero_bound(x: i32) -> quad {
+    let out: quad = match x {
+        0..=0 => { T }
+        _ => { F }
+    };
+    return out;
+}
+
+fn classify_max_bound(x: i32) -> quad {
+    let out: quad = match x {
+        2147483647..=2147483647 => { T }
+        _ => { F }
+    };
+    return out;
+}
+
 fn main() {
     assert(classify(5) == T);
     assert(classify(4) == F);
     assert(classify(6) == F);
+
+    assert(classify_zero_bound(0) == T);
+    assert(classify_zero_bound(1) == F);
+    assert(classify_zero_bound(-1) == F);
+
+    assert(classify_max_bound(2147483647) == T);
+    assert(classify_max_bound(0) == F);
+    assert(classify_max_bound(2147483646) == F);
     return;
 }
