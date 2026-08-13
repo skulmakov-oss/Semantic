@@ -115,8 +115,19 @@ only by the Logos profile and is not executable under this contract.
   and `Option(T)` scrutinees, with and without an accompanying wildcard
   arm) that lowering rejects them deterministically — `compile` itself
   fails, not just `run` — with a lowering-side re-check that cannot expand
-  an or-pattern, producing a confusing "non-exhaustive match" diagnostic
-  even though `check` already accepted the program as exhaustive. `quad`,
+  an or-pattern, but the exact diagnostic depends on whether a wildcard arm
+  is present: without one, `missing_exhaustive_sum_variants` still runs and
+  produces a confusing "non-exhaustive match" diagnostic even though
+  `check` already accepted the program as exhaustive; with one, that check
+  is skipped (the wildcard already satisfies it) and
+  `resolve_sum_match_pattern_for_lowering` instead rejects the or-pattern
+  with an equally confusing, differently-worded diagnostic — confirmed
+  empirically for an enum scrutinee as "quad match pattern requires quad
+  scrutinee; enum 'Flag' needs explicit variant patterns in lowering" — and
+  the same shared function backs every sum-family scrutinee (enum/ADT,
+  `Option(T)`, `Result(T, E)`), substituting each family's own display
+  label for `enum 'Flag'`. Either way, lowering rejects the or-pattern
+  deterministically before a runnable artifact exists. `quad`,
   `i32`, and `u32` scrutinees typecheck an or-pattern arm the same way and
   then fail to lower it too, each with its own distinct diagnostic instead
   of the sum-family one: a `quad` or-pattern (`N | F => { ... }`) fails
@@ -273,11 +284,17 @@ must not be ignored, guessed, or reinterpreted. This includes:
   typechecks (including as sole exhaustiveness coverage for the sum-family
   case), then is rejected deterministically at the lowering phase
   regardless of whether a wildcard arm is also present, not the Included
-  executable surface. The sum-family case surfaces as a "non-exhaustive
-  match" diagnostic; `quad` surfaces as "wildcard/or/range match pattern
-  lowering is not yet implemented in the IR backend"; `i32` and `u32`
-  both surface the identical "wildcard/or/quad match pattern lowering is
-  not yet implemented in the IR backend";
+  executable surface, though the exact diagnostic for the sum-family case
+  depends on that presence: without a wildcard arm it surfaces as a
+  "non-exhaustive match" diagnostic, and with one it instead surfaces a
+  differently-worded diagnostic from the same shared lowering function —
+  confirmed for an enum scrutinee as "quad match pattern requires quad
+  scrutinee; enum 'Flag' needs explicit variant patterns in lowering",
+  with every sum-family scrutinee substituting its own display label in
+  place of `enum 'Flag'`. `quad` surfaces as "wildcard/or/range match
+  pattern lowering is not yet implemented in the IR backend"; `i32` and
+  `u32` both surface the identical "wildcard/or/quad match pattern
+  lowering is not yet implemented in the IR backend";
 - a genuine multi-value integer range match arm (`1..=5`, as opposed to a
   single-value arm like `5..=5`) over an `i32` scrutinee — typechecks, then
   is rejected deterministically at the lowering phase (M9.4 Wave 1
