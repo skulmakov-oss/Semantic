@@ -8,7 +8,16 @@ Parser acceptance envelope: `semantic.foundation` profile version `1.0`
 Version `1.1` is a backward-compatible clarification per the version policy
 below: it documents the already-enforced `match` scrutinee allowlist and
 range-pattern exhaustiveness carve-out (SSF-07), with no grammar, semantic,
-or rejection-behavior change from `1.0`.
+or rejection-behavior change from `1.0`. The evidence base commit above is a
+behavioral-snapshot anchor for SSF-01's original gathering, not a claim that
+every currently-mapped test already existed there: SSF-07 added net-new
+executable evidence in this same revision — most notably
+`tests/match_surface_qualification.rs`'s singleton-range fixture, which pins
+both interval boundaries (`0` and `i32::MAX`) end to end — to back the newly
+precise range and or-pattern claims this version documents. What keeps this
+contract honest is the Qualification rule below, not the frozen snapshot: the
+mapped evidence must stay green in the current tree, not merely at the
+evidence-base commit.
 
 ## Authority
 

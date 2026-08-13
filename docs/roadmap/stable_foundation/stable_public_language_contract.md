@@ -8,8 +8,18 @@ Base commit: `4de0b6eb1cd5d8e5dc37989e9b9b95a5a8e07e57`
 The contract identifier above tracks the current version of the normative
 profile document; it is not frozen to the base commit, which records only
 when the underlying SSF-01 evidence was gathered. SSF-07 bumped the profile
-to `1.1` (a backward-compatible clarification, no evidence re-audit
-required); this record was updated in the same PR to keep the two in sync.
+to `1.1` (a backward-compatible clarification: no grammar, semantic, or
+rejection-behavior change from `1.0`). That clarification did add net-new
+executable evidence in the same PR, so this is not a documentation-only
+revision: the "`match`, guards, patterns" row below gained a
+singleton-range fixture in its primary evidence file
+(`tests/match_surface_qualification.rs`) pinning both interval boundaries
+(`0` and `i32::MAX`) end to end, backing the newly precise range and
+or-pattern claims the profile now documents. The base commit above remains
+SSF-01's original gathering anchor; the evidence that actually governs this
+contract's standing is whatever the mapped test/fixture files in the table
+below currently contain, per the normative profile's Qualification rule,
+not a frozen historical snapshot.
 
 ## Decision
 
