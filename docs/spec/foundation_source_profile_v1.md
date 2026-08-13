@@ -114,17 +114,26 @@ only by the Logos profile and is not executable under this contract.
   fails, not just `run` — with a lowering-side re-check that cannot expand
   an or-pattern, producing a confusing "non-exhaustive match" diagnostic
   even though `check` already accepted the program as exhaustive;
-- integer range match arms over an `i32` scrutinee: a single-value range
-  (`5..=5`) is Included and executable, lowering as a literal-equality
-  match; a genuine multi-value range (`1..=5`) is typecheck-only — a known
-  M9.4 Wave 1 boundary, rejected deterministically at the lowering phase
-  ("integer range match pattern lowering is not yet implemented in the IR
-  backend"); see "Deterministically unsupported forms" below for both this
-  and the or-pattern case. An incomplete range match without a wildcard `_`
-  arm is still rejected deterministically at typecheck time through the
-  same "match requires default arm '_'" check every non-exhaustive match
-  falls back to, independent of the lowering gaps above. There is no tuple
-  match-arm
+- integer range match arms over an `i32` scrutinee: an **inclusive**
+  single-value range (`5..=5`) is Included and executable, lowering as a
+  literal-equality match; a genuine multi-value range (`1..=5` inclusive or
+  `1..5` exclusive) is typecheck-only — a known M9.4 Wave 1 boundary,
+  rejected deterministically at the lowering phase ("integer range match
+  pattern lowering is not yet implemented in the IR backend"); see
+  "Deterministically unsupported forms" below for both this and the
+  or-pattern case. The **exclusive**, degenerate single-value form (`5..5`,
+  semantically an empty range matching nothing) is a confirmed silent
+  miscompilation, not a rejection: lowering checks only that the raw parsed
+  start and end bounds are numerically equal and ignores the
+  inclusive/exclusive flag entirely, so `5..5` is lowered exactly like
+  `5..=5` and incorrectly matches the scrutinee value `5`. `5..5` is
+  therefore **not** part of the Included executable surface and is
+  excluded from "Deterministically unsupported forms" below for the same
+  reason `u32` match is (silent wrong behavior, not a pre-execution
+  rejection). An incomplete range match without a wildcard `_` arm is still
+  rejected deterministically at typecheck time through the same "match
+  requires default arm '_'" check every non-exhaustive match falls back
+  to, independent of the lowering gaps above. There is no tuple match-arm
   pattern at all — tuples are already excluded from the scrutinee allowlist
   above, and tuple destructuring is the separate, `let`/assignment-only
   mechanism already covered by the tuple bullet earlier in this list, not a
@@ -250,9 +259,13 @@ Not listed above because it is **not** a deterministic pre-execution
 rejection (this section's own definition): any literal or range match arm
 over a `u32` scrutinee typechecks and often compiles, then fails
 unpredictably at a later phase (runtime trap for small values, a lowering
-error only for large ones) instead of a clean up-front diagnostic. See
-"Data and patterns" above for the precise, empirically-confirmed behavior;
-this is a known gap pending a proper fix, not a documented rejection form.
+error only for large ones) instead of a clean up-front diagnostic. The
+degenerate exclusive single-value range `5..5` over an `i32` scrutinee is
+excluded for the same reason: it compiles cleanly and silently
+miscompiles, matching the literal value instead of correctly matching
+nothing. See "Data and patterns" above for the precise, empirically-
+confirmed behavior of both; these are known gaps pending a proper fix, not
+documented rejection forms.
 
 The canonical diagnostic taxonomy remains `docs/spec/diagnostics.md`. SSF-09
 owns a stable machine-readable schema; SSF-01 freezes deterministic rejection
