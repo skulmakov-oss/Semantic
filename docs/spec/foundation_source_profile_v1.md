@@ -82,6 +82,16 @@ only by the Logos profile and is not executable under this contract.
 - `Option(T)` and `Result(T, E)` standard variants and exhaustive match flow;
 - bounded patterns and destructuring already covered by record, tuple, enum,
   Option, and Result qualification;
+- `match` scrutinees are admitted only for `quad`, nominal enums/ADTs,
+  `Option(T)`, `Result(T, E)`, `i32`, and `u32`; every other scrutinee type
+  (including `text`, `bool`, tuples, and records) is rejected deterministically
+  at typecheck time (SSF-07);
+- exhaustiveness checking over sum-family scrutinees (enum/ADT, `Option(T)`,
+  `Result(T, E)`) covers wildcard and or-pattern expansion; range and tuple
+  patterns are not part of the exhaustiveness algorithm itself, but an
+  incomplete range or tuple match without a wildcard `_` arm is still
+  rejected deterministically through the same "match requires default arm
+  '_'" check every non-exhaustive match falls back to (SSF-07);
 - `Sequence(T)` values, indexing, iteration, length/emptiness, contains,
   persistent push/prepend/pop operations;
 - `Map(K, V)` deterministic functional empty/get/set/contains operations for
@@ -185,6 +195,9 @@ must not be ignored, guessed, or reinterpreted. This includes:
 - unrestricted host I/O, networking, and process effects;
 - implicit numeric conversions and unsupported cross-family arithmetic;
 - malformed imports, root escapes, cycles, and unknown symbols;
+- `match` over a scrutinee type outside the admitted allowlist (`quad`,
+  nominal enums/ADTs, `Option(T)`, `Result(T, E)`, `i32`, `u32`) — for
+  example `text`, `bool`, tuple, or record scrutinees;
 - non-exhaustive included-pattern matches and type-incompatible arms;
 - malformed or unsupported SemCode headers at verifier admission.
 
