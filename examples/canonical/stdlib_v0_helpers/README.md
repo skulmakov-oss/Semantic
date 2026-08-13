@@ -8,7 +8,7 @@ Stable Foundation Standard Library v0 candidate.
 The example shows currently admitted helper functions used together in a small
 practical program.
 
-The `std.*` family names are documentation identities. Foundation Source 1.0
+The `std.*` family names are documentation identities. Foundation Source 1.1
 uses canonical language-owned builtins and standard forms rather than
 namespace-qualified imports.
 

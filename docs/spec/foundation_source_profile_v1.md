@@ -92,19 +92,39 @@ only by the Logos profile and is not executable under this contract.
   (including `text`, `bool`, tuples, and records) is rejected deterministically
   at typecheck time (SSF-07);
 - exhaustiveness checking over sum-family scrutinees (enum/ADT, `Option(T)`,
-  `Result(T, E)`) covers wildcard and or-pattern expansion; integer range
-  patterns (`i32`/`u32` scrutinees only) are not part of that exhaustiveness
-  algorithm, but an incomplete range match without a wildcard `_` arm is
-  still rejected deterministically through the same "match requires default
-  arm '_'" check every non-exhaustive match falls back to (SSF-07). A
-  single-value range arm (`5..=5`) is Included and executable: it lowers as
-  a literal-equality match. A genuine multi-value range arm (`1..=5`)
-  typechecks but is **not** part of the Included executable surface — it is
-  a known M9.4 Wave 1 boundary, rejected deterministically at the lowering
-  phase with "integer range match pattern lowering is not yet implemented
-  in the IR backend" (`crates/sm-ir/src/legacy_lowering.rs`), confirmed
-  empirically to fail `compile`/`run` while `check` passes; see
-  "Deterministically unsupported forms" below. There is no tuple match-arm
+  `Result(T, E)`) at typecheck time covers wildcard and or-pattern
+  expansion, but **or-pattern arms (`A | B`) are typecheck-only and not
+  part of the Included executable surface**: confirmed empirically (enum
+  and `Option(T)` scrutinees, with and without an accompanying wildcard
+  arm) that lowering rejects them deterministically — `compile` itself
+  fails, not just `run` — with a lowering-side re-check that cannot expand
+  an or-pattern, producing a confusing "non-exhaustive match" diagnostic
+  even though `check` already accepted the program as exhaustive; see
+  "Deterministically unsupported forms" below;
+- integer range match arms are typecheck-only for `i32`/`u32` scrutinees at
+  the same allowlist above, but lowering support is narrower still and
+  differs by scrutinee family (SSF-07, confirmed empirically against the
+  actual CLI for each case below — none of this is assumed):
+  - `i32` scrutinee, single-value range (`5..=5`): Included and executable;
+    lowers as a literal-equality match;
+  - `i32` scrutinee, genuine multi-value range (`1..=5`): typecheck-only —
+    a known M9.4 Wave 1 boundary, rejected deterministically at the
+    lowering phase ("integer range match pattern lowering is not yet
+    implemented in the IR backend", `crates/sm-ir/src/legacy_lowering.rs`);
+  - `u32` scrutinee, any range (single- or multi-value): typecheck-only and
+    **not currently safe to rely on** — a small-value range (`5..=5`)
+    compiles successfully but then traps unpredictably at runtime with an
+    internal "runtime type mismatch: CmpEq/CmpNe operands must have same
+    runtime type" error rather than a deterministic rejection at any
+    earlier phase; a large-value range (e.g. `u32::MAX..=u32::MAX`) does
+    fail deterministically, but only because the pattern-bound conversion
+    unconditionally goes through `i32::try_from` regardless of scrutinee
+    type ("integer match pattern literal is outside i32 range");
+  - an incomplete range match without a wildcard `_` arm is still rejected
+    deterministically at typecheck time through the same "match requires
+    default arm '_'" check every non-exhaustive match falls back to,
+    independent of the lowering gaps above.
+  There is no tuple match-arm
   pattern at all — tuples are already excluded from the scrutinee allowlist
   above, and tuple destructuring is the separate, `let`/assignment-only
   mechanism already covered by the tuple bullet earlier in this list, not a
@@ -216,10 +236,19 @@ must not be ignored, guessed, or reinterpreted. This includes:
   nominal enums/ADTs, `Option(T)`, `Result(T, E)`, `i32`, `u32`) — for
   example `text`, `bool`, tuple, or record scrutinees;
 - non-exhaustive included-pattern matches and type-incompatible arms;
+- an or-pattern match arm (`A | B`) over an enum/ADT or `Option(T)`/`Result(T, E)`
+  scrutinee — typechecks (including as sole exhaustiveness coverage), then
+  is rejected deterministically at the lowering phase regardless of whether
+  a wildcard arm is also present, not the Included executable surface;
 - a genuine multi-value integer range match arm (`1..=5`, as opposed to a
-  single-value arm like `5..=5`) — typechecks, then is rejected
-  deterministically at the lowering phase (M9.4 Wave 1 boundary), not the
-  Included executable surface;
+  single-value arm like `5..=5`) over an `i32` scrutinee — typechecks, then
+  is rejected deterministically at the lowering phase (M9.4 Wave 1
+  boundary), not the Included executable surface;
+- any integer range match arm over a `u32` scrutinee — typechecks, then
+  either fails to lower (large values) or, more concerning, compiles
+  successfully but traps at runtime with an internal type-mismatch error
+  (small values) rather than a deterministic rejection; not the Included
+  executable surface pending a proper fix;
 - malformed or unsupported SemCode headers at verifier admission.
 
 The canonical diagnostic taxonomy remains `docs/spec/diagnostics.md`. SSF-09

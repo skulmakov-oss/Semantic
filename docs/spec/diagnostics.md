@@ -5,7 +5,7 @@ Primary frontend owners: `sm-front`, `sm-sema`
 
 ## Purpose
 
-The Stable Foundation Source 1.0 selection and its required rejection phases
+The Stable Foundation Source 1.1 selection and its required rejection phases
 are defined in `foundation_source_profile_v1.md`. This document owns the
 component diagnostic taxonomy referenced by that narrower contract.
 

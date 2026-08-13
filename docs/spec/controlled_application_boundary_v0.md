@@ -23,7 +23,7 @@ denies the exact capability, and only then may the host adapter act.
 | `fs.write` | `fs_write_text(path, text)` | relative `text`, UTF-8 `text` | `unit` | host write |
 | `time.duration` | `time_duration_ms()` | explicit injected value | `u32` milliseconds | captured observation |
 
-The dotted names are capability identities. Foundation Source 1.0 remains
+The dotted names are capability identities. Foundation Source 1.1 remains
 flat and Rust-like, so they are not source namespaces.
 
 Every source builtin identifier in the capability catalog is reserved for the
