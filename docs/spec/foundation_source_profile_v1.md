@@ -117,14 +117,21 @@ only by the Logos profile and is not executable under this contract.
   an or-pattern, producing a confusing "non-exhaustive match" diagnostic
   even though `check` already accepted the program as exhaustive;
 - integer range match arms over an `i32` scrutinee: an **inclusive**
-  single-value range with a **nonnegative literal bound** (`5..=5`) is
-  Included and executable, lowering as a literal-equality match. A negative
-  bound (`-5..=-5`) is not part of this claim and does not even parse —
-  confirmed empirically to fail at the parser (`E0000: expected match
-  pattern`) before typecheck, since range-pattern parsing requires the
-  current token to be a bare `Num` literal and does not admit a leading
-  unary `-`. A genuine multi-value range (`1..=5` inclusive or `1..5`
-  exclusive) is typecheck-only — a known M9.4 Wave 1 boundary,
+  single-value range whose literal bound is in `0..=2147483647`
+  (`i32::MAX`) (`5..=5`) is Included and executable, lowering as a
+  literal-equality match. A negative bound (`-5..=-5`) is not part of this
+  claim and does not even parse — confirmed empirically to fail at the
+  parser (`E0000: expected match pattern`) before typecheck, since
+  range-pattern parsing requires the current token to be a bare `Num`
+  literal and does not admit a leading unary `-`. A nonnegative bound
+  exceeding `i32::MAX` (`2147483648..=2147483648`) parses and typechecks —
+  the frontend checks only the scrutinee family and `start <= end`, not
+  whether the literal actually fits `i32` — but is **not** part of this
+  claim either: confirmed empirically to fail at the identical lowering
+  step as the multi-value case ("integer match pattern literal is outside
+  i32 range"), so it belongs with the deterministic-rejection cases below,
+  not the executable ones. A genuine multi-value range (`1..=5` inclusive
+  or `1..5` exclusive) is typecheck-only — a known M9.4 Wave 1 boundary,
   rejected deterministically at the lowering phase ("integer range match
   pattern lowering is not yet implemented in the IR backend"); see
   "Deterministically unsupported forms" below for both this and the
@@ -260,6 +267,10 @@ must not be ignored, guessed, or reinterpreted. This includes:
   single-value arm like `5..=5`) over an `i32` scrutinee — typechecks, then
   is rejected deterministically at the lowering phase (M9.4 Wave 1
   boundary), not the Included executable surface;
+- a single-value integer range match arm whose literal bound exceeds
+  `i32::MAX` (`2147483648..=2147483648`) — parses and typechecks (the
+  frontend does not check the literal actually fits `i32`), then hits the
+  identical lowering-phase rejection as the multi-value case above;
 - malformed or unsupported SemCode headers at verifier admission.
 
 Not listed above because it is **not** a deterministic pre-execution
