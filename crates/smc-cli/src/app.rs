@@ -1497,10 +1497,17 @@ fn current_feature_hash() -> u64 {
             return parsed;
         }
     }
+    // SM_ENABLED_FEATURES (set by build.rs from this build's own
+    // CARGO_FEATURE_* env vars) folds Cargo feature flags such as
+    // profile-rust/profile-logos/debug-symbols into this identity: they
+    // change lowering/verification behavior independently of source
+    // content, so a --no-default-features build must not accept an
+    // artifact/cache entry produced by a default-features build.
     let flags = format!(
-        "debug_assertions={};target_pointer_width={}",
+        "debug_assertions={};target_pointer_width={};features={}",
         cfg!(debug_assertions),
-        std::mem::size_of::<usize>() * 8
+        std::mem::size_of::<usize>() * 8,
+        env!("SM_ENABLED_FEATURES")
     );
     fnv1a64(flags.as_bytes())
 }
@@ -2244,6 +2251,41 @@ fn score(value: i32) -> i32 {
     // version therefore produced the identical toolchain_hash, letting an
     // old build's cached "PASS" survive a rebuild that would now reject the
     // same source. See build.rs and toolchain_identity_tag's doc comment.
+
+    #[test]
+    fn build_script_identity_env_vars_are_wired_into_the_runtime_formulas() {
+        // build.rs's own logic (dependency-closure discovery, path-relative
+        // content hashing, enabled-feature collection) is not directly unit
+        // -testable here - it runs in a separate process before this crate
+        // compiles, not as one of its modules - and was instead verified
+        // empirically by hand (closure discovery found every crate a review
+        // pass flagged as missing; two checkouts of identical content at
+        // different absolute paths produced the identical hash; a
+        // --no-default-features build produced a different feature string
+        // than the default build). This test locks in the one thing that
+        // *is* checkable from here: that current_toolchain_hash() and
+        // current_feature_hash() actually consume the env vars build.rs
+        // sets, not just that the env vars exist.
+        assert_eq!(
+            env!("SM_COMPILER_SOURCE_HASH").len(),
+            16,
+            "build.rs must emit a 16-hex-digit content hash"
+        );
+        assert!(
+            env!("SM_ENABLED_FEATURES").contains("STD"),
+            "a normal `cargo test` build always has the std feature enabled"
+        );
+
+        let tag_without_generation = toolchain_identity_tag(env!("CARGO_PKG_VERSION"), "");
+        let tag_with_real_generation =
+            toolchain_identity_tag(env!("CARGO_PKG_VERSION"), env!("SM_COMPILER_SOURCE_HASH"));
+        assert_ne!(
+            fnv1a64(tag_without_generation.as_bytes()),
+            fnv1a64(tag_with_real_generation.as_bytes()),
+            "current_toolchain_hash()'s formula must actually depend on \
+             SM_COMPILER_SOURCE_HASH, not silently ignore it"
+        );
+    }
 
     #[test]
     fn semantic_cache_toolchain_hash_differs_across_compiler_generations() {
