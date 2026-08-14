@@ -47,8 +47,8 @@ coverage reasoning specifically, not merely "did typecheck pass") /
 
 | Form | Parse | Typecheck | Exhaustiveness | Lower | Verify | Run | Classification | Fixture |
 |---|---|---|---|---|---|---|---|---|
-| Plain literal, incl. `0` (`0 =>` / `0u32 =>`) | PASS | PASS | n/a | PASS | PASS | PASS | **Included** | `positive_u32_match_full_domain` |
-| Ordinary small literal (`5u32`) | PASS | PASS | n/a | PASS | PASS | PASS | **Included** | `positive_u32_match_full_domain` |
+| Suffixed plain literal (`0u32 =>`, `5u32 =>`) | PASS | PASS | n/a | PASS | PASS | PASS | **Included** | `positive_u32_match_full_domain` (`classify_literal`) |
+| Unsuffixed plain literal (`0 =>`, `5 =>`) — distinct parser branch from the suffixed and range forms | PASS | PASS | n/a | PASS | PASS | PASS | **Included** | `positive_u32_match_full_domain` (`classify_literal_unsuffixed`) |
 | `2147483647` (`i32::MAX`) | PASS | PASS | n/a | PASS | PASS | PASS | **Included** | `positive_u32_match_full_domain` |
 | `2147483648` (`i32::MAX + 1`) | PASS | PASS | n/a | PASS | PASS | PASS | **Included** | `positive_u32_match_full_domain` |
 | `4294967295` (`u32::MAX`) | PASS | PASS | n/a | PASS | PASS | PASS | **Included** | `positive_u32_match_full_domain` |

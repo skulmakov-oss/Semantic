@@ -10,6 +10,16 @@ fn classify_literal(x: u32) -> quad {
     return out;
 }
 
+fn classify_literal_unsuffixed(x: u32) -> quad {
+    let out: quad = match x {
+        0 => { N }
+        5 => { F }
+        4294967295 => { T }
+        _ => { S }
+    };
+    return out;
+}
+
 fn classify_range(x: u32) -> quad {
     let out: quad = match x {
         0..=0 => { N }
@@ -27,6 +37,11 @@ fn main() {
     assert(classify_literal(2147483648u32) == S);
     assert(classify_literal(4294967295u32) == T);
     assert(classify_literal(1u32) == N);
+
+    assert(classify_literal_unsuffixed(0u32) == N);
+    assert(classify_literal_unsuffixed(5u32) == F);
+    assert(classify_literal_unsuffixed(4294967295u32) == T);
+    assert(classify_literal_unsuffixed(6u32) == S);
 
     assert(classify_range(0u32) == N);
     assert(classify_range(5u32) == F);
