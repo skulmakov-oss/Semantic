@@ -6,7 +6,11 @@
 //!   verification, execution), discovered as `smc-cli`'s full transitive
 //!   local-path dependency closure rather than a hand-maintained list, so a
 //!   newly-added semantic dependency is picked up automatically instead of
-//!   silently falling outside the fingerprint.
+//!   silently falling outside the fingerprint. Includes each closure
+//!   member's `Cargo.toml` content, not just its `.rs` files: a manifest
+//!   can change compiled behavior (e.g. a crate hardcoding
+//!   `features = [...]` on one of its own path-dependencies) without
+//!   touching a single source file.
 //! - `SM_ENABLED_FEATURES` — the Cargo feature flags this specific build of
 //!   `smc-cli` was compiled with (e.g. `profile-rust`, `debug-symbols`),
 //!   since those change lowering/verification behavior independently of
@@ -46,11 +50,9 @@ fn main() {
 
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for crate_name in &closure {
-        hash_dir(
-            &crates_dir,
-            &crates_dir.join(crate_name).join("src"),
-            &mut hash,
-        );
+        let crate_dir = crates_dir.join(crate_name);
+        hash_file(&crates_dir, &crate_dir.join("Cargo.toml"), &mut hash);
+        hash_dir(&crates_dir, &crate_dir.join("src"), &mut hash);
     }
     println!("cargo:rustc-env=SM_COMPILER_SOURCE_HASH={:016x}", hash);
 
@@ -70,7 +72,6 @@ fn discover_local_dependency_closure(crates_dir: &Path, entry_crate: &str) -> BT
             continue;
         }
         let manifest_path = crates_dir.join(&name).join("Cargo.toml");
-        println!("cargo:rerun-if-changed={}", manifest_path.display());
         for dep in local_path_dependencies(&manifest_path) {
             stack.push(dep);
         }
@@ -118,17 +119,25 @@ fn hash_dir(crates_dir: &Path, dir: &Path, hash: &mut u64) {
         if path.is_dir() {
             hash_dir(crates_dir, &path, hash);
         } else if path.extension().is_some_and(|ext| ext == "rs") {
-            if let Ok(bytes) = fs::read(&path) {
-                let relative = path.strip_prefix(crates_dir).unwrap_or(&path);
-                fnv1a64_update(
-                    hash,
-                    relative.to_string_lossy().replace('\\', "/").as_bytes(),
-                );
-                fnv1a64_update(hash, &bytes);
-            }
-            println!("cargo:rerun-if-changed={}", path.display());
+            hash_file(crates_dir, &path, hash);
         }
     }
+}
+
+/// Hashes one file's crates-relative path and content, and registers it
+/// with `cargo:rerun-if-changed`. A missing file is skipped rather than
+/// treated as an error, matching `hash_dir`'s tolerance of a stripped-down
+/// checkout.
+fn hash_file(crates_dir: &Path, path: &Path, hash: &mut u64) {
+    if let Ok(bytes) = fs::read(path) {
+        let relative = path.strip_prefix(crates_dir).unwrap_or(path);
+        fnv1a64_update(
+            hash,
+            relative.to_string_lossy().replace('\\', "/").as_bytes(),
+        );
+        fnv1a64_update(hash, &bytes);
+    }
+    println!("cargo:rerun-if-changed={}", path.display());
 }
 
 fn fnv1a64_update(hash: &mut u64, bytes: &[u8]) {
