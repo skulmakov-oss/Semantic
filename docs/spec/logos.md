@@ -149,7 +149,7 @@ here; it is not a stable compatibility or execution promise. Incompatible
 changes require a new contract identifier version and updated fixtures.
 
 This status is separate from Rust-like
-`semantic.foundation.source/1.1`, which is the qualified-limited executable
+`semantic.foundation.source/1.2`, which is the qualified-limited executable
 Stable Foundation candidate. The shared parser-profile version is an admission
 envelope and must not be used to collapse these maturity states.
 

@@ -251,11 +251,10 @@ Current statement rules:
 - `invariant(condition)` is currently a function-level contract clause only
 - `if` conditions must be `bool`
 - `match` currently accepts `quad`, nominal enum, `Option(T)`, `Result(T, E)`,
-  `i32`, and `u32` scrutinees at typecheck time; every other scrutinee type
-  is rejected deterministically (SSF-07). `u32` is typecheck-only: no
-  literal or range match arm over a `u32` scrutinee currently executes
-  correctly (see `docs/spec/foundation_source_profile_v1.md`'s "Data and
-  patterns" section for the confirmed failure modes)
+  `i32`, and `u32` scrutinees; every other scrutinee type is rejected
+  deterministically (SSF-07). All six families are fully executable,
+  including `u32` (see `docs/spec/foundation_source_profile_v1.md`'s "Data
+  and patterns" section for the exact admitted literal/range bound forms)
 - `quad` `match` requires an explicit default arm `_ => { ... }`
 - enum `match` may omit `_ => { ... }` only when explicit unguarded variant
   coverage is exhaustive

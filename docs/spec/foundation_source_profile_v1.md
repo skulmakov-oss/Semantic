@@ -1,23 +1,46 @@
-# Semantic Foundation Source Profile 1.1
+# Semantic Foundation Source Profile 1.2
 
 Status: stable-candidate source contract; not published stable
-Contract identifier: `semantic.foundation.source/1.1`
+Contract identifier: `semantic.foundation.source/1.2`
 Evidence base: `main` at `4de0b6eb1cd5d8e5dc37989e9b9b95a5a8e07e57`
 Parser acceptance envelope: `semantic.foundation` profile version `1.0`
 
-Version `1.1` is a backward-compatible clarification per the version policy
-below: it documents the already-enforced `match` scrutinee allowlist and
-range-pattern exhaustiveness carve-out (SSF-07), with no grammar, semantic,
-or rejection-behavior change from `1.0`. The evidence base commit above is a
-behavioral-snapshot anchor for SSF-01's original gathering, not a claim that
-every currently-mapped test already existed there: SSF-07 added net-new
-executable evidence in this same revision — most notably
-`tests/match_surface_qualification.rs`'s singleton-range fixture, which pins
-both interval boundaries (`0` and `i32::MAX`) end to end — to back the newly
-precise range and or-pattern claims this version documents. What keeps this
-contract honest is the Qualification rule below, not the frozen snapshot: the
-mapped evidence must stay green in the current tree, not merely at the
-evidence-base commit.
+Version `1.1` documented the already-enforced `match` scrutinee allowlist and
+range-pattern exhaustiveness carve-out (SSF-07) as a backward-compatible
+clarification of `1.0`, with no grammar, semantic, or rejection-behavior
+change. Version `1.2` is not a pure clarification: SSF-07's review process
+found and fixed three real phase-consistency defects in the `match`/pattern
+boundary, each backward-compatible with everything `1.1` actually promised
+(no previously Included form stopped working; every change either adds new
+executable capability or converts a previously undocumented, buggy edge case
+into either correct behavior or a clean deterministic rejection):
+
+- `u32` `match` moved from typecheck-only (every arm either trapped at
+  runtime or failed to lower) to fully Included and executable across its
+  whole domain (`0` through `u32::MAX`), for both literal and range arm
+  forms. This is purely additive — no `1.1` program could have depended on
+  the old trap/lowering-failure behavior, since no `u32` match ever
+  produced a correct result under `1.1`.
+- the exclusive equal-bound range pattern (`5..5`) moved from a silent
+  miscompilation (matched the literal value `5` as if written `5..=5`,
+  ignoring that it is semantically an empty range) to a deterministic
+  lowering-phase rejection. `5..5` was never part of the Included
+  executable surface under `1.1` — this closes an undocumented, buggy edge
+  case rather than removing a promised capability.
+- or-pattern match arms (`A | B`) moved from a phase-inconsistent state
+  (typecheck/exhaustiveness accepted them, then lowering failed with a
+  family-specific, sometimes actively misleading diagnostic) to a single,
+  deterministic rejection at typecheck time, worded identically regardless
+  of scrutinee family or wildcard presence. Or-patterns were never part of
+  the Included executable surface under `1.1` either; this only moves the
+  rejection earlier and makes its diagnostic uniform.
+
+The evidence base commit above remains a behavioral-snapshot anchor for
+SSF-01's original gathering, not a claim that every currently-mapped test
+already existed there. What keeps this contract honest is the Qualification
+rule below, not the frozen snapshot: the mapped evidence in
+`tests/match_surface_qualification.rs` and the frontend/IR unit suites must
+stay green in the current tree, not merely at the evidence-base commit.
 
 ## Authority
 
@@ -34,7 +57,7 @@ executable qualification != published stable
 Only forms listed as **Included** below belong to this contract. A form marked
 **Experimental** may still be accepted by current-main tooling, but receives no
 Foundation compatibility promise. A form marked **Deferred** is owned by a
-later phase or roadmap and is not required for Foundation Source 1.1.
+later phase or roadmap and is not required for Foundation Source 1.2.
 
 The Rust-like surface is the only executable profile governed here. Logos
 remains a separate experimental declarative profile pending SSF-02.
@@ -99,93 +122,61 @@ only by the Logos profile and is not executable under this contract.
 - `match` scrutinees are admitted at typecheck time for `quad`, nominal
   enums/ADTs, `Option(T)`, `Result(T, E)`, `i32`, and `u32`; every other
   scrutinee type (including `text`, `bool`, tuples, and records) is
-  rejected deterministically at typecheck time (SSF-07). Of these, **`u32`
-  is typecheck-only and not part of the Included executable surface**:
-  confirmed empirically that every literal or range match arm over a `u32`
-  scrutinee fails — a plain literal arm (`5 => { ... }`) and a range arm
-  (`5..=5 => { ... }`) both compile successfully and then trap at runtime
-  with an internal "runtime type mismatch: CmpEq/CmpNe operands must have
-  same runtime type" error, and a large-value arm (e.g. `4294967295`, the
-  literal spelling of `u32::MAX` — this language has no `Type::MAX`
-  associated-constant syntax) instead fails to lower at all ("integer match
-  pattern literal is outside i32 range") because the pattern-bound
-  conversion in
-  `crates/sm-ir/src/legacy_lowering.rs` unconditionally goes through
-  `i32::try_from` regardless of scrutinee type. No known safe subset of
-  `u32` match arms exists today (a `u32` match with only a wildcard `_` arm
-  compiles and runs, but provides no actual matching capability). `i32`,
-  `quad`, enum/ADT, `Option(T)`, and `Result(T, E)` scrutinees are
-  unaffected by this gap;
-- exhaustiveness checking over sum-family scrutinees (enum/ADT, `Option(T)`,
-  `Result(T, E)`) at typecheck time covers wildcard and or-pattern
-  expansion, but **or-pattern arms (`A | B`) are typecheck-only and not
-  part of the Included executable surface, for every admitted scrutinee
-  family, not only the sum-family ones**: confirmed empirically (enum
-  and `Option(T)` scrutinees, with and without an accompanying wildcard
-  arm) that lowering rejects them deterministically — `compile` itself
-  fails, not just `run` — with a lowering-side re-check that cannot expand
-  an or-pattern, but the exact diagnostic depends on whether a wildcard arm
-  is present: without one, `missing_exhaustive_sum_variants` still runs and
-  produces a confusing "non-exhaustive match" diagnostic even though
-  `check` already accepted the program as exhaustive; with one, that check
-  is skipped (the wildcard already satisfies it) and
-  `resolve_sum_match_pattern_for_lowering` instead rejects the or-pattern
-  with an equally confusing, differently-worded diagnostic — confirmed
-  empirically for an enum scrutinee as "quad match pattern requires quad
-  scrutinee; enum 'Flag' needs explicit variant patterns in lowering" — and
-  the same shared function backs every sum-family scrutinee (enum/ADT,
-  `Option(T)`, `Result(T, E)`), substituting each family's own display
-  label for `enum 'Flag'`. Either way, lowering rejects the or-pattern
-  deterministically before a runnable artifact exists. `quad`,
-  `i32`, and `u32` scrutinees typecheck an or-pattern arm the same way and
-  then fail to lower it too, each with its own distinct diagnostic instead
-  of the sum-family one: a `quad` or-pattern (`N | F => { ... }`) fails
-  with "wildcard/or/range match pattern lowering is not yet implemented in
-  the IR backend", and an `i32` or a `u32` or-pattern (`1 | 2 => { ... }`)
-  both fail with the identical "wildcard/or/quad match pattern lowering is
-  not yet implemented in the
-  IR backend" — all three confirmed empirically at the `compile` step;
-- integer range match arms over an `i32` scrutinee: an **inclusive**
-  single-value range whose literal bound is in `0..=2147483647`
-  (`i32::MAX`), spelled as a plain, suffix-free integer literal (`5..=5`),
-  is Included and executable, lowering as a literal-equality match. A
-  type-suffixed bound (`5i32..=5i32`) is not part of this claim and does
-  not parse either — confirmed empirically to fail at the parser
-  ("range pattern bound does not accept a type suffix; use a plain
-  integer"), since `parse_i64_pattern_bound` rejects every suffixed range
-  bound regardless of scrutinee type. A negative bound (`-5..=-5`) is not
-  part of this claim and does not even parse — confirmed empirically to
-  fail at the parser (`E0000: expected match pattern`) before typecheck,
-  since range-pattern parsing requires the current token to be a bare
-  `Num` literal and does not admit a leading unary `-`. A nonnegative bound
-  exceeding `i32::MAX` (`2147483648..=2147483648`) parses and typechecks —
-  the frontend checks only the scrutinee family and `start <= end`, not
-  whether the literal actually fits `i32` — but is **not** part of this
-  claim either: confirmed empirically to fail at the identical lowering
-  step as the multi-value case ("integer match pattern literal is outside
-  i32 range"), so it belongs with the deterministic-rejection cases below,
-  not the executable ones. A genuine multi-value range (`1..=5` inclusive
-  or `1..5` exclusive) is typecheck-only — a known M9.4 Wave 1 boundary,
-  rejected deterministically at the lowering phase ("integer range match
-  pattern lowering is not yet implemented in the IR backend"); see
-  "Deterministically unsupported forms" below for both this and the
-  or-pattern case. The **exclusive**, degenerate single-value form (`5..5`,
-  semantically an empty range matching nothing) is a confirmed silent
-  miscompilation, not a rejection: lowering checks only that the raw parsed
-  start and end bounds are numerically equal and ignores the
-  inclusive/exclusive flag entirely, so `5..5` is lowered exactly like
-  `5..=5` and incorrectly matches the scrutinee value `5`. `5..5` is
-  therefore **not** part of the Included executable surface and is
-  excluded from "Deterministically unsupported forms" below for the same
-  reason `u32` match is (silent wrong behavior, not a pre-execution
-  rejection). An incomplete range match without a wildcard `_` arm is still
-  rejected deterministically at typecheck time through the same "match
-  requires default arm '_'" check every non-exhaustive match falls back
-  to, independent of the lowering gaps above. There is no tuple match-arm
-  pattern at all — tuples are already excluded from the scrutinee allowlist
-  above, and tuple destructuring is the separate, `let`/assignment-only
-  mechanism already covered by the tuple bullet earlier in this list, not a
-  `match`-arm concept;
+  rejected deterministically at typecheck time (SSF-07). All six admitted
+  scrutinee families are fully Included and executable — `u32` match now
+  works across its complete domain (`0` through `u32::MAX`, both literal
+  and range arm forms), lowering through a dedicated `u32` pattern-literal
+  carrier instead of miscarrying every arm through an `i32` one;
+- for `i32` and `u32` scrutinees, a literal match arm may be spelled either
+  as a bare literal (`5 => { ... }`) or as an inclusive single-value range
+  (`5..=5 => { ... }`) — both are equivalent and Included, lowering as a
+  literal-equality comparison typed to the scrutinee's own family. The
+  literal's type suffix, if any (`5u32`), is informative only; the
+  scrutinee's declared type is what selects the `i32` or `u32` comparison
+  path, so an unsuffixed literal (`5 => { ... }`) works identically against
+  either family. The admitted bound range is `0` through the scrutinee
+  family's own maximum (`i32::MAX` = `2147483647`, or `u32::MAX` =
+  `4294967295`); a bound past that maximum is rejected deterministically at
+  the lowering phase with "integer match pattern literal is outside i32
+  range" or "...u32 range" respectively — see "Deterministically
+  unsupported forms" below. A negative bound (`-5..=-5`) does not even
+  parse (`E0000: expected match pattern`), since range-pattern parsing
+  requires the current token to be a bare `Num` literal and does not admit
+  a leading unary `-`; this restriction is unconditional and applies
+  regardless of scrutinee family. A type-suffixed **range bound**
+  (`5i32..=5i32`, as opposed to a suffixed bare literal) is a separate,
+  narrower restriction and does not parse either ("range pattern bound
+  does not accept a type suffix; use a plain integer"), since
+  `parse_i64_pattern_bound` rejects every suffixed range bound regardless
+  of scrutinee type;
+- a genuine multi-value range (`1..=5` inclusive or `1..5` exclusive, over
+  either `i32` or `u32`) is typecheck-only, not Included — a known M9.4
+  Wave 1 boundary, rejected deterministically at the lowering phase
+  ("integer range match pattern lowering is not yet implemented in the IR
+  backend"). The **exclusive**, degenerate single-value form (`5..5`, over
+  either `i32` or `u32`) is also typecheck-only and rejected
+  deterministically at the identical lowering phase and with the identical
+  diagnostic as the multi-value case: lowering only takes the
+  literal-equality fast path when the range is both equal-bound **and**
+  inclusive, so an exclusive equal-bound range falls through to the
+  same "not yet implemented" rejection as any other unsupported range form,
+  rather than being silently treated as the literal value. See
+  "Deterministically unsupported forms" below for both. An incomplete
+  range match without a wildcard `_` arm is still rejected deterministically
+  at typecheck time through the same "match requires default arm '_'"
+  check every non-exhaustive match falls back to, independent of the
+  lowering gaps above. There is no tuple match-arm pattern at all — tuples
+  are already excluded from the scrutinee allowlist above, and tuple
+  destructuring is the separate, `let`/assignment-only mechanism already
+  covered by the tuple bullet earlier in this list, not a `match`-arm
+  concept;
+- or-pattern match arms (`A | B`) are rejected deterministically at
+  typecheck time for every admitted scrutinee family — `quad`, `i32`,
+  `u32`, enum/ADT, `Option(T)`, and `Result(T, E)` — with one diagnostic
+  worded identically regardless of family or wildcard presence: "or-pattern
+  match arms ('A | B') are not supported; split into separate arms with
+  identical bodies instead". `if let` is unaffected by this restriction, as
+  it is a distinct binding construct from `match`;
 - `Sequence(T)` values, indexing, iteration, length/emptiness, contains,
   persistent push/prepend/pop operations;
 - `Map(K, V)` deterministic functional empty/get/set/contains operations for
@@ -234,7 +225,7 @@ SSF-05 and SSF-06 rather than by the parser/typechecker.
 | `bool` | Literals, equality, boolean conditions, and admitted logic. |
 | `text` | UTF-8 literal carrier, equality, concatenation, and explicit `to_text` for admitted scalar families. Indexing/slicing and general formatting are not included. |
 | `i32` | Literals, equality/order, unary minus, and same-family `+`, `-`, `*`, `/`, `%`. Cross-family implicit conversion is excluded. Overflow policy is frozen: `+`, `-`, `*` wrap silently on two's-complement overflow (no trap); unary minus lowers through the same `-` (`SubI32`) path and wraps identically, so `-i32::MIN` evaluates to `i32::MIN` rather than trapping; `/` and `%` trap deterministically on division/modulo by zero and on the `i32::MIN / -1` (and `i32::MIN % -1`) overflow edge case. See `crates/sm-vm/src/semcode_vm.rs`'s `vm_wraps_i32_*`/`vm_traps_on_i32_*` tests for the frozen contract evidence; each case runs under both `OptLevel::O0` (runtime opcodes) and `OptLevel::O1` (`crystalfold.rs` constant folding) via the shared `assert_wraps_under_all_opt_levels`/`assert_traps_under_all_opt_levels` helpers, since the two are independent implementations of the same policy. |
-| `u32` | Literals and equality only. General arithmetic, conversions, and overflow policy are deferred to SSF-07. |
+| `u32` | Literals, equality, and `match` scrutinee/pattern selection (see "Data and patterns" above). General arithmetic, conversions, and overflow policy are deferred to SSF-07. |
 | `f64` | Literals and same-family arithmetic/order. Cross-family coercion is excluded. Transcendental math builtins remain experimental until their cross-platform compatibility/determinism policy is qualified. |
 | `fx` | Explicit fixed-point literals, equality/order, and the qualified same-family arithmetic contour. Cross-family and measured arithmetic remain excluded. |
 | `unit` | Function/result unit value and `return;`. |
@@ -247,7 +238,7 @@ SSF-07; this contract does not fill those gaps by implication.
 ## Experimental but currently accepted extensions
 
 The following may parse, typecheck, or execute on current `main`, but are not
-Foundation Source 1.1 compatibility promises:
+Foundation Source 1.2 compatibility promises:
 
 - Rust-like `when`;
 - schemas and schema migration forms;
@@ -294,47 +285,35 @@ must not be ignored, guessed, or reinterpreted. This includes:
   example `text`, `bool`, tuple, or record scrutinees;
 - non-exhaustive included-pattern matches and type-incompatible arms;
 - an or-pattern match arm (`A | B`) over any admitted scrutinee family —
-  enum/ADT, `Option(T)`/`Result(T, E)`, `quad`, `i32`, or `u32` —
-  typechecks (including as sole exhaustiveness coverage for the sum-family
-  case), then is rejected deterministically at the lowering phase
-  regardless of whether a wildcard arm is also present, not the Included
-  executable surface, though the exact diagnostic for the sum-family case
-  depends on that presence: without a wildcard arm it surfaces as a
-  "non-exhaustive match" diagnostic, and with one it instead surfaces a
-  differently-worded diagnostic from the same shared lowering function —
-  confirmed for an enum scrutinee as "quad match pattern requires quad
-  scrutinee; enum 'Flag' needs explicit variant patterns in lowering",
-  with every sum-family scrutinee substituting its own display label in
-  place of `enum 'Flag'`. `quad` surfaces as "wildcard/or/range match
-  pattern lowering is not yet implemented in the IR backend"; `i32` and
-  `u32` both surface the identical "wildcard/or/quad match pattern
-  lowering is not yet implemented in the IR backend";
-- a genuine multi-value integer range match arm (`1..=5`, as opposed to a
-  single-value arm like `5..=5`) over an `i32` scrutinee — typechecks, then
-  is rejected deterministically at the lowering phase (M9.4 Wave 1
-  boundary) with "integer range match pattern lowering is not yet
-  implemented in the IR backend", not the Included executable surface;
-- a single-value integer range match arm whose literal bound exceeds
-  `i32::MAX` (`2147483648..=2147483648`) — parses and typechecks (the
-  frontend does not check the literal actually fits `i32`), then is
-  rejected at the same lowering phase as the multi-value case above, but
-  with its own distinct diagnostic — "integer match pattern literal is
-  outside i32 range" — from the equal-bounds branch of
-  `expect_int_match_pattern`, not the "range lowering is not yet
-  implemented" one;
+  `quad`, `i32`, `u32`, enum/ADT, `Option(T)`, or `Result(T, E)` — is
+  rejected deterministically at typecheck time (`build_and_apply_match_plan`
+  in `crates/sm-front/src/typecheck.rs`), before exhaustiveness or lowering
+  ever run, with one diagnostic worded identically for every family and
+  regardless of whether a wildcard arm is also present: "or-pattern match
+  arms ('A | B') are not supported; split into separate arms with identical
+  bodies instead";
+- a genuine multi-value integer range match arm (`1..=5` inclusive or
+  `1..5` exclusive) over an `i32` or `u32` scrutinee — typechecks, then is
+  rejected deterministically at the lowering phase (M9.4 Wave 1 boundary)
+  with "integer range match pattern lowering is not yet implemented in the
+  IR backend", not the Included executable surface;
+- the exclusive, degenerate equal-bound range form (`5..5`) over an `i32`
+  or `u32` scrutinee — typechecks, then is rejected deterministically at
+  the identical lowering phase and with the identical diagnostic as the
+  multi-value case above (lowering's literal-equality fast path requires
+  both an equal bound **and** `inclusive`, so the exclusive form falls
+  through to the same "not yet implemented" rejection rather than being
+  treated as the literal value);
+- a single-value integer range match arm whose literal bound exceeds the
+  scrutinee family's own maximum (`i32::MAX` = `2147483647`, or `u32::MAX`
+  = `4294967295`) — parses and typechecks (the frontend checks only the
+  scrutinee family and `start <= end`, not whether the literal actually
+  fits), then is rejected at the same lowering phase as the multi-value
+  case above, but with its own distinct, family-typed diagnostic —
+  "integer match pattern literal is outside i32 range" or "...u32 range"
+  — from the equal-bounds branch of `expect_int_match_pattern`, not the
+  "range lowering is not yet implemented" one;
 - malformed or unsupported SemCode headers at verifier admission.
-
-Not listed above because it is **not** a deterministic pre-execution
-rejection (this section's own definition): any literal or range match arm
-over a `u32` scrutinee typechecks and often compiles, then fails
-unpredictably at a later phase (runtime trap for small values, a lowering
-error only for large ones) instead of a clean up-front diagnostic. The
-degenerate exclusive single-value range `5..5` over an `i32` scrutinee is
-excluded for the same reason: it compiles cleanly and silently
-miscompiles, matching the literal value instead of correctly matching
-nothing. See "Data and patterns" above for the precise, empirically-
-confirmed behavior of both; these are known gaps pending a proper fix, not
-documented rejection forms.
 
 The canonical diagnostic taxonomy remains `docs/spec/diagnostics.md`. SSF-09
 owns a stable machine-readable schema; SSF-01 freezes deterministic rejection
@@ -342,7 +321,7 @@ behavior and existing diagnostic categories, not a new transport format.
 
 ### Diagnostic expectations
 
-| Rejection owner | Foundation Source 1.1 expectation |
+| Rejection owner | Foundation Source 1.2 expectation |
 |---|---|
 | Lexer/parser | Return `FrontendErrorKind::Syntax` with a source span; Logos parser families retain `E0200` through the documented `E0237` range. |
 | Profile policy | Return `FrontendErrorKind::PolicyViolation`; never reinterpret a disabled surface as another grammar form. |
@@ -360,14 +339,14 @@ diagnostic-code compatibility remain SSF-09/SSF-10 work.
 Source contract version and SemCode header are separate dimensions:
 
 ```text
-semantic.foundation.source/1.1
+semantic.foundation.source/1.2
   -> compile using ParserProfile semantic.foundation/1.0
   -> select the oldest sufficient supported SemCode header from actual emitted use
   -> verify exact header, capabilities, structure, and instruction contract
   -> execute only after verifier admission
 ```
 
-Foundation Source 1.1 does not mandate one universal SemCode header. Current
+Foundation Source 1.2 does not mandate one universal SemCode header. Current
 qualified programs may select a member of the documented supported family from
 `SEMCODE0` through `SEMCOD14` according to actual emitted features — `SEMCOD14`
 is the header selected when a program actually uses the included `Map(K, V)`
@@ -385,6 +364,11 @@ negative, lowering/SemCode, verifier, VM, canonical-example, and adversarial
 evidence stays green. The executable evidence map is maintained in:
 
 - `docs/roadmap/stable_foundation/stable_public_language_contract.md`
+
+For `match`/pattern forms specifically, a granular per-form, per-phase
+supplement to that map's summary row lives in:
+
+- `docs/roadmap/stable_foundation/ssf07_pattern_qualification_matrix.md`
 
 If evidence regresses, the feature returns to experimental/unqualified status;
 the contract must not be preserved by documentation alone.
