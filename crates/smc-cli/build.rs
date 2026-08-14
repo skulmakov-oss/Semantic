@@ -331,11 +331,17 @@ pub(crate) fn hash_dir(crates_dir: &Path, dir: &Path, hash: &mut u64) -> Result<
 /// crates. The existence check itself is fail-closed: an I/O error while
 /// merely checking for presence (e.g. an unreadable parent directory) fails
 /// the build rather than being treated as "absent".
+///
+/// The watch directive is registered unconditionally, before the existence
+/// check: if the file is absent today, cargo must still rerun this script
+/// when it's later created, or a crate that gains a `build.rs` after this
+/// script last ran would silently keep the old (incomplete) identity.
 pub(crate) fn hash_optional_file(
     crates_dir: &Path,
     path: &Path,
     hash: &mut u64,
 ) -> Result<(), String> {
+    println!("cargo:rerun-if-changed={}", path.display());
     match path.try_exists() {
         Ok(true) => hash_file(crates_dir, path, hash),
         Ok(false) => Ok(()),
@@ -392,8 +398,20 @@ pub(crate) fn repository_relative_identity_path(
     })
 }
 
-fn mix_labeled(hash: &mut u64, label: &str, bytes: &[u8]) {
-    fnv1a64_update(hash, label.as_bytes());
+/// Mixes a `(label, content)` pair into `hash`, each part length-prefixed so
+/// the boundary between them - and between consecutive calls - can never be
+/// ambiguous. Plain concatenation would let a boundary shift between a
+/// label and its payload (or between one file's payload and the next file's
+/// label) produce the same byte stream, and therefore the same hash, for
+/// two genuinely different source trees; e.g. label `"a/b.rs"` + content
+/// `"x"` must not hash the same as label `"a/b.r"` + content `"sx"`.
+pub(crate) fn mix_labeled(hash: &mut u64, label: &str, bytes: &[u8]) {
+    mix_length_prefixed(hash, label.as_bytes());
+    mix_length_prefixed(hash, bytes);
+}
+
+fn mix_length_prefixed(hash: &mut u64, bytes: &[u8]) {
+    fnv1a64_update(hash, &(bytes.len() as u64).to_le_bytes());
     fnv1a64_update(hash, bytes);
 }
 

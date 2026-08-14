@@ -59,6 +59,25 @@ fn hash_file_changes_when_content_changes() {
     assert_ne!(h1, h2, "changed content must change the identity");
 }
 
+#[test]
+fn mix_labeled_disambiguates_boundary_shifts_between_label_and_content() {
+    // Before length-prefixing, mix_labeled just concatenated label bytes
+    // then content bytes with no separator, so label "ab" + content "cd"
+    // hashed identically to label "abc" + content "d" - both reduce to
+    // fnv1a64(b"abcd"). That's a real collision between two different
+    // (path, file-content) pairs, reported by review as reachable via a
+    // file whose content happens to start with more path-like bytes.
+    let mut h_split_early = 0u64;
+    build_script::mix_labeled(&mut h_split_early, "ab", b"cd");
+    let mut h_split_late = 0u64;
+    build_script::mix_labeled(&mut h_split_late, "abc", b"d");
+
+    assert_ne!(
+        h_split_early, h_split_late,
+        "a label/content boundary shift must not produce the same hash"
+    );
+}
+
 // --- checkout-path independence ---
 
 #[test]
