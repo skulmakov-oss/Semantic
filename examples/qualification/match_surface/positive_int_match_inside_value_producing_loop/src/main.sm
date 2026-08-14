@@ -1,0 +1,27 @@
+fn classify_i32(x: i32) -> i32 {
+    let result: i32 = loop {
+        match x {
+            5 => { break 1; }
+            _ => { break 0; }
+        }
+    };
+    return result;
+}
+
+fn classify_u32(x: u32) -> i32 {
+    let result: i32 = loop {
+        match x {
+            5u32 => { break 1; }
+            _ => { break 0; }
+        }
+    };
+    return result;
+}
+
+fn main() {
+    assert(classify_i32(5) == 1);
+    assert(classify_i32(6) == 0);
+    assert(classify_u32(5u32) == 1);
+    assert(classify_u32(6u32) == 0);
+    return;
+}

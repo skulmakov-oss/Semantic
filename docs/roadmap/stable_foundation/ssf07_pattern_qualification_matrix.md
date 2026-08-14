@@ -94,6 +94,26 @@ version-`1.2` note for the full before/after account). `if let` uses a
 separate entry point (`build_match_pattern_plan` called directly, not
 through `build_and_apply_match_plan`) and is unaffected by this rejection.
 
+## Control-flow context coverage
+
+The rows above are keyed by scrutinee family and pattern form; frontend
+`match` handling is additionally split across three separate typecheck/
+lowering code paths by *where* the `match` appears (a plain statement, a
+value-producing expression, and a statement inside a value-producing
+`loop { ... break value; }` expression body), each with its own dedicated
+functions in `crates/sm-front/src/typecheck.rs` and
+`crates/sm-ir/src/legacy_lowering.rs`. Review found that the loop-body
+lowering path (`lower_loop_expr_stmt`) had no `i32`/`u32` branch at all —
+any such match caused a compiler panic (`unreachable!("non-matchable
+scrutinee handled above")`) rather than a diagnostic or a runnable
+artifact — while the plain-statement and expression-form paths already
+handled it correctly. Added the missing branch (mirroring the other two
+paths exactly) and `positive_int_match_inside_value_producing_loop`, which
+pins both `i32` and `u32` matches inside a loop-expression body end to end.
+The loop-body path's own default-arm-ordering bug (relative to or-pattern
+rejection) was found and fixed in the same review round; see the profile's
+version-`1.2` note.
+
 ## Validation contour
 
 This matrix's rows are exercised end to end by:
