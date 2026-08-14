@@ -6394,10 +6394,14 @@ fn lower_stmt(
                         };
 
                         let lit_reg = alloc(&mut ctx.next_reg);
-                        ctx.instrs.push(IrInstr::LoadI32 {
-                            dst: lit_reg,
-                            val: expect_int_match_pattern(&arm.pat)?,
-                        });
+                        match expect_int_match_pattern(&arm.pat, &scr_ty)? {
+                            IntMatchLiteral::I32(val) => {
+                                ctx.instrs.push(IrInstr::LoadI32 { dst: lit_reg, val })
+                            }
+                            IntMatchLiteral::U32(val) => {
+                                ctx.instrs.push(IrInstr::LoadU32 { dst: lit_reg, val })
+                            }
+                        }
                         let cmp_reg = alloc(&mut ctx.next_reg);
                         ctx.instrs.push(IrInstr::CmpEq {
                             dst: cmp_reg,
@@ -7135,14 +7139,40 @@ fn expect_quad_match_pattern(pat: &MatchPattern) -> Result<QuadVal, FrontendErro
     }
 }
 
-fn expect_int_match_pattern(pat: &MatchPattern) -> Result<i32, FrontendError> {
+/// A lowered integer match-pattern literal, carrying the scrutinee's own
+/// runtime type so callers emit `LoadI32`/`LoadU32` consistently with the
+/// scrutinee register's actual runtime type instead of always assuming i32.
+enum IntMatchLiteral {
+    I32(i32),
+    U32(u32),
+}
+
+fn expect_int_match_pattern(
+    pat: &MatchPattern,
+    scrutinee_ty: &Type,
+) -> Result<IntMatchLiteral, FrontendError> {
     match pat {
-        MatchPattern::IntRange(range) if range.start == range.end => {
-            i32::try_from(range.start).map_err(|_| FrontendError {
-                pos: 0,
-                message: "integer match pattern literal is outside i32 range".to_string(),
-            })
+        MatchPattern::IntRange(range) if range.start == range.end && range.inclusive => {
+            if matches!(scrutinee_ty, Type::U32) {
+                u32::try_from(range.start)
+                    .map(IntMatchLiteral::U32)
+                    .map_err(|_| FrontendError {
+                        pos: 0,
+                        message: "integer match pattern literal is outside u32 range".to_string(),
+                    })
+            } else {
+                i32::try_from(range.start)
+                    .map(IntMatchLiteral::I32)
+                    .map_err(|_| FrontendError {
+                        pos: 0,
+                        message: "integer match pattern literal is outside i32 range".to_string(),
+                    })
+            }
         }
+        // Exclusive equal-bound ranges (`5..5`) are semantically empty and must
+        // never be treated as the literal `5`; route them to the same
+        // deterministic "not yet implemented" rejection as every other range
+        // form lowering does not support, rather than silently miscompiling.
         MatchPattern::IntRange(_) => Err(FrontendError {
             pos: 0,
             message: "integer range match pattern lowering is not yet implemented in the IR backend"
@@ -8402,10 +8432,10 @@ fn lower_match_expr(
                 };
 
                 let lit_reg = alloc(next);
-                out.push(IrInstr::LoadI32 {
-                    dst: lit_reg,
-                    val: expect_int_match_pattern(&arm.pat)?,
-                });
+                match expect_int_match_pattern(&arm.pat, &scr_ty)? {
+                    IntMatchLiteral::I32(val) => out.push(IrInstr::LoadI32 { dst: lit_reg, val }),
+                    IntMatchLiteral::U32(val) => out.push(IrInstr::LoadU32 { dst: lit_reg, val }),
+                }
                 let cmp_reg = alloc(next);
                 out.push(IrInstr::CmpEq {
                     dst: cmp_reg,
