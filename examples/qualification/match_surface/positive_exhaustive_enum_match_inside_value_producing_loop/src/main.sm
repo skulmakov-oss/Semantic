@@ -1,0 +1,17 @@
+enum Flag { A, B }
+
+fn pick(f: Flag) -> i32 {
+    let result: i32 = loop {
+        match f {
+            Flag::A => { break 1; }
+            Flag::B => { break 2; }
+        }
+    };
+    return result;
+}
+
+fn main() {
+    assert(pick(Flag::A) == 1);
+    assert(pick(Flag::B) == 2);
+    return;
+}

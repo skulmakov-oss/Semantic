@@ -7705,6 +7705,68 @@ mod tests {
     }
 
     #[test]
+    fn exhaustive_enum_match_without_wildcard_typechecks_inside_value_producing_loop_body() {
+        // Regression for a second real bug in the same control-flow context:
+        // check_loop_expr_stmt's default-arm check used to be a naive
+        // "default.is_empty() => reject", unlike the plain statement-form
+        // match handler's missing_exhaustive_sum_variants-based check. An
+        // exhaustive enum/Option/Result match with no wildcard arm therefore
+        // could not typecheck inside a `loop { ... break value; }` body even
+        // though the identical program typechecks fine as an ordinary
+        // statement (found by review on PR #1615).
+        let src = r#"
+            enum Flag { A, B }
+
+            fn pick(f: Flag) -> i32 {
+                let result: i32 = loop {
+                    match f {
+                        Flag::A => { break 1; }
+                        Flag::B => { break 2; }
+                    }
+                };
+                return result;
+            }
+
+            fn main() {
+                let r: i32 = pick(Flag::A);
+                let _ = r;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("exhaustive enum match without wildcard should typecheck inside a loop body");
+    }
+
+    #[test]
+    fn non_exhaustive_enum_match_without_wildcard_still_rejects_inside_value_producing_loop_body() {
+        let src = r#"
+            enum Flag { A, B, C }
+
+            fn pick(f: Flag) -> i32 {
+                let result: i32 = loop {
+                    match f {
+                        Flag::A => { break 1; }
+                        Flag::B => { break 2; }
+                    }
+                };
+                return result;
+            }
+
+            fn main() {
+                let r: i32 = pick(Flag::A);
+                let _ = r;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("non-exhaustive match must still be rejected");
+        assert!(
+            err.message.contains("non-exhaustive match") && err.message.contains("C"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
     fn int_range_pattern_typechecks_on_i32() {
         let src = r#"
             fn main() {
@@ -9790,28 +9852,50 @@ fn check_loop_expr_stmt(
             apply_plans_to_scrutinee(*scrutinee, &arm_plans, arena, env);
 
             if default.is_empty() {
-                return Err(FrontendError {
-                    pos: 0,
-                    message: "match requires default arm '_'".to_string(),
-                });
-            }
-
-            let mut def_env = env.clone();
-            def_env.push_scope();
-            for stmt in default {
-                check_loop_expr_stmt(
-                    *stmt,
+                // Mirror the plain statement-form match handler: an empty
+                // default arm is only a hard rejection when the covered sum-
+                // family variants aren't already exhaustive. A naive
+                // "default.is_empty() => reject" check here (as opposed to
+                // this exhaustiveness-aware one) would wrongly reject an
+                // exhaustive enum/Option/Result match with no wildcard arm
+                // inside a value-producing loop, even though the ordinary
+                // statement-form match already admits the identical program
+                // (SSF-07 review finding).
+                match missing_exhaustive_sum_variants(
+                    &st,
+                    arms.iter().map(|arm| (&arm.pat, arm.guard)),
                     arena,
-                    &mut def_env,
-                    table,
-                    record_table,
                     adt_table,
-                    ret_ty.clone(),
-                    loop_stack,
-                    impl_list,
-                )?;
+                )? {
+                    Some((family_label, missing)) if !missing.is_empty() => {
+                        return Err(non_exhaustive_match_error(&family_label, &missing, false)?)
+                    }
+                    Some(_) => {}
+                    None => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: "match requires default arm '_'".to_string(),
+                        });
+                    }
+                }
+            } else {
+                let mut def_env = env.clone();
+                def_env.push_scope();
+                for stmt in default {
+                    check_loop_expr_stmt(
+                        *stmt,
+                        arena,
+                        &mut def_env,
+                        table,
+                        record_table,
+                        adt_table,
+                        ret_ty.clone(),
+                        loop_stack,
+                        impl_list,
+                    )?;
+                }
+                def_env.pop_scope();
             }
-            def_env.pop_scope();
             Ok(())
         }
         _ => check_stmt(
