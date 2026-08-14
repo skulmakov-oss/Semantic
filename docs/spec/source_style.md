@@ -69,9 +69,11 @@ compile-time-only `schema` (including `config schema` / `api schema` /
 `requires` / `ensures` / `invariant`; `let` / `const` / destructuring /
 `let-else`; `quad` and its literals `N`, `F`, `T`, `S`; `if` / `else if` /
 `else` (condition must be `bool` — `quad` is never an implicit condition);
-`match` (over `quad`, nominal enums, `Option`, `Result`); `for` / `while` /
-`loop` / `guard`; `assert`; `Result` / `Option`; `Sequence(T)`; imports;
-`fn main()`.
+`match` (over `quad`, nominal enums, `Option`, `Result`, `i32`, and `u32` at
+typecheck time — `u32` is typecheck-only and does not execute correctly, see
+`foundation_source_profile_v1.md`'s "Data and patterns" section); `for` /
+`while` / `loop` / `guard`; `assert`; `Result` / `Option`; `Sequence(T)`;
+imports; `fn main()`.
 
 ### Logos declarative surface
 
