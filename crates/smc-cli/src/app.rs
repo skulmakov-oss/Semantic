@@ -1467,7 +1467,7 @@ struct PackHeader {
 /// Builds the tag string that identifies "this compiler build" for cache
 /// purposes: the crate's package version plus a discriminator for the
 /// actual compiler/build semantics. Pulled out as a pure function so the
-/// dependency on `compiler_generation` is independently testable (DL-XXX:
+/// dependency on `compiler_generation` is independently testable (DL-024:
 /// a semantic cache entry produced by one compiler generation must not be
 /// accepted as valid by a differently-behaving generation, even when
 /// `pkg_version` is unchanged).
@@ -1475,6 +1475,22 @@ fn toolchain_identity_tag(pkg_version: &str, compiler_generation: &str) -> Strin
     format!("smc-cli:{}:{}", pkg_version, compiler_generation)
 }
 
+// A malformed `SM_*` override below (set but not parseable) is deliberately
+// left to silently fall through to the computed default, not treated as a
+// build/cache-usage error (DL-025). This is safe, not merely convenient: the
+// default in every one of these functions is itself a real, complete,
+// fail-closed identity computed from this exact binary's own build-time
+// constants (`SM_COMPILER_SOURCE_HASH`/`SM_ENABLED_FEATURES`, both emitted by
+// `build.rs`, which fails the *build* rather than emitting an incomplete
+// value - see its module doc). Two genuinely different compiler generations
+// therefore still compute two different default hashes even if both somehow
+// inherited the same malformed override string, so a malformed override can
+// never cause a false cache `HIT` the way an incomplete *construction*-time
+// fallback could. This is a different situation from the fail-closed
+// requirements on `build.rs`'s own identity construction: there, a fallback
+// value is silently wrong (e.g. missing real source content); here, the
+// fallback value is the same correct value these functions would compute
+// with no override at all.
 fn current_toolchain_hash() -> u64 {
     if let Ok(v) = std::env::var("SM_TOOLCHAIN_HASH") {
         if let Ok(parsed) = u64::from_str_radix(v.trim(), 16).or_else(|_| v.trim().parse::<u64>()) {
@@ -2242,7 +2258,7 @@ fn score(value: i32) -> i32 {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // --- Compiler-generation cache invalidation (DL-XXX) ---
+    // --- Compiler-generation cache invalidation (DL-024, DL-025) ---
     //
     // Root cause: current_toolchain_hash()'s default value used to depend
     // only on CARGO_PKG_VERSION, which does not change when compiler
