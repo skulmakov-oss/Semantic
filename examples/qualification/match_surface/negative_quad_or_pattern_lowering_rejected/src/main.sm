@@ -1,0 +1,11 @@
+fn pick(x: quad) -> quad {
+    let out: quad = match x {
+        N | F => { T }
+        _ => { S }
+    };
+    return out;
+}
+
+fn main() {
+    return;
+}

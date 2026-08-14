@@ -82,6 +82,38 @@ fn assert_check_rejects(rel: &str, needle: &str) {
     );
 }
 
+fn assert_compile_rejects(rel: &str, needle: &str) {
+    let path = repo_path(rel);
+    cli_ok(
+        vec!["check".to_string(), path.clone()],
+        &format!("smc check for {path}"),
+    );
+
+    let temp_dir = mk_temp_dir("match_surface_qualification_compile_reject");
+    let out = temp_dir.join(
+        Path::new(rel)
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("out.smc")),
+    );
+    let out_arg = out.to_string_lossy().replace('\\', "/");
+
+    let err = cli_err(
+        vec![
+            "compile".to_string(),
+            path.clone(),
+            "-o".to_string(),
+            out_arg.clone(),
+        ],
+        &format!("smc compile for {path}"),
+    );
+    assert!(
+        err.contains(needle),
+        "expected lowering diagnostic containing '{needle}' for {rel}, got: {err}"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
 #[test]
 fn match_surface_positive_fixtures_run_end_to_end() {
     let positive_cases = [
@@ -121,5 +153,35 @@ fn match_surface_negative_fixtures_reject_deterministically() {
 
     for (rel, needle) in negative_cases {
         assert_check_rejects(rel, needle);
+    }
+}
+
+#[test]
+fn match_surface_or_pattern_fixtures_reject_at_compile_phase() {
+    let compile_reject_cases = [
+        (
+            "examples/qualification/match_surface/negative_quad_or_pattern_lowering_rejected/src/main.sm",
+            "wildcard/or/range match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_i32_or_pattern_lowering_rejected/src/main.sm",
+            "wildcard/or/quad match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_u32_or_pattern_lowering_rejected/src/main.sm",
+            "wildcard/or/quad match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_enum_or_pattern_no_wildcard_lowering_rejected/src/main.sm",
+            "non-exhaustive match expression for enum 'Flag'; missing variants: A, B",
+        ),
+        (
+            "examples/qualification/match_surface/negative_enum_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
+            "quad match pattern requires quad scrutinee; enum 'Flag' needs explicit variant patterns in lowering",
+        ),
+    ];
+
+    for (rel, needle) in compile_reject_cases {
+        assert_compile_rejects(rel, needle);
     }
 }

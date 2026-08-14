@@ -1,0 +1,11 @@
+fn pick(x: i32) -> quad {
+    let out: quad = match x {
+        1 | 2 => { T }
+        _ => { S }
+    };
+    return out;
+}
+
+fn main() {
+    return;
+}

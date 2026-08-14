@@ -1,0 +1,17 @@
+enum Flag {
+    A,
+    B,
+    C,
+}
+
+fn pick(x: Flag) -> quad {
+    let out: quad = match x {
+        Flag::A | Flag::B => { T }
+        _ => { F }
+    };
+    return out;
+}
+
+fn main() {
+    return;
+}
