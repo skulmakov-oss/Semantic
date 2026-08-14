@@ -7621,7 +7621,11 @@ mod tests {
     }
 
     #[test]
-    fn or_pattern_two_variants_covers_both() {
+    fn or_pattern_match_arm_rejects_even_when_it_would_cover_two_variants() {
+        // SSF-07: or-patterns have no lowering implementation for any
+        // scrutinee family, so `match` rejects them deterministically at
+        // typecheck regardless of whether they would otherwise contribute
+        // useful exhaustiveness coverage.
         let src = r#"
             enum Color { Red, Blue, Green }
 
@@ -7634,11 +7638,16 @@ mod tests {
                 return;
             }
         "#;
-        typecheck_source(src).expect("or-pattern covering two variants should typecheck");
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
+        assert!(
+            err.message.contains("or-pattern match arms"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
-    fn or_pattern_covers_all_variants_exhaustive() {
+    fn or_pattern_match_arm_rejects_even_when_it_would_be_exhaustive() {
         let src = r#"
             enum Flag { A, B }
 
@@ -7650,7 +7659,12 @@ mod tests {
                 return;
             }
         "#;
-        typecheck_source(src).expect("or-pattern covering all variants should be exhaustive");
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
+        assert!(
+            err.message.contains("or-pattern match arms"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -8124,8 +8138,10 @@ mod tests {
     }
 
     #[test]
-    fn match_or_pattern_all_borrow_ok() {
-        // Or-pattern where all alternatives borrow: ok.
+    fn match_or_pattern_rejects_regardless_of_consistent_capture_modes() {
+        // Or-pattern where all alternatives borrow the same way is still
+        // rejected — SSF-07 blanket-rejects or-pattern match arms before
+        // capture-mode consistency is even considered.
         let src = r#"
             enum Flag { A, B, C }
             fn main() {
@@ -8137,12 +8153,23 @@ mod tests {
                 return;
             }
         "#;
-        typecheck_source(src).expect("or-pattern match should typecheck");
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
+        assert!(
+            err.message.contains("or-pattern match arms"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
-    fn match_inconsistent_or_pattern_capture_rejects() {
-        // One arm binds with ref, the other without — must be same shape.
+    fn match_or_pattern_rejects_before_capture_mode_conflict_is_checked() {
+        // One arm binds with ref, the other without. Before SSF-07's
+        // blanket or-pattern rejection this failed on capture-mode
+        // inconsistency instead; now the blanket rejection fires first,
+        // regardless of whether the alternatives would have been internally
+        // consistent. The underlying capture-mode-conflict check itself is
+        // still exercised via `if let`, which does not route through this
+        // match-arm entry point.
         let src = r#"
             enum Wrap { Val(i32) }
             fn make() -> Wrap { return Wrap::Val(1); }
@@ -8154,12 +8181,9 @@ mod tests {
                 return;
             }
         "#;
-        let err =
-            typecheck_source(src).expect_err("inconsistent or-pattern capture modes must reject");
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
         assert!(
-            err.message.contains("same")
-                || err.message.contains("capture")
-                || err.message.contains("alternative"),
+            err.message.contains("or-pattern match arms"),
             "unexpected error: {}",
             err.message
         );
@@ -12379,6 +12403,18 @@ pub(crate) fn build_and_apply_match_plan(
     arena: &AstArena,
     adt_table: &AdtTable,
 ) -> Result<(BindingPlan, ScopeEnv), FrontendError> {
+    // SSF-07: or-pattern match arms (`A | B`) have no lowering implementation
+    // for any scrutinee family. Rather than let this typecheck successfully
+    // and fail later at the lowering phase with a family-specific diagnostic,
+    // reject deterministically here so `match` never accepts a form it cannot
+    // produce a runnable artifact for. `if let` is unaffected — it calls
+    // `build_match_pattern_plan` directly, not this match-arm entry point.
+    if matches!(pattern, MatchPattern::Or(_)) {
+        return Err(FrontendError {
+            pos: 0,
+            message: "or-pattern match arms ('A | B') are not supported; split into separate arms with identical bodies instead".to_string(),
+        });
+    }
     let mut plan = BindingPlan::default();
     build_match_pattern_plan(
         pattern,
