@@ -149,6 +149,10 @@ fn match_surface_negative_fixtures_reject_deterministically() {
             "examples/qualification/match_surface/negative_match_result_type_mismatch/src/main.sm",
             "match expression branch type mismatch",
         ),
+        (
+            "examples/qualification/match_surface/negative_i32_range_pattern_suffixed_bound_rejected/src/main.sm",
+            "range pattern bound does not accept a type suffix; use a plain integer",
+        ),
     ];
 
     for (rel, needle) in negative_cases {

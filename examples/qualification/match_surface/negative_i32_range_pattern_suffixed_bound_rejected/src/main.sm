@@ -1,0 +1,11 @@
+fn classify(x: i32) -> quad {
+    let out: quad = match x {
+        5i32..=5i32 => { T }
+        _ => { F }
+    };
+    return out;
+}
+
+fn main() {
+    return;
+}

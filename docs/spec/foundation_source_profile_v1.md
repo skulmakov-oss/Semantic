@@ -147,12 +147,17 @@ only by the Logos profile and is not executable under this contract.
   IR backend" — all three confirmed empirically at the `compile` step;
 - integer range match arms over an `i32` scrutinee: an **inclusive**
   single-value range whose literal bound is in `0..=2147483647`
-  (`i32::MAX`) (`5..=5`) is Included and executable, lowering as a
-  literal-equality match. A negative bound (`-5..=-5`) is not part of this
-  claim and does not even parse — confirmed empirically to fail at the
-  parser (`E0000: expected match pattern`) before typecheck, since
-  range-pattern parsing requires the current token to be a bare `Num`
-  literal and does not admit a leading unary `-`. A nonnegative bound
+  (`i32::MAX`), spelled as a plain, suffix-free integer literal (`5..=5`),
+  is Included and executable, lowering as a literal-equality match. A
+  type-suffixed bound (`5i32..=5i32`) is not part of this claim and does
+  not parse either — confirmed empirically to fail at the parser
+  ("range pattern bound does not accept a type suffix; use a plain
+  integer"), since `parse_i64_pattern_bound` rejects every suffixed range
+  bound regardless of scrutinee type. A negative bound (`-5..=-5`) is not
+  part of this claim and does not even parse — confirmed empirically to
+  fail at the parser (`E0000: expected match pattern`) before typecheck,
+  since range-pattern parsing requires the current token to be a bare
+  `Num` literal and does not admit a leading unary `-`. A nonnegative bound
   exceeding `i32::MAX` (`2147483648..=2147483648`) parses and typechecks —
   the frontend checks only the scrutinee family and `start <= end`, not
   whether the literal actually fits `i32` — but is **not** part of this
