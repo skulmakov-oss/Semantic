@@ -1464,13 +1464,30 @@ struct PackHeader {
     payload_checksum: u64,
 }
 
+/// Builds the tag string that identifies "this compiler build" for cache
+/// purposes: the crate's package version plus a discriminator for the
+/// actual compiler/build semantics. Pulled out as a pure function so the
+/// dependency on `compiler_generation` is independently testable (DL-XXX:
+/// a semantic cache entry produced by one compiler generation must not be
+/// accepted as valid by a differently-behaving generation, even when
+/// `pkg_version` is unchanged).
+fn toolchain_identity_tag(pkg_version: &str, compiler_generation: &str) -> String {
+    format!("smc-cli:{}:{}", pkg_version, compiler_generation)
+}
+
 fn current_toolchain_hash() -> u64 {
     if let Ok(v) = std::env::var("SM_TOOLCHAIN_HASH") {
         if let Ok(parsed) = u64::from_str_radix(v.trim(), 16).or_else(|_| v.trim().parse::<u64>()) {
             return parsed;
         }
     }
-    let tag = format!("smc-cli:{}", env!("CARGO_PKG_VERSION"));
+    // SM_COMPILER_SOURCE_HASH is set by build.rs from the content of every
+    // crate that determines check/compile/verify/run semantics (parse,
+    // typecheck, lowering, verification, execution). A rebuild from edited
+    // source in any of them - committed or not - changes this value, so an
+    // old cache entry from a semantically different build cannot alias with
+    // a new one just because CARGO_PKG_VERSION didn't change.
+    let tag = toolchain_identity_tag(env!("CARGO_PKG_VERSION"), env!("SM_COMPILER_SOURCE_HASH"));
     fnv1a64(tag.as_bytes())
 }
 
@@ -2216,6 +2233,186 @@ fn score(value: i32) -> i32 {
         let got = load_cache_entry(&path, 1).expect("load");
         assert!(got.is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // --- Compiler-generation cache invalidation (DL-XXX) ---
+    //
+    // Root cause: current_toolchain_hash()'s default value used to depend
+    // only on CARGO_PKG_VERSION, which does not change when compiler
+    // semantics change without a version bump (the normal case between
+    // commits). Two builds that behave differently but share a package
+    // version therefore produced the identical toolchain_hash, letting an
+    // old build's cached "PASS" survive a rebuild that would now reject the
+    // same source. See build.rs and toolchain_identity_tag's doc comment.
+
+    #[test]
+    fn semantic_cache_toolchain_hash_differs_across_compiler_generations() {
+        // Direct test of the fix's core claim: the tag function that feeds
+        // current_toolchain_hash() must produce different output for two
+        // "generations" sharing the same package version. Before this fix,
+        // no parameter representing compiler generation existed at all -
+        // the formula was `format!("smc-cli:{}", pkg_version)` with nothing
+        // else, so it could not have varied no matter what the generation
+        // was.
+        let generation_a =
+            fnv1a64(toolchain_identity_tag("0.1.0", "sourceHashAAAAAAAA").as_bytes());
+        let generation_b =
+            fnv1a64(toolchain_identity_tag("0.1.0", "sourceHashBBBBBBBB").as_bytes());
+        assert_ne!(
+            generation_a, generation_b,
+            "same package version, different compiler generation, must not collide"
+        );
+
+        let generation_a_again =
+            fnv1a64(toolchain_identity_tag("0.1.0", "sourceHashAAAAAAAA").as_bytes());
+        assert_eq!(
+            generation_a, generation_a_again,
+            "the same generation must hash identically every time (no nondeterminism)"
+        );
+    }
+
+    #[test]
+    fn semantic_cache_hits_for_same_compiler_generation() {
+        // 8.1: source fingerprint X, compiler generation A (this test
+        // binary's own, real current_toolchain_hash()) saved then loaded
+        // under the identical generation -> HIT.
+        let dir = mk_temp_dir("smc_cache_same_generation");
+        let path = dir.join("entry.cache");
+        let entry = CacheEntry {
+            fingerprint: 0xABCD_1234,
+            warning_count: 0,
+            law_count: 0,
+            warnings: Vec::new(),
+        };
+        save_cache_entry(&path, &entry).expect("save");
+        let got = load_cache_entry(&path, entry.fingerprint).expect("load");
+        assert!(
+            got.is_some(),
+            "same compiler generation + same source fingerprint must HIT"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn semantic_cache_misses_when_compiler_generation_changes() {
+        // 8.2 (the key regression): source fingerprint X saved under a
+        // compiler generation that is NOT this test binary's own
+        // current_toolchain_hash() (constructed directly, the same
+        // technique cache_version_mismatch_is_ignored and
+        // cache_checksum_mismatch_is_ignored already use to inject a
+        // specific header field) must MISS(ToolchainMismatch) when loaded
+        // under the real current generation, even though the source
+        // fingerprint and schema/feature hashes all still match.
+        let dir = mk_temp_dir("smc_cache_cross_generation");
+        let path = dir.join("entry.cache");
+        let payload = b"FP 000000000000abcd\nWARN 0\nLAW 0\nWSUM 14650fb0739d0383\n".to_vec();
+        let other_generation_hash = current_toolchain_hash() ^ 0xDEAD_BEEF_DEAD_BEEF;
+        assert_ne!(
+            other_generation_hash,
+            current_toolchain_hash(),
+            "sanity: the injected generation must actually differ from the real one"
+        );
+        let header = PackHeader {
+            kind: PACK_KIND_SEM,
+            schema_version: CACHE_SCHEMA_VERSION,
+            toolchain_hash: other_generation_hash,
+            feature_hash: current_feature_hash(),
+            payload_len: payload.len() as u64,
+            payload_checksum: fnv1a64(&payload),
+        };
+        let mut bytes = encode_pack_header(&header);
+        bytes.extend_from_slice(&payload);
+        std::fs::write(&path, bytes).expect("write");
+
+        match load_cache_entry_ex(&path, 0xabcd) {
+            Ok(CacheLookup::Miss(CacheReason::ToolchainMismatch)) => {}
+            Ok(CacheLookup::Hit(_)) => panic!(
+                "a cache entry from a different compiler generation must not be accepted as a HIT"
+            ),
+            other => panic!("expected Miss(ToolchainMismatch), got {:?}", other.is_ok()),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn semantic_cache_still_misses_when_source_fingerprint_changes() {
+        // 8.3: existing fingerprint invalidation must keep working
+        // regardless of this fix - same (real, current) compiler
+        // generation, different source fingerprint -> MISS.
+        let dir = mk_temp_dir("smc_cache_fingerprint_change");
+        let path = dir.join("entry.cache");
+        let entry = CacheEntry {
+            fingerprint: 0x1111_1111,
+            warning_count: 0,
+            law_count: 0,
+            warnings: Vec::new(),
+        };
+        save_cache_entry(&path, &entry).expect("save");
+        match load_cache_entry_ex(&path, 0x2222_2222) {
+            Ok(CacheLookup::Miss(CacheReason::FingerprintMismatch)) => {}
+            other => panic!(
+                "expected Miss(FingerprintMismatch), got {:?}",
+                other.is_ok()
+            ),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn semantic_check_command_discards_cache_entry_from_another_compiler_generation() {
+        // 8.5: exercises the real `smc check` path (cmd_check), not just
+        // the cache helper functions. Pre-seeds a SEM-kind pack at the
+        // exact path cmd_check itself will look up (cache_file_for_root),
+        // stamped with a different compiler generation, then runs a real
+        // check on the same source. If the stale entry were wrongly
+        // accepted, cmd_check returns before ever touching the cache file
+        // again, so it would still carry the injected other_generation_hash
+        // afterward. A correct MISS makes cmd_check perform a fresh check
+        // and unconditionally overwrite the file with a fresh entry stamped
+        // with the real current_toolchain_hash() - that overwrite is what
+        // this test observes, since cmd_check does not expose HIT/MISS as a
+        // return value.
+        let dir = mk_temp_dir("smc_check_cross_generation");
+        let source_path = dir.join("main.sm");
+        std::fs::write(&source_path, "fn main() {\n    return;\n}\n").expect("write source");
+
+        let canonical_root = source_path.canonicalize().expect("canonicalize");
+        let fp = module_graph_fingerprint(&canonical_root, CACHE_SCHEMA_VERSION)
+            .expect("fingerprint the fixture");
+        let cache_path = cache_file_for_root(&canonical_root).expect("cache path for root");
+
+        let other_generation_hash = current_toolchain_hash() ^ 0xDEAD_BEEF_DEAD_BEEF;
+        let payload = format!("FP {:016x}\nWARN 0\nLAW 0\nWSUM 14650fb0739d0383\n", fp);
+        let header = PackHeader {
+            kind: PACK_KIND_SEM,
+            schema_version: CACHE_SCHEMA_VERSION,
+            toolchain_hash: other_generation_hash,
+            feature_hash: current_feature_hash(),
+            payload_len: payload.len() as u64,
+            payload_checksum: fnv1a64(payload.as_bytes()),
+        };
+        let mut bytes = encode_pack_header(&header);
+        bytes.extend_from_slice(payload.as_bytes());
+        std::fs::write(&cache_path, bytes).expect("seed stale cross-generation cache entry");
+
+        cmd_check(&[source_path.to_string_lossy().into_owned()]).expect("check must pass");
+
+        let rewritten = std::fs::read(&cache_path).expect("cache file must exist after check");
+        let (rewritten_header, _) =
+            decode_pack_header(&rewritten).expect("rewritten cache header must decode");
+        assert_eq!(
+            rewritten_header.toolchain_hash,
+            current_toolchain_hash(),
+            "a check that correctly rejected the other-generation entry must rewrite the cache \
+             with the real current generation, not silently keep serving the stale one"
+        );
+        assert_ne!(
+            rewritten_header.toolchain_hash, other_generation_hash,
+            "the stale cross-generation entry must not have been left in place"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_file(&cache_path);
     }
 
     #[test]
