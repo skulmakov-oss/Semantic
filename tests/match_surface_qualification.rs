@@ -114,6 +114,46 @@ fn assert_compile_rejects(rel: &str, needle: &str) {
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
 
+fn assert_runtime_traps(rel: &str, needle: &str) {
+    let path = repo_path(rel);
+    cli_ok(
+        vec!["check".to_string(), path.clone()],
+        &format!("smc check for {path}"),
+    );
+
+    let temp_dir = mk_temp_dir("match_surface_qualification_runtime_trap");
+    let out = temp_dir.join(
+        Path::new(rel)
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("out.smc")),
+    );
+    let out_arg = out.to_string_lossy().replace('\\', "/");
+
+    cli_ok(
+        vec![
+            "compile".to_string(),
+            path.clone(),
+            "-o".to_string(),
+            out_arg.clone(),
+        ],
+        &format!("smc compile for {path}"),
+    );
+    cli_ok(
+        vec!["verify".to_string(), out_arg.clone()],
+        &format!("smc verify for {out_arg}"),
+    );
+    let err = cli_err(
+        vec!["run-smc".to_string(), out_arg.clone()],
+        &format!("smc run-smc for {out_arg}"),
+    );
+    assert!(
+        err.contains(needle),
+        "expected runtime trap containing '{needle}' for {rel}, got: {err}"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
 #[test]
 fn match_surface_positive_fixtures_run_end_to_end() {
     let positive_cases = [
@@ -196,4 +236,34 @@ fn match_surface_lowering_rejection_fixtures_reject_at_compile_phase() {
     for (rel, needle) in compile_reject_cases {
         assert_compile_rejects(rel, needle);
     }
+}
+
+#[test]
+fn match_surface_u32_match_fixtures_trap_at_runtime() {
+    let runtime_trap_cases = [
+        (
+            "examples/qualification/match_surface/defect_u32_literal_match_runtime_trap/src/main.sm",
+            "runtime type mismatch: CmpEq/CmpNe operands must have same runtime type",
+        ),
+        (
+            "examples/qualification/match_surface/defect_u32_range_match_runtime_trap/src/main.sm",
+            "runtime type mismatch: CmpEq/CmpNe operands must have same runtime type",
+        ),
+    ];
+
+    for (rel, needle) in runtime_trap_cases {
+        assert_runtime_traps(rel, needle);
+    }
+}
+
+#[test]
+fn match_surface_exclusive_singleton_range_pins_known_miscompilation() {
+    // Known defect, not correct behavior: `5..5` is semantically an empty
+    // range that should match nothing, but lowering ignores the
+    // inclusive/exclusive flag and treats it like `5..=5`. This fixture's
+    // own assertions pin the current (wrong) runtime behavior so a fix
+    // shows up as a test failure here, not silent drift.
+    run_full_pipeline(
+        "examples/qualification/match_surface/defect_i32_exclusive_singleton_range_miscompilation/src/main.sm",
+    );
 }

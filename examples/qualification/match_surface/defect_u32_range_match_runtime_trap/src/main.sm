@@ -1,0 +1,12 @@
+fn pick(x: u32) -> quad {
+    let out: quad = match x {
+        5..=5 => { T }
+        _ => { F }
+    };
+    return out;
+}
+
+fn main() {
+    assert(pick(5u32) == T);
+    return;
+}
