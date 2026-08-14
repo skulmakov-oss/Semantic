@@ -7668,6 +7668,43 @@ mod tests {
     }
 
     #[test]
+    fn or_pattern_match_arm_rejects_inside_value_producing_loop_body_too() {
+        // Regression for a real ordering bug: check_loop_expr_stmt's own
+        // "match requires default arm '_'" check used to run before its
+        // per-arm build_and_apply_match_plan loop, so a no-wildcard
+        // or-pattern arm inside a `loop { ... break value; }` expression
+        // body surfaced the generic default-arm diagnostic instead of the
+        // or-pattern one, breaking the "identical diagnostic regardless of
+        // wildcard presence" promise specifically in this control-flow
+        // context (found by review on PR #1615).
+        let src = r#"
+            enum Flag { A, B }
+
+            fn pick() -> i32 {
+                let result: i32 = loop {
+                    let f: Flag = Flag::A;
+                    match f {
+                        Flag::A | Flag::B => { break 1; }
+                    }
+                };
+                return result;
+            }
+
+            fn main() {
+                let r: i32 = pick();
+                let _ = r;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
+        assert!(
+            err.message.contains("or-pattern match arms"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
     fn int_range_pattern_typechecks_on_i32() {
         let src = r#"
             fn main() {
@@ -9708,14 +9745,15 @@ fn check_loop_expr_stmt(
                             .to_string(),
                 });
             }
-            if default.is_empty() {
-                return Err(FrontendError {
-                    pos: 0,
-                    message: "match requires default arm '_'".to_string(),
-                });
-            }
-
             // M9.5 Wave D / M9.7 / M9.8: BindingPlan pipeline + path-based ownership.
+            // The per-arm loop (which rejects any or-pattern arm deterministically,
+            // regardless of wildcard presence) must run before the default-arm
+            // check below, mirroring the ordering used by the statement- and
+            // expression-form match handlers. Checking `default.is_empty()` first
+            // would let a naive "no `_` arm at all" rejection pre-empt the
+            // or-pattern diagnostic for an or-pattern match with no wildcard arm,
+            // breaking the promise that or-pattern rejection is uniform regardless
+            // of wildcard presence (SSF-07).
             let mut arm_plans: Vec<BindingPlan> = Vec::new();
             for arm in arms {
                 let (plan, mut arm_env) =
@@ -9750,6 +9788,13 @@ fn check_loop_expr_stmt(
                 arm_env.pop_scope();
             }
             apply_plans_to_scrutinee(*scrutinee, &arm_plans, arena, env);
+
+            if default.is_empty() {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "match requires default arm '_'".to_string(),
+                });
+            }
 
             let mut def_env = env.clone();
             def_env.push_scope();
