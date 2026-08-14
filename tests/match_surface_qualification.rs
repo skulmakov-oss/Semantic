@@ -220,6 +220,22 @@ fn match_surface_lowering_rejection_fixtures_reject_at_compile_phase() {
             "non-exhaustive match expression for enum 'Flag'; missing variants: A, B",
         ),
         (
+            "examples/qualification/match_surface/negative_option_or_pattern_no_wildcard_lowering_rejected/src/main.sm",
+            "non-exhaustive match expression for Option(T); missing variants: Some",
+        ),
+        (
+            "examples/qualification/match_surface/negative_option_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
+            "quad match pattern requires quad scrutinee; Option(T) needs explicit variant patterns in lowering",
+        ),
+        (
+            "examples/qualification/match_surface/negative_result_or_pattern_no_wildcard_lowering_rejected/src/main.sm",
+            "non-exhaustive match expression for Result(T, E); missing variants: Ok, Err",
+        ),
+        (
+            "examples/qualification/match_surface/negative_result_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
+            "quad match pattern requires quad scrutinee; Result(T, E) needs explicit variant patterns in lowering",
+        ),
+        (
             "examples/qualification/match_surface/negative_enum_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
             "quad match pattern requires quad scrutinee; enum 'Flag' needs explicit variant patterns in lowering",
         ),
