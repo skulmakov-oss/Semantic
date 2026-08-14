@@ -312,11 +312,16 @@ must not be ignored, guessed, or reinterpreted. This includes:
 - a genuine multi-value integer range match arm (`1..=5`, as opposed to a
   single-value arm like `5..=5`) over an `i32` scrutinee — typechecks, then
   is rejected deterministically at the lowering phase (M9.4 Wave 1
-  boundary), not the Included executable surface;
+  boundary) with "integer range match pattern lowering is not yet
+  implemented in the IR backend", not the Included executable surface;
 - a single-value integer range match arm whose literal bound exceeds
   `i32::MAX` (`2147483648..=2147483648`) — parses and typechecks (the
-  frontend does not check the literal actually fits `i32`), then hits the
-  identical lowering-phase rejection as the multi-value case above;
+  frontend does not check the literal actually fits `i32`), then is
+  rejected at the same lowering phase as the multi-value case above, but
+  with its own distinct diagnostic — "integer match pattern literal is
+  outside i32 range" — from the equal-bounds branch of
+  `expect_int_match_pattern`, not the "range lowering is not yet
+  implemented" one;
 - malformed or unsupported SemCode headers at verifier admission.
 
 Not listed above because it is **not** a deterministic pre-execution

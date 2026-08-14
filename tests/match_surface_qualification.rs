@@ -161,7 +161,7 @@ fn match_surface_negative_fixtures_reject_deterministically() {
 }
 
 #[test]
-fn match_surface_or_pattern_fixtures_reject_at_compile_phase() {
+fn match_surface_lowering_rejection_fixtures_reject_at_compile_phase() {
     let compile_reject_cases = [
         (
             "examples/qualification/match_surface/negative_quad_or_pattern_lowering_rejected/src/main.sm",
@@ -182,6 +182,14 @@ fn match_surface_or_pattern_fixtures_reject_at_compile_phase() {
         (
             "examples/qualification/match_surface/negative_enum_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
             "quad match pattern requires quad scrutinee; enum 'Flag' needs explicit variant patterns in lowering",
+        ),
+        (
+            "examples/qualification/match_surface/negative_i32_multivalue_range_lowering_rejected/src/main.sm",
+            "integer range match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_i32_oversized_singleton_range_lowering_rejected/src/main.sm",
+            "integer match pattern literal is outside i32 range",
         ),
     ];
 
