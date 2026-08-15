@@ -139,8 +139,12 @@ Current rule:
 Current rules:
 
 - `quad` participates in equality and implication
-- `match` currently operates on `quad`, nominal enum scrutinees, and the
-  standard-form `Option(T)` / `Result(T, E)` families
+- `match` currently operates on `quad`, nominal enum, `Option(T)`,
+  `Result(T, E)`, `i32`, and `u32` scrutinees; every other scrutinee type
+  is rejected deterministically (SSF-07). All six families are fully
+  executable, including `u32` (see
+  `docs/spec/foundation_source_profile_v1.md`'s "Data and patterns" section
+  for the exact admitted literal/range bound forms)
 - `quad` is not accepted directly as an `if` condition
 - the user-facing quad predicate vocabulary is documented in
   [`docs/language/quad_language_design.md`](../language/quad_language_design.md)
@@ -377,7 +381,9 @@ Current equality and control rules:
 
 - `==` and `!=` require meaningful same-family comparisons
 - `if` requires `bool`
-- `match` requires `quad`, nominal enum, `Option(T)`, or `Result(T, E)`
+- `match` requires `quad`, nominal enum, `Option(T)`, `Result(T, E)`, `i32`,
+  or `u32`, all fully executable (see "Quad" above and
+  `docs/spec/foundation_source_profile_v1.md`'s "Data and patterns" section)
 
 ## Function Typing Rules
 

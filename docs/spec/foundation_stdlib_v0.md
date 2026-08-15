@@ -4,7 +4,7 @@ Status: SSF-03 candidate contract; not published stable
 
 Contract ID: `semantic.foundation.std/0.1`
 
-Base source contract: `semantic.foundation.source/1.0`
+Base source contract: `semantic.foundation.source/1.2`
 
 This document is the canonical Standard Library v0 index for the Stable
 Foundation contour. It freezes the smallest already-implemented library
@@ -13,7 +13,7 @@ repository, language, or library to Published Stable.
 
 ## Binding model
 
-Foundation Source 1.0 does not admit namespace-qualified `std.*` imports.
+Foundation Source 1.2 does not admit namespace-qualified `std.*` imports.
 Consequently the names below are public documentation family identities, not
 import paths. Their callable surface is the listed canonical language-owned
 equivalent: a builtin, operator, type, constructor, or match form already
@@ -229,7 +229,7 @@ The per-family positive, negative, and compatibility anchors are recorded in
 The canonical executable example is
 `examples/canonical/stdlib_v0_helpers/src/main.sm`. It uses the public
 language-owned names because `std.*` imports are intentionally outside
-Foundation Source 1.0.
+Foundation Source 1.2.
 
 ## SSF-04 entry conditions
 

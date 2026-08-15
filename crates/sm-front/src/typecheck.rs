@@ -7621,7 +7621,11 @@ mod tests {
     }
 
     #[test]
-    fn or_pattern_two_variants_covers_both() {
+    fn or_pattern_match_arm_rejects_even_when_it_would_cover_two_variants() {
+        // SSF-07: or-patterns have no lowering implementation for any
+        // scrutinee family, so `match` rejects them deterministically at
+        // typecheck regardless of whether they would otherwise contribute
+        // useful exhaustiveness coverage.
         let src = r#"
             enum Color { Red, Blue, Green }
 
@@ -7634,11 +7638,16 @@ mod tests {
                 return;
             }
         "#;
-        typecheck_source(src).expect("or-pattern covering two variants should typecheck");
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
+        assert!(
+            err.message.contains("or-pattern match arms"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
-    fn or_pattern_covers_all_variants_exhaustive() {
+    fn or_pattern_match_arm_rejects_even_when_it_would_be_exhaustive() {
         let src = r#"
             enum Flag { A, B }
 
@@ -7650,7 +7659,111 @@ mod tests {
                 return;
             }
         "#;
-        typecheck_source(src).expect("or-pattern covering all variants should be exhaustive");
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
+        assert!(
+            err.message.contains("or-pattern match arms"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn or_pattern_match_arm_rejects_inside_value_producing_loop_body_too() {
+        // Regression for a real ordering bug: check_loop_expr_stmt's own
+        // "match requires default arm '_'" check used to run before its
+        // per-arm build_and_apply_match_plan loop, so a no-wildcard
+        // or-pattern arm inside a `loop { ... break value; }` expression
+        // body surfaced the generic default-arm diagnostic instead of the
+        // or-pattern one, breaking the "identical diagnostic regardless of
+        // wildcard presence" promise specifically in this control-flow
+        // context (found by review on PR #1615).
+        let src = r#"
+            enum Flag { A, B }
+
+            fn pick() -> i32 {
+                let result: i32 = loop {
+                    let f: Flag = Flag::A;
+                    match f {
+                        Flag::A | Flag::B => { break 1; }
+                    }
+                };
+                return result;
+            }
+
+            fn main() {
+                let r: i32 = pick();
+                let _ = r;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
+        assert!(
+            err.message.contains("or-pattern match arms"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn exhaustive_enum_match_without_wildcard_typechecks_inside_value_producing_loop_body() {
+        // Regression for a second real bug in the same control-flow context:
+        // check_loop_expr_stmt's default-arm check used to be a naive
+        // "default.is_empty() => reject", unlike the plain statement-form
+        // match handler's missing_exhaustive_sum_variants-based check. An
+        // exhaustive enum/Option/Result match with no wildcard arm therefore
+        // could not typecheck inside a `loop { ... break value; }` body even
+        // though the identical program typechecks fine as an ordinary
+        // statement (found by review on PR #1615).
+        let src = r#"
+            enum Flag { A, B }
+
+            fn pick(f: Flag) -> i32 {
+                let result: i32 = loop {
+                    match f {
+                        Flag::A => { break 1; }
+                        Flag::B => { break 2; }
+                    }
+                };
+                return result;
+            }
+
+            fn main() {
+                let r: i32 = pick(Flag::A);
+                let _ = r;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("exhaustive enum match without wildcard should typecheck inside a loop body");
+    }
+
+    #[test]
+    fn non_exhaustive_enum_match_without_wildcard_still_rejects_inside_value_producing_loop_body() {
+        let src = r#"
+            enum Flag { A, B, C }
+
+            fn pick(f: Flag) -> i32 {
+                let result: i32 = loop {
+                    match f {
+                        Flag::A => { break 1; }
+                        Flag::B => { break 2; }
+                    }
+                };
+                return result;
+            }
+
+            fn main() {
+                let r: i32 = pick(Flag::A);
+                let _ = r;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("non-exhaustive match must still be rejected");
+        assert!(
+            err.message.contains("non-exhaustive match") && err.message.contains("C"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -8124,8 +8237,10 @@ mod tests {
     }
 
     #[test]
-    fn match_or_pattern_all_borrow_ok() {
-        // Or-pattern where all alternatives borrow: ok.
+    fn match_or_pattern_rejects_regardless_of_consistent_capture_modes() {
+        // Or-pattern where all alternatives borrow the same way is still
+        // rejected — SSF-07 blanket-rejects or-pattern match arms before
+        // capture-mode consistency is even considered.
         let src = r#"
             enum Flag { A, B, C }
             fn main() {
@@ -8137,12 +8252,23 @@ mod tests {
                 return;
             }
         "#;
-        typecheck_source(src).expect("or-pattern match should typecheck");
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
+        assert!(
+            err.message.contains("or-pattern match arms"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
-    fn match_inconsistent_or_pattern_capture_rejects() {
-        // One arm binds with ref, the other without — must be same shape.
+    fn match_or_pattern_rejects_before_capture_mode_conflict_is_checked() {
+        // One arm binds with ref, the other without. Before SSF-07's
+        // blanket or-pattern rejection this failed on capture-mode
+        // inconsistency instead; now the blanket rejection fires first,
+        // regardless of whether the alternatives would have been internally
+        // consistent. The underlying capture-mode-conflict check itself is
+        // still exercised via `if let`, which does not route through this
+        // match-arm entry point.
         let src = r#"
             enum Wrap { Val(i32) }
             fn make() -> Wrap { return Wrap::Val(1); }
@@ -8154,12 +8280,9 @@ mod tests {
                 return;
             }
         "#;
-        let err =
-            typecheck_source(src).expect_err("inconsistent or-pattern capture modes must reject");
+        let err = typecheck_source(src).expect_err("or-pattern match arm must be rejected");
         assert!(
-            err.message.contains("same")
-                || err.message.contains("capture")
-                || err.message.contains("alternative"),
+            err.message.contains("or-pattern match arms"),
             "unexpected error: {}",
             err.message
         );
@@ -9684,14 +9807,15 @@ fn check_loop_expr_stmt(
                             .to_string(),
                 });
             }
-            if default.is_empty() {
-                return Err(FrontendError {
-                    pos: 0,
-                    message: "match requires default arm '_'".to_string(),
-                });
-            }
-
             // M9.5 Wave D / M9.7 / M9.8: BindingPlan pipeline + path-based ownership.
+            // The per-arm loop (which rejects any or-pattern arm deterministically,
+            // regardless of wildcard presence) must run before the default-arm
+            // check below, mirroring the ordering used by the statement- and
+            // expression-form match handlers. Checking `default.is_empty()` first
+            // would let a naive "no `_` arm at all" rejection pre-empt the
+            // or-pattern diagnostic for an or-pattern match with no wildcard arm,
+            // breaking the promise that or-pattern rejection is uniform regardless
+            // of wildcard presence (SSF-07).
             let mut arm_plans: Vec<BindingPlan> = Vec::new();
             for arm in arms {
                 let (plan, mut arm_env) =
@@ -9727,22 +9851,51 @@ fn check_loop_expr_stmt(
             }
             apply_plans_to_scrutinee(*scrutinee, &arm_plans, arena, env);
 
-            let mut def_env = env.clone();
-            def_env.push_scope();
-            for stmt in default {
-                check_loop_expr_stmt(
-                    *stmt,
+            if default.is_empty() {
+                // Mirror the plain statement-form match handler: an empty
+                // default arm is only a hard rejection when the covered sum-
+                // family variants aren't already exhaustive. A naive
+                // "default.is_empty() => reject" check here (as opposed to
+                // this exhaustiveness-aware one) would wrongly reject an
+                // exhaustive enum/Option/Result match with no wildcard arm
+                // inside a value-producing loop, even though the ordinary
+                // statement-form match already admits the identical program
+                // (SSF-07 review finding).
+                match missing_exhaustive_sum_variants(
+                    &st,
+                    arms.iter().map(|arm| (&arm.pat, arm.guard)),
                     arena,
-                    &mut def_env,
-                    table,
-                    record_table,
                     adt_table,
-                    ret_ty.clone(),
-                    loop_stack,
-                    impl_list,
-                )?;
+                )? {
+                    Some((family_label, missing)) if !missing.is_empty() => {
+                        return Err(non_exhaustive_match_error(&family_label, &missing, false)?)
+                    }
+                    Some(_) => {}
+                    None => {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: "match requires default arm '_'".to_string(),
+                        });
+                    }
+                }
+            } else {
+                let mut def_env = env.clone();
+                def_env.push_scope();
+                for stmt in default {
+                    check_loop_expr_stmt(
+                        *stmt,
+                        arena,
+                        &mut def_env,
+                        table,
+                        record_table,
+                        adt_table,
+                        ret_ty.clone(),
+                        loop_stack,
+                        impl_list,
+                    )?;
+                }
+                def_env.pop_scope();
             }
-            def_env.pop_scope();
             Ok(())
         }
         _ => check_stmt(
@@ -12379,6 +12532,18 @@ pub(crate) fn build_and_apply_match_plan(
     arena: &AstArena,
     adt_table: &AdtTable,
 ) -> Result<(BindingPlan, ScopeEnv), FrontendError> {
+    // SSF-07: or-pattern match arms (`A | B`) have no lowering implementation
+    // for any scrutinee family. Rather than let this typecheck successfully
+    // and fail later at the lowering phase with a family-specific diagnostic,
+    // reject deterministically here so `match` never accepts a form it cannot
+    // produce a runnable artifact for. `if let` is unaffected — it calls
+    // `build_match_pattern_plan` directly, not this match-arm entry point.
+    if matches!(pattern, MatchPattern::Or(_)) {
+        return Err(FrontendError {
+            pos: 0,
+            message: "or-pattern match arms ('A | B') are not supported; split into separate arms with identical bodies instead".to_string(),
+        });
+    }
     let mut plan = BindingPlan::default();
     build_match_pattern_plan(
         pattern,

@@ -6394,10 +6394,14 @@ fn lower_stmt(
                         };
 
                         let lit_reg = alloc(&mut ctx.next_reg);
-                        ctx.instrs.push(IrInstr::LoadI32 {
-                            dst: lit_reg,
-                            val: expect_int_match_pattern(&arm.pat)?,
-                        });
+                        match expect_int_match_pattern(&arm.pat, &scr_ty)? {
+                            IntMatchLiteral::I32(val) => {
+                                ctx.instrs.push(IrInstr::LoadI32 { dst: lit_reg, val })
+                            }
+                            IntMatchLiteral::U32(val) => {
+                                ctx.instrs.push(IrInstr::LoadU32 { dst: lit_reg, val })
+                            }
+                        }
                         let cmp_reg = alloc(&mut ctx.next_reg);
                         ctx.instrs.push(IrInstr::CmpEq {
                             dst: cmp_reg,
@@ -7135,14 +7139,40 @@ fn expect_quad_match_pattern(pat: &MatchPattern) -> Result<QuadVal, FrontendErro
     }
 }
 
-fn expect_int_match_pattern(pat: &MatchPattern) -> Result<i32, FrontendError> {
+/// A lowered integer match-pattern literal, carrying the scrutinee's own
+/// runtime type so callers emit `LoadI32`/`LoadU32` consistently with the
+/// scrutinee register's actual runtime type instead of always assuming i32.
+enum IntMatchLiteral {
+    I32(i32),
+    U32(u32),
+}
+
+fn expect_int_match_pattern(
+    pat: &MatchPattern,
+    scrutinee_ty: &Type,
+) -> Result<IntMatchLiteral, FrontendError> {
     match pat {
-        MatchPattern::IntRange(range) if range.start == range.end => {
-            i32::try_from(range.start).map_err(|_| FrontendError {
-                pos: 0,
-                message: "integer match pattern literal is outside i32 range".to_string(),
-            })
+        MatchPattern::IntRange(range) if range.start == range.end && range.inclusive => {
+            if matches!(scrutinee_ty, Type::U32) {
+                u32::try_from(range.start)
+                    .map(IntMatchLiteral::U32)
+                    .map_err(|_| FrontendError {
+                        pos: 0,
+                        message: "integer match pattern literal is outside u32 range".to_string(),
+                    })
+            } else {
+                i32::try_from(range.start)
+                    .map(IntMatchLiteral::I32)
+                    .map_err(|_| FrontendError {
+                        pos: 0,
+                        message: "integer match pattern literal is outside i32 range".to_string(),
+                    })
+            }
         }
+        // Exclusive equal-bound ranges (`5..5`) are semantically empty and must
+        // never be treated as the literal `5`; route them to the same
+        // deterministic "not yet implemented" rejection as every other range
+        // form lowering does not support, rather than silently miscompiling.
         MatchPattern::IntRange(_) => Err(FrontendError {
             pos: 0,
             message: "integer range match pattern lowering is not yet implemented in the IR backend"
@@ -8038,6 +8068,91 @@ fn lower_loop_expr_stmt(
                         });
                     }
                 }
+                Type::I32 | Type::U32 => {
+                    for (i, arm) in arms.iter().enumerate() {
+                        if i > 0 {
+                            out.push(IrInstr::Label {
+                                name: format!("loop_match_{}_check_{}", id, i),
+                            });
+                        }
+                        let next_label = if i + 1 < arms.len() {
+                            format!("loop_match_{}_check_{}", id, i + 1)
+                        } else {
+                            default_label.clone()
+                        };
+
+                        let lit_reg = alloc(next);
+                        match expect_int_match_pattern(&arm.pat, &scr_ty)? {
+                            IntMatchLiteral::I32(val) => {
+                                out.push(IrInstr::LoadI32 { dst: lit_reg, val })
+                            }
+                            IntMatchLiteral::U32(val) => {
+                                out.push(IrInstr::LoadU32 { dst: lit_reg, val })
+                            }
+                        }
+                        let cmp_reg = alloc(next);
+                        out.push(IrInstr::CmpEq {
+                            dst: cmp_reg,
+                            lhs: scr_reg,
+                            rhs: lit_reg,
+                        });
+                        out.push(IrInstr::JmpIf {
+                            cond: cmp_reg,
+                            label: arm_labels[i].clone(),
+                        });
+                        out.push(IrInstr::Jmp {
+                            label: next_label.clone(),
+                        });
+
+                        out.push(IrInstr::Label {
+                            name: arm_labels[i].clone(),
+                        });
+                        let mut arm_env = env.clone();
+                        arm_env.push_scope();
+                        if let Some(guard_reg) = lower_match_guard(
+                            arm.guard,
+                            arena,
+                            next,
+                            out,
+                            &arm_env,
+                            loop_stack,
+                            fn_table,
+                            record_table,
+                            adt_table,
+                            ret_ty.clone(),
+                            closure_state,
+                        )? {
+                            let guarded_body_label = format!("loop_match_{}_body_{}", id, i);
+                            out.push(IrInstr::JmpIf {
+                                cond: guard_reg,
+                                label: guarded_body_label.clone(),
+                            });
+                            out.push(IrInstr::Jmp { label: next_label });
+                            out.push(IrInstr::Label {
+                                name: guarded_body_label,
+                            });
+                        }
+                        for stmt in &arm.block {
+                            lower_loop_expr_stmt(
+                                *stmt,
+                                arena,
+                                next,
+                                out,
+                                &mut arm_env,
+                                loop_stack,
+                                fn_table,
+                                record_table,
+                                adt_table,
+                                ret_ty.clone(),
+                                closure_state,
+                            )?;
+                        }
+                        arm_env.pop_scope();
+                        out.push(IrInstr::Jmp {
+                            label: end_label.clone(),
+                        });
+                    }
+                }
                 Type::Adt(_) | Type::Option(_) | Type::Result(_, _) => {
                     let family = resolve_match_family_for_lowering(&scr_ty, arena, adt_table)?
                         .expect("sum scrutinee family should resolve");
@@ -8402,10 +8517,10 @@ fn lower_match_expr(
                 };
 
                 let lit_reg = alloc(next);
-                out.push(IrInstr::LoadI32 {
-                    dst: lit_reg,
-                    val: expect_int_match_pattern(&arm.pat)?,
-                });
+                match expect_int_match_pattern(&arm.pat, &scr_ty)? {
+                    IntMatchLiteral::I32(val) => out.push(IrInstr::LoadI32 { dst: lit_reg, val }),
+                    IntMatchLiteral::U32(val) => out.push(IrInstr::LoadU32 { dst: lit_reg, val }),
+                }
                 let cmp_reg = alloc(next);
                 out.push(IrInstr::CmpEq {
                     dst: cmp_reg,

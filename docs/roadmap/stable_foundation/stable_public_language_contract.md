@@ -2,8 +2,27 @@
 
 Status: SSF-01 evidence and closure record
 Normative contract: `docs/spec/foundation_source_profile_v1.md`
-Contract identifier: `semantic.foundation.source/1.0`
+Contract identifier: `semantic.foundation.source/1.2`
 Base commit: `4de0b6eb1cd5d8e5dc37989e9b9b95a5a8e07e57`
+
+The contract identifier above tracks the current version of the normative
+profile document; it is not frozen to the base commit, which records only
+when the underlying SSF-01 evidence was gathered. SSF-07 first bumped the
+profile to `1.1` (a backward-compatible clarification: no grammar,
+semantic, or rejection-behavior change from `1.0`), then to `1.2` after its
+own review process found and fixed three real phase-consistency defects in
+the `match`/pattern boundary: `u32` match moved from always-broken
+(runtime trap or lowering failure on every arm) to fully Included and
+executable across its whole domain; the exclusive equal-bound range
+pattern (`5..5`) moved from a silent miscompilation to a deterministic
+lowering-phase rejection; and or-pattern match arms moved from a
+phase-inconsistent, family-dependent lowering failure to one deterministic
+typecheck-time rejection. See the normative profile's version-`1.2` note
+for the full account. Neither bump changed the base commit's role — it
+remains SSF-01's original gathering anchor. The evidence that actually
+governs this contract's standing is whatever the mapped test/fixture files
+in the table below currently contain, per the normative profile's
+Qualification rule, not a frozen historical snapshot.
 
 ## Decision
 
@@ -20,7 +39,7 @@ is implemented by this phase.
 | Functions, entrypoint, calls, `let`, `const`, return | Included stable candidate | `tests/practical_surface_execution_qualification.rs`, `tests/call_shape_surface_qualification.rs`, `tests/return_assert_surface_qualification.rs` | arity/type/unknown-call and return diagnostics in the same suites |
 | Mutable bindings and assignment | Included stable candidate | `tests/mutable_binding_qualification.rs`, application-completeness benchmark | const/type/unknown-target negatives |
 | `if`/`else`, blocks, value expressions | Included stable candidate | `tests/pcc1_control_flow_gate.rs`, `tests/pcc1_control_flow_lowering_stability.rs`, practical execution suite | branch/result mismatch diagnostics |
-| `match`, guards, patterns | Included stable candidate | `tests/match_surface_qualification.rs`, PCC5/PCC6 acceptance | exhaustiveness, guard type, pattern-family and arm-type negatives |
+| `match`, guards, patterns | Included stable candidate | `tests/match_surface_qualification.rs` (including full-domain `u32` literal/range positive coverage), PCC5/PCC6 acceptance | exhaustiveness, guard type, pattern-family and arm-type negatives; check-phase or-pattern rejection across all six admitted scrutinee families with and without a wildcard arm; compile-phase range-lowering rejection covering multi-value, exclusive-singleton, and oversized-singleton forms for both `i32` and `u32`; and a check-phase suffixed-range-bound and negative-bound rejection fixture |
 | `while`, `loop`, range/sequence `for`, exits | Included stable candidate | PCC1 suites, PCC7 sequence acceptance, application benchmark | outside-loop and unsupported nested-form negatives |
 | Records | Included stable candidate | `tests/pcc4_records_acceptance.rs`, record copy-with qualification, Gate 1 programs | PCC4 and copy-with diagnostics |
 | Tuples | Included stable candidate | IR lowering, tuple ownership golden, runtime ownership E2E | overlap/move/path negatives |
@@ -78,7 +97,7 @@ working experimental research merely to keep the stable contour small.
 
 ## Version and compatibility relationship
 
-- source contract: `semantic.foundation.source/1.0`;
+- source contract: `semantic.foundation.source/1.2`;
 - parser acceptance envelope: `semantic.foundation` / `1.0`;
 - SemCode: capability-derived supported header, currently `SEMCODE0` through
   `SEMCOD14`, never chosen solely from profile permission;
@@ -103,7 +122,7 @@ Skipped checks cannot count as pass.
 
 SSF-02 may start only after:
 
-1. `semantic.foundation.source/1.0` and this evidence map are reviewed and
+1. `semantic.foundation.source/1.2` and this evidence map are reviewed and
    merged;
 2. all included rows remain green through exact-head CI;
 3. experimental/deferred rows remain explicitly unpromoted in current-facing

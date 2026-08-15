@@ -82,6 +82,38 @@ fn assert_check_rejects(rel: &str, needle: &str) {
     );
 }
 
+fn assert_compile_rejects(rel: &str, needle: &str) {
+    let path = repo_path(rel);
+    cli_ok(
+        vec!["check".to_string(), path.clone()],
+        &format!("smc check for {path}"),
+    );
+
+    let temp_dir = mk_temp_dir("match_surface_qualification_compile_reject");
+    let out = temp_dir.join(
+        Path::new(rel)
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new("out.smc")),
+    );
+    let out_arg = out.to_string_lossy().replace('\\', "/");
+
+    let err = cli_err(
+        vec![
+            "compile".to_string(),
+            path.clone(),
+            "-o".to_string(),
+            out_arg.clone(),
+        ],
+        &format!("smc compile for {path}"),
+    );
+    assert!(
+        err.contains(needle),
+        "expected lowering diagnostic containing '{needle}' for {rel}, got: {err}"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
 #[test]
 fn match_surface_positive_fixtures_run_end_to_end() {
     let positive_cases = [
@@ -90,6 +122,11 @@ fn match_surface_positive_fixtures_run_end_to_end() {
         "examples/qualification/match_surface/positive_option_result_match/src/main.sm",
         "examples/qualification/match_surface/positive_match_guard_bool/src/main.sm",
         "examples/qualification/match_surface/positive_nested_match/src/main.sm",
+        "examples/qualification/match_surface/positive_i32_singleton_range_match/src/main.sm",
+        "examples/qualification/match_surface/positive_i32_plain_literal_match/src/main.sm",
+        "examples/qualification/match_surface/positive_u32_match_full_domain/src/main.sm",
+        "examples/qualification/match_surface/positive_int_match_inside_value_producing_loop/src/main.sm",
+        "examples/qualification/match_surface/positive_exhaustive_enum_match_inside_value_producing_loop/src/main.sm",
     ];
 
     for rel in positive_cases {
@@ -116,9 +153,95 @@ fn match_surface_negative_fixtures_reject_deterministically() {
             "examples/qualification/match_surface/negative_match_result_type_mismatch/src/main.sm",
             "match expression branch type mismatch",
         ),
+        (
+            "examples/qualification/match_surface/negative_i32_range_pattern_suffixed_bound_rejected/src/main.sm",
+            "range pattern bound does not accept a type suffix; use a plain integer",
+        ),
+        (
+            "examples/qualification/match_surface/negative_i32_negative_bound_range_pattern_rejected/src/main.sm",
+            "expected match pattern",
+        ),
+        // or-patterns: SSF-07 rejects `A | B` match arms deterministically at
+        // typecheck, before lowering, with one unified diagnostic regardless
+        // of scrutinee family or wildcard presence. See
+        // build_and_apply_match_plan in crates/sm-front/src/typecheck.rs.
+        (
+            "examples/qualification/match_surface/negative_quad_or_pattern_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
+        (
+            "examples/qualification/match_surface/negative_i32_or_pattern_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
+        (
+            "examples/qualification/match_surface/negative_u32_or_pattern_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
+        (
+            "examples/qualification/match_surface/negative_enum_or_pattern_no_wildcard_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
+        (
+            "examples/qualification/match_surface/negative_enum_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
+        (
+            "examples/qualification/match_surface/negative_option_or_pattern_no_wildcard_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
+        (
+            "examples/qualification/match_surface/negative_option_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
+        (
+            "examples/qualification/match_surface/negative_result_or_pattern_no_wildcard_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
+        (
+            "examples/qualification/match_surface/negative_result_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
+            "or-pattern match arms ('A | B') are not supported",
+        ),
     ];
 
     for (rel, needle) in negative_cases {
         assert_check_rejects(rel, needle);
+    }
+}
+
+#[test]
+fn match_surface_range_lowering_rejection_fixtures_reject_at_compile_phase() {
+    let compile_reject_cases = [
+        (
+            "examples/qualification/match_surface/negative_i32_multivalue_range_lowering_rejected/src/main.sm",
+            "integer range match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_i32_exclusive_multivalue_range_lowering_rejected/src/main.sm",
+            "integer range match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_i32_exclusive_singleton_range_lowering_rejected/src/main.sm",
+            "integer range match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_i32_oversized_singleton_range_lowering_rejected/src/main.sm",
+            "integer match pattern literal is outside i32 range",
+        ),
+        (
+            "examples/qualification/match_surface/negative_u32_multivalue_range_lowering_rejected/src/main.sm",
+            "integer range match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_u32_exclusive_singleton_range_lowering_rejected/src/main.sm",
+            "integer range match pattern lowering is not yet implemented in the IR backend",
+        ),
+        (
+            "examples/qualification/match_surface/negative_u32_oversized_singleton_range_lowering_rejected/src/main.sm",
+            "integer match pattern literal is outside u32 range",
+        ),
+    ];
+
+    for (rel, needle) in compile_reject_cases {
+        assert_compile_rejects(rel, needle);
     }
 }
