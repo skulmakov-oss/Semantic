@@ -105,10 +105,10 @@ jobs:
         with:
           toolchain: 1.97.1
       - uses: Swatinem/rust-cache@v2
-      - name: Test root targets (std)
-        run: cargo test --all-targets --quiet
-      - name: Test workspace packages (std)
-        run: cargo test --workspace --quiet
+      - name: Test workspace (all targets, std)
+        run: cargo test --workspace --all-targets --quiet
+      - name: Test workspace doctests (std)
+        run: cargo test --workspace --doc --quiet
 
   check-no-std:
     runs-on: ubuntu-latest
