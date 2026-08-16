@@ -3,3 +3,4 @@
 tests/golden_snapshots/** text eol=lf
 tests/fixtures/ui_frame_inspection/** text eol=lf
 tests/fixtures/hub/** text eol=lf
+examples/canonical/** text eol=lf
