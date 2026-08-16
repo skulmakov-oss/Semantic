@@ -72,6 +72,23 @@ Current ownership-specific structural checks for ownership transport include:
 - structural admission for valid `Borrow(Field)` and `Write(Field)` payloads
 - header/capability consistency for ownership transport
 
+## Canonical Operand Value Domains
+
+Operand shape validity is not only "a byte is present" — for fields with a
+fixed value domain, the byte must also be the canonical encoding for that
+domain. The verifier enforces:
+
+- boolean literal operands (`LOAD_BOOL`): must be `0` (false) or `1` (true)
+- quad literal operands (`LOAD_Q`): must be `0..=3` (the four-value quad
+  domain)
+- presence-flag operands (`CALL` and `CLOSURE_CALL` destination-present,
+  `RET` source-present): must be `0` or `1`
+
+A byte outside the canonical domain for its field is rejected at admission
+(`OperandOutOfBounds`), not normalized downstream. This narrows the
+previously admitted surface: byte values outside these domains that an
+earlier verifier accepted are no longer admissible.
+
 ## Contract Rule
 
 Standard execution uses the chain:
