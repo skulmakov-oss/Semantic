@@ -620,12 +620,18 @@ fn decode_operands(
         Opcode::LoadQ => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            read_u8(code, cursor).map_err(|_| invalid("truncated quad literal"))?;
+            let literal = read_u8(code, cursor).map_err(|_| invalid("truncated quad literal"))?;
+            if literal > 3 {
+                return Err(invalid("non-canonical quad literal: must be 0..=3"));
+            }
         }
         Opcode::LoadBool => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            read_u8(code, cursor).map_err(|_| invalid("truncated bool literal"))?;
+            let literal = read_u8(code, cursor).map_err(|_| invalid("truncated bool literal"))?;
+            if literal > 1 {
+                return Err(invalid("non-canonical bool literal: must be 0 or 1"));
+            }
         }
         Opcode::LoadI32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
@@ -969,8 +975,14 @@ fn decode_operands(
             }
         }
         Opcode::ClosureCall => {
-            let has_dst =
-                read_u8(code, cursor).map_err(|_| invalid("truncated closure-call dst flag"))? != 0;
+            let has_dst_flag =
+                read_u8(code, cursor).map_err(|_| invalid("truncated closure-call dst flag"))?;
+            if has_dst_flag > 1 {
+                return Err(invalid(
+                    "non-canonical closure-call dst flag: must be 0 or 1",
+                ));
+            }
+            let has_dst = has_dst_flag != 0;
             if has_dst {
                 let dst = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure-call dst register"))?;
@@ -1060,7 +1072,13 @@ fn decode_operands(
             refs.jump_targets.push(target as usize);
         }
         Opcode::Call => {
-            read_u8(code, cursor).map_err(|_| invalid("truncated call destination flag"))?;
+            let has_dst_flag =
+                read_u8(code, cursor).map_err(|_| invalid("truncated call destination flag"))?;
+            if has_dst_flag > 1 {
+                return Err(invalid(
+                    "non-canonical call destination flag: must be 0 or 1",
+                ));
+            }
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated call dst register"))?;
             mark_reg(dst);
@@ -1137,6 +1155,9 @@ fn decode_operands(
         }
         Opcode::Ret => {
             let has_src = read_u8(code, cursor).map_err(|_| invalid("truncated return flag"))?;
+            if has_src > 1 {
+                return Err(invalid("non-canonical return flag: must be 0 or 1"));
+            }
             if has_src != 0 {
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated return src register"))?;
@@ -1767,6 +1788,114 @@ mod tests {
         assert_eq!(
             report.diagnostics[0].code,
             VerificationCode::InvalidRegisterReference
+        );
+    }
+
+    // FA-07-001 (#1741): LOAD_BOOL literal byte must be canonical 0/1. A byte
+    // outside that domain must be rejected at admission, not silently
+    // normalized to `true` by the VM's `!= 0` check.
+    #[test]
+    fn verifier_rejects_non_canonical_bool_literal() {
+        let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
+            .expect("compile");
+        let opcode_pos = find_opcode(&bytes, Opcode::LoadBool.byte()).expect("load bool");
+        let literal_pos = opcode_pos + 1 + 2;
+        bytes[literal_pos] = 0xff;
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OperandOutOfBounds
+        );
+    }
+
+    // FA-07-002 (#1742): LOAD_Q literal byte must be canonical 0..=3. A byte
+    // outside that domain must be rejected at admission instead of receiving
+    // a Verified token and only failing later in the VM as BadFormat.
+    #[test]
+    fn verifier_rejects_non_canonical_quad_literal() {
+        // No let-binding: a named local would intern a string, and a short
+        // string's length byte can coincidentally equal LoadQ's opcode byte
+        // (0x01), making a naive byte scan land on the wrong offset.
+        let mut bytes =
+            compile_program_to_semcode("fn get() -> quad { return T; } fn main() { return; }")
+                .expect("compile");
+        let opcode_pos = find_opcode(&bytes, Opcode::LoadQ.byte()).expect("load q");
+        let literal_pos = opcode_pos + 1 + 2;
+        bytes[literal_pos] = 0xff;
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OperandOutOfBounds
+        );
+    }
+
+    // FA-07-003 (#1743): CALL's destination-present flag must be canonical
+    // 0/1. The verifier currently reads and discards this byte entirely.
+    #[test]
+    fn verifier_rejects_non_canonical_call_dst_flag() {
+        let mut bytes =
+            compile_program_to_semcode("fn helper() { return; } fn main() { helper(); return; }")
+                .expect("compile");
+        let opcode_pos = find_opcode(&bytes, Opcode::Call.byte()).expect("call");
+        bytes[opcode_pos + 1] = 0xff;
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OperandOutOfBounds
+        );
+    }
+
+    // FA-07-003 (#1743): CLOSURE_CALL's destination-present flag must be
+    // canonical 0/1, not "any nonzero byte is true".
+    #[test]
+    fn verifier_rejects_non_canonical_closure_call_dst_flag() {
+        let mut bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "helper".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::MakeClosure {
+                            dst: 0,
+                            name: "helper".to_string(),
+                            captures: Vec::new(),
+                        },
+                        IrInstr::ClosureCall {
+                            dst: None,
+                            closure: 0,
+                            arg: 0,
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        let opcode_pos = find_opcode(&bytes, Opcode::ClosureCall.byte()).expect("closure call");
+        bytes[opcode_pos + 1] = 0xff;
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OperandOutOfBounds
+        );
+    }
+
+    // FA-07-003 (#1743): RET's source-present flag must be canonical 0/1.
+    #[test]
+    fn verifier_rejects_non_canonical_ret_src_flag() {
+        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        let opcode_pos = find_opcode(&bytes, Opcode::Ret.byte()).expect("ret");
+        bytes[opcode_pos + 1] = 0xff;
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OperandOutOfBounds
         );
     }
 
