@@ -116,9 +116,11 @@ SEMANTIC admission:
   presence/count-controlled byte lengths, evaluated to determine only
   whether a complete instruction stream exists at all
 - semantic admission: canonical literal value domains (`LOAD_Q`,
-  `LOAD_BOOL`) and canonical presence-flag domains (`CALL`, `CLOSURE_CALL`,
-  `RET`), which remain a separate, later concern applied only to whichever
-  single reading admission actually accepts
+  `LOAD_BOOL`), canonical presence-flag domains (`CALL`, `CLOSURE_CALL`,
+  `RET`), and canonical arity/cardinality domains (`MAKE_TUPLE` arity
+  `>= 2`, `MAKE_RECORD` slot count `>= 1`), which remain a separate, later
+  concern applied only to whichever single reading admission actually
+  accepts
 
 The alternative reading only needs to be structurally complete to count as
 a genuine competing interpretation - a non-canonical operand value (for

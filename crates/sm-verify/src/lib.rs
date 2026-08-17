@@ -684,9 +684,21 @@ fn verify_function_code(
 ///   the flag. This is what determines whether a byte range decodes as a
 ///   complete instruction stream at all.
 /// - SEMANTIC ADMISSION: canonical literal value domains (`LOAD_Q`,
-///   `LOAD_BOOL`) and canonical presence-flag domains (`CALL`,
-///   `CLOSURE_CALL`, `RET`) - applied only when `enforce_canonical_domains`
-///   is `true`.
+///   `LOAD_BOOL`), canonical presence-flag domains (`CALL`,
+///   `CLOSURE_CALL`, `RET`), and canonical arity/cardinality domains
+///   (`MAKE_TUPLE` arity `>= 2`, `MAKE_RECORD` slot count `>= 1`) - applied
+///   only when `enforce_canonical_domains` is `true`. In every one of these
+///   cases the count or flag byte itself is read unconditionally and always
+///   determines how many further operand bytes follow (there is no
+///   width-affecting difference between a canonical and non-canonical
+///   value), so disabling this enforcement never changes byte-shape
+///   consumption - only whether an out-of-domain value is rejected.
+///
+/// Every other rejection in this function's match arms is a truncation /
+/// missing-bytes error from a failed `read_*` call - i.e. genuinely
+/// structural (unknown opcode is rejected by the caller before this
+/// function is even entered; every remaining path here fails only on
+/// missing/truncated operand bytes).
 ///
 /// Normal verifier admission (the real instruction-stream walk in
 /// `verify_function_code`) must enforce both, so it passes `true`. The
@@ -805,7 +817,7 @@ fn decode_operands(
             mark_reg(dst);
             let count =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple arity"))? as usize;
-            if count < 2 {
+            if enforce_canonical_domains && count < 2 {
                 return Err(invalid("tuple literal arity must be at least 2"));
             }
             for _ in 0..count {
@@ -825,7 +837,7 @@ fn decode_operands(
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated record slot count"))?
                 as usize;
-            if count == 0 {
+            if enforce_canonical_domains && count == 0 {
                 return Err(invalid("record literal must encode at least one slot"));
             }
             for _ in 0..count {
@@ -2201,6 +2213,56 @@ mod tests {
             "must be patching LoadBool's literal byte"
         );
         bytes[literal_pos] = 0xff;
+
+        let report = verify_semcode(&bytes).expect_err("must reject ambiguous framing");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AmbiguousInstructionFraming
+        );
+    }
+
+    // #1731 review follow-up (round 2): `MAKE_TUPLE`'s arity-`>=2` check and
+    // `MAKE_RECORD`'s slot-count-`>=1` check are cardinality/value-domain
+    // constraints, not byte-shape constraints - the count field itself is
+    // always read unconditionally and always determines how many further
+    // item-register bytes follow, regardless of whether that count value is
+    // semantically canonical. They must be gated on
+    // `enforce_canonical_domains` exactly like the literal/flag checks
+    // above, or the same silent-ambiguity gap reopens for any alternative
+    // reading built around a too-small tuple/record.
+    //
+    // Fixture: the exact #1731 TupleGet collision, followed by a genuine
+    // `MakeTuple{dst:0, items:[5]}` - arity 1, non-canonical (`< 2`) but
+    // fully shape-complete (the count field legitimately says "one item
+    // follows", and one item follows).
+    #[test]
+    fn verifier_rejects_ambiguous_framing_with_non_canonical_maketuple_arity() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::TupleGet {
+                        dst: 0x4742,
+                        src: 0x0030,
+                        index: 0x6600,
+                    },
+                    IrInstr::MakeTuple {
+                        dst: 0,
+                        items: vec![5],
+                    },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let env = &functions[0];
+        assert!(env.has_debug_section);
+        assert_eq!(&env.code_slice[2..6], b"DBG0");
 
         let report = verify_semcode(&bytes).expect_err("must reject ambiguous framing");
         assert_eq!(
