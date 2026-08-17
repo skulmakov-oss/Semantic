@@ -1,10 +1,11 @@
 use super::*;
 use crate::semcode_format::{
     write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC10,
-    MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17, MAGIC2, MAGIC3, MAGIC4, MAGIC5,
-    MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
-    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
+    MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC3, MAGIC4,
+    MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
+    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+    OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
+    OWNERSHIP_SECTION_TAG,
 };
 use sm_front::types::{
     AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
@@ -1079,7 +1080,10 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // require_ownership_section: whenever the chosen header includes CAP_OWNERSHIP_PATHS,
     // every function must have an OWN0 section (even if empty) so the verifier check passes.
     let require_ownership_section;
-    if has_v17_application_instr(funcs) {
+    if has_v18_qtruth_instr(funcs) {
+        out.extend_from_slice(&MAGIC18);
+        require_ownership_section = true;
+    } else if has_v17_application_instr(funcs) {
         out.extend_from_slice(&MAGIC17);
         require_ownership_section = true;
     } else if has_v16_stdout_instr(funcs) {
@@ -1889,6 +1893,29 @@ fn has_v17_application_instr(funcs: &[IrFunction]) -> bool {
                             | "fs_write_text"
                             | "time_duration_ms"
                     )
+            )
+        })
+    })
+}
+
+/// #1732 (FA-05-002): QTruth is the only IR-level trigger whose emitted
+/// opcodes (`Opcode::QTruthAnd`/`QTruthOr`/`QTruthNot`/`QTruthImpl`) have a
+/// non-default `Opcode::minimum_semcode_revision()` (see sm-format). This
+/// predicate exists to promote the header at the IR level, mirroring every
+/// other `has_vN_*_instr` promotion in this file; the actual minimum
+/// revision number itself lives in exactly one place, sm-format's
+/// `Opcode::minimum_semcode_revision`, which `sm-verify` uses independently
+/// to enforce admission - this function only decides *whether* to promote,
+/// not *what revision* QTruth requires.
+fn has_v18_qtruth_instr(funcs: &[IrFunction]) -> bool {
+    funcs.iter().any(|f| {
+        f.instrs.iter().any(|i| {
+            matches!(
+                i,
+                IrInstr::QTruthAnd { .. }
+                    | IrInstr::QTruthOr { .. }
+                    | IrInstr::QTruthNot { .. }
+                    | IrInstr::QTruthImpl { .. }
             )
         })
     })

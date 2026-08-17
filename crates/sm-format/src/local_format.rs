@@ -16,6 +16,7 @@ pub const MAGIC14: [u8; 8] = *b"SEMCOD14";
 pub const MAGIC15: [u8; 8] = *b"SEMCOD15";
 pub const MAGIC16: [u8; 8] = *b"SEMCOD16";
 pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
+pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -337,11 +338,24 @@ pub const HEADER_V17: SemcodeHeaderSpec = SemcodeHeaderSpec {
         | CAP_TIME_DURATION,
 };
 
+/// #1732 (FA-05-002): the first header revision whose contract actually
+/// includes the QTruth opcode family (`QTruthAnd`/`QTruthOr`/`QTruthNot`/
+/// `QTruthImpl`, `0x17..0x1A`). QTruth needs no new capability bit - it
+/// carries forward `HEADER_V17`'s capability set unchanged - because the
+/// gap this closes is a missing *version identity* gate, not a missing
+/// capability (see `Opcode::minimum_semcode_revision`).
+pub const HEADER_V18: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC18,
+    epoch: 0,
+    rev: 19,
+    capabilities: HEADER_V17.capabilities,
+};
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
-        HEADER_V15, HEADER_V16, HEADER_V17,
+        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18,
     ]
 }
 
@@ -530,6 +544,41 @@ impl Opcode {
             x if x == Self::EventPost as u8 => Ok(Self::EventPost),
             x if x == Self::ClockRead as u8 => Ok(Self::ClockRead),
             _ => Err(SemcodeFormatError::UnknownOpcode(v)),
+        }
+    }
+
+    /// The minimum SemCode header revision (`SemcodeHeaderSpec::rev`) whose
+    /// contract this opcode's semantics belong to (see #1732 / FA-05-002).
+    ///
+    /// This is the single, format-owned authority binding executable opcode
+    /// vocabulary to artifact header identity: `sm-verify` uses it to
+    /// reject an opcode admitted under a header older than its minimum
+    /// revision, and `sm-ir`'s header selection promotes to a header
+    /// whose revision covers every opcode a program actually emits.
+    ///
+    /// Defaults to `1` (`SEMCODE0`, the baseline header) for every opcode.
+    /// Only opcode families with a *provable* later introduction revision -
+    /// backed by an actual repository decision record, not by commit date
+    /// alone - get a non-default entry here; this function must not imply
+    /// stronger historical knowledge than the repository has actually
+    /// established. Every opcode that is instead gated by a capability bit
+    /// (`decode_operands`'s `required_capabilities`) already has its
+    /// minimum header enforced through that existing, independent
+    /// mechanism - `header.capabilities` is a fixed, monotonically-growing
+    /// set per header revision - so this function is only load-bearing for
+    /// opcodes that carry no capability requirement at all.
+    ///
+    /// Currently this covers only the QTruth family
+    /// (`QTruthAnd`/`QTruthOr`/`QTruthNot`/`QTruthImpl`), whose minimum
+    /// revision is `19` (`SEMCOD18`) per the #1732 repair decision: no
+    /// existing header's documented contract ever claimed QTruth (it was
+    /// added in #1455 with zero header/capability change across the entire
+    /// rollout, #1455/#1457/#1459/#1461/#1463/#1465/#1471), so a new header
+    /// revision was introduced specifically to close the identity gap.
+    pub fn minimum_semcode_revision(self) -> u16 {
+        match self {
+            Self::QTruthAnd | Self::QTruthOr | Self::QTruthNot | Self::QTruthImpl => 19,
+            _ => 1,
         }
     }
 }

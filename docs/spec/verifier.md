@@ -40,6 +40,7 @@ Current SemCode verification checks include:
 - function and section integrity
 - canonical (unambiguous) instruction framing
 - opcode validity
+- opcode/header-revision consistency
 - operand shape validity
 - jump-target validity
 - string and debug reference validity
@@ -89,6 +90,48 @@ A byte outside the canonical domain for its field is rejected at admission
 (`OperandOutOfBounds`), not normalized downstream. This narrows the
 previously admitted surface: byte values outside these domains that an
 earlier verifier accepted are no longer admissible.
+
+## Opcode/Header-Revision Consistency
+
+Header identity constrains the executable opcode vocabulary (see
+`docs/spec/semcode.md`). For every decoded instruction, the verifier
+requires:
+
+```text
+artifact_header_revision >= opcode.minimum_semcode_revision()
+```
+
+before `VerifiedSemCode` is issued. `Opcode::minimum_semcode_revision` (in
+`sm-format`) is the single, format-owned authority for this comparison -
+`sm-verify` uses it directly for admission, and `sm-ir`'s header selection
+uses the same underlying opcode/feature relationship (through its own IR-
+level promotion predicates) to choose a header whose revision actually
+covers everything a program emits. There is no separate, independently-
+maintained opcode-to-revision table anywhere else.
+
+A violation rejects with `AmbiguousInstructionFraming`'s sibling code,
+`VerificationCode::OpcodeRequiresNewerHeader` - deliberately distinct from
+`CapabilityViolation`. The two checks address different failure modes:
+
+- `CapabilityViolation`: the artifact's header does not carry a capability
+  bit an opcode requires. Because each header revision's capability set is
+  fixed and cumulative, this check already transitively enforces a minimum
+  header for any capability-gated opcode.
+- `OpcodeRequiresNewerHeader`: the opcode requires no missing capability at
+  all - it is structurally valid and every capability it needs (if any) is
+  present - but the artifact's header revision predates the revision whose
+  contract actually admits this opcode's semantics. This is a version-
+  identity gap, not a capability gap, and only opcodes with no capability
+  bit at all need this check to be independently load-bearing (see #1732 /
+  FA-05-002).
+
+`Opcode::minimum_semcode_revision` defaults to the baseline revision (`1`,
+`SEMCODE0`) for every opcode. Only an opcode family with a *provable* later
+introduction revision - backed by an actual repository decision record, not
+by commit date alone - gets a non-default entry; the function must not
+imply stronger historical knowledge than the repository has actually
+established. Currently this covers only the `QTruth` family (minimum
+revision `19`, `SEMCOD18`).
 
 ## Canonical Instruction Framing
 
