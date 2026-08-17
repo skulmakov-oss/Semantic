@@ -8,6 +8,15 @@ function Assert-Success {
     }
 }
 
+# Shared with scripts/admission_guard.ps1: one authoritative fmt-check
+# mechanism, not two copies that can drift apart. See #1796 - bare
+# `cargo fmt --check` is not root-scoped (its actual default scope already
+# reaches the full local-package graph) and hits the same Windows
+# CreateProcess argument-length limit as `cargo fmt --all --check` once the
+# package set is large enough; it only happened to survive on CI's short
+# checkout path.
+. (Join-Path $PSScriptRoot "..\..\scripts\workspace_fmt_check.ps1")
+
 Write-Host "========================================="
 Write-Host "  7hell PCC Qualification Fast Gate      "
 Write-Host "========================================="
@@ -16,8 +25,12 @@ Write-Host ""
 # -----------------------------------------------------------------------------
 # Hell 1
 Write-Host "[ Hell 1 ] Workspace Health..." -ForegroundColor Cyan
-cargo fmt --check
-Assert-Success "cargo fmt failed"
+try {
+    Invoke-WorkspaceFmtCheck
+} catch {
+    Write-Host "FAIL: cargo fmt failed - $($_.Exception.Message)" -ForegroundColor Red
+    exit 1
+}
 cargo check --workspace --all-features
 Assert-Success "cargo check failed"
 Write-Host "PASS: Hell 1" -ForegroundColor Green
