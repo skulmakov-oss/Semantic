@@ -377,6 +377,46 @@ Current `SEMCOD12` format extension in this slice:
 Execution semantics for admitted ownership payload are specified separately in
 `runtime_ownership.md`.
 
+### Offset Arithmetic Must Stay Inside The Result Model
+
+Every cursor/length computation in the `sm-format` decoder
+(`local_format.rs`'s low-level readers, and `semcode_decode.rs`'s function
+`code_len` check and its `DBG0`/`OWN0` section tag-sniffs) that could
+produce an out-of-bounds slice uses `checked_add`, never a raw `+`. A fully
+attacker-controlled length field (function `code_len`, or a per-string
+`len` consumed from the string table) combined with an already-advanced
+cursor must never be able to wrap past `usize::MAX` and produce a false
+in-bounds result - on any target width, including 32-bit, where a `u32`
+length field can realistically overflow `usize` arithmetic. Loop trip
+counts (string/debug-symbol/ownership-path counts, and ownership
+component counts) never participate in this cursor arithmetic themselves -
+each loop iteration's individual field read is independently bounds-checked
+- so an oversized count cannot overflow anything; it only causes however
+many extra `read_*` calls the loop makes, each still subject to the same
+checked arithmetic.
+
+For the function `code_len` check specifically, an overflow is always
+treated as "the claimed length cannot possibly fit" and rejected with the
+same structural decode error (`DecodeError::TruncatedFunction`) the
+ordinary bounds check already produces; it is never silently wrapped,
+saturated, or ignored. The `DBG0`/`OWN0` tag-sniffs use the identical
+checked-arithmetic pattern, but for a different purpose: they are a
+lookahead probe for an *optional* section, not an accept/reject gate. A
+failed probe - whether from overflow, an ordinary out-of-bounds lookahead,
+or (the common case) simply because the function has no debug/ownership
+section - means "section absent," and decoding proceeds normally; it does
+not, by itself, produce a decode error. Genuine corruption of a section
+that IS present (a truncated count or entry once the tag has matched) is
+still caught deterministically by the ordinary `read_*` calls inside that
+section's parsing, same as everywhere else in this file. The checked
+arithmetic's job in the tag-sniff is narrower than in the `code_len` check:
+only to prevent the lookahead read itself from panicking, not to gate
+whether the artifact is accepted.
+
+Diagnostic-only offset values reported inside an already-failed read's
+error message (i.e. values that do not themselves gate acceptance) may
+saturate instead, since no accept/reject decision depends on them.
+
 ## Backward Compatibility Rule
 
 The following changes require a SemCode version review:

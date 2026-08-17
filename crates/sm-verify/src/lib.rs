@@ -2847,6 +2847,25 @@ mod tests {
         assert_eq!(report.diagnostics[0].code, VerificationCode::BadHeader);
     }
 
+    // #1736 (FA-05-006): before the sm-format checked-arithmetic repair, this
+    // exact artifact shape (a claimed function code length that overflows
+    // cursor arithmetic) could panic inside `decode_semcode_envelope` on a
+    // 32-bit target instead of surfacing as a `RejectReport` - i.e. the
+    // verifier boundary was not actually panic-safe against malformed input.
+    #[test]
+    fn verify_semcode_token_rejects_overflowing_code_length_without_panicking() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&sm_format::semcode_format::MAGIC0);
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(b"main");
+        bytes.extend_from_slice(&0xFFFFFFF0u32.to_le_bytes());
+        let report = verify_semcode_token(&bytes).expect_err("must reject, never panic");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::TruncatedFunction
+        );
+    }
+
     #[test]
     fn verified_semcode_token_keeps_original_bytes() {
         let src = "fn main() { return; }";
