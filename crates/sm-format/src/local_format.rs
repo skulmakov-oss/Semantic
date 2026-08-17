@@ -577,8 +577,93 @@ impl Opcode {
     /// revision was introduced specifically to close the identity gap.
     pub fn minimum_semcode_revision(self) -> u16 {
         match self {
+            // #1732 (FA-05-002): QTruth Belnap truth-table opcodes -
+            // independently provable later introduction (roadmap reservation
+            // docs, #1455, zero header/capability change across the entire
+            // rollout) with an explicit owner decision establishing SEMCOD18
+            // as the minimum revision. The only family with a non-default
+            // entry in this match.
             Self::QTruthAnd | Self::QTruthOr | Self::QTruthNot | Self::QTruthImpl => 19,
-            _ => 1,
+
+            // Baseline loads / constants
+            Self::LoadQ
+            | Self::LoadBool
+            | Self::LoadI32
+            | Self::LoadU32
+            | Self::LoadVar
+            | Self::StoreVar => 1,
+
+            // Baseline 32-bit integer arithmetic
+            Self::AddI32 | Self::SubI32 | Self::MulI32 | Self::DivI32 | Self::ModI32 => 1,
+
+            // Baseline quad/bool logic - the legacy lattice family QTruth
+            // sits right next to in the opcode byte layout, but is itself
+            // historically baseline (present since the original enum)
+            Self::QAnd
+            | Self::QOr
+            | Self::QNot
+            | Self::QImpl
+            | Self::BoolAnd
+            | Self::BoolOr
+            | Self::BoolNot => 1,
+
+            // Baseline comparisons
+            Self::CmpEq | Self::CmpNe | Self::CmpI32Lt | Self::CmpI32Le => 1,
+
+            // Baseline control flow / calls
+            Self::Jmp | Self::JmpIf | Self::Call | Self::Ret | Self::Assert => 1,
+
+            // Baseline tuple / record / ADT
+            Self::MakeTuple
+            | Self::TupleGet
+            | Self::MakeRecord
+            | Self::RecordGet
+            | Self::MakeAdt
+            | Self::AdtTag
+            | Self::AdtGet => 1,
+
+            // Text (capability-gated: CAP_TEXT_VALUES already transitively
+            // enforces the minimum header for these; listed explicitly only
+            // for match exhaustiveness)
+            Self::ConcatText | Self::LoadText => 1,
+
+            // f64 / fx (capability-gated: CAP_F64_MATH / CAP_FX_VALUES / CAP_FX_MATH)
+            Self::LoadF64
+            | Self::AddF64
+            | Self::SubF64
+            | Self::MulF64
+            | Self::DivF64
+            | Self::LoadFx
+            | Self::AddFx
+            | Self::SubFx
+            | Self::MulFx
+            | Self::DivFx => 1,
+
+            // Sequence (capability-gated: CAP_SEQUENCE_VALUES / CAP_SEQUENCE_ITERATION)
+            Self::MakeSequence
+            | Self::SequenceGet
+            | Self::SequenceLen
+            | Self::SequenceIsEmpty
+            | Self::SequenceContains
+            | Self::SequencePush
+            | Self::SequencePrepend
+            | Self::SequencePop => 1,
+
+            // Closures (capability-gated: CAP_CLOSURE_VALUES)
+            Self::MakeClosure | Self::ClosureCall => 1,
+
+            // Map (capability-gated: CAP_MAP_VALUES)
+            Self::MapEmpty | Self::MapContains | Self::MapGet | Self::MapSet => 1,
+
+            // PRNG (capability-gated: CAP_PRNG)
+            Self::RngSeed | Self::RngNextI32 => 1,
+
+            // Gate host-effect surface (capability-gated: CAP_GATE_SURFACE)
+            Self::GateRead | Self::GateWrite | Self::PulseEmit => 1,
+
+            // Host-boundary state/event/clock (capability-gated:
+            // CAP_STATE_QUERY / CAP_STATE_UPDATE / CAP_EVENT_POST / CAP_CLOCK_READ)
+            Self::StateQuery | Self::StateUpdate | Self::EventPost | Self::ClockRead => 1,
         }
     }
 }
