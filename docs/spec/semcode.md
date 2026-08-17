@@ -277,12 +277,17 @@ Discipline rules:
 ## Opcode Vocabulary And Header Identity
 
 SemCode header identity constrains the executable opcode vocabulary. Every
-opcode belongs to a minimum SemCode header revision (baseline, `SEMCODE0`,
-unless a specific opcode family is provably documented as introduced at a
-later revision). An opcode introduced after a header revision is
-non-canonical under an older header and must be rejected before
-`VerifiedSemCode` is issued, even if that opcode is structurally
-well-formed and requires no missing capability.
+`Opcode` variant is explicitly bound to a minimum SemCode header revision by
+`Opcode::minimum_semcode_revision()`. Variants established as baseline are
+explicitly assigned revision `1` (`SEMCODE0`); a family with repository-backed
+evidence for a later semantic introduction is explicitly assigned that later
+revision. The mapping is exhaustive and has no wildcard/default revision arm,
+so adding a new `Opcode` variant requires an explicit revision-policy decision
+at compile time.
+
+An opcode introduced after a header revision is non-canonical under an older
+header and must be rejected before `VerifiedSemCode` is issued, even if that
+opcode is structurally well-formed and requires no missing capability.
 
 This is a distinct concern from the capability contract above: most
 opcodes that gained new semantics after the baseline also gained a
