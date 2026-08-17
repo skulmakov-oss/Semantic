@@ -348,10 +348,14 @@ semantic.foundation.source/1.2
 
 Foundation Source 1.2 does not mandate one universal SemCode header. Current
 qualified programs may select a member of the documented supported family from
-`SEMCODE0` through `SEMCOD14` according to actual emitted features — `SEMCOD14`
+`SEMCODE0` through `SEMCOD14`, or `SEMCOD18` when the program uses the
+`std.quad` QTruth family, according to actual emitted features — `SEMCOD14`
 is the header selected when a program actually uses the included `Map(K, V)`
-operations. A profile permission cannot add unused capabilities, and the VM
-cannot reinterpret an unknown header.
+operations, and `SEMCOD18` is the header selected when a program actually
+uses `qtruth_and`/`qtruth_or`/`qtruth_not`/`qtruth_impl` (see #1732 /
+FA-05-002: no header before `SEMCOD18` legitimately admits those opcodes). A
+profile permission cannot add unused capabilities, and the VM cannot
+reinterpret an unknown header.
 
 SSF-10 owns the long-term source/SemCode compatibility window and artifact
 trust policy. Until that phase closes, this section is a version relationship,
