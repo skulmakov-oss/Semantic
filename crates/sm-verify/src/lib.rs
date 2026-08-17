@@ -415,19 +415,32 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
 }
 
 /// Returns true if `code[start..]` decodes as a complete, well-formed
-/// instruction stream: every opcode byte is valid, every operand is present
-/// (including count/flag-controlled variable-length operands), and the walk
-/// consumes exactly to `code.len()` with nothing left over.
+/// instruction stream: every opcode byte is valid, every operand's byte
+/// shape is fully present (including count/flag-controlled variable-length
+/// operands), and the walk consumes exactly to `code.len()` with nothing
+/// left over.
 ///
-/// Reuses `decode_operands` - the same function the normal admission walk
-/// uses - rather than a second, independently-maintained opcode-shape
-/// table. This is deliberate: it means a byte sequence only counts as a
-/// genuine competing interpretation if it would itself be admissible by the
-/// verifier's real rules (including domain checks like canonical bool/quad
-/// literal ranges), not merely "structurally shaped like instructions". A
-/// reading that decode_operands would reject anyway was never a real
-/// alternative meaning to begin with, so it cannot make the artifact
-/// ambiguous.
+/// This is a STRUCTURAL question only - it must not depend on whether the
+/// resulting operand *values* happen to be semantically canonical (e.g. a
+/// bool literal byte of 2, or a presence flag of 5). Ambiguous framing is a
+/// fact about the bytes' shape: a decoder that doesn't apply the verifier's
+/// current canonical-domain policy (an older tool version, a disassembler,
+/// a different implementation) could still read this range as instructions.
+/// Coupling "was this ambiguous" to "is sm-verify's semantic policy today
+/// willing to admit the alternative reading" would make the one-canonical-
+/// interpretation invariant depend on semantic policy instead of being a
+/// decoder-level fact, and would silently keep the DBG0 reading whenever
+/// the competing instruction reading merely contains a non-canonical
+/// literal - exactly the kind of hidden-content risk #1731 exists to close.
+///
+/// Reuses `decode_operands` - the same function, same opcode-shape match,
+/// that the normal admission walk uses - with canonical-domain enforcement
+/// turned off via its `enforce_canonical_domains` parameter, rather than a
+/// second, independently-maintained opcode-shape table. Every byte read and
+/// every count/flag-controlled branch is identical to the semantic-
+/// admission walk; only the four inline out-of-domain rejections (LOAD_Q,
+/// LOAD_BOOL, CALL/CLOSURE_CALL dst-present flag, RET src-present flag) are
+/// skipped here.
 #[cfg(feature = "std")]
 fn instruction_stream_parses_fully(name: &str, code: &[u8], start: usize) -> bool {
     let mut cursor = start;
@@ -439,7 +452,7 @@ fn instruction_stream_parses_fully(name: &str, code: &[u8], start: usize) -> boo
         let Ok(opcode) = Opcode::from_byte(raw_opcode) else {
             return false;
         };
-        if decode_operands(name, code, &mut cursor, offset, opcode).is_err() {
+        if decode_operands(name, code, &mut cursor, offset, opcode, false).is_err() {
             return false;
         }
     }
@@ -553,7 +566,7 @@ fn verify_function_code(
                 err.to_string(),
             ),
         })?;
-        let refs = decode_operands(name, code, &mut cursor, offset, opcode)?;
+        let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
         jump_targets.extend(refs.jump_targets);
         string_refs.extend(refs.string_refs);
         used_caps |= refs.required_capabilities;
@@ -660,6 +673,29 @@ fn verify_function_code(
     })
 }
 
+/// Decodes one instruction's operands, advancing `cursor` past its full byte
+/// shape (including count/flag-controlled variable-length fields).
+///
+/// `enforce_canonical_domains` separates two distinct concerns that this
+/// function used to conflate:
+///
+/// - STRUCTURAL SHAPE: opcode recognition, operand byte widths, and
+///   presence/count-controlled byte lengths - always applied, regardless of
+///   the flag. This is what determines whether a byte range decodes as a
+///   complete instruction stream at all.
+/// - SEMANTIC ADMISSION: canonical literal value domains (`LOAD_Q`,
+///   `LOAD_BOOL`) and canonical presence-flag domains (`CALL`,
+///   `CLOSURE_CALL`, `RET`) - applied only when `enforce_canonical_domains`
+///   is `true`.
+///
+/// Normal verifier admission (the real instruction-stream walk in
+/// `verify_function_code`) must enforce both, so it passes `true`. The
+/// `#1731` ambiguity probe (`instruction_stream_parses_fully`) must decide
+/// only whether an alternative byte-level *framing* exists at all - a
+/// non-canonical operand value doesn't make an otherwise complete
+/// instruction-shaped reading any less structurally real - so it passes
+/// `false`. This keeps both concerns on one shared opcode-shape match
+/// rather than duplicating it.
 #[cfg(feature = "std")]
 fn decode_operands(
     function: &str,
@@ -667,6 +703,7 @@ fn decode_operands(
     cursor: &mut usize,
     offset: usize,
     opcode: Opcode,
+    enforce_canonical_domains: bool,
 ) -> Result<OperandRefs, RejectReport> {
     let invalid =
         |msg: &str| reject_one(function, VerificationCode::OperandOutOfBounds, offset, msg);
@@ -681,7 +718,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
             let literal = read_u8(code, cursor).map_err(|_| invalid("truncated quad literal"))?;
-            if literal > 3 {
+            if enforce_canonical_domains && literal > 3 {
                 return Err(invalid("non-canonical quad literal: must be 0..=3"));
             }
         }
@@ -689,7 +726,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
             let literal = read_u8(code, cursor).map_err(|_| invalid("truncated bool literal"))?;
-            if literal > 1 {
+            if enforce_canonical_domains && literal > 1 {
                 return Err(invalid("non-canonical bool literal: must be 0 or 1"));
             }
         }
@@ -1037,7 +1074,7 @@ fn decode_operands(
         Opcode::ClosureCall => {
             let has_dst_flag =
                 read_u8(code, cursor).map_err(|_| invalid("truncated closure-call dst flag"))?;
-            if has_dst_flag > 1 {
+            if enforce_canonical_domains && has_dst_flag > 1 {
                 return Err(invalid(
                     "non-canonical closure-call dst flag: must be 0 or 1",
                 ));
@@ -1134,7 +1171,7 @@ fn decode_operands(
         Opcode::Call => {
             let has_dst_flag =
                 read_u8(code, cursor).map_err(|_| invalid("truncated call destination flag"))?;
-            if has_dst_flag > 1 {
+            if enforce_canonical_domains && has_dst_flag > 1 {
                 return Err(invalid(
                     "non-canonical call destination flag: must be 0 or 1",
                 ));
@@ -1215,7 +1252,7 @@ fn decode_operands(
         }
         Opcode::Ret => {
             let has_src = read_u8(code, cursor).map_err(|_| invalid("truncated return flag"))?;
-            if has_src > 1 {
+            if enforce_canonical_domains && has_src > 1 {
                 return Err(invalid("non-canonical return flag: must be 0 or 1"));
             }
             if has_src != 0 {
@@ -2101,6 +2138,77 @@ mod tests {
         ));
     }
 
+    // #1731 review follow-up: the ambiguity probe must be a purely
+    // STRUCTURAL question (opcode recognized, every operand's byte shape
+    // present, stream consumes exactly to the end) and must NOT be gated on
+    // whether the alternative reading's operand *values* are semantically
+    // canonical. Before this fix, `instruction_stream_parses_fully` reused
+    // `decode_operands` with full canonical-domain enforcement, so an
+    // alternative reading that was shape-complete but contained one
+    // non-canonical literal (out-of-domain, not out-of-space) was wrongly
+    // treated as "not a real competing interpretation" and the DBG0 reading
+    // was silently kept.
+    //
+    // Fixture: reuses the exact #1731 TupleGet collision (dst=0x4742,
+    // src=0x0030 spell `DBG0` + an empty debug_symbol_count, exactly like
+    // `verifier_rejects_ambiguous_dbg0_tupleget_collision` above), followed
+    // by a genuine `LoadBool{dst:0, val:true}` whose literal byte is then
+    // hand-patched from canonical `1` to non-canonical `0xff`. This does not
+    // change any operand's byte width (the literal is always exactly one
+    // byte regardless of its value), so the alternative reading - decoding
+    // the whole buffer from the start, ignoring the `DBG0` sniff entirely -
+    // remains fully shape-complete: `TupleGet{..}; LoadBool{dst:0,
+    // literal:0xff}; Ret{None}`, consuming every byte to the end, with one
+    // non-canonical literal.
+    //
+    // What the `DBG0` reading's own (byte-shifted, effectively garbled)
+    // instruction decode would produce is irrelevant here: the ambiguity
+    // check runs before that decode is ever attempted, so this test only
+    // needs the alternative reading to be genuinely shape-complete.
+    #[test]
+    fn verifier_rejects_ambiguous_framing_even_when_alternate_reading_has_non_canonical_operand() {
+        let mut bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::TupleGet {
+                        dst: 0x4742,
+                        src: 0x0030,
+                        index: 0x6600,
+                    },
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+
+        let (_, code_start, _) = function_code_span(&bytes, "main");
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let env = &functions[0];
+        assert!(env.has_debug_section);
+        assert_eq!(&env.code_slice[2..6], b"DBG0");
+
+        // TupleGet is 7 bytes (opcode + dst + src + index); LoadBool's
+        // literal is the 4th byte of the instruction right after it
+        // (opcode + dst(2) + literal).
+        let literal_pos = code_start + env.string_table_end_offset + 7 + 1 + 2;
+        assert_eq!(
+            bytes[literal_pos], 1,
+            "must be patching LoadBool's literal byte"
+        );
+        bytes[literal_pos] = 0xff;
+
+        let report = verify_semcode(&bytes).expect_err("must reject ambiguous framing");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AmbiguousInstructionFraming
+        );
+    }
+
     #[test]
     fn verifier_rejects_unknown_call_target() {
         let mut bytes =
@@ -2603,8 +2711,15 @@ mod tests {
             if decoded == opcode {
                 matches.push(instr_offset);
             }
-            decode_operands(function_name, code, &mut cursor, instr_offset, decoded)
-                .expect("decode operands");
+            decode_operands(
+                function_name,
+                code,
+                &mut cursor,
+                instr_offset,
+                decoded,
+                true,
+            )
+            .expect("decode operands");
         }
 
         let relative = *matches.get(occurrence).unwrap_or_else(|| {

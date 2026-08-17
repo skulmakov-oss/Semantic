@@ -40,11 +40,16 @@ immediately after the preceding section - there is no explicit
 presence-flag or length-prefixed section table.
 
 A byte sequence that is simultaneously valid as `DBG0` debug-section framing
-and as executable instruction framing is non-canonical. Admission (`sm-verify`)
-rejects such an artifact rather than silently choosing one reading, because
-doing so could hide otherwise-invalid instruction content (e.g. a
-register reference outside the verified-local budget) inside what gets
-reclassified as metadata. See #1731 and `docs/spec/verifier.md`.
+and as executable instruction framing is non-canonical. "Executable
+instruction framing" here is a structural question - opcode recognition and
+operand byte shape - independent of whether the resulting operand values
+are themselves semantically canonical; a competing reading is not exempted
+from this rule merely because it also contains a non-canonical literal.
+Admission (`sm-verify`) rejects such an artifact rather than silently
+choosing one reading, because doing so could hide otherwise-invalid
+instruction content (e.g. a register reference outside the verified-local
+budget) inside what gets reclassified as metadata. See #1731 and
+`docs/spec/verifier.md`.
 
 `OWN0`'s tag byte (`0x4F`) is not a currently valid opcode, so it cannot
 collide with the start of an instruction the way `DBG0`'s tag byte (`0x44`

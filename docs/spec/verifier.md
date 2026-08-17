@@ -107,11 +107,33 @@ table, with no metadata-section recognition at all - would also form a
 complete, well-formed instruction stream to the end of the function's code.
 If both readings are valid, admission fails closed with
 `AmbiguousInstructionFraming` rather than silently keeping the `DBG0`
-reading. This check reuses the verifier's own operand decoder for the
-alternative reading rather than a second, independently-maintained
-opcode-shape table; a reading that the verifier's own operand decoder would
-itself reject was never a genuine competing interpretation; only completed,
-independently-admissible parses count as ambiguous.
+reading.
+
+This is a purely STRUCTURAL question, deliberately kept separate from
+SEMANTIC admission:
+
+- structural framing: opcode recognition, operand byte shape, and
+  presence/count-controlled byte lengths, evaluated to determine only
+  whether a complete instruction stream exists at all
+- semantic admission: canonical literal value domains (`LOAD_Q`,
+  `LOAD_BOOL`) and canonical presence-flag domains (`CALL`, `CLOSURE_CALL`,
+  `RET`), which remain a separate, later concern applied only to whichever
+  single reading admission actually accepts
+
+The alternative reading only needs to be structurally complete to count as
+a genuine competing interpretation - a non-canonical operand value (for
+example an out-of-domain literal byte) does not make an otherwise
+shape-complete instruction reading any less structurally real, and does not
+exempt an artifact from the ambiguity check. Gating ambiguity detection on
+today's semantic admission policy would make the one-canonical-
+interpretation invariant depend on that policy instead of being a
+decoder-level fact, and would silently keep the `DBG0` reading whenever the
+competing instruction reading merely contained a non-canonical literal.
+
+This check reuses the verifier's own operand-shape decoder for the
+alternative reading - the same function, same opcode-shape match, that
+semantic admission uses, with canonical-domain enforcement turned off -
+rather than a second, independently-maintained opcode-shape table.
 
 `OWN0`'s tag byte (`0x4F`) is not a currently valid opcode, so this specific
 ambiguity does not apply to ownership-section recognition.
