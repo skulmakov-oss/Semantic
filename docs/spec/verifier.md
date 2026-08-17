@@ -38,6 +38,7 @@ Current SemCode verification checks include:
 - header validity
 - supported version validity
 - function and section integrity
+- canonical (unambiguous) instruction framing
 - opcode validity
 - operand shape validity
 - jump-target validity
@@ -88,6 +89,56 @@ A byte outside the canonical domain for its field is rejected at admission
 (`OperandOutOfBounds`), not normalized downstream. This narrows the
 previously admitted surface: byte values outside these domains that an
 earlier verifier accepted are no longer admissible.
+
+## Canonical Instruction Framing
+
+A canonical SemCode function encoding must have exactly one unambiguous
+structural interpretation (see `docs/spec/semcode.md`).
+
+The `DBG0` debug-section tag is recognized by sniffing a fixed 4-byte
+sequence, and its first byte (`0x44`) is also `TupleGet`'s opcode byte, so a
+producer-emitted instruction stream can coincidentally spell the same bytes
+as `DBG0` framing. A byte sequence that is simultaneously valid as `DBG0`
+metadata and as a complete instruction stream is non-canonical.
+
+The verifier detects this by checking, whenever a `DBG0` section was
+recognized, whether the same bytes - read from immediately after the string
+table, with no metadata-section recognition at all - would also form a
+complete, well-formed instruction stream to the end of the function's code.
+If both readings are valid, admission fails closed with
+`AmbiguousInstructionFraming` rather than silently keeping the `DBG0`
+reading.
+
+This is a purely STRUCTURAL question, deliberately kept separate from
+SEMANTIC admission:
+
+- structural framing: opcode recognition, operand byte shape, and
+  presence/count-controlled byte lengths, evaluated to determine only
+  whether a complete instruction stream exists at all
+- semantic admission: canonical literal value domains (`LOAD_Q`,
+  `LOAD_BOOL`), canonical presence-flag domains (`CALL`, `CLOSURE_CALL`,
+  `RET`), and canonical arity/cardinality domains (`MAKE_TUPLE` arity
+  `>= 2`, `MAKE_RECORD` slot count `>= 1`), which remain a separate, later
+  concern applied only to whichever single reading admission actually
+  accepts
+
+The alternative reading only needs to be structurally complete to count as
+a genuine competing interpretation - a non-canonical operand value (for
+example an out-of-domain literal byte) does not make an otherwise
+shape-complete instruction reading any less structurally real, and does not
+exempt an artifact from the ambiguity check. Gating ambiguity detection on
+today's semantic admission policy would make the one-canonical-
+interpretation invariant depend on that policy instead of being a
+decoder-level fact, and would silently keep the `DBG0` reading whenever the
+competing instruction reading merely contained a non-canonical literal.
+
+This check reuses the verifier's own operand-shape decoder for the
+alternative reading - the same function, same opcode-shape match, that
+semantic admission uses, with canonical-domain enforcement turned off -
+rather than a second, independently-maintained opcode-shape table.
+
+`OWN0`'s tag byte (`0x4F`) is not a currently valid opcode, so this specific
+ambiguity does not apply to ownership-section recognition.
 
 ## Contract Rule
 

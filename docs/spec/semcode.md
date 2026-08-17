@@ -27,6 +27,35 @@ verifier-admitted VM execution.
 The VM is not the primary structural admission gate.
 `sm-verify` is the required admission stage for standard SemCode execution.
 
+## Canonical Structural Framing
+
+A canonical SemCode function encoding must have exactly one unambiguous
+structural interpretation.
+
+Per function, the code block is: a length-delimited string table, then an
+optional tagged `DBG0` debug section, then an optional tagged `OWN0`
+ownership section, then the instruction stream running to the end of the
+code block. `DBG0` and `OWN0` are recognized by sniffing a fixed 4-byte tag
+immediately after the preceding section - there is no explicit
+presence-flag or length-prefixed section table.
+
+A byte sequence that is simultaneously valid as `DBG0` debug-section framing
+and as executable instruction framing is non-canonical. "Executable
+instruction framing" here is a structural question - opcode recognition and
+operand byte shape - independent of whether the resulting operand values
+are themselves semantically canonical; a competing reading is not exempted
+from this rule merely because it also contains a non-canonical literal.
+Admission (`sm-verify`) rejects such an artifact rather than silently
+choosing one reading, because doing so could hide otherwise-invalid
+instruction content (e.g. a register reference outside the verified-local
+budget) inside what gets reclassified as metadata. See #1731 and
+`docs/spec/verifier.md`.
+
+`OWN0`'s tag byte (`0x4F`) is not a currently valid opcode, so it cannot
+collide with the start of an instruction the way `DBG0`'s tag byte (`0x44`
+= `TupleGet`) can; this ambiguity is specific to `DBG0`, not a general
+property of the tagged-section scheme.
+
 ## Versioned Header Family
 
 Current supported header family:

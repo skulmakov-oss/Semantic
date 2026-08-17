@@ -49,18 +49,40 @@ pub struct DecodedFunctionEnvelope<'a> {
     pub borrowed_paths: Vec<DecodedAccessPath>,
     pub write_paths: Vec<DecodedAccessPath>,
     pub has_ownership_section: bool,
+    // Whether the `DBG0` sentinel was recognized for this function. This is
+    // a purely structural fact (no opcode/operand knowledge), kept so
+    // callers can tell "no debug section" apart from "an empty debug
+    // section" - both currently produce an empty `debug_symbols`, but only
+    // the latter means the DBG0-sniff branch was taken and
+    // `instr_start_offset` was advanced past it. See #1731: the DBG0
+    // sentinel collides with `TupleGet`'s opcode byte (0x44 = 'D'), so a
+    // producer-emitted instruction stream can coincidentally spell the same
+    // six bytes as an empty DBG0 section. This flag lets sm-verify check,
+    // at its own admission boundary, whether the bytes between the string
+    // table and `instr_start_offset` also form a structurally valid
+    // instruction stream under the alternative (no-DBG0) reading, and
+    // reject as ambiguous if so - without sm-format needing any opcode/
+    // operand-shape knowledge itself.
+    pub has_debug_section: bool,
+    // Cursor position (relative to code_slice) immediately after the
+    // string table, before any DBG0/OWN0 sentinel is sniffed. Always
+    // well-defined; equals `instr_start_offset` when neither section is
+    // present.
+    pub string_table_end_offset: usize,
     pub instr_start_offset: usize, // relative to code_slice
     pub code_slice: &'a [u8],      // the full code block for this function
 }
 
-type StringTableDebugOwnershipParse = (
-    Vec<String>,
-    Vec<DecodedDebugSymbol>,
-    Vec<DecodedAccessPath>,
-    Vec<DecodedAccessPath>,
-    bool,
-    usize,
-);
+struct StringTableDebugOwnershipParse {
+    strings: Vec<String>,
+    debug_symbols: Vec<DecodedDebugSymbol>,
+    borrowed_paths: Vec<DecodedAccessPath>,
+    write_paths: Vec<DecodedAccessPath>,
+    has_ownership_section: bool,
+    has_debug_section: bool,
+    string_table_end_offset: usize,
+    instr_start_offset: usize,
+}
 
 pub fn decode_semcode_envelope<'a>(
     bytes: &'a [u8],
@@ -136,26 +158,21 @@ pub fn decode_semcode_envelope<'a>(
         let code_slice = &bytes[cursor..cursor + code_len];
         cursor += code_len;
 
-        let (
-            strings,
-            debug_symbols,
-            borrowed_paths,
-            write_paths,
-            has_ownership_section,
-            instr_start_offset,
-        ) = parse_string_table_debug_and_ownership(code_offset, code_slice)?;
+        let parsed = parse_string_table_debug_and_ownership(code_offset, code_slice)?;
 
         functions.push(DecodedFunctionEnvelope {
             name,
             name_offset,
             code_offset,
             code_len,
-            strings,
-            debug_symbols,
-            borrowed_paths,
-            write_paths,
-            has_ownership_section,
-            instr_start_offset,
+            strings: parsed.strings,
+            debug_symbols: parsed.debug_symbols,
+            borrowed_paths: parsed.borrowed_paths,
+            write_paths: parsed.write_paths,
+            has_ownership_section: parsed.has_ownership_section,
+            has_debug_section: parsed.has_debug_section,
+            string_table_end_offset: parsed.string_table_end_offset,
+            instr_start_offset: parsed.instr_start_offset,
             code_slice,
         });
     }
@@ -207,8 +224,11 @@ fn parse_string_table_debug_and_ownership(
         strings.push(str_val);
     }
 
+    let string_table_end_offset = cursor;
+    let mut has_debug_section = false;
     let mut debug_symbols = Vec::new();
     if cursor + 4 <= code.len() && &code[cursor..cursor + 4] == b"DBG0" {
+        has_debug_section = true;
         cursor += 4;
         let dbg_count_offset = base_offset + cursor;
         let count =
@@ -362,14 +382,16 @@ fn parse_string_table_debug_and_ownership(
         }
     }
 
-    Ok((
+    Ok(StringTableDebugOwnershipParse {
         strings,
         debug_symbols,
         borrowed_paths,
         write_paths,
         has_ownership_section,
-        cursor,
-    ))
+        has_debug_section,
+        string_table_end_offset,
+        instr_start_offset: cursor,
+    })
 }
 
 #[cfg(test)]
