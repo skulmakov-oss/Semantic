@@ -556,10 +556,14 @@ impl Opcode {
     /// revision, and `sm-ir`'s header selection promotes to a header
     /// whose revision covers every opcode a program actually emits.
     ///
-    /// Defaults to `1` (`SEMCODE0`, the baseline header) for every opcode.
-    /// Only opcode families with a *provable* later introduction revision -
-    /// backed by an actual repository decision record, not by commit date
-    /// alone - get a non-default entry here; this function must not imply
+    /// Every `Opcode` variant is assigned its minimum SemCode revision
+    /// explicitly. Variants established as baseline are explicitly assigned
+    /// revision `1` (`SEMCODE0`). Only opcode families with a *provable* later
+    /// introduction revision - backed by an actual repository decision record,
+    /// not by commit date alone - are explicitly assigned that later revision.
+    /// The match is intentionally exhaustive and has no wildcard/default
+    /// revision arm, so adding a new `Opcode` variant requires an explicit
+    /// revision-policy decision at compile time. This function must not imply
     /// stronger historical knowledge than the repository has actually
     /// established. Every opcode that is instead gated by a capability bit
     /// (`decode_operands`'s `required_capabilities`) already has its
@@ -581,8 +585,8 @@ impl Opcode {
             // independently provable later introduction (roadmap reservation
             // docs, #1455, zero header/capability change across the entire
             // rollout) with an explicit owner decision establishing SEMCOD18
-            // as the minimum revision. The only family with a non-default
-            // entry in this match.
+            // as the minimum revision. The only family currently assigned a
+            // non-baseline minimum revision in this match.
             Self::QTruthAnd | Self::QTruthOr | Self::QTruthNot | Self::QTruthImpl => 19,
 
             // Baseline loads / constants
