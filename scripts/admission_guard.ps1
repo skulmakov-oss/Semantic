@@ -38,15 +38,25 @@ function Invoke-WorkspaceFmtCheck {
     # (every package still gets checked, none skipped), just split across
     # multiple invocations that each stay under the limit.
     #
-    # The package set comes from `cargo metadata`, not a hand-maintained
-    # list, so it also covers workspace packages that are pulled in only as
-    # a local path-dependency of a member and are not themselves listed in
-    # [workspace.members] (e.g. ui-shell-kit).
-    $metadataJson = cargo metadata --no-deps --format-version 1
+    # The package set comes from the full `cargo metadata` resolution
+    # (not --no-deps, and not a hand-maintained list), filtered to local
+    # (source = null) packages. `cargo fmt --all` covers "all packages, and
+    # also their local path-based dependencies" (per `cargo fmt --help`) -
+    # a broader set than just [workspace.members], since a local path
+    # dependency does not have to be a declared member to be part of that
+    # set (e.g. this repo's own ui-shell-kit is pulled in only as a path
+    # dependency of a member and isn't listed in [workspace.members]).
+    # --no-deps would miss a local path dependency that lives outside the
+    # workspace root's directory tree; filtering the full graph by
+    # source = null does not, matching --all's actual scope exactly.
+    $metadataJson = cargo metadata --format-version 1
     if ($LASTEXITCODE -ne 0) {
         throw "cargo metadata failed while deriving the workspace package set for fmt check"
     }
-    $packages = ($metadataJson | ConvertFrom-Json).packages.name | Sort-Object
+    $packages = ($metadataJson | ConvertFrom-Json).packages |
+        Where-Object { $null -eq $_.source } |
+        Select-Object -ExpandProperty name |
+        Sort-Object
 
     $failed = @()
     foreach ($pkg in $packages) {
