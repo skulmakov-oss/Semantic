@@ -38,6 +38,7 @@ Current SemCode verification checks include:
 - header validity
 - supported version validity
 - function and section integrity
+- canonical (unambiguous) instruction framing
 - opcode validity
 - operand shape validity
 - jump-target validity
@@ -88,6 +89,32 @@ A byte outside the canonical domain for its field is rejected at admission
 (`OperandOutOfBounds`), not normalized downstream. This narrows the
 previously admitted surface: byte values outside these domains that an
 earlier verifier accepted are no longer admissible.
+
+## Canonical Instruction Framing
+
+A canonical SemCode function encoding must have exactly one unambiguous
+structural interpretation (see `docs/spec/semcode.md`).
+
+The `DBG0` debug-section tag is recognized by sniffing a fixed 4-byte
+sequence, and its first byte (`0x44`) is also `TupleGet`'s opcode byte, so a
+producer-emitted instruction stream can coincidentally spell the same bytes
+as `DBG0` framing. A byte sequence that is simultaneously valid as `DBG0`
+metadata and as a complete instruction stream is non-canonical.
+
+The verifier detects this by checking, whenever a `DBG0` section was
+recognized, whether the same bytes - read from immediately after the string
+table, with no metadata-section recognition at all - would also form a
+complete, well-formed instruction stream to the end of the function's code.
+If both readings are valid, admission fails closed with
+`AmbiguousInstructionFraming` rather than silently keeping the `DBG0`
+reading. This check reuses the verifier's own operand decoder for the
+alternative reading rather than a second, independently-maintained
+opcode-shape table; a reading that the verifier's own operand decoder would
+itself reject was never a genuine competing interpretation; only completed,
+independently-admissible parses count as ambiguous.
+
+`OWN0`'s tag byte (`0x4F`) is not a currently valid opcode, so this specific
+ambiguity does not apply to ownership-section recognition.
 
 ## Contract Rule
 

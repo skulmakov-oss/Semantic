@@ -40,6 +40,14 @@ pub enum VerificationCode {
     UnknownCallTarget,
     ResourceLimitExceeded,
     CapabilityViolation,
+    /// The byte range immediately after the string table has more than one
+    /// valid canonical structural reading: it can be interpreted as an
+    /// empty/populated `DBG0` debug section AND, independently, as a
+    /// complete, well-formed instruction stream. Verified SemCode must have
+    /// exactly one canonical structural interpretation (see #1731); when
+    /// both readings are structurally valid, admission fails closed rather
+    /// than silently choosing one.
+    AmbiguousInstructionFraming,
 }
 
 #[cfg(feature = "std")]
@@ -406,6 +414,38 @@ pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {
     verify_semcode_token(bytes).map(|token| token.program.clone())
 }
 
+/// Returns true if `code[start..]` decodes as a complete, well-formed
+/// instruction stream: every opcode byte is valid, every operand is present
+/// (including count/flag-controlled variable-length operands), and the walk
+/// consumes exactly to `code.len()` with nothing left over.
+///
+/// Reuses `decode_operands` - the same function the normal admission walk
+/// uses - rather than a second, independently-maintained opcode-shape
+/// table. This is deliberate: it means a byte sequence only counts as a
+/// genuine competing interpretation if it would itself be admissible by the
+/// verifier's real rules (including domain checks like canonical bool/quad
+/// literal ranges), not merely "structurally shaped like instructions". A
+/// reading that decode_operands would reject anyway was never a real
+/// alternative meaning to begin with, so it cannot make the artifact
+/// ambiguous.
+#[cfg(feature = "std")]
+fn instruction_stream_parses_fully(name: &str, code: &[u8], start: usize) -> bool {
+    let mut cursor = start;
+    while cursor < code.len() {
+        let offset = cursor - start;
+        let Ok(raw_opcode) = read_u8(code, &mut cursor) else {
+            return false;
+        };
+        let Ok(opcode) = Opcode::from_byte(raw_opcode) else {
+            return false;
+        };
+        if decode_operands(name, code, &mut cursor, offset, opcode).is_err() {
+            return false;
+        }
+    }
+    cursor == code.len()
+}
+
 #[cfg(feature = "std")]
 fn verify_function_code(
     env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
@@ -413,6 +453,26 @@ fn verify_function_code(
     quotas: &RuntimeQuotas,
 ) -> Result<PendingVerifiedFunction, RejectReport> {
     let name = env.name.as_str();
+
+    // #1731 (FA-05-001): the DBG0 sentinel collides with TupleGet's opcode
+    // byte (0x44 = 'D'). If the decoder recognized a DBG0 section, check
+    // whether the same bytes, read from string_table_end_offset with no
+    // metadata-section recognition at all, would ALSO form a complete,
+    // well-formed instruction stream all the way to the end of this
+    // function's code. If both readings are valid, the artifact has more
+    // than one canonical structural interpretation and admission must fail
+    // closed rather than silently keep the DBG0 reading.
+    if env.has_debug_section
+        && instruction_stream_parses_fully(name, env.code_slice, env.string_table_end_offset)
+    {
+        return Err(reject_one(
+            name,
+            VerificationCode::AmbiguousInstructionFraming,
+            env.string_table_end_offset,
+            "byte range is both a valid DBG0 debug section and a valid instruction stream",
+        ));
+    }
+
     let string_count = env.strings.len();
     if string_count > quotas.max_symbol_table {
         return Err(reject_one(
@@ -1899,6 +1959,146 @@ mod tests {
             report.diagnostics[0].code,
             VerificationCode::OperandOutOfBounds
         );
+    }
+
+    // FA-05-001 (#1731): TupleGet's opcode byte (0x44 = 'D') can begin the
+    // exact same six bytes as the DBG0 debug-section sentinel + an empty
+    // debug_symbol_count (`44 42 47 30 00 00` == "DBG0" + 0u16). This exact
+    // IR sequence matches the confirmed Phase A fixture: it makes the
+    // decoder currently reclassify the producer's real first instruction
+    // (TupleGet dst=0x4742) as an empty debug section, hiding a destination
+    // register far outside the verified-local register budget from every
+    // downstream admission check. Both readings of these six bytes are
+    // structurally valid (empty DBG0 metadata, or the start of a real
+    // instruction stream), so admission must fail closed rather than
+    // silently choosing one.
+    #[test]
+    fn verifier_rejects_ambiguous_dbg0_tupleget_collision() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::TupleGet {
+                        dst: 0x4742,
+                        src: 0x0030,
+                        index: 0x6600,
+                    },
+                    IrInstr::Ret { src: None },
+                    IrInstr::ClockRead { dst: 0 },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+
+        // B: byte identity - the emitted instruction stream literally spells
+        // DBG0 where the real TupleGet begins (string table is empty: a
+        // bare 2-byte count=0, so the collision starts at code_slice[2]).
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let env = &functions[0];
+        assert_eq!(&env.code_slice[2..6], b"DBG0");
+
+        // C: decoder reinterpretation - instr_start_offset must currently
+        // land past the fake sentinel + fake empty count (2 + 4 + 2 = 8),
+        // not at the true instruction start (2, right after the empty
+        // string table) - i.e. this is not merely byte-identical, the
+        // shared decoder actually consumes it as metadata today.
+        assert_eq!(env.instr_start_offset, 8);
+
+        // D+E: admission consequence - despite the hidden TupleGet
+        // referencing register 0x4742 (18242), far outside any verified-
+        // local register budget, admission must fail closed rather than
+        // silently accept it.
+        let report = verify_semcode(&bytes).expect_err("must reject ambiguous framing");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AmbiguousInstructionFraming
+        );
+    }
+
+    // #1731 regression matrix (2/3): a minimal genuine DBG0 section (debug
+    // symbols enabled, one traced instruction) must remain accepted
+    // unchanged - it is not byte-identical to any instruction reading, so
+    // it is not ambiguous. Built via emit_ir_to_semcode (IR-level, not the
+    // source front-end) so this test doesn't depend on the `debug-symbols`
+    // cargo feature being enabled for every invocation this repo uses to
+    // run sm-verify's tests (e.g. 7hell Hell 4 enables sm-ir/profile-rust
+    // only).
+    #[test]
+    fn verifier_accepts_minimal_genuine_debug_section() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![IrInstr::Ret { src: None }],
+                ownership_events: Vec::new(),
+            }],
+            true,
+        )
+        .expect("emit");
+        let verified = verify_semcode(&bytes).expect("genuine debug section must verify");
+        assert_eq!(verified.functions.len(), 1);
+        assert!(verified.functions[0].debug_symbol_count > 0);
+    }
+
+    // #1731 regression matrix (4): an ordinary, non-empty DBG0 section
+    // (several traced instructions) must remain accepted unchanged.
+    #[test]
+    fn verifier_accepts_ordinary_debug_section_with_multiple_entries() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadI32 { dst: 0, val: 1 },
+                    IrInstr::LoadI32 { dst: 1, val: 2 },
+                    IrInstr::AddI32 {
+                        dst: 2,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                    IrInstr::Ret { src: Some(2) },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            true,
+        )
+        .expect("emit");
+        let verified = verify_semcode(&bytes).expect("ordinary debug section must verify");
+        assert_eq!(verified.functions.len(), 1);
+        assert!(
+            verified.functions[0].debug_symbol_count > 1,
+            "fixture must exercise a genuinely non-empty debug section"
+        );
+    }
+
+    // #1731 regression matrix (7/8): a truncated DBG0 tag or count must
+    // still hit the existing deterministic malformed-section rejection,
+    // unaffected by the new ambiguity check (which only runs once a full,
+    // successfully-decoded DBG0 section is already present).
+    #[test]
+    fn verifier_rejects_truncated_debug_section_tag() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![IrInstr::Ret { src: None }],
+                ownership_events: Vec::new(),
+            }],
+            true,
+        )
+        .expect("emit");
+        // Truncate the artifact to land inside the DBG0 tag/count region,
+        // matching this file's existing truncation-test convention.
+        let mut truncated = bytes.clone();
+        truncated.truncate(truncated.len() - 1);
+        let report =
+            sm_format::semcode_decode::decode_semcode_envelope(&truncated).expect_err("decode");
+        assert!(matches!(
+            report,
+            sm_format::semcode_decode::DecodeError::InvalidDebugSection { .. }
+                | sm_format::semcode_decode::DecodeError::TruncatedFunction { .. }
+        ));
     }
 
     #[test]
