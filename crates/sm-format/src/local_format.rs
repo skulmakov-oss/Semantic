@@ -16,6 +16,7 @@ pub const MAGIC14: [u8; 8] = *b"SEMCOD14";
 pub const MAGIC15: [u8; 8] = *b"SEMCOD15";
 pub const MAGIC16: [u8; 8] = *b"SEMCOD16";
 pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
+pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -337,11 +338,24 @@ pub const HEADER_V17: SemcodeHeaderSpec = SemcodeHeaderSpec {
         | CAP_TIME_DURATION,
 };
 
+/// #1732 (FA-05-002): the first header revision whose contract actually
+/// includes the QTruth opcode family (`QTruthAnd`/`QTruthOr`/`QTruthNot`/
+/// `QTruthImpl`, `0x17..0x1A`). QTruth needs no new capability bit - it
+/// carries forward `HEADER_V17`'s capability set unchanged - because the
+/// gap this closes is a missing *version identity* gate, not a missing
+/// capability (see `Opcode::minimum_semcode_revision`).
+pub const HEADER_V18: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC18,
+    epoch: 0,
+    rev: 19,
+    capabilities: HEADER_V17.capabilities,
+};
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
-        HEADER_V15, HEADER_V16, HEADER_V17,
+        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18,
     ]
 }
 
@@ -530,6 +544,130 @@ impl Opcode {
             x if x == Self::EventPost as u8 => Ok(Self::EventPost),
             x if x == Self::ClockRead as u8 => Ok(Self::ClockRead),
             _ => Err(SemcodeFormatError::UnknownOpcode(v)),
+        }
+    }
+
+    /// The minimum SemCode header revision (`SemcodeHeaderSpec::rev`) whose
+    /// contract this opcode's semantics belong to (see #1732 / FA-05-002).
+    ///
+    /// This is the single, format-owned authority binding executable opcode
+    /// vocabulary to artifact header identity: `sm-verify` uses it to
+    /// reject an opcode admitted under a header older than its minimum
+    /// revision, and `sm-ir`'s header selection promotes to a header
+    /// whose revision covers every opcode a program actually emits.
+    ///
+    /// Every `Opcode` variant is assigned its minimum SemCode revision
+    /// explicitly. Variants established as baseline are explicitly assigned
+    /// revision `1` (`SEMCODE0`). Only opcode families with a *provable* later
+    /// introduction revision - backed by an actual repository decision record,
+    /// not by commit date alone - are explicitly assigned that later revision.
+    /// The match is intentionally exhaustive and has no wildcard/default
+    /// revision arm, so adding a new `Opcode` variant requires an explicit
+    /// revision-policy decision at compile time. This function must not imply
+    /// stronger historical knowledge than the repository has actually
+    /// established. Every opcode that is instead gated by a capability bit
+    /// (`decode_operands`'s `required_capabilities`) already has its
+    /// minimum header enforced through that existing, independent
+    /// mechanism - `header.capabilities` is a fixed, monotonically-growing
+    /// set per header revision - so this function is only load-bearing for
+    /// opcodes that carry no capability requirement at all.
+    ///
+    /// Currently this covers only the QTruth family
+    /// (`QTruthAnd`/`QTruthOr`/`QTruthNot`/`QTruthImpl`), whose minimum
+    /// revision is `19` (`SEMCOD18`) per the #1732 repair decision: no
+    /// existing header's documented contract ever claimed QTruth (it was
+    /// added in #1455 with zero header/capability change across the entire
+    /// rollout, #1455/#1457/#1459/#1461/#1463/#1465/#1471), so a new header
+    /// revision was introduced specifically to close the identity gap.
+    pub fn minimum_semcode_revision(self) -> u16 {
+        match self {
+            // #1732 (FA-05-002): QTruth Belnap truth-table opcodes -
+            // independently provable later introduction (roadmap reservation
+            // docs, #1455, zero header/capability change across the entire
+            // rollout) with an explicit owner decision establishing SEMCOD18
+            // as the minimum revision. The only family currently assigned a
+            // non-baseline minimum revision in this match.
+            Self::QTruthAnd | Self::QTruthOr | Self::QTruthNot | Self::QTruthImpl => 19,
+
+            // Baseline loads / constants
+            Self::LoadQ
+            | Self::LoadBool
+            | Self::LoadI32
+            | Self::LoadU32
+            | Self::LoadVar
+            | Self::StoreVar => 1,
+
+            // Baseline 32-bit integer arithmetic
+            Self::AddI32 | Self::SubI32 | Self::MulI32 | Self::DivI32 | Self::ModI32 => 1,
+
+            // Baseline quad/bool logic - the legacy lattice family QTruth
+            // sits right next to in the opcode byte layout, but is itself
+            // historically baseline (present since the original enum)
+            Self::QAnd
+            | Self::QOr
+            | Self::QNot
+            | Self::QImpl
+            | Self::BoolAnd
+            | Self::BoolOr
+            | Self::BoolNot => 1,
+
+            // Baseline comparisons
+            Self::CmpEq | Self::CmpNe | Self::CmpI32Lt | Self::CmpI32Le => 1,
+
+            // Baseline control flow / calls
+            Self::Jmp | Self::JmpIf | Self::Call | Self::Ret | Self::Assert => 1,
+
+            // Baseline tuple / record / ADT
+            Self::MakeTuple
+            | Self::TupleGet
+            | Self::MakeRecord
+            | Self::RecordGet
+            | Self::MakeAdt
+            | Self::AdtTag
+            | Self::AdtGet => 1,
+
+            // Text (capability-gated: CAP_TEXT_VALUES already transitively
+            // enforces the minimum header for these; listed explicitly only
+            // for match exhaustiveness)
+            Self::ConcatText | Self::LoadText => 1,
+
+            // f64 / fx (capability-gated: CAP_F64_MATH / CAP_FX_VALUES / CAP_FX_MATH)
+            Self::LoadF64
+            | Self::AddF64
+            | Self::SubF64
+            | Self::MulF64
+            | Self::DivF64
+            | Self::LoadFx
+            | Self::AddFx
+            | Self::SubFx
+            | Self::MulFx
+            | Self::DivFx => 1,
+
+            // Sequence (capability-gated: CAP_SEQUENCE_VALUES / CAP_SEQUENCE_ITERATION)
+            Self::MakeSequence
+            | Self::SequenceGet
+            | Self::SequenceLen
+            | Self::SequenceIsEmpty
+            | Self::SequenceContains
+            | Self::SequencePush
+            | Self::SequencePrepend
+            | Self::SequencePop => 1,
+
+            // Closures (capability-gated: CAP_CLOSURE_VALUES)
+            Self::MakeClosure | Self::ClosureCall => 1,
+
+            // Map (capability-gated: CAP_MAP_VALUES)
+            Self::MapEmpty | Self::MapContains | Self::MapGet | Self::MapSet => 1,
+
+            // PRNG (capability-gated: CAP_PRNG)
+            Self::RngSeed | Self::RngNextI32 => 1,
+
+            // Gate host-effect surface (capability-gated: CAP_GATE_SURFACE)
+            Self::GateRead | Self::GateWrite | Self::PulseEmit => 1,
+
+            // Host-boundary state/event/clock (capability-gated:
+            // CAP_STATE_QUERY / CAP_STATE_UPDATE / CAP_EVENT_POST / CAP_CLOCK_READ)
+            Self::StateQuery | Self::StateUpdate | Self::EventPost | Self::ClockRead => 1,
         }
     }
 }

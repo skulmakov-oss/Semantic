@@ -48,6 +48,14 @@ pub enum VerificationCode {
     /// both readings are structurally valid, admission fails closed rather
     /// than silently choosing one.
     AmbiguousInstructionFraming,
+    /// The decoded opcode's minimum SemCode header revision
+    /// (`Opcode::minimum_semcode_revision`) exceeds the artifact's actual
+    /// header revision (see #1732 / FA-05-002). This is a version-identity
+    /// gap, not a missing-capability gap: the opcode is structurally valid
+    /// and every capability it needs (if any) is present, but the artifact
+    /// header predates the revision whose contract actually admits this
+    /// opcode's semantics.
+    OpcodeRequiresNewerHeader,
 }
 
 #[cfg(feature = "std")]
@@ -567,6 +575,19 @@ fn verify_function_code(
             ),
         })?;
         let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
+        let min_rev = opcode.minimum_semcode_revision();
+        if header.rev < min_rev {
+            return Err(reject_one(
+                name,
+                VerificationCode::OpcodeRequiresNewerHeader,
+                offset,
+                format!(
+                    "opcode {opcode:?} requires SemCode header revision >= {min_rev}, but artifact header '{}' is revision {}",
+                    String::from_utf8_lossy(&header.magic),
+                    header.rev
+                ),
+            ));
+        }
         jump_targets.extend(refs.jump_targets);
         string_refs.extend(refs.string_refs);
         used_caps |= refs.required_capabilities;
@@ -2919,8 +2940,18 @@ mod tests {
         assert_eq!(entry_token.program(), token.program());
     }
 
+    // #1732 (FA-05-002): QTruth opcodes (0x17..0x1A) were introduced after
+    // the SEMCODE0 baseline vocabulary (see docs/roadmap/core_quad/) but
+    // carry no capability bit and no minimum-header-revision gate, so a
+    // baseline-header artifact containing them was previously admitted.
+    // This is the RED->GREEN regression for that gap: same fixture the old
+    // `verifier_accepts_unsupported_qtruth_opcodes` test used (a trivial
+    // `fn main() { return; }` baseline-header artifact with its opcode
+    // stream patched to raw QTruth bytes), but the artifact's header
+    // revision (SEMCODE0, rev 1) is below QTruth's minimum (SEMCOD18,
+    // rev 19), so admission must now fail closed.
     #[test]
-    fn verifier_accepts_unsupported_qtruth_opcodes() {
+    fn verifier_rejects_qtruth_opcodes_under_baseline_header() {
         let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
         let code_len_pos = 8 + 2 + 4;
         let opcode_pos = code_len_pos + 4 + 2;
@@ -2954,13 +2985,64 @@ mod tests {
         let new_code_len = 2 + new_code.len();
         bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
 
-        let verified = verify_semcode(&bytes).expect("verify");
+        assert_eq!(&bytes[0..8], b"SEMCODE0");
+        let report = verify_semcode(&bytes).expect_err("must reject QTruth under baseline header");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OpcodeRequiresNewerHeader
+        );
+    }
+
+    // #1732 regression matrix (2): the exact same QTruth opcode stream must
+    // be accepted once the artifact carries SEMCOD18 (QTruth's actual
+    // minimum header revision) - proving the gate is a real revision
+    // comparison, not a blanket QTruth rejection.
+    #[test]
+    fn verifier_accepts_qtruth_opcodes_under_semcod18_header() {
+        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        bytes[0..8].copy_from_slice(b"SEMCOD18");
+        let code_len_pos = 8 + 2 + 4;
+        let opcode_pos = code_len_pos + 4 + 2;
+
+        // SEMCOD18 carries CAP_OWNERSHIP_PATHS (inherited from SEMCOD11+),
+        // which requires a present (possibly empty) OWN0 section.
+        let mut new_code = Vec::new();
+        new_code.extend_from_slice(b"OWN0");
+        new_code.extend_from_slice(&0u16.to_le_bytes()); // empty ownership event count
+        new_code.push(0x17); // QTruthAnd
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.push(0x18); // QTruthOr
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.push(0x19); // QTruthNot
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.push(0x1A); // QTruthImpl
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.push(Opcode::Ret as u8);
+        new_code.push(0);
+
+        bytes.splice(opcode_pos..opcode_pos + 2, new_code.iter().copied());
+        let new_code_len = 2 + new_code.len();
+        bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
+
+        let verified = verify_semcode(&bytes).expect("QTruth under SEMCOD18 must verify");
         assert_eq!(verified.functions.len(), 1);
     }
 
     #[test]
     fn verifier_rejects_truncated_qtruth_opcodes() {
         let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        // Use SEMCOD18 (QTruth's actual minimum header) so this test
+        // isolates truncation handling from the #1732 header-revision gate
+        // - both are legitimate rejections, but this test is specifically
+        // about truncated operand bytes, not about the header revision.
+        bytes[0..8].copy_from_slice(b"SEMCOD18");
         let opcode_pos = 8 + 2 + 4 + 4 + 2;
 
         bytes[opcode_pos] = 0x17; // QTruthAnd (requires 4 operands bytes, only 1 left)
@@ -2970,5 +3052,125 @@ mod tests {
             report.diagnostics[0].code,
             VerificationCode::OperandOutOfBounds
         );
+    }
+
+    // Structural validity must be established before the header-revision
+    // gate applies: a truncated QTruth instruction under a baseline
+    // (SEMCODE0) header is not "structurally valid but from an older
+    // header" - decode_operands cannot even establish it as a complete
+    // instruction - so it must reject as OperandOutOfBounds, not
+    // OpcodeRequiresNewerHeader, per docs/spec/verifier.md's diagnostic
+    // contract for that code.
+    #[test]
+    fn verifier_rejects_truncated_qtruth_opcodes_under_baseline_header_as_operand_error() {
+        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        assert_eq!(&bytes[0..8], b"SEMCODE0");
+        let opcode_pos = 8 + 2 + 4 + 4 + 2;
+
+        bytes[opcode_pos] = 0x17; // QTruthAnd (requires 4 operand bytes, only 1 left)
+
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OperandOutOfBounds
+        );
+    }
+
+    // #1732 regression matrix (4/5): historically-baseline opcodes -
+    // including the legacy lattice `QAnd`/`QOr`/`QNot`/`QImpl` opcodes
+    // QTruth sits right next to - have minimum_semcode_revision() == 1, so
+    // they must remain fully admissible under SEMCODE0, completely
+    // unaffected by the new header-revision gate.
+    #[test]
+    fn verifier_accepts_baseline_logic_opcodes_under_semcode0_unchanged() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadI32 { dst: 0, val: 1 },
+                    IrInstr::LoadI32 { dst: 1, val: 0 },
+                    IrInstr::QAnd {
+                        dst: 2,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                    IrInstr::QOr {
+                        dst: 3,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                    IrInstr::QNot { dst: 4, src: 0 },
+                    IrInstr::QImpl {
+                        dst: 5,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+        assert_eq!(&bytes[0..8], b"SEMCODE0");
+        let verified = verify_semcode(&bytes).expect("baseline logic opcodes must verify");
+        assert_eq!(verified.header.rev, 1);
+    }
+
+    // #1732 regression matrix (6): a program mixing QTruth with an
+    // unrelated capability-gated feature (here, f64 math, which alone
+    // would only require SEMCODE1) must select the MAXIMUM required
+    // header revision (SEMCOD18, rev 19), not whichever feature's
+    // if/else-if branch happens to match first.
+    #[test]
+    fn emitter_selects_maximum_required_revision_for_mixed_program() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadF64 { dst: 0, val: 1.5 },
+                    IrInstr::QTruthAnd {
+                        dst: 1,
+                        lhs: 0,
+                        rhs: 0,
+                    },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+        assert_eq!(&bytes[0..8], b"SEMCOD18");
+        let verified = verify_semcode(&bytes).expect("mixed QTruth+f64 program must verify");
+        assert_eq!(verified.header.rev, 19);
+    }
+
+    // #1732 regression matrix (3): the canonical emitter itself must choose
+    // a header whose revision actually covers QTruth, not just structurally
+    // valid bytes hand-patched by a test. Uses emit_ir_to_semcode (IR
+    // level) so this doesn't depend on the source front-end's own QTruth
+    // admission being wired for every feature-gate combination.
+    #[test]
+    fn emitter_promotes_qtruth_only_program_to_semcod18() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::QTruthAnd {
+                        dst: 0,
+                        lhs: 0,
+                        rhs: 0,
+                    },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+        assert_eq!(&bytes[0..8], b"SEMCOD18");
+        let verified = verify_semcode(&bytes).expect("emitted QTruth program must verify");
+        assert_eq!(verified.header.rev, 19);
     }
 }

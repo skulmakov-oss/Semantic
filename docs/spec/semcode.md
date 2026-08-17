@@ -75,6 +75,11 @@ Current supported header family:
 - `SEMCOD12`
 - `SEMCOD13`
 - `SEMCOD14`
+- `SEMCOD18`
+
+`SEMCOD15`, `SEMCOD16`, and `SEMCOD17` are also currently emitted/admitted
+by the toolchain but are not yet documented in this section; that is a
+pre-existing documentation gap, not part of the #1732 repair.
 
 Observed runtime support in the current toolchain:
 
@@ -93,6 +98,7 @@ Observed runtime support in the current toolchain:
 - `SEMCOD12`: epoch `0`, revision `13`
 - `SEMCOD13`: epoch `0`, revision `14`
 - `SEMCOD14`: epoch `0`, revision `15`
+- `SEMCOD18`: epoch `0`, revision `19`
 
 Header responsibilities:
 
@@ -254,6 +260,45 @@ Discipline rules:
 - does not claim mutable in-place map update, iteration, or non-frame-local
   map state beyond the admitted functional empty/get/set/contains contour
 
+`SEMCOD18`
+
+- promoted contract used when emitted program usage requires the `QTruth`
+  Belnap truth-table opcode family (`QTruthAnd`, `QTruthOr`, `QTruthNot`,
+  `QTruthImpl`)
+- keeps `SEMCODE0..17` fixed for older artifacts; `QTruth` is not admitted
+  under any older header (see #1732 / FA-05-002 and
+  `## Opcode Vocabulary And Header Identity` below)
+- carries forward the same capability envelope as `SEMCOD17` unchanged - no
+  new capability bit is introduced; the gap this closes is a missing
+  version-identity gate, not a missing capability
+- does not claim any change to the existing lattice `QAnd`/`QOr`/`QNot`/
+  `QImpl` opcodes, which remain baseline and unaffected
+
+## Opcode Vocabulary And Header Identity
+
+SemCode header identity constrains the executable opcode vocabulary. Every
+`Opcode` variant is explicitly bound to a minimum SemCode header revision by
+`Opcode::minimum_semcode_revision()`. Variants established as baseline are
+explicitly assigned revision `1` (`SEMCODE0`); a family with repository-backed
+evidence for a later semantic introduction is explicitly assigned that later
+revision. The mapping is exhaustive and has no wildcard/default revision arm,
+so adding a new `Opcode` variant requires an explicit revision-policy decision
+at compile time.
+
+An opcode introduced after a header revision is non-canonical under an older
+header and must be rejected before `VerifiedSemCode` is issued, even if that
+opcode is structurally well-formed and requires no missing capability.
+
+This is a distinct concern from the capability contract above: most
+opcodes that gained new semantics after the baseline also gained a
+capability bit, and since each header's capability set is fixed and
+cumulative per revision, the capability check already transitively enforces
+their minimum header. The opcode-vocabulary/header-identity invariant is
+only independently load-bearing for an opcode family that carries no
+capability bit at all - currently only `QTruth` (see #1732 / FA-05-002 for
+the full audit and rationale). See `docs/spec/verifier.md` for the
+enforcement mechanism.
+
 Important rule:
 
 - header selection is derived from actual emitted usage, not from profile
@@ -302,6 +347,8 @@ Current SemCode admission validates:
 - header magic and supported version
 - section and function-layout integrity
 - opcode validity against the public opcode admission matrix in `verifier.md`
+- opcode/header-revision consistency (see
+  `## Opcode Vocabulary And Header Identity`)
 - operand shape validity
 - jump-target validity
 - call-target validity

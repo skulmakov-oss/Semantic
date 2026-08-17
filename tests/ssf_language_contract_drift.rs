@@ -39,7 +39,8 @@ fn ssf_01_language_contract_keeps_its_version_and_evidence_map() {
         "Experimental but currently accepted extensions",
         "Deterministically unsupported forms",
         "Source-to-SemCode relationship",
-        "SEMCODE0` through `SEMCOD14",
+        "SEMCODE0` through `SEMCOD14`, or `SEMCOD18` when the program uses the",
+        "std.quad` QTruth family",
         "not published stable",
     ] {
         assert!(
