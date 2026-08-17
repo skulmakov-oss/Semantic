@@ -53,15 +53,15 @@ mod tests {
 
     // #1732 (FA-05-002) review follow-up: minimum_semcode_revision() is now
     // an exhaustive match over Opcode (no wildcard `_`), so adding a future
-    // opcode variant without updating it is a compile-time error, not a
-    // silent SEMCODE0 default. This test is a readable sample across every
-    // group in that match, not a substitute for the compiler's own
-    // exhaustiveness guarantee.
+    // opcode variant without updating it is a compile-time error and no
+    // variant can acquire a minimum revision implicitly. This test is a
+    // readable sample across every group in that match, not a substitute for
+    // the compiler's own exhaustiveness guarantee.
     #[test]
     fn minimum_semcode_revision_matches_expected_values() {
         use semcode_format::Opcode;
 
-        // QTruth: the one non-default family
+        // QTruth: the only family currently assigned a non-baseline minimum revision
         for op in [
             Opcode::QTruthAnd,
             Opcode::QTruthOr,
