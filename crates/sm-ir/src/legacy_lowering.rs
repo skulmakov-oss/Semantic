@@ -1,8 +1,8 @@
 use super::*;
 use crate::semcode_format::{
-    write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0, MAGIC1, MAGIC10,
-    MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC2, MAGIC3, MAGIC4,
-    MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
+    header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0,
+    MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17, MAGIC18,
+    MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
     OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
     OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG,
@@ -1138,6 +1138,18 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
         out.extend_from_slice(&MAGIC0);
         require_ownership_section = false;
     }
+    // #1732 (FA-05-002): the `has_vN_*_instr` chain above is a hand-written
+    // promotion decision, independent of `Opcode::minimum_semcode_revision`
+    // (sm-format's actual admission authority). This is the mechanical
+    // safety net closing that gap: every function's actual emitted opcode
+    // bytes are checked against the chosen header's revision below, so a
+    // future opcode given a non-default minimum revision without a
+    // matching promotion branch here hard-fails at emission time - loudly,
+    // at the point of the bug - instead of silently shipping an artifact
+    // its own verifier would reject.
+    let chosen_magic: [u8; 8] = out[0..8].try_into().expect("header magic just written");
+    let chosen_header = header_spec_from_magic(&chosen_magic).expect("known header just chosen");
+    let mut max_opcode_revision_used: u16 = 1;
     for f in funcs {
         let name_bytes = f.name.as_bytes();
         write_u16_le(
@@ -1148,7 +1160,9 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
             })?,
         );
         out.extend_from_slice(name_bytes);
-        let code = emit_semcode_function(f, debug_symbols, require_ownership_section)?;
+        let (code, func_max_revision) =
+            emit_semcode_function(f, debug_symbols, require_ownership_section)?;
+        max_opcode_revision_used = max_opcode_revision_used.max(func_max_revision);
         write_u32_le(
             &mut out,
             u32::try_from(code.len()).map_err(|_| FrontendError {
@@ -1158,6 +1172,20 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
         );
         out.extend_from_slice(&code);
     }
+    if max_opcode_revision_used > chosen_header.rev {
+        return Err(FrontendError {
+            pos: 0,
+            message: format!(
+                "internal error: emitted opcode requires minimum SemCode revision {}, \
+                 but header selection chose revision {} ('{}') - a header-selection \
+                 predicate is missing for an opcode with a non-baseline \
+                 Opcode::minimum_semcode_revision()",
+                max_opcode_revision_used,
+                chosen_header.rev,
+                String::from_utf8_lossy(&chosen_header.magic)
+            ),
+        });
+    }
     Ok(out)
 }
 
@@ -1165,7 +1193,7 @@ fn emit_semcode_function(
     f: &IrFunction,
     debug_symbols: bool,
     require_ownership_section: bool,
-) -> Result<Vec<u8>, FrontendError> {
+) -> Result<(Vec<u8>, u16), FrontendError> {
     let mut interner = StringInterner::new();
     for instr in &f.instrs {
         match instr {
@@ -1257,6 +1285,14 @@ fn emit_semcode_function(
 
     let mut instr_stream = Vec::new();
     let mut dbg = Vec::<(u32, u32, u16)>::new();
+    // #1732 (FA-05-002): tracks the maximum Opcode::minimum_semcode_revision()
+    // actually emitted, read back from the real opcode byte emit_instr just
+    // wrote - not a second hand-maintained opcode/feature table - so the
+    // emit_semcode caller can mechanically detect (and hard-fail on) any
+    // future opcode whose minimum-revision authority is updated without a
+    // matching header-selection promotion, instead of silently emitting an
+    // artifact its own verifier would reject.
+    let mut max_opcode_revision: u16 = 1;
     for instr in &f.instrs {
         if matches!(instr, IrInstr::Label { .. }) {
             continue;
@@ -1265,7 +1301,13 @@ fn emit_semcode_function(
             pos: 0,
             message: "instruction stream too large".to_string(),
         })?;
+        let opcode_byte_pos = instr_stream.len();
         emit_instr(instr, &label_pc, &interner, &mut instr_stream)?;
+        if let Some(&raw_opcode) = instr_stream.get(opcode_byte_pos) {
+            if let Ok(opcode) = Opcode::from_byte(raw_opcode) {
+                max_opcode_revision = max_opcode_revision.max(opcode.minimum_semcode_revision());
+            }
+        }
         if debug_symbols {
             let line = u32::try_from(dbg.len() + 1).map_err(|_| FrontendError {
                 pos: 0,
@@ -1294,7 +1336,7 @@ fn emit_semcode_function(
     }
     emit_ownership_events(&f.ownership_events, require_ownership_section, &mut code)?;
     code.extend_from_slice(&instr_stream);
-    Ok(code)
+    Ok((code, max_opcode_revision))
 }
 
 fn encoded_size(instr: &IrInstr) -> Option<usize> {
@@ -9880,6 +9922,46 @@ mod opt_tests {
     use crate::passes::run_default_opt_passes;
     use sm_format::semcode_decode::{decode_semcode_envelope, DecodedAccessPathComponent};
     use sm_front::parse_program;
+
+    // #1732 (FA-05-002) review follow-up: proves emit_semcode_function's
+    // opcode-revision tracking is genuinely mechanical (reads the real byte
+    // emit_instr wrote), not a second hand-maintained table - this is what
+    // lets emit_semcode's post-loop check catch a future opcode whose
+    // Opcode::minimum_semcode_revision() is elevated without a matching
+    // header-selection promotion, instead of silently emitting bytes its
+    // own verifier would reject.
+    #[test]
+    fn emit_semcode_function_tracks_max_opcode_revision_for_qtruth() {
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![
+                IrInstr::LoadI32 { dst: 0, val: 1 },
+                IrInstr::QTruthAnd {
+                    dst: 1,
+                    lhs: 0,
+                    rhs: 0,
+                },
+                IrInstr::Ret { src: None },
+            ],
+            ownership_events: Vec::new(),
+        };
+        let (_, max_rev) = emit_semcode_function(&func, false, false).expect("emit");
+        assert_eq!(max_rev, 19);
+    }
+
+    #[test]
+    fn emit_semcode_function_tracks_baseline_revision_without_qtruth() {
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![
+                IrInstr::LoadI32 { dst: 0, val: 1 },
+                IrInstr::Ret { src: None },
+            ],
+            ownership_events: Vec::new(),
+        };
+        let (_, max_rev) = emit_semcode_function(&func, false, false).expect("emit");
+        assert_eq!(max_rev, 1);
+    }
 
     #[test]
     fn access_path_root_starts_with_empty_component_list() {
