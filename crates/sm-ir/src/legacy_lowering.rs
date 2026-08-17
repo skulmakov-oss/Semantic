@@ -1143,7 +1143,7 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // (sm-format's actual admission authority). This is the mechanical
     // safety net closing that gap: every function's actual emitted opcode
     // bytes are checked against the chosen header's revision below, so a
-    // future opcode given a non-default minimum revision without a
+    // future opcode assigned a non-baseline minimum revision without a
     // matching promotion branch here hard-fails at emission time - loudly,
     // at the point of the bug - instead of silently shipping an artifact
     // its own verifier would reject.
@@ -1964,14 +1964,14 @@ fn has_v17_application_instr(funcs: &[IrFunction]) -> bool {
 }
 
 /// #1732 (FA-05-002): QTruth is the only IR-level trigger whose emitted
-/// opcodes (`Opcode::QTruthAnd`/`QTruthOr`/`QTruthNot`/`QTruthImpl`) have a
-/// non-default `Opcode::minimum_semcode_revision()` (see sm-format). This
-/// predicate exists to promote the header at the IR level, mirroring every
-/// other `has_vN_*_instr` promotion in this file; the actual minimum
-/// revision number itself lives in exactly one place, sm-format's
-/// `Opcode::minimum_semcode_revision`, which `sm-verify` uses independently
-/// to enforce admission - this function only decides *whether* to promote,
-/// not *what revision* QTruth requires.
+/// opcodes (`Opcode::QTruthAnd`/`QTruthOr`/`QTruthNot`/`QTruthImpl`) are
+/// currently assigned a non-baseline `Opcode::minimum_semcode_revision()`
+/// (see sm-format). This predicate exists to promote the header at the IR
+/// level, mirroring every other `has_vN_*_instr` promotion in this file;
+/// the actual minimum revision number itself lives in exactly one place,
+/// sm-format's `Opcode::minimum_semcode_revision`, which `sm-verify` uses
+/// independently to enforce admission - this function only decides
+/// *whether* to promote, not *what revision* QTruth requires.
 fn has_v18_qtruth_instr(funcs: &[IrFunction]) -> bool {
     funcs.iter().any(|f| {
         f.instrs.iter().any(|i| {
