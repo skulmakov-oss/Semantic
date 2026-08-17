@@ -1189,6 +1189,32 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     Ok(out)
 }
 
+/// #1732 (FA-05-002) review follow-up: reads back the opcode byte
+/// `emit_instr` just wrote at `opcode_byte_pos` and returns its
+/// `Opcode::minimum_semcode_revision()`. Fails closed - returns
+/// `Err(FrontendError)` - rather than silently skipping, if the byte is
+/// missing or unrecognized. Under the current `emit_instr`, every non-Label
+/// `IrInstr` variant always writes a real `Opcode::X.byte()` as its first
+/// byte, so both error paths are unreachable through the public API today;
+/// they exist so a future `emit_instr` change that broke that invariant
+/// hard-fails immediately instead of letting the mechanical revision guard
+/// silently under-report the required header revision.
+fn opcode_minimum_revision_at(code: &[u8], opcode_byte_pos: usize) -> Result<u16, FrontendError> {
+    let raw_opcode = *code.get(opcode_byte_pos).ok_or_else(|| FrontendError {
+        pos: 0,
+        message: "internal error: emit_instr produced no opcode byte for a non-Label instruction"
+            .to_string(),
+    })?;
+    let opcode = Opcode::from_byte(raw_opcode).map_err(|_| FrontendError {
+        pos: 0,
+        message: format!(
+            "internal error: emit_instr wrote an unrecognized opcode byte 0x{raw_opcode:02x} \
+             that Opcode::from_byte cannot decode"
+        ),
+    })?;
+    Ok(opcode.minimum_semcode_revision())
+}
+
 fn emit_semcode_function(
     f: &IrFunction,
     debug_symbols: bool,
@@ -1303,11 +1329,8 @@ fn emit_semcode_function(
         })?;
         let opcode_byte_pos = instr_stream.len();
         emit_instr(instr, &label_pc, &interner, &mut instr_stream)?;
-        if let Some(&raw_opcode) = instr_stream.get(opcode_byte_pos) {
-            if let Ok(opcode) = Opcode::from_byte(raw_opcode) {
-                max_opcode_revision = max_opcode_revision.max(opcode.minimum_semcode_revision());
-            }
-        }
+        let instr_min_revision = opcode_minimum_revision_at(&instr_stream, opcode_byte_pos)?;
+        max_opcode_revision = max_opcode_revision.max(instr_min_revision);
         if debug_symbols {
             let line = u32::try_from(dbg.len() + 1).map_err(|_| FrontendError {
                 pos: 0,
@@ -9961,6 +9984,37 @@ mod opt_tests {
         };
         let (_, max_rev) = emit_semcode_function(&func, false, false).expect("emit");
         assert_eq!(max_rev, 1);
+    }
+
+    // #1732 (FA-05-002) review follow-up: opcode_minimum_revision_at must
+    // fail closed - never silently skip - if the opcode byte it's asked to
+    // read is missing or unrecognized. Both failure modes are unreachable
+    // through the public compile/emit API today (emit_instr always writes a
+    // real Opcode byte for every non-Label instruction), so these test the
+    // pure helper directly with hand-built byte slices rather than trying
+    // to force emit_instr to misbehave.
+    #[test]
+    fn opcode_minimum_revision_at_fails_closed_on_missing_byte() {
+        let code: &[u8] = &[];
+        let err = opcode_minimum_revision_at(code, 0).expect_err("must fail closed");
+        assert!(err.message.contains("no opcode byte"));
+    }
+
+    #[test]
+    fn opcode_minimum_revision_at_fails_closed_on_unrecognized_byte() {
+        // 0x00 is not assigned to any Opcode variant.
+        let code: &[u8] = &[0x00];
+        let err = opcode_minimum_revision_at(code, 0).expect_err("must fail closed");
+        assert!(err.message.contains("unrecognized opcode byte"));
+    }
+
+    #[test]
+    fn opcode_minimum_revision_at_returns_correct_revision_for_known_opcode() {
+        let code: &[u8] = &[Opcode::QTruthAnd.byte(), 0, 0, 0, 0, 0, 0];
+        assert_eq!(opcode_minimum_revision_at(code, 0), Ok(19));
+
+        let code: &[u8] = &[Opcode::LoadI32.byte(), 0, 0, 0, 0, 0, 0];
+        assert_eq!(opcode_minimum_revision_at(code, 0), Ok(1));
     }
 
     #[test]
