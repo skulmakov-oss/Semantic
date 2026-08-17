@@ -1752,7 +1752,7 @@ mod tests {
     fn verifier_rejects_jump_past_instruction_stream() {
         let mut bytes = compile_program_to_semcode("fn main() { if true { return; } return; }")
             .expect("compile");
-        let opcode_pos = find_opcode(&bytes, Opcode::JmpIf.byte()).expect("jmpif");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::JmpIf, 0);
         let target_pos = opcode_pos + 1 + 2;
         bytes[target_pos..target_pos + 4].copy_from_slice(&999u32.to_le_bytes());
         let report = verify_semcode(&bytes).expect_err("must reject");
@@ -1767,7 +1767,7 @@ mod tests {
         let mut bytes =
             compile_program_to_semcode("fn helper() { return; } fn main() { helper(); return; }")
                 .expect("compile");
-        let opcode_pos = find_opcode(&bytes, Opcode::Call.byte()).expect("call");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::Call, 0);
         let sid_pos = opcode_pos + 1 + 1 + 2;
         bytes[sid_pos..sid_pos + 2].copy_from_slice(&99u16.to_le_bytes());
         let report = verify_semcode(&bytes).expect_err("must reject");
@@ -1781,7 +1781,7 @@ mod tests {
     fn verifier_rejects_register_past_verified_local_budget() {
         let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
             .expect("compile");
-        let opcode_pos = find_opcode(&bytes, Opcode::LoadBool.byte()).expect("load bool");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
         let dst_pos = opcode_pos + 1;
         bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
         let report = verify_semcode(&bytes).expect_err("must reject");
@@ -1798,7 +1798,7 @@ mod tests {
     fn verifier_rejects_non_canonical_bool_literal() {
         let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
             .expect("compile");
-        let opcode_pos = find_opcode(&bytes, Opcode::LoadBool.byte()).expect("load bool");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
         let literal_pos = opcode_pos + 1 + 2;
         bytes[literal_pos] = 0xff;
         let report = verify_semcode(&bytes).expect_err("must reject");
@@ -1813,13 +1813,15 @@ mod tests {
     // a Verified token and only failing later in the VM as BadFormat.
     #[test]
     fn verifier_rejects_non_canonical_quad_literal() {
-        // No let-binding: a named local would intern a string, and a short
-        // string's length byte can coincidentally equal LoadQ's opcode byte
-        // (0x01), making a naive byte scan land on the wrong offset.
+        // This exact fixture interns "a" as a string; the string table's
+        // length byte for a 1-character string equals LoadQ's opcode byte
+        // (0x01), which used to make a naive whole-buffer byte scan land on
+        // the string table instead of the real LOAD_Q instruction (see
+        // #1791). find_instruction locates it via the decoded instruction
+        // stream instead, so it is unaffected by that coincidence.
         let mut bytes =
-            compile_program_to_semcode("fn get() -> quad { return T; } fn main() { return; }")
-                .expect("compile");
-        let opcode_pos = find_opcode(&bytes, Opcode::LoadQ.byte()).expect("load q");
+            compile_program_to_semcode("fn main() { let a: quad = N; return; }").expect("compile");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadQ, 0);
         let literal_pos = opcode_pos + 1 + 2;
         bytes[literal_pos] = 0xff;
         let report = verify_semcode(&bytes).expect_err("must reject");
@@ -1836,7 +1838,7 @@ mod tests {
         let mut bytes =
             compile_program_to_semcode("fn helper() { return; } fn main() { helper(); return; }")
                 .expect("compile");
-        let opcode_pos = find_opcode(&bytes, Opcode::Call.byte()).expect("call");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::Call, 0);
         bytes[opcode_pos + 1] = 0xff;
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
@@ -1877,7 +1879,7 @@ mod tests {
             false,
         )
         .expect("emit");
-        let opcode_pos = find_opcode(&bytes, Opcode::ClosureCall.byte()).expect("closure call");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::ClosureCall, 0);
         bytes[opcode_pos + 1] = 0xff;
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
@@ -1890,7 +1892,7 @@ mod tests {
     #[test]
     fn verifier_rejects_non_canonical_ret_src_flag() {
         let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        let opcode_pos = find_opcode(&bytes, Opcode::Ret.byte()).expect("ret");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::Ret, 0);
         bytes[opcode_pos + 1] = 0xff;
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
@@ -2361,8 +2363,58 @@ mod tests {
         cursor
     }
 
-    fn find_opcode(bytes: &[u8], opcode: u8) -> Option<usize> {
-        bytes.iter().position(|byte| *byte == opcode)
+    /// Locates the absolute byte offset of the `occurrence`-th (0-indexed)
+    /// instance of `opcode` within `function_name`'s actual decoded
+    /// instruction stream.
+    ///
+    /// Walks instruction-by-instruction from the real `instr_start_offset`,
+    /// reusing the same decode logic (`decode_semcode_envelope`,
+    /// `decode_operands`) the verifier's own admission path uses, instead of
+    /// scanning raw bytes for the first matching value anywhere in the
+    /// buffer. This cannot match a header, function-name, string-table,
+    /// debug-section, or ownership-section byte, and cannot match an earlier
+    /// instruction's operand byte, because those are never mistaken for an
+    /// opcode-position read during the walk.
+    ///
+    /// Panics with a precise message if the function isn't found, if
+    /// decoding fails, or if fewer than `occurrence + 1` matches exist -
+    /// never silently selects an arbitrary occurrence when more than one
+    /// exists.
+    fn find_instruction(
+        bytes: &[u8],
+        function_name: &str,
+        opcode: Opcode,
+        occurrence: usize,
+    ) -> usize {
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode semcode");
+        let env = functions
+            .iter()
+            .find(|f| f.name == function_name)
+            .unwrap_or_else(|| panic!("function '{function_name}' not found"));
+
+        let code = env.code_slice;
+        let mut cursor = env.instr_start_offset;
+        let mut matches = Vec::new();
+        while cursor < code.len() {
+            let instr_offset = cursor;
+            let raw = read_u8(code, &mut cursor).expect("read opcode byte");
+            let decoded = Opcode::from_byte(raw).expect("valid opcode");
+            if decoded == opcode {
+                matches.push(instr_offset);
+            }
+            decode_operands(function_name, code, &mut cursor, instr_offset, decoded)
+                .expect("decode operands");
+        }
+
+        let relative = *matches.get(occurrence).unwrap_or_else(|| {
+            panic!(
+                "expected occurrence {occurrence} of {opcode:?} in '{function_name}', found \
+                 {} match(es) at {matches:?}",
+                matches.len()
+            )
+        });
+        env.code_offset + relative
     }
 
     #[test]
