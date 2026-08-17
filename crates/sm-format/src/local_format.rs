@@ -688,30 +688,44 @@ pub fn write_f64_le(out: &mut Vec<u8>, v: f64) {
     out.extend_from_slice(&v.to_le_bytes());
 }
 
-pub fn read_u8(bytes: &[u8], i: &mut usize) -> Result<u8, SemcodeFormatError> {
-    if *i >= bytes.len() {
+/// #1736 (FA-05-006): shared bounds-check primitive for every low-level
+/// reader below. Uses `checked_add`, never raw `+`, so a maliciously large
+/// `start` (e.g. a cursor advanced by an attacker-controlled length field)
+/// cannot wrap past `usize::MAX` and produce a false in-bounds result -
+/// which is exactly how the pre-fix `*i + width > bytes.len()` comparison
+/// could be defeated on 32-bit targets.
+fn checked_read_end(
+    bytes_len: usize,
+    start: usize,
+    width: usize,
+) -> Result<usize, SemcodeFormatError> {
+    let end = start
+        .checked_add(width)
+        .ok_or(SemcodeFormatError::UnexpectedEof)?;
+    if end > bytes_len {
         return Err(SemcodeFormatError::UnexpectedEof);
     }
+    Ok(end)
+}
+
+pub fn read_u8(bytes: &[u8], i: &mut usize) -> Result<u8, SemcodeFormatError> {
+    let end = checked_read_end(bytes.len(), *i, 1)?;
     let v = bytes[*i];
-    *i += 1;
+    *i = end;
     Ok(v)
 }
 
 pub fn read_u16_le(bytes: &[u8], i: &mut usize) -> Result<u16, SemcodeFormatError> {
-    if *i + 2 > bytes.len() {
-        return Err(SemcodeFormatError::UnexpectedEof);
-    }
-    let v = u16::from_le_bytes([bytes[*i], bytes[*i + 1]]);
-    *i += 2;
+    let end = checked_read_end(bytes.len(), *i, 2)?;
+    let v = u16::from_le_bytes(bytes[*i..end].try_into().unwrap());
+    *i = end;
     Ok(v)
 }
 
 pub fn read_u32_le(bytes: &[u8], i: &mut usize) -> Result<u32, SemcodeFormatError> {
-    if *i + 4 > bytes.len() {
-        return Err(SemcodeFormatError::UnexpectedEof);
-    }
-    let v = u32::from_le_bytes([bytes[*i], bytes[*i + 1], bytes[*i + 2], bytes[*i + 3]]);
-    *i += 4;
+    let end = checked_read_end(bytes.len(), *i, 4)?;
+    let v = u32::from_le_bytes(bytes[*i..end].try_into().unwrap());
+    *i = end;
     Ok(v)
 }
 
@@ -720,22 +734,118 @@ pub fn read_i32_le(bytes: &[u8], i: &mut usize) -> Result<i32, SemcodeFormatErro
 }
 
 pub fn read_f64_le(bytes: &[u8], i: &mut usize) -> Result<f64, SemcodeFormatError> {
-    if *i + 8 > bytes.len() {
-        return Err(SemcodeFormatError::UnexpectedEof);
-    }
-    let mut raw = [0u8; 8];
-    raw.copy_from_slice(&bytes[*i..*i + 8]);
-    *i += 8;
-    Ok(f64::from_le_bytes(raw))
+    let end = checked_read_end(bytes.len(), *i, 8)?;
+    let v = f64::from_le_bytes(bytes[*i..end].try_into().unwrap());
+    *i = end;
+    Ok(v)
 }
 
 pub fn read_utf8(bytes: &[u8], i: &mut usize, len: usize) -> Result<String, SemcodeFormatError> {
-    if *i + len > bytes.len() {
-        return Err(SemcodeFormatError::UnexpectedEof);
-    }
-    let s = std::str::from_utf8(&bytes[*i..*i + len])
+    let end = checked_read_end(bytes.len(), *i, len)?;
+    let s = std::str::from_utf8(&bytes[*i..end])
         .map_err(|_| SemcodeFormatError::InvalidUtf8)?
         .to_string();
-    *i += len;
+    *i = end;
     Ok(s)
+}
+
+// #1736 (FA-05-006): regression coverage for the checked-arithmetic repair.
+// Before the fix, `*i + width > bytes.len()` used raw addition, so a cursor
+// near `usize::MAX` (reachable from an attacker-controlled cursor/length on
+// any target, and trivially reachable from an ordinary u32 length field on a
+// 32-bit target) could wrap past zero and pass the bounds check, producing
+// an out-of-range slice index panic instead of a decode error.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_u8_rejects_cursor_near_usize_max_without_panicking() {
+        let bytes = [1u8, 2, 3];
+        let mut i = usize::MAX - 1;
+        assert_eq!(
+            read_u8(&bytes, &mut i),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+    }
+
+    #[test]
+    fn read_u16_le_rejects_cursor_near_usize_max_without_panicking() {
+        let bytes = [1u8, 2, 3];
+        let mut i = usize::MAX - 1;
+        assert_eq!(
+            read_u16_le(&bytes, &mut i),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+    }
+
+    #[test]
+    fn read_u32_le_rejects_cursor_near_usize_max_without_panicking() {
+        let bytes = [1u8, 2, 3];
+        let mut i = usize::MAX - 1;
+        assert_eq!(
+            read_u32_le(&bytes, &mut i),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+    }
+
+    #[test]
+    fn read_f64_le_rejects_cursor_near_usize_max_without_panicking() {
+        let bytes = [1u8, 2, 3];
+        let mut i = usize::MAX - 1;
+        assert_eq!(
+            read_f64_le(&bytes, &mut i),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+    }
+
+    #[test]
+    fn read_utf8_rejects_overflowing_cursor_plus_len_without_panicking() {
+        let bytes = [1u8, 2, 3];
+        let mut i = 1usize;
+        assert_eq!(
+            read_utf8(&bytes, &mut i, usize::MAX),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+    }
+
+    #[test]
+    fn ordinary_reads_still_succeed_and_advance_cursor() {
+        let bytes: Vec<u8> = vec![
+            0x42, 0x01, 0x02, 0x03, 0x04, 1, 2, 3, 4, 5, 6, 7, 8, b'h', b'i',
+        ];
+        let mut i = 0usize;
+        assert_eq!(read_u8(&bytes, &mut i), Ok(0x42));
+        assert_eq!(i, 1);
+        assert_eq!(read_u32_le(&bytes, &mut i), Ok(0x04030201));
+        assert_eq!(i, 5);
+        assert_eq!(
+            read_f64_le(&bytes, &mut i),
+            Ok(f64::from_le_bytes([1, 2, 3, 4, 5, 6, 7, 8]))
+        );
+        assert_eq!(i, 13);
+        assert_eq!(read_utf8(&bytes, &mut i, 2), Ok("hi".to_string()));
+        assert_eq!(i, 15);
+    }
+
+    #[test]
+    fn ordinary_truncation_is_still_rejected() {
+        let bytes = [0u8, 1];
+        assert_eq!(
+            read_u16_le(&bytes, &mut 1),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+        assert_eq!(
+            read_u32_le(&bytes, &mut 0),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+        assert_eq!(
+            read_f64_le(&bytes, &mut 0),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+        assert_eq!(
+            read_utf8(&bytes, &mut 0, 3),
+            Err(SemcodeFormatError::UnexpectedEof)
+        );
+    }
 }
