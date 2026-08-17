@@ -1,0 +1,40 @@
+name: Clippy SARIF
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  clippy-sarif:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install system BLAS (required by the turbovec Hub dependency on Linux)
+        run: sudo apt-get update && sudo apt-get install -y libopenblas-dev
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.97.1
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install SARIF converters
+        run: cargo install --locked clippy-sarif sarif-fmt
+      - name: Run Clippy and generate SARIF
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets --all-features --message-format=json \
+            | clippy-sarif \
+            | tee clippy-results.sarif \
+            | sarif-fmt
+      - name: Upload Clippy SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: clippy-results.sarif
