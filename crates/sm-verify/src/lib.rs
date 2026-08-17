@@ -574,6 +574,7 @@ fn verify_function_code(
                 err.to_string(),
             ),
         })?;
+        let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
         let min_rev = opcode.minimum_semcode_revision();
         if header.rev < min_rev {
             return Err(reject_one(
@@ -587,7 +588,6 @@ fn verify_function_code(
                 ),
             ));
         }
-        let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
         jump_targets.extend(refs.jump_targets);
         string_refs.extend(refs.string_refs);
         used_caps |= refs.required_capabilities;
@@ -3046,6 +3046,28 @@ mod tests {
         let opcode_pos = 8 + 2 + 4 + 4 + 2;
 
         bytes[opcode_pos] = 0x17; // QTruthAnd (requires 4 operands bytes, only 1 left)
+
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::OperandOutOfBounds
+        );
+    }
+
+    // Structural validity must be established before the header-revision
+    // gate applies: a truncated QTruth instruction under a baseline
+    // (SEMCODE0) header is not "structurally valid but from an older
+    // header" - decode_operands cannot even establish it as a complete
+    // instruction - so it must reject as OperandOutOfBounds, not
+    // OpcodeRequiresNewerHeader, per docs/spec/verifier.md's diagnostic
+    // contract for that code.
+    #[test]
+    fn verifier_rejects_truncated_qtruth_opcodes_under_baseline_header_as_operand_error() {
+        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        assert_eq!(&bytes[0..8], b"SEMCODE0");
+        let opcode_pos = 8 + 2 + 4 + 4 + 2;
+
+        bytes[opcode_pos] = 0x17; // QTruthAnd (requires 4 operand bytes, only 1 left)
 
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
