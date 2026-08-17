@@ -125,13 +125,16 @@ A violation rejects with `AmbiguousInstructionFraming`'s sibling code,
   bit at all need this check to be independently load-bearing (see #1732 /
   FA-05-002).
 
-`Opcode::minimum_semcode_revision` defaults to the baseline revision (`1`,
-`SEMCODE0`) for every opcode. Only an opcode family with a *provable* later
+`Opcode::minimum_semcode_revision` assigns a minimum revision explicitly to
+every `Opcode` variant. Variants established as baseline are explicitly
+assigned revision `1` (`SEMCODE0`). An opcode family with a *provable* later
 introduction revision - backed by an actual repository decision record, not
-by commit date alone - gets a non-default entry; the function must not
-imply stronger historical knowledge than the repository has actually
-established. Currently this covers only the `QTruth` family (minimum
-revision `19`, `SEMCOD18`).
+by commit date alone - is explicitly assigned that later revision. The match
+is intentionally exhaustive and has no wildcard/default revision arm, so a
+new `Opcode` variant cannot acquire a revision policy implicitly. This
+function must not imply stronger historical knowledge than the repository has
+actually established. Currently the only family assigned a non-baseline
+minimum revision is `QTruth` (revision `19`, `SEMCOD18`).
 
 ## Canonical Instruction Framing
 
