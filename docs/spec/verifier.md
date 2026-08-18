@@ -215,6 +215,20 @@ infinite loop is admissible, and an ordinary trailing instruction may fall
 through if it is unreachable from function entry. The verifier does not require
 the final encoded instruction to be `RET`.
 
+## Debug Reference Validity
+
+A `DBG0` debug symbol's `pc` must reference a decoded instruction boundary,
+not merely fall within the executable byte range. The verifier reuses the
+same `instr_starts` set collected during its normal instruction walk (the
+same authority the jump-target boundary check above already relies on) - it
+does not run a second decoder or infer boundaries from opcode-byte scanning.
+A `pc` that is numerically less than the instruction stream length but lands
+inside a decoded instruction's operand bytes is rejected with
+`VerificationCode::InvalidDebugSection`, the same code already used for an
+out-of-range `pc`. This proves only that a debug reference denotes a real
+instruction boundary; it does not claim source-line fidelity, debugger
+correctness, or any stronger metadata semantics than that structural fact.
+
 ## Contract Rule
 
 Standard execution uses the chain:

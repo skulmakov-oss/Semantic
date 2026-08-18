@@ -632,6 +632,19 @@ fn verify_function_code(
                 "debug symbol pc points past the instruction stream",
             ));
         }
+        // #1746 (FA-07-006): range alone does not prove `sym.pc` denotes an
+        // actual instruction boundary - it could land inside a decoded
+        // operand's bytes. Reuse the instruction-start set this same
+        // verification walk already built, exactly like the jump-target
+        // check below does for `InvalidJumpTarget`.
+        if !instr_starts.contains(&sym.pc) {
+            return Err(reject_one(
+                name,
+                VerificationCode::InvalidDebugSection,
+                sym.pc,
+                "debug symbol pc does not land on an instruction boundary",
+            ));
+        }
     }
 
     if debug_symbol_count > 0 {
@@ -2373,6 +2386,144 @@ mod tests {
         assert!(
             verified.functions[0].debug_symbol_count > 1,
             "fixture must exercise a genuinely non-empty debug section"
+        );
+    }
+
+    /// #1746 (FA-07-006) test helper: overwrites the `pc` field of the
+    /// `symbol_index`-th `DBG0` debug-symbol entry in `bytes` in place, via
+    /// the decoded format offsets (`code_offset`, `string_table_end_offset`)
+    /// rather than a raw-byte search. Entry layout after the `DBG0` tag (4
+    /// bytes) and symbol count (2 bytes) is `pc: u32 LE, line: u32,
+    /// col: u16` (10 bytes per entry), matching
+    /// `semcode_decode::parse_string_table_debug_and_ownership`.
+    fn overwrite_debug_symbol_pc(bytes: &mut [u8], symbol_index: usize, new_pc: u32) {
+        let entry_offset = {
+            let (_, functions) = sm_format::semcode_decode::decode_semcode_envelope(bytes)
+                .expect("decode for mutation");
+            let f = &functions[0];
+            f.code_offset + f.string_table_end_offset + 4 + 2 + symbol_index * 10
+        };
+        bytes[entry_offset..entry_offset + 4].copy_from_slice(&new_pc.to_le_bytes());
+    }
+
+    // #1746 (FA-07-006) regression matrix (1/7 and 2/7): a debug-symbol pc
+    // that is numerically in range but lands inside a decoded instruction's
+    // operand bytes - not on an instruction start - must reject. `LOAD_BOOL
+    // dst, val` is a real 4-byte instruction (opcode + 2-byte dst register +
+    // 1-byte bool literal) at instruction offset 0; offsets 1 and 2 are two
+    // distinct interior bytes of its `dst` operand, proving this is a
+    // boundary-membership check (`instr_starts.contains`), not a single
+    // hardcoded interior offset.
+    #[test]
+    fn verifier_rejects_debug_pc_pointing_into_operand_middle_byte() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            true,
+        )
+        .expect("emit");
+        let mut mutated = bytes.clone();
+        overwrite_debug_symbol_pc(&mut mutated, 0, 1);
+        let report = verify_semcode(&mutated)
+            .expect_err("debug pc pointing into the first interior operand byte must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidDebugSection
+        );
+        assert_eq!(report.diagnostics[0].offset, Some(1));
+    }
+
+    #[test]
+    fn verifier_rejects_debug_pc_pointing_into_operand_final_byte() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            true,
+        )
+        .expect("emit");
+        let mut mutated = bytes.clone();
+        overwrite_debug_symbol_pc(&mut mutated, 0, 2);
+        let report = verify_semcode(&mutated)
+            .expect_err("debug pc pointing into a second interior operand byte must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidDebugSection
+        );
+        assert_eq!(report.diagnostics[0].offset, Some(2));
+    }
+
+    // #1746 regression matrix (3/7 and 4/7): pc == 0 at the first
+    // instruction, and pc pointing at a later real instruction start, must
+    // both remain accepted - unmutated, genuinely compiler-emitted debug
+    // symbols for a two-instruction function land exactly on the two real
+    // instruction starts (0 and 4).
+    #[test]
+    fn verifier_accepts_debug_pc_at_first_and_later_instruction_starts() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            true,
+        )
+        .expect("emit");
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let pcs: Vec<usize> = functions[0].debug_symbols.iter().map(|s| s.pc).collect();
+        assert_eq!(
+            pcs,
+            vec![0, 4],
+            "fixture must exercise pc=0 (first instruction) and a later instruction start"
+        );
+        let verified =
+            verify_semcode(&bytes).expect("debug pcs on real instruction starts must verify");
+        assert_eq!(verified.functions[0].debug_symbol_count, 2);
+    }
+
+    // #1746 regression matrix (5/7): out-of-range debug pc must still
+    // reject with the existing diagnostic and message, unchanged by the new
+    // boundary check (range is checked first).
+    #[test]
+    fn verifier_rejects_out_of_range_debug_pc() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            true,
+        )
+        .expect("emit");
+        let mut mutated = bytes.clone();
+        overwrite_debug_symbol_pc(&mut mutated, 0, 100);
+        let report = verify_semcode(&mutated).expect_err("out-of-range debug pc must still reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidDebugSection
+        );
+        assert_eq!(report.diagnostics[0].offset, Some(100));
+        assert_eq!(
+            report.diagnostics[0].message,
+            "debug symbol pc points past the instruction stream"
         );
     }
 

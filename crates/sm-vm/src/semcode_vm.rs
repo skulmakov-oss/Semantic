@@ -1435,6 +1435,16 @@ fn validate_function_bytecode(f: &FunctionBytecode) -> Result<(), RuntimeError> 
                 f.name, ds.pc
             )));
         }
+        // #1746 (FA-07-006): mirrors sm-verify's canonical admission check.
+        // `starts` (built above, same instruction walk) already proves
+        // which offsets are real instruction boundaries; range alone does
+        // not rule out a pc landing inside a decoded operand's bytes.
+        if !starts.contains(&ds.pc) {
+            return Err(RuntimeError::BadFormat(format!(
+                "debug pc not on an instruction boundary in '{}': {}",
+                f.name, ds.pc
+            )));
+        }
     }
     for addr in jumps {
         if addr >= instr_len {
@@ -6044,5 +6054,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    // #1746 (FA-07-006): mirrors sm-verify's own regression coverage for the
+    // same structural invariant, exercised here through `run_semcode` - the
+    // raw path that calls `parse_semcode`/`validate_function_bytecode`
+    // directly without going through `sm-verify` admission at all, so this
+    // check is this path's only structural gate against a malformed debug
+    // pc, not merely a redundant defense-in-depth mirror.
+    #[test]
+    fn vm_rejects_debug_pc_pointing_into_operand_byte() {
+        let src = r#"
+            fn main() {
+                let x: bool = true;
+                return;
+            }
+        "#;
+        let bytes = sm_emit::compile_program_to_semcode_with_options_debug(
+            src,
+            sm_emit::CompileProfile::RustLike,
+            sm_emit::OptLevel::O0,
+            true,
+        )
+        .expect("compile with debug symbols");
+
+        let entry_offset = {
+            let (_, functions) =
+                sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+            let f = &functions[0];
+            assert_eq!(
+                f.debug_symbols.iter().map(|s| s.pc).collect::<Vec<_>>(),
+                vec![0, 4, 9],
+                "fixture must have real instruction-start debug pcs before mutation"
+            );
+            f.code_offset + f.string_table_end_offset + 4 + 2
+        };
+        let mut mutated = bytes.clone();
+        // First debug entry's pc: overwrite 0 -> 1, landing inside
+        // LOAD_BOOL's 2-byte `dst` operand (instruction 0 spans bytes 0..4),
+        // not on any instruction start (0, 4, 9).
+        mutated[entry_offset..entry_offset + 4].copy_from_slice(&1u32.to_le_bytes());
+
+        let err =
+            run_semcode(&mutated).expect_err("debug pc pointing into an operand byte must reject");
+        assert!(
+            matches!(err, RuntimeError::BadFormat(ref msg) if msg.contains("debug pc not on an instruction boundary")),
+            "unexpected error: {err:?}"
+        );
     }
 }
