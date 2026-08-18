@@ -351,6 +351,9 @@ Current SemCode admission validates:
   `## Opcode Vocabulary And Header Identity`)
 - operand shape validity
 - jump-target validity
+- reachable control-flow closure: every successor reachable from function
+  entry is another instruction boundary or an admitted terminal condition;
+  end-of-stream fallthrough is not admissible
 - executable-target validity: direct calls resolve to declared functions or
   admitted builtins, while closures resolve only to declared functions
 - register-budget validity against the runtime contract

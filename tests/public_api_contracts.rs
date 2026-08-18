@@ -159,6 +159,66 @@ fn public_api_inventory_matches_checked_in_contract_snapshots() {
     }
 }
 
+fn verification_code_contract_name(code: sm_verify::VerificationCode) -> &'static str {
+    use sm_verify::VerificationCode;
+
+    match code {
+        VerificationCode::BadHeader => "BadHeader",
+        VerificationCode::UnsupportedVersion => "UnsupportedVersion",
+        VerificationCode::TruncatedFunction => "TruncatedFunction",
+        VerificationCode::InvalidFunctionName => "InvalidFunctionName",
+        VerificationCode::DuplicateFunction => "DuplicateFunction",
+        VerificationCode::InvalidStringTable => "InvalidStringTable",
+        VerificationCode::InvalidDebugSection => "InvalidDebugSection",
+        VerificationCode::InvalidOwnershipSection => "InvalidOwnershipSection",
+        VerificationCode::UnknownOpcode => "UnknownOpcode",
+        VerificationCode::OperandOutOfBounds => "OperandOutOfBounds",
+        VerificationCode::InvalidJumpTarget => "InvalidJumpTarget",
+        VerificationCode::InvalidStringReference => "InvalidStringReference",
+        VerificationCode::InvalidRegisterReference => "InvalidRegisterReference",
+        VerificationCode::UnknownCallTarget => "UnknownCallTarget",
+        VerificationCode::ResourceLimitExceeded => "ResourceLimitExceeded",
+        VerificationCode::CapabilityViolation => "CapabilityViolation",
+        VerificationCode::AmbiguousInstructionFraming => "AmbiguousInstructionFraming",
+        VerificationCode::OpcodeRequiresNewerHeader => "OpcodeRequiresNewerHeader",
+        VerificationCode::ReachableFunctionFallthrough => "ReachableFunctionFallthrough",
+    }
+}
+
+#[test]
+fn verification_code_variants_match_public_contract() {
+    use sm_verify::VerificationCode;
+
+    let variants = [
+        VerificationCode::BadHeader,
+        VerificationCode::UnsupportedVersion,
+        VerificationCode::TruncatedFunction,
+        VerificationCode::InvalidFunctionName,
+        VerificationCode::DuplicateFunction,
+        VerificationCode::InvalidStringTable,
+        VerificationCode::InvalidDebugSection,
+        VerificationCode::InvalidOwnershipSection,
+        VerificationCode::UnknownOpcode,
+        VerificationCode::OperandOutOfBounds,
+        VerificationCode::InvalidJumpTarget,
+        VerificationCode::InvalidStringReference,
+        VerificationCode::InvalidRegisterReference,
+        VerificationCode::UnknownCallTarget,
+        VerificationCode::ResourceLimitExceeded,
+        VerificationCode::CapabilityViolation,
+        VerificationCode::AmbiguousInstructionFraming,
+        VerificationCode::OpcodeRequiresNewerHeader,
+        VerificationCode::ReachableFunctionFallthrough,
+    ];
+
+    for variant in variants {
+        assert_eq!(
+            verification_code_contract_name(variant),
+            format!("{variant:?}")
+        );
+    }
+}
+
 #[test]
 fn prom_refs_forbidden_impl_surface_is_absent() {
     let path = "crates/prom-refs/src/lib.rs";
