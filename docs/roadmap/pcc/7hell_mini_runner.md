@@ -13,8 +13,11 @@ This is **not** a full release qualification tool (which would cover packaging, 
 ### Hell 1 — Workspace Health
 Proves the basic structural health of the codebase.
 - Checks formatting (`cargo fmt --check`)
-- Ensures the entire workspace compiles without warnings or errors (`cargo check`)
-- Validates that the entire general test suite passes (`cargo test`)
+- Ensures the entire workspace compiles under the runner's configured feature
+  contour (`cargo check --workspace --all-features`)
+- Does **not** execute the workspace test suite. Hell 1 is a compile-health
+  gate only; later gates run targeted per-crate test lanes (see Hell 3-6
+  below), not the general `cargo test --workspace` suite.
 
 ### Hell 2 — Trust Boundary Guards
 Proves that critical lower-level crates do not acquire forbidden dependencies on higher-level abstractions.
@@ -49,5 +52,27 @@ Proves the end-to-end frontend compiler pipeline works correctly up to the binar
 Proves that architectural documentation matches code reality.
 - Checks that `adt_payload_ownership_matrix.md`, `adt_payload_ownership_slice_closeout.md`, and `adt_payload_ownership_paths.md` are present and up to date.
 
+## Qualification Boundary
+
+A 7hell PASS proves only the commands and targeted qualification lanes
+actually executed by the gates above (workspace compile-health, targeted
+per-crate tests for `sm-format`/`sm-verify`/`sm-vm`, and the other named
+checks). It does **not** imply that the entire workspace test suite passed.
+
+Workspace-wide tests (`cargo test --workspace ...`) are a separate
+qualification lane. In hosted CI they are currently executed by the
+`test-std` job (`cargo test --workspace --all-targets --quiet` and
+`cargo test --workspace --doc --quiet`), not by any 7hell gate. A 7hell PASS
+alone must not be cited as proof that the complete workspace test suite
+passed.
+
 ## Usage
-Run the scripts in `tools/7hell/` (either `run.ps1` for Windows or `run.sh` for Linux/macOS). The scripts will fail-fast at the first broken gate.
+Run the scripts in `tools/7hell/`:
+
+- `run.ps1` (Windows) and `run.sh` (Linux/macOS) are the full local 7hell
+  runners and execute all 7 gates above.
+- `run_ci.ps1` is the fast CI qualification contour and currently executes
+  only Hell 1 through Hell 5 - it does not include Hell 6 (Source to SemCode
+  Smoke) or Hell 7 (PCC Documentation Integrity).
+
+The scripts will fail-fast at the first broken gate.
