@@ -662,7 +662,7 @@ fn verify_function_code(
                 format!("{usage} uses missing string id s{sid}"),
             ));
         }
-        if usage == "call target" {
+        if matches!(usage, "call target" | "closure function name") {
             call_targets.push((offset, env.strings[sid].clone()));
         }
     }
@@ -2303,6 +2303,30 @@ mod tests {
             .expect("helper string");
         bytes[helper_pos..helper_pos + b"helper".len()].copy_from_slice(b"gh0st!");
         let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UnknownCallTarget
+        );
+    }
+
+    #[test]
+    fn verifier_rejects_unknown_closure_target() {
+        let mut bytes = compile_program_to_semcode(
+            "fn main() { let add: Closure(f64 -> f64) = (x => x + 1.0); add(2.0); return; }",
+        )
+        .expect("compile");
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let (closure_name_offset, closure_name_len) = functions
+            .iter()
+            .find(|function| function.name.starts_with("__closure_"))
+            .map(|function| (function.name_offset + 2, function.name.len()))
+            .expect("closure function");
+        let replacement = "x".repeat(closure_name_len);
+        bytes[closure_name_offset..closure_name_offset + closure_name_len]
+            .copy_from_slice(replacement.as_bytes());
+
+        let report = verify_semcode(&bytes).expect_err("must reject dangling closure target");
         assert_eq!(
             report.diagnostics[0].code,
             VerificationCode::UnknownCallTarget

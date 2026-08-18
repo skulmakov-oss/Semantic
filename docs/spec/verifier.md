@@ -63,7 +63,7 @@ without turning this document into a stable bytecode ISA promise.
 | Effect-oriented host-boundary families such as `GateRead`, `GateWrite`, and `PulseEmit` | Admitted only when the emitted contract matches the required capability envelope | Capability-gated / host-boundary | These opcodes do not define capability policy semantics by themselves. |
 | Ownership transport payloads admitted through `OWN0` | Admitted structurally only when the ownership transport slice is present and well formed | Header and capability consistency required | This covers the currently documented tuple-only and direct record-field ownership transport slices. |
 | Unknown, unsupported, or malformed opcode encodings | Rejected | N/A | Rejection must happen before a successful VM execution path. |
-| Opcode streams that fail operand, jump-target, call-target, register-budget, string-reference, or section-integrity checks | Rejected | N/A | These are verifier admission failures, not successful runtime executions. |
+| Opcode streams that fail operand, jump-target, call-target, closure-function-target, register-budget, string-reference, or section-integrity checks | Rejected | N/A | These are verifier admission failures, not successful runtime executions. |
 
 Current ownership-specific structural checks for ownership transport include:
 
