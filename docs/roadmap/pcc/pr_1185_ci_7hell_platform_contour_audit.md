@@ -73,12 +73,24 @@ surface that is currently included by the 7hell workspace-wide build.
 
 ## 4. `run.ps1` vs `run.sh`
 
+> **Correction (FA-05-005 / #1735):** the bullet below originally claimed both
+> runners start with `cargo check --workspace --all-features` *and*
+> `cargo test --workspace --all-features`. At the audited runner state, and
+> still on current main, neither runner executes a workspace-wide
+> `cargo test`; Hell 1 is `cargo fmt --check` followed by
+> `cargo check --workspace --all-features` only. This section is corrected in
+> place rather than silently rewritten, since the document's own finding (the
+> Linux `winit` failure path) depends only on the `cargo check` command and is
+> unaffected by this correction. See `docs/roadmap/pcc/7hell_mini_runner.md`
+> for the current, accurate Hell 1 description.
+
 The two runners are structurally similar:
 
 - both run the same Hell 1 / Hell 2 / Hell 3 / Hell 4 / Hell 5 / Hell 6 / Hell
   7 sequence;
-- both start with `cargo check --workspace --all-features` and
-  `cargo test --workspace --all-features`;
+- both run `cargo fmt --check` followed by
+  `cargo check --workspace --all-features`; neither runs a workspace-wide
+  `cargo test`;
 - both include the same trust-boundary and SemCode checks.
 
 The differences are platform and shell:
