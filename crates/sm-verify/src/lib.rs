@@ -370,24 +370,26 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
         .map(|function| function.verified.name.as_str())
         .collect::<HashSet<_>>();
     for function in &pending_functions {
-        for (offset, callee) in &function.call_targets {
+        for (offset, callee, allows_builtin) in &function.call_targets {
             if known_functions.contains(callee.as_str()) {
                 continue;
             }
 
-            if let Some(required_capabilities) = builtin_call_required_capabilities(callee) {
-                if header.capabilities & required_capabilities != required_capabilities {
-                    diagnostics.push(diag(
-                        VerificationCode::CapabilityViolation,
-                        Some(function.verified.name.clone()),
-                        Some(*offset),
-                        format!(
-                            "builtin call target '{}' requires capability bits 0x{required_capabilities:08x}",
-                            callee
-                        ),
-                    ));
+            if *allows_builtin {
+                if let Some(required_capabilities) = builtin_call_required_capabilities(callee) {
+                    if header.capabilities & required_capabilities != required_capabilities {
+                        diagnostics.push(diag(
+                            VerificationCode::CapabilityViolation,
+                            Some(function.verified.name.clone()),
+                            Some(*offset),
+                            format!(
+                                "builtin call target '{}' requires capability bits 0x{required_capabilities:08x}",
+                                callee
+                            ),
+                        ));
+                    }
+                    continue;
                 }
-                continue;
             }
 
             diagnostics.push(diag(
@@ -662,8 +664,12 @@ fn verify_function_code(
                 format!("{usage} uses missing string id s{sid}"),
             ));
         }
-        if matches!(usage, "call target" | "closure function name") {
-            call_targets.push((offset, env.strings[sid].clone()));
+        match usage {
+            "call target" => call_targets.push((offset, env.strings[sid].clone(), true)),
+            "closure function name" => {
+                call_targets.push((offset, env.strings[sid].clone(), false));
+            }
+            _ => {}
         }
     }
 
@@ -1329,7 +1335,7 @@ struct OperandRefs {
 #[cfg(feature = "std")]
 struct PendingVerifiedFunction {
     verified: VerifiedFunction,
-    call_targets: Vec<(usize, String)>,
+    call_targets: Vec<(usize, String, bool)>,
     has_ownership_section: bool,
 }
 
@@ -2327,6 +2333,33 @@ mod tests {
             .copy_from_slice(replacement.as_bytes());
 
         let report = verify_semcode(&bytes).expect_err("must reject dangling closure target");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UnknownCallTarget
+        );
+    }
+
+    #[test]
+    fn verifier_rejects_builtin_closure_target() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadF64 { dst: 0, val: 1.0 },
+                    IrInstr::MakeClosure {
+                        dst: 1,
+                        name: "sqrt".to_string(),
+                        captures: Vec::new(),
+                    },
+                    IrInstr::Ret { src: None },
+                ],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+
+        let report = verify_semcode(&bytes).expect_err("must reject builtin closure target");
         assert_eq!(
             report.diagnostics[0].code,
             VerificationCode::UnknownCallTarget
