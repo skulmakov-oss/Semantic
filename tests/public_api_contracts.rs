@@ -11,6 +11,18 @@ const PROM_REF_WRAPPERS: &[&str] = &[
 
 const TARGETS: &[(&str, &str)] = &[
     (
+        "crates/sm-emit/src/lib.rs",
+        "tests/golden_snapshots/public_api/sm_emit_lib.txt",
+    ),
+    (
+        "crates/sm-emit/src/hello_real_semcode.rs",
+        "tests/golden_snapshots/public_api/sm_emit_hello_real_semcode.txt",
+    ),
+    (
+        "crates/sm-emit/src/hello_observation_bytes.rs",
+        "tests/golden_snapshots/public_api/sm_emit_hello_observation_bytes.txt",
+    ),
+    (
         "crates/sm-format/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_format_lib.txt",
     ),

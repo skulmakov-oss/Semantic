@@ -1,0 +1,12 @@
+source: crates/sm-emit/src/hello_observation_bytes.rs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloObservationByteModule {
+pub records: Vec<HelloObservationByteRecord>,
+pub format_status: &'static str,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelloObservationByteRecord {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelloObservationByteEmissionError {
+pub fn emit_hello_observation_bytes_from_real_semcode_skeleton( module: &HelloRealSemCodeModule, ) -> Result<HelloObservationByteModule, HelloObservationByteEmissionError> {
+pub fn emit_hello_observation_bytes_gated( module: &HelloRealSemCodeModule, ) -> Result<HelloObservationByteModule, HelloObservationByteEmissionError> {
+pub fn render_hello_observation_bytes_gated( module: &HelloRealSemCodeModule, ) -> Result<Vec<u8>, HelloObservationByteEmissionError> {
