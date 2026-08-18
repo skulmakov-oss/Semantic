@@ -1,0 +1,11 @@
+source: crates/sm-emit/src/hello_real_semcode.rs
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloRealSemCodeModule {
+pub ops: Vec<HelloRealSemCodeOp>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelloRealSemCodeOp {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelloRealSemCodeError {
+pub fn emit_hello_real_semcode_skeleton( module: &HelloIrModule, ) -> Result<HelloRealSemCodeModule, HelloRealSemCodeError> {
+pub fn render_hello_real_semcode_skeleton( module: &HelloIrModule, ) -> Result<Vec<HelloRealSemCodeOp>, HelloRealSemCodeError> {
+pub fn render_hello_real_semcode_skeleton_text( module: &HelloIrModule, ) -> Result<Vec<String>, HelloRealSemCodeError> {
