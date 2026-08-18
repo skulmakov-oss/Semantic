@@ -351,7 +351,8 @@ Current SemCode admission validates:
   `## Opcode Vocabulary And Header Identity`)
 - operand shape validity
 - jump-target validity
-- call-target validity
+- executable-target validity: direct calls resolve to declared functions or
+  admitted builtins, while closures resolve only to declared functions
 - register-budget validity against the runtime contract
 - string and debug reference validity
 - capability consistency between actual usage and emitted contract
