@@ -1,6 +1,6 @@
 source: crates/sm-emit/src/lib.rs
 #[cfg(feature = "std")]
-pub use sm_format::semcode_format::{
+pub use sm_format::semcode_format::*;
 #[cfg(feature = "std")]
 pub use sm_ir::{
 #[cfg(feature = "std")]
