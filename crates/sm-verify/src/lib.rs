@@ -636,8 +636,15 @@ fn verify_function_code(
         // actual instruction boundary - it could land inside a decoded
         // operand's bytes. Reuse the instruction-start set this same
         // verification walk already built, exactly like the jump-target
-        // check below does for `InvalidJumpTarget`.
-        if !instr_starts.contains(&sym.pc) {
+        // check below does for `InvalidJumpTarget`. `instr_starts` is
+        // pushed in strictly increasing order (each iteration's `offset` is
+        // read from `cursor` before `cursor` only ever advances further),
+        // so `binary_search` is valid and avoids an O(symbols x
+        // instructions) linear scan - the format permits up to 8,192 debug
+        // symbols per function, so a debug-heavy artifact could otherwise
+        // force a disproportionate amount of verifier CPU per function
+        // (review finding on this PR).
+        if instr_starts.binary_search(&sym.pc).is_err() {
             return Err(reject_one(
                 name,
                 VerificationCode::InvalidDebugSection,
