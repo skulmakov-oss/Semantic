@@ -43,6 +43,7 @@ Current SemCode verification checks include:
 - opcode/header-revision consistency
 - operand shape validity
 - jump-target validity
+- reachable control-flow closure (no end-of-stream fallthrough)
 - string and debug reference validity
 - register-budget validity
 - call-target validity
@@ -63,7 +64,7 @@ without turning this document into a stable bytecode ISA promise.
 | Effect-oriented host-boundary families such as `GateRead`, `GateWrite`, and `PulseEmit` | Admitted only when the emitted contract matches the required capability envelope | Capability-gated / host-boundary | These opcodes do not define capability policy semantics by themselves. |
 | Ownership transport payloads admitted through `OWN0` | Admitted structurally only when the ownership transport slice is present and well formed | Header and capability consistency required | This covers the currently documented tuple-only and direct record-field ownership transport slices. |
 | Unknown, unsupported, or malformed opcode encodings | Rejected | N/A | Rejection must happen before a successful VM execution path. |
-| Opcode streams that fail operand, jump-target, call-target, closure-function-target, register-budget, string-reference, or section-integrity checks | Rejected | N/A | Direct calls may resolve to declared functions or admitted builtins; closure targets must resolve to declared functions. These are verifier admission failures, not successful runtime executions. |
+| Opcode streams that fail operand, jump-target, reachable-control-flow, call-target, closure-function-target, register-budget, string-reference, or section-integrity checks | Rejected | N/A | Direct calls may resolve to declared functions or admitted builtins; closure targets must resolve to declared functions. These are verifier admission failures, not successful runtime executions. |
 
 Current ownership-specific structural checks for ownership transport include:
 
@@ -186,6 +187,34 @@ rather than a second, independently-maintained opcode-shape table.
 `OWN0`'s tag byte (`0x4F`) is not a currently valid opcode, so this specific
 ambiguity does not apply to ownership-section recognition.
 
+## Reachable Control-Flow Closure
+
+For every function, the verifier reuses the instruction boundaries, decoded
+next offsets, and explicit jump targets collected by its normal instruction
+walk. Starting at instruction offset zero, it admits only reachable successors
+with these VM-derived rules:
+
+- `RET` is terminal and has no successor
+- `JMP` has only its explicit jump target
+- `JMP_IF` has its explicit jump target and the decoded next instruction
+- every other opcode, including `CALL` and `CLOSURE_CALL`, has the decoded next
+  instruction as its successor
+
+The two call forms are fallthrough operations structurally because the VM saves
+the decoded next PC before entering the callee and resumes there after `RET`.
+
+Every reachable successor must be an instruction start. A successor equal to
+the end of the executable instruction stream is rejected with
+`VerificationCode::ReachableFunctionFallthrough`; an empty executable stream is
+the same defect at entry offset zero. Existing explicit jump-target range and
+instruction-boundary checks remain independently enforced as
+`InvalidJumpTarget`.
+
+This proves structural control-flow closure, not program termination. A closed
+infinite loop is admissible, and an ordinary trailing instruction may fall
+through if it is unreachable from function entry. The verifier does not require
+the final encoded instruction to be `RET`.
+
 ## Contract Rule
 
 Standard execution uses the chain:
@@ -222,6 +251,10 @@ Verifier rejection must preserve:
 - the failing verification code
 - enough function or offset context to debug the failure
 - deterministic diagnostics for the same input artifact
+
+`ReachableFunctionFallthrough` specifically means that control flow reachable
+from function entry can advance to the end of the executable instruction
+stream without first reaching an admitted terminal instruction.
 
 ## Verified Execution Rule
 

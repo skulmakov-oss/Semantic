@@ -56,6 +56,11 @@ pub enum VerificationCode {
     /// header predates the revision whose contract actually admits this
     /// opcode's semantics.
     OpcodeRequiresNewerHeader,
+    /// A control-flow successor reachable from the function entry falls off
+    /// the executable instruction stream instead of reaching another
+    /// instruction boundary or an admitted terminal instruction (`RET`).
+    /// Closed loops remain admissible; this code does not imply termination.
+    ReachableFunctionFallthrough,
 }
 
 #[cfg(feature = "std")]
@@ -547,6 +552,7 @@ fn verify_function_code(
     let instr_start = cursor;
     let instr_len = code.len().saturating_sub(instr_start);
     let mut instr_starts = Vec::new();
+    let mut instruction_successors = Vec::new();
     let mut jump_targets = Vec::new();
     let mut string_refs = Vec::new();
     let mut max_register: Option<usize> = None;
@@ -577,6 +583,23 @@ fn verify_function_code(
             ),
         })?;
         let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
+        let next_offset = cursor - instr_start;
+        let jump_target = refs.jump_targets.first().copied();
+        let successors = match (opcode, jump_target) {
+            (Opcode::Ret, _) => InstructionSuccessors::None,
+            (Opcode::Jmp, Some(target)) => InstructionSuccessors::One(target),
+            (Opcode::JmpIf, Some(target)) => InstructionSuccessors::Two(target, next_offset),
+            (Opcode::Jmp | Opcode::JmpIf, None) => {
+                return Err(reject_one(
+                    name,
+                    VerificationCode::InvalidJumpTarget,
+                    offset,
+                    "jump instruction has no decoded target",
+                ));
+            }
+            _ => InstructionSuccessors::One(next_offset),
+        };
+        instruction_successors.push(successors);
         let min_rev = opcode.minimum_semcode_revision();
         if header.rev < min_rev {
             return Err(reject_one(
@@ -654,6 +677,8 @@ fn verify_function_code(
         }
     }
 
+    verify_reachable_control_flow(name, instr_len, &instr_starts, &instruction_successors)?;
+
     let mut call_targets = Vec::new();
     for (offset, sid, usage) in string_refs {
         if sid >= string_count {
@@ -698,6 +723,56 @@ fn verify_function_code(
         call_targets,
         has_ownership_section,
     })
+}
+
+#[cfg(feature = "std")]
+enum InstructionSuccessors {
+    None,
+    One(usize),
+    Two(usize, usize),
+}
+
+#[cfg(feature = "std")]
+fn verify_reachable_control_flow(
+    function: &str,
+    instr_len: usize,
+    instr_starts: &[usize],
+    instruction_successors: &[InstructionSuccessors],
+) -> Result<(), RejectReport> {
+    let mut pending = vec![0usize];
+    let mut reachable = HashSet::new();
+
+    while let Some(offset) = pending.pop() {
+        if !reachable.insert(offset) {
+            continue;
+        }
+        if offset == instr_len {
+            return Err(reject_one(
+                function,
+                VerificationCode::ReachableFunctionFallthrough,
+                offset,
+                "reachable control flow falls off the end of the instruction stream",
+            ));
+        }
+        let index = instr_starts.binary_search(&offset).map_err(|_| {
+            reject_one(
+                function,
+                VerificationCode::ReachableFunctionFallthrough,
+                offset,
+                "reachable control-flow successor is not an instruction boundary",
+            )
+        })?;
+        match &instruction_successors[index] {
+            InstructionSuccessors::None => {}
+            InstructionSuccessors::One(successor) => pending.push(*successor),
+            InstructionSuccessors::Two(first, second) => {
+                pending.push(*first);
+                pending.push(*second);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Decodes one instruction's operands, advancing `cursor` past its full byte
@@ -1381,6 +1456,158 @@ mod tests {
         compile_program_to_semcode, compile_program_to_semcode_with_options_debug,
         emit_ir_to_semcode, CompileProfile, IrFunction, IrInstr, OptLevel,
     };
+
+    fn emit_test_function(instrs: Vec<IrInstr>) -> Vec<u8> {
+        emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs,
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit test function")
+    }
+
+    #[test]
+    fn verifier_rejects_reachable_ordinary_instruction_fallthrough() {
+        let bytes = emit_test_function(vec![IrInstr::LoadBool { dst: 0, val: true }]);
+        let report =
+            verify_semcode(&bytes).expect_err("reachable LOAD_BOOL followed by EOF must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::ReachableFunctionFallthrough
+        );
+        assert_eq!(report.diagnostics[0].offset, Some(4));
+    }
+
+    #[test]
+    fn verifier_rejects_empty_instruction_stream() {
+        let bytes = emit_test_function(Vec::new());
+        let report =
+            verify_semcode(&bytes).expect_err("empty executable instruction stream must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::ReachableFunctionFallthrough
+        );
+        assert_eq!(report.diagnostics[0].offset, Some(0));
+    }
+
+    #[test]
+    fn verifier_rejects_conditional_branch_with_eof_fallthrough() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadBool { dst: 0, val: true },
+            IrInstr::Label {
+                name: "branch".to_string(),
+            },
+            IrInstr::JmpIf {
+                cond: 0,
+                label: "branch".to_string(),
+            },
+        ]);
+        let report = verify_semcode(&bytes)
+            .expect_err("conditional branch with a reachable EOF successor must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::ReachableFunctionFallthrough
+        );
+    }
+
+    #[test]
+    fn verifier_accepts_function_ending_in_ret() {
+        let bytes = emit_test_function(vec![IrInstr::Ret { src: None }]);
+        verify_semcode(&bytes).expect("RET is a terminal instruction");
+    }
+
+    #[test]
+    fn verifier_accepts_unconditional_jump_to_valid_return_boundary() {
+        let bytes = emit_test_function(vec![
+            IrInstr::Jmp {
+                label: "return".to_string(),
+            },
+            IrInstr::LoadBool { dst: 0, val: true },
+            IrInstr::Label {
+                name: "return".to_string(),
+            },
+            IrInstr::Ret { src: None },
+        ]);
+        verify_semcode(&bytes).expect("JMP has only its valid explicit target as successor");
+    }
+
+    #[test]
+    fn verifier_accepts_structurally_closed_infinite_loop() {
+        let bytes = emit_test_function(vec![
+            IrInstr::Label {
+                name: "loop".to_string(),
+            },
+            IrInstr::Jmp {
+                label: "loop".to_string(),
+            },
+            IrInstr::LoadBool { dst: 0, val: true },
+        ]);
+        verify_semcode(&bytes)
+            .expect("closed reachable control flow may leave trailing fallthrough unreachable");
+    }
+
+    #[test]
+    fn verifier_preserves_call_and_closure_call_fallthrough() {
+        let direct_call = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "helper".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: None,
+                            name: "helper".to_string(),
+                            args: Vec::new(),
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit direct call");
+        verify_semcode(&direct_call).expect("CALL returns to the decoded next instruction");
+
+        let closure_call = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "helper".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::MakeClosure {
+                            dst: 0,
+                            name: "helper".to_string(),
+                            captures: Vec::new(),
+                        },
+                        IrInstr::LoadBool { dst: 1, val: true },
+                        IrInstr::ClosureCall {
+                            dst: None,
+                            closure: 0,
+                            arg: 1,
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit closure call");
+        verify_semcode(&closure_call)
+            .expect("CLOSURE_CALL returns to the decoded next instruction");
+    }
 
     #[test]
     fn verifier_accepts_valid_semcode() {
