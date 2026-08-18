@@ -75,8 +75,9 @@ surface that is currently included by the 7hell workspace-wide build.
 
 > **Correction (FA-05-005 / #1735):** the bullet below originally claimed both
 > runners start with `cargo check --workspace --all-features` *and*
-> `cargo test --workspace --all-features`. Neither runner has ever executed a
-> workspace-wide `cargo test`; Hell 1 is `cargo fmt --check` followed by
+> `cargo test --workspace --all-features`. At the audited runner state, and
+> still on current main, neither runner executes a workspace-wide
+> `cargo test`; Hell 1 is `cargo fmt --check` followed by
 > `cargo check --workspace --all-features` only. This section is corrected in
 > place rather than silently rewritten, since the document's own finding (the
 > Linux `winit` failure path) depends only on the `cargo check` command and is
@@ -87,8 +88,9 @@ The two runners are structurally similar:
 
 - both run the same Hell 1 / Hell 2 / Hell 3 / Hell 4 / Hell 5 / Hell 6 / Hell
   7 sequence;
-- both start with `cargo check --workspace --all-features` (not a workspace
-  `cargo test`);
+- both run `cargo fmt --check` followed by
+  `cargo check --workspace --all-features`; neither runs a workspace-wide
+  `cargo test`;
 - both include the same trust-boundary and SemCode checks.
 
 The differences are platform and shell:
