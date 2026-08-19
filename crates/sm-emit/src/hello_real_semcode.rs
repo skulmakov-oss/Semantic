@@ -30,10 +30,14 @@ pub fn emit_hello_real_semcode_skeleton(
     Ok(HelloRealSemCodeModule { ops })
 }
 
+const CANONICAL_HELLO_ENTRY: &str = "HelloWorld";
+const CANONICAL_HELLO_SYMBOL: &str = "boot";
+const CANONICAL_HELLO_RENDERED_TEXT: &str = "\"Hello, World!\"";
+
 pub fn render_hello_real_semcode_skeleton(
     module: &HelloIrModule,
 ) -> Result<Vec<HelloRealSemCodeOp>, HelloRealSemCodeError> {
-    if module.entry.name != "HelloWorld" {
+    if module.entry.name != CANONICAL_HELLO_ENTRY {
         return Err(HelloRealSemCodeError::UnsupportedShape);
     }
 
@@ -49,20 +53,25 @@ pub fn render_hello_real_semcode_skeleton(
             observation_class: HelloIrObservationClass::Controlled,
         }), HelloIrStmt::CompleteQuad(HelloIrCompleteQuad {
             value: HelloIrQuadLit::T,
-        })] => vec![
-            HelloRealSemCodeOp::DeclareLocalQuad {
-                name: symbol.clone(),
-                value: render_quad(HelloIrQuadLit::T).to_string(),
-            },
-            HelloRealSemCodeOp::RequireQuadEq {
-                name: require_symbol.clone(),
-                expected: render_quad(HelloIrQuadLit::T).to_string(),
-            },
-            HelloRealSemCodeOp::ObserveTextLiteral { text: text.clone() },
-            HelloRealSemCodeOp::CompleteQuad {
-                value: render_quad(HelloIrQuadLit::T).to_string(),
-            },
-        ],
+        })] if symbol == CANONICAL_HELLO_SYMBOL
+            && require_symbol == CANONICAL_HELLO_SYMBOL
+            && text == CANONICAL_HELLO_RENDERED_TEXT =>
+        {
+            vec![
+                HelloRealSemCodeOp::DeclareLocalQuad {
+                    name: symbol.clone(),
+                    value: render_quad(HelloIrQuadLit::T).to_string(),
+                },
+                HelloRealSemCodeOp::RequireQuadEq {
+                    name: require_symbol.clone(),
+                    expected: render_quad(HelloIrQuadLit::T).to_string(),
+                },
+                HelloRealSemCodeOp::ObserveTextLiteral { text: text.clone() },
+                HelloRealSemCodeOp::CompleteQuad {
+                    value: render_quad(HelloIrQuadLit::T).to_string(),
+                },
+            ]
+        }
         _ => return Err(HelloRealSemCodeError::UnsupportedShape),
     };
 
