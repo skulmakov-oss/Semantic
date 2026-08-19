@@ -151,6 +151,8 @@ fn denial_reason_from_pending(reason: HelloPendingPolicyReason) -> &'static str 
         HelloPendingPolicyReason::NondeterministicSinkConfiguration => {
             "nondeterministic_sink_configuration"
         }
+        HelloPendingPolicyReason::UnsupportedOperationKind => "unsupported_operation_kind",
+        HelloPendingPolicyReason::UnsupportedPayloadType => "unsupported_payload_type",
     }
 }
 
