@@ -1,9 +1,14 @@
 use std::path::PathBuf;
 
-use sm_emit::hello_real_semcode::{emit_hello_real_semcode_skeleton, HelloRealSemCodeOp};
+use sm_emit::hello_real_semcode::{
+    emit_hello_real_semcode_skeleton, HelloRealSemCodeError, HelloRealSemCodeOp,
+};
 use sm_front::hello_parser::parse_hello_file;
 use sm_front::hello_sema::validate_hello_file;
-use sm_ir::hello_ir::lower_hello_checked_file;
+use sm_ir::hello_ir::{
+    lower_hello_checked_file, HelloIrCompleteQuad, HelloIrEntry, HelloIrLocalQuad, HelloIrModule,
+    HelloIrObservationClass, HelloIrObserveText, HelloIrQuadLit, HelloIrRequireQuadEq, HelloIrStmt,
+};
 use sm_verify::hello_real_semcode_admission::{
     admit_controlled_text_observation_shape, admit_hello_real_semcode_skeleton,
     builtin_call_controlled_observation_admission, ControlledObservationAdmissionKind,
@@ -216,5 +221,69 @@ fn hello_real_semcode_controlled_observation_admission_seam_distinguishes_print_
     assert_eq!(
         admit_controlled_text_observation_shape(&render_text_literal("Hello, World!")),
         Ok(ControlledObservationAdmissionKind::ControlledTextLiteral)
+    );
+}
+
+fn hand_built_hello_ir_module(symbol: &str, require_symbol: &str, text: &str) -> HelloIrModule {
+    HelloIrModule {
+        entry: HelloIrEntry {
+            name: "HelloWorld".to_string(),
+            body: vec![
+                HelloIrStmt::LocalQuad(HelloIrLocalQuad {
+                    symbol: symbol.to_string(),
+                    value: HelloIrQuadLit::T,
+                }),
+                HelloIrStmt::RequireQuadEq(HelloIrRequireQuadEq {
+                    symbol: require_symbol.to_string(),
+                    expected: HelloIrQuadLit::T,
+                }),
+                HelloIrStmt::ObserveText(HelloIrObserveText {
+                    text: text.to_string(),
+                    observation_class: HelloIrObservationClass::Controlled,
+                }),
+                HelloIrStmt::CompleteQuad(HelloIrCompleteQuad {
+                    value: HelloIrQuadLit::T,
+                }),
+            ],
+        },
+    }
+}
+
+#[test]
+fn hello_real_semcode_emitter_accepts_hand_built_canonical_module_and_verifier_admits_it() {
+    let module = hand_built_hello_ir_module("boot", "boot", "\"Hello, World!\"");
+    let semcode = emit_hello_real_semcode_skeleton(&module)
+        .expect("hand-built canonical Hello IR should emit real SemCode skeleton");
+    let input = skeleton_to_admission_input(&semcode.ops);
+    assert_eq!(
+        admit_hello_real_semcode_skeleton(&input),
+        HelloRealSemCodeAdmissionDecision::Admit
+    );
+}
+
+#[test]
+fn hello_real_semcode_emitter_rejects_noncanonical_symbol() {
+    let module = hand_built_hello_ir_module("ready", "ready", "\"Hello, World!\"");
+    assert_eq!(
+        emit_hello_real_semcode_skeleton(&module),
+        Err(HelloRealSemCodeError::UnsupportedShape)
+    );
+}
+
+#[test]
+fn hello_real_semcode_emitter_rejects_mismatched_local_and_require_symbols() {
+    let module = hand_built_hello_ir_module("boot", "notboot", "\"Hello, World!\"");
+    assert_eq!(
+        emit_hello_real_semcode_skeleton(&module),
+        Err(HelloRealSemCodeError::UnsupportedShape)
+    );
+}
+
+#[test]
+fn hello_real_semcode_emitter_rejects_noncanonical_controlled_text() {
+    let module = hand_built_hello_ir_module("boot", "boot", "\"Hi\"");
+    assert_eq!(
+        emit_hello_real_semcode_skeleton(&module),
+        Err(HelloRealSemCodeError::UnsupportedShape)
     );
 }
