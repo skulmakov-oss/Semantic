@@ -110,7 +110,8 @@ fn validate_and_extract_controlled_text(
             && expected == "T"
             && complete_value == "T" =>
         {
-            let text = strip_rendered_text(text);
+            let text = strip_rendered_text(text)
+                .ok_or(HelloObservationByteEmissionError::UnsupportedShape)?;
             if is_forbidden_host_output(text) {
                 return Err(HelloObservationByteEmissionError::ForbiddenHostOutput);
             }
@@ -123,10 +124,9 @@ fn validate_and_extract_controlled_text(
     }
 }
 
-fn strip_rendered_text(text: &str) -> &str {
-    text.strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-        .unwrap_or(text)
+fn strip_rendered_text(text: &str) -> Option<&str> {
+    let value = text.strip_prefix('"')?;
+    value.strip_suffix('"')
 }
 
 fn is_forbidden_host_output(text: &str) -> bool {

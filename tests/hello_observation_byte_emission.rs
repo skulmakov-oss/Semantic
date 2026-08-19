@@ -155,3 +155,41 @@ fn hello_observation_byte_emission_rejects_non_hello_text() {
         HelloObservationByteEmissionError::UnsupportedShape,
     );
 }
+
+#[test]
+fn hello_observation_byte_emission_rejects_raw_unquoted_text() {
+    let module = canonical_real_semcode();
+
+    let mut mutated = module.clone();
+    if let HelloRealSemCodeOp::ObserveTextLiteral { text } = &mut mutated.ops[2] {
+        *text = "Hello, World!".to_string();
+    }
+
+    assert_reject(
+        &mutated,
+        HelloObservationByteEmissionError::UnsupportedShape,
+    );
+}
+
+// Defense-in-depth coverage for the #1739 adversarial matrix (malformed
+// one-sided quoting). Note this case already rejected pre-fix too: the old
+// `.unwrap_or(text)` fallback returns the ORIGINAL text unchanged when
+// stripping fails, and the stray leading quote keeps it from ever matching
+// bare CANONICAL_HELLO_TEXT. It is not a discriminating regression test —
+// `hello_observation_byte_emission_rejects_raw_unquoted_text` above is the
+// one that actually reproduces the #1739 gap (fully-unquoted text has no
+// stray characters, so the old fallback let it slip through as canonical).
+#[test]
+fn hello_observation_byte_emission_rejects_one_sided_quote_text() {
+    let module = canonical_real_semcode();
+
+    let mut mutated = module.clone();
+    if let HelloRealSemCodeOp::ObserveTextLiteral { text } = &mut mutated.ops[2] {
+        *text = "\"Hello, World!".to_string();
+    }
+
+    assert_reject(
+        &mutated,
+        HelloObservationByteEmissionError::UnsupportedShape,
+    );
+}
