@@ -19,6 +19,7 @@ pub struct HelloPendingPolicyInput {
 pub enum HelloPendingPolicyReason {
     MissingObservationCapability,
     StdoutNotDefaultSink,
+    GenericIoNotAllowed,
     AuditRequiredButUnavailable,
     NondeterministicSinkConfiguration,
     UnsupportedOperationKind,
@@ -62,10 +63,18 @@ pub fn evaluate_hello_pending_policy(input: &HelloPendingPolicyInput) -> HelloPe
         };
     }
 
-    if matches!(input.requested_host_channel.as_deref(), Some("stdout")) {
-        return HelloPendingPolicyResult::Deny {
-            reason: HelloPendingPolicyReason::StdoutNotDefaultSink,
-        };
+    match input.requested_host_channel.as_deref() {
+        Some("stdout") => {
+            return HelloPendingPolicyResult::Deny {
+                reason: HelloPendingPolicyReason::StdoutNotDefaultSink,
+            };
+        }
+        Some("print") | Some("io.write") | Some("file") | Some("network") | Some("stdin") => {
+            return HelloPendingPolicyResult::Deny {
+                reason: HelloPendingPolicyReason::GenericIoNotAllowed,
+            };
+        }
+        _ => {}
     }
 
     if input.audit_policy == "required" && !input.audit_available {

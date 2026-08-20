@@ -147,6 +147,7 @@ fn denial_reason_from_pending(reason: HelloPendingPolicyReason) -> &'static str 
     match reason {
         HelloPendingPolicyReason::MissingObservationCapability => "missing_observation_capability",
         HelloPendingPolicyReason::StdoutNotDefaultSink => "stdout_not_default_sink",
+        HelloPendingPolicyReason::GenericIoNotAllowed => "generic_io_not_allowed",
         HelloPendingPolicyReason::AuditRequiredButUnavailable => "audit_required_but_unavailable",
         HelloPendingPolicyReason::NondeterministicSinkConfiguration => {
             "nondeterministic_sink_configuration"

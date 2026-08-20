@@ -111,6 +111,8 @@ fn hello_pending_verifier_admission_evaluates_all_policy_fixtures() {
             reason: HelloPendingPolicyReason::MissingObservationCapability,
         },
     );
+    // Preservation, not a new regression: stdout keeps its own distinct
+    // diagnostic and is not folded into GenericIoNotAllowed.
     assert_admission(
         "tests/fixtures/pending/hello_policy/negative_stdout_fallback.toml",
         HelloPendingPolicyResult::Deny {
@@ -178,6 +180,27 @@ fn hello_pending_verifier_admission_rejects_both_unsupported_with_operation_kind
             reason: HelloPendingPolicyReason::UnsupportedOperationKind,
         }
     );
+}
+
+#[test]
+fn hello_pending_verifier_admission_rejects_forbidden_host_channels() {
+    // The controlled-observation contract excludes six host channels.
+    // stdout gets its own diagnostic (covered above); the remaining five
+    // are generic-IO denials.
+    for channel in ["print", "io.write", "file", "network", "stdin"] {
+        let mut input = fixture_input(
+            "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+        );
+        input.requested_host_channel = Some(channel.to_string());
+        let actual = evaluate_hello_pending_policy(&input);
+        assert_eq!(
+            actual,
+            HelloPendingPolicyResult::Deny {
+                reason: HelloPendingPolicyReason::GenericIoNotAllowed,
+            },
+            "channel {channel}"
+        );
+    }
 }
 
 #[test]
