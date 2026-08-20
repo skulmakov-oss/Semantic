@@ -468,6 +468,41 @@ mod tests {
     // index panic, not a decode error. This is the exact artifact shape
     // that reproduced `slice index starts at 18 but ends at 2` under
     // `cargo test --target i686-pc-windows-msvc --release`.
+    // #1751 (FA-07-011): sm-format is sole owner of the static function-count
+    // bound (`MAX_FUNCTIONS`). This confirms the decoder still enforces it
+    // directly (independent of, and unaffected by, sm-verify no longer
+    // conflating function-definition count with the runtime frame quota).
+    fn minimal_function_bytes(name: &str) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.extend_from_slice(&2u32.to_le_bytes()); // code_len: 2 bytes
+        bytes.extend_from_slice(&0u16.to_le_bytes()); // empty string table
+        bytes
+    }
+
+    #[test]
+    fn decode_accepts_exactly_max_functions() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC0);
+        for i in 0..MAX_FUNCTIONS {
+            bytes.extend_from_slice(&minimal_function_bytes(&format!("f{i}")));
+        }
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("must accept MAX_FUNCTIONS");
+        assert_eq!(functions.len(), MAX_FUNCTIONS);
+    }
+
+    #[test]
+    fn decode_rejects_one_more_than_max_functions() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC0);
+        for i in 0..(MAX_FUNCTIONS + 1) {
+            bytes.extend_from_slice(&minimal_function_bytes(&format!("f{i}")));
+        }
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject over MAX_FUNCTIONS");
+        assert!(matches!(err, DecodeError::ResourceLimit { .. }));
+    }
+
     #[test]
     fn decode_rejects_code_len_that_would_overflow_cursor_arithmetic() {
         let mut bytes = Vec::new();

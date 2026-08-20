@@ -344,19 +344,6 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
         }
     }
 
-    if pending_functions.len() > quotas.max_frames {
-        diagnostics.push(diag(
-            VerificationCode::ResourceLimitExceeded,
-            None,
-            None,
-            format!(
-                "program defines {} functions, which exceeds the verified-local frame budget of {}",
-                pending_functions.len(),
-                quotas.max_frames
-            ),
-        ));
-    }
-
     if header.capabilities & CAP_OWNERSHIP_PATHS != 0
         && !pending_functions
             .iter()
@@ -3724,5 +3711,39 @@ mod tests {
         assert_eq!(&bytes[0..8], b"SEMCOD18");
         let verified = verify_semcode(&bytes).expect("emitted QTruth program must verify");
         assert_eq!(verified.header.rev, 19);
+    }
+
+    // #1751 (FA-07-011): `pending_functions.len()` is a static count of
+    // function definitions in the whole program; `quotas.max_frames` is a
+    // dynamic runtime call-stack-depth budget enforced independently (and
+    // correctly) at execution time in sm-vm's `push_frame`. Comparing the
+    // two conflated "how many functions exist" with "how deep can the call
+    // stack get". sm-format already owns the real static function-count
+    // bound (`MAX_FUNCTIONS = 1024`, enforced at decode time), so the
+    // verifier must not duplicate or misuse `max_frames` for this purpose.
+    #[test]
+    fn verify_semcode_token_accepts_many_function_definitions_regardless_of_frame_quota() {
+        // Control: previously accepted (256 total functions, at the old
+        // static bound) and must remain accepted.
+        let bytes_256 = compile_many_functions(255);
+        verify_semcode_token(&bytes_256).expect("256 functions must be accepted");
+
+        // #1751 repro: previously rejected with ResourceLimitExceeded citing
+        // "verified-local frame budget of 256" purely because the program
+        // defines more functions than the runtime frame quota - a static
+        // function count has nothing to do with live call-stack depth, so
+        // this must now be accepted.
+        let bytes_258 = compile_many_functions(257);
+        verify_semcode_token(&bytes_258)
+            .expect("function count must not be checked against the runtime frame quota");
+    }
+
+    fn compile_many_functions(extra_fn_count: usize) -> Vec<u8> {
+        let mut src = String::new();
+        for i in 0..extra_fn_count {
+            src.push_str(&format!("fn fn_{i}() {{ return; }}\n"));
+        }
+        src.push_str("fn main() { return; }");
+        compile_program_to_semcode(&src).expect("compile")
     }
 }
