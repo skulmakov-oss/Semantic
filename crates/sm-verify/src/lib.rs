@@ -1310,9 +1310,15 @@ fn decode_operands(
                     "non-canonical call destination flag: must be 0 or 1",
                 ));
             }
-            let dst =
-                read_u16_le(code, cursor).map_err(|_| invalid("truncated call dst register"))?;
-            mark_reg(dst);
+            let has_dst = has_dst_flag != 0;
+            if has_dst {
+                let dst = read_u16_le(code, cursor)
+                    .map_err(|_| invalid("truncated call dst register"))?;
+                mark_reg(dst);
+            } else {
+                let _ = read_u16_le(code, cursor)
+                    .map_err(|_| invalid("truncated call dst register"))?;
+            }
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated callee string id"))?;
             refs.string_refs.push((offset, sid as usize, "call target"));
@@ -2228,6 +2234,91 @@ mod tests {
             report.diagnostics[0].code,
             VerificationCode::OperandOutOfBounds
         );
+    }
+
+    // FA-07-013 (#1753): a no-destination CALL (has_dst=0) must not count its
+    // ignored dst placeholder as a live register reference. The emitter
+    // writes a dummy dst field even when has_dst=0; that dummy value must
+    // never reach mark_reg, so an oversized placeholder must not spuriously
+    // blow the register budget.
+    #[test]
+    fn verifier_accepts_call_no_dst_with_out_of_budget_placeholder() {
+        let mut bytes =
+            compile_program_to_semcode("fn helper() { return; } fn main() { helper(); return; }")
+                .expect("compile");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::Call, 0);
+        assert_eq!(
+            bytes[opcode_pos + 1],
+            0u8,
+            "expected has_dst=0 for a no-assignment call"
+        );
+        let dst_pos = opcode_pos + 2;
+        bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        verify_semcode(&bytes).expect("no-dst call must ignore its dummy dst placeholder");
+    }
+
+    // FA-07-013 (#1753) control: a CALL that genuinely has a destination
+    // (has_dst=1) must still have that real dst register validated against
+    // the register budget - the fix must not blanket-skip mark_reg.
+    #[test]
+    fn verifier_rejects_call_real_dst_past_register_budget() {
+        let mut bytes = compile_program_to_semcode(
+            "fn helper() -> bool { return true; } fn main() { let a: bool = helper(); return; }",
+        )
+        .expect("compile");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::Call, 0);
+        assert_eq!(
+            bytes[opcode_pos + 1],
+            1u8,
+            "expected has_dst=1 for an assigned call"
+        );
+        let dst_pos = opcode_pos + 2;
+        bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidRegisterReference
+        );
+    }
+
+    // FA-07-013 (#1753) control: CLOSURE_CALL already ignores its dummy dst
+    // placeholder when has_dst=0 - this locks in that reference behavior
+    // that Opcode::Call's decode_operands branch was made to mirror.
+    #[test]
+    fn verifier_accepts_closure_call_no_dst_with_out_of_budget_placeholder() {
+        let mut bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "helper".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::MakeClosure {
+                            dst: 0,
+                            name: "helper".to_string(),
+                            captures: Vec::new(),
+                        },
+                        IrInstr::ClosureCall {
+                            dst: None,
+                            closure: 0,
+                            arg: 0,
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::ClosureCall, 0);
+        assert_eq!(bytes[opcode_pos + 1], 0u8, "expected has_dst=0");
+        let dst_pos = opcode_pos + 2;
+        bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        verify_semcode(&bytes).expect("no-dst closure-call must ignore its dummy dst placeholder");
     }
 
     // FA-07-003 (#1743): CLOSURE_CALL's destination-present flag must be
