@@ -132,6 +132,55 @@ fn hello_pending_verifier_admission_evaluates_all_policy_fixtures() {
 }
 
 #[test]
+fn hello_pending_verifier_admission_rejects_unsupported_operation_kind() {
+    let mut input = fixture_input(
+        "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+    );
+    input.operation_kind = "generic_io".to_string();
+    let actual = evaluate_hello_pending_policy(&input);
+    assert_eq!(
+        actual,
+        HelloPendingPolicyResult::Deny {
+            reason: HelloPendingPolicyReason::UnsupportedOperationKind,
+        }
+    );
+}
+
+#[test]
+fn hello_pending_verifier_admission_rejects_unsupported_payload_type() {
+    let mut input = fixture_input(
+        "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+    );
+    input.payload_type = "bytes".to_string();
+    let actual = evaluate_hello_pending_policy(&input);
+    assert_eq!(
+        actual,
+        HelloPendingPolicyResult::Deny {
+            reason: HelloPendingPolicyReason::UnsupportedPayloadType,
+        }
+    );
+}
+
+#[test]
+fn hello_pending_verifier_admission_rejects_both_unsupported_with_operation_kind_priority() {
+    // evaluate_hello_pending_policy checks operation_kind before payload_type
+    // (both checks run right after the capability gate), so when both fields
+    // are unsupported the operation_kind check wins deterministically.
+    let mut input = fixture_input(
+        "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+    );
+    input.operation_kind = "generic_io".to_string();
+    input.payload_type = "bytes".to_string();
+    let actual = evaluate_hello_pending_policy(&input);
+    assert_eq!(
+        actual,
+        HelloPendingPolicyResult::Deny {
+            reason: HelloPendingPolicyReason::UnsupportedOperationKind,
+        }
+    );
+}
+
+#[test]
 fn hello_pending_verifier_admission_policy_registry_stays_pending_only() {
     let registry = fixture_text("docs/language/semantic_hello_policy_fixtures.md");
     let readme = fixture_text("tests/fixtures/pending/hello_policy/README.md");
