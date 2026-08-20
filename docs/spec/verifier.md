@@ -49,6 +49,9 @@ Current SemCode verification checks include:
 - reachable control-flow closure (no end-of-stream fallthrough)
 - string and debug reference validity
 - register-budget validity
+- program-wide runtime symbol-table budget validity (the number of *distinct*
+  strings the VM will intern across every function, deduplicated by exact
+  string value program-wide - not a per-function string-table entry count)
 - call-target validity
 - capability consistency with actual opcode usage
 
