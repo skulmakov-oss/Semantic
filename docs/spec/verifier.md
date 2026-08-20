@@ -25,7 +25,14 @@ Current verifier surface is centered on:
 
 Canonical token-producing admission path:
 
-- `verify_semcode_token`
+- `verify_semcode_token` — admits against the default `VerifiedLocal` resource
+  quota profile.
+- `verify_semcode_token_with_quotas` — identical admission logic, but the
+  caller supplies the `RuntimeQuotas` profile to admit against (e.g.
+  `KernelBound`). `verify_semcode_token` is a thin wrapper over this with
+  `RuntimeQuotas::verified_local()`. Rejection diagnostics report the budget
+  and usage from whichever profile was supplied, not a fixed profile name —
+  callers should not assume a rejection implies `VerifiedLocal` limits.
 
 Compatibility / legacy admission surface:
 
@@ -48,10 +55,12 @@ Current SemCode verification checks include:
 - jump-target validity
 - reachable control-flow closure (no end-of-stream fallthrough)
 - string and debug reference validity
-- register-budget validity
+- register-budget validity (against the caller-selected `RuntimeQuotas`
+  profile; see Public Surface)
 - program-wide runtime symbol-table budget validity (the number of *distinct*
   strings the VM will intern across every function, deduplicated by exact
-  string value program-wide - not a per-function string-table entry count)
+  string value program-wide - not a per-function string-table entry count;
+  also checked against the caller-selected `RuntimeQuotas` profile)
 - call-target validity
 - capability consistency with actual opcode usage
 
