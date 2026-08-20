@@ -23,4 +23,5 @@ sm-format = { path = "../sm-format", default-features = false, features = ["std"
 
 [dev-dependencies]
 sm-emit = { path = "../sm-emit", default-features = false, features = ["std"] }
+sm-ir = { path = "../sm-ir", default-features = false, features = ["std"] }
 

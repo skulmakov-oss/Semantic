@@ -2483,6 +2483,19 @@ where
                     next_pc = cur - f.instr_start;
                 }
             }
+            // Call target resolution precedence (#1653 / #1750, umbrella #1617):
+            // an internal/program function named `callee` always wins over a
+            // same-named builtin. This mirrors the verifier's already-correct
+            // rule (crates/sm-verify/src/lib.rs: `known_functions.contains`
+            // short-circuits before any builtin capability check) and the
+            // source-level rule (crates/sm-front: user table checked before
+            // `builtin_sig`). Before this fix, `try_eval_builtin_call` ran
+            // unconditionally first, so a user-defined `sin`/`to_text`/etc.
+            // was silently shadowed by the builtin at the one layer (the VM)
+            // that actually executes code, even though both the frontend and
+            // the verifier had already admitted/proven the user function.
+            // Builtin resolution now only happens when no internal function
+            // by that name exists.
             Opcode::Call => {
                 let has_dst = read_u8(&f.code, &mut cur).map_err(map_format_err)? != 0;
                 let dst = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
@@ -2494,12 +2507,22 @@ where
                     let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                     args.push(get_reg(vm, frame_idx, r)?);
                 }
-                if let Some(result) = try_eval_builtin_call(host, observation, &callee, &args)? {
+                if vm.functions.contains_key(&callee) {
+                    vm.callstack[frame_idx].pc = cur - f.instr_start;
+                    push_frame(vm, &callee, args, if has_dst { Some(dst) } else { None })?;
+                    continue;
+                } else if let Some(result) =
+                    try_eval_builtin_call(host, observation, &callee, &args)?
+                {
                     if has_dst {
                         set_reg(vm, frame_idx, dst, result)?;
                     }
                     next_pc = cur - f.instr_start;
                 } else {
+                    // Truly unknown callee: neither an internal function nor
+                    // a builtin. Route through push_frame so the error
+                    // (RuntimeError::UnknownFunction) is unchanged from
+                    // pre-fix behavior.
                     vm.callstack[frame_idx].pc = cur - f.instr_start;
                     push_frame(vm, &callee, args, if has_dst { Some(dst) } else { None })?;
                     continue;
