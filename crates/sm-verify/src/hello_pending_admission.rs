@@ -24,6 +24,7 @@ pub enum HelloPendingPolicyReason {
     NondeterministicSinkConfiguration,
     UnsupportedOperationKind,
     UnsupportedPayloadType,
+    UnsupportedAuditPolicy,
 }
 
 #[cfg(feature = "std")]
@@ -77,10 +78,19 @@ pub fn evaluate_hello_pending_policy(input: &HelloPendingPolicyInput) -> HelloPe
         _ => {}
     }
 
-    if input.audit_policy == "required" && !input.audit_available {
-        return HelloPendingPolicyResult::Deny {
-            reason: HelloPendingPolicyReason::AuditRequiredButUnavailable,
-        };
+    match input.audit_policy.as_str() {
+        "required" => {
+            if !input.audit_available {
+                return HelloPendingPolicyResult::Deny {
+                    reason: HelloPendingPolicyReason::AuditRequiredButUnavailable,
+                };
+            }
+        }
+        _ => {
+            return HelloPendingPolicyResult::Deny {
+                reason: HelloPendingPolicyReason::UnsupportedAuditPolicy,
+            };
+        }
     }
 
     if !input.deterministic_order {

@@ -204,6 +204,96 @@ fn hello_pending_verifier_admission_rejects_forbidden_host_channels() {
 }
 
 #[test]
+fn hello_pending_verifier_admission_rejects_unknown_audit_policy_when_audit_unavailable() {
+    let mut input = fixture_input(
+        "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+    );
+    input.audit_policy = "unknown".to_string();
+    input.audit_available = false;
+    let actual = evaluate_hello_pending_policy(&input);
+    assert_eq!(
+        actual,
+        HelloPendingPolicyResult::Deny {
+            reason: HelloPendingPolicyReason::UnsupportedAuditPolicy,
+        }
+    );
+}
+
+#[test]
+fn hello_pending_verifier_admission_rejects_unknown_audit_policy_even_when_audit_available() {
+    // The defect this guards against is unknown POLICY IDENTITY, not merely
+    // missing audit availability: an unrecognized audit_policy string must
+    // deny regardless of audit_available.
+    let mut input = fixture_input(
+        "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+    );
+    input.audit_policy = "unknown".to_string();
+    input.audit_available = true;
+    let actual = evaluate_hello_pending_policy(&input);
+    assert_eq!(
+        actual,
+        HelloPendingPolicyResult::Deny {
+            reason: HelloPendingPolicyReason::UnsupportedAuditPolicy,
+        }
+    );
+}
+
+#[test]
+fn hello_pending_verifier_admission_rejects_misspelled_audit_policy() {
+    let mut input = fixture_input(
+        "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+    );
+    input.audit_policy = "requred".to_string();
+    input.audit_available = true;
+    let actual = evaluate_hello_pending_policy(&input);
+    assert_eq!(
+        actual,
+        HelloPendingPolicyResult::Deny {
+            reason: HelloPendingPolicyReason::UnsupportedAuditPolicy,
+        }
+    );
+}
+
+#[test]
+fn hello_pending_verifier_admission_rejects_empty_audit_policy() {
+    let mut input = fixture_input(
+        "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+    );
+    input.audit_policy = String::new();
+    input.audit_available = true;
+    let actual = evaluate_hello_pending_policy(&input);
+    assert_eq!(
+        actual,
+        HelloPendingPolicyResult::Deny {
+            reason: HelloPendingPolicyReason::UnsupportedAuditPolicy,
+        }
+    );
+}
+
+#[test]
+fn hello_pending_verifier_admission_rejects_deferred_audit_policy_string() {
+    // This freezes the CURRENT boundary of this pending-verifier String API:
+    // no serialized spelling for the Deferred audit policy class has been
+    // defined/evidenced at this layer yet, so "deferred" denies like any
+    // other unrecognized string. This does NOT mean Deferred is conceptually
+    // invalid — HelloObservationAuditPolicyClass::Deferred remains a valid
+    // typed state in prom-audit; a future issue may define a canonical
+    // deferred string representation here with its own evidence/fixtures.
+    let mut input = fixture_input(
+        "tests/fixtures/pending/hello_policy/positive_observation_policy_admitted.toml",
+    );
+    input.audit_policy = "deferred".to_string();
+    input.audit_available = true;
+    let actual = evaluate_hello_pending_policy(&input);
+    assert_eq!(
+        actual,
+        HelloPendingPolicyResult::Deny {
+            reason: HelloPendingPolicyReason::UnsupportedAuditPolicy,
+        }
+    );
+}
+
+#[test]
 fn hello_pending_verifier_admission_policy_registry_stays_pending_only() {
     let registry = fixture_text("docs/language/semantic_hello_policy_fixtures.md");
     let readme = fixture_text("tests/fixtures/pending/hello_policy/README.md");

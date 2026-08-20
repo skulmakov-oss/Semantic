@@ -136,10 +136,14 @@ fn to_capability_context(map: &BTreeMap<String, String>) -> HelloObservationCapa
 fn audit_policy_class_from_input(
     input: &HelloPendingPolicyInput,
 ) -> HelloObservationAuditPolicyClass {
-    if input.audit_policy == "required" {
-        HelloObservationAuditPolicyClass::Required
-    } else {
-        HelloObservationAuditPolicyClass::Deferred
+    // evaluate_hello_pending_policy (called earlier in run_isolated_harness,
+    // which returns on Deny before this helper is ever reached) already
+    // denies any audit_policy other than exactly "required". So this arm is
+    // an assertion that the upstream fail-closed check is doing its job, not
+    // a new fail-open classification path.
+    match input.audit_policy.as_str() {
+        "required" => HelloObservationAuditPolicyClass::Required,
+        other => panic!("pending admission allowed unsupported audit_policy: {other}"),
     }
 }
 
@@ -154,6 +158,7 @@ fn denial_reason_from_pending(reason: HelloPendingPolicyReason) -> &'static str 
         }
         HelloPendingPolicyReason::UnsupportedOperationKind => "unsupported_operation_kind",
         HelloPendingPolicyReason::UnsupportedPayloadType => "unsupported_payload_type",
+        HelloPendingPolicyReason::UnsupportedAuditPolicy => "unsupported_audit_policy",
     }
 }
 
