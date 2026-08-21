@@ -115,6 +115,10 @@ Contract rule:
 - quota exhaustion must preserve the exceeded quota kind, limit, and usage
 - malformed or unsupported bytecode must not be treated as a successful run
 
+`MAP_GET` evaluates its default register only on a key miss. Failure to
+read the default register is a runtime error. `MAP_GET` must never
+convert a register-read failure into `Value::Unit`.
+
 ## Determinism Rule
 
 The VM must behave deterministically for the same:
