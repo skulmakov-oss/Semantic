@@ -6150,4 +6150,59 @@ mod tests {
             "unexpected error: {err:?}"
         );
     }
+
+    // #1754 (FA-07-014): cross-check that sm-verify's program-wide distinct
+    // runtime symbol count (union of every function's local strings,
+    // deduped by exact value) matches what `build_vm_program_view_from_decoded`
+    // actually builds into `RuntimeSymbolTable`, for a representative
+    // multi-function artifact that reuses some strings across functions.
+    // No new production API: `build_vm_program_view_from_decoded` is an
+    // existing private fn in this same module, called directly from this
+    // in-crate test.
+    #[test]
+    fn program_wide_symbol_table_matches_verifier_distinct_count() {
+        use sm_ir::{IrFunction, IrInstr};
+
+        // f0: a,b,c ; f1: b,c,d (b,c shared with f0) ; f2: d,e (d shared with f1)
+        let make = |name: &str, strings: &[&str]| IrFunction {
+            name: name.to_string(),
+            instrs: {
+                let mut instrs: Vec<IrInstr> = strings
+                    .iter()
+                    .map(|s| IrInstr::LoadText {
+                        dst: 0,
+                        val: s.to_string(),
+                    })
+                    .collect();
+                instrs.push(IrInstr::Ret { src: None });
+                instrs
+            },
+            ownership_events: Vec::new(),
+        };
+        let funcs = vec![
+            make("f0", &["a", "b", "c"]),
+            make("f1", &["b", "c", "d"]),
+            make("f2", &["d", "e"]),
+        ];
+        let bytes = sm_emit::emit_ir_to_semcode(&funcs, false).expect("emit");
+
+        // sm-verify must accept it (well under quota).
+        sm_verify::verify_semcode_token(&bytes).expect("small duplicate-string program admits");
+
+        // The verifier's counting algorithm, mirrored here: union of every
+        // function's local strings, deduped by value.
+        let (header, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let verifier_style_distinct = decoded
+            .iter()
+            .flat_map(|env| env.strings.iter().map(|s| s.as_str()))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert_eq!(verifier_style_distinct, 5); // a, b, c, d, e
+
+        // The REAL VM resource, built the same way execution builds it.
+        let program =
+            build_vm_program_view_from_decoded(header, &decoded).expect("build vm program view");
+        assert_eq!(program.runtime_symbols.len(), verifier_style_distinct);
+    }
 }

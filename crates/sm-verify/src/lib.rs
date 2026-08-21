@@ -344,6 +344,32 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
         }
     }
 
+    // #1754 (FA-07-014): the VM builds ONE program-wide `RuntimeSymbolTable`
+    // shared across every function (see `build_vm_program_view_from_decoded`
+    // in crates/sm-vm/src/semcode_vm.rs), interning each function's
+    // `env.strings` into it and deduplicating by exact string value. A
+    // per-function check against `max_symbol_table` cannot catch a program
+    // that stays under the budget in every individual function but exceeds
+    // it once all functions' distinct strings are unioned program-wide, so
+    // the check has to be made at this granularity to match the real
+    // runtime resource.
+    let unique_runtime_symbols: HashSet<&str> = decoded_functions
+        .iter()
+        .flat_map(|env| env.strings.iter().map(|s| s.as_str()))
+        .collect();
+    let unique_runtime_symbol_count = unique_runtime_symbols.len();
+    if unique_runtime_symbol_count > quotas.max_symbol_table {
+        diagnostics.push(diag(
+            VerificationCode::ResourceLimitExceeded,
+            None,
+            None,
+            format!(
+                "program-wide runtime symbol table uses {} distinct entries, exceeding the verified-local symbol budget of {}",
+                unique_runtime_symbol_count, quotas.max_symbol_table
+            ),
+        ));
+    }
+
     if header.capabilities & CAP_OWNERSHIP_PATHS != 0
         && !pending_functions
             .iter()
@@ -488,18 +514,18 @@ fn verify_function_code(
         ));
     }
 
+    // #1754 (FA-07-014): a per-function string-table check against
+    // `max_symbol_table` used to live here, but sm-format already caps each
+    // function's local string table at `MAX_STRINGS_PER_FUNCTION` (256, see
+    // semcode_decode.rs), which is far below `max_symbol_table` (16_384) -
+    // making that check dead code. The real program-wide resource is the VM's
+    // `RuntimeSymbolTable` (crates/sm-runtime-core/src/lib.rs), which is
+    // built ONCE per program and shared across every function (see
+    // `build_vm_program_view_from_decoded` in crates/sm-vm/src/semcode_vm.rs,
+    // which interns each function's `env.strings` into a single
+    // program-wide, dedup-by-value table). That budget is enforced
+    // program-wide in `verify_semcode_token` instead, see the check there.
     let string_count = env.strings.len();
-    if string_count > quotas.max_symbol_table {
-        return Err(reject_one(
-            name,
-            VerificationCode::ResourceLimitExceeded,
-            0,
-            format!(
-                "function string table uses {} entries, exceeding the verified-local symbol budget of {}",
-                string_count, quotas.max_symbol_table
-            ),
-        ));
-    }
 
     let debug_symbol_count = env.debug_symbols.len();
     if debug_symbol_count > quotas.max_trace_entries {
@@ -3745,5 +3771,139 @@ mod tests {
         }
         src.push_str("fn main() { return; }");
         compile_program_to_semcode(&src).expect("compile")
+    }
+
+    // #1754 (FA-07-014) test matrix: the verifier must sum DISTINCT
+    // runtime symbols (function-local string-table entries, deduplicated
+    // by exact value) across the WHOLE program against max_symbol_table
+    // (16_384), matching the VM's single shared `RuntimeSymbolTable`
+    // (crates/sm-runtime-core/src/lib.rs), not a per-function check.
+
+    fn function_with_strings(name: &str, strings: &[String]) -> IrFunction {
+        let mut instrs: Vec<IrInstr> = strings
+            .iter()
+            .map(|s| IrInstr::LoadText {
+                dst: 0,
+                val: s.clone(),
+            })
+            .collect();
+        instrs.push(IrInstr::Ret { src: None });
+        IrFunction {
+            name: name.to_string(),
+            instrs,
+            ownership_events: Vec::new(),
+        }
+    }
+
+    /// Union of every function's local strings, deduplicated by value -
+    /// the same quantity `RuntimeSymbolTable` (via
+    /// `build_vm_program_view_from_decoded`) ends up holding.
+    fn distinct_runtime_symbol_count(bytes: &[u8]) -> usize {
+        let (_, decoded) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode");
+        decoded
+            .iter()
+            .flat_map(|env| env.strings.iter().map(|s| s.as_str()))
+            .collect::<HashSet<_>>()
+            .len()
+    }
+
+    #[test]
+    fn verifier_accepts_heavy_duplication_under_program_wide_symbol_quota() {
+        // 165 functions x 100 strings, but every function reuses the exact
+        // same 100 string values: raw per-function-summed entries
+        // (16_500) exceed max_symbol_table, while the DISTINCT program-wide
+        // count (100) stays far under it. A naive "sum all local string
+        // table lengths" implementation would wrongly reject this; the
+        // correct dedup-by-value implementation must accept it.
+        let shared_strings: Vec<String> = (0..100).map(|j| format!("dup_s{j}")).collect();
+        let funcs: Vec<IrFunction> = (0..165)
+            .map(|i| function_with_strings(&format!("f{i}"), &shared_strings))
+            .collect();
+        let bytes = emit_ir_to_semcode(&funcs, false).expect("emit");
+
+        let raw_sum: usize = funcs.len() * shared_strings.len();
+        assert!(
+            raw_sum > 16_384,
+            "raw sum must exceed the quota to be a meaningful control"
+        );
+        let distinct = distinct_runtime_symbol_count(&bytes);
+        assert_eq!(distinct, 100);
+        assert!(distinct <= 16_384);
+
+        verify_semcode_token(&bytes)
+            .expect("duplicate-heavy program under the distinct-symbol quota must be accepted");
+    }
+
+    #[test]
+    fn verifier_accepts_program_wide_symbols_at_exact_quota_boundary() {
+        // 64 functions x 256 strings, all globally distinct, each function
+        // exactly at sm-format's MAX_STRINGS_PER_FUNCTION cap: 64 * 256 =
+        // 16_384, exactly max_symbol_table. This hits the boundary exactly.
+        let functions_count = 64usize;
+        let strings_per_function = 256usize;
+        assert_eq!(functions_count * strings_per_function, 16_384);
+        assert_eq!(
+            strings_per_function,
+            sm_format::semcode_decode::MAX_STRINGS_PER_FUNCTION
+        );
+
+        let funcs: Vec<IrFunction> = (0..functions_count)
+            .map(|i| {
+                let strings: Vec<String> = (0..strings_per_function)
+                    .map(|j| format!("b{i}_{j}"))
+                    .collect();
+                function_with_strings(&format!("f{i}"), &strings)
+            })
+            .collect();
+        let bytes = emit_ir_to_semcode(&funcs, false).expect("emit");
+
+        let distinct = distinct_runtime_symbol_count(&bytes);
+        assert_eq!(distinct, 16_384);
+
+        verify_semcode_token(&bytes)
+            .expect("program exactly at the symbol quota boundary must be accepted");
+    }
+
+    #[test]
+    fn verifier_rejects_program_wide_symbols_over_quota() {
+        // Permanent regression test for the #1754 reproduction: 66
+        // functions x 250 globally-distinct strings each (66 * 250 =
+        // 16_500 > 16_384), with every individual function's local string
+        // table staying at 250 <= MAX_STRINGS_PER_FUNCTION (256) - proving
+        // this is caught only by GLOBAL, program-wide accounting, not by
+        // any per-function limit.
+        let functions_count = 66usize;
+        let strings_per_function = 250usize;
+        assert!(strings_per_function <= sm_format::semcode_decode::MAX_STRINGS_PER_FUNCTION);
+        assert!(functions_count <= 256); // stay under the unrelated #1751 max_frames check
+
+        let funcs: Vec<IrFunction> = (0..functions_count)
+            .map(|i| {
+                let strings: Vec<String> = (0..strings_per_function)
+                    .map(|j| format!("f{i}_s{j}"))
+                    .collect();
+                function_with_strings(&format!("f{i}"), &strings)
+            })
+            .collect();
+        let bytes = emit_ir_to_semcode(&funcs, false).expect("emit");
+
+        let distinct = distinct_runtime_symbol_count(&bytes);
+        assert_eq!(distinct, functions_count * strings_per_function);
+        assert!(distinct > 16_384);
+
+        let report = verify_semcode_token(&bytes)
+            .expect_err("program-wide distinct runtime symbol count over quota must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::ResourceLimitExceeded
+        );
+        assert!(
+            report.diagnostics[0]
+                .message
+                .contains("program-wide runtime symbol table"),
+            "diagnostic message must name the program-wide runtime symbol table: {}",
+            report.diagnostics[0].message
+        );
     }
 }
