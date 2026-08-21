@@ -60,10 +60,23 @@ pub enum Value {
     Unit,
 }
 
+/// A single register slot.
+///
+/// Physical slot existence (storage capacity) and Semantic value
+/// definition are distinct properties: a slot may exist without ever
+/// having been written by an instruction. `Value::Unit` is an ordinary
+/// Semantic value, never a stand-in for "nothing was written here" --
+/// that state is represented explicitly by `Uninitialized`.
+#[derive(Debug, Clone)]
+enum RegisterSlot {
+    Uninitialized,
+    Value(Value),
+}
+
 #[derive(Debug, Clone)]
 pub struct Frame {
     pub pc: usize,
-    pub regs: Vec<Value>,
+    regs: Vec<RegisterSlot>,
     pub locals: HashMap<SymbolId, Value>,
     pub borrowed_paths: Vec<AccessPath>,
     next_write_path: usize,
@@ -2735,9 +2748,9 @@ fn push_frame(
     }
     let initial_reg_count = 16usize.max(args.len());
     enforce_quota(&vm.config.quotas, QuotaKind::Registers, initial_reg_count)?;
-    let mut regs = vec![Value::Unit; initial_reg_count];
+    let mut regs = vec![RegisterSlot::Uninitialized; initial_reg_count];
     for (i, v) in args.into_iter().enumerate() {
-        regs[i] = v;
+        regs[i] = RegisterSlot::Value(v);
     }
     let frame = Frame {
         pc: 0,
@@ -2789,11 +2802,18 @@ fn lookup_symbol(f: &FunctionBytecode, sid: u16) -> Result<SymbolId, RuntimeErro
 }
 
 fn get_reg(vm: &VM, frame_idx: usize, r: u16) -> Result<Value, RuntimeError> {
-    vm.callstack
+    match vm
+        .callstack
         .get(frame_idx)
         .and_then(|fr| fr.regs.get(r as usize))
-        .cloned()
-        .ok_or_else(|| RuntimeError::BadFormat(format!("read invalid reg r{}", r)))
+    {
+        Some(RegisterSlot::Value(v)) => Ok(v.clone()),
+        Some(RegisterSlot::Uninitialized) => Err(RuntimeError::BadFormat(format!(
+            "read uninitialized reg r{}",
+            r
+        ))),
+        None => Err(RuntimeError::BadFormat(format!("read invalid reg r{}", r))),
+    }
 }
 
 fn set_reg(vm: &mut VM, frame_idx: usize, r: u16, v: Value) -> Result<(), RuntimeError> {
@@ -2812,9 +2832,9 @@ fn write_reg(
     if frame.regs.len() <= r {
         let required = r + 1;
         enforce_quota(quotas, QuotaKind::Registers, required)?;
-        frame.regs.resize(required, Value::Unit);
+        frame.regs.resize(required, RegisterSlot::Uninitialized);
     }
-    frame.regs[r] = v;
+    frame.regs[r] = RegisterSlot::Value(v);
     Ok(())
 }
 
@@ -4048,6 +4068,17 @@ mod tests {
     // the function's code-slice start (recovered via pointer arithmetic,
     // since `code_slice` is a genuine subslice of `bytes`) plus
     // `instr_start_offset`.
+    //
+    // #1770 follow-up: `let a: bool = true;` also emits a STORE_VAR
+    // immediately after LOAD_BOOL, reading the same register LOAD_BOOL
+    // wrote (`src`), to bind it to local `a`. Relocating only LOAD_BOOL's
+    // `dst` to r5000 without also relocating STORE_VAR's `src` left the
+    // original register (r0) referenced-but-never-written -- which used to
+    // read back as a fail-open `Value::Unit` (the exact #1770 bug) and
+    // silently worked by accident. Now that undefined reads are correctly
+    // rejected, both operands of this load/store pair must be relocated
+    // together so the artifact stays internally consistent; the r5000
+    // register-budget property under test is otherwise unaffected.
     fn build_r5000_register_artifact() -> Vec<u8> {
         let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
             .expect("compile");
@@ -4066,6 +4097,16 @@ mod tests {
         );
         let dst_pos = opcode_pos + 1;
         bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        // LOAD_BOOL is [opcode:1][dst:u16][val:u8] = 4 bytes; STORE_VAR
+        // follows immediately as [opcode:1][sid:u16][src:u16].
+        let store_var_pos = opcode_pos + 4;
+        assert_eq!(
+            bytes[store_var_pos],
+            Opcode::StoreVar as u8,
+            "expected STORE_VAR immediately after LOAD_BOOL"
+        );
+        let store_var_src_pos = store_var_pos + 1 + 2;
+        bytes[store_var_src_pos..store_var_src_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
         bytes
     }
 
@@ -5818,6 +5859,226 @@ mod tests {
         ]);
         let res = run_map_get_test_program(&bytes).expect("run");
         assert_eq!(res, Value::Unit);
+    }
+
+    /// B5 layout evidence: `RegisterSlot` has the same layout as the stdlib
+    /// `Option<Value>` alternative would have. This locks in the *relative*
+    /// comparison the representation decision was based on; it does not by
+    /// itself bound `Value`'s own size (a Rust layout detail of the
+    /// compiler/target, not a semantic contract this test should gate) --
+    /// the concrete `size_of::<Value>() == size_of::<Option<Value>>() ==
+    /// size_of::<RegisterSlot>() == 80` measurement is recorded as PR
+    /// evidence instead.
+    #[test]
+    fn register_slot_layout_matches_option_value() {
+        assert_eq!(
+            std::mem::size_of::<RegisterSlot>(),
+            std::mem::size_of::<Option<Value>>(),
+            "RegisterSlot must not cost more than the stdlib Option<Value> alternative"
+        );
+    }
+
+    // --- #1770 (FA-09-002, umbrella #1617) regression matrix ---------------
+    //
+    // `push_frame` used to materialize at least 16 register slots with
+    // `Value::Unit` regardless of arguments, and `write_reg` filled any gap
+    // created by a high-register write the same way. That made "physical
+    // slot exists" and "a Semantic value was actually defined here"
+    // indistinguishable: an entirely undefined register read back as a
+    // plausible `Unit` instead of failing. Built with `emit_ir_to_semcode`
+    // directly for the same reason as #1771's tests: precise control over
+    // exactly which registers are written, independent of what the
+    // source-level compiler happens to allocate.
+
+    fn build_register_init_test_program(functions: Vec<IrFunction>) -> Vec<u8> {
+        emit_ir_to_semcode(&functions, false).expect("emit register-init test program")
+    }
+
+    fn ret_only_function(name: &str, src: Option<u16>) -> IrFunction {
+        IrFunction {
+            name: name.to_string(),
+            instrs: vec![IrInstr::Ret { src }],
+            ownership_events: Vec::new(),
+        }
+    }
+
+    /// B12.1 + B13 cross-layer defense: a zero-arg entry reading `r0` with
+    /// no preceding definition must be rejected by the VM even though the
+    /// verifier (lacking #1756's definite-assignment proof) admits it.
+    #[test]
+    fn frame_reads_zero_arg_entry_register_as_uninitialized_error() {
+        let bytes = build_register_init_test_program(vec![ret_only_function("main", Some(0))]);
+        let token = verify_semcode_token(&bytes)
+            .expect("verifier currently has no definite-assignment proof (#1756) and must accept");
+        let entry = token.require_entry("main").expect("entry");
+        let err = run_verified_function_semcode_with_args(&entry, "main", vec![])
+            .expect_err("VM must independently reject the undefined read");
+        assert_eq!(
+            err,
+            RuntimeError::BadFormat("read uninitialized reg r0".to_string())
+        );
+    }
+
+    /// B12.2: a write to a high register must not materialize the gap
+    /// below it as legitimate values; a never-written register in that gap
+    /// must still fail as uninitialized (not succeed with a fabricated
+    /// `Unit`).
+    #[test]
+    fn write_high_register_then_read_gap_is_uninitialized_error() {
+        let bytes = build_register_init_test_program(vec![IrFunction {
+            name: "main".to_string(),
+            instrs: vec![
+                IrInstr::LoadI32 { dst: 100, val: 1 },
+                IrInstr::Ret { src: Some(50) },
+            ],
+            ownership_events: Vec::new(),
+        }]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let err = run_verified_function_semcode_with_args(&entry, "main", vec![])
+            .expect_err("gap register must remain uninitialized");
+        assert_eq!(
+            err,
+            RuntimeError::BadFormat("read uninitialized reg r50".to_string())
+        );
+    }
+
+    /// B12.3 + B12.9: `Value::Unit` remains an ordinary, readable value once
+    /// genuinely written -- including via a real `CALL` whose callee
+    /// returns unit (`Ret { src: None }`), proving the call's destination
+    /// register becomes explicitly initialized rather than only
+    /// incidentally holding `Unit` by virtue of unwritten storage.
+    #[test]
+    fn explicit_unit_write_then_read_succeeds_and_call_result_is_initialized() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("helper", None),
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::Call {
+                        dst: Some(5),
+                        name: "helper".to_string(),
+                        args: vec![],
+                    },
+                    IrInstr::Ret { src: Some(5) },
+                ],
+                ownership_events: Vec::new(),
+            },
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let res = run_verified_function_semcode_with_args(&entry, "main", vec![]).expect("run");
+        assert_eq!(res, Value::Unit);
+    }
+
+    /// B12.4 + B12.5 (single-argument half): exactly one supplied argument
+    /// defines `r0`; a sibling register that was never supplied and never
+    /// written must remain uninitialized, not "magically" defined.
+    #[test]
+    fn single_argument_initializes_only_r0() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("main", None),
+            ret_only_function("read_r0", Some(0)),
+            ret_only_function("read_r1", Some(1)),
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+
+        let ok = run_verified_function_semcode_with_args(&entry, "read_r0", vec![Value::I32(42)])
+            .expect("supplied arg register must be defined");
+        assert_eq!(ok, Value::I32(42));
+
+        let err = run_verified_function_semcode_with_args(&entry, "read_r1", vec![Value::I32(42)])
+            .expect_err("unsupplied sibling register must not be magically defined");
+        assert_eq!(
+            err,
+            RuntimeError::BadFormat("read uninitialized reg r1".to_string())
+        );
+    }
+
+    /// B12.5 (multiple-arguments half): exactly the supplied registers are
+    /// initialized -- not one more.
+    #[test]
+    fn multiple_arguments_initialize_exactly_supplied_registers() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("main", None),
+            ret_only_function("read_r1", Some(1)),
+            ret_only_function("read_r2", Some(2)),
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let args = vec![Value::I32(1), Value::I32(2)];
+
+        let ok = run_verified_function_semcode_with_args(&entry, "read_r1", args.clone())
+            .expect("second supplied arg register must be defined");
+        assert_eq!(ok, Value::I32(2));
+
+        let err = run_verified_function_semcode_with_args(&entry, "read_r2", args)
+            .expect_err("register past the supplied argument count must be uninitialized");
+        assert_eq!(
+            err,
+            RuntimeError::BadFormat("read uninitialized reg r2".to_string())
+        );
+    }
+
+    /// B12.10: a `CALL` with no destination operand must define no
+    /// register at all -- not even incidentally.
+    #[test]
+    fn call_without_destination_creates_no_register_definition() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("helper", None),
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::Call {
+                        dst: None,
+                        name: "helper".to_string(),
+                        args: vec![],
+                    },
+                    IrInstr::Ret { src: Some(7) },
+                ],
+                ownership_events: Vec::new(),
+            },
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let err = run_verified_function_semcode_with_args(&entry, "main", vec![])
+            .expect_err("no-dst call must not define r7");
+        assert_eq!(
+            err,
+            RuntimeError::BadFormat("read uninitialized reg r7".to_string())
+        );
+    }
+
+    /// B12.11: a `ClosureCall`'s result register is initialized the same
+    /// way a plain `CALL`'s is.
+    #[test]
+    fn closure_call_result_initialization_preserved() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("closure_target", Some(0)),
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadI32 { dst: 0, val: 77 },
+                    IrInstr::MakeClosure {
+                        dst: 1,
+                        name: "closure_target".to_string(),
+                        captures: vec![],
+                    },
+                    IrInstr::ClosureCall {
+                        dst: Some(2),
+                        closure: 1,
+                        arg: 0,
+                    },
+                    IrInstr::Ret { src: Some(2) },
+                ],
+                ownership_events: Vec::new(),
+            },
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let res = run_verified_function_semcode_with_args(&entry, "main", vec![]).expect("run");
+        assert_eq!(res, Value::I32(77));
     }
 
     #[test]

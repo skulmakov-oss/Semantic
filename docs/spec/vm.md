@@ -144,6 +144,14 @@ Current frame model includes:
 - function identity
 - optional return destination
 
+Register storage capacity and register initialization are independent:
+a register slot may physically exist without ever having been defined by
+an instruction. `Value::Unit` is an ordinary Semantic value, never a
+stand-in for "nothing was written here." A read of an undefined register
+deterministically fails; it must never be treated as `Value::Unit` by
+default. This runtime defense is independent of and does not replace
+verifier dataflow proof of definite assignment.
+
 Current function-bytecode model includes:
 
 - function name
