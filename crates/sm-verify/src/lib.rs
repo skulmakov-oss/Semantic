@@ -244,11 +244,28 @@ impl<'a> VerifiedSemCode<'a> {
 ///
 /// This is the primary entry point for the canonical verified execution path.
 /// It validates raw SemCode bytes against admission policies and returns a
-/// `VerifiedSemCode` token if successful.
+/// `VerifiedSemCode` token if successful. Admits against the `VerifiedLocal`
+/// quota profile; use `verify_semcode_token_with_quotas` to admit against a
+/// different (e.g. `KernelBound`) profile.
 #[cfg(feature = "std")]
 pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectReport> {
+    verify_semcode_token_with_quotas(bytes, RuntimeQuotas::verified_local())
+}
+
+/// Admission gate for SemCode bytes against an explicit quota profile.
+///
+/// Identical to `verify_semcode_token` except the caller supplies the
+/// `RuntimeQuotas` admission is checked against, instead of the hardcoded
+/// `VerifiedLocal` profile. This lets a context (e.g. `KernelBound`) admit
+/// tokens whose register/symbol usage exceeds `VerifiedLocal`'s budget but
+/// stays within its own. The returned token's admission proof reflects only
+/// the quotas passed here - it says nothing about any other profile.
+#[cfg(feature = "std")]
+pub fn verify_semcode_token_with_quotas(
+    bytes: &[u8],
+    quotas: RuntimeQuotas,
+) -> Result<VerifiedSemCode<'_>, RejectReport> {
     let mut diagnostics = Vec::new();
-    let quotas = RuntimeQuotas::verified_local();
 
     let (header, decoded_functions) =
         match sm_format::semcode_decode::decode_semcode_envelope(bytes) {
@@ -364,7 +381,7 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
             None,
             None,
             format!(
-                "program-wide runtime symbol table uses {} distinct entries, exceeding the verified-local symbol budget of {}",
+                "program-wide runtime symbol table uses {} distinct entries, exceeding the symbol budget of {}",
                 unique_runtime_symbol_count, quotas.max_symbol_table
             ),
         ));
@@ -534,7 +551,7 @@ fn verify_function_code(
             VerificationCode::ResourceLimitExceeded,
             0,
             format!(
-                "debug section uses {} entries, exceeding the verified-local trace budget of {}",
+                "debug section uses {} entries, exceeding the trace budget of {}",
                 debug_symbol_count, quotas.max_trace_entries
             ),
         ));
@@ -739,7 +756,7 @@ fn verify_function_code(
                 VerificationCode::InvalidRegisterReference,
                 used - 1,
                 format!(
-                    "function references register r{}, exceeding the verified-local register budget of {}",
+                    "function references register r{}, exceeding the register budget of {}",
                     max_register, quotas.max_registers
                 ),
             ));
@@ -2190,6 +2207,83 @@ mod tests {
         assert_eq!(
             report.diagnostics[0].code,
             VerificationCode::InvalidRegisterReference
+        );
+    }
+
+    // #1757 (FA-07-017): a register above VerifiedLocal's 4096 budget but
+    // within KernelBound's 8192 budget must be rejected under the default
+    // (VerifiedLocal) admission gate.
+    #[test]
+    fn verify_semcode_token_default_still_rejects_register_past_verified_local_budget() {
+        let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
+            .expect("compile");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
+        let dst_pos = opcode_pos + 1;
+        bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        let report = verify_semcode_token(&bytes).expect_err("must reject under default quotas");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidRegisterReference
+        );
+    }
+
+    // The same register must be ACCEPTED when the caller explicitly admits
+    // against KernelBound quotas via the new quota-aware API.
+    #[test]
+    fn verify_semcode_token_with_quotas_accepts_register_within_kernel_bound_budget() {
+        let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
+            .expect("compile");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
+        let dst_pos = opcode_pos + 1;
+        bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        verify_semcode_token_with_quotas(&bytes, RuntimeQuotas::kernel_bound())
+            .expect("r5000 must be within KernelBound's register budget");
+    }
+
+    // KernelBound is not infinite: a register above its own 8192 budget must
+    // still be rejected even when explicitly admitting against KernelBound.
+    #[test]
+    fn verify_semcode_token_with_quotas_rejects_register_past_kernel_bound_budget() {
+        let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
+            .expect("compile");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
+        let dst_pos = opcode_pos + 1;
+        bytes[dst_pos..dst_pos + 2].copy_from_slice(&8200u16.to_le_bytes());
+        let report = verify_semcode_token_with_quotas(&bytes, RuntimeQuotas::kernel_bound())
+            .expect_err("must reject past KernelBound's own register budget");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::InvalidRegisterReference
+        );
+    }
+
+    // No regression to the common path: an ordinary small artifact still
+    // admits cleanly under the unchanged default quota profile.
+    #[test]
+    fn verify_semcode_token_default_still_accepts_ordinary_artifact() {
+        let bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
+            .expect("compile");
+        verify_semcode_token(&bytes).expect("ordinary artifact must still admit");
+    }
+
+    // #1757 review follow-up: since quotas are now caller-supplied, a
+    // rejection diagnostic must not hardcode "verified-local" - that text
+    // would misidentify the active policy for any other profile (e.g. a
+    // KernelBound rejection reporting its 8192-register budget as if it
+    // were verified-local's, whose real budget is 4096).
+    #[test]
+    fn verify_semcode_token_with_quotas_rejection_message_does_not_hardcode_verified_local() {
+        let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
+            .expect("compile");
+        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
+        let dst_pos = opcode_pos + 1;
+        bytes[dst_pos..dst_pos + 2].copy_from_slice(&8200u16.to_le_bytes());
+        let report = verify_semcode_token_with_quotas(&bytes, RuntimeQuotas::kernel_bound())
+            .expect_err("must reject past KernelBound's own register budget");
+        assert!(
+            !report.diagnostics[0].message.contains("verified-local"),
+            "diagnostic must not claim a KernelBound rejection is a verified-local budget: {}",
+            report.diagnostics[0].message
         );
     }
 

@@ -16,7 +16,10 @@ use sm_runtime_core::{
     RecordCarrier, RuntimeQuotas, RuntimeSymbolTable, RuntimeTrap, SymbolId,
 };
 use sm_verify::RejectReport;
-use sm_verify::{verify_semcode_token, EntryResolutionError, VerifiedEntrySemCode};
+use sm_verify::{
+    verify_semcode_token, verify_semcode_token_with_quotas, EntryResolutionError,
+    VerifiedEntrySemCode,
+};
 use std::collections::{HashMap, HashSet};
 
 /// Scalar key type for Map values.
@@ -611,7 +614,8 @@ pub fn run_verified_semcode_with_config(
     bytes: &[u8],
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let token = verify_semcode_token_with_quotas(bytes, config.quotas)
+        .map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry("main").map_err(|err| match err {
         EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
     })?;
@@ -644,7 +648,8 @@ pub fn run_verified_semcode_with_entry_and_config(
     entry: &str,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let token = verify_semcode_token_with_quotas(bytes, config.quotas)
+        .map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry(entry).map_err(|err| match err {
         EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
     })?;
@@ -664,7 +669,9 @@ pub fn run_verified_semcode_with_host_and_capabilities<
     host: &mut H,
     capabilities: &C,
 ) -> Result<(), RuntimeError> {
-    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let config = ExecutionConfig::for_context(ExecutionContext::KernelBound);
+    let token = verify_semcode_token_with_quotas(bytes, config.quotas)
+        .map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry("main").map_err(|err| match err {
         EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
     })?;
@@ -672,7 +679,7 @@ pub fn run_verified_semcode_with_host_and_capabilities<
         &entry_token,
         host,
         capabilities,
-        ExecutionConfig::for_context(ExecutionContext::KernelBound),
+        config,
     )
 }
 
@@ -691,7 +698,8 @@ pub fn run_verified_semcode_with_host_and_capabilities_and_config<
     capabilities: &C,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let token = verify_semcode_token_with_quotas(bytes, config.quotas)
+        .map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry(entry).map_err(|err| match err {
         EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
     })?;
@@ -713,7 +721,8 @@ pub fn run_verified_semcode_with_application_host_and_capabilities_and_config<
     capabilities: &C,
     config: ExecutionConfig,
 ) -> Result<(), RuntimeError> {
-    let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+    let token = verify_semcode_token_with_quotas(bytes, config.quotas)
+        .map_err(RuntimeError::VerifierRejected)?;
     let entry_token = token.require_entry(entry).map_err(|err| match err {
         EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
     })?;
@@ -4030,6 +4039,73 @@ mod tests {
         let mut config = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
         config.quotas.max_stack_depth = 1;
         run_verified_entry_semcode_with_config(&entry_token, config).expect("run");
+    }
+
+    // #1757 (FA-07-017): builds "fn main() { let a: bool = true; return; }"
+    // and patches LOAD_BOOL's dst register operand to r5000 - the same
+    // fixture shape as sm-verify's own r5000 regression tests. LOAD_BOOL is
+    // the function's first instruction, so its absolute byte offset is just
+    // the function's code-slice start (recovered via pointer arithmetic,
+    // since `code_slice` is a genuine subslice of `bytes`) plus
+    // `instr_start_offset`.
+    fn build_r5000_register_artifact() -> Vec<u8> {
+        let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
+            .expect("compile");
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode semcode");
+        let env = functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("main function present");
+        let code_start = env.code_slice.as_ptr() as usize - bytes.as_ptr() as usize;
+        let opcode_pos = code_start + env.instr_start_offset;
+        assert_eq!(
+            bytes[opcode_pos],
+            Opcode::LoadBool as u8,
+            "expected LOAD_BOOL as main's first instruction"
+        );
+        let dst_pos = opcode_pos + 1;
+        bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        bytes
+    }
+
+    // Config-aware byte shim, KernelBound config: admission must now reach
+    // the shim's caller-supplied quotas, so r5000 (within KernelBound's 8192
+    // register budget) must no longer be rejected by the old hardcoded
+    // VerifiedLocal (4096) admission profile.
+    #[test]
+    fn run_verified_semcode_with_config_admits_r5000_under_kernel_bound_config() {
+        let bytes = build_r5000_register_artifact();
+        let config = ExecutionConfig::for_context(ExecutionContext::KernelBound);
+        run_verified_semcode_with_config(&bytes, config)
+            .expect("KernelBound config must admit and run an r5000 artifact");
+    }
+
+    // Same r5000 bytes, VerifiedLocal config: still rejected, proving the
+    // canonical stricter path is unaffected by the fix.
+    #[test]
+    fn run_verified_semcode_with_config_still_rejects_r5000_under_verified_local_config() {
+        let bytes = build_r5000_register_artifact();
+        let config = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
+        let err = run_verified_semcode_with_config(&bytes, config)
+            .expect_err("VerifiedLocal config must still reject an r5000 artifact");
+        assert!(matches!(err, RuntimeError::VerifierRejected(_)));
+    }
+
+    // #1757 follow-up (found by adversarial review): the no-`_and_config`
+    // sibling `run_verified_semcode_with_host_and_capabilities` hardcodes
+    // KernelBound execution but was still admitting via the old
+    // hardcoded-VerifiedLocal `verify_semcode_token`. Fixed to admit under
+    // the same KernelBound quotas it executes with. r5000 (within
+    // KernelBound's 8192 register budget, over VerifiedLocal's 4096) must
+    // now be admitted and run instead of rejected at admission.
+    #[test]
+    fn run_verified_semcode_with_host_and_capabilities_admits_r5000_under_kernel_bound() {
+        let bytes = build_r5000_register_artifact();
+        let manifest = prom_cap::CapabilityManifest::new();
+        let mut host = prom_abi::RecordingHostAbi::default();
+        run_verified_semcode_with_host_and_capabilities(&bytes, &mut host, &manifest)
+            .expect("KernelBound-hardcoded shim must admit and run an r5000 artifact");
     }
 
     #[test]
