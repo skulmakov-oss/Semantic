@@ -37,7 +37,10 @@ Current SemCode verification checks include:
 
 - header validity
 - supported version validity
-- function and section integrity
+- function and section integrity (the number of function definitions in an
+  artifact is a static structural bound owned by `sm-format`
+  (`MAX_FUNCTIONS`), independent of any runtime resource quota; the verifier
+  does not re-derive or narrow it from a quota profile)
 - canonical (unambiguous) instruction framing
 - opcode validity
 - opcode/header-revision consistency

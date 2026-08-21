@@ -5498,6 +5498,31 @@ mod tests {
         assert_eq!(err, RuntimeError::StackOverflow);
     }
 
+    // #1751 (FA-07-011): proves `max_frames` is still enforced against live
+    // call-stack depth at execution time (in `push_frame`) after sm-verify
+    // stopped misusing the same field name as a static function-definition
+    // count. A real 2-level call chain (main -> helper) must still trap once
+    // it genuinely exceeds a shrunk frame budget.
+    #[test]
+    fn vm_enforces_configured_frame_budget() {
+        let src = r#"
+            fn helper() { return; }
+            fn main() { helper(); return; }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let mut config = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
+        config.quotas.max_frames = 1;
+        let err = run_semcode_with_config(&bytes, config).expect_err("must fail");
+        assert_eq!(
+            err,
+            RuntimeError::QuotaExceeded(QuotaExceeded {
+                kind: QuotaKind::Frames,
+                limit: 1,
+                used: 2,
+            })
+        );
+    }
+
     #[test]
     fn vm_enforces_configured_register_budget() {
         let src = r#"
