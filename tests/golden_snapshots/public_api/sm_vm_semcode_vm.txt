@@ -10,7 +10,6 @@ pub enum Value {
 #[derive(Debug, Clone)]
 pub struct Frame {
 pub pc: usize,
-pub regs: Vec<Value>,
 pub locals: HashMap<SymbolId, Value>,
 pub borrowed_paths: Vec<AccessPath>,
 pub func: String,

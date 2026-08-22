@@ -9,10 +9,15 @@ GPU/Vulkan backend work, verifier changes, SemCode changes, or P5-A.
 
 - current active execution path: scalar `sm-vm`
 - verified execution requires SemCode admission
-- public VM API unchanged
-- production VM behavior unchanged
+- public VM API unchanged, except the narrow #1770 correctness hardening below
+- production VM behavior unchanged, except the narrow #1770 correctness hardening below
 - Pulsar P4 evidence closed and evidence-repaired
 - Pulsar P5-A blocked by current profiling evidence
+- `#1770` (umbrella #1617): `Frame.regs` was privatized (`pub regs: Vec<Value>` ->
+  private `Vec<RegisterSlot>`) and undefined register reads now deterministically
+  fail instead of silently reading back a fail-open `Value::Unit`. This is a
+  narrow safety-invariant repair, not the kind of new-behavior/API-widening
+  scope this document otherwise gates.
 
 ## 2. Current verified execution pipeline
 
@@ -51,7 +56,7 @@ Raw SemCode Bytes
 | Component | Current implementation meaning | Notes |
 |---|---|---|
 | Frame Stack | VM call stack | `VM.callstack` |
-| Frame Registers | frame-local `Vec<Value>` | not a hardware register file |
+| Frame Registers | frame-local, private `Vec<RegisterSlot>` (`Uninitialized` or `Value`) | not a hardware register file; undefined reads fail deterministically (#1770) |
 | Locals | `HashMap<SymbolId, Value>` | deterministic runtime locals |
 | Execution Loop | opcode dispatch loop | scalar `sm-vm` execution |
 | Capability Checker | host capability boundary | no authority widening |
@@ -135,7 +140,7 @@ flowchart LR
 
     subgraph CORE["Verified Execution Core"]
         STACK["Frame Stack"]
-        REGS["Frame Registers Vec<Value>"]
+        REGS["Frame Registers Vec<RegisterSlot> private"]
         LOCALS["Locals HashMap<SymbolId, Value>"]
         CAP["Capability Checker"]
         ABI["Prometheus Host ABI Bridge"]
@@ -163,8 +168,8 @@ flowchart LR
 This document does not claim:
 
 - VM performance improved;
-- public VM API changed;
-- production VM behavior changed;
+- public VM API changed, beyond the narrow #1770 `Frame.regs` privatization noted in Section 1;
+- production VM behavior changed, beyond the narrow #1770 undefined-register fail-closed repair noted in Section 1;
 - Pulsar is runtime-integrated;
 - P5-A is open;
 - P5-B is approved;
