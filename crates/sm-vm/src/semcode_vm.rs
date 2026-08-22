@@ -2243,11 +2243,10 @@ where
                     ));
                 };
                 let key = map_key_from_value(get_reg(vm, frame_idx, key_reg)?)?;
-                let result = pairs
-                    .iter()
-                    .find(|(k, _)| k == &key)
-                    .map(|(_, v)| v.clone())
-                    .unwrap_or_else(|| get_reg(vm, frame_idx, default_reg).unwrap_or(Value::Unit));
+                let result = match pairs.iter().find(|(k, _)| k == &key) {
+                    Some((_, v)) => v.clone(),
+                    None => get_reg(vm, frame_idx, default_reg)?,
+                };
                 set_reg(vm, frame_idx, dst, result)?;
                 next_pc = cur - f.instr_start;
             }
@@ -3729,6 +3728,7 @@ mod tests {
         OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
         OWNERSHIP_SECTION_TAG,
     };
+    use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
     use sm_runtime_core::{
         ExecutionConfig, ExecutionContext, PathComponent, QuotaExceeded, QuotaKind, RuntimeTrap,
     };
@@ -5621,6 +5621,203 @@ mod tests {
                 used: 16,
             })
         );
+    }
+
+    // --- #1771 (FA-09-003, umbrella #1617) regression matrix ---------------
+    //
+    // `Opcode::MapGet`'s missing-key path reads `default_reg` lazily (only
+    // when the key is absent) via `get_reg(vm, frame_idx, default_reg)`.
+    // Built with `emit_ir_to_semcode` directly (bypassing the source-level
+    // `map_get(...)` builtin) specifically so `default_val` can reference a
+    // register the program never writes — the source-level builtin always
+    // lowers its third argument expression into a register write before
+    // `IrInstr::MapGet` is emitted, which would make "physically absent
+    // default register" unconstructible from source.
+    //
+    // `push_frame` materializes at least 16 register slots regardless of
+    // arguments, so `r100` is guaranteed physically absent from a fresh
+    // zero-arg frame in every case below that uses it, and no instruction
+    // in these programs writes a register anywhere near that high.
+
+    /// Builds a two-function program (`helper` returns unit; `main` runs
+    /// `main_instrs`) via direct IR emission.
+    fn build_map_get_test_program(main_instrs: Vec<IrInstr>) -> Vec<u8> {
+        emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "helper".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: main_instrs,
+                    ownership_events: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit map_get test program")
+    }
+
+    fn run_map_get_test_program(bytes: &[u8]) -> Result<Value, RuntimeError> {
+        let token = verify_semcode_token(bytes).expect("verifier must accept: default_reg is a legal in-budget register reference regardless of physical materialization");
+        let entry = token.require_entry("main").expect("entry");
+        run_verified_function_semcode_with_args(&entry, "main", vec![])
+    }
+
+    /// A5.1: missing key + valid initialized default register -> exact
+    /// default value.
+    #[test]
+    fn map_get_missing_key_returns_initialized_default_register_value() {
+        let bytes = build_map_get_test_program(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 2, val: 10 },
+            IrInstr::MapSet {
+                dst: 0,
+                map: 0,
+                key: 1,
+                val: 2,
+            },
+            IrInstr::LoadI32 { dst: 3, val: 2 }, // requested key (absent: map only has key 1)
+            IrInstr::LoadI32 { dst: 4, val: 999 }, // initialized default
+            IrInstr::MapGet {
+                dst: 5,
+                map: 0,
+                key: 3,
+                default_val: 4,
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        let res = run_map_get_test_program(&bytes).expect("run");
+        assert_eq!(res, Value::I32(999));
+    }
+
+    /// A5.2 (the core #1771 regression): missing key + a `default_reg` that
+    /// is numerically in-budget but physically absent from the frame must
+    /// propagate `get_reg`'s own read error, not fabricate `Value::Unit`.
+    ///
+    /// Confirmed RED against the pre-fix `unwrap_or(Value::Unit)` swallow
+    /// (returned `Ok(Value::Unit)` instead of this error) before the
+    /// production fix in this same PR was applied.
+    #[test]
+    fn map_get_missing_key_with_physically_absent_default_register_propagates_error() {
+        let bytes = build_map_get_test_program(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 2, val: 10 },
+            IrInstr::MapSet {
+                dst: 0,
+                map: 0,
+                key: 1,
+                val: 2,
+            },
+            IrInstr::LoadI32 { dst: 3, val: 2 }, // requested key (absent)
+            IrInstr::MapGet {
+                dst: 5,
+                map: 0,
+                key: 3,
+                default_val: 100, // never written anywhere in this program
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        let err = run_map_get_test_program(&bytes).expect_err("must propagate the read error");
+        assert_eq!(
+            err,
+            RuntimeError::BadFormat("read invalid reg r100".to_string())
+        );
+    }
+
+    /// A5.3: present key + physically absent default register -> the map
+    /// value is returned and `default_reg` is never observed (laziness
+    /// boundary case).
+    #[test]
+    fn map_get_present_key_ignores_physically_absent_default_register() {
+        let bytes = build_map_get_test_program(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 2, val: 10 },
+            IrInstr::MapSet {
+                dst: 0,
+                map: 0,
+                key: 1,
+                val: 2,
+            },
+            IrInstr::LoadI32 { dst: 3, val: 1 }, // requested key (present)
+            IrInstr::MapGet {
+                dst: 5,
+                map: 0,
+                key: 3,
+                default_val: 100, // never written; must not be read
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        let res = run_map_get_test_program(&bytes).expect("run");
+        assert_eq!(res, Value::I32(10));
+    }
+
+    /// A5.4: present key + valid default register -> the map value still
+    /// wins over the default.
+    #[test]
+    fn map_get_present_key_prefers_map_value_over_valid_default() {
+        let bytes = build_map_get_test_program(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 2, val: 10 },
+            IrInstr::MapSet {
+                dst: 0,
+                map: 0,
+                key: 1,
+                val: 2,
+            },
+            IrInstr::LoadI32 { dst: 3, val: 1 }, // requested key (present)
+            IrInstr::LoadI32 { dst: 4, val: 999 }, // valid default, must be ignored
+            IrInstr::MapGet {
+                dst: 5,
+                map: 0,
+                key: 3,
+                default_val: 4,
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        let res = run_map_get_test_program(&bytes).expect("run");
+        assert_eq!(res, Value::I32(10));
+    }
+
+    /// A5.5: the default register genuinely, explicitly holds `Value::Unit`
+    /// (written by a real call to a function that returns unit) -> the
+    /// missing-key result is a legitimate `Unit`, proving `Unit` itself is
+    /// never rejected -- only a *fabricated* `Unit` (from a swallowed read
+    /// error) is forbidden.
+    #[test]
+    fn map_get_missing_key_with_explicit_unit_default_returns_legitimate_unit() {
+        let bytes = build_map_get_test_program(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 2, val: 10 },
+            IrInstr::MapSet {
+                dst: 0,
+                map: 0,
+                key: 1,
+                val: 2,
+            },
+            IrInstr::LoadI32 { dst: 3, val: 2 }, // requested key (absent)
+            IrInstr::Call {
+                dst: Some(4),
+                name: "helper".to_string(),
+                args: vec![],
+            }, // r4 = Value::Unit, via a real RET-with-no-src write
+            IrInstr::MapGet {
+                dst: 5,
+                map: 0,
+                key: 3,
+                default_val: 4,
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        let res = run_map_get_test_program(&bytes).expect("run");
+        assert_eq!(res, Value::Unit);
     }
 
     #[test]
