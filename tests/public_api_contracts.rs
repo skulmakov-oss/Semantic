@@ -51,6 +51,14 @@ const TARGETS: &[(&str, &str)] = &[
         "tests/golden_snapshots/public_api/sm_verify_lib.txt",
     ),
     (
+        "crates/sm-verify/src/hello_pending_admission.rs",
+        "tests/golden_snapshots/public_api/sm_verify_hello_pending_admission.txt",
+    ),
+    (
+        "crates/sm-verify/src/hello_real_semcode_admission.rs",
+        "tests/golden_snapshots/public_api/sm_verify_hello_real_semcode_admission.txt",
+    ),
+    (
         "crates/sm-vm/src/lib.rs",
         "tests/golden_snapshots/public_api/sm_vm_lib.txt",
     ),
