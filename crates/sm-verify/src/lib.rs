@@ -225,8 +225,19 @@ impl<'a> VerifiedSemCode<'a> {
         }
     }
 
-    /// Workspace-internal accessor for VM preparation.
-    /// Exposes the decoded internal state safely without creating a stable public API.
+    /// Intentionally public, hidden implementation seam for VM preparation.
+    ///
+    /// `sm-vm` (a separate workspace crate) calls this to bridge a verified
+    /// token into VM-executable state (`prepare_verified_execution` in
+    /// `crates/sm-vm/src/semcode_vm.rs`). Rust has no visibility level
+    /// narrower than `pub` that still permits a separate crate to call a
+    /// method, so this is genuinely part of `sm-verify`'s externally
+    /// callable Rust surface -- `#[doc(hidden)]` only suppresses it from
+    /// generated documentation, it does not restrict downstream crates from
+    /// naming and calling it. It is not recommended for use outside this
+    /// workspace's own crates, and its closure-based shape (rather than a
+    /// plain accessor) is deliberate: it keeps the caller from holding onto
+    /// or independently reconstructing the decoded envelope data.
     #[cfg(feature = "std")]
     #[doc(hidden)]
     pub fn with_decoded_envelopes<R, F>(&self, f: F) -> R
