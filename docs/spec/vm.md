@@ -207,6 +207,26 @@ Current core rule:
 Richer ABI and capability binding is outside this core contract PR and must not
 be smuggled into the VM execution contract by implication.
 
+## Host ABI Boundary
+
+The host ABI is a trust boundary: a `PrometheusHostAbi` (or
+`ApplicationHostAbi`) implementation is arbitrary caller-supplied code, and a
+value it returns must be validated before it acquires VM-internal meaning.
+
+The canonical raw quad domain is exactly the four byte values `0`, `1`, `2`,
+`3`, mapping respectively to `N`, `F`, `T`, `S`. When a host-returned
+`AbiValue::Quad(byte)` crosses into the VM (for example via `GateRead` or
+`StateQuery`), the VM must validate `byte` against this domain before
+constructing a `Value::Quad`.
+
+Core rule:
+
+- a raw byte inside `0..=3` converts to the corresponding `Value::Quad`
+- a raw byte outside `0..=3` is invalid input at the boundary and must
+  produce a deterministic `RuntimeError::HostAbi` error
+- an out-of-domain byte must never be masked or truncated (e.g. `& 0b11`)
+  into a plausible-but-arbitrary valid quad value
+
 ## Compatibility Rule
 
 The VM must reject unsupported SemCode versions with a clear migration hint.

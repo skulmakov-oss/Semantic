@@ -1574,10 +1574,11 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
         self.capabilities
             .require_call(HostCallId::GateRead)
             .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
+        let raw = self
+            .host
             .gate_read(device_id, port)
-            .map(value_from_abi)
-            .map_err(RuntimeError::HostAbi)
+            .map_err(RuntimeError::HostAbi)?;
+        value_from_abi(raw, HostCallId::GateRead)
     }
 
     fn gate_write(&mut self, device_id: u16, port: u16, value: Value) -> Result<(), RuntimeError> {
@@ -1600,10 +1601,8 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> VmHostBridge for Prometheus
         self.capabilities
             .require_call(HostCallId::StateQuery)
             .map_err(RuntimeError::CapabilityDenied)?;
-        self.host
-            .state_query(key)
-            .map(value_from_abi)
-            .map_err(RuntimeError::HostAbi)
+        let raw = self.host.state_query(key).map_err(RuntimeError::HostAbi)?;
+        value_from_abi(raw, HostCallId::StateQuery)
     }
 
     fn state_update(&mut self, key: &str, value: Value) -> Result<(), RuntimeError> {
@@ -2712,15 +2711,28 @@ fn value_to_abi(value: Value) -> Result<AbiValue, RuntimeError> {
     }
 }
 
-fn value_from_abi(value: AbiValue) -> Value {
+/// Converts a host-supplied `AbiValue` into a VM `Value`.
+///
+/// This is the untrusted host-ABI -> VM boundary (FA-09-007 / #1775): a
+/// `PrometheusHostAbi` implementation is arbitrary caller-supplied code, and
+/// its return values must be validated before they acquire VM-internal
+/// meaning. `call` identifies which host operation produced `value`, so a
+/// rejection carries accurate `AbiError` context.
+fn value_from_abi(value: AbiValue, call: HostCallId) -> Result<Value, RuntimeError> {
     match value {
-        AbiValue::Quad(q) => Value::Quad(u8_to_quad(q)),
-        AbiValue::Bool(v) => Value::Bool(v),
-        AbiValue::I32(v) => Value::I32(v),
-        AbiValue::F64(v) => Value::F64(v),
-        AbiValue::U32(v) => Value::U32(v),
-        AbiValue::Fx(v) => Value::Fx(v),
-        AbiValue::Unit => Value::Unit,
+        AbiValue::Quad(raw) => quad_from_abi(raw).map(Value::Quad).map_err(|raw| {
+            RuntimeError::HostAbi(AbiError::new(
+                call,
+                AbiFailureKind::InvalidInput,
+                format!("host returned out-of-domain quad byte {raw} (valid domain is 0..=3)"),
+            ))
+        }),
+        AbiValue::Bool(v) => Ok(Value::Bool(v)),
+        AbiValue::I32(v) => Ok(Value::I32(v)),
+        AbiValue::F64(v) => Ok(Value::F64(v)),
+        AbiValue::U32(v) => Ok(Value::U32(v)),
+        AbiValue::Fx(v) => Ok(Value::Fx(v)),
+        AbiValue::Unit => Ok(Value::Unit),
     }
 }
 
@@ -2976,12 +2988,36 @@ fn quad_to_u8(q: QuadVal) -> u8 {
     }
 }
 
+// Only exercised by `mod tests`' legacy reference implementations (see
+// `legacy_qnot`/`legacy_qand`/`legacy_qor`), which round-trip already-valid
+// `QuadVal`s through `u8` and are mathematically closed under `0..=3`. The
+// untrusted host-ABI boundary uses `quad_from_abi` instead (see #1775).
+#[cfg(test)]
 fn u8_to_quad(v: u8) -> QuadVal {
     match v & 0b11 {
         0 => QuadVal::N,
         1 => QuadVal::F,
         2 => QuadVal::T,
         _ => QuadVal::S,
+    }
+}
+
+/// Validates a raw host-ABI quad byte against the canonical four-value
+/// domain (0=N, 1=F, 2=T, 3=S).
+///
+/// Unlike `u8_to_quad` (which masks bytes that are trusted, internally
+/// produced, and already known to be closed under `0..=3`, e.g. bitwise
+/// combinations of two already-valid `QuadVal`s), this function is the
+/// gatekeeper for bytes arriving from an untrusted host ABI implementation.
+/// It rejects anything outside `0..=3` instead of silently truncating it
+/// into a plausible value. See `value_from_abi`.
+fn quad_from_abi(raw: u8) -> Result<QuadVal, u8> {
+    match raw {
+        0 => Ok(QuadVal::N),
+        1 => Ok(QuadVal::F),
+        2 => Ok(QuadVal::T),
+        3 => Ok(QuadVal::S),
+        other => Err(other),
     }
 }
 
@@ -6738,5 +6774,260 @@ mod tests {
         let program =
             build_vm_program_view_from_decoded(header, &decoded).expect("build vm program view");
         assert_eq!(program.runtime_symbols.len(), verifier_style_distinct);
+    }
+
+    // --- #1775 (FA-09-007, umbrella #1617) regression matrix ---------------
+    //
+    // The host ABI boundary (`PrometheusHostAbi` -> `Value` via
+    // `value_from_abi`/`quad_from_abi`) must reject a raw host `AbiValue::
+    // Quad(u8)` byte outside the canonical `0..=3` domain with a
+    // deterministic `RuntimeError::HostAbi` error, never silently mask it
+    // (e.g. `& 0b11`) into a plausible-but-wrong valid quad value.
+    //
+    // Pre-fix (confirmed RED against the original `u8_to_quad(q)` masking
+    // used directly in `value_from_abi`, before `quad_from_abi` existed):
+    // `AbiValue::Quad(4)` -> `4 & 3 == 0` -> `QuadVal::N`, and
+    // `AbiValue::Quad(0xff)` -> `0xff & 3 == 3` -> `QuadVal::S`; both
+    // executions completed successfully with no error at all.
+
+    /// Runs a single-function `main` program against a real
+    /// `PrometheusHostAbi` + `CapabilityChecker` pair and returns `main`'s
+    /// terminal `Value`, unlike the public `run_verified_semcode_with_host_
+    /// and_capabilities*` family (which discards the return value and only
+    /// reports success/failure).
+    fn run_prometheus_program_capturing_value<H: PrometheusHostAbi, C: CapabilityChecker>(
+        instrs: Vec<IrInstr>,
+        host: &mut H,
+        capabilities: &C,
+    ) -> Result<Value, RuntimeError> {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs,
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit #1775 test program");
+        let config = ExecutionConfig::for_context(ExecutionContext::KernelBound);
+        let token = verify_semcode_token_with_quotas(&bytes, config.quotas)
+            .expect("#1775 test program must admit");
+        let entry_token = token.require_entry("main").expect("main entry");
+        let program = prepare_verified_execution(&entry_token).expect("prepare");
+        let mut vm = VM {
+            functions: program.functions,
+            callstack: Vec::new(),
+            config,
+            effect_calls: 0,
+            symbols: program.runtime_symbols,
+            prng_state: 0,
+        };
+        push_frame(&mut vm, entry_token.entry(), Vec::new(), None).expect("push main frame");
+        let mut bridge = PrometheusVmHost { host, capabilities };
+        let mut observation = HelloObservationRuntime::discard();
+        exec_loop(&mut vm, &mut bridge, &mut observation)
+    }
+
+    /// A `GateRead` into r0 followed by `Ret r0`: the real opcode/host-call
+    /// path that turns a host-returned `AbiValue` into a VM `Value`.
+    fn gate_read_into_return_program() -> Vec<IrInstr> {
+        vec![
+            IrInstr::GateRead {
+                dst: 0,
+                device_id: 0,
+                port: 0,
+            },
+            IrInstr::Ret { src: Some(0) },
+        ]
+    }
+
+    fn gate_read_capabilities() -> prom_cap::CapabilityManifest {
+        let mut manifest = prom_cap::CapabilityManifest::new();
+        manifest.allow(prom_cap::CapabilityKind::GateRead);
+        manifest
+    }
+
+    /// A5.1-A5.4: canonical raw bytes 0/1/2/3 still succeed end-to-end
+    /// through the real `GateRead` opcode and decode to exactly N/F/T/S,
+    /// unchanged from before this fix.
+    #[test]
+    fn gate_read_admits_every_canonical_quad_byte() {
+        for (raw, expected) in [
+            (0u8, QuadVal::N),
+            (1u8, QuadVal::F),
+            (2u8, QuadVal::T),
+            (3u8, QuadVal::S),
+        ] {
+            let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(raw));
+            let capabilities = gate_read_capabilities();
+            let result = run_prometheus_program_capturing_value(
+                gate_read_into_return_program(),
+                &mut host,
+                &capabilities,
+            )
+            .unwrap_or_else(|err| panic!("raw quad byte {raw} must still be admitted: {err:?}"));
+            assert_eq!(result, Value::Quad(expected), "mismatch for raw byte {raw}");
+        }
+    }
+
+    /// A5.5-A5.7 (the core #1775 regression): raw bytes 4, 5, and 0xff are
+    /// outside the canonical quad domain and must now be rejected with a
+    /// deterministic `RuntimeError::HostAbi` error instead of being masked
+    /// (pre-fix: `4 & 3 == 0` -> silently `N`; `5 & 3 == 1` -> silently `F`;
+    /// `0xff & 3 == 3` -> silently `S`, all with no error).
+    #[test]
+    fn gate_read_rejects_every_out_of_domain_quad_byte() {
+        for raw in [4u8, 5u8, 0xffu8] {
+            let mut host = prom_abi::RecordingHostAbi::with_read_value(AbiValue::Quad(raw));
+            let capabilities = gate_read_capabilities();
+            let err = run_prometheus_program_capturing_value(
+                gate_read_into_return_program(),
+                &mut host,
+                &capabilities,
+            )
+            .expect_err(&format!(
+                "out-of-domain raw quad byte {raw} must now be rejected, not masked"
+            ));
+            match err {
+                RuntimeError::HostAbi(abi_err) => {
+                    assert_eq!(abi_err.call, HostCallId::GateRead);
+                    assert_eq!(abi_err.kind, AbiFailureKind::InvalidInput);
+                    assert!(
+                        abi_err.message.contains(&raw.to_string()),
+                        "error message should name the offending byte {raw}: {}",
+                        abi_err.message
+                    );
+                }
+                other => panic!("expected RuntimeError::HostAbi for raw byte {raw}, got {other:?}"),
+            }
+        }
+    }
+
+    /// Direct unit-level check of the boundary function's exact matching
+    /// table, independent of VM plumbing: 0/1/2/3 map to N/F/T/S and
+    /// everything else is rejected (proven exhaustively over all 256 byte
+    /// values, not just the issue's representative samples).
+    #[test]
+    fn quad_from_abi_matches_canonical_domain_exhaustively() {
+        for raw in 0u8..=255 {
+            match raw {
+                0 => assert_eq!(quad_from_abi(raw), Ok(QuadVal::N)),
+                1 => assert_eq!(quad_from_abi(raw), Ok(QuadVal::F)),
+                2 => assert_eq!(quad_from_abi(raw), Ok(QuadVal::T)),
+                3 => assert_eq!(quad_from_abi(raw), Ok(QuadVal::S)),
+                other => assert_eq!(quad_from_abi(other), Err(other)),
+            }
+        }
+    }
+
+    /// Ordinary non-`Quad` `AbiValue` variants must be completely
+    /// unaffected by the quad-domain validation added at this boundary.
+    #[test]
+    fn gate_read_of_non_quad_abi_values_is_unaffected() {
+        let cases: Vec<(AbiValue, Value)> = vec![
+            (AbiValue::Bool(true), Value::Bool(true)),
+            (AbiValue::I32(-7), Value::I32(-7)),
+            (AbiValue::U32(9), Value::U32(9)),
+            (AbiValue::F64(1.5), Value::F64(1.5)),
+            (AbiValue::Unit, Value::Unit),
+        ];
+        for (abi_val, expected) in cases {
+            let mut host = prom_abi::RecordingHostAbi::with_read_value(abi_val.clone());
+            let capabilities = gate_read_capabilities();
+            let result = run_prometheus_program_capturing_value(
+                gate_read_into_return_program(),
+                &mut host,
+                &capabilities,
+            )
+            .unwrap_or_else(|err| panic!("{abi_val:?} must be unaffected by #1775: {err:?}"));
+            assert_eq!(result, expected);
+        }
+    }
+
+    /// A legitimate `AbiError` returned directly by the host (independent of
+    /// any quad-domain issue) must propagate completely unchanged: same
+    /// `RuntimeError::HostAbi(..)` wrapping the host's own `AbiError`, not
+    /// reinterpreted or swallowed by the new validation.
+    #[test]
+    fn gate_read_existing_host_error_propagation_is_unchanged() {
+        struct FailingHost;
+        impl PrometheusHostAbi for FailingHost {
+            fn gate_read(&mut self, _device_id: u16, _port: u16) -> Result<AbiValue, AbiError> {
+                Err(AbiError::new(
+                    HostCallId::GateRead,
+                    AbiFailureKind::HostFault,
+                    "simulated host fault, unrelated to #1775",
+                ))
+            }
+            fn gate_write(&mut self, _: u16, _: u16, _: AbiValue) -> Result<(), AbiError> {
+                unreachable!()
+            }
+            fn pulse_emit(&mut self, _: &str) -> Result<(), AbiError> {
+                unreachable!()
+            }
+            fn state_query(&mut self, _: &str) -> Result<AbiValue, AbiError> {
+                unreachable!()
+            }
+            fn state_update(&mut self, _: &str, _: AbiValue) -> Result<(), AbiError> {
+                unreachable!()
+            }
+            fn event_post(&mut self, _: &str) -> Result<(), AbiError> {
+                unreachable!()
+            }
+            fn clock_read(&mut self) -> Result<u32, AbiError> {
+                unreachable!()
+            }
+        }
+
+        let mut host = FailingHost;
+        let capabilities = gate_read_capabilities();
+        let err = run_prometheus_program_capturing_value(
+            gate_read_into_return_program(),
+            &mut host,
+            &capabilities,
+        )
+        .expect_err("host-returned AbiError must propagate");
+        match err {
+            RuntimeError::HostAbi(abi_err) => {
+                assert_eq!(abi_err.call, HostCallId::GateRead);
+                assert_eq!(abi_err.kind, AbiFailureKind::HostFault);
+                assert_eq!(abi_err.message, "simulated host fault, unrelated to #1775");
+            }
+            other => panic!("expected unchanged RuntimeError::HostAbi passthrough, got {other:?}"),
+        }
+    }
+
+    /// Confirms the second untrusted-boundary call site (`state_query`)
+    /// gets the identical repair: canonical bytes still succeed, and an
+    /// out-of-domain byte is now rejected with `HostCallId::StateQuery`
+    /// context (not `GateRead`'s), proving `call` is threaded through
+    /// correctly rather than hardcoded.
+    #[test]
+    fn state_query_quad_boundary_matches_gate_read() {
+        let mut ok_host = prom_abi::RecordingHostAbi::with_state_query_value(AbiValue::Quad(2));
+        let mut manifest = prom_cap::CapabilityManifest::new();
+        manifest.allow(prom_cap::CapabilityKind::StateQuery);
+        let program = vec![
+            IrInstr::StateQuery {
+                dst: 0,
+                key: "k".to_string(),
+            },
+            IrInstr::Ret { src: Some(0) },
+        ];
+        let result =
+            run_prometheus_program_capturing_value(program.clone(), &mut ok_host, &manifest)
+                .expect("canonical raw byte 2 via state_query must succeed");
+        assert_eq!(result, Value::Quad(QuadVal::T));
+
+        let mut bad_host = prom_abi::RecordingHostAbi::with_state_query_value(AbiValue::Quad(0xff));
+        let err = run_prometheus_program_capturing_value(program, &mut bad_host, &manifest)
+            .expect_err("out-of-domain raw byte via state_query must now be rejected");
+        match err {
+            RuntimeError::HostAbi(abi_err) => {
+                assert_eq!(abi_err.call, HostCallId::StateQuery);
+                assert_eq!(abi_err.kind, AbiFailureKind::InvalidInput);
+            }
+            other => panic!("expected RuntimeError::HostAbi, got {other:?}"),
+        }
     }
 }
