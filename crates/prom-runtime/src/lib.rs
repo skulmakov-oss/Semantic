@@ -11,7 +11,7 @@ use prom_state::{
     StateUpdate, StateValidationError,
 };
 use sm_runtime_core::{ExecutionConfig, ExecutionContext};
-use sm_verify::{verify_semcode_token, EntryResolutionError};
+use sm_verify::{verify_semcode_token_with_quotas, EntryResolutionError};
 use sm_vm::{run_verified_entry_semcode_with_host_and_capabilities_and_config, RuntimeError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,7 +369,8 @@ impl<'a, H: PrometheusHostAbi, C: CapabilityChecker> ExecutionSession<'a, H, C> 
         bytes: &[u8],
         entry: &str,
     ) -> Result<(), RuntimeError> {
-        let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+        let token = verify_semcode_token_with_quotas(bytes, self.config.quotas)
+            .map_err(RuntimeError::VerifierRejected)?;
         let entry_token = token.require_entry(entry).map_err(|err| match err {
             EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
         })?;
@@ -536,7 +537,8 @@ impl<'a, B: GateBinding, C: CapabilityChecker> GateExecutionSession<'a, B, C> {
         entry: &str,
     ) -> Result<(), RuntimeError> {
         let mut host = GateHostAdapter::new(self.registry, self.binding);
-        let token = verify_semcode_token(bytes).map_err(RuntimeError::VerifierRejected)?;
+        let token = verify_semcode_token_with_quotas(bytes, self.config.quotas)
+            .map_err(RuntimeError::VerifierRejected)?;
         let entry_token = token.require_entry(entry).map_err(|err| match err {
             EntryResolutionError::MissingEntry { entry } => RuntimeError::UnknownFunction(entry),
         })?;

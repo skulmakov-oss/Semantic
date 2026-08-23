@@ -3,7 +3,7 @@ use semantic_language::prom_abi::{AbiValue, RecordingHostAbi};
 use semantic_language::prom_cap::{CapabilityKind, CapabilityManifest};
 use semantic_language::prom_gates::{DeterministicGateMock, GateDescriptor, GateId, GateRegistry};
 use semantic_language::prom_runtime::{ExecutionSession, GateExecutionSession};
-use semantic_language::runtime_core::ExecutionContext;
+use semantic_language::runtime_core::{ExecutionConfig, ExecutionContext};
 use semantic_language::semcode_vm::RuntimeError;
 
 fn runtime_program() -> Vec<IrFunction> {
@@ -310,4 +310,97 @@ fn execution_session_denies_clock_read_without_manifest_capability() {
 
     drop(session);
     assert_eq!(host.clock_reads, 0);
+}
+
+// --- #1822 (umbrella #1617) regression matrix -------------------------
+//
+// `ExecutionSession`/`GateExecutionSession::run_verified_semcode_entry`
+// used to admit via the hardcoded-default `verify_semcode_token(bytes)`
+// (VerifiedLocal's 4096-register budget) regardless of `self.config`,
+// even when the session was explicitly constructed with `kernel_bound()`
+// (8192). Built directly via `emit_ir_to_semcode` -- a single `LoadI32`
+// into `r5000` (between the two budgets) followed by a `Ret` reading it
+// back -- rather than the older raw-byte-patching idiom, for the same
+// reason established elsewhere in this campaign: full, unambiguous
+// control over the exact register referenced.
+
+fn r5000_program() -> Vec<IrFunction> {
+    vec![IrFunction {
+        name: "main".to_string(),
+        instrs: vec![
+            IrInstr::LoadI32 { dst: 5000, val: 1 },
+            IrInstr::Ret { src: Some(5000) },
+        ],
+        ownership_events: Vec::new(),
+    }]
+}
+
+#[test]
+fn execution_session_kernel_bound_admits_r5000() {
+    let bytes = emit_ir_to_semcode(&r5000_program(), false).expect("emit");
+    let manifest = CapabilityManifest::new();
+    let metadata = manifest.metadata();
+    let mut host = RecordingHostAbi::default();
+    let mut session = ExecutionSession::kernel_bound(&mut host, &manifest, metadata);
+    session
+        .run_verified_semcode(&bytes)
+        .expect("KernelBound session must admit and run an r5000 artifact");
+}
+
+#[test]
+fn execution_session_verified_local_rejects_r5000() {
+    let bytes = emit_ir_to_semcode(&r5000_program(), false).expect("emit");
+    let manifest = CapabilityManifest::new();
+    let metadata = manifest.metadata();
+    let mut host = RecordingHostAbi::default();
+    let mut session = ExecutionSession::new(
+        &mut host,
+        &manifest,
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        metadata,
+    );
+    let err = session
+        .run_verified_semcode(&bytes)
+        .expect_err("VerifiedLocal session must still reject an r5000 artifact");
+    assert!(
+        matches!(err, RuntimeError::VerifierRejected(_)),
+        "expected VerifierRejected, got {err:?}"
+    );
+}
+
+#[test]
+fn gate_execution_session_kernel_bound_admits_r5000() {
+    let bytes = emit_ir_to_semcode(&r5000_program(), false).expect("emit");
+    let registry = GateRegistry::new();
+    let manifest = CapabilityManifest::new();
+    let metadata = manifest.metadata();
+    let mut binding = DeterministicGateMock::new();
+    let mut session =
+        GateExecutionSession::kernel_bound(&registry, &mut binding, &manifest, metadata);
+    session
+        .run_verified_semcode(&bytes)
+        .expect("KernelBound gate session must admit and run an r5000 artifact");
+}
+
+#[test]
+fn gate_execution_session_verified_local_rejects_r5000() {
+    let bytes = emit_ir_to_semcode(&r5000_program(), false).expect("emit");
+    let registry = GateRegistry::new();
+    let manifest = CapabilityManifest::new();
+    let metadata = manifest.metadata();
+    let mut binding = DeterministicGateMock::new();
+    let mut session = GateExecutionSession::new(
+        &registry,
+        &mut binding,
+        &manifest,
+        ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        metadata,
+    );
+    let err = session
+        .run_verified_semcode(&bytes)
+        .expect_err("VerifiedLocal gate session must still reject an r5000 artifact");
+    assert!(
+        matches!(err, RuntimeError::VerifierRejected(_)),
+        "expected VerifierRejected, got {err:?}"
+    );
 }
