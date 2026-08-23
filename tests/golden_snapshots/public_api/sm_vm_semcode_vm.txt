@@ -61,8 +61,8 @@ pub fn run_verified_entry_semcode_with_host_and_capabilities_and_config< H: Prom
 pub fn run_verified_entry_semcode_with_application_host_and_capabilities_and_config< H: ApplicationHostAbi, C: CapabilityChecker, >( token: &VerifiedEntrySemCode<'_, '_>, host: &mut H, capabilities: &C, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode( token: &VerifiedEntrySemCode<'_, '_>, ) -> Result<(), RuntimeError> {
 pub fn run_verified_entry_semcode_with_config( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<(), RuntimeError> {
-pub fn run_verified_function_semcode_with_args( token: &VerifiedEntrySemCode<'_, '_>, func_name: &str, args: Vec<Value>, ) -> Result<Value, RuntimeError> {
-pub fn run_verified_function_semcode_with_args_and_config( token: &VerifiedEntrySemCode<'_, '_>, func_name: &str, args: Vec<Value>, config: ExecutionConfig, ) -> Result<Value, RuntimeError> {
+pub fn run_verified_function_semcode_with_args( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, ) -> Result<Value, RuntimeError> {
+pub fn run_verified_function_semcode_with_args_and_config( token: &VerifiedEntrySemCode<'_, '_>, args: Vec<Value>, config: ExecutionConfig, ) -> Result<Value, RuntimeError> {
 #[cfg(feature = "vm-profile")]
 pub fn run_verified_entry_semcode_with_profile( token: &VerifiedEntrySemCode<'_, '_>, config: ExecutionConfig, ) -> Result<VmOpcodeProfile, RuntimeError> {
 pub fn run_semcode_with_entry_and_config( bytes: &[u8], entry: &str, config: ExecutionConfig, ) -> Result<(), RuntimeError> {

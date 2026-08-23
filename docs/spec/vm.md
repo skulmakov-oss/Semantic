@@ -44,6 +44,12 @@ Lower-level helpers may still exist for tests or narrow integration points, but
 they must not redefine the public contract or be described as the canonical
 trusted route.
 
+`VerifiedEntrySemCode`'s entry identity is authoritative for execution.
+Possession of a token resolved for one entry does not authorize selecting a
+different function from the same verified artifact through an independent
+identifier. Every public execution API accepting a `VerifiedEntrySemCode`
+derives its execution target from `token.entry()` alone.
+
 ## Runtime Value Model
 
 Current runtime values:

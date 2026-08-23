@@ -467,12 +467,9 @@ impl CalculatorApp {
         let action_val = encode_semantic_action(&action);
 
         // Step 3: Structured verified VM invocation (no Rust transition calculations)
-        let next_state_val = sm_vm::run_verified_function_semcode_with_args(
-            &entry,
-            "apply_action",
-            vec![state_val, action_val],
-        )
-        .map_err(|e| format!("Semantic VM execution error: {e:?}"))?;
+        let next_state_val =
+            sm_vm::run_verified_function_semcode_with_args(&entry, vec![state_val, action_val])
+                .map_err(|e| format!("Semantic VM execution error: {e:?}"))?;
 
         // Step 4: Replace read-only mirror with decoded Semantic state
         self.state = decode_semantic_state(&next_state_val)?;
