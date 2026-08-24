@@ -872,10 +872,9 @@ pub fn run_verified_function_semcode_with_args_and_config(
 ) -> Result<Value, RuntimeError> {
     let program = prepare_verified_execution(token)?;
     let func_name = token.entry();
-    let Some(target) = program.functions.get(func_name) else {
+    if !program.functions.contains_key(func_name) {
         return Err(RuntimeError::UnknownFunction(func_name.to_string()));
-    };
-    validate_call_arguments(func_name, target.signature.as_ref(), &args)?;
+    }
     let mut vm = VM {
         functions: program.functions,
         callstack: Vec::new(),
@@ -884,6 +883,8 @@ pub fn run_verified_function_semcode_with_args_and_config(
         symbols: program.runtime_symbols,
         prng_state: 0,
     };
+    // Argument validation happens inside `push_frame` itself (#1773 /
+    // FA-09-005) - see `validate_call_arguments`'s doc comment.
     push_frame(&mut vm, func_name, args, None)?;
     let mut host = LegacyVmHost;
     let mut observation = HelloObservationRuntime::discard();
@@ -2542,14 +2543,10 @@ where
                     let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                     args.push(get_reg(vm, frame_idx, r)?);
                 }
-                if let Some(target) = vm.functions.get(&callee) {
-                    // #1773 (FA-09-005): the second of the two authoritative
-                    // `validate_call_arguments` call sites - see its doc
-                    // comment. The "truly unknown callee" branch below
-                    // deliberately does not validate: it exists only to
-                    // preserve the pre-fix `RuntimeError::UnknownFunction`
-                    // error via `push_frame`, not for typed invocation.
-                    validate_call_arguments(&callee, target.signature.as_ref(), &args)?;
+                if vm.functions.contains_key(&callee) {
+                    // Argument validation happens inside `push_frame` itself
+                    // (#1773 / FA-09-005) - see `validate_call_arguments`'s
+                    // doc comment.
                     vm.callstack[frame_idx].pc = cur - f.instr_start;
                     push_frame(vm, &callee, args, if has_dst { Some(dst) } else { None })?;
                     continue;
@@ -2789,14 +2786,26 @@ fn value_family(value: &Value) -> CallableValueFamily {
     }
 }
 
-/// The one authoritative invocation validator (#1773 / FA-09-005), shared
-/// by both the public invocation helper
-/// (`run_verified_function_semcode_with_args_and_config`) and internal
-/// `Opcode::Call` handling, called immediately before each of their
-/// `push_frame` calls - never fused into `push_frame` itself, since
-/// `push_frame` is also the raw/unverified execution path's primitive
-/// (`run_semcode_with_entry_and_config` et al., which intentionally bypass
-/// sm-verify admission and always pass zero args).
+/// The one authoritative invocation validator (#1773 / FA-09-005),
+/// fused directly into `push_frame` (see below) rather than called
+/// separately at each of its callers. An earlier revision of this PR called
+/// it explicitly from just the public invocation helper and internal
+/// `Opcode::Call`, reasoning that `push_frame` also backs the deliberately
+/// unverified raw execution path and other verified entry routes shouldn't
+/// need to remember to call it too. Codex review on this PR correctly
+/// identified that reasoning as incomplete on both counts: several other
+/// genuinely *verified* entry routes (`run_verified_entry_semcode_with_config`
+/// and the PROMETHEUS/application host routes) call `push_frame` directly
+/// and were left unvalidated, and `Opcode::ClosureCall` - not just
+/// `Opcode::Call` - also calls `push_frame` and was left unvalidated too,
+/// letting a `MAKE_CLOSURE` with the wrong capture count/family enter its
+/// target frame unchecked. Fusing into `push_frame` closes every call site
+/// at once, including any future one, rather than relying on each caller to
+/// remember to call this separately. The raw/unverified path is safe to
+/// include: it always passes empty args, so this only ever produces a
+/// clean, deterministic rejection in place of a later, more confusing
+/// uninitialized-register error - never a false rejection of a scenario the
+/// raw path is trying to exercise.
 ///
 /// `target_contract: None` means the callee's artifact header predates
 /// canonical signatures (`SEMCODE_SIGNATURE_MIN_REVISION`) - nothing to
@@ -2843,6 +2852,7 @@ fn push_frame(
         .functions
         .get(func_name)
         .ok_or_else(|| RuntimeError::UnknownFunction(func_name.to_string()))?;
+    validate_call_arguments(func_name, f.signature.as_ref(), &args)?;
     let next_depth = vm.callstack.len() + 1;
     enforce_quota(&vm.config.quotas, QuotaKind::Frames, next_depth)?;
     match enforce_quota(&vm.config.quotas, QuotaKind::StackDepth, next_depth) {
@@ -6241,7 +6251,11 @@ mod tests {
     #[test]
     fn closure_call_result_initialization_preserved() {
         let bytes = build_register_init_test_program(vec![
-            ret_only_function("closure_target", Some(0), vec![]),
+            // #1773 (FA-09-005): ClosureCall now validates too (see the
+            // updated doc comment on `validate_call_arguments`) - this
+            // closure has zero captures, so its real invocation passes
+            // exactly one argument (the closure's own parameter).
+            ret_only_function("closure_target", Some(0), vec![CallableValueFamily::I32]),
             IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -6473,6 +6487,74 @@ mod tests {
             "internal 'sqrt' must win over the builtin, and its I32 signature must validate \
              cleanly against the I32 arg it is actually called with"
         );
+    }
+
+    /// Codex review finding on this PR: `Opcode::ClosureCall` calls
+    /// `push_frame` the same way `Opcode::Call` does, and was left
+    /// unvalidated by an earlier revision of this fix. A structurally
+    /// valid, verifier-admitted artifact could `MAKE_CLOSURE` a target
+    /// whose real signature disagrees with what the closure supplies
+    /// (captures + the closure's own parameter) and still enter its frame.
+    /// Fixed by fusing `validate_call_arguments` directly into
+    /// `push_frame`, the one function every real call path - `Call`,
+    /// `ClosureCall`, and every verified entry route - already funnels
+    /// through.
+    #[test]
+    fn closure_call_rejects_argument_family_mismatch() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("closure_target", Some(0), vec![CallableValueFamily::I32]),
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::MakeClosure {
+                        dst: 1,
+                        name: "closure_target".to_string(),
+                        captures: vec![],
+                    },
+                    IrInstr::ClosureCall {
+                        dst: Some(2),
+                        closure: 1,
+                        arg: 0,
+                    },
+                    IrInstr::Ret { src: Some(2) },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            },
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let err = run_verified_function_semcode_with_args(&entry, vec![])
+            .expect_err("closure call family mismatch must be rejected");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+    }
+
+    /// Codex review finding on this PR: an earlier revision validated only
+    /// the argument-taking public helper
+    /// (`run_verified_function_semcode_with_args_and_config`) and internal
+    /// `Opcode::Call`, leaving every other verified entry route (which
+    /// always passes zero args to `push_frame`) unvalidated - a
+    /// parameterized function invoked through one of those routes with a
+    /// required-but-unused parameter would succeed with no argument at all.
+    /// `run_verified_entry_semcode_with_config` is representative of the
+    /// whole family (the PROMETHEUS/application host routes share the same
+    /// `push_frame` call shape).
+    #[test]
+    fn verified_entry_route_rejects_zero_args_for_parameterized_function() {
+        let bytes = build_register_init_test_program(vec![ret_only_function(
+            "main",
+            None, // body never reads the unsupplied parameter
+            vec![CallableValueFamily::I32],
+        )]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let err = run_verified_entry_semcode_with_config(
+            &entry,
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        )
+        .expect_err("a required parameter must be rejected, not silently supplied zero args");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
     }
 
     // --- #1772 (FA-09-004, umbrella #1617) regression matrix ---------------
