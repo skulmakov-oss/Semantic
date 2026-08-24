@@ -1,11 +1,12 @@
 use super::*;
 use crate::semcode_format::{
-    header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le, Opcode, MAGIC0,
-    MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14, MAGIC15, MAGIC16, MAGIC17, MAGIC18,
-    MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW,
-    OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
-    OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-    OWNERSHIP_SECTION_TAG,
+    header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
+    CallableValueFamily, Opcode, MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14,
+    MAGIC15, MAGIC16, MAGIC17, MAGIC18, MAGIC19, MAGIC2, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7,
+    MAGIC8, MAGIC9, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
+    OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+    OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG, SEMCODE_SIGNATURE_MIN_REVISION,
+    SIGNATURE_SECTION_TAG,
 };
 use sm_front::types::{
     AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
@@ -455,6 +456,84 @@ pub struct IrFunction {
     pub name: String,
     pub instrs: Vec<IrInstr>,
     pub ownership_events: Vec<OwnershipPathEvent>,
+    /// The canonical callable-signature record for this function (#1773 /
+    /// FA-09-005): one executable runtime family per parameter, in
+    /// declaration order. This is the source of truth `emit_semcode_function`
+    /// writes into each function's `SIG0` wire section - see
+    /// `callable_family_for_type` for the source-`Type` to
+    /// `CallableValueFamily` mapping this is derived from.
+    pub params: Vec<CallableValueFamily>,
+}
+
+/// Maps a canonicalized source `Type` to the executable runtime family a
+/// value of that type actually has (#1773 / FA-09-005 approved architecture
+/// decision). This is the callable-signature type-family checkpoint made
+/// executable: every variant is handled explicitly (no wildcard arm), so a
+/// future `Type` variant added without updating this function is a
+/// compile-time error, not a silent gap.
+///
+/// `Type::QVec` is the one currently-legal source parameter type with no
+/// sound executable family - real, parser-writable, typechecks, and can
+/// lower when unused, but `sm-vm::Value` has no corresponding variant and no
+/// lowering path anywhere ever constructs one (see the #1773 architecture
+/// checkpoint and its QVec follow-up, both posted to issue #1773). Per the
+/// owner's decision, this is a deterministic *emission/compilation* failure,
+/// not a wire-format tag and not deferred to VM execution.
+///
+/// `Type::RangeI32` and `Type::TypeVar` can never reach this function as a
+/// resolved, written parameter type (see the same checkpoint), so their
+/// arms exist only for exhaustiveness and return a descriptive error rather
+/// than `unreachable!()`, matching this codebase's "no fallback" discipline
+/// if that invariant is ever violated.
+fn callable_family_for_type(ty: &Type) -> Result<CallableValueFamily, FrontendError> {
+    match ty {
+        Type::Quad => Ok(CallableValueFamily::Quad),
+        Type::Bool => Ok(CallableValueFamily::Bool),
+        Type::Text => Ok(CallableValueFamily::Text),
+        Type::Sequence(_) => Ok(CallableValueFamily::Sequence),
+        Type::Map(_) => Ok(CallableValueFamily::Map),
+        Type::Closure(_) => Ok(CallableValueFamily::Closure),
+        Type::I32 => Ok(CallableValueFamily::I32),
+        Type::U32 => Ok(CallableValueFamily::U32),
+        Type::Fx => Ok(CallableValueFamily::Fx),
+        Type::F64 => Ok(CallableValueFamily::F64),
+        // #1773: a unit annotation is compile-time-only (parser restricts it
+        // to i32/u32/f64/fx bases; `erase_units()` strips it recursively;
+        // `legacy_lowering` has zero `Type::Measured`-specific handling
+        // anywhere else) - the runtime family is the erased base's family.
+        Type::Measured(base, _) => callable_family_for_type(base),
+        Type::Tuple(_) => Ok(CallableValueFamily::Tuple),
+        // #1773: both lower via `IrInstr::AdtTag`, the same instruction
+        // `Type::Adt` uses (legacy_lowering.rs match arms grouping
+        // `Type::Adt(_) | Type::Option(_) | Type::Result(_, _)` together) -
+        // the runtime representation genuinely is `Value::Adt` for all three.
+        Type::Option(_) => Ok(CallableValueFamily::Adt),
+        Type::Result(_, _) => Ok(CallableValueFamily::Adt),
+        Type::Record(_) => Ok(CallableValueFamily::Record),
+        Type::Adt(_) => Ok(CallableValueFamily::Adt),
+        Type::Unit => Ok(CallableValueFamily::Unit),
+        Type::QVec(_) => Err(FrontendError {
+            pos: 0,
+            message:
+                "'qvec' has no executable runtime value representation and cannot be used as a \
+                 callable parameter type (#1773 architecture decision: qvec is real, \
+                 parser-writable, typechecking syntax with no corresponding sm-vm::Value variant \
+                 and no lowering path that ever constructs one)"
+                    .to_string(),
+        }),
+        Type::RangeI32 => Err(FrontendError {
+            pos: 0,
+            message: "internal error: 'RangeI32' is a range-expression-only type and should be \
+                       unreachable as a resolved callable parameter type"
+                .to_string(),
+        }),
+        Type::TypeVar(_) => Err(FrontendError {
+            pos: 0,
+            message: "internal error: an unresolved type-inference variable should be \
+                       unreachable as a resolved callable parameter type"
+                .to_string(),
+        }),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -651,6 +730,13 @@ fn lower_function_to_ir_with_tables(
             ))
         })
         .collect::<Result<Vec<_>, FrontendError>>()?;
+    // #1773 (FA-09-005): derived from the same `canonical_params` the
+    // register/StoreVar lowering below already uses - this is the exact
+    // lowering boundary that previously discarded `func.params` entirely.
+    let signature_params = canonical_params
+        .iter()
+        .map(|(_, ty)| callable_family_for_type(ty))
+        .collect::<Result<Vec<_>, FrontendError>>()?;
     let canonical_ret = canonicalize_declared_type(&func.ret, record_table, adt_table, arena)?;
     let mut env = ScopeEnv::with_params(&canonical_params);
     ctx.next_reg = u16::try_from(func.params.len()).map_err(|_| FrontendError {
@@ -768,6 +854,7 @@ fn lower_function_to_ir_with_tables(
             name: parent_fn_name,
             instrs: ctx.instrs,
             ownership_events: ctx.ownership_events,
+            params: signature_params,
         },
         lifted: ctx.closure_state.lifted_funcs,
     })
@@ -1079,65 +1166,84 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     let mut out = Vec::new();
     // require_ownership_section: whenever the chosen header includes CAP_OWNERSHIP_PATHS,
     // every function must have an OWN0 section (even if empty) so the verifier check passes.
-    let require_ownership_section;
+    let opcode_driven_magic: [u8; 8];
+    let opcode_driven_require_ownership_section;
     if has_v18_qtruth_instr(funcs) {
-        out.extend_from_slice(&MAGIC18);
-        require_ownership_section = true;
+        opcode_driven_magic = MAGIC18;
+        opcode_driven_require_ownership_section = true;
     } else if has_v17_application_instr(funcs) {
-        out.extend_from_slice(&MAGIC17);
-        require_ownership_section = true;
+        opcode_driven_magic = MAGIC17;
+        opcode_driven_require_ownership_section = true;
     } else if has_v16_stdout_instr(funcs) {
-        out.extend_from_slice(&MAGIC16);
-        require_ownership_section = true;
+        opcode_driven_magic = MAGIC16;
+        opcode_driven_require_ownership_section = true;
     } else if has_v15_prng_instr(funcs) {
-        out.extend_from_slice(&MAGIC15);
-        require_ownership_section = true;
+        opcode_driven_magic = MAGIC15;
+        opcode_driven_require_ownership_section = true;
     } else if has_v14_map_instr(funcs) {
-        out.extend_from_slice(&MAGIC14);
-        require_ownership_section = true;
+        opcode_driven_magic = MAGIC14;
+        opcode_driven_require_ownership_section = true;
     } else if has_v13_sequence_iter_instr(funcs) {
-        out.extend_from_slice(&MAGIC13);
-        require_ownership_section = true;
+        opcode_driven_magic = MAGIC13;
+        opcode_driven_require_ownership_section = true;
     } else if has_v12_record_field_ownership_events(funcs) {
-        out.extend_from_slice(&MAGIC12);
-        require_ownership_section = true;
+        opcode_driven_magic = MAGIC12;
+        opcode_driven_require_ownership_section = true;
     } else if has_v11_ownership_events(funcs) {
-        out.extend_from_slice(&MAGIC11);
-        require_ownership_section = true;
+        opcode_driven_magic = MAGIC11;
+        opcode_driven_require_ownership_section = true;
     } else if has_v10_closure_instr(funcs) {
-        out.extend_from_slice(&MAGIC10);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC10;
+        opcode_driven_require_ownership_section = false;
     } else if has_v9_sequence_instr(funcs) {
-        out.extend_from_slice(&MAGIC9);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC9;
+        opcode_driven_require_ownership_section = false;
     } else if has_v8_text_instr(funcs) {
-        out.extend_from_slice(&MAGIC8);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC8;
+        opcode_driven_require_ownership_section = false;
     } else if has_v7_clock_read_instr(funcs) {
-        out.extend_from_slice(&MAGIC7);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC7;
+        opcode_driven_require_ownership_section = false;
     } else if has_v6_event_post_instr(funcs) {
-        out.extend_from_slice(&MAGIC6);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC6;
+        opcode_driven_require_ownership_section = false;
     } else if has_v5_state_update_instr(funcs) {
-        out.extend_from_slice(&MAGIC5);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC5;
+        opcode_driven_require_ownership_section = false;
     } else if has_v4_state_query_instr(funcs) {
-        out.extend_from_slice(&MAGIC4);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC4;
+        opcode_driven_require_ownership_section = false;
     } else if has_v3_fx_math_instr(funcs) {
-        out.extend_from_slice(&MAGIC3);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC3;
+        opcode_driven_require_ownership_section = false;
     } else if has_v2_fx_instr(funcs) {
-        out.extend_from_slice(&MAGIC2);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC2;
+        opcode_driven_require_ownership_section = false;
     } else if has_v1_math_instr(funcs) {
-        out.extend_from_slice(&MAGIC1);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC1;
+        opcode_driven_require_ownership_section = false;
     } else {
-        out.extend_from_slice(&MAGIC0);
-        require_ownership_section = false;
+        opcode_driven_magic = MAGIC0;
+        opcode_driven_require_ownership_section = false;
     }
+    let opcode_driven_header =
+        header_spec_from_magic(&opcode_driven_magic).expect("known header just chosen");
+    // #1773 (FA-09-005): every function's envelope now carries a canonical
+    // callable-signature record unconditionally (see `emit_semcode_function`
+    // below), which only a header at or above `SEMCODE_SIGNATURE_MIN_REVISION`
+    // can structurally carry - so that revision is now the emitter's floor,
+    // regardless of which opcodes a program happens to use. The opcode-driven
+    // chain above is preserved unchanged beneath that floor so a future
+    // opcode needing an even newer revision still promotes correctly on top
+    // of it (mirrors the #1732 precedent: a new header revision closing a
+    // version-identity gap, not a capability gap).
+    let (chosen_magic, require_ownership_section) =
+        if opcode_driven_header.rev < SEMCODE_SIGNATURE_MIN_REVISION {
+            (MAGIC19, true)
+        } else {
+            (opcode_driven_magic, opcode_driven_require_ownership_section)
+        };
+    out.extend_from_slice(&chosen_magic);
     // #1732 (FA-05-002): the `has_vN_*_instr` chain above is a hand-written
     // promotion decision, independent of `Opcode::minimum_semcode_revision`
     // (sm-format's actual admission authority). This is the mechanical
@@ -1147,7 +1253,6 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
     // matching promotion branch here hard-fails at emission time - loudly,
     // at the point of the bug - instead of silently shipping an artifact
     // its own verifier would reject.
-    let chosen_magic: [u8; 8] = out[0..8].try_into().expect("header magic just written");
     let chosen_header = header_spec_from_magic(&chosen_magic).expect("known header just chosen");
     let mut max_opcode_revision_used: u16 = 1;
     for f in funcs {
@@ -1160,8 +1265,12 @@ fn emit_semcode(funcs: &[IrFunction], debug_symbols: bool) -> Result<Vec<u8>, Fr
             })?,
         );
         out.extend_from_slice(name_bytes);
-        let (code, func_max_revision) =
-            emit_semcode_function(f, debug_symbols, require_ownership_section)?;
+        let (code, func_max_revision) = emit_semcode_function(
+            f,
+            debug_symbols,
+            require_ownership_section,
+            chosen_header.rev,
+        )?;
         max_opcode_revision_used = max_opcode_revision_used.max(func_max_revision);
         write_u32_le(
             &mut out,
@@ -1219,6 +1328,7 @@ fn emit_semcode_function(
     f: &IrFunction,
     debug_symbols: bool,
     require_ownership_section: bool,
+    chosen_header_rev: u16,
 ) -> Result<(Vec<u8>, u16), FrontendError> {
     let mut interner = StringInterner::new();
     for instr in &f.instrs {
@@ -1358,6 +1468,25 @@ fn emit_semcode_function(
         }
     }
     emit_ownership_events(&f.ownership_events, require_ownership_section, &mut code)?;
+    // #1773 (FA-09-005): unconditional, never a per-function/emission-time
+    // choice like `debug_symbols` - every function gets a SIG0 section once
+    // the chosen header can carry one, so `sm-format`'s decoder can expect
+    // it deterministically from the header revision alone (see
+    // `parse_string_table_debug_and_ownership`'s doc comment on why it is
+    // not content-sniffed).
+    if chosen_header_rev >= SEMCODE_SIGNATURE_MIN_REVISION {
+        code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        write_u16_le(
+            &mut code,
+            u16::try_from(f.params.len()).map_err(|_| FrontendError {
+                pos: 0,
+                message: "too many callable-signature parameters".to_string(),
+            })?,
+        );
+        for family in &f.params {
+            code.push(family.byte());
+        }
+    }
     code.extend_from_slice(&instr_stream);
     Ok((code, max_opcode_revision))
 }
@@ -2254,6 +2383,13 @@ fn lower_closure_literal_expr(
         message: "closure parameter/capture count exceeds register space".to_string(),
     })?;
     let mut local_loop_stack = Vec::new();
+    // #1773 (FA-09-005): the lifted helper's real invocation convention is
+    // captures first (r0..captures.len()-1), then the closure's own param
+    // (r{captures.len()}) - built here from the exact same `capture_ty`/
+    // `expected_closure.param` this function already uses to bind those
+    // registers below, so the signature can never drift from the actual
+    // register layout.
+    let mut lifted_signature_params = Vec::with_capacity(closure.captures.len() + 1);
 
     for (index, capture) in closure.captures.iter().enumerate() {
         let capture_ty = env.get(*capture).ok_or(FrontendError {
@@ -2263,6 +2399,7 @@ fn lower_closure_literal_expr(
                 resolve_symbol_name(arena, *capture)?
             ),
         })?;
+        lifted_signature_params.push(callable_family_for_type(&capture_ty)?);
         if env.is_const(*capture) {
             lifted_env.insert_const(*capture, capture_ty.clone());
         } else {
@@ -2281,6 +2418,7 @@ fn lower_closure_literal_expr(
         pos: 0,
         message: "closure parameter index exceeds v0 limit".to_string(),
     })?;
+    lifted_signature_params.push(callable_family_for_type(expected_closure.param.as_ref())?);
     lifted_env.insert(closure.param, expected_closure.param.as_ref().clone());
     lifted_instrs.push(IrInstr::StoreVar {
         name: resolve_symbol_name(arena, closure.param)?.to_string(),
@@ -2317,6 +2455,7 @@ fn lower_closure_literal_expr(
         name: helper_name.clone(),
         instrs: lifted_instrs,
         ownership_events: Vec::new(),
+        params: lifted_signature_params,
     });
 
     let mut capture_regs = Vec::with_capacity(closure.captures.len());
@@ -9967,8 +10106,9 @@ mod opt_tests {
                 IrInstr::Ret { src: None },
             ],
             ownership_events: Vec::new(),
+            params: Vec::new(),
         };
-        let (_, max_rev) = emit_semcode_function(&func, false, false).expect("emit");
+        let (_, max_rev) = emit_semcode_function(&func, false, false, 19).expect("emit");
         assert_eq!(max_rev, 19);
     }
 
@@ -9981,8 +10121,9 @@ mod opt_tests {
                 IrInstr::Ret { src: None },
             ],
             ownership_events: Vec::new(),
+            params: Vec::new(),
         };
-        let (_, max_rev) = emit_semcode_function(&func, false, false).expect("emit");
+        let (_, max_rev) = emit_semcode_function(&func, false, false, 1).expect("emit");
         assert_eq!(max_rev, 1);
     }
 
@@ -10553,7 +10694,7 @@ mod opt_tests {
     }
 
     #[test]
-    fn text_literals_lower_to_load_text_and_semcode8() {
+    fn text_literals_lower_to_load_text_and_semcod19() {
         let src = r#"
             fn main() {
                 let left: text = "alpha";
@@ -10570,12 +10711,17 @@ mod opt_tests {
             .iter()
             .any(|instr| matches!(instr, IrInstr::LoadText { .. })));
 
+        // #1773 (FA-09-005): every compiled artifact now carries a canonical
+        // callable-signature record per function, which only a header at or
+        // above SEMCODE_SIGNATURE_MIN_REVISION can structurally carry - so
+        // SEMCOD19 is now the floor regardless of which lesser opcodes this
+        // program happens to use (was SEMCODE8, text's own promotion floor).
         let bytes = compile_program_to_semcode(src).expect("text semcode should emit");
-        assert_eq!(&bytes[0..8], b"SEMCODE8");
+        assert_eq!(&bytes[0..8], b"SEMCOD19");
     }
 
     #[test]
-    fn sequence_literals_indexing_and_equality_lower_to_semcode9() {
+    fn sequence_literals_indexing_and_equality_lower_to_semcod19() {
         let src = r#"
             fn head(values: Sequence(i32), index: i32) -> i32 {
                 return values[index];
@@ -10607,12 +10753,15 @@ mod opt_tests {
             .iter()
             .any(|instr| matches!(instr, IrInstr::SequenceGet { .. })));
 
+        // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+        // artifact (was SEMCODE9, sequences' own promotion floor) - see the
+        // comment in `text_literals_lower_to_load_text_and_semcod19` above.
         let bytes = compile_program_to_semcode(src).expect("ordered sequence semcode should emit");
-        assert_eq!(&bytes[0..8], b"SEMCODE9");
+        assert_eq!(&bytes[0..8], b"SEMCOD19");
     }
 
     #[test]
-    fn first_class_closures_lower_to_runtime_carrier_and_semcod10() {
+    fn first_class_closures_lower_to_runtime_carrier_and_semcod19() {
         let src = r#"
             fn main() {
                 let offset: f64 = 1.0;
@@ -10642,8 +10791,117 @@ mod opt_tests {
             .iter()
             .any(|instr| matches!(instr, IrInstr::AddF64 { .. })));
 
+        // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+        // artifact (was SEMCOD10, closures' own promotion floor) - see the
+        // comment in `text_literals_lower_to_load_text_and_semcod19` above.
         let bytes = compile_program_to_semcode(src).expect("closure semcode should emit");
-        assert_eq!(&bytes[0..8], b"SEMCOD10");
+        assert_eq!(&bytes[0..8], b"SEMCOD19");
+    }
+
+    // #1773 (FA-09-005) permanent regressions: callable-signature contract
+    // preservation and the QVec architecture-decision boundary. These
+    // promote the original architecture-checkpoint RED reproductions (Cases
+    // A-E, posted to issue #1773) to permanent coverage.
+
+    #[test]
+    fn callable_signature_preserves_multi_family_parameters_in_declared_order() {
+        let src = r#"
+            fn describe(count: i32, active: bool, label: text) -> i32 {
+                return count;
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("multi-param function should lower");
+        let describe = ir
+            .iter()
+            .find(|func| func.name == "describe")
+            .expect("describe fn");
+        assert_eq!(
+            describe.params,
+            vec![
+                CallableValueFamily::I32,
+                CallableValueFamily::Bool,
+                CallableValueFamily::Text,
+            ]
+        );
+    }
+
+    #[test]
+    fn callable_signature_is_empty_for_zero_parameter_function() {
+        let src = "fn main() { return; }";
+        let ir = compile_program_to_ir(src).expect("zero-param function should lower");
+        let main = ir.iter().find(|func| func.name == "main").expect("main fn");
+        assert!(main.params.is_empty());
+    }
+
+    #[test]
+    fn callable_signature_measured_parameter_erases_to_base_family() {
+        let src = r#"
+            fn scale(amount: f64[meters]) -> f64[meters] {
+                return amount;
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("measured param should lower");
+        let scale = ir
+            .iter()
+            .find(|func| func.name == "scale")
+            .expect("scale fn");
+        assert_eq!(scale.params, vec![CallableValueFamily::F64]);
+    }
+
+    #[test]
+    fn callable_signature_option_and_result_parameters_map_to_adt_family() {
+        let src = r#"
+            fn first(items: Option(i32)) -> i32 {
+                return 0;
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("option param should lower");
+        let first = ir
+            .iter()
+            .find(|func| func.name == "first")
+            .expect("first fn");
+        assert_eq!(first.params, vec![CallableValueFamily::Adt]);
+    }
+
+    #[test]
+    fn qvec_callable_parameter_is_a_deterministic_compile_time_rejection_no_semcode_emitted() {
+        // #1773 owner decision: qvec is real, parser-writable, typechecking
+        // syntax with no corresponding sm-vm::Value variant and no lowering
+        // path that ever constructs one. It typechecks fine today (this is
+        // Case-equivalent to the original architecture-checkpoint evidence),
+        // so this must fail specifically at the new callable-signature
+        // boundary inside lowering - not at parse/typecheck - and must never
+        // reach SemCode emission.
+        let src = "fn f(x: qvec) -> i32 { return 0; } fn main() { return; }";
+
+        let ir_err = compile_program_to_ir(src)
+            .expect_err("qvec callable parameter must be rejected, not silently lowered");
+        assert!(
+            ir_err.message.contains("qvec"),
+            "rejection must name the offending type, got: {}",
+            ir_err.message
+        );
+        assert!(
+            ir_err.message.contains("executable"),
+            "rejection must explain the executable-family gap, got: {}",
+            ir_err.message
+        );
+
+        let semcode_err = compile_program_to_semcode(src)
+            .expect_err("no SemCode bytes may be emitted for a qvec callable parameter");
+        assert!(semcode_err.message.contains("qvec"));
     }
 
     #[test]
@@ -12483,6 +12741,7 @@ mod opt_tests {
                 IrInstr::Ret { src: None },
             ],
             ownership_events: Vec::new(),
+            params: Vec::new(),
         }];
         let report = run_default_opt_passes(&mut ir);
         assert!(report.changed);
@@ -12503,6 +12762,7 @@ mod opt_tests {
                 IrInstr::Ret { src: Some(1) },
             ],
             ownership_events: Vec::new(),
+            params: Vec::new(),
         }];
         let report = run_default_opt_passes(&mut ir);
         assert!(report.changed);
@@ -12540,6 +12800,7 @@ mod opt_tests {
                 IrInstr::Ret { src: Some(5) },
             ],
             ownership_events: Vec::new(),
+            params: Vec::new(),
         };
         let mut ir = vec![f];
         let report = crate::passes::run_default_opt_passes(&mut ir);
@@ -12691,6 +12952,7 @@ mod opt_tests {
                         IrInstr::Ret { src: Some(2) },
                     ],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 }],
                 false,
             )

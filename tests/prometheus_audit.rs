@@ -23,6 +23,7 @@ fn runtime_program() -> Vec<IrFunction> {
             IrInstr::Ret { src: None },
         ],
         ownership_events: Vec::new(),
+        params: Vec::new(),
     }]
 }
 

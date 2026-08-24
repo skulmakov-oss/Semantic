@@ -1,7 +1,7 @@
 #![allow(clippy::op_ref, clippy::needless_lifetimes)]
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
-    read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC11, MAGIC12, OWNERSHIP_EVENT_KIND_BORROW,
+    read_u16_le, read_u32_le, read_u8, read_utf8, MAGIC19, OWNERSHIP_EVENT_KIND_BORROW,
     OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
@@ -33,7 +33,11 @@ struct OwnershipEventSpec<'a> {
 struct FunctionLayout {
     strings: Vec<String>,
     ownership_start: Option<usize>,
-    instr_start: usize,
+    // #1773 (FA-09-005): end of the OWN0 section, i.e. the start of the
+    // (now mandatory) SIG0 section that follows it - lets a rewrite that
+    // only wants to replace OWN0 preserve the real SIG0 + instruction
+    // stream bytes verbatim, rather than discarding them.
+    own0_end: usize,
 }
 
 const DETERMINISTIC_RUNS: usize = 8;
@@ -41,7 +45,7 @@ const DETERMINISTIC_RUNS: usize = 8;
 #[test]
 fn runtime_ownership_sibling_write_passes_on_verified_path() {
     let bytes = compile_program_to_semcode(tuple_assignment_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC11);
+    assert_eq!(&bytes[..8], &MAGIC19);
 
     let rewritten = rewrite_function_ownership_events(
         &bytes,
@@ -319,7 +323,7 @@ fn runtime_ownership_sequence_parent_borrow_conflicts_with_dynamic_write() {
 #[test]
 fn runtime_ownership_inner_frame_borrow_does_not_leak_after_exit() {
     let bytes = compile_program_to_semcode(multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC11);
+    assert_eq!(&bytes[..8], &MAGIC19);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -339,7 +343,7 @@ fn runtime_ownership_inner_frame_borrow_does_not_leak_after_exit() {
 #[test]
 fn runtime_ownership_record_sibling_field_write_passes_on_verified_path() {
     let bytes = compile_program_to_semcode(record_assignment_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC12);
+    assert_eq!(&bytes[..8], &MAGIC19);
     assert!(function_has_ownership_section(&bytes, "main"));
     let (camera_field, quality_field) = record_field_component_ids(&bytes, "main");
 
@@ -555,7 +559,7 @@ fn runtime_ownership_conflict_surface_is_stable_across_tuple_and_record_cases() 
 #[test]
 fn runtime_ownership_record_inner_frame_borrow_does_not_leak_after_exit() {
     let bytes = compile_program_to_semcode(record_multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC12);
+    assert_eq!(&bytes[..8], &MAGIC19);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -566,9 +570,11 @@ fn runtime_ownership_record_inner_frame_borrow_does_not_leak_after_exit() {
 fn runtime_ownership_unsupported_paths_do_not_silently_claim_support() {
     let src = schema_source();
     let bytes = compile_program_to_semcode(src).expect("compile");
-    assert_ne!(&bytes[..8], &MAGIC11);
-    assert_ne!(&bytes[..8], &MAGIC12);
-    assert!(!any_function_has_ownership_section(&bytes));
+    // #1773 (FA-09-005): OWN0 is now unconditionally present (mandatory
+    // once the header reaches SEMCODE_SIGNATURE_MIN_REVISION), so the real
+    // invariant this program must uphold is "no ownership events recorded"
+    // - see `any_function_has_nonempty_ownership_section`'s doc comment.
+    assert!(!any_function_has_nonempty_ownership_section(&bytes));
     run_token_first_main(&bytes).expect("run");
 
     let _ = compile_program_to_semcode(indirect_record_projection_source())
@@ -686,7 +692,7 @@ fn runtime_ownership_multi_frame_cleanup_is_stable_across_runs() {
 #[test]
 fn runtime_ownership_record_sibling_write_is_stable_across_runs() {
     let bytes = compile_program_to_semcode(record_assignment_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC12);
+    assert_eq!(&bytes[..8], &MAGIC19);
     let (camera_field, quality_field) = record_field_component_ids(&bytes, "main");
     let rewritten = rewrite_function_ownership_events(
         &bytes,
@@ -783,7 +789,7 @@ fn runtime_ownership_record_child_parent_rejects_identically_across_runs() {
 #[test]
 fn runtime_ownership_record_multi_frame_cleanup_is_stable_across_runs() {
     let bytes = compile_program_to_semcode(record_multi_frame_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC12);
+    assert_eq!(&bytes[..8], &MAGIC19);
     assert!(function_has_ownership_section(&bytes, "helper"));
     assert!(function_has_ownership_section(&bytes, "main"));
 
@@ -950,13 +956,25 @@ fn assert_repeated_write_overlap_rejects(bytes: &[u8], _symbol_name: &str, runs:
     }
 }
 
-fn any_function_has_ownership_section(bytes: &[u8]) -> bool {
+// #1773 (FA-09-005): OWN0 is now unconditionally present in every compiled
+// function's envelope (mandatory once the header reaches
+// SEMCODE_SIGNATURE_MIN_REVISION), so `any_function_has_ownership_section`
+// no longer distinguishes "does this program need ownership tracking" -
+// it's now vacuously true for any program. This checks the thing that
+// still matters: does the (always-present) section actually record any
+// borrow/write events, or is it structurally empty.
+fn any_function_has_nonempty_ownership_section(bytes: &[u8]) -> bool {
     let mut cursor = 8usize;
     while cursor < bytes.len() {
         let (name, code, next) = next_function(bytes, cursor);
         let _ = name;
-        if parse_function_layout(code).ownership_start.is_some() {
-            return true;
+        let layout = parse_function_layout(code);
+        if let Some(ownership_start) = layout.ownership_start {
+            let mut event_cursor = ownership_start + OWNERSHIP_SECTION_TAG.len();
+            let count = read_u16_le(code, &mut event_cursor).expect("ownership count");
+            if count > 0 {
+                return true;
+            }
         }
         cursor = next;
     }
@@ -1004,7 +1022,10 @@ fn rewrite_function_code(code: &[u8], events: &[OwnershipEventSpec<'_>]) -> Vec<
     let mut out = Vec::with_capacity(code.len());
     out.extend_from_slice(&code[..ownership_start]);
     out.extend_from_slice(&ownership_section_bytes(&layout.strings, events));
-    out.extend_from_slice(&code[layout.instr_start..]);
+    // #1773 (FA-09-005): preserve the real SIG0 section verbatim - only
+    // OWN0 is being replaced here, not the range through `instr_start`,
+    // which would silently drop SIG0 along with it.
+    out.extend_from_slice(&code[layout.own0_end..]);
     out
 }
 
@@ -1159,7 +1180,7 @@ fn parse_function_layout(code: &[u8]) -> FunctionLayout {
     FunctionLayout {
         strings,
         ownership_start,
-        instr_start: cursor,
+        own0_end: cursor,
     }
 }
 

@@ -157,7 +157,9 @@ fn run_flow(
     profile: ApplicationCapabilityProfile,
 ) -> Result<(), RuntimeError> {
     let bytes = compile_program_to_semcode(FLOW).expect("compile");
-    assert_eq!(&bytes[..8], b"SEMCOD17");
+    // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+    // artifact regardless of which opcodes it uses (was SEMCOD17).
+    assert_eq!(&bytes[..8], b"SEMCOD19");
     run_verified_semcode_with_application_host_and_capabilities_and_config(
         &bytes,
         "main",

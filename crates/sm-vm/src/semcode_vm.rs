@@ -1,6 +1,6 @@
 use crate::semcode_format::{
-    read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, Opcode, SemcodeFormatError,
-    SemcodeHeaderSpec,
+    read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, CallableSignature,
+    CallableValueFamily, Opcode, SemcodeFormatError, SemcodeHeaderSpec,
 };
 use crate::QuadVal;
 use prom_abi::{
@@ -94,6 +94,12 @@ pub struct FunctionBytecode {
     write_paths: Vec<AccessPath>,
     pub code: Vec<u8>,
     pub instr_start: usize,
+    /// The decoded canonical callable-signature record (#1773 / FA-09-005),
+    /// retained unchanged from `DecodedFunctionEnvelope::signature`. `None`
+    /// means the artifact's header predates canonical signatures
+    /// (`SEMCODE_SIGNATURE_MIN_REVISION`) - `validate_call_arguments` treats
+    /// that as "nothing to enforce", preserving pre-#1773 behavior exactly.
+    pub signature: Option<CallableSignature>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -866,9 +872,10 @@ pub fn run_verified_function_semcode_with_args_and_config(
 ) -> Result<Value, RuntimeError> {
     let program = prepare_verified_execution(token)?;
     let func_name = token.entry();
-    if !program.functions.contains_key(func_name) {
+    let Some(target) = program.functions.get(func_name) else {
         return Err(RuntimeError::UnknownFunction(func_name.to_string()));
-    }
+    };
+    validate_call_arguments(func_name, target.signature.as_ref(), &args)?;
     let mut vm = VM {
         functions: program.functions,
         callstack: Vec::new(),
@@ -1040,6 +1047,9 @@ fn decode_and_map_errors(
         sm_format::semcode_decode::DecodeError::InvalidOwnershipSection { msg, .. } => {
             RuntimeError::BadFormat(msg.to_string())
         }
+        sm_format::semcode_decode::DecodeError::InvalidSignatureSection { msg, .. } => {
+            RuntimeError::BadFormat(msg.to_string())
+        }
         sm_format::semcode_decode::DecodeError::ResourceLimit { msg, .. } => {
             RuntimeError::BadFormat(msg)
         }
@@ -1139,6 +1149,7 @@ fn build_vm_program_view_from_decoded(
             write_paths,
             code: env.code_slice.to_vec(),
             instr_start: env.instr_start_offset,
+            signature: env.signature.clone(),
         };
         validate_function_bytecode(&f)?;
         if out.insert(name.clone(), f).is_some() {
@@ -2531,7 +2542,14 @@ where
                     let r = read_u16_le(&f.code, &mut cur).map_err(map_format_err)?;
                     args.push(get_reg(vm, frame_idx, r)?);
                 }
-                if vm.functions.contains_key(&callee) {
+                if let Some(target) = vm.functions.get(&callee) {
+                    // #1773 (FA-09-005): the second of the two authoritative
+                    // `validate_call_arguments` call sites - see its doc
+                    // comment. The "truly unknown callee" branch below
+                    // deliberately does not validate: it exists only to
+                    // preserve the pre-fix `RuntimeError::UnknownFunction`
+                    // error via `push_frame`, not for typed invocation.
+                    validate_call_arguments(&callee, target.signature.as_ref(), &args)?;
                     vm.callstack[frame_idx].pc = cur - f.instr_start;
                     push_frame(vm, &callee, args, if has_dst { Some(dst) } else { None })?;
                     continue;
@@ -2744,6 +2762,75 @@ fn stable_state_query_fallback(key: &str) -> i32 {
     key.bytes().fold(0i32, |acc, byte| {
         acc.wrapping_mul(31).wrapping_add(i32::from(byte))
     })
+}
+
+/// The executable runtime family a `Value` actually belongs to (#1773 /
+/// FA-09-005). Mirrors `sm-format`'s `CallableValueFamily` 1:1 - this is
+/// the runtime-side half of the wire family tag; `callable_family_for_type`
+/// in `sm-ir` is the compile-time half deriving the same tag from a source
+/// `Type`. Exhaustive match, no wildcard, so a future `Value` variant added
+/// without a family arm here is a compile-time error.
+fn value_family(value: &Value) -> CallableValueFamily {
+    match value {
+        Value::Quad(_) => CallableValueFamily::Quad,
+        Value::Bool(_) => CallableValueFamily::Bool,
+        Value::Text(_) => CallableValueFamily::Text,
+        Value::Sequence(_) => CallableValueFamily::Sequence,
+        Value::Map(_) => CallableValueFamily::Map,
+        Value::Closure(_) => CallableValueFamily::Closure,
+        Value::I32(_) => CallableValueFamily::I32,
+        Value::F64(_) => CallableValueFamily::F64,
+        Value::U32(_) => CallableValueFamily::U32,
+        Value::Fx(_) => CallableValueFamily::Fx,
+        Value::Tuple(_) => CallableValueFamily::Tuple,
+        Value::Record(_) => CallableValueFamily::Record,
+        Value::Adt(_) => CallableValueFamily::Adt,
+        Value::Unit => CallableValueFamily::Unit,
+    }
+}
+
+/// The one authoritative invocation validator (#1773 / FA-09-005), shared
+/// by both the public invocation helper
+/// (`run_verified_function_semcode_with_args_and_config`) and internal
+/// `Opcode::Call` handling, called immediately before each of their
+/// `push_frame` calls - never fused into `push_frame` itself, since
+/// `push_frame` is also the raw/unverified execution path's primitive
+/// (`run_semcode_with_entry_and_config` et al., which intentionally bypass
+/// sm-verify admission and always pass zero args).
+///
+/// `target_contract: None` means the callee's artifact header predates
+/// canonical signatures (`SEMCODE_SIGNATURE_MIN_REVISION`) - nothing to
+/// enforce, preserving pre-#1773 behavior for old artifacts exactly.
+/// Checks too-few/too-many args and wrong family in both used AND unused
+/// parameters (family is checked for every supplied argument regardless of
+/// whether the callee's body ever reads that register), so no body
+/// instruction is needed to expose a type mismatch.
+fn validate_call_arguments(
+    func_name: &str,
+    target_contract: Option<&CallableSignature>,
+    args: &[Value],
+) -> Result<(), RuntimeError> {
+    let Some(contract) = target_contract else {
+        return Ok(());
+    };
+    if args.len() != contract.families.len() {
+        return Err(RuntimeError::TypeMismatchRuntime(format!(
+            "call to '{}' passed {} argument(s), but its canonical signature declares {} parameter(s)",
+            func_name,
+            args.len(),
+            contract.families.len()
+        )));
+    }
+    for (index, (arg, expected_family)) in args.iter().zip(&contract.families).enumerate() {
+        let actual_family = value_family(arg);
+        if actual_family != *expected_family {
+            return Err(RuntimeError::TypeMismatchRuntime(format!(
+                "call to '{}' argument {} has runtime family {:?}, but its canonical signature declares {:?}",
+                func_name, index, actual_family, expected_family
+            )));
+        }
+    }
+    Ok(())
 }
 
 fn push_frame(
@@ -3786,7 +3873,7 @@ mod tests {
         compile_program_to_semcode, compile_program_to_semcode_with_options, CompileProfile,
         OptLevel, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
         OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-        OWNERSHIP_SECTION_TAG,
+        OWNERSHIP_SECTION_TAG, SIGNATURE_SECTION_TAG,
     };
     use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
     use sm_runtime_core::{
@@ -5518,7 +5605,15 @@ mod tests {
     fn vm_rejects_unknown_opcode_on_load() {
         let src = "fn main() { return; }";
         let mut bytes = compile_program_to_semcode(src).expect("compile");
-        let opcode_pos = 8 + 2 + 4 + 4 + 2;
+        // #1773 (FA-09-005): the first opcode byte's absolute offset now
+        // depends on the mandatory OWN0/SIG0 sections preceding the
+        // instruction stream - located via the real decode rather than a
+        // hand-counted literal, which silently drifted out of the
+        // instruction stream (and even out of the function's own code
+        // region) once those sections became mandatory.
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let opcode_pos = 8 + 2 + 4 + 4 + functions[0].instr_start_offset;
         bytes[opcode_pos] = 0xff;
         let err = run_semcode(&bytes).expect_err("must fail");
         assert!(matches!(err, RuntimeError::BadFormat(_)));
@@ -5555,11 +5650,25 @@ mod tests {
         new_code.push(1); // has_src
         new_code.extend_from_slice(&2u16.to_le_bytes());
 
-        let opcode_pos = 8 + 2 + 4 + 4 + 2;
-        bytes.splice(opcode_pos..opcode_pos + 2, new_code.iter().copied());
-
-        let new_code_len = 2 + new_code.len();
+        // #1773 (FA-09-005): the instruction stream's real start/prefix
+        // length now depends on the mandatory OWN0/SIG0 sections - located
+        // via the real decode rather than hand-counted literals, which
+        // silently corrupted this splice (and the resulting `code_len`)
+        // once those sections became mandatory. `prefix_len` covers
+        // everything before the instruction stream (string table + OWN0 +
+        // SIG0), which the splice below leaves untouched.
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let prefix_len = functions[0].instr_start_offset;
         let code_len_pos = 8 + 2 + 4;
+        let opcode_pos = code_len_pos + 4 + prefix_len;
+        let old_instr_len = functions[0].code_slice.len() - prefix_len;
+        bytes.splice(
+            opcode_pos..opcode_pos + old_instr_len,
+            new_code.iter().copied(),
+        );
+
+        let new_code_len = prefix_len + new_code.len();
         bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
 
         bytes
@@ -5622,7 +5731,12 @@ mod tests {
         let err = run_semcode(&bytes).expect_err("must fail");
         match err {
             RuntimeError::UnsupportedBytecodeVersion { found, supported } => {
-                assert!(found.starts_with("SEMCODE"));
+                // #1773 (FA-09-005): the natural compile of this program is
+                // now SEMCOD19 (was SEMCODE0), so the corrupted last byte
+                // produces "SEMCOD1X", not "SEMCODEX" - "SEMCOD" is the
+                // stable 6-byte prefix shared by every header revision's
+                // magic, single- and double-digit alike.
+                assert!(found.starts_with("SEMCOD"));
                 assert!(supported.contains("SEMCODE0"));
                 assert!(supported.contains("SEMCODE1"));
                 assert!(supported.contains("SEMCODE2"));
@@ -5729,11 +5843,13 @@ mod tests {
                     name: "helper".to_string(),
                     instrs: vec![IrInstr::Ret { src: None }],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
                 IrFunction {
                     name: "main".to_string(),
                     instrs: main_instrs,
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
             ],
             false,
@@ -5934,11 +6050,21 @@ mod tests {
         emit_ir_to_semcode(&functions, false).expect("emit register-init test program")
     }
 
-    fn ret_only_function(name: &str, src: Option<u16>) -> IrFunction {
+    // #1773 (FA-09-005): `params` must match what each call site below
+    // actually invokes this function with - the new canonical-signature
+    // contract is enforced before `push_frame`, so a declared arity that
+    // disagreed with the real call would reject before ever reaching the
+    // register-initialization behavior these #1770 tests exist to probe.
+    fn ret_only_function(
+        name: &str,
+        src: Option<u16>,
+        params: Vec<CallableValueFamily>,
+    ) -> IrFunction {
         IrFunction {
             name: name.to_string(),
             instrs: vec![IrInstr::Ret { src }],
             ownership_events: Vec::new(),
+            params,
         }
     }
 
@@ -5947,7 +6073,8 @@ mod tests {
     /// verifier (lacking #1756's definite-assignment proof) admits it.
     #[test]
     fn frame_reads_zero_arg_entry_register_as_uninitialized_error() {
-        let bytes = build_register_init_test_program(vec![ret_only_function("main", Some(0))]);
+        let bytes =
+            build_register_init_test_program(vec![ret_only_function("main", Some(0), vec![])]);
         let token = verify_semcode_token(&bytes)
             .expect("verifier currently has no definite-assignment proof (#1756) and must accept");
         let entry = token.require_entry("main").expect("entry");
@@ -5972,6 +6099,7 @@ mod tests {
                 IrInstr::Ret { src: Some(50) },
             ],
             ownership_events: Vec::new(),
+            params: Vec::new(),
         }]);
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("main").expect("entry");
@@ -5991,7 +6119,7 @@ mod tests {
     #[test]
     fn explicit_unit_write_then_read_succeeds_and_call_result_is_initialized() {
         let bytes = build_register_init_test_program(vec![
-            ret_only_function("helper", None),
+            ret_only_function("helper", None, vec![]),
             IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -6003,6 +6131,7 @@ mod tests {
                     IrInstr::Ret { src: Some(5) },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             },
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
@@ -6017,9 +6146,9 @@ mod tests {
     #[test]
     fn single_argument_initializes_only_r0() {
         let bytes = build_register_init_test_program(vec![
-            ret_only_function("main", None),
-            ret_only_function("read_r0", Some(0)),
-            ret_only_function("read_r1", Some(1)),
+            ret_only_function("main", None, vec![]),
+            ret_only_function("read_r0", Some(0), vec![CallableValueFamily::I32]),
+            ret_only_function("read_r1", Some(1), vec![CallableValueFamily::I32]),
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
 
@@ -6046,9 +6175,17 @@ mod tests {
     #[test]
     fn multiple_arguments_initialize_exactly_supplied_registers() {
         let bytes = build_register_init_test_program(vec![
-            ret_only_function("main", None),
-            ret_only_function("read_r1", Some(1)),
-            ret_only_function("read_r2", Some(2)),
+            ret_only_function("main", None, vec![]),
+            ret_only_function(
+                "read_r1",
+                Some(1),
+                vec![CallableValueFamily::I32, CallableValueFamily::I32],
+            ),
+            ret_only_function(
+                "read_r2",
+                Some(2),
+                vec![CallableValueFamily::I32, CallableValueFamily::I32],
+            ),
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
         let args = vec![Value::I32(1), Value::I32(2)];
@@ -6074,7 +6211,7 @@ mod tests {
     #[test]
     fn call_without_destination_creates_no_register_definition() {
         let bytes = build_register_init_test_program(vec![
-            ret_only_function("helper", None),
+            ret_only_function("helper", None, vec![]),
             IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -6086,6 +6223,7 @@ mod tests {
                     IrInstr::Ret { src: Some(7) },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             },
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
@@ -6103,7 +6241,7 @@ mod tests {
     #[test]
     fn closure_call_result_initialization_preserved() {
         let bytes = build_register_init_test_program(vec![
-            ret_only_function("closure_target", Some(0)),
+            ret_only_function("closure_target", Some(0), vec![]),
             IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -6121,12 +6259,220 @@ mod tests {
                     IrInstr::Ret { src: Some(2) },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             },
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("main").expect("entry");
         let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
         assert_eq!(res, Value::I32(77));
+    }
+
+    // --- #1773 (FA-09-005, umbrella #1617) regression matrix ---------------
+    //
+    // `sm-verify` can only prove argument COUNT statically (registers are
+    // untyped storage - see the #1773 architecture checkpoint on issue
+    // #1773). Runtime FAMILY enforcement is uniquely `validate_call_
+    // arguments`'s responsibility, checked immediately before `push_frame`
+    // for both the public invocation helper and internal `Opcode::Call` -
+    // these promote the original architecture-checkpoint RED reproductions
+    // to permanent coverage for that half of the contract.
+
+    /// Public invocation: a family mismatch (Bool supplied where the
+    /// canonical signature declares I32) must be rejected before the frame
+    /// is even pushed - not merely "the body traps on the wrong value".
+    #[test]
+    fn public_invocation_rejects_argument_family_mismatch() {
+        let bytes = build_register_init_test_program(vec![ret_only_function(
+            "main",
+            Some(0),
+            vec![CallableValueFamily::I32],
+        )]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let err = run_verified_function_semcode_with_args(&entry, vec![Value::Bool(true)])
+            .expect_err("family mismatch must be rejected");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+    }
+
+    /// Public invocation: the family check applies even to a parameter the
+    /// callee's body never reads - no body instruction should be needed to
+    /// expose the mismatch (mirrors #1770's "unused parameter register
+    /// storage must not fabricate a value" invariant, one layer up).
+    #[test]
+    fn public_invocation_rejects_family_mismatch_in_unused_parameter() {
+        let bytes = build_register_init_test_program(vec![ret_only_function(
+            "main",
+            None, // body never reads r0
+            vec![CallableValueFamily::I32],
+        )]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let err = run_verified_function_semcode_with_args(&entry, vec![Value::Text("x".into())])
+            .expect_err("family mismatch in an unused parameter must still be rejected");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+    }
+
+    /// Internal `Opcode::Call`: the exact same family enforcement applies
+    /// to a call made from inside another function's body, not just the
+    /// public entry point - proving the single shared validator, not two
+    /// independently-maintained checks.
+    #[test]
+    fn internal_call_rejects_argument_family_mismatch() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("callee", Some(0), vec![CallableValueFamily::I32]),
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::Call {
+                        dst: Some(1),
+                        name: "callee".to_string(),
+                        args: vec![0],
+                    },
+                    IrInstr::Ret { src: Some(1) },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            },
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let err = run_verified_function_semcode_with_args(&entry, vec![])
+            .expect_err("internal call family mismatch must be rejected");
+        assert!(matches!(err, RuntimeError::TypeMismatchRuntime(_)));
+    }
+
+    /// Internal `Opcode::Call`: multiple call sites to the same two-
+    /// parameter callee, each with correct argc/family, must all succeed -
+    /// the validator is not a one-shot/first-call-only check.
+    #[test]
+    fn internal_call_accepts_multiple_correct_call_sites_to_same_callee() {
+        let bytes = build_register_init_test_program(vec![
+            IrFunction {
+                name: "add".to_string(),
+                instrs: vec![
+                    IrInstr::AddI32 {
+                        dst: 2,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                    IrInstr::Ret { src: Some(2) },
+                ],
+                ownership_events: Vec::new(),
+                params: vec![CallableValueFamily::I32, CallableValueFamily::I32],
+            },
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadI32 { dst: 0, val: 1 },
+                    IrInstr::LoadI32 { dst: 1, val: 2 },
+                    IrInstr::Call {
+                        dst: Some(2),
+                        name: "add".to_string(),
+                        args: vec![0, 1],
+                    },
+                    IrInstr::LoadI32 { dst: 3, val: 10 },
+                    IrInstr::LoadI32 { dst: 4, val: 20 },
+                    IrInstr::Call {
+                        dst: Some(5),
+                        name: "add".to_string(),
+                        args: vec![3, 4],
+                    },
+                    IrInstr::AddI32 {
+                        dst: 6,
+                        lhs: 2,
+                        rhs: 5,
+                    },
+                    IrInstr::Ret { src: Some(6) },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            },
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
+        assert_eq!(res, Value::I32(33)); // (1+2) + (10+20)
+    }
+
+    /// Internal `Opcode::Call`: a self-recursive callee's own declared
+    /// signature is enforced identically on every recursive call, not only
+    /// the initial (non-recursive) entry.
+    #[test]
+    fn internal_call_enforces_signature_across_recursive_calls() {
+        let bytes = build_register_init_test_program(vec![IrFunction {
+            name: "count_down".to_string(),
+            instrs: vec![
+                IrInstr::LoadI32 { dst: 1, val: 0 },
+                IrInstr::CmpEq {
+                    dst: 2,
+                    lhs: 0,
+                    rhs: 1,
+                },
+                IrInstr::JmpIf {
+                    cond: 2,
+                    label: "base_case".to_string(),
+                },
+                IrInstr::LoadI32 { dst: 3, val: 1 },
+                IrInstr::SubI32 {
+                    dst: 4,
+                    lhs: 0,
+                    rhs: 3,
+                },
+                IrInstr::Call {
+                    dst: Some(5),
+                    name: "count_down".to_string(),
+                    args: vec![4],
+                },
+                IrInstr::Ret { src: Some(5) },
+                IrInstr::Label {
+                    name: "base_case".to_string(),
+                },
+                IrInstr::Ret { src: Some(0) },
+            ],
+            ownership_events: Vec::new(),
+            params: vec![CallableValueFamily::I32],
+        }]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("count_down").expect("entry");
+        let res =
+            run_verified_function_semcode_with_args(&entry, vec![Value::I32(3)]).expect("run");
+        assert_eq!(res, Value::I32(0));
+    }
+
+    /// Builtin-precedence preservation (#1817, re-asserted for #1773): a
+    /// call to a name that resolves to a known internal function must still
+    /// win over a same-named builtin, unaffected by the new arity/family
+    /// validator sitting in front of that same `push_frame` call.
+    #[test]
+    fn internal_call_precedence_over_builtin_unaffected_by_signature_validation() {
+        let bytes = build_register_init_test_program(vec![
+            ret_only_function("sqrt", Some(0), vec![CallableValueFamily::I32]),
+            IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadI32 { dst: 0, val: 777 },
+                    IrInstr::Call {
+                        dst: Some(1),
+                        name: "sqrt".to_string(),
+                        args: vec![0],
+                    },
+                    IrInstr::Ret { src: Some(1) },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            },
+        ]);
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("main").expect("entry");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
+        assert_eq!(
+            res,
+            Value::I32(777),
+            "internal 'sqrt' must win over the builtin, and its I32 signature must validate \
+             cleanly against the I32 arg it is actually called with"
+        );
     }
 
     // --- #1772 (FA-09-004, umbrella #1617) regression matrix ---------------
@@ -6153,6 +6499,7 @@ mod tests {
                         IrInstr::Ret { src: Some(0) },
                     ],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
                 IrFunction {
                     name: "b_fn".to_string(),
@@ -6161,6 +6508,7 @@ mod tests {
                         IrInstr::Ret { src: Some(0) },
                     ],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
             ],
             false,
@@ -6229,6 +6577,7 @@ mod tests {
                 name: "id_fn".to_string(),
                 instrs: vec![IrInstr::Ret { src: Some(0) }],
                 ownership_events: Vec::new(),
+                params: vec![CallableValueFamily::I32],
             }],
             false,
         )
@@ -6450,8 +6799,18 @@ mod tests {
         let env = decoded_functions.remove(0);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
+        // #1773 (FA-09-005): see the identical fix (and rationale) in
+        // `rewrite_main_ownership_section` above - a real SIG0 section now
+        // sits between OWN0 and the instruction stream, so the OWN0
+        // replacement must stop at OWN0's own end, not `instr_start`.
+        let sig0_len = env
+            .signature
+            .as_ref()
+            .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
+            .unwrap_or(0);
+        let own0_end = instr_start - sig0_len;
         let e_root = strings.iter().position(|s| s == "e").expect("e root index") as u32;
-        let ownership_start = code[..instr_start]
+        let ownership_start = code[..own0_end]
             .windows(OWNERSHIP_SECTION_TAG.len())
             .position(|window| window == OWNERSHIP_SECTION_TAG)
             .expect("OWN0 section");
@@ -6475,7 +6834,7 @@ mod tests {
         );
 
         new_code.extend_from_slice(&out_ownership);
-        new_code.extend_from_slice(&code[instr_start..]);
+        new_code.extend_from_slice(&code[own0_end..]);
 
         let mut out = Vec::with_capacity(bytes.len() + new_code.len().saturating_sub(code.len()));
         out.extend_from_slice(&bytes[..code_len_pos]);
@@ -6583,11 +6942,19 @@ mod tests {
         let env = decoded_functions.remove(0);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
+        // #1773 (FA-09-005): see the identical fix (and rationale) in
+        // `rewrite_main_ownership_section` above.
+        let sig0_len = env
+            .signature
+            .as_ref()
+            .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
+            .unwrap_or(0);
+        let own0_end = instr_start - sig0_len;
         let ctx_root = strings
             .iter()
             .position(|s| s == "ctx")
             .expect("ctx root index") as u32;
-        let ownership_start = code[..instr_start]
+        let ownership_start = code[..own0_end]
             .windows(OWNERSHIP_SECTION_TAG.len())
             .position(|window| window == OWNERSHIP_SECTION_TAG)
             .expect("OWN0 section");
@@ -6599,7 +6966,7 @@ mod tests {
             borrowed_field,
             write_field,
         ));
-        new_code.extend_from_slice(&code[instr_start..]);
+        new_code.extend_from_slice(&code[own0_end..]);
 
         let mut out = Vec::with_capacity(bytes.len() + new_code.len().saturating_sub(code.len()));
         out.extend_from_slice(&bytes[..code_len_pos]);
@@ -6692,11 +7059,24 @@ mod tests {
         let env = decoded_functions.remove(0);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
+        // #1773 (FA-09-005): a real SIG0 section now sits between OWN0 and
+        // the instruction stream (mandatory once the compiled header
+        // reaches SEMCODE_SIGNATURE_MIN_REVISION), so the OWN0 replacement
+        // below must stop at OWN0's own end - not `instr_start` - or it
+        // silently drops SIG0 along with the OWN0 bytes it means to
+        // replace, corrupting the artifact its own header still claims to
+        // carry a signature for.
+        let sig0_len = env
+            .signature
+            .as_ref()
+            .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
+            .unwrap_or(0);
+        let own0_end = instr_start - sig0_len;
         let total_root = strings
             .iter()
             .position(|s| s == "total")
             .expect("total root index") as u32;
-        let ownership_start = code[..instr_start]
+        let ownership_start = code[..own0_end]
             .windows(OWNERSHIP_SECTION_TAG.len())
             .position(|window| window == OWNERSHIP_SECTION_TAG)
             .expect("OWN0 section");
@@ -6707,7 +7087,7 @@ mod tests {
             borrowed_components,
             write_components,
         ));
-        new_code.extend_from_slice(&code[instr_start..]);
+        new_code.extend_from_slice(&code[own0_end..]);
 
         let mut out = Vec::with_capacity(bytes.len() + new_code.len().saturating_sub(code.len()));
         out.extend_from_slice(&bytes[..code_len_pos]);
@@ -6891,6 +7271,7 @@ mod tests {
                 instrs
             },
             ownership_events: Vec::new(),
+            params: Vec::new(),
         };
         let funcs = vec![
             make("f0", &["a", "b", "c"]),
@@ -6948,6 +7329,7 @@ mod tests {
                 name: "main".to_string(),
                 instrs,
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )

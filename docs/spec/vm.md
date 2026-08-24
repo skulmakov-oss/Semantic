@@ -165,8 +165,42 @@ Current function-bytecode model includes:
 - runtime symbol ids
 - optional debug symbols
 - tuple and direct record-field ownership path metadata admitted from `OWN0`
+- the decoded canonical callable-signature record admitted from `SIG0`
+  (`signature: Option<CallableSignature>`, #1773 / FA-09-005), retained
+  unchanged from the decoded envelope; `None` for an artifact whose header
+  predates canonical signatures
 - instruction stream
 - instruction start offset
+
+## Callable Runtime Family Enforcement
+
+`validate_call_arguments` is the one authoritative invocation validator,
+called immediately before `push_frame` at exactly two sites: the public
+invocation helper (`run_verified_function_semcode_with_args_and_config`) and
+internal `Opcode::Call` handling for a callee that resolves to a known
+function. It is a distinct step, never fused into `push_frame` itself,
+because `push_frame` is also the raw/unverified execution path's primitive
+(`run_semcode_with_entry_and_config` and friends, which intentionally bypass
+`sm-verify` admission).
+
+Given the callee's decoded `signature`:
+
+- `None` (pre-#1773 artifact): no contract to enforce, unchanged behavior
+- `Some(contract)`: reject if `args.len() != contract.families.len()`, and
+  reject if any supplied argument's runtime family
+  (`Value` variant, mapped 1:1 to `CallableValueFamily`) disagrees with the
+  contract's declared family at that position - including a parameter the
+  callee's body never reads, so no body instruction is needed to expose a
+  type mismatch
+
+This is the runtime half of the canonical callable contract; arity alone is
+also checked statically by the verifier (see
+[`verifier.md`](verifier.md#callable-arity-enforcement)) - the VM cannot
+skip its own family check on the assumption the verifier already proved
+arity, since the verifier cannot prove runtime family from register
+storage alone. Both checks independently agree with the same canonical
+signature (see [`semcode.md`](semcode.md#callable-signature-sig0)), never
+a caller-derived or independently-reconstructed one.
 
 ## Runtime Ownership Slice
 

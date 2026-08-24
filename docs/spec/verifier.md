@@ -285,6 +285,33 @@ Verifier rejection must preserve:
 from function entry can advance to the end of the executable instruction
 stream without first reaching an admitted terminal instruction.
 
+## Callable Arity Enforcement
+
+For every `Opcode::Call` site whose callee resolves to a known internal
+function, the verifier checks the call's `argc` against the callee's decoded
+canonical signature (see [`semcode.md`](semcode.md#callable-signature-sig0)),
+rejecting a mismatch with `CallArgumentCountMismatch`. This is arity only:
+
+- `sm-verify` cannot prove a `CALL` argument register's runtime family
+  statically - registers are untyped storage - so it never attempts to; that
+  half of the contract is the VM's responsibility, enforced immediately
+  before `push_frame` (see [`vm.md`](vm.md#callable-runtime-family-enforcement))
+- caller-supplied `argc` never defines callee arity; only the callee's own
+  decoded signature does
+- when the callee's artifact predates canonical signatures
+  (`signature: None`), there is no contract to check and this enforcement is
+  a no-op - unchanged behavior for pre-#1773 artifacts
+- a missing `SIG0` section on a header that requires one
+  (`SEMCODE_SIGNATURE_MIN_REVISION` or newer) is not a policy check at this
+  layer at all: it is a structural decode rejection
+  (`InvalidSignatureSection`) before admission ever reaches this check,
+  since `SIG0` presence is derived deterministically from the header
+  revision, never sniffed
+
+Calls to builtins are out of scope for this check; only calls that resolve
+to a known internal function (with a decoded canonical signature to check
+against) are covered.
+
 ## Verified Execution Rule
 
 The standard `.smc` execution route must require `sm-verify` admission.

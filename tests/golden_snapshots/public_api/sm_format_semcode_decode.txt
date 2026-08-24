@@ -3,6 +3,7 @@ pub const MAX_FUNCTIONS: usize = 1024;
 pub const MAX_STRING_LEN: usize = 1024;
 pub const MAX_STRINGS_PER_FUNCTION: usize = 256;
 pub const MAX_DEBUG_SYMBOLS_PER_FUNCTION: usize = 8192;
+pub const MAX_SIGNATURE_PARAMETERS_PER_FUNCTION: usize = 4096;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +30,7 @@ pub write_paths: Vec<DecodedAccessPath>,
 pub has_ownership_section: bool,
 pub has_debug_section: bool,
 pub string_table_end_offset: usize,
+pub signature: Option<CallableSignature>,
 pub instr_start_offset: usize, // relative to code_slice
 pub code_slice: &'a [u8], // the full code block for this function
 pub fn decode_semcode_envelope<'a>( bytes: &'a [u8], ) -> Result<(SemcodeHeaderSpec, Vec<DecodedFunctionEnvelope<'a>>), DecodeError> {

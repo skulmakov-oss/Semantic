@@ -61,6 +61,18 @@ pub enum VerificationCode {
     /// instruction boundary or an admitted terminal instruction (`RET`).
     /// Closed loops remain admissible; this code does not imply termination.
     ReachableFunctionFallthrough,
+    /// The function envelope's `SIG0` callable-signature section is absent,
+    /// truncated, or carries an unrecognized parameter-family tag (#1773 /
+    /// FA-09-005). Structurally distinct from `UnsupportedVersion`: the
+    /// header itself is recognized, but this specific function's signature
+    /// record could not be decoded.
+    InvalidSignatureSection,
+    /// An `Opcode::Call` site's `argc` disagrees with its resolved callee's
+    /// canonical parameter count (#1773 / FA-09-005). This is arity
+    /// enforcement only - sm-verify cannot prove a CALL argument register's
+    /// runtime family statically (registers are untyped storage), so family
+    /// mismatches are rejected by the VM before `push_frame` instead.
+    CallArgumentCountMismatch,
 }
 
 #[cfg(feature = "std")]
@@ -337,6 +349,15 @@ pub fn verify_semcode_token_with_quotas(
                         Some(offset),
                         msg,
                     ),
+                    sm_format::semcode_decode::DecodeError::InvalidSignatureSection {
+                        offset,
+                        msg,
+                    } => diag(
+                        VerificationCode::InvalidSignatureSection,
+                        None,
+                        Some(offset),
+                        msg,
+                    ),
                     sm_format::semcode_decode::DecodeError::ResourceLimit { offset, msg } => diag(
                         VerificationCode::ResourceLimitExceeded,
                         None,
@@ -419,9 +440,45 @@ pub fn verify_semcode_token_with_quotas(
         .iter()
         .map(|function| function.verified.name.as_str())
         .collect::<HashSet<_>>();
+    // #1773 (FA-09-005): callee name -> its decoded canonical signature, so
+    // the cross-function pass below can enforce arity. `None` for a known
+    // callee means the artifact's header predates canonical signatures
+    // (`SEMCODE_SIGNATURE_MIN_REVISION`) - nothing to check, matching how
+    // pre-#1773 artifacts already behaved.
+    let signatures_by_name: std::collections::HashMap<
+        &str,
+        &sm_format::semcode_format::CallableSignature,
+    > = decoded_functions
+        .iter()
+        .filter_map(|env| env.signature.as_ref().map(|sig| (env.name.as_str(), sig)))
+        .collect();
     for function in &pending_functions {
-        for (offset, callee, allows_builtin) in &function.call_targets {
+        for (offset, callee, allows_builtin, argc) in &function.call_targets {
             if known_functions.contains(callee.as_str()) {
+                // #1773 (FA-09-005): arity enforcement. Family/runtime-type
+                // enforcement is the VM's responsibility before `push_frame`
+                // (see `validate_call_arguments` in sm-vm) - sm-verify
+                // cannot know a CALL argument register's runtime family
+                // (registers are untyped storage, see the #1773 architecture
+                // checkpoint), so it enforces only what it can prove
+                // statically: parameter count.
+                if let (Some(argc), Some(signature)) =
+                    (argc, signatures_by_name.get(callee.as_str()))
+                {
+                    if *argc != signature.families.len() {
+                        diagnostics.push(diag(
+                            VerificationCode::CallArgumentCountMismatch,
+                            Some(function.verified.name.clone()),
+                            Some(*offset),
+                            format!(
+                                "call to '{}' passes {} argument(s), but its canonical signature declares {} parameter(s)",
+                                callee,
+                                argc,
+                                signature.families.len()
+                            ),
+                        ));
+                    }
+                }
                 continue;
             }
 
@@ -600,6 +657,7 @@ fn verify_function_code(
     let mut instruction_successors = Vec::new();
     let mut jump_targets = Vec::new();
     let mut string_refs = Vec::new();
+    let mut call_argcs = Vec::new();
     let mut max_register: Option<usize> = None;
     let mut used_caps = 0u32;
     while cursor < code.len() {
@@ -660,6 +718,7 @@ fn verify_function_code(
         }
         jump_targets.extend(refs.jump_targets);
         string_refs.extend(refs.string_refs);
+        call_argcs.extend(refs.call_argcs);
         used_caps |= refs.required_capabilities;
         max_register = match (max_register, refs.max_register) {
             (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
@@ -744,6 +803,13 @@ fn verify_function_code(
 
     verify_reachable_control_flow(name, instr_len, &instr_starts, &instruction_successors)?;
 
+    // #1773 (FA-09-005): argc, keyed by the Call instruction's own offset -
+    // only "call target" entries (real `Opcode::Call` sites) ever have an
+    // entry here; "closure function name" entries come from `MakeClosure`
+    // (a static reference check, not a call site with a known argc) and are
+    // deliberately left with `argc: None` below.
+    let call_argcs: std::collections::HashMap<usize, usize> = call_argcs.into_iter().collect();
+
     let mut call_targets = Vec::new();
     for (offset, sid, usage) in string_refs {
         if sid >= string_count {
@@ -755,9 +821,14 @@ fn verify_function_code(
             ));
         }
         match usage {
-            "call target" => call_targets.push((offset, env.strings[sid].clone(), true)),
+            "call target" => call_targets.push((
+                offset,
+                env.strings[sid].clone(),
+                true,
+                call_argcs.get(&offset).copied(),
+            )),
             "closure function name" => {
-                call_targets.push((offset, env.strings[sid].clone(), false));
+                call_targets.push((offset, env.strings[sid].clone(), false, None));
             }
             _ => {}
         }
@@ -1368,6 +1439,11 @@ fn decode_operands(
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated callee string id"))?;
             refs.string_refs.push((offset, sid as usize, "call target"));
             let argc = read_u16_le(code, cursor).map_err(|_| invalid("truncated argc"))? as usize;
+            // #1773 (FA-09-005): recorded alongside the "call target" string
+            // ref above, keyed by the same `offset`, so the cross-function
+            // pass can enforce arity against the callee's canonical
+            // signature without re-decoding operands.
+            refs.call_argcs.push((offset, argc));
             for _ in 0..argc {
                 let arg = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call arg register"))?;
@@ -1476,12 +1552,16 @@ struct OperandRefs {
     string_refs: Vec<(usize, usize, &'static str)>,
     max_register: Option<usize>,
     required_capabilities: u32,
+    // #1773 (FA-09-005): (offset, argc) for each `Opcode::Call` site, keyed
+    // by the same offset as its "call target" string_refs entry.
+    call_argcs: Vec<(usize, usize)>,
 }
 
 #[cfg(feature = "std")]
 struct PendingVerifiedFunction {
     verified: VerifiedFunction,
-    call_targets: Vec<(usize, String, bool)>,
+    // (offset, callee name, allows_builtin, argc for real Call sites)
+    call_targets: Vec<(usize, String, bool, Option<usize>)>,
     has_ownership_section: bool,
 }
 
@@ -1521,7 +1601,8 @@ fn diag(
 mod tests {
     use super::*;
     use sm_format::semcode_format::{
-        read_u16_le, read_u32_le, MAGIC11, MAGIC12, OWNERSHIP_SECTION_TAG,
+        read_u16_le, read_u32_le, CallableValueFamily, MAGIC0, MAGIC10, MAGIC11, MAGIC18, MAGIC19,
+        MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG, SIGNATURE_SECTION_TAG,
     };
     use sm_ir::{
         compile_program_to_semcode, compile_program_to_semcode_with_options_debug,
@@ -1534,6 +1615,7 @@ mod tests {
                 name: "main".to_string(),
                 instrs,
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
@@ -1628,6 +1710,7 @@ mod tests {
                     name: "helper".to_string(),
                     instrs: vec![IrInstr::Ret { src: None }],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
                 IrFunction {
                     name: "main".to_string(),
@@ -1640,6 +1723,7 @@ mod tests {
                         IrInstr::Ret { src: None },
                     ],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
             ],
             false,
@@ -1653,6 +1737,7 @@ mod tests {
                     name: "helper".to_string(),
                     instrs: vec![IrInstr::Ret { src: None }],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
                 IrFunction {
                     name: "main".to_string(),
@@ -1671,6 +1756,7 @@ mod tests {
                         IrInstr::Ret { src: None },
                     ],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
             ],
             false,
@@ -1699,7 +1785,9 @@ mod tests {
         "#;
         let bytes = compile_program_to_semcode(src).expect("compile");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 3);
+        // #1773 (FA-09-005): SEMCOD19/rev20 is now the floor for every
+        // compiled artifact - see the analogous sm-ir comment.
+        assert_eq!(verified.header.rev, 20);
     }
 
     #[test]
@@ -1718,7 +1806,7 @@ mod tests {
         )
         .expect("compile");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 2);
+        assert_eq!(verified.header.rev, 20);
     }
 
     #[test]
@@ -1737,7 +1825,7 @@ mod tests {
         )
         .expect("compile");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 2);
+        assert_eq!(verified.header.rev, 20);
     }
 
     #[test]
@@ -1766,12 +1854,13 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 5);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -1789,12 +1878,13 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 6);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -1810,12 +1900,13 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 7);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -1826,12 +1917,13 @@ mod tests {
                 name: "main".to_string(),
                 instrs: vec![IrInstr::ClockRead { dst: 0 }, IrInstr::Ret { src: None }],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 8);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -1847,7 +1939,7 @@ mod tests {
         "#;
         let bytes = compile_program_to_semcode(src).expect("compile");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 9);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -2095,25 +2187,25 @@ mod tests {
     fn verifier_accepts_ownership_semcode() {
         let bytes = ownership_semcode_bytes();
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 12);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 2);
     }
 
     #[test]
     fn verifier_accepts_record_field_borrow_ownership_semcode() {
         let bytes = record_field_borrow_semcode_bytes();
-        assert_eq!(&bytes[..MAGIC12.len()], &MAGIC12);
+        assert_eq!(&bytes[..MAGIC19.len()], &MAGIC19);
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 13);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 1);
     }
 
     #[test]
     fn verifier_accepts_record_field_write_ownership_semcode() {
         let bytes = record_field_write_semcode_bytes();
-        assert_eq!(&bytes[..MAGIC12.len()], &MAGIC12);
+        assert_eq!(&bytes[..MAGIC19.len()], &MAGIC19);
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 13);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -2138,9 +2230,9 @@ mod tests {
             }
         "#;
         let bytes = compile_program_to_semcode(src).expect("compile");
-        assert_eq!(&bytes[..MAGIC12.len()], b"SEMCOD13");
+        assert_eq!(&bytes[..MAGIC19.len()], b"SEMCOD19");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 14);
+        assert_eq!(verified.header.rev, 20);
         assert_eq!(verified.functions.len(), 2);
     }
 
@@ -2153,7 +2245,19 @@ mod tests {
     #[test]
     fn verifier_rejects_unknown_opcode() {
         let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        let opcode_pos = 8 + 2 + 4 + 4 + 2;
+        // #1773 (FA-09-005): the first opcode byte's absolute offset now
+        // depends on whether a SIG0 section (and, at this revision, OWN0)
+        // precede the instruction stream - located via the real decode
+        // rather than a hand-counted literal, which silently drifted out of
+        // the instruction stream once SIG0 became mandatory.
+        let (_, code_start, _) = function_code_span(&bytes, "main");
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let main = functions
+            .iter()
+            .find(|f| f.name == "main")
+            .expect("main function");
+        let opcode_pos = code_start + main.instr_start_offset;
         bytes[opcode_pos] = 0xff;
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(report.diagnostics[0].code, VerificationCode::UnknownOpcode);
@@ -2414,6 +2518,7 @@ mod tests {
                     name: "helper".to_string(),
                     instrs: vec![IrInstr::Ret { src: None }],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
                 IrFunction {
                     name: "main".to_string(),
@@ -2431,6 +2536,7 @@ mod tests {
                         IrInstr::Ret { src: None },
                     ],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
             ],
             false,
@@ -2453,6 +2559,7 @@ mod tests {
                     name: "helper".to_string(),
                     instrs: vec![IrInstr::Ret { src: None }],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
                 IrFunction {
                     name: "main".to_string(),
@@ -2470,6 +2577,7 @@ mod tests {
                         IrInstr::Ret { src: None },
                     ],
                     ownership_events: Vec::new(),
+                    params: Vec::new(),
                 },
             ],
             false,
@@ -2510,7 +2618,7 @@ mod tests {
     // silently choosing one.
     #[test]
     fn verifier_rejects_ambiguous_dbg0_tupleget_collision() {
-        let bytes = emit_ir_to_semcode(
+        let emitted = emit_ir_to_semcode(
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -2524,14 +2632,45 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
 
-        // B: byte identity - the emitted instruction stream literally spells
-        // DBG0 where the real TupleGet begins (string table is empty: a
-        // bare 2-byte count=0, so the collision starts at code_slice[2]).
+        // #1773 (FA-09-005): `emit_ir_to_semcode` now unconditionally
+        // targets SEMCOD19+ (mandatory OWN0 + SIG0 sections), which places
+        // real, correctly-tagged sections between the string table and the
+        // instruction stream - closing off exactly this collision site for
+        // any artifact the current emitter can produce (the DBG0 sniff runs
+        // once, immediately after the string table, and now finds a real
+        // "OWN0" tag there instead of the TupleGet's colliding bytes). The
+        // #1731 vulnerability this test proves closed remains real for
+        // pre-#1732 header revisions (V0-V10, no mandatory OWN0), so this
+        // rebuilds the bare `[string table][instruction stream]` envelope
+        // shape those headers produce - string table and instruction-stream
+        // bytes taken verbatim from the real emission above, only the
+        // now-mandatory OWN0/SIG0 sections excised - to keep proving the
+        // fix holds for every artifact shape the verifier must still admit.
+        let (_, emitted_functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&emitted).expect("decode");
+        let emitted_env = &emitted_functions[0];
+        let string_table = &emitted_env.code_slice[..2];
+        let instr_stream = &emitted_env.code_slice[emitted_env.instr_start_offset..];
+        let mut code = Vec::new();
+        code.extend_from_slice(string_table);
+        code.extend_from_slice(instr_stream);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC0);
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(b"main");
+        bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&code);
+
+        // B: byte identity - the reconstructed instruction stream literally
+        // spells DBG0 where the real TupleGet begins (string table is
+        // empty: a bare 2-byte count=0, so the collision starts at
+        // code_slice[2]).
         let (_, functions) =
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let env = &functions[0];
@@ -2570,6 +2709,7 @@ mod tests {
                 name: "main".to_string(),
                 instrs: vec![IrInstr::Ret { src: None }],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             true,
         )
@@ -2597,6 +2737,7 @@ mod tests {
                     IrInstr::Ret { src: Some(2) },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             true,
         )
@@ -2644,6 +2785,7 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             true,
         )
@@ -2669,6 +2811,7 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             true,
         )
@@ -2699,6 +2842,7 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             true,
         )
@@ -2729,6 +2873,7 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             true,
         )
@@ -2758,6 +2903,7 @@ mod tests {
                 name: "main".to_string(),
                 instrs: vec![IrInstr::Ret { src: None }],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             true,
         )
@@ -2804,7 +2950,7 @@ mod tests {
     // needs the alternative reading to be genuinely shape-complete.
     #[test]
     fn verifier_rejects_ambiguous_framing_even_when_alternate_reading_has_non_canonical_operand() {
-        let mut bytes = emit_ir_to_semcode(
+        let emitted = emit_ir_to_semcode(
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -2817,10 +2963,28 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
+
+        // #1773 (FA-09-005): rebuild the bare `[string table][instruction
+        // stream]` envelope shape (no mandatory OWN0/SIG0) so the DBG0 sniff
+        // lands on the TupleGet collision again - see the identical comment
+        // on `verifier_rejects_ambiguous_dbg0_tupleget_collision` above.
+        let (_, emitted_functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&emitted).expect("decode");
+        let emitted_env = &emitted_functions[0];
+        let mut code = Vec::new();
+        code.extend_from_slice(&emitted_env.code_slice[..2]);
+        code.extend_from_slice(&emitted_env.code_slice[emitted_env.instr_start_offset..]);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC0);
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(b"main");
+        bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&code);
 
         let (_, code_start, _) = function_code_span(&bytes, "main");
         let (_, functions) =
@@ -2862,7 +3026,7 @@ mod tests {
     // follows", and one item follows).
     #[test]
     fn verifier_rejects_ambiguous_framing_with_non_canonical_maketuple_arity() {
-        let bytes = emit_ir_to_semcode(
+        let emitted = emit_ir_to_semcode(
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -2878,10 +3042,27 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
+
+        // #1773 (FA-09-005): rebuild the bare `[string table][instruction
+        // stream]` envelope shape - see the identical comment on
+        // `verifier_rejects_ambiguous_dbg0_tupleget_collision` above.
+        let (_, emitted_functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(&emitted).expect("decode");
+        let emitted_env = &emitted_functions[0];
+        let mut code = Vec::new();
+        code.extend_from_slice(&emitted_env.code_slice[..2]);
+        code.extend_from_slice(&emitted_env.code_slice[emitted_env.instr_start_offset..]);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC0);
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(b"main");
+        bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&code);
 
         let (_, functions) =
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
@@ -2911,6 +3092,83 @@ mod tests {
             report.diagnostics[0].code,
             VerificationCode::UnknownCallTarget
         );
+    }
+
+    // #1773 (FA-09-005) permanent regressions: sm-verify's arity
+    // enforcement. Built at the IR level (not the source front-end) because
+    // the front-end always emits a call site whose argc matches the
+    // callee's real declared arity - a genuine mismatch can only arise from
+    // a malformed/adversarial artifact, exactly what the verifier's
+    // admission gate must catch.
+
+    #[test]
+    fn verifier_rejects_call_argument_count_mismatch() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: vec![CallableValueFamily::I32, CallableValueFamily::I32],
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadI32 { dst: 0, val: 1 },
+                        IrInstr::Call {
+                            dst: None,
+                            name: "callee".to_string(),
+                            args: vec![0],
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+
+        let report = verify_semcode(&bytes).expect_err("must reject argc/arity mismatch");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::CallArgumentCountMismatch
+        );
+    }
+
+    #[test]
+    fn verifier_accepts_call_matching_argument_count() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: vec![CallableValueFamily::I32, CallableValueFamily::I32],
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadI32 { dst: 0, val: 1 },
+                        IrInstr::LoadI32 { dst: 1, val: 2 },
+                        IrInstr::Call {
+                            dst: None,
+                            name: "callee".to_string(),
+                            args: vec![0, 1],
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+
+        let verified = verify_semcode(&bytes).expect("matching argc must verify");
+        assert_eq!(verified.functions.len(), 2);
     }
 
     #[test]
@@ -2952,6 +3210,7 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
@@ -2972,8 +3231,8 @@ mod tests {
                 return;
             }
         "#;
-        let mut bytes = compile_program_to_semcode(src).expect("compile");
-        bytes[7] = b'0';
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC0);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -2983,8 +3242,15 @@ mod tests {
 
     #[test]
     fn verifier_rejects_missing_ownership_section_under_v11_capabilities() {
-        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        bytes[..MAGIC11.len()].copy_from_slice(&MAGIC11);
+        // #1773 (FA-09-005): hand-built directly under MAGIC11 with no OWN0
+        // section at all - `compile_program_to_semcode`'s output now always
+        // includes a real (if empty) OWN0 section (mandatory once its own
+        // chosen header reaches V11's floor), so stripping only the SIG0
+        // span (as `downgrade_header_stripping_signature` does for the
+        // capability-downgrade tests above) would leave OWN0 genuinely
+        // present here - the opposite of what this test needs to prove.
+        let new_code = [Opcode::Ret as u8, 0];
+        let bytes = minimal_semcode_bytes_with_header(MAGIC11, "main", &new_code);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -3153,8 +3419,8 @@ mod tests {
 
     #[test]
     fn verifier_rejects_record_field_payload_under_v11_capabilities() {
-        let mut bytes = record_field_borrow_semcode_bytes();
-        bytes[..MAGIC11.len()].copy_from_slice(&MAGIC11);
+        let bytes = record_field_borrow_semcode_bytes();
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC11);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -3164,8 +3430,8 @@ mod tests {
 
     #[test]
     fn verifier_rejects_ownership_section_under_v10_capabilities() {
-        let mut bytes = ownership_semcode_bytes();
-        bytes[7] = b'0';
+        let bytes = ownership_semcode_bytes();
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC10);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -3175,7 +3441,7 @@ mod tests {
 
     #[test]
     fn verifier_rejects_state_query_under_v3_capabilities() {
-        let mut bytes = emit_ir_to_semcode(
+        let bytes = emit_ir_to_semcode(
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -3186,11 +3452,12 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
-        bytes[7] = b'3';
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC3);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -3200,7 +3467,7 @@ mod tests {
 
     #[test]
     fn verifier_rejects_state_update_under_v4_capabilities() {
-        let mut bytes = emit_ir_to_semcode(
+        let bytes = emit_ir_to_semcode(
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -3212,11 +3479,12 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
-        bytes[7] = b'4';
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC4);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -3226,7 +3494,7 @@ mod tests {
 
     #[test]
     fn verifier_rejects_event_post_under_v5_capabilities() {
-        let mut bytes = emit_ir_to_semcode(
+        let bytes = emit_ir_to_semcode(
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
@@ -3236,11 +3504,12 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
-        bytes[7] = b'5';
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC5);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -3250,16 +3519,17 @@ mod tests {
 
     #[test]
     fn verifier_rejects_clock_read_under_v6_capabilities() {
-        let mut bytes = emit_ir_to_semcode(
+        let bytes = emit_ir_to_semcode(
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![IrInstr::ClockRead { dst: 0 }, IrInstr::Ret { src: None }],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
-        bytes[7] = b'6';
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC6);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -3277,8 +3547,8 @@ mod tests {
                 return;
             }
         "#;
-        let mut bytes = compile_program_to_semcode(src).expect("compile");
-        bytes[7] = b'7';
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC7);
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
             report.diagnostics[0].code,
@@ -3399,6 +3669,63 @@ mod tests {
         cursor
     }
 
+    /// #1773 (FA-09-005): rebuilds `bytes` under `target_magic`, stripping
+    /// each function's `SIG0` section along the way. Every artifact produced
+    /// by `compile_program_to_semcode`/`emit_ir_to_semcode` now
+    /// unconditionally carries a `SIG0` section (the new floor is
+    /// `SEMCODE_SIGNATURE_MIN_REVISION`), so simply overwriting the header
+    /// magic bytes to simulate an older revision - the technique several
+    /// pre-#1773 tests in this module used - leaves a structurally
+    /// inconsistent artifact: a header claiming a revision that structurally
+    /// cannot carry `SIG0`, over a body that still does. This reconstructs
+    /// what the body would genuinely have looked like had it been compiled
+    /// under an older header, matching real pre-#1773 artifact shape.
+    fn downgrade_header_stripping_signature(bytes: &[u8], target_magic: [u8; 8]) -> Vec<u8> {
+        let (_, functions) = sm_format::semcode_decode::decode_semcode_envelope(bytes)
+            .expect("decode current bytes");
+        let mut out = Vec::new();
+        out.extend_from_slice(&target_magic);
+        for f in &functions {
+            let sig0_len = f
+                .signature
+                .as_ref()
+                .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
+                .unwrap_or(0);
+            let sig0_start = f.instr_start_offset - sig0_len;
+            let mut code = Vec::new();
+            code.extend_from_slice(&f.code_slice[..sig0_start]);
+            code.extend_from_slice(&f.code_slice[f.instr_start_offset..]);
+            let name_bytes = f.name.as_bytes();
+            out.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+            out.extend_from_slice(name_bytes);
+            out.extend_from_slice(&(code.len() as u32).to_le_bytes());
+            out.extend_from_slice(&code);
+        }
+        out
+    }
+
+    /// #1773 (FA-09-005): a minimal, fully hand-built artifact - explicit
+    /// header magic, empty string table, caller-supplied raw instruction
+    /// bytes - with no OWN0/SIG0 section at all. Several pre-#1773 tests
+    /// patched `compile_program_to_semcode`'s output at a hand-counted byte
+    /// offset assuming the instruction stream began immediately after a
+    /// bare empty string table; that assumption broke once every compiled
+    /// artifact unconditionally gained OWN0+SIG0 sections. This sidesteps
+    /// the compiler entirely for tests that need full, explicit control
+    /// over byte layout under an arbitrary (possibly pre-#1732) header.
+    fn minimal_semcode_bytes_with_header(magic: [u8; 8], name: &str, instrs: &[u8]) -> Vec<u8> {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes()); // empty string table
+        code.extend_from_slice(instrs);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&magic);
+        bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&code);
+        bytes
+    }
+
     fn ownership_section_offset(code: &[u8]) -> usize {
         let cursor = skip_string_table(code);
         assert!(cursor + OWNERSHIP_SECTION_TAG.len() <= code.len());
@@ -3477,6 +3804,7 @@ mod tests {
                 name: "helper".to_string(),
                 instrs: vec![IrInstr::Ret { src: None }],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
@@ -3557,6 +3885,7 @@ mod tests {
                 name: "helper".to_string(),
                 instrs: vec![IrInstr::Ret { src: None }],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
@@ -3578,6 +3907,7 @@ mod tests {
                 name: "helper".to_string(),
                 instrs: vec![IrInstr::Ret { src: None }],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
@@ -3594,6 +3924,7 @@ mod tests {
                 name: "helper".to_string(),
                 instrs: vec![IrInstr::Ret { src: None }],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
@@ -3626,10 +3957,12 @@ mod tests {
     // rev 19), so admission must now fail closed.
     #[test]
     fn verifier_rejects_qtruth_opcodes_under_baseline_header() {
-        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        let code_len_pos = 8 + 2 + 4;
-        let opcode_pos = code_len_pos + 4 + 2;
-
+        // #1773 (FA-09-005): hand-built directly under MAGIC0 rather than
+        // patching `compile_program_to_semcode`'s output - every compiled
+        // artifact now unconditionally carries OWN0+SIG0 sections, so a
+        // hand-counted byte offset assuming the instruction stream starts
+        // right after a bare string table no longer lands on real opcode
+        // bytes. See `minimal_semcode_bytes_with_header`'s doc comment.
         let mut new_code = Vec::new();
         // QTruthAnd (0x17)
         new_code.push(0x17);
@@ -3654,10 +3987,7 @@ mod tests {
         new_code.push(Opcode::Ret as u8);
         new_code.push(0);
 
-        bytes.splice(opcode_pos..opcode_pos + 2, new_code.iter().copied());
-
-        let new_code_len = 2 + new_code.len();
-        bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
+        let bytes = minimal_semcode_bytes_with_header(MAGIC0, "main", &new_code);
 
         assert_eq!(&bytes[0..8], b"SEMCODE0");
         let report = verify_semcode(&bytes).expect_err("must reject QTruth under baseline header");
@@ -3673,10 +4003,8 @@ mod tests {
     // comparison, not a blanket QTruth rejection.
     #[test]
     fn verifier_accepts_qtruth_opcodes_under_semcod18_header() {
-        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
-        bytes[0..8].copy_from_slice(b"SEMCOD18");
-        let code_len_pos = 8 + 2 + 4;
-        let opcode_pos = code_len_pos + 4 + 2;
+        // #1773 (FA-09-005): hand-built directly under MAGIC18 - see the
+        // comment on `verifier_rejects_qtruth_opcodes_under_baseline_header`.
 
         // SEMCOD18 carries CAP_OWNERSHIP_PATHS (inherited from SEMCOD11+),
         // which requires a present (possibly empty) OWN0 section.
@@ -3701,9 +4029,7 @@ mod tests {
         new_code.push(Opcode::Ret as u8);
         new_code.push(0);
 
-        bytes.splice(opcode_pos..opcode_pos + 2, new_code.iter().copied());
-        let new_code_len = 2 + new_code.len();
-        bytes[code_len_pos..code_len_pos + 4].copy_from_slice(&(new_code_len as u32).to_le_bytes());
+        let bytes = minimal_semcode_bytes_with_header(MAGIC18, "main", &new_code);
 
         let verified = verify_semcode(&bytes).expect("QTruth under SEMCOD18 must verify");
         assert_eq!(verified.functions.len(), 1);
@@ -3711,15 +4037,19 @@ mod tests {
 
     #[test]
     fn verifier_rejects_truncated_qtruth_opcodes() {
-        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        // #1773 (FA-09-005): hand-built directly under MAGIC18 - see the
+        // comment on `verifier_rejects_qtruth_opcodes_under_baseline_header`.
         // Use SEMCOD18 (QTruth's actual minimum header) so this test
         // isolates truncation handling from the #1732 header-revision gate
         // - both are legitimate rejections, but this test is specifically
         // about truncated operand bytes, not about the header revision.
-        bytes[0..8].copy_from_slice(b"SEMCOD18");
-        let opcode_pos = 8 + 2 + 4 + 4 + 2;
-
-        bytes[opcode_pos] = 0x17; // QTruthAnd (requires 4 operands bytes, only 1 left)
+        // SEMCOD18 carries CAP_OWNERSHIP_PATHS, which requires a present
+        // (possibly empty) OWN0 section.
+        let mut new_code = Vec::new();
+        new_code.extend_from_slice(b"OWN0");
+        new_code.extend_from_slice(&0u16.to_le_bytes());
+        new_code.push(0x17); // QTruthAnd (requires 4 operand bytes, zero left)
+        let bytes = minimal_semcode_bytes_with_header(MAGIC18, "main", &new_code);
 
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
@@ -3737,11 +4067,11 @@ mod tests {
     // contract for that code.
     #[test]
     fn verifier_rejects_truncated_qtruth_opcodes_under_baseline_header_as_operand_error() {
-        let mut bytes = compile_program_to_semcode("fn main() { return; }").expect("compile");
+        // #1773 (FA-09-005): hand-built directly under MAGIC0 - see the
+        // comment on `verifier_rejects_qtruth_opcodes_under_baseline_header`.
+        let new_code = [0x17u8]; // QTruthAnd (requires 4 operand bytes, zero left)
+        let bytes = minimal_semcode_bytes_with_header(MAGIC0, "main", &new_code);
         assert_eq!(&bytes[0..8], b"SEMCODE0");
-        let opcode_pos = 8 + 2 + 4 + 4 + 2;
-
-        bytes[opcode_pos] = 0x17; // QTruthAnd (requires 4 operand bytes, only 1 left)
 
         let report = verify_semcode(&bytes).expect_err("must reject");
         assert_eq!(
@@ -3782,20 +4112,27 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
-        assert_eq!(&bytes[0..8], b"SEMCODE0");
+        // #1773 (FA-09-005): SEMCOD19/rev20 is now the floor for every
+        // emitted artifact regardless of which opcodes it uses (was
+        // SEMCODE0/rev1, this program's own promotion floor) - see the
+        // analogous sm-ir comment.
+        assert_eq!(&bytes[0..8], b"SEMCOD19");
         let verified = verify_semcode(&bytes).expect("baseline logic opcodes must verify");
-        assert_eq!(verified.header.rev, 1);
+        assert_eq!(verified.header.rev, 20);
     }
 
     // #1732 regression matrix (6): a program mixing QTruth with an
     // unrelated capability-gated feature (here, f64 math, which alone
     // would only require SEMCODE1) must select the MAXIMUM required
-    // header revision (SEMCOD18, rev 19), not whichever feature's
-    // if/else-if branch happens to match first.
+    // header revision - originally SEMCOD18/rev19, now SEMCOD19/rev20
+    // since #1773 (FA-09-005) raised the floor for every emitted artifact
+    // regardless of opcodes used - not whichever feature's if/else-if
+    // branch happens to match first.
     #[test]
     fn emitter_selects_maximum_required_revision_for_mixed_program() {
         let bytes = emit_ir_to_semcode(
@@ -3811,13 +4148,14 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
-        assert_eq!(&bytes[0..8], b"SEMCOD18");
+        assert_eq!(&bytes[0..8], b"SEMCOD19");
         let verified = verify_semcode(&bytes).expect("mixed QTruth+f64 program must verify");
-        assert_eq!(verified.header.rev, 19);
+        assert_eq!(verified.header.rev, 20);
     }
 
     // #1732 regression matrix (3): the canonical emitter itself must choose
@@ -3839,13 +4177,17 @@ mod tests {
                     IrInstr::Ret { src: None },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
-        assert_eq!(&bytes[0..8], b"SEMCOD18");
+        // #1773 (FA-09-005): SEMCOD19/rev20 is now the floor (was SEMCOD18/
+        // rev19, QTruth's own promotion floor) - see the comment on
+        // `emitter_selects_maximum_required_revision_for_mixed_program`.
+        assert_eq!(&bytes[0..8], b"SEMCOD19");
         let verified = verify_semcode(&bytes).expect("emitted QTruth program must verify");
-        assert_eq!(verified.header.rev, 19);
+        assert_eq!(verified.header.rev, 20);
     }
 
     // #1751 (FA-07-011): `pending_functions.len()` is a static count of
@@ -3901,6 +4243,7 @@ mod tests {
             name: name.to_string(),
             instrs,
             ownership_events: Vec::new(),
+            params: Vec::new(),
         }
     }
 

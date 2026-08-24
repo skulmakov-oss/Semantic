@@ -9,10 +9,10 @@
   "expected_status": "accept",
   "source_hash": "b674e2eb54322422",
   "ir_hash": "f40e40b30590a1ac",
-  "semcode_hash": "35c781ffe8a81c83",
+  "semcode_hash": "d08f5423564f175f",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "c407777f917b26bd",
+  "expected_output_hash": "f32440f653970467",
   "notes": "Selected basic ADT/match trace only; no broader pattern-matching freeze."
 }

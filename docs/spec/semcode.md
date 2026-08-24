@@ -274,6 +274,59 @@ Discipline rules:
 - does not claim any change to the existing lattice `QAnd`/`QOr`/`QNot`/
   `QImpl` opcodes, which remain baseline and unaffected
 
+`SEMCOD19`
+
+- promoted contract used unconditionally by the current emitter for every
+  compiled artifact (#1773 / FA-09-005), independent of which opcodes the
+  program actually uses - every function envelope under this revision
+  carries a canonical callable-signature record, so the revision floor
+  applies uniformly rather than being promoted per-opcode like the
+  revisions above
+- carries forward the same capability envelope as `SEMCOD18` unchanged - no
+  new capability bit is introduced; the gap this closes is a missing
+  version-identity gate (every function's signature is now structurally
+  present and provable), not a missing capability
+- keeps `SEMCODE0..18` fixed for older artifacts: an artifact under any
+  older header structurally cannot carry a `SIG0` section at all, and its
+  functions decode with `signature: None` - canonical typed callable
+  execution then has no contract to prove for that artifact and cannot
+  offer the same trusted-callable guarantee (see
+  [`verifier.md`](verifier.md#callable-arity-enforcement) and
+  [`vm.md`](vm.md#callable-runtime-family-enforcement))
+
+### Callable Signature (`SIG0`)
+
+Every function envelope under `SEMCOD19` or newer carries a `SIG0` section,
+placed immediately after the (also now-mandatory) `OWN0` section and before
+the instruction stream:
+
+- 4-byte tag `SIG0`
+- `u16` little-endian parameter count
+- one family-tag byte per parameter, in declaration order
+
+The parameter count and the number of family-tag bytes are the same field by
+construction - there is no separate, independently-desyncable count. Each
+family tag is one of the 14 executable runtime families (`Quad`, `Bool`,
+`Text`, `Sequence`, `Map`, `Closure`, `I32`, `U32`, `Fx`, `F64`, `Tuple`,
+`Record`, `Adt`, `Unit`); tag `0` is deliberately never assigned, so a
+zero-initialized or truncated buffer never decodes as a valid family. A
+malformed, truncated, or unknown-tag `SIG0` section is a deterministic
+decode rejection.
+
+Unlike `DBG0`/`OWN0`, `SIG0` presence is never content-sniffed - it is
+derived purely from the artifact's header revision
+(`SEMCODE_SIGNATURE_MIN_REVISION`), on both the encode and decode side. This
+is a deliberate difference: sniffing would reopen the `TupleGet`/`DBG0` byte
+collision class (#1731) for a new tag, and a mandatory, revision-derived
+section has no ambiguous alternative reading to defend against.
+
+This signature originates at the function's typed source definition and
+survives unchanged through IR and SemCode emission - see
+[`ir.md`](ir.md#current-ir-shapes) for where it is derived, and
+[`verifier.md`](verifier.md#callable-arity-enforcement) /
+[`vm.md`](vm.md#callable-runtime-family-enforcement) for how it is enforced
+at a callee before execution.
+
 ## Opcode Vocabulary And Header Identity
 
 SemCode header identity constrains the executable opcode vocabulary. Every

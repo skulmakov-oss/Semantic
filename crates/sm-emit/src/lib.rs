@@ -77,7 +77,9 @@ mod tests {
     fn sm_emit_smoke_compile_to_semcode() {
         let src = "fn main() { return; }";
         let bytes = compile_program_to_semcode(src).expect("emit");
-        assert_eq!(&bytes[0..8], &MAGIC0);
+        // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+        // artifact regardless of which opcodes it uses (was SEMCODE0).
+        assert_eq!(&bytes[0..8], &MAGIC19);
     }
 
     #[test]
@@ -97,11 +99,13 @@ mod tests {
         let bytes_again = compile_program_to_semcode(src).expect("emit");
 
         assert_eq!(bytes, bytes_again);
-        assert_eq!(&bytes[0..8], &MAGIC11);
+        // #1773 (FA-09-005): SEMCOD19/rev20 is now the floor (was
+        // SEMCOD11/rev12).
+        assert_eq!(&bytes[0..8], &MAGIC19);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 12);
+        assert_eq!(spec.rev, 20);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
 
         let code = function_code(&bytes, "main");
@@ -162,11 +166,11 @@ mod tests {
         let bytes_again = compile_program_to_semcode(src).expect("emit");
 
         assert_eq!(bytes, bytes_again);
-        assert_eq!(&bytes[0..8], &MAGIC12);
+        assert_eq!(&bytes[0..8], &MAGIC19);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 13);
+        assert_eq!(spec.rev, 20);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_FIELD_PATHS, 0);
 
@@ -213,11 +217,11 @@ mod tests {
         let bytes_again = compile_program_to_semcode(src).expect("emit");
 
         assert_eq!(bytes, bytes_again);
-        assert_eq!(&bytes[0..8], &MAGIC12);
+        assert_eq!(&bytes[0..8], &MAGIC19);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 13);
+        assert_eq!(spec.rev, 20);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_PATHS, 0);
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_FIELD_PATHS, 0);
 
@@ -258,11 +262,11 @@ mod tests {
         let bytes_again = compile_program_to_semcode(src).expect("emit");
 
         assert_eq!(bytes, bytes_again);
-        assert_eq!(&bytes[0..8], &MAGIC13);
+        assert_eq!(&bytes[0..8], &MAGIC19);
         let mut magic = [0u8; 8];
         magic.copy_from_slice(&bytes[0..8]);
         let spec = header_spec_from_magic(&magic).expect("known header");
-        assert_eq!(spec.rev, 14);
+        assert_eq!(spec.rev, 20);
         assert_ne!(spec.capabilities & CAP_SEQUENCE_VALUES, 0);
         assert_ne!(spec.capabilities & CAP_SEQUENCE_ITERATION, 0);
 

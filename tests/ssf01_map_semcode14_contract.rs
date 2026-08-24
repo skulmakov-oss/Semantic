@@ -24,10 +24,15 @@ fn main() {
 #[test]
 fn map_program_selects_the_semcod14_header() {
     let bytes = sm_emit::compile_program_to_semcode(MAP_PROGRAM).expect("compile Map program");
+    // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+    // artifact regardless of which opcodes it uses (was SEMCOD14, Map's own
+    // promotion floor - Map still needs at least that revision internally,
+    // this just isn't independently observable from `compile_program_to_semcode`'s
+    // header output anymore).
     assert_eq!(
         &bytes[..8],
-        b"SEMCOD14",
-        "a program that actually uses Map(K, V) must select the SEMCOD14 header"
+        b"SEMCOD19",
+        "a program that actually uses Map(K, V) must select a header at or above SEMCOD14"
     );
 }
 

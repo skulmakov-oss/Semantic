@@ -9,10 +9,10 @@
   "expected_status": "accept",
   "source_hash": "7dd16913eee5d7ee",
   "ir_hash": "aa750173e9bbe47f",
-  "semcode_hash": "ddba0b30bdabfdf7",
+  "semcode_hash": "0a866dcd56462717",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "7da46547c025309f",
+  "expected_output_hash": "596e83cf71af371d",
   "notes": "Selected assert helper boundary only; no universal to_text or debug_render widening."
 }

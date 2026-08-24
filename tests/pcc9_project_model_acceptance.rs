@@ -331,11 +331,13 @@ fn assert_artifact_only_command_rejects_project_root_input(
 fn assert_verify_accepts_project_root_input(dir: &std::path::Path, context: &str) {
     let absolute = cli_command_project_root_output("verify", dir, context);
     let dot = cli_command_project_root_output_dot("verify", dir, context);
+    // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+    // artifact regardless of which opcodes it uses (was SEMCODE0).
     assert!(
-        absolute.contains("header=SEMCODE0"),
+        absolute.contains("header=SEMCOD19"),
         "{context}: {absolute}"
     );
-    assert!(dot.contains("header=SEMCODE0"), "{context}: {dot}");
+    assert!(dot.contains("header=SEMCOD19"), "{context}: {dot}");
     assert_no_semcode_artifacts(dir, context);
 }
 
