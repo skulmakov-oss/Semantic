@@ -841,27 +841,31 @@ pub fn run_verified_entry_semcode_with_config(
 
 /// Canonical verified function invocation path with arguments and structured return value.
 ///
-/// Requires a `VerifiedEntrySemCode` token ensuring bytecode verification has passed.
+/// Requires a `VerifiedEntrySemCode` token ensuring bytecode verification has
+/// passed. The execution target is `token.entry()` -- the entry this token
+/// was resolved against -- and is not independently selectable. Possession
+/// of a token bound to one function must not authorize executing a
+/// different function from the same verified artifact (#1772).
 pub fn run_verified_function_semcode_with_args(
     token: &VerifiedEntrySemCode<'_, '_>,
-    func_name: &str,
     args: Vec<Value>,
 ) -> Result<Value, RuntimeError> {
     run_verified_function_semcode_with_args_and_config(
         token,
-        func_name,
         args,
         ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
     )
 }
 
+/// See [`run_verified_function_semcode_with_args`]. The execution target is
+/// `token.entry()`, not independently selectable (#1772).
 pub fn run_verified_function_semcode_with_args_and_config(
     token: &VerifiedEntrySemCode<'_, '_>,
-    func_name: &str,
     args: Vec<Value>,
     config: ExecutionConfig,
 ) -> Result<Value, RuntimeError> {
     let program = prepare_verified_execution(token)?;
+    let func_name = token.entry();
     if !program.functions.contains_key(func_name) {
         return Err(RuntimeError::UnknownFunction(func_name.to_string()));
     }
@@ -5740,7 +5744,7 @@ mod tests {
     fn run_map_get_test_program(bytes: &[u8]) -> Result<Value, RuntimeError> {
         let token = verify_semcode_token(bytes).expect("verifier must accept: default_reg is a legal in-budget register reference regardless of physical materialization");
         let entry = token.require_entry("main").expect("entry");
-        run_verified_function_semcode_with_args(&entry, "main", vec![])
+        run_verified_function_semcode_with_args(&entry, vec![])
     }
 
     /// A5.1: missing key + valid initialized default register -> exact
@@ -5947,7 +5951,7 @@ mod tests {
         let token = verify_semcode_token(&bytes)
             .expect("verifier currently has no definite-assignment proof (#1756) and must accept");
         let entry = token.require_entry("main").expect("entry");
-        let err = run_verified_function_semcode_with_args(&entry, "main", vec![])
+        let err = run_verified_function_semcode_with_args(&entry, vec![])
             .expect_err("VM must independently reject the undefined read");
         assert_eq!(
             err,
@@ -5971,7 +5975,7 @@ mod tests {
         }]);
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("main").expect("entry");
-        let err = run_verified_function_semcode_with_args(&entry, "main", vec![])
+        let err = run_verified_function_semcode_with_args(&entry, vec![])
             .expect_err("gap register must remain uninitialized");
         assert_eq!(
             err,
@@ -6003,7 +6007,7 @@ mod tests {
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("main").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "main", vec![]).expect("run");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
         assert_eq!(res, Value::Unit);
     }
 
@@ -6018,13 +6022,18 @@ mod tests {
             ret_only_function("read_r1", Some(1)),
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
-        let entry = token.require_entry("main").expect("entry");
 
-        let ok = run_verified_function_semcode_with_args(&entry, "read_r0", vec![Value::I32(42)])
+        // Each target function gets its own entry-bound token (#1772: the
+        // execution target is always token.entry(), never an independent
+        // string), so this test resolves "read_r0" and "read_r1" separately
+        // rather than reusing one token across two different targets.
+        let entry_r0 = token.require_entry("read_r0").expect("entry read_r0");
+        let ok = run_verified_function_semcode_with_args(&entry_r0, vec![Value::I32(42)])
             .expect("supplied arg register must be defined");
         assert_eq!(ok, Value::I32(42));
 
-        let err = run_verified_function_semcode_with_args(&entry, "read_r1", vec![Value::I32(42)])
+        let entry_r1 = token.require_entry("read_r1").expect("entry read_r1");
+        let err = run_verified_function_semcode_with_args(&entry_r1, vec![Value::I32(42)])
             .expect_err("unsupplied sibling register must not be magically defined");
         assert_eq!(
             err,
@@ -6042,14 +6051,17 @@ mod tests {
             ret_only_function("read_r2", Some(2)),
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
-        let entry = token.require_entry("main").expect("entry");
         let args = vec![Value::I32(1), Value::I32(2)];
 
-        let ok = run_verified_function_semcode_with_args(&entry, "read_r1", args.clone())
+        // As above (#1772): resolve each target function's own entry-bound
+        // token rather than reusing one token across two different targets.
+        let entry_r1 = token.require_entry("read_r1").expect("entry read_r1");
+        let ok = run_verified_function_semcode_with_args(&entry_r1, args.clone())
             .expect("second supplied arg register must be defined");
         assert_eq!(ok, Value::I32(2));
 
-        let err = run_verified_function_semcode_with_args(&entry, "read_r2", args)
+        let entry_r2 = token.require_entry("read_r2").expect("entry read_r2");
+        let err = run_verified_function_semcode_with_args(&entry_r2, args)
             .expect_err("register past the supplied argument count must be uninitialized");
         assert_eq!(
             err,
@@ -6078,7 +6090,7 @@ mod tests {
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("main").expect("entry");
-        let err = run_verified_function_semcode_with_args(&entry, "main", vec![])
+        let err = run_verified_function_semcode_with_args(&entry, vec![])
             .expect_err("no-dst call must not define r7");
         assert_eq!(
             err,
@@ -6113,9 +6125,140 @@ mod tests {
         ]);
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("main").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "main", vec![]).expect("run");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
         assert_eq!(res, Value::I32(77));
     }
+
+    // --- #1772 (FA-09-004, umbrella #1617) regression matrix ---------------
+    //
+    // `run_verified_function_semcode_with_args[_and_config]` used to accept
+    // an independent `func_name: &str` alongside the entry-bound token,
+    // letting a token resolved for "a_fn" execute an unrelated "b_fn" from
+    // the same verified artifact. Confirmed RED against pre-fix code before
+    // this fix (a temporary probe -- since removed, as its call shape no
+    // longer compiles -- called `run_verified_function_semcode_with_args
+    // (&entry_a, "b_fn", vec![])` and observed `Ok(Value::I32(222))`,
+    // proving b_fn's body genuinely executed). `func_name` is now removed
+    // entirely: the execution target is always `token.entry()`, making the
+    // divergence structurally impossible to express, not merely rejected
+    // at runtime.
+
+    fn build_ab_sentinel_program() -> Vec<u8> {
+        emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "a_fn".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadI32 { dst: 0, val: 111 },
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                },
+                IrFunction {
+                    name: "b_fn".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadI32 { dst: 0, val: 222 },
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit")
+    }
+
+    /// Item 1: token(A) + request A -> A executes.
+    #[test]
+    fn entry_token_a_executes_a() {
+        let bytes = build_ab_sentinel_program();
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry_a = token.require_entry("a_fn").expect("entry a_fn");
+        let res = run_verified_function_semcode_with_args(&entry_a, vec![]).expect("run");
+        assert_eq!(res, Value::I32(111));
+    }
+
+    /// Item 2: token(A) + "request B" is no longer expressible at all --
+    /// `func_name` does not exist as a parameter on this API. The bug is
+    /// eliminated by construction, not by a runtime check.
+    #[test]
+    fn entry_token_execution_target_is_not_independently_selectable() {
+        // This test's existence and the crate's own successful compilation
+        // ARE the proof: there is no `func_name` parameter through which a
+        // caller holding `entry_a` (bound to "a_fn") could name "b_fn".
+        let bytes = build_ab_sentinel_program();
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry_a = token.require_entry("a_fn").expect("entry a_fn");
+        let res = run_verified_function_semcode_with_args(&entry_a, vec![]).expect("run");
+        assert_eq!(
+            res,
+            Value::I32(111),
+            "the only reachable execution target for entry_a is a_fn"
+        );
+    }
+
+    /// Item 3: independently resolving token(B) -> B executes normally.
+    #[test]
+    fn entry_token_b_executes_b() {
+        let bytes = build_ab_sentinel_program();
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry_b = token.require_entry("b_fn").expect("entry b_fn");
+        let res = run_verified_function_semcode_with_args(&entry_b, vec![]).expect("run");
+        assert_eq!(res, Value::I32(222));
+    }
+
+    /// Item 4: missing entry still produces the existing `require_entry`
+    /// failure, unchanged by this fix.
+    #[test]
+    fn entry_token_missing_entry_still_fails_at_resolution() {
+        let bytes = build_ab_sentinel_program();
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let err = token.require_entry("c_fn").expect_err("must fail");
+        assert!(matches!(
+            err,
+            sm_verify::EntryResolutionError::MissingEntry { .. }
+        ));
+    }
+
+    /// Item 5: the config-aware sibling obeys the identical identity rule
+    /// (execution target is `token.entry()`, args still delivered).
+    #[test]
+    fn entry_token_config_aware_sibling_uses_token_entry_and_delivers_args() {
+        let bytes = emit_ir_to_semcode(
+            &[IrFunction {
+                name: "id_fn".to_string(),
+                instrs: vec![IrInstr::Ret { src: Some(0) }],
+                ownership_events: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit");
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("id_fn").expect("entry id_fn");
+        let config = ExecutionConfig::for_context(ExecutionContext::VerifiedLocal);
+        let res = run_verified_function_semcode_with_args_and_config(
+            &entry,
+            vec![Value::I32(99)],
+            config,
+        )
+        .expect("run");
+        assert_eq!(
+            res,
+            Value::I32(99),
+            "args must still be delivered to the bound target"
+        );
+    }
+
+    // Item 6 (args delivered correctly) is covered directly by
+    // `entry_token_config_aware_sibling_uses_token_entry_and_delivers_args`
+    // above and by the many pre-existing single-argument tests in this
+    // module and in `crates/sm-vm/src/lib.rs` (e.g.
+    // `test_2_invoke_function_accepting_i32`), all of which pass unchanged
+    // after `func_name` was dropped from the call.
+    //
+    // Item 7 (ordinary canonical verified-entry execution unchanged) is
+    // covered by the full existing `vm_runs_*` / `test_N_*` suite (~90
+    // tests), which passes unchanged.
 
     #[test]
     fn verified_run_rejects_invalid_bytecode_before_execution() {

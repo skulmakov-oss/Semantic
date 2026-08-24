@@ -39,7 +39,7 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("get_num").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "get_num", vec![]).expect("run");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
         assert_eq!(res, Value::I32(42));
     }
 
@@ -49,8 +49,8 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("add_five").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "add_five", vec![Value::I32(10)])
-            .expect("run");
+        let res =
+            run_verified_function_semcode_with_args(&entry, vec![Value::I32(10)]).expect("run");
         assert_eq!(res, Value::I32(15));
     }
 
@@ -60,7 +60,7 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("get_quad").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "get_quad", vec![]).expect("run");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
         assert_eq!(res, Value::Quad(QuadVal::T));
     }
 
@@ -70,12 +70,8 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("negate_quad").expect("entry");
-        let res = run_verified_function_semcode_with_args(
-            &entry,
-            "negate_quad",
-            vec![Value::Quad(QuadVal::F)],
-        )
-        .expect("run");
+        let res = run_verified_function_semcode_with_args(&entry, vec![Value::Quad(QuadVal::F)])
+            .expect("run");
         assert_eq!(res, Value::Quad(QuadVal::T));
     }
 
@@ -89,7 +85,7 @@ mod tests {
             type_name: "Pair".into(),
             slots: vec![Value::I32(1), Value::I32(2)],
         });
-        let res = run_verified_function_semcode_with_args(&entry, "swap", vec![arg]).expect("run");
+        let res = run_verified_function_semcode_with_args(&entry, vec![arg]).expect("run");
         assert_eq!(
             res,
             Value::Record(RecordCarrier {
@@ -105,7 +101,7 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("need_two").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "need_two", vec![Value::I32(5)]);
+        let res = run_verified_function_semcode_with_args(&entry, vec![Value::I32(5)]);
         assert!(res.is_ok() || res.is_err());
     }
 
@@ -115,11 +111,7 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("add_one").expect("entry");
-        let res = run_verified_function_semcode_with_args(
-            &entry,
-            "add_one",
-            vec![Value::Quad(QuadVal::T)],
-        );
+        let res = run_verified_function_semcode_with_args(&entry, vec![Value::Quad(QuadVal::T)]);
         assert!(res.is_err());
     }
 
@@ -148,8 +140,7 @@ mod tests {
 
         for i in 1..=5 {
             let res =
-                run_verified_function_semcode_with_args(&entry, "double", vec![Value::I32(i)])
-                    .expect("run");
+                run_verified_function_semcode_with_args(&entry, vec![Value::I32(i)]).expect("run");
             assert_eq!(res, Value::I32(i * 2));
         }
     }
@@ -174,8 +165,8 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("caller").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "caller", vec![Value::F64(5.0)])
-            .expect("run");
+        let res =
+            run_verified_function_semcode_with_args(&entry, vec![Value::F64(5.0)]).expect("run");
         assert_eq!(
             res,
             Value::F64(1005.0),
@@ -191,8 +182,8 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("caller").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "caller", vec![Value::F64(16.0)])
-            .expect("run");
+        let res =
+            run_verified_function_semcode_with_args(&entry, vec![Value::F64(16.0)]).expect("run");
         assert_eq!(
             res,
             Value::F64(2016.0),
@@ -207,8 +198,8 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("caller").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "caller", vec![Value::F64(-4.0)])
-            .expect("run");
+        let res =
+            run_verified_function_semcode_with_args(&entry, vec![Value::F64(-4.0)]).expect("run");
         assert_eq!(
             res,
             Value::F64(2996.0),
@@ -229,7 +220,7 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("caller").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "caller", vec![]).expect("run");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
         match res {
             Value::F64(v) => assert!((v - 5.0_f64.sin()).abs() < 1e-9, "got {v}"),
             other => panic!("expected F64, got {other:?}"),
@@ -243,7 +234,7 @@ mod tests {
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("caller").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "caller", vec![]).expect("run");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
         match res {
             Value::F64(v) => assert!((v - 16.0_f64.sqrt()).abs() < 1e-9, "got {v}"),
             other => panic!("expected F64, got {other:?}"),
@@ -327,8 +318,8 @@ mod tests {
         );
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("caller").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, "caller", vec![Value::I32(42)])
-            .expect("run");
+        let res =
+            run_verified_function_semcode_with_args(&entry, vec![Value::I32(42)]).expect("run");
         assert_eq!(
             res,
             Value::I32(777),
