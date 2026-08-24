@@ -1,0 +1,15 @@
+source: crates/sm-verify/src/hello_real_semcode_admission.rs
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlledObservationAdmissionKind {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloRealSemCodeAdmissionInput {
+pub ops: Vec<HelloRealSemCodeAdmissionOp>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelloRealSemCodeAdmissionOp {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelloRealSemCodeAdmissionDecision {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelloRealSemCodeAdmissionError {
+pub fn builtin_call_controlled_observation_admission( name: &str, ) -> Option<ControlledObservationAdmissionKind> {
+pub fn admit_controlled_text_observation_shape( text: &str, ) -> Result<ControlledObservationAdmissionKind, HelloRealSemCodeAdmissionError> {
+pub fn admit_hello_real_semcode_skeleton( input: &HelloRealSemCodeAdmissionInput, ) -> HelloRealSemCodeAdmissionDecision {

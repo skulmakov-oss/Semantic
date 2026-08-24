@@ -1,0 +1,20 @@
+source: crates/sm-verify/src/hello_pending_admission.rs
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelloPendingPolicyInput {
+pub operation_kind: String,
+pub payload_type: String,
+pub capability_observation_sink: String,
+pub sink_available: bool,
+pub audit_policy: String,
+pub audit_available: bool,
+pub deterministic_order: bool,
+pub requested_host_channel: Option<String>,
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HelloPendingPolicyReason {
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HelloPendingPolicyResult {
+#[cfg(feature = "std")]
+pub fn evaluate_hello_pending_policy(input: &HelloPendingPolicyInput) -> HelloPendingPolicyResult {
