@@ -454,6 +454,28 @@ fn parse_string_table_debug_and_ownership(
     // section (see `emit_semcode_function`), so decode and emit agree by
     // construction.
     let signature = if header_rev >= SEMCODE_SIGNATURE_MIN_REVISION {
+        // #1773 review follow-up: every header at or above
+        // SEMCODE_SIGNATURE_MIN_REVISION carries CAP_OWNERSHIP_PATHS
+        // (HEADER_V19 inherits it unchanged from V18/V11, and capabilities
+        // only ever grow across revisions in this format - never shrink -
+        // so this holds for any future revision too), meaning OWN0 is
+        // just as mandatory per function as SIG0 is. Before this check,
+        // a function could omit or strip its own OWN0 section entirely
+        // and still decode a SIG0 placed right after the string table -
+        // sm-verify's program-wide ownership check only proves *some*
+        // function in the artifact has OWN0 (`.any(...)`), not that
+        // *this* one does, so a multi-function artifact could smuggle one
+        // OWN0-less function past admission and have the VM execute it
+        // with no borrow/write path enforcement at all. Rejecting here,
+        // before SIG0 is even inspected, closes that per-function gap
+        // structurally rather than relying on a coarser whole-program
+        // policy check.
+        if !has_ownership_section {
+            return Err(DecodeError::InvalidOwnershipSection {
+                offset: diag_offset(base_offset, cursor),
+                msg: "header requires per-function ownership-path metadata but no OWN0 section is present",
+            });
+        }
         let tag_offset = diag_offset(base_offset, cursor);
         let tag_end = checked_end(cursor, SIGNATURE_SECTION_TAG.len(), code.len()).ok_or(
             DecodeError::InvalidSignatureSection {
@@ -764,6 +786,61 @@ mod tests {
         let bytes = function_bytes_with_header(MAGIC19, "main", &code);
         let err = decode_semcode_envelope(&bytes).expect_err("must reject, never fall back");
         assert!(matches!(err, DecodeError::InvalidSignatureSection { .. }));
+    }
+
+    // #1773 review follow-up: a rev20+ function that strips its own OWN0
+    // section and places SIG0 immediately after the string table must be
+    // rejected, not silently decoded as "no ownership metadata for this
+    // function". Every header at SEMCODE_SIGNATURE_MIN_REVISION or above
+    // carries CAP_OWNERSHIP_PATHS, so OWN0 is exactly as mandatory per
+    // function as SIG0 is - without this check, sm-verify's program-wide
+    // `.any(has_ownership_section)` policy check could be satisfied by a
+    // sibling function in the same multi-function artifact while this one
+    // silently loses all borrow/write path enforcement.
+    #[test]
+    fn decode_rev20_header_rejects_function_with_sig0_but_no_own0() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes()); // empty string table
+                                                     // OWN0 deliberately omitted - SIG0 placed directly after it.
+        code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes());
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let err = decode_semcode_envelope(&bytes)
+            .expect_err("a rev20+ function missing OWN0 must be rejected before SIG0 is trusted");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    /// The same exploit, but with a second, well-formed function in the
+    /// same artifact - proving the rejection is genuinely per-function, not
+    /// something a sibling function's real OWN0 section could paper over
+    /// via sm-verify's whole-program `.any(...)` check.
+    #[test]
+    fn decode_rev20_header_rejects_own0_less_function_even_with_a_well_formed_sibling() {
+        let mut good_code = Vec::new();
+        good_code.extend_from_slice(&0u16.to_le_bytes());
+        good_code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        good_code.extend_from_slice(&0u16.to_le_bytes());
+        good_code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        good_code.extend_from_slice(&0u16.to_le_bytes());
+
+        let mut bad_code = Vec::new();
+        bad_code.extend_from_slice(&0u16.to_le_bytes());
+        bad_code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        bad_code.extend_from_slice(&0u16.to_le_bytes());
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC19);
+        for (name, code) in [("good", &good_code), ("bad", &bad_code)] {
+            bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(name.as_bytes());
+            bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(code);
+        }
+
+        let err = decode_semcode_envelope(&bytes)
+            .expect_err("a well-formed sibling function must not excuse this one's missing OWN0");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
     }
 
     #[test]

@@ -33,11 +33,21 @@ A canonical SemCode function encoding must have exactly one unambiguous
 structural interpretation.
 
 Per function, the code block is: a length-delimited string table, then an
-optional tagged `DBG0` debug section, then an optional tagged `OWN0`
-ownership section, then the instruction stream running to the end of the
-code block. `DBG0` and `OWN0` are recognized by sniffing a fixed 4-byte tag
-immediately after the preceding section - there is no explicit
-presence-flag or length-prefixed section table.
+optional tagged `DBG0` debug section, then a tagged `OWN0` ownership
+section, then (at `SEMCODE_SIGNATURE_MIN_REVISION` or newer) a tagged
+`SIG0` callable-signature section, then the instruction stream running to
+the end of the code block. `DBG0` and `OWN0` are recognized by sniffing a
+fixed 4-byte tag immediately after the preceding section - there is no
+explicit presence-flag or length-prefixed section table. `OWN0` is
+structurally optional below the header revision that first requires
+per-function ownership-path metadata (`SEMCODE11`), and mandatory at or
+above it. `SIG0` is never content-sniffed at all (see
+[`## Callable Signature (SIG0)`](#callable-signature-sig0)): its presence -
+and, at `SEMCODE_SIGNATURE_MIN_REVISION` or newer, `OWN0`'s presence too -
+is derived deterministically from the header revision alone, and a
+function's decode fails closed if either section required by its header is
+missing, independent of whether any other function in the same artifact
+has one.
 
 A byte sequence that is simultaneously valid as `DBG0` debug-section framing
 and as executable instruction framing is non-canonical. "Executable
