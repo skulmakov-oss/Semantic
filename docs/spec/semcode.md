@@ -33,21 +33,28 @@ A canonical SemCode function encoding must have exactly one unambiguous
 structural interpretation.
 
 Per function, the code block is: a length-delimited string table, then an
-optional tagged `DBG0` debug section, then a tagged `OWN0` ownership
-section, then (at `SEMCODE_SIGNATURE_MIN_REVISION` or newer) a tagged
-`SIG0` callable-signature section, then the instruction stream running to
-the end of the code block. `DBG0` and `OWN0` are recognized by sniffing a
-fixed 4-byte tag immediately after the preceding section - there is no
-explicit presence-flag or length-prefixed section table. `OWN0` is
-structurally optional below the header revision that first requires
-per-function ownership-path metadata (`SEMCODE11`), and mandatory at or
-above it. `SIG0` is never content-sniffed at all (see
-[`## Callable Signature (SIG0)`](#callable-signature-sig0)): its presence -
-and, at `SEMCODE_SIGNATURE_MIN_REVISION` or newer, `OWN0`'s presence too -
-is derived deterministically from the header revision alone, and a
-function's decode fails closed if either section required by its header is
-missing, independent of whether any other function in the same artifact
-has one.
+optional tagged `DBG0` debug section, then an `OWN0` ownership section
+(structurally optional below `SEMCOD11`, the header revision that first
+requires per-function ownership-path metadata; content-sniffed - not
+enforced present - at `SEMCOD11` through `SEMCOD18`; deterministically
+mandatory at `SEMCODE_SIGNATURE_MIN_REVISION` or newer), then (at
+`SEMCODE_SIGNATURE_MIN_REVISION` or newer) a tagged `SIG0`
+callable-signature section, then the instruction stream running to the end
+of the code block. `DBG0` and `OWN0` are recognized by sniffing a fixed
+4-byte tag immediately after the preceding section - there is no explicit
+presence-flag or length-prefixed section table.
+
+Admission at `SEMCOD11` through `SEMCOD18` only proves that *some* function
+in the artifact has `OWN0` (`sm-verify`'s program-wide
+`.any(has_ownership_section)` check) - a specific function omitting it is
+not independently rejected at those revisions. This is a pre-existing gap
+that predates #1773 and is out of scope for it; only
+`SEMCODE_SIGNATURE_MIN_REVISION` and newer closes it per function, at
+decode time, deterministically from the header revision alone,
+independent of whether any other function in the same artifact has one
+(see [`## Callable Signature (SIG0)`](#callable-signature-sig0)). `SIG0`
+itself is never content-sniffed at all - its presence is derived the same
+deterministic way.
 
 A byte sequence that is simultaneously valid as `DBG0` debug-section framing
 and as executable instruction framing is non-canonical. "Executable
@@ -86,6 +93,7 @@ Current supported header family:
 - `SEMCOD13`
 - `SEMCOD14`
 - `SEMCOD18`
+- `SEMCOD19`
 
 `SEMCOD15`, `SEMCOD16`, and `SEMCOD17` are also currently emitted/admitted
 by the toolchain but are not yet documented in this section; that is a
@@ -109,6 +117,7 @@ Observed runtime support in the current toolchain:
 - `SEMCOD13`: epoch `0`, revision `14`
 - `SEMCOD14`: epoch `0`, revision `15`
 - `SEMCOD18`: epoch `0`, revision `19`
+- `SEMCOD19`: epoch `0`, revision `20`
 
 Header responsibilities:
 
