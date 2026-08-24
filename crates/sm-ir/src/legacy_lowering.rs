@@ -1,4 +1,5 @@
 use super::*;
+use crate::semcode_decode::MAX_SIGNATURE_PARAMETERS_PER_FUNCTION;
 use crate::semcode_format::{
     header_spec_from_magic, write_f64_le, write_i32_le, write_u16_le, write_u32_le,
     CallableValueFamily, Opcode, MAGIC0, MAGIC1, MAGIC10, MAGIC11, MAGIC12, MAGIC13, MAGIC14,
@@ -1475,6 +1476,22 @@ fn emit_semcode_function(
     // `parse_string_table_debug_and_ownership`'s doc comment on why it is
     // not content-sniffed).
     if chosen_header_rev >= SEMCODE_SIGNATURE_MIN_REVISION {
+        // #1773 review follow-up: bounded by the decoder's own
+        // MAX_SIGNATURE_PARAMETERS_PER_FUNCTION, not just the wire field's
+        // u16 width - without this, a function with 4,097..=65,535
+        // parameters would emit successfully (fits in a u16) but produce
+        // bytes `decode_semcode_envelope` unconditionally rejects,
+        // discovered only downstream at every verified execution route.
+        if f.params.len() > MAX_SIGNATURE_PARAMETERS_PER_FUNCTION {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "too many callable-signature parameters: {} (max {})",
+                    f.params.len(),
+                    MAX_SIGNATURE_PARAMETERS_PER_FUNCTION
+                ),
+            });
+        }
         code.extend_from_slice(&SIGNATURE_SECTION_TAG);
         write_u16_le(
             &mut code,
@@ -10902,6 +10919,48 @@ mod opt_tests {
         let semcode_err = compile_program_to_semcode(src)
             .expect_err("no SemCode bytes may be emitted for a qvec callable parameter");
         assert!(semcode_err.message.contains("qvec"));
+    }
+
+    /// Codex review follow-up on #1773: the SIG0 wire field's `u16` count
+    /// alone permits up to 65,535 parameters, but the decoder bounds
+    /// acceptance at `MAX_SIGNATURE_PARAMETERS_PER_FUNCTION` (4,096) -
+    /// without an equal check on the emit side, a function with
+    /// 4,097..=65,535 parameters would emit successfully and then be
+    /// unconditionally rejected by every verified execution route
+    /// downstream. Built via `emit_ir_to_semcode` directly since no source
+    /// program plausibly declares this many parameters.
+    #[test]
+    fn callable_signature_rejects_parameter_count_over_decoder_limit() {
+        let too_many = vec![CallableValueFamily::I32; MAX_SIGNATURE_PARAMETERS_PER_FUNCTION + 1];
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![IrInstr::Ret { src: None }],
+            ownership_events: Vec::new(),
+            params: too_many,
+        };
+        let err = emit_ir_to_semcode(&[func], false)
+            .expect_err("over-limit parameter count must be rejected before emission");
+        assert!(
+            err.message
+                .contains("too many callable-signature parameters"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    /// The boundary immediately below the same limit must still emit
+    /// successfully - this is a decoder capacity bound, not an
+    /// artificially-lowered one.
+    #[test]
+    fn callable_signature_accepts_parameter_count_at_decoder_limit() {
+        let at_limit = vec![CallableValueFamily::I32; MAX_SIGNATURE_PARAMETERS_PER_FUNCTION];
+        let func = IrFunction {
+            name: "main".to_string(),
+            instrs: vec![IrInstr::Ret { src: None }],
+            ownership_events: Vec::new(),
+            params: at_limit,
+        };
+        emit_ir_to_semcode(&[func], false).expect("at-limit parameter count must emit");
     }
 
     #[test]

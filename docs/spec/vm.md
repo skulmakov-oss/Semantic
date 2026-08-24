@@ -175,13 +175,21 @@ Current function-bytecode model includes:
 ## Callable Runtime Family Enforcement
 
 `validate_call_arguments` is the one authoritative invocation validator,
-called immediately before `push_frame` at exactly two sites: the public
-invocation helper (`run_verified_function_semcode_with_args_and_config`) and
-internal `Opcode::Call` handling for a callee that resolves to a known
-function. It is a distinct step, never fused into `push_frame` itself,
-because `push_frame` is also the raw/unverified execution path's primitive
-(`run_semcode_with_entry_and_config` and friends, which intentionally bypass
-`sm-verify` admission).
+fused directly into `push_frame` itself rather than called separately at
+each of its callers. `push_frame` is the single choke point every real
+frame-entry path already funnels through - `Opcode::Call`, `Opcode::
+ClosureCall`, the public invocation helper
+(`run_verified_function_semcode_with_args_and_config`), and every other
+verified entry route (`run_verified_entry_semcode_with_config` and the
+PROMETHEUS/application host routes) - so fusing here closes every one of
+them at once, including any future call site, rather than relying on each
+caller to remember to call the validator separately. The raw/unverified
+execution path (`run_semcode_with_entry_and_config` and friends, which
+intentionally bypass `sm-verify` admission) shares `push_frame` too and is
+safe to include: it always passes empty args, so this only ever produces
+an earlier, cleaner rejection in place of a later, more confusing
+uninitialized-register error - never a false rejection of a scenario that
+path is trying to exercise.
 
 Given the callee's decoded `signature`:
 
