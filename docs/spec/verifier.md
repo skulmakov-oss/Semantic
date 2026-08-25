@@ -57,6 +57,9 @@ Current SemCode verification checks include:
 - string and debug reference validity
 - register-budget validity (against the caller-selected `RuntimeQuotas`
   profile; see Public Surface)
+- definite register assignment for functions carrying a canonical `SIG0`
+  signature (every reachable register read is defined on every incoming
+  path; see [Definite Register Assignment](#definite-register-assignment-1756--fa-07-016))
 - program-wide runtime symbol-table budget validity (the number of *distinct*
   strings the VM will intern across every function, deduplicated by exact
   string value program-wide - not a per-function string-table entry count;
@@ -311,6 +314,74 @@ rejecting a mismatch with `CallArgumentCountMismatch`. This is arity only:
 Calls to builtins are out of scope for this check; only calls that resolve
 to a known internal function (with a decoded canonical signature to check
 against) are covered.
+
+## Definite Register Assignment (#1756 / FA-07-016)
+
+An in-range register identity (see the register-budget check above) is
+necessary but not sufficient for admission. The verifier additionally
+proves, for every function carrying a canonical `SIG0` signature: **every
+reachable register read is definitely defined on every execution path that
+can reach it** - not merely that the register number is within budget, and
+not merely that *some* path defines it before that read.
+
+This is a forward **MUST** dataflow analysis (meet = set intersection), not
+a MAY/reachability analysis. A future implementation that only proves "some
+path defines this register" (MAY semantics) does not satisfy this contract
+and must not be described as equivalent - MUST is strictly stronger, and is
+the property `RegisterSlot::Uninitialized` in `sm-vm` (#1770) already
+enforces at runtime; this pass proves the same property statically, ahead
+of execution.
+
+**Entry definitions.** For a function whose canonical signature declares `N`
+parameters, `ENTRY_DEFS = {r0, r1, ..., r(N-1)}` - exactly the registers
+`sm-vm`'s `push_frame` initializes from successfully validated call
+arguments (#1770, #1773). No other register is defined at entry merely
+because it is numerically in range, because register storage has capacity
+for it, or because some call site happens to supply that many arguments;
+`Value::Unit` remains an ordinary defined value once genuinely written, not
+an "undefined register" sentinel.
+
+**Scope: signature-bearing functions only.** This proof runs only when
+`env.signature` is `Some` (a canonical `SIG0` record was decoded - see
+[`semcode.md`](semcode.md#callable-signature-sig0)). A function whose header
+predates canonical signatures (`signature: None`) has no sound way to
+determine `ENTRY_DEFS` - inferring it from caller-supplied `argc`, from
+`STORE_VAR` prologue shape, or from any other convention would be an unsound
+heuristic (caller `argc` is not even self-consistent across independent call
+sites prior to #1773's arity enforcement). This mirrors exactly how the
+callable arity check above treats `signature: None`: nothing new to enforce,
+unchanged pre-#1756 admission behavior for signature-less artifacts.
+
+**MAP_GET's default register is conservative.** `MAP_GET` reads its default
+register lazily at runtime, only on a key miss (#1771). The verifier cannot
+soundly prove key presence, so this pass does not attempt a value-sensitive
+"only on the miss path" proof: `MAP_GET`'s default register is treated as an
+unconditional read, required to be definitely defined regardless of which
+runtime path a given key would actually take. Runtime laziness (#1771) and
+this static proof (#1756) are deliberately distinct guarantees, not
+restatements of each other.
+
+**Control-flow reuse.** This pass reuses the same instruction boundaries and
+successor relation the reachable-control-flow check above already computes
+(and that same check's reachable-offset result), building predecessors from
+that one successor relation rather than a second CFG or branch-target
+engine. It judges only reachable register reads, matching the reachable-
+control-flow check's own reachability boundary; a register read inside
+structurally valid but unreachable code is not judged by this pass, matching
+the verifier's existing, separate policy on such code.
+
+**Non-entry nodes start at TOP** (every register in the function's register
+domain, provisionally), never at the empty set. This is a correctness
+requirement, not a style preference: initializing non-entry nodes to empty
+computes the wrong converged fixed point for a register defined once outside
+a loop and never invalidated inside it, incorrectly rejecting reads that are
+actually always defined.
+
+A violation rejects with `VerificationCode::UndefinedRegisterRead` -
+deliberately distinct from `InvalidRegisterReference`, which is a numeric
+range/quota failure. `UndefinedRegisterRead` means the register number is
+in range but no incoming execution path has been proven to define it before
+this read.
 
 ## Verified Execution Rule
 

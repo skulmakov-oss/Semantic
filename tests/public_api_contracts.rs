@@ -227,6 +227,7 @@ fn verification_code_contract_name(code: sm_verify::VerificationCode) -> &'stati
         VerificationCode::ReachableFunctionFallthrough => "ReachableFunctionFallthrough",
         VerificationCode::InvalidSignatureSection => "InvalidSignatureSection",
         VerificationCode::CallArgumentCountMismatch => "CallArgumentCountMismatch",
+        VerificationCode::UndefinedRegisterRead => "UndefinedRegisterRead",
     }
 }
 
@@ -256,6 +257,7 @@ fn verification_code_variants_match_public_contract() {
         VerificationCode::ReachableFunctionFallthrough,
         VerificationCode::InvalidSignatureSection,
         VerificationCode::CallArgumentCountMismatch,
+        VerificationCode::UndefinedRegisterRead,
     ];
 
     for variant in variants {

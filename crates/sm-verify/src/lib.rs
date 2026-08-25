@@ -73,6 +73,15 @@ pub enum VerificationCode {
     /// runtime family statically (registers are untyped storage), so family
     /// mismatches are rejected by the VM before `push_frame` instead.
     CallArgumentCountMismatch,
+    /// A register read is reachable from function entry on some execution
+    /// path where that register has not been definitely written (#1756 /
+    /// FA-07-016). Distinct from `InvalidRegisterReference`: the register
+    /// number is in range and within the configured quota - what's missing
+    /// is a proof that every incoming path defines it before this read.
+    /// Only checked for a function carrying a canonical `SIG0` signature
+    /// (`SEMCODE_SIGNATURE_MIN_REVISION`+); a signature-less artifact has no
+    /// sound `IN[entry]` to prove against and is unaffected by this code.
+    UndefinedRegisterRead,
 }
 
 #[cfg(feature = "std")]
@@ -655,6 +664,13 @@ fn verify_function_code(
     let instr_len = code.len().saturating_sub(instr_start);
     let mut instr_starts = Vec::new();
     let mut instruction_successors = Vec::new();
+    // #1756 (FA-07-016): parallel to `instr_starts`/`instruction_successors`
+    // (same index), the exact register reads/writes this pass's definite-
+    // assignment proof needs - populated by the same exhaustive `Opcode`
+    // match in `decode_operands` that already classifies every operand for
+    // the register-range quota below.
+    let mut instr_reads: Vec<Vec<u16>> = Vec::new();
+    let mut instr_writes: Vec<Vec<u16>> = Vec::new();
     let mut jump_targets = Vec::new();
     let mut string_refs = Vec::new();
     let mut call_argcs = Vec::new();
@@ -685,7 +701,7 @@ fn verify_function_code(
                 err.to_string(),
             ),
         })?;
-        let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
+        let mut refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
         let next_offset = cursor - instr_start;
         let jump_target = refs.jump_targets.first().copied();
         let successors = match (opcode, jump_target) {
@@ -703,6 +719,8 @@ fn verify_function_code(
             _ => InstructionSuccessors::One(next_offset),
         };
         instruction_successors.push(successors);
+        instr_reads.push(std::mem::take(&mut refs.reads));
+        instr_writes.push(std::mem::take(&mut refs.writes));
         let min_rev = opcode.minimum_semcode_revision();
         if header.rev < min_rev {
             return Err(reject_one(
@@ -801,7 +819,8 @@ fn verify_function_code(
         }
     }
 
-    verify_reachable_control_flow(name, instr_len, &instr_starts, &instruction_successors)?;
+    let reachable_offsets =
+        verify_reachable_control_flow(name, instr_len, &instr_starts, &instruction_successors)?;
 
     // #1773 (FA-09-005): argc, keyed by the Call instruction's own offset -
     // only "call target" entries (real `Opcode::Call` sites) ever have an
@@ -849,6 +868,51 @@ fn verify_function_code(
         }
     }
 
+    // #1756 (FA-07-016): forward MUST definite-assignment proof - every
+    // reachable register read must be definitely defined on every incoming
+    // execution path, not merely in range. Runs only when this function has
+    // a canonical `SIG0` signature (`env.signature.is_some()`): a pre-#1773
+    // artifact's header predates canonical per-function arity metadata, so
+    // `IN[entry]` cannot be soundly determined for it - caller-inferred or
+    // convention-inferred entry definitions are exactly the unsound
+    // heuristic #1756's own research explicitly rejected (see the issue's
+    // Phase B checkpoint). This preserves pre-#1756 admission behavior for
+    // signature-less artifacts exactly, mirroring how #1773's own
+    // `validate_call_arguments`/arity check already treats `signature: None`
+    // as "nothing new to enforce" - not a new decision, the same one
+    // continued.
+    if let Some(signature) = env.signature.as_ref() {
+        let entry_param_count = signature.families.len();
+        // #1756: the domain must be bounded by the already-established
+        // register quota before any allocation sized by it - an
+        // attacker-controlled SIG0 parameter count (bounded only by the
+        // decoder's own MAX_SIGNATURE_PARAMETERS_PER_FUNCTION, independent
+        // of this verification call's actual `quotas.max_registers`) must
+        // not be allowed to size a per-node bitset on its own.
+        if entry_param_count > quotas.max_registers {
+            return Err(reject_one(
+                name,
+                VerificationCode::InvalidRegisterReference,
+                0,
+                format!(
+                    "canonical signature declares {} parameter register(s), exceeding the register budget of {}",
+                    entry_param_count, quotas.max_registers
+                ),
+            ));
+        }
+        let domain_size = max_register.map_or(0, |m| m + 1).max(entry_param_count);
+        prove_definite_register_assignment(
+            name,
+            &instr_starts,
+            &instruction_successors,
+            &instr_reads,
+            &instr_writes,
+            &reachable_offsets,
+            entry_param_count,
+            domain_size,
+        )?;
+    }
+
     Ok(PendingVerifiedFunction {
         verified: VerifiedFunction {
             name: name.to_string(),
@@ -868,13 +932,17 @@ enum InstructionSuccessors {
     Two(usize, usize),
 }
 
+/// Returns the set of reachable instruction offsets on success. #1756
+/// (FA-07-016) reuses this exact return value as the authoritative
+/// reachable-node set for its definite-assignment pass, rather than
+/// re-deriving reachability with a second traversal.
 #[cfg(feature = "std")]
 fn verify_reachable_control_flow(
     function: &str,
     instr_len: usize,
     instr_starts: &[usize],
     instruction_successors: &[InstructionSuccessors],
-) -> Result<(), RejectReport> {
+) -> Result<HashSet<usize>, RejectReport> {
     let mut pending = vec![0usize];
     let mut reachable = HashSet::new();
 
@@ -904,6 +972,219 @@ fn verify_reachable_control_flow(
             InstructionSuccessors::Two(first, second) => {
                 pending.push(*first);
                 pending.push(*second);
+            }
+        }
+    }
+
+    Ok(reachable)
+}
+
+/// #1756 (FA-07-016): a compact fixed-size bitset over register numbers
+/// `0..domain_size`, the MUST-dataflow lattice element (a register set under
+/// intersection meet). `domain_size` is always bounded by the register-range
+/// quota already enforced before this pass runs (see the caller), so this
+/// never allocates from an attacker-controlled unbounded register id.
+#[cfg(feature = "std")]
+#[derive(Clone)]
+struct RegSet {
+    words: Vec<u64>,
+}
+
+#[cfg(feature = "std")]
+impl RegSet {
+    fn word_count(domain_size: usize) -> usize {
+        domain_size.saturating_add(63) / 64
+    }
+
+    /// TOP: every register in the domain is (conservatively) considered
+    /// defined. Required initialization for every *non-entry* node in a
+    /// forward MUST analysis - starting from the empty set instead computes
+    /// the wrong fixed point for loops (a loop-carried definition would
+    /// never survive the still-unconverged first pass through its own
+    /// back-edge). This is the non-negotiable TOP-initialization rule.
+    fn full(domain_size: usize) -> Self {
+        let mut words = vec![u64::MAX; Self::word_count(domain_size)];
+        let rem = domain_size % 64;
+        if rem != 0 {
+            if let Some(last) = words.last_mut() {
+                *last &= (1u64 << rem) - 1;
+            }
+        }
+        RegSet { words }
+    }
+
+    fn empty(domain_size: usize) -> Self {
+        RegSet {
+            words: vec![0u64; Self::word_count(domain_size)],
+        }
+    }
+
+    fn contains(&self, reg: usize) -> bool {
+        let word = reg / 64;
+        let bit = reg % 64;
+        self.words.get(word).is_some_and(|w| (w >> bit) & 1 != 0)
+    }
+
+    fn insert(&mut self, reg: usize) {
+        let word = reg / 64;
+        let bit = reg % 64;
+        if let Some(w) = self.words.get_mut(word) {
+            *w |= 1u64 << bit;
+        }
+    }
+
+    fn intersect_with(&mut self, other: &RegSet) {
+        for (a, b) in self.words.iter_mut().zip(other.words.iter()) {
+            *a &= *b;
+        }
+    }
+}
+
+/// #1756 (FA-07-016): forward MUST dataflow proving every reachable register
+/// read is definitely defined on every incoming execution path (meet =
+/// intersection). Reuses the verifier's own successor relation
+/// (`instruction_successors`) to build predecessors, and its own computed
+/// reachable-offset set (`reachable_offsets`, from
+/// `verify_reachable_control_flow`) to decide which nodes this proof
+/// actually applies to - no second CFG/branch-target engine, no
+/// re-derivation of reachability.
+///
+/// `entry_param_count` registers `0..entry_param_count` are `IN[entry]`
+/// (`ENTRY_DEFS`, from the caller's canonical `SIG0` signature) - the only
+/// registers defined at function entry, regardless of numeric range or
+/// register-storage capacity. Every other node initializes to TOP
+/// (`RegSet::full`), per the non-negotiable loop-correctness rule.
+///
+/// Unreachable nodes are simply never revisited by the fixed-point loop
+/// below (it only iterates `reachable_offsets`), so they stay at TOP
+/// forever. That is intentionally harmless, not an approximation: TOP is the
+/// identity element for intersection, so an unreachable predecessor's
+/// (permanently-TOP) `OUT` set never narrows a reachable successor's `IN`.
+/// This preserves the verifier's existing, separate policy on structurally
+/// valid-but-unreachable code untouched - this pass only judges reachable
+/// reads.
+#[cfg(feature = "std")]
+#[allow(clippy::too_many_arguments)]
+fn prove_definite_register_assignment(
+    function: &str,
+    instr_starts: &[usize],
+    instruction_successors: &[InstructionSuccessors],
+    instr_reads: &[Vec<u16>],
+    instr_writes: &[Vec<u16>],
+    reachable_offsets: &HashSet<usize>,
+    entry_param_count: usize,
+    domain_size: usize,
+) -> Result<(), RejectReport> {
+    let node_count = instr_starts.len();
+    if node_count == 0 {
+        return Ok(());
+    }
+
+    // Predecessors, built from the SAME successor relation
+    // `verify_reachable_control_flow` already walks - not a second CFG.
+    let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); node_count];
+    for (idx, successors) in instruction_successors.iter().enumerate() {
+        let mut link = |target: usize| {
+            // A target that isn't a real instruction boundary can only
+            // belong to an unreachable fallthrough off the end of the
+            // stream - every jump target was already fully validated above
+            // regardless of reachability, so this is never a real,
+            // reachable edge silently dropped.
+            if let Ok(target_idx) = instr_starts.binary_search(&target) {
+                predecessors[target_idx].push(idx);
+            }
+        };
+        match successors {
+            InstructionSuccessors::None => {}
+            InstructionSuccessors::One(target) => link(*target),
+            InstructionSuccessors::Two(first, second) => {
+                link(*first);
+                link(*second);
+            }
+        }
+    }
+
+    // Reachable node INDICES, derived from the reachable OFFSET set
+    // `verify_reachable_control_flow` already computed - not re-derived.
+    // Ascending index order equals ascending offset order (`instr_starts` is
+    // built in strictly increasing cursor order during the single forward
+    // decode walk), which is exactly the deterministic diagnostic ordering
+    // this pass's final validation below relies on.
+    let mut reachable_indices: Vec<usize> = reachable_offsets
+        .iter()
+        .filter_map(|offset| instr_starts.binary_search(offset).ok())
+        .collect();
+    reachable_indices.sort_unstable();
+
+    let mut entry_defs = RegSet::empty(domain_size);
+    for r in 0..entry_param_count {
+        entry_defs.insert(r);
+    }
+
+    let mut in_sets: Vec<RegSet> = (0..node_count)
+        .map(|idx| {
+            if idx == 0 {
+                entry_defs.clone()
+            } else {
+                RegSet::full(domain_size)
+            }
+        })
+        .collect();
+    let mut out_sets: Vec<RegSet> = in_sets.clone();
+    for &w in &instr_writes[0] {
+        out_sets[0].insert(w as usize);
+    }
+
+    // Iterate to a fixed point over reachable nodes only. Entry's IN/OUT are
+    // fixed inputs (`ENTRY_DEFS` and its own writes), never recomputed. For
+    // a monotone framework iterated to a genuine fixed point (not stopped
+    // early), the converged result is independent of processing order
+    // within a round - only the round count is - so this simple round-robin
+    // re-scan never makes diagnostics order-dependent.
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for &idx in &reachable_indices {
+            if idx == 0 {
+                continue;
+            }
+            let mut new_in = RegSet::full(domain_size);
+            for &pred in &predecessors[idx] {
+                new_in.intersect_with(&out_sets[pred]);
+            }
+            let mut new_out = new_in.clone();
+            for &w in &instr_writes[idx] {
+                new_out.insert(w as usize);
+            }
+            if new_in.words != in_sets[idx].words {
+                in_sets[idx] = new_in;
+                changed = true;
+            }
+            if new_out.words != out_sets[idx].words {
+                out_sets[idx] = new_out;
+                changed = true;
+            }
+        }
+    }
+
+    // Validate reads against the converged fixed point only - never during
+    // an unstable iteration, so the reported diagnostic always describes the
+    // actual least/greatest fixed point, not transient worklist state.
+    // Iterating `reachable_indices` in ascending (offset) order, then each
+    // instruction's own reads in their fixed decode order, makes the first
+    // reported diagnostic deterministic across repeated runs on identical
+    // bytes, independent of any `HashSet`/`HashMap` iteration order.
+    for &idx in &reachable_indices {
+        for &r in &instr_reads[idx] {
+            if !in_sets[idx].contains(r as usize) {
+                return Err(reject_one(
+                    function,
+                    VerificationCode::UndefinedRegisterRead,
+                    instr_starts[idx],
+                    format!(
+                        "register r{r} is read but not definitely defined on every execution path reaching this instruction"
+                    ),
+                ));
             }
         }
     }
@@ -967,6 +1248,7 @@ fn decode_operands(
         Opcode::LoadQ => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             let literal = read_u8(code, cursor).map_err(|_| invalid("truncated quad literal"))?;
             if enforce_canonical_domains && literal > 3 {
                 return Err(invalid("non-canonical quad literal: must be 0..=3"));
@@ -975,6 +1257,7 @@ fn decode_operands(
         Opcode::LoadBool => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             let literal = read_u8(code, cursor).map_err(|_| invalid("truncated bool literal"))?;
             if enforce_canonical_domains && literal > 1 {
                 return Err(invalid("non-canonical bool literal: must be 0 or 1"));
@@ -983,6 +1266,7 @@ fn decode_operands(
         Opcode::LoadI32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             read_i32_le(code, cursor).map_err(|_| invalid("truncated i32 literal"))?;
         }
         Opcode::AddI32 => {
@@ -992,6 +1276,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
+            refs.reads.push(lhs);
+            refs.reads.push(rhs);
+            refs.writes.push(dst);
         }
         Opcode::SubI32 | Opcode::MulI32 | Opcode::DivI32 | Opcode::ModI32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
@@ -1000,27 +1287,34 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
+            refs.reads.push(lhs);
+            refs.reads.push(rhs);
+            refs.writes.push(dst);
         }
         Opcode::LoadU32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             read_u32_le(code, cursor).map_err(|_| invalid("truncated u32 literal"))?;
         }
         Opcode::LoadF64 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_F64_MATH;
             read_f64_le(code, cursor).map_err(|_| invalid("truncated f64 literal"))?;
         }
         Opcode::LoadFx => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_FX_VALUES;
             read_i32_le(code, cursor).map_err(|_| invalid("truncated fx literal"))?;
         }
         Opcode::LoadText => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_TEXT_VALUES;
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated text literal string id"))?;
@@ -1034,12 +1328,16 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
+            refs.reads.push(lhs);
+            refs.reads.push(rhs);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_TEXT_VALUES;
         }
         Opcode::MakeSequence => {
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated sequence dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated sequence arity"))? as usize;
@@ -1047,12 +1345,14 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated sequence item register"))?;
                 mark_reg(src);
+                refs.reads.push(src);
             }
         }
         Opcode::MakeTuple => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             let count =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple arity"))? as usize;
             if enforce_canonical_domains && count < 2 {
@@ -1062,12 +1362,14 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated tuple item register"))?;
                 mark_reg(src);
+                refs.reads.push(src);
             }
         }
         Opcode::MakeRecord => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated record dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated record type string id"))?;
             refs.string_refs
@@ -1082,12 +1384,14 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated record slot register"))?;
                 mark_reg(src);
+                refs.reads.push(src);
             }
         }
         Opcode::MakeAdt => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated enum dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated enum type string id"))?;
             refs.string_refs
@@ -1104,6 +1408,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated enum payload register"))?;
                 mark_reg(src);
+                refs.reads.push(src);
             }
         }
         Opcode::AdtTag => {
@@ -1115,6 +1420,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated adt-tag type string id"))?;
             mark_reg(dst);
             mark_reg(src);
+            refs.reads.push(src);
+            refs.writes.push(dst);
             refs.string_refs
                 .push((offset, sid as usize, "enum type name"));
         }
@@ -1128,6 +1435,8 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated adt-get payload index"))?;
             mark_reg(dst);
             mark_reg(src);
+            refs.reads.push(src);
+            refs.writes.push(dst);
             refs.string_refs
                 .push((offset, sid as usize, "enum type name"));
         }
@@ -1141,6 +1450,8 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated record-get slot index"))?;
             mark_reg(dst);
             mark_reg(src);
+            refs.reads.push(src);
+            refs.writes.push(dst);
             refs.string_refs
                 .push((offset, sid as usize, "record type name"));
         }
@@ -1152,6 +1463,8 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple-get index"))?;
             mark_reg(dst);
             mark_reg(src);
+            refs.reads.push(src);
+            refs.writes.push(dst);
         }
         Opcode::SequenceGet => {
             let dst = read_u16_le(code, cursor)
@@ -1163,6 +1476,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(src);
             mark_reg(index);
+            refs.reads.push(src);
+            refs.reads.push(index);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
         }
         Opcode::SequenceLen => {
@@ -1172,6 +1488,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-len src register"))?;
             mark_reg(dst);
             mark_reg(src);
+            refs.reads.push(src);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1182,6 +1500,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-is-empty src register"))?;
             mark_reg(dst);
             mark_reg(src);
+            refs.reads.push(src);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1195,6 +1515,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
+            refs.reads.push(seq);
+            refs.reads.push(val);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1208,6 +1531,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
+            refs.reads.push(seq);
+            refs.reads.push(val);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1221,6 +1547,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
+            refs.reads.push(seq);
+            refs.reads.push(val);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1231,6 +1560,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-pop src register"))?;
             mark_reg(dst);
             mark_reg(src);
+            refs.reads.push(src);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1238,6 +1569,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated map-empty dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapContains => {
@@ -1250,6 +1582,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(map);
             mark_reg(key);
+            refs.reads.push(map);
+            refs.reads.push(key);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapGet => {
@@ -1265,6 +1600,15 @@ fn decode_operands(
             mark_reg(map);
             mark_reg(key);
             mark_reg(default_val);
+            refs.reads.push(map);
+            refs.reads.push(key);
+            // #1756 (FA-07-016): MAP_GET reads `default_val` lazily at
+            // runtime, only on a key miss (see #1771). The verifier cannot
+            // soundly prove key presence, so this pass conservatively
+            // requires `default_val` definitely defined unconditionally -
+            // never a value-sensitive "only on the miss path" proof.
+            refs.reads.push(default_val);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapSet => {
@@ -1280,6 +1624,10 @@ fn decode_operands(
             mark_reg(map);
             mark_reg(key);
             mark_reg(val);
+            refs.reads.push(map);
+            refs.reads.push(key);
+            refs.reads.push(val);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::RngSeed => {
@@ -1289,6 +1637,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated rng-seed seed register"))?;
             mark_reg(dst);
             mark_reg(seed);
+            refs.reads.push(seed);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_PRNG;
         }
         Opcode::RngNextI32 => {
@@ -1301,12 +1651,16 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lo);
             mark_reg(hi);
+            refs.reads.push(lo);
+            refs.reads.push(hi);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_PRNG;
         }
         Opcode::MakeClosure => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated closure dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_CLOSURE_VALUES;
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated closure function string id"))?;
@@ -1319,6 +1673,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure capture register"))?;
                 mark_reg(src);
+                refs.reads.push(src);
             }
         }
         Opcode::ClosureCall => {
@@ -1334,7 +1689,13 @@ fn decode_operands(
                 let dst = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure-call dst register"))?;
                 mark_reg(dst);
+                refs.writes.push(dst);
             } else {
+                // #1756 (FA-07-016): matches the pre-existing `mark_reg`
+                // asymmetry below - the encoded dummy dst register bytes are
+                // still consumed from the stream, but this opcode form
+                // defines no register at all, so the dummy dst is neither a
+                // read nor a write.
                 let _ = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure-call dst register"))?;
             }
@@ -1344,11 +1705,14 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated closure-call arg register"))?;
             mark_reg(closure);
             mark_reg(arg);
+            refs.reads.push(closure);
+            refs.reads.push(arg);
             refs.required_capabilities |= CAP_CLOSURE_VALUES;
         }
         Opcode::LoadVar => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated variable string id"))?;
             refs.string_refs
@@ -1361,12 +1725,20 @@ fn decode_operands(
                 .push((offset, sid as usize, "variable reference"));
             let src = read_u16_le(code, cursor).map_err(|_| invalid("truncated src register"))?;
             mark_reg(src);
+            // #1756 (FA-07-016): reads the source register into the named
+            // local-variable slot. Register dataflow only - the variable
+            // store itself is outside this pass's domain (see LOAD_VAR,
+            // which writes only its destination register, not a register
+            // form of the variable it names).
+            refs.reads.push(src);
         }
         Opcode::QNot | Opcode::BoolNot | Opcode::QTruthNot => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             let src = read_u16_le(code, cursor).map_err(|_| invalid("truncated src register"))?;
             mark_reg(dst);
             mark_reg(src);
+            refs.reads.push(src);
+            refs.writes.push(dst);
         }
         Opcode::QAnd
         | Opcode::QOr
@@ -1394,6 +1766,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
+            refs.reads.push(lhs);
+            refs.reads.push(rhs);
+            refs.writes.push(dst);
             if matches!(
                 opcode,
                 Opcode::AddF64 | Opcode::SubF64 | Opcode::MulF64 | Opcode::DivF64
@@ -1415,6 +1790,7 @@ fn decode_operands(
             let cond =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated condition register"))?;
             mark_reg(cond);
+            refs.reads.push(cond);
             let target = read_u32_le(code, cursor).map_err(|_| invalid("truncated jump target"))?;
             refs.jump_targets.push(target as usize);
         }
@@ -1431,7 +1807,11 @@ fn decode_operands(
                 let dst = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call dst register"))?;
                 mark_reg(dst);
+                refs.writes.push(dst);
             } else {
+                // #1756 (FA-07-016): same asymmetry as `ClosureCall` above -
+                // the dummy dst register bytes are consumed but define
+                // nothing; this form's `CALL` defines no register.
                 let _ = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call dst register"))?;
             }
@@ -1448,17 +1828,20 @@ fn decode_operands(
                 let arg = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call arg register"))?;
                 mark_reg(arg);
+                refs.reads.push(arg);
             }
         }
         Opcode::Assert => {
             let cond = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated assert condition register"))?;
             mark_reg(cond);
+            refs.reads.push(cond);
         }
         Opcode::GateRead => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated gate dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_GATE_SURFACE;
             read_u16_le(code, cursor).map_err(|_| invalid("truncated gate device id"))?;
             read_u16_le(code, cursor).map_err(|_| invalid("truncated gate port"))?;
@@ -1470,6 +1853,7 @@ fn decode_operands(
             let src =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated gate src register"))?;
             mark_reg(src);
+            refs.reads.push(src);
         }
         Opcode::PulseEmit => {
             refs.required_capabilities |= CAP_GATE_SURFACE;
@@ -1482,6 +1866,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated state-query dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_STATE_QUERY;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated state query key id"))?;
@@ -1497,6 +1882,7 @@ fn decode_operands(
             let src = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated state-update src register"))?;
             mark_reg(src);
+            refs.reads.push(src);
         }
         Opcode::EventPost => {
             refs.required_capabilities |= CAP_EVENT_POST;
@@ -1509,6 +1895,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated clock-read dst register"))?;
             mark_reg(dst);
+            refs.writes.push(dst);
             refs.required_capabilities |= CAP_CLOCK_READ;
         }
         Opcode::Ret => {
@@ -1520,6 +1907,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated return src register"))?;
                 mark_reg(src);
+                refs.reads.push(src);
             }
         }
     }
@@ -1555,6 +1943,16 @@ struct OperandRefs {
     // #1773 (FA-09-005): (offset, argc) for each `Opcode::Call` site, keyed
     // by the same offset as its "call target" string_refs entry.
     call_argcs: Vec<(usize, usize)>,
+    // #1756 (FA-07-016): every register this instruction reads/writes, in
+    // the order fixed by `decode_operands`'s exhaustive `Opcode` match below
+    // (the same match that already classifies every operand for the
+    // register-range quota). `reads` and `writes` are independent - a
+    // register can appear in both (e.g. an opcode reading and writing the
+    // same numeric register would list it in both), never merged, so the
+    // definite-assignment pass can validate reads against `IN[n]` before
+    // folding writes into `OUT[n]`.
+    reads: Vec<u16>,
+    writes: Vec<u16>,
 }
 
 #[cfg(feature = "std")]
@@ -1616,6 +2014,25 @@ mod tests {
                 instrs,
                 ownership_events: Vec::new(),
                 params: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit test function")
+    }
+
+    // #1756 (FA-07-016): like `emit_test_function`, but with a caller-chosen
+    // canonical SIG0 parameter list, for regressions that need a non-empty
+    // `ENTRY_DEFS`.
+    fn emit_test_function_with_params(
+        params: Vec<CallableValueFamily>,
+        instrs: Vec<IrInstr>,
+    ) -> Vec<u8> {
+        emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs,
+                ownership_events: Vec::new(),
+                params,
             }],
             false,
         )
@@ -2352,9 +2769,18 @@ mod tests {
     fn verify_semcode_token_with_quotas_accepts_register_within_kernel_bound_budget() {
         let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
             .expect("compile");
-        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
-        let dst_pos = opcode_pos + 1;
-        bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        let load_opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
+        let load_dst_pos = load_opcode_pos + 1;
+        bytes[load_dst_pos..load_dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        // #1756 (FA-07-016): the compiled body also has `StoreVar "a" src=r0`
+        // reading whatever register `LoadBool` originally wrote. Patching
+        // only `LoadBool`'s dst would leave that `StoreVar` reading a
+        // register nothing ever defines - repoint it at the same patched
+        // register so this fixture keeps proving "r5000 is within budget",
+        // not "an undefined read happens to still be in range".
+        let store_opcode_pos = find_instruction(&bytes, "main", Opcode::StoreVar, 0);
+        let store_src_pos = store_opcode_pos + 1 + 2;
+        bytes[store_src_pos..store_src_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
         verify_semcode_token_with_quotas(&bytes, RuntimeQuotas::kernel_bound())
             .expect("r5000 must be within KernelBound's register budget");
     }
@@ -3169,6 +3595,603 @@ mod tests {
 
         let verified = verify_semcode(&bytes).expect("matching argc must verify");
         assert_eq!(verified.functions.len(), 2);
+    }
+
+    // --- #1756 (FA-07-016, umbrella #1617) regression matrix -------------
+    //
+    // Forward MUST dataflow proving every reachable register read is
+    // definitely defined on every incoming execution path. `ENTRY_DEFS` is
+    // exactly `{r0..signature.families.len()-1}` from the function's
+    // canonical SIG0 signature (#1773); every other register starts
+    // undefined until an instruction actually writes it. Cases 1-26 below
+    // match the campaign's required regression matrix one-to-one.
+
+    #[test]
+    fn c1756_case1_rejects_zero_arg_entry_undefined_read() {
+        let bytes = emit_test_function(vec![IrInstr::Ret { src: Some(0) }]);
+        let report =
+            verify_semcode(&bytes).expect_err("r0 undefined at a zero-arg entry must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case2_accepts_one_parameter_entry_read() {
+        let bytes = emit_test_function_with_params(
+            vec![CallableValueFamily::I32],
+            vec![IrInstr::Ret { src: Some(0) }],
+        );
+        verify_semcode(&bytes).expect("r0 is entry-defined by SIG0's one parameter");
+    }
+
+    #[test]
+    fn c1756_case3_accepts_multiple_parameter_entry_reads() {
+        let bytes = emit_test_function_with_params(
+            vec![
+                CallableValueFamily::I32,
+                CallableValueFamily::I32,
+                CallableValueFamily::I32,
+            ],
+            vec![
+                IrInstr::AddI32 {
+                    dst: 3,
+                    lhs: 0,
+                    rhs: 1,
+                },
+                IrInstr::AddI32 {
+                    dst: 3,
+                    lhs: 3,
+                    rhs: 2,
+                },
+                IrInstr::Ret { src: Some(3) },
+            ],
+        );
+        verify_semcode(&bytes).expect("r0..r2 are all entry-defined by SIG0's three parameters");
+    }
+
+    #[test]
+    fn c1756_case4_rejects_register_just_past_parameter_prefix() {
+        let bytes = emit_test_function_with_params(
+            vec![CallableValueFamily::I32],
+            vec![IrInstr::Ret { src: Some(1) }],
+        );
+        let report = verify_semcode(&bytes)
+            .expect_err("r1 is not entry-defined by a one-parameter signature");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case5_rejects_read_before_write_same_register() {
+        let bytes = emit_test_function(vec![
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            },
+            IrInstr::LoadI32 { dst: 5, val: 1 },
+            IrInstr::Ret { src: Some(6) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("r5 is read before any write reaches it");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case6_accepts_write_before_read_same_register() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 5, val: 1 },
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            },
+            IrInstr::Ret { src: Some(6) },
+        ]);
+        verify_semcode(&bytes).expect("r5 is written before it is read");
+    }
+
+    #[test]
+    fn c1756_case7_accepts_read_when_both_branches_define() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadBool { dst: 0, val: true },
+            IrInstr::JmpIf {
+                cond: 0,
+                label: "then".to_string(),
+            },
+            IrInstr::LoadI32 { dst: 5, val: 1 }, // else path
+            IrInstr::Jmp {
+                label: "join".to_string(),
+            },
+            IrInstr::Label {
+                name: "then".to_string(),
+            },
+            IrInstr::LoadI32 { dst: 5, val: 2 }, // then path
+            IrInstr::Label {
+                name: "join".to_string(),
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        verify_semcode(&bytes).expect("both branches define r5 before the join reads it");
+    }
+
+    #[test]
+    fn c1756_case8_rejects_read_when_only_one_branch_defines() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadBool { dst: 0, val: true },
+            IrInstr::JmpIf {
+                cond: 0,
+                label: "then".to_string(),
+            },
+            IrInstr::Jmp {
+                label: "join".to_string(),
+            }, // else path: no write
+            IrInstr::Label {
+                name: "then".to_string(),
+            },
+            IrInstr::LoadI32 { dst: 5, val: 2 }, // only the then path writes r5
+            IrInstr::Label {
+                name: "join".to_string(),
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("only the 'then' branch defines r5");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case9_accepts_definition_before_branch_survives_join() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 5, val: 1 },
+            IrInstr::LoadBool { dst: 0, val: true },
+            IrInstr::JmpIf {
+                cond: 0,
+                label: "join".to_string(),
+            },
+            IrInstr::Label {
+                name: "join".to_string(),
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        verify_semcode(&bytes).expect("r5 defined before the branch remains defined on both paths");
+    }
+
+    #[test]
+    fn c1756_case10_accepts_dominating_definition_before_loop() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 5, val: 1 },
+            IrInstr::Label {
+                name: "loop_head".to_string(),
+            },
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            },
+            IrInstr::Jmp {
+                label: "loop_head".to_string(),
+            },
+        ]);
+        verify_semcode(&bytes)
+            .expect("r5 defined once before the loop remains valid on every iteration");
+    }
+
+    #[test]
+    fn c1756_case11_rejects_first_iteration_reading_loop_carried_undefined_register() {
+        let bytes = emit_test_function(vec![
+            IrInstr::Label {
+                name: "loop_head".to_string(),
+            },
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            }, // reads r5, which no path yet defines on entry to loop_head
+            IrInstr::LoadI32 { dst: 5, val: 1 }, // defines r5 only for the NEXT iteration
+            IrInstr::Jmp {
+                label: "loop_head".to_string(),
+            },
+        ]);
+        let report = verify_semcode(&bytes)
+            .expect_err("the first iteration reads r5 before any path has defined it");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Case 12 proves the non-negotiable TOP-initialization rule is load-
+    /// bearing, not merely a stated preference. `loop_head` (the `AddI32`)
+    /// has two predecessors: the entry `LoadI32` and the back-edge `JmpIf`.
+    /// `r5` is written exactly once, before the loop, and never rewritten
+    /// inside it - nothing inside the loop body ever re-adds `r5` to a set
+    /// that excludes it. Under the correct rule (non-entry nodes start at
+    /// `TOP = U`), `IN[loop_head]` in the very first fixed-point round is
+    /// `OUT[entry] ∩ TOP = OUT[entry]`, which already (correctly) contains
+    /// `r5`. Under the incorrect rule (non-entry nodes start at `∅`),
+    /// `OUT[back-edge]` starts at `∅`, so `IN[loop_head] = OUT[entry] ∩ ∅ =
+    /// ∅` in round one - and because MUST-intersection only ever shrinks a
+    /// set and nothing in this loop ever re-adds `r5`, that wrongly-empty
+    /// result can never self-correct in any later round: it is the loop's
+    /// actual (wrong) converged fixed point, not a transient one. This is
+    /// exactly the "correct fixed point" vs. "wrong fixed point" failure
+    /// the rule exists to prevent - not just a slower convergence.
+    #[test]
+    fn c1756_case12_accepts_loop_read_requires_top_initialization() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 5, val: 1 }, // entry: the only write to r5 anywhere
+            IrInstr::Label {
+                name: "loop_head".to_string(),
+            },
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            }, // loop_head: reads r5 every iteration
+            IrInstr::JmpIf {
+                cond: 6,
+                label: "loop_head".to_string(),
+            }, // conditional back-edge
+            IrInstr::Ret { src: Some(6) }, // exit path
+        ]);
+        verify_semcode(&bytes).expect(
+            "r5, defined once before the loop and never invalidated inside it, must remain \
+             provably defined at loop_head - this is exactly the case that would incorrectly \
+             reject under a non-entry-nodes-start-at-empty-set initialization strategy",
+        );
+    }
+
+    #[test]
+    fn c1756_case13_rejects_call_argument_undefined() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: vec![CallableValueFamily::I32],
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: None,
+                            name: "callee".to_string(),
+                            args: vec![7],
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        let report = verify_semcode(&bytes).expect_err("call argument r7 is undefined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case14_accepts_call_argument_defined() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: vec![CallableValueFamily::I32],
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadI32 { dst: 7, val: 1 },
+                        IrInstr::Call {
+                            dst: None,
+                            name: "callee".to_string(),
+                            args: vec![7],
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        verify_semcode(&bytes).expect("call argument r7 is defined");
+    }
+
+    #[test]
+    fn c1756_case15_accepts_call_destination_defined_after_call() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadI32 { dst: 0, val: 1 },
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: Some(0),
+                            name: "callee".to_string(),
+                            args: vec![],
+                        },
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        verify_semcode(&bytes).expect("a CALL with a destination defines it on fallthrough");
+    }
+
+    #[test]
+    fn c1756_case16_rejects_reading_call_without_destination_placeholder() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: None,
+                            name: "callee".to_string(),
+                            args: vec![],
+                        },
+                        // r0 was never defined - the no-dst CALL's encoded
+                        // dummy destination must not have defined it.
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        let report = verify_semcode(&bytes)
+            .expect_err("no-dst CALL must not define its encoded placeholder register");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case17_rejects_undefined_return_source() {
+        let bytes = emit_test_function_with_params(
+            vec![CallableValueFamily::I32, CallableValueFamily::I32],
+            vec![IrInstr::Ret { src: Some(5) }],
+        );
+        let report = verify_semcode(&bytes)
+            .expect_err("return source r5 is unrelated to either declared parameter");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Case 18 is distinct from case 15: it specifically proves that
+    /// `Value::Unit` is an ordinary defined value for this pass's purposes,
+    /// not an "undefined register" sentinel - the callee explicitly returns
+    /// `Unit` (`Ret { src: None }`), and reading the caller's destination
+    /// register afterward must still be accepted purely because the
+    /// register was *written*, independent of what runtime value it holds.
+    #[test]
+    fn c1756_case18_accepts_reading_register_defined_by_unit_returning_call() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "returns_unit".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: Some(0),
+                            name: "returns_unit".to_string(),
+                            args: vec![],
+                        },
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        verify_semcode(&bytes)
+            .expect("r0 is defined by the call regardless of its runtime value being Unit");
+    }
+
+    #[test]
+    fn c1756_case19_accepts_unit_parameter_entry_read() {
+        let bytes = emit_test_function_with_params(
+            vec![CallableValueFamily::Unit],
+            vec![IrInstr::Ret { src: Some(0) }],
+        );
+        verify_semcode(&bytes)
+            .expect("r0 is entry-defined even though its declared family is Unit");
+    }
+
+    #[test]
+    fn c1756_case20_rejects_map_get_default_undefined() {
+        let bytes = emit_test_function(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::MapGet {
+                dst: 2,
+                map: 0,
+                key: 1,
+                default_val: 9, // never written anywhere
+            },
+            IrInstr::Ret { src: Some(2) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err(
+            "MAP_GET's default register is a conservative, unconditional read (#1756) - key \
+             presence is never statically proven, matching the runtime laziness rule (#1771) \
+             being distinct from this static proof",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case21_accepts_map_get_default_defined() {
+        let bytes = emit_test_function(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 9, val: 0 },
+            IrInstr::MapGet {
+                dst: 2,
+                map: 0,
+                key: 1,
+                default_val: 9,
+            },
+            IrInstr::Ret { src: Some(2) },
+        ]);
+        verify_semcode(&bytes).expect("MAP_GET's default register is defined");
+    }
+
+    #[test]
+    fn c1756_case22_rejects_map_get_map_source_undefined() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 9, val: 0 },
+            IrInstr::MapGet {
+                dst: 2,
+                map: 0, // never written
+                key: 1,
+                default_val: 9,
+            },
+            IrInstr::Ret { src: Some(2) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("MAP_GET's map register is undefined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case23_rejects_conditional_branch_condition_undefined() {
+        let bytes = emit_test_function(vec![
+            IrInstr::JmpIf {
+                cond: 0, // never written
+                label: "target".to_string(),
+            },
+            IrInstr::Label {
+                name: "target".to_string(),
+            },
+            IrInstr::Ret { src: None },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("branch condition r0 is undefined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case24_ignores_undefined_read_in_unreachable_code() {
+        let bytes = emit_test_function(vec![
+            IrInstr::Ret { src: None },
+            // Unreachable (RET has no successor). r99 is undefined, but
+            // this pass only judges reachable reads, matching the
+            // verifier's existing, separate policy on structurally valid
+            // but unreachable code (see `verifier_accepts_structurally_
+            // closed_infinite_loop`'s trailing-code precedent).
+            IrInstr::AddI32 {
+                dst: 1,
+                lhs: 99,
+                rhs: 99,
+            },
+        ]);
+        verify_semcode(&bytes)
+            .expect("an undefined read in unreachable code must not be judged by this pass");
+    }
+
+    #[test]
+    fn c1756_case25_reports_deterministic_first_diagnostic_among_multiple_undefined_reads() {
+        let bytes = emit_test_function(vec![
+            IrInstr::AddI32 {
+                dst: 2,
+                lhs: 10,
+                rhs: 11,
+            }, // r10, r11 both undefined
+            IrInstr::AddI32 {
+                dst: 3,
+                lhs: 20,
+                rhs: 21,
+            }, // r20, r21 also undefined
+            IrInstr::Ret { src: Some(3) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+        assert_eq!(report.diagnostics[0].offset, Some(0));
+        assert!(
+            report.diagnostics[0].message.contains("r10"),
+            "the first reported undefined register must be the lowest-offset, first-decoded \
+             operand (r10, not r11/r20/r21): {}",
+            report.diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn c1756_case26_repeated_verification_yields_identical_diagnostic() {
+        let bytes = emit_test_function(vec![
+            IrInstr::AddI32 {
+                dst: 2,
+                lhs: 10,
+                rhs: 11,
+            },
+            IrInstr::Ret { src: Some(2) },
+        ]);
+        let first = verify_semcode(&bytes).expect_err("must reject");
+        for _ in 0..9 {
+            let again = verify_semcode(&bytes).expect_err("must reject");
+            assert_eq!(
+                again, first,
+                "repeated verification of identical bytes must produce an identical diagnostic"
+            );
+        }
     }
 
     #[test]
@@ -4169,6 +5192,13 @@ mod tests {
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
+                    // #1756 (FA-07-016): r0 must be definitely defined before
+                    // `QTruthAnd` reads it as both `lhs` and `rhs` - this
+                    // fixture only exercises header-revision promotion for
+                    // the opcode, not runtime QTruth semantics, so a plain
+                    // `LoadI32` satisfies definedness without needing this
+                    // module to import `QuadVal` for a real `LoadQ`.
+                    IrInstr::LoadI32 { dst: 0, val: 0 },
                     IrInstr::QTruthAnd {
                         dst: 0,
                         lhs: 0,
