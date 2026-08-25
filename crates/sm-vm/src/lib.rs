@@ -165,8 +165,9 @@ mod tests {
     /// supplied correctly and `unused` is wrong-typed but never read by the
     /// body: if `validate_call_arguments`'s family check were removed, this
     /// call would never read the mistyped `unused` register and would
-    /// silently *succeed* with `Value::I32(7)`, so a failure here can only
-    /// come from the invocation boundary, never from body semantics.
+    /// silently *succeed* with `Value::I32(8)` (`x + 1`), so a failure here
+    /// can only come from the invocation boundary, never from body
+    /// semantics.
     #[test]
     fn rejects_wrong_unused_argument_family_at_invocation_boundary() {
         let src = "fn add_one(x: i32, unused: bool) -> i32 { return x + 1; } fn main() { return; }";
