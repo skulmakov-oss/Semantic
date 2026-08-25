@@ -1122,6 +1122,28 @@ fn dataflow_domain_accounting(
     (reachable_indices, universe)
 }
 
+/// Returns `base` with every register in `writes` inserted, sharing `base`'s
+/// `Rc` (no allocation) whenever `writes` is empty or every register it
+/// names is already set in `base`. This is the structural-sharing half of
+/// the Codex-review-round-2 fix documented on `prove_definite_register_
+/// assignment`: a node whose write(s) introduce no new information never
+/// allocates its own `RegSet`, it just shares its input's.
+#[cfg(feature = "std")]
+fn apply_writes(
+    base: &std::rc::Rc<RegSet>,
+    writes: &[u16],
+    dense: &impl Fn(u16) -> usize,
+) -> std::rc::Rc<RegSet> {
+    if writes.iter().all(|&w| base.contains(dense(w))) {
+        return std::rc::Rc::clone(base);
+    }
+    let mut set = (**base).clone();
+    for &w in writes {
+        set.insert(dense(w));
+    }
+    std::rc::Rc::new(set)
+}
+
 #[cfg(feature = "std")]
 #[allow(clippy::too_many_arguments)]
 fn prove_definite_register_assignment(
@@ -1153,14 +1175,16 @@ fn prove_definite_register_assignment(
             .expect("register must be in U by construction")
     };
 
-    // Predecessors, built from the SAME successor relation
-    // `verify_reachable_control_flow` already walks - not a second CFG.
-    // Indexed and stored by REACHABLE POSITION (see the doc comment above):
-    // only reachable source nodes are visited (an edge from an unreachable
-    // node is never traversed by any real execution path), and only
-    // reachable targets are recorded (an unreachable target's dataflow
-    // state is never allocated, so no predecessor list for it is needed).
+    // Predecessors AND successors, both built from the SAME successor
+    // relation `verify_reachable_control_flow` already walks - not a second
+    // CFG. Indexed and stored by REACHABLE POSITION (see the doc comment
+    // above): only reachable source nodes are visited (an edge from an
+    // unreachable node is never traversed by any real execution path), and
+    // only reachable targets are recorded (an unreachable target's dataflow
+    // state is never allocated, so no predecessor/successor entry for it is
+    // needed).
     let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); reachable_count];
+    let mut successors: Vec<Vec<usize>> = vec![Vec::new(); reachable_count];
     for (src_pos, &idx) in reachable_indices.iter().enumerate() {
         let mut link = |target: usize| {
             // A target that isn't a real instruction boundary can only
@@ -1171,6 +1195,7 @@ fn prove_definite_register_assignment(
             if let Ok(target_idx) = instr_starts.binary_search(&target) {
                 if let Ok(target_pos) = reachable_indices.binary_search(&target_idx) {
                     predecessors[target_pos].push(src_pos);
+                    successors[src_pos].push(target_pos);
                 }
             }
         };
@@ -1189,46 +1214,83 @@ fn prove_definite_register_assignment(
         entry_defs.insert(dense(r as u16));
     }
 
-    let mut in_sets: Vec<RegSet> = (0..reachable_count)
+    // #1756 Codex review round 2 (PR #1840) found two further issues in the
+    // round-1 fix, addressed together here:
+    //
+    // 1. A signature-bearing function that genuinely, reachably references
+    //    every register in a large domain (e.g. defines r0..r4095 then
+    //    continues through a long fallthrough chain) still allocated one
+    //    full `RegSet` per reachable node, since `reachable_count *
+    //    domain_size` was still the product driving memory.
+    // 2. The round-robin rescan (`while changed { for pos in 1.. }`)
+    //    propagates a changed value only one position per round when
+    //    information must flow against the ascending scan order (e.g. a
+    //    backward chain of jumps toward an early undefined read),
+    //    performing up to `O(reachable_count^2)` node visits.
+    //
+    // Fixed together: `Rc<RegSet>` gives cheap (`O(1)`, no allocation)
+    // structural sharing whenever a node's computed state turns out to
+    // equal one already held elsewhere - a node with exactly one
+    // predecessor and no write (or a write that only sets already-defined
+    // bits, as in the "continue writing already-defined registers" tail of
+    // finding 1's example) never allocates a new `RegSet` at all, it just
+    // clones the `Rc`. A predecessor/successor worklist (finding 2) means
+    // only nodes whose *actual input changed* are ever recomputed, and each
+    // node's `IN` can only lose bits over its lifetime (MUST/intersection
+    // is monotonically decreasing), so total work is bounded by the
+    // standard iterative-dataflow bound of `O(edges * domain_size)`, not
+    // `O(reachable_count^2)`.
+    let top: std::rc::Rc<RegSet> = std::rc::Rc::new(RegSet::full(domain_size));
+    let mut in_sets: Vec<std::rc::Rc<RegSet>> = (0..reachable_count)
         .map(|pos| {
             if pos == 0 {
-                entry_defs.clone()
+                std::rc::Rc::new(entry_defs.clone())
             } else {
-                RegSet::full(domain_size)
+                std::rc::Rc::clone(&top)
             }
         })
         .collect();
-    let mut out_sets: Vec<RegSet> = in_sets.clone();
-    for &w in &instr_writes[reachable_indices[0]] {
-        out_sets[0].insert(dense(w));
+    let entry_out = apply_writes(&in_sets[0], &instr_writes[reachable_indices[0]], &dense);
+    let mut out_sets: Vec<std::rc::Rc<RegSet>> = in_sets.clone();
+    out_sets[0] = entry_out;
+
+    // Worklist seeded with entry's successors - entry's own IN/OUT are
+    // fixed inputs (`ENTRY_DEFS` and its own writes), never recomputed.
+    let mut worklist: std::collections::VecDeque<usize> = successors[0].iter().copied().collect();
+    let mut queued = vec![false; reachable_count];
+    for &pos in &successors[0] {
+        queued[pos] = true;
     }
 
-    // Iterate to a fixed point over reachable positions only. Entry's IN/OUT
-    // are fixed inputs (`ENTRY_DEFS` and its own writes), never recomputed.
-    // For a monotone framework iterated to a genuine fixed point (not
-    // stopped early), the converged result is independent of processing
-    // order within a round - only the round count is - so this simple
-    // round-robin re-scan never makes diagnostics order-dependent.
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for pos in 1..reachable_count {
-            let idx = reachable_indices[pos];
-            let mut new_in = RegSet::full(domain_size);
-            for &pred_pos in &predecessors[pos] {
-                new_in.intersect_with(&out_sets[pred_pos]);
+    while let Some(pos) = worklist.pop_front() {
+        queued[pos] = false;
+        let idx = reachable_indices[pos];
+
+        let new_in = match predecessors[pos].as_slice() {
+            [] => std::rc::Rc::clone(&top), // unreachable via any recorded edge; defensive only
+            [only] => std::rc::Rc::clone(&out_sets[*only]),
+            [first, rest @ ..] => {
+                let mut acc = (*out_sets[*first]).clone();
+                for &pred_pos in rest {
+                    acc.intersect_with(&out_sets[pred_pos]);
+                }
+                std::rc::Rc::new(acc)
             }
-            let mut new_out = new_in.clone();
-            for &w in &instr_writes[idx] {
-                new_out.insert(dense(w));
-            }
-            if new_in.words != in_sets[pos].words {
-                in_sets[pos] = new_in;
-                changed = true;
-            }
-            if new_out.words != out_sets[pos].words {
-                out_sets[pos] = new_out;
-                changed = true;
+        };
+        let new_out = apply_writes(&new_in, &instr_writes[idx], &dense);
+
+        let in_changed = new_in.words != in_sets[pos].words;
+        let out_changed = new_out.words != out_sets[pos].words;
+        if in_changed {
+            in_sets[pos] = new_in;
+        }
+        if out_changed {
+            out_sets[pos] = new_out;
+            for &succ_pos in &successors[pos] {
+                if !queued[succ_pos] {
+                    queued[succ_pos] = true;
+                    worklist.push_back(succ_pos);
+                }
             }
         }
     }
@@ -4262,6 +4324,82 @@ mod tests {
         let rejected = emit_test_function(vec![IrInstr::Ret { src: Some(4095) }]);
         let report = verify_semcode(&rejected)
             .expect_err("r4095 is read but never written or entry-defined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Codex review round 2 on PR #1840, finding 1: making the padding
+    /// reachable still amplified memory under round 1's fix, because
+    /// `domain_size` scales with *actual* register usage, and a program can
+    /// genuinely, reachably use every register in the budget. This
+    /// reproduces exactly that shape - define every register `r0..r4095`
+    /// once, then continue through a long fallthrough chain of writes to
+    /// registers already defined (the realistic form of "cheap writes" that
+    /// doesn't grow `U` further) - and proves it still verifies correctly.
+    /// Fixed by `Rc`-sharing (see `apply_writes`): every node in the long
+    /// tail writes only already-defined bits, so it shares its
+    /// predecessor's `Rc<RegSet>` instead of allocating its own.
+    #[test]
+    fn c1756_reachable_full_domain_then_long_redefine_chain_stays_correct() {
+        let mut instrs = Vec::new();
+        for r in 0..4096u16 {
+            instrs.push(IrInstr::LoadI32 { dst: r, val: 0 });
+        }
+        for _ in 0..4000 {
+            // Re-writes r0, already defined above - grows no new
+            // information, the exact "cheap write" tail the finding
+            // describes.
+            instrs.push(IrInstr::LoadI32 { dst: 0, val: 1 });
+        }
+        instrs.push(IrInstr::Ret { src: Some(4095) });
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "every register 0..4095 is genuinely defined before the final read, regardless of \
+             how long the redefine tail is",
+        );
+    }
+
+    /// Codex review round 2 on PR #1840, finding 2: the round-1 fixed-point
+    /// loop rescanned reachable positions in ascending (offset) order every
+    /// round, so information propagating *against* that order (as it does
+    /// here: entry jumps to the LAST instruction, and each subsequent
+    /// instruction jumps one step backward toward an early, undefined
+    /// `RET`) only advanced one node per round - `O(reachable_count)`
+    /// rounds of `O(reachable_count)` work each. Fixed by a genuine
+    /// predecessor/successor worklist: each node's `IN` is computed
+    /// directly from its actual predecessor(s)' `OUT`, propagated forward
+    /// along real edges regardless of node-index order, so this chain
+    /// converges in a single pass over its edges, not a quadratic scan.
+    #[test]
+    fn c1756_backward_propagating_chain_still_rejects_and_converges_promptly() {
+        const CHAIN_LEN: usize = 3000;
+        let mut instrs = vec![IrInstr::Jmp {
+            label: format!("l{CHAIN_LEN}"),
+        }];
+        // "l1" resolves to the very next real instruction, this RET.
+        instrs.push(IrInstr::Label {
+            name: "l1".to_string(),
+        });
+        instrs.push(IrInstr::Ret { src: Some(0) }); // never defined
+        for i in 2..=CHAIN_LEN {
+            instrs.push(IrInstr::Label {
+                name: format!("l{i}"),
+            });
+            instrs.push(IrInstr::Jmp {
+                label: format!("l{}", i - 1),
+            });
+        }
+        // Physical/offset order: entry, l1(RET), l2(Jmp l1), l3(Jmp l2), ...,
+        // l{CHAIN_LEN}(Jmp l{CHAIN_LEN-1}). Execution/propagation order is
+        // the reverse: entry -> l{CHAIN_LEN} -> l{CHAIN_LEN-1} -> ... -> l2
+        // -> l1(RET) - directly opposite the ascending-offset scan order
+        // the pre-fix round-robin loop used.
+        let bytes = emit_test_function(instrs);
+        let report = verify_semcode(&bytes).expect_err(
+            "r0 is read by the RET at the far end of the backward chain and is never defined",
+        );
         assert_eq!(
             report.diagnostics[0].code,
             VerificationCode::UndefinedRegisterRead
