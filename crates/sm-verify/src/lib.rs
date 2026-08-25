@@ -664,13 +664,6 @@ fn verify_function_code(
     let instr_len = code.len().saturating_sub(instr_start);
     let mut instr_starts = Vec::new();
     let mut instruction_successors = Vec::new();
-    // #1756 (FA-07-016): parallel to `instr_starts`/`instruction_successors`
-    // (same index), the exact register reads/writes this pass's definite-
-    // assignment proof needs - populated by the same exhaustive `Opcode`
-    // match in `decode_operands` that already classifies every operand for
-    // the register-range quota below.
-    let mut instr_reads: Vec<Vec<u16>> = Vec::new();
-    let mut instr_writes: Vec<Vec<u16>> = Vec::new();
     let mut jump_targets = Vec::new();
     let mut string_refs = Vec::new();
     let mut call_argcs = Vec::new();
@@ -701,7 +694,7 @@ fn verify_function_code(
                 err.to_string(),
             ),
         })?;
-        let mut refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
+        let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
         let next_offset = cursor - instr_start;
         let jump_target = refs.jump_targets.first().copied();
         let successors = match (opcode, jump_target) {
@@ -719,8 +712,6 @@ fn verify_function_code(
             _ => InstructionSuccessors::One(next_offset),
         };
         instruction_successors.push(successors);
-        instr_reads.push(std::mem::take(&mut refs.reads));
-        instr_writes.push(std::mem::take(&mut refs.writes));
         let min_rev = opcode.minimum_semcode_revision();
         if header.rev < min_rev {
             return Err(reject_one(
@@ -902,10 +893,10 @@ fn verify_function_code(
         }
         prove_definite_register_assignment(
             name,
+            code,
+            instr_start,
             &instr_starts,
             &instruction_successors,
-            &instr_reads,
-            &instr_writes,
             &reachable_offsets,
             entry_param_count,
         )?;
@@ -1092,34 +1083,59 @@ impl RegSet {
 ///
 /// Computes the two quantities that bound `prove_definite_register_
 /// assignment`'s own memory use: the reachable node index set (ascending,
-/// position 0 = function entry) and the dense register universe `U`
-/// (ascending, deduplicated). Factored out from that function so tests can
-/// assert directly on `reachable_indices.len()` and `universe.len()` - the
-/// exact per-node and per-register-domain multipliers - rather than relying
-/// only on timing to demonstrate the Codex-review-round-1 fix above.
+/// position 0 = function entry), the reachable nodes' own reads/writes (also
+/// position-indexed), and the dense register universe `U` (ascending,
+/// deduplicated). Factored out from that function so tests can assert
+/// directly on the returned lengths - the exact per-node and per-register-
+/// domain multipliers - rather than relying only on timing to demonstrate
+/// the Codex-review fixes above.
+///
+/// `reads_writes_of` is called exactly once per REACHABLE raw instruction
+/// index, never for an unreachable one (Codex review round 3 on this PR,
+/// #1840: the prior revision built dense `instr_reads`/`instr_writes: Vec<
+/// Vec<u16>>` for every structurally decoded instruction in the caller,
+/// before reachability was even known - a `Vec<u16>` costs 24 bytes even
+/// empty, so millions of unreachable instructions cost hundreds of MB for
+/// these two arrays alone. The real caller's closure re-decodes just that
+/// one reachable instruction's operands on demand via `decode_operands`;
+/// tests can supply a trivial closure over a small, hand-built map instead).
+/// `(reachable_indices, reachable_reads, reachable_writes, universe)` - see
+/// `dataflow_domain_accounting`'s own doc comment for what each element is.
+#[cfg(feature = "std")]
+type DataflowDomainAccounting = (Vec<usize>, Vec<Vec<u16>>, Vec<Vec<u16>>, Vec<u16>);
+
 #[cfg(feature = "std")]
 fn dataflow_domain_accounting(
     instr_starts: &[usize],
-    instr_reads: &[Vec<u16>],
-    instr_writes: &[Vec<u16>],
     reachable_offsets: &HashSet<usize>,
     entry_param_count: usize,
-) -> (Vec<usize>, Vec<u16>) {
+    mut reads_writes_of: impl FnMut(usize) -> (Vec<u16>, Vec<u16>),
+) -> DataflowDomainAccounting {
     let mut reachable_indices: Vec<usize> = reachable_offsets
         .iter()
         .filter_map(|offset| instr_starts.binary_search(offset).ok())
         .collect();
     reachable_indices.sort_unstable();
 
+    let mut reachable_reads: Vec<Vec<u16>> = Vec::with_capacity(reachable_indices.len());
+    let mut reachable_writes: Vec<Vec<u16>> = Vec::with_capacity(reachable_indices.len());
     let mut universe: Vec<u16> = (0..entry_param_count).map(|r| r as u16).collect();
     for &idx in &reachable_indices {
-        universe.extend_from_slice(&instr_reads[idx]);
-        universe.extend_from_slice(&instr_writes[idx]);
+        let (reads, writes) = reads_writes_of(idx);
+        universe.extend_from_slice(&reads);
+        universe.extend_from_slice(&writes);
+        reachable_reads.push(reads);
+        reachable_writes.push(writes);
     }
     universe.sort_unstable();
     universe.dedup();
 
-    (reachable_indices, universe)
+    (
+        reachable_indices,
+        reachable_reads,
+        reachable_writes,
+        universe,
+    )
 }
 
 /// Returns `base` with every register in `writes` inserted, sharing `base`'s
@@ -1148,10 +1164,10 @@ fn apply_writes(
 #[allow(clippy::too_many_arguments)]
 fn prove_definite_register_assignment(
     function: &str,
+    code: &[u8],
+    instr_start: usize,
     instr_starts: &[usize],
     instruction_successors: &[InstructionSuccessors],
-    instr_reads: &[Vec<u16>],
-    instr_writes: &[Vec<u16>],
     reachable_offsets: &HashSet<usize>,
     entry_param_count: usize,
 ) -> Result<(), RejectReport> {
@@ -1159,13 +1175,32 @@ fn prove_definite_register_assignment(
         return Ok(());
     }
 
-    let (reachable_indices, universe) = dataflow_domain_accounting(
-        instr_starts,
-        instr_reads,
-        instr_writes,
-        reachable_offsets,
-        entry_param_count,
-    );
+    // Codex review round 3 on this PR (#1840): re-decodes exactly one
+    // reachable instruction's operands on demand, via the same
+    // `decode_operands` the main structural walk already used - never a
+    // second decoder, and never materialized for an unreachable
+    // instruction. Every byte here already passed full structural
+    // validation earlier in `verify_function_code` (opcode recognition,
+    // operand shape, canonical domains), so a decode failure here would be
+    // an internal invariant violation, not an attacker-reachable outcome.
+    let reads_writes_of = |idx: usize| -> (Vec<u16>, Vec<u16>) {
+        let offset = instr_starts[idx];
+        let mut cursor = instr_start + offset;
+        let opcode_byte =
+            read_u8(code, &mut cursor).expect("previously-decoded instruction must re-decode");
+        let opcode =
+            Opcode::from_byte(opcode_byte).expect("previously-decoded instruction must re-decode");
+        let refs = decode_operands(function, code, &mut cursor, offset, opcode, true)
+            .expect("previously-decoded instruction must re-decode");
+        (refs.reads, refs.writes)
+    };
+    let (reachable_indices, reachable_reads, reachable_writes, universe) =
+        dataflow_domain_accounting(
+            instr_starts,
+            reachable_offsets,
+            entry_param_count,
+            reads_writes_of,
+        );
     let reachable_count = reachable_indices.len();
     debug_assert_eq!(reachable_indices.first(), Some(&0));
     let domain_size = universe.len();
@@ -1250,7 +1285,7 @@ fn prove_definite_register_assignment(
             }
         })
         .collect();
-    let entry_out = apply_writes(&in_sets[0], &instr_writes[reachable_indices[0]], &dense);
+    let entry_out = apply_writes(&in_sets[0], &reachable_writes[0], &dense);
     let mut out_sets: Vec<std::rc::Rc<RegSet>> = in_sets.clone();
     out_sets[0] = entry_out;
 
@@ -1264,7 +1299,6 @@ fn prove_definite_register_assignment(
 
     while let Some(pos) = worklist.pop_front() {
         queued[pos] = false;
-        let idx = reachable_indices[pos];
 
         let new_in = match predecessors[pos].as_slice() {
             [] => std::rc::Rc::clone(&top), // unreachable via any recorded edge; defensive only
@@ -1277,7 +1311,7 @@ fn prove_definite_register_assignment(
                 std::rc::Rc::new(acc)
             }
         };
-        let new_out = apply_writes(&new_in, &instr_writes[idx], &dense);
+        let new_out = apply_writes(&new_in, &reachable_writes[pos], &dense);
 
         let in_changed = new_in.words != in_sets[pos].words;
         let out_changed = new_out.words != out_sets[pos].words;
@@ -1304,7 +1338,7 @@ fn prove_definite_register_assignment(
     // bytes, independent of any `HashSet`/`HashMap` iteration order.
     for pos in 0..reachable_count {
         let idx = reachable_indices[pos];
-        for &r in &instr_reads[idx] {
+        for &r in &reachable_reads[pos] {
             if !in_sets[pos].contains(dense(r)) {
                 return Err(reject_one(
                     function,
@@ -4303,6 +4337,33 @@ mod tests {
         );
     }
 
+    /// Codex review round 3 on PR #1840: even after round 1's reachable-only
+    /// `RegSet` allocation fix, `verify_function_code`'s main decode loop
+    /// still built a dense `Vec<Vec<u16>>` of reads/writes for every
+    /// structurally decoded instruction, reachable or not - an empty
+    /// `Vec<u16>` costs 24 bytes even with no heap allocation, so a
+    /// signature-bearing function padded with a large number of cheap
+    /// unreachable instructions (their own example: an entry `RET` followed
+    /// by megabytes of two-byte `RET`s) still cost hundreds of MB for these
+    /// two arrays alone, despite only one reachable node. Fixed by no longer
+    /// building them at all in the main decode loop; `prove_definite_
+    /// register_assignment` re-decodes only the instructions `reachable_
+    /// offsets` actually names. 50,000 unreachable `RET`s (100 KB of dead
+    /// code) is enough to prove this stays fast and correct without
+    /// literally allocating gigabytes in a unit test.
+    #[test]
+    fn c1756_rejects_large_unreachable_ret_padding_without_dense_metadata() {
+        let mut instrs = vec![IrInstr::Ret { src: None }];
+        for _ in 0..50_000 {
+            instrs.push(IrInstr::Ret { src: None });
+        }
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "tens of thousands of unreachable two-byte RETs must not require per-instruction \
+             reads/writes metadata to be materialized for every one of them",
+        );
+    }
+
     /// Codex review round 1 on PR #1840, second fix: the register domain
     /// must be the actual registers in use (`U`), densely packed, not the
     /// raw `0..=max_register_id` numeric span. This function references
@@ -4406,12 +4467,16 @@ mod tests {
         );
     }
 
-    /// Direct accounting evidence for the Codex-review-round-1 fix, per the
-    /// review's own request not to rely only on timing.
+    /// Direct accounting evidence for the Codex-review round-1 and round-3
+    /// fixes, per the review's own request not to rely only on timing.
     /// `dataflow_domain_accounting` takes plain, hand-constructible inputs -
-    /// this asserts its two outputs' exact lengths (the two quantities that
-    /// bound `prove_definite_register_assignment`'s memory) directly,
-    /// without needing to run a full decode walk.
+    /// this asserts its outputs' exact lengths (the quantities that bound
+    /// `prove_definite_register_assignment`'s memory) directly, without
+    /// needing to run a full decode walk. The `reads_writes_of` closure is
+    /// backed by a small map covering ONLY the reachable indices actually
+    /// queried - proving directly that unreachable indices are never even
+    /// looked up, let alone materialized as a dense per-instruction entry
+    /// (round 3's fix).
     #[test]
     fn c1756_accounting_bounds_reachable_nodes_and_dense_universe_exactly() {
         // 501 structurally decoded nodes (an entry RET plus 500 unreachable
@@ -4419,22 +4484,24 @@ mod tests {
         // read or written - the exact "RET followed by unreachable bloat"
         // shape Codex's finding described.
         let instr_starts: Vec<usize> = (0..501).collect();
-        let instr_reads: Vec<Vec<u16>> = vec![Vec::new(); 501];
-        let instr_writes: Vec<Vec<u16>> = vec![Vec::new(); 501];
         let mut reachable_offsets = HashSet::new();
         reachable_offsets.insert(0);
-        let (reachable_indices, universe) = dataflow_domain_accounting(
-            &instr_starts,
-            &instr_reads,
-            &instr_writes,
-            &reachable_offsets,
-            0,
-        );
+        let reads_writes: std::collections::HashMap<usize, (Vec<u16>, Vec<u16>)> =
+            std::collections::HashMap::from([(0, (Vec::new(), Vec::new()))]);
+        let (reachable_indices, reachable_reads, reachable_writes, universe) =
+            dataflow_domain_accounting(&instr_starts, &reachable_offsets, 0, |idx| {
+                reads_writes
+                    .get(&idx)
+                    .cloned()
+                    .expect("must only be queried for the one reachable index")
+            });
         assert_eq!(
             reachable_indices.len(),
             1,
             "500 unreachable nodes must not be allocated dataflow state"
         );
+        assert_eq!(reachable_reads.len(), 1);
+        assert_eq!(reachable_writes.len(), 1);
         assert_eq!(
             universe.len(),
             0,
@@ -4444,19 +4511,21 @@ mod tests {
         // Two reachable nodes, referencing only r0 and r4095 - numerically
         // 4095 apart, but only 2 distinct registers actually in use.
         let instr_starts: Vec<usize> = vec![0, 1];
-        let instr_reads: Vec<Vec<u16>> = vec![Vec::new(), vec![4095]];
-        let instr_writes: Vec<Vec<u16>> = vec![vec![0], Vec::new()];
         let mut reachable_offsets = HashSet::new();
         reachable_offsets.insert(0);
         reachable_offsets.insert(1);
-        let (reachable_indices, universe) = dataflow_domain_accounting(
-            &instr_starts,
-            &instr_reads,
-            &instr_writes,
-            &reachable_offsets,
-            0,
-        );
+        let reads_writes: std::collections::HashMap<usize, (Vec<u16>, Vec<u16>)> =
+            std::collections::HashMap::from([
+                (0, (Vec::new(), vec![0])),
+                (1, (vec![4095], Vec::new())),
+            ]);
+        let (reachable_indices, reachable_reads, reachable_writes, universe) =
+            dataflow_domain_accounting(&instr_starts, &reachable_offsets, 0, |idx| {
+                reads_writes.get(&idx).cloned().expect("both are reachable")
+            });
         assert_eq!(reachable_indices.len(), 2);
+        assert_eq!(reachable_reads.len(), 2);
+        assert_eq!(reachable_writes.len(), 2);
         assert_eq!(
             universe.len(),
             2,
