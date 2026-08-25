@@ -126,24 +126,65 @@ mod tests {
         );
     }
 
+    /// #1774 (FA-09-006): the original `test_6_reject_wrong_argument_count`
+    /// ended with `assert!(res.is_ok() || res.is_err())`, which is true for
+    /// every possible `Result` and therefore proves nothing about whether
+    /// the wrong count was actually rejected. `b` is unused by the body on
+    /// purpose: since #1773, `validate_call_arguments` rejects an argument-
+    /// count mismatch inside `push_frame`, before the frame -- and therefore
+    /// the body -- ever runs, with a distinct `TypeMismatchRuntime`.
+    /// Mutation-tested by temporarily disabling that boundary check: `b`'s
+    /// parameter binding still gets one unconditional `StoreVar` read of its
+    /// argument register during lowering regardless of whether the body
+    /// later references `b`, so execution does not silently succeed --
+    /// instead it falls through to a materially worse, VM-internals-leaking
+    /// `RuntimeError::BadFormat("read uninitialized reg r1")`. Asserting the
+    /// specific `TypeMismatchRuntime` variant (not just `is_err()`) is what
+    /// distinguishes the clean boundary rejection this test protects from
+    /// that fallback failure mode.
     #[test]
-    fn test_6_reject_wrong_argument_count() {
-        let src = "fn need_two(a: i32, b: i32) -> i32 { return a + b; } fn main() { return; }";
+    fn rejects_missing_unused_argument_at_invocation_boundary() {
+        let src = "fn need_two(a: i32, b: i32) -> i32 { return a; } fn main() { return; }";
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("need_two").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, vec![Value::I32(5)]);
-        assert!(res.is_ok() || res.is_err());
+        let err = run_verified_function_semcode_with_args(&entry, vec![Value::I32(5)])
+            .expect_err("a missing argument for an unused parameter must still be rejected");
+        assert!(
+            matches!(err, RuntimeError::TypeMismatchRuntime(_)),
+            "expected a boundary argument-count rejection (TypeMismatchRuntime) from \
+             validate_call_arguments, got {err:?}"
+        );
     }
 
+    /// #1774 (FA-09-006): the original `test_7_reject_wrong_argument_type`
+    /// invoked `add_one(x: i32) { x + 1 }` with a `Quad` argument. `x` is
+    /// used by `AddI32`, so that rejection only proves a downstream
+    /// arithmetic opcode can reject a bad runtime shape -- not that the
+    /// call boundary itself checks the declared parameter type. Here `x` is
+    /// supplied correctly and `unused` is wrong-typed but never read by the
+    /// body: if `validate_call_arguments`'s family check were removed, this
+    /// call would never read the mistyped `unused` register and would
+    /// silently *succeed* with `Value::I32(7)`, so a failure here can only
+    /// come from the invocation boundary, never from body semantics.
     #[test]
-    fn test_7_reject_wrong_argument_type() {
-        let src = "fn add_one(x: i32) -> i32 { return x + 1; } fn main() { return; }";
+    fn rejects_wrong_unused_argument_family_at_invocation_boundary() {
+        let src = "fn add_one(x: i32, unused: bool) -> i32 { return x + 1; } fn main() { return; }";
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("add_one").expect("entry");
-        let res = run_verified_function_semcode_with_args(&entry, vec![Value::Quad(QuadVal::T)]);
-        assert!(res.is_err());
+        let err = run_verified_function_semcode_with_args(
+            &entry,
+            vec![Value::I32(7), Value::Text("wrong".into())],
+        )
+        .expect_err(
+            "a wrong-family argument in a parameter the body never reads must still be rejected",
+        );
+        assert!(
+            matches!(err, RuntimeError::TypeMismatchRuntime(_)),
+            "expected a boundary family rejection (TypeMismatchRuntime) from \
+             validate_call_arguments, got {err:?}"
+        );
     }
 
     #[test]
@@ -162,18 +203,36 @@ mod tests {
         assert!(token_res.is_err());
     }
 
+    /// #1774 (FA-09-006): the original `test_10_deterministic_repeated_
+    /// invocation` called `double(i)` for five *different* values of `i`,
+    /// each exactly once. That proves `double(i) == 2*i` holds for five
+    /// distinct inputs, not that repeated execution of the *same* verified
+    /// SemCode/entry/argument state yields the same result every time --
+    /// the actual claim `docs/spec/vm.md`'s Determinism Rule makes (same
+    /// verified SemCode input, execution config, and entry function). This
+    /// version holds the SemCode bytes, the resolved entry token, and the
+    /// argument vector fixed and invokes the identical call ten times.
+    /// `double` is a pure, host-effect-free function, matching the
+    /// Determinism Rule's scope: it makes no claim about host-backed
+    /// effects, wall-clock timing, or external scheduling.
     #[test]
-    fn test_10_deterministic_repeated_invocation() {
+    fn repeated_identical_invocation_is_deterministic() {
         let src = "fn double(x: i32) -> i32 { return x * 2; } fn main() { return; }";
         let bytes = compile_program_to_semcode(src).expect("compile");
         let token = verify_semcode_token(&bytes).expect("verify");
         let entry = token.require_entry("double").expect("entry");
 
-        for i in 1..=5 {
-            let res =
-                run_verified_function_semcode_with_args(&entry, vec![Value::I32(i)]).expect("run");
-            assert_eq!(res, Value::I32(i * 2));
-        }
+        let results: Vec<Value> = (0..10)
+            .map(|_| {
+                run_verified_function_semcode_with_args(&entry, vec![Value::I32(21)]).expect("run")
+            })
+            .collect();
+        assert!(
+            results.iter().all(|r| *r == results[0]),
+            "repeated invocation of identical SemCode/entry/argument state must yield an \
+             identical result every time, got {results:?}"
+        );
+        assert_eq!(results[0], Value::I32(42));
     }
 
     // --- #1653 / #1750 (umbrella #1617) regression matrix -----------------
