@@ -1172,9 +1172,13 @@ fn dataflow_domain_accounting(
 }
 
 /// Reads position `pos`'s slice back out of a CSR-encoded (flat, offsets)
-/// pair built by `dataflow_domain_accounting`.
+/// pair - built by `dataflow_domain_accounting` for register lists, and (as
+/// of #1756 Codex review round 7) by the SCC-membership table in
+/// `prove_definite_register_assignment` for reachable positions - generic
+/// over the element type since both callers share the identical
+/// flat-Vec-plus-offset-table shape.
 #[cfg(feature = "std")]
-fn csr_slice<'a>(flat: &'a [u16], offsets: &[u32], pos: usize) -> &'a [u16] {
+fn csr_slice<'a, T>(flat: &'a [T], offsets: &[u32], pos: usize) -> &'a [T] {
     &flat[offsets[pos] as usize..offsets[pos + 1] as usize]
 }
 
@@ -1462,6 +1466,134 @@ fn narrow_in_place(
     }
 }
 
+/// Reverse-postorder rank for one SCC's own members, computed via a DFS
+/// restricted to edges that stay WITHIN the SCC - an edge leaving it is
+/// simply not followed here (by the time this SCC is processed, per
+/// `tarjan_scc`'s topological order, an external predecessor has either
+/// already contributed via `narrow_in_place` or hasn't started yet and
+/// will feed this SCC when its own turn comes; this DFS only needs to
+/// order the SCC's own internal convergence). `members[0]` is a valid
+/// single-source start regardless of which member it is: by definition,
+/// every node in a strongly-connected component is mutually reachable from
+/// every other one via paths that stay entirely inside it.
+///
+/// Returns ranks parallel to `members` (`rank[i]` is `members[i]`'s local
+/// rank), not a dense array sized by total reachable count - allocating
+/// `O(reachable_count)` space per SCC would reproduce the exact
+/// amplification the CSR membership table in `prove_definite_register_
+/// assignment` exists to avoid.
+///
+/// #1756 Codex review round 7: applies the exact fix round 5 applied to
+/// the whole reachable graph - a plain FIFO gives no guarantee a node's
+/// predecessors are drained before the node itself is first processed -
+/// to the INSIDE of one large SCC too. Without this, seeding an SCC's
+/// local worklist in arbitrary (ascending-position) order and draining it
+/// FIFO can suffer the identical `O(arms * cycle_size)` blowup round 5
+/// fixed at the top level, just contained to one large component instead
+/// of leaking into a downstream tail: many distinct external "entry arms"
+/// feeding different points of one big cycle, each contributing a
+/// different missing register, only advance the newly-missing information
+/// one hop per FIFO pass without this ordering.
+#[cfg(feature = "std")]
+fn local_reverse_postorder_ranks(
+    members: &[usize],
+    scc_id: &[u32],
+    this_scc: u32,
+    reachable_indices: &[usize],
+    instruction_successors: &[InstructionSuccessors],
+    instr_starts: &[usize],
+) -> Vec<u32> {
+    let m = members.len();
+    if m <= 1 {
+        return vec![0u32; m];
+    }
+    let mut visited = vec![false; m];
+    let mut postorder: Vec<usize> = Vec::with_capacity(m); // indices into `members`
+    let mut work: Vec<TarjanFrame> = Vec::new();
+    visited[0] = true;
+    work.push((0, 0));
+
+    while let Some(&(mi, slot)) = work.last() {
+        if slot < 2 {
+            work.last_mut()
+                .expect("work non-empty by the while-let condition just above")
+                .1 += 1;
+            let pos = members[mi];
+            if let Some(succ_pos) = nth_reachable_successor(
+                pos,
+                slot,
+                reachable_indices,
+                instruction_successors,
+                instr_starts,
+            ) {
+                if scc_id[succ_pos] == this_scc {
+                    if let Ok(succ_mi) = members.binary_search(&succ_pos) {
+                        if !visited[succ_mi] {
+                            visited[succ_mi] = true;
+                            work.push((succ_mi, 0));
+                        }
+                    }
+                }
+            }
+        } else {
+            postorder.push(mi);
+            work.pop();
+        }
+    }
+
+    debug_assert!(
+        visited.iter().all(|&v| v),
+        "every SCC member must be visited from members[0] - strongly connected components are \
+         mutually reachable via internal edges by definition"
+    );
+    let mut rank = vec![0u32; m];
+    for (r, &mi) in postorder.iter().rev().enumerate() {
+        rank[mi] = r as u32;
+    }
+    rank
+}
+
+/// Builds CSR-encoded (flat, offsets) SCC membership from `scc_id` (dense
+/// over `0..scc_count`, one entry per reachable position - position 0's
+/// entry is present but never contributes a member, matching `entry`'s
+/// exclusion from SCC processing in `prove_definite_register_assignment`).
+/// Returns `(members_flat, members_offsets)`: every SCC's member positions
+/// back to back, plus a `scc_count + 1`-entry offset table marking each
+/// SCC's slice boundary - `csr_slice(&members_flat, &members_offsets,
+/// scc_ordinal)` reads a given SCC's members back out.
+///
+/// #1756 Codex review round 7: a long, fully reachable, non-branching
+/// stream produces one trivial (singleton) SCC per node, so a
+/// `Vec<Vec<usize>>` here would cost one 24-byte header (plus a small heap
+/// allocation) per reachable node - the exact `Vec<Vec<T>>` amplification
+/// round 4 already eliminated for reads/writes. Built via a counting sort
+/// on `scc_id` instead - two allocations total, not one per SCC. Factored
+/// out from `prove_definite_register_assignment` so tests can assert
+/// directly on the returned arrays' exact contents, rather than relying
+/// only on timing.
+#[cfg(feature = "std")]
+fn scc_membership_csr(scc_id: &[u32], scc_count: usize) -> (Vec<usize>, Vec<u32>) {
+    let mut scc_sizes: Vec<u32> = vec![0; scc_count];
+    for &s in &scc_id[1..] {
+        scc_sizes[s as usize] += 1;
+    }
+    let mut members_offsets: Vec<u32> = Vec::with_capacity(scc_count + 1);
+    let mut running = 0u32;
+    for &size in &scc_sizes {
+        members_offsets.push(running);
+        running += size;
+    }
+    members_offsets.push(running);
+    let mut members_flat: Vec<usize> = vec![0; running as usize];
+    let mut cursor: Vec<u32> = members_offsets[..scc_count].to_vec();
+    for (pos, &s) in scc_id.iter().enumerate().skip(1) {
+        let s = s as usize;
+        members_flat[cursor[s] as usize] = pos;
+        cursor[s] += 1;
+    }
+    (members_flat, members_offsets)
+}
+
 #[cfg(feature = "std")]
 #[allow(clippy::too_many_arguments)]
 fn prove_definite_register_assignment(
@@ -1610,23 +1742,37 @@ fn prove_definite_register_assignment(
     );
 
     let scc = tarjan_scc(&reachable_indices, instruction_successors, instr_starts);
-    let mut members_by_scc: Vec<Vec<usize>> = vec![Vec::new(); scc.order.len()];
-    for pos in 1..reachable_count {
-        members_by_scc[scc.scc_id[pos] as usize].push(pos);
-    }
+    let (members_flat, members_offsets) = scc_membership_csr(&scc.scc_id, scc.order.len());
 
     let mut queued = vec![false; reachable_count];
-    let mut local_queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
     for &scc_ordinal in &scc.order {
-        let members = &members_by_scc[scc_ordinal as usize];
+        let members = csr_slice(&members_flat, &members_offsets, scc_ordinal as usize);
         if members.is_empty() {
             continue; // entry's own excluded SCC bucket
         }
-        for &pos in members {
+        // Codex review round 7: a plain FIFO over an SCC's members, seeded
+        // in arbitrary (ascending-position) order, gives no guarantee
+        // about how many hops one changed value takes to reach another
+        // member - the same ordering hazard round 5 fixed for the whole
+        // reachable graph, now scoped inside one large component instead.
+        // `local_reverse_postorder_ranks` orders this SCC's own internal
+        // convergence the same way `tarjan_scc`'s topological order
+        // already orders convergence ACROSS components.
+        let local_rank = local_reverse_postorder_ranks(
+            members,
+            &scc.scc_id,
+            scc_ordinal,
+            &reachable_indices,
+            instruction_successors,
+            instr_starts,
+        );
+        let mut local_heap: std::collections::BinaryHeap<std::cmp::Reverse<(u32, usize)>> =
+            std::collections::BinaryHeap::new();
+        for (mi, &pos) in members.iter().enumerate() {
             queued[pos] = true;
-            local_queue.push_back(pos);
+            local_heap.push(std::cmp::Reverse((local_rank[mi], pos)));
         }
-        while let Some(pos) = local_queue.pop_front() {
+        while let Some(std::cmp::Reverse((_, pos))) = local_heap.pop() {
             queued[pos] = false;
             let new_out = apply_writes(&in_sets[pos], writes_at(pos), &dense);
             if new_out.words != out_sets[pos].words {
@@ -1644,7 +1790,10 @@ fn prove_definite_register_assignment(
                         // SCC's own members are seeded above.
                         if changed && scc.scc_id[succ_pos] == scc_ordinal && !queued[succ_pos] {
                             queued[succ_pos] = true;
-                            local_queue.push_back(succ_pos);
+                            let succ_mi = members.binary_search(&succ_pos).expect(
+                                "a same-SCC successor must be a member of this SCC's own list",
+                            );
+                            local_heap.push(std::cmp::Reverse((local_rank[succ_mi], succ_pos)));
                         }
                     },
                 );
@@ -4966,6 +5115,132 @@ mod tests {
         );
     }
 
+    /// Codex review round 7 on PR #1840: reproduces the "bound convergence
+    /// work inside each SCC" shape - one big cycle `c_0 -> c_1 -> ... ->
+    /// c_{CHAIN_LEN-1} -> back to c_0`, laid out in REVERSE physical order
+    /// (`c_{CHAIN_LEN-1}`'s bytes come first, `c_0`'s come last - the exact
+    /// technique `c1756_backward_propagating_chain_still_rejects_and_
+    /// converges_promptly` already uses for the whole-graph case), where
+    /// the first `ARMS` cycle nodes (`c_0..c_{ARMS-1}`) each also have
+    /// their own external arm `arm_i` (reached from a shared dispatch off
+    /// entry) contributing "every register except r_i" within the `0..
+    /// ARMS` domain - `arm_i`'s own write cost is bounded by `ARMS`, not
+    /// `CHAIN_LEN`, so the ring can be made long independently of how many
+    /// distinct exclusions feed it. `c_i`'s true fixed point (for `i <
+    /// ARMS`) is the intersection of `arm_0..arm_i`'s contributions -
+    /// genuinely cumulative along the ring, not something any single arm
+    /// already determines. A plain FIFO seeded in ascending-position (=
+    /// descending logical-index, per the reversed layout) order only
+    /// advances newly-arriving information one hop per pass against that
+    /// mismatch - round 5's exact ordering hazard, reproduced entirely
+    /// INSIDE one SCC where round 6's cross-SCC isolation cannot help.
+    /// Fixed by `local_reverse_postorder_ranks`: the same RPO-ordering
+    /// technique round 5 applied to the whole graph, now applied to each
+    /// SCC's own internal convergence.
+    ///
+    /// Correctness: the converged fixed point at the far end of the ring
+    /// is the intersection of every arm's contribution - the empty set
+    /// within `0..ARMS`, since `arm_i` excludes `r_i` for every `i` - so
+    /// the tail read of `r0` is correctly rejected regardless of ring
+    /// length or physical layout.
+    #[test]
+    fn c1756_rejects_reverse_physical_cycle_with_many_external_arms_without_per_arm_blowup() {
+        const ARMS: u16 = 64;
+        const CHAIN_LEN: u32 = 40_000;
+        const COND_REG: u16 = ARMS;
+        const TAIL_LEN: usize = 20_000;
+
+        let mut instrs: Vec<IrInstr> = vec![IrInstr::LoadBool {
+            dst: COND_REG,
+            val: true,
+        }];
+        instrs.push(IrInstr::Label {
+            name: "dispatch".to_string(),
+        });
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::JmpIf {
+                cond: COND_REG,
+                label: format!("arm{arm}"),
+            });
+        }
+        // Fallthrough arm (ARMS - 1): defines every register in 0..ARMS
+        // except itself, then jumps into the ring at c_{ARMS - 1}.
+        for r in 0..ARMS {
+            if r != ARMS - 1 {
+                instrs.push(IrInstr::LoadI32 {
+                    dst: r,
+                    val: r as i32,
+                });
+            }
+        }
+        instrs.push(IrInstr::Jmp {
+            label: format!("c{}", ARMS - 1),
+        });
+        // The remaining arms, each reached by its own JmpIf target above -
+        // defines every register in 0..ARMS except its own index, then
+        // jumps into the ring at the matching c_i.
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::Label {
+                name: format!("arm{arm}"),
+            });
+            for r in 0..ARMS {
+                if r != arm {
+                    instrs.push(IrInstr::LoadI32 {
+                        dst: r,
+                        val: r as i32,
+                    });
+                }
+            }
+            instrs.push(IrInstr::Jmp {
+                label: format!("c{arm}"),
+            });
+        }
+        // c_{CHAIN_LEN - 1}: the ring's last logical node - back edge to
+        // c_0 (closing the loop) or fallthrough to the exit tail. Emitted
+        // FIRST physically (lowest position), even though it's LAST in
+        // logical/control-flow order.
+        instrs.push(IrInstr::Label {
+            name: format!("c{}", CHAIN_LEN - 1),
+        });
+        instrs.push(IrInstr::JmpIf {
+            cond: COND_REG,
+            label: "c0".to_string(),
+        });
+        for _ in 0..TAIL_LEN {
+            instrs.push(IrInstr::LoadI32 {
+                dst: COND_REG,
+                val: 0,
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0: undefined by arm 0
+                                                    // c_{CHAIN_LEN - 2} down to c_0: each jumps to its logical
+                                                    // successor - emitted in DESCENDING index order, so ascending
+                                                    // physical position is the exact reverse of logical/control-flow
+                                                    // order (c_{CHAIN_LEN - 1} lowest position .. c_0 highest).
+                                                    // Positions ARMS..CHAIN_LEN-1 have no external arm at all - pure
+                                                    // pass-through, carrying the already-converging state forward
+                                                    // without adding new information - so the ring's own length can
+                                                    // grow far beyond ARMS at negligible construction cost.
+        for i in (0..CHAIN_LEN - 1).rev() {
+            instrs.push(IrInstr::Label {
+                name: format!("c{i}"),
+            });
+            instrs.push(IrInstr::Jmp {
+                label: format!("c{}", i + 1),
+            });
+        }
+
+        let bytes = emit_test_function(instrs);
+        let report = verify_semcode(&bytes).expect_err(
+            "each arm_i excludes r_i, so the intersection over all ARMS arms at the far end \
+             of the ring is empty within 0..ARMS, and the tail read of r0 must be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
     /// Codex review round 1 on PR #1840, second fix: the register domain
     /// must be the actual registers in use (`U`), densely packed, not the
     /// raw `0..=max_register_id` numeric span. This function references
@@ -5149,6 +5424,60 @@ mod tests {
             "the dense register domain must track the 2 registers actually referenced \
              ({{r0, r4095}}), not the raw 4096-wide numeric span between them: {universe:?}"
         );
+    }
+
+    /// Direct accounting evidence for the Codex-review round-7 "store SCC
+    /// membership without one Vec per component" fix, per the review's own
+    /// request not to rely only on timing. `scc_membership_csr` takes
+    /// plain, hand-constructible `scc_id` inputs - this asserts the
+    /// returned flat/offsets arrays' exact contents directly, proving the
+    /// membership table is one flat allocation plus one offset table (not
+    /// one `Vec<usize>` per SCC) for both a fully-linear-stream shape
+    /// (every position its own singleton SCC) and a mixed shape (multiple
+    /// members sharing one SCC).
+    #[test]
+    fn c1756_scc_membership_csr_bounds_by_flat_allocation_not_one_vec_per_component() {
+        // 5 reachable positions (0 = entry, excluded from membership),
+        // each its own singleton SCC - the exact "long linear reachable
+        // stream" shape Codex's finding described, just small enough to
+        // hand-construct and assert on directly.
+        let scc_id: Vec<u32> = vec![0, 1, 2, 3, 4];
+        let (members_flat, members_offsets) = scc_membership_csr(&scc_id, 5);
+        assert_eq!(
+            members_flat,
+            vec![1, 2, 3, 4],
+            "position 0 (entry) contributes no member; each of 1..4 is its own singleton SCC"
+        );
+        assert_eq!(
+            members_offsets,
+            vec![0, 0, 1, 2, 3, 4],
+            "one flat offset table sized scc_count+1, not one Vec per SCC"
+        );
+        for (ordinal, &pos) in [1usize, 2, 3, 4].iter().enumerate() {
+            assert_eq!(
+                csr_slice(&members_flat, &members_offsets, ordinal + 1),
+                &[pos]
+            );
+        }
+        assert_eq!(
+            csr_slice(&members_flat, &members_offsets, 0),
+            &[] as &[usize],
+            "position 0's own (entry-only) SCC bucket must be empty, never containing entry \
+             itself"
+        );
+
+        // A mixed shape: positions 1 and 3 share SCC 0 (a real cycle),
+        // positions 2 and 4 are singleton SCCs 1 and 2.
+        let scc_id: Vec<u32> = vec![u32::MAX, 0, 1, 0, 2];
+        let (members_flat, members_offsets) = scc_membership_csr(&scc_id, 3);
+        assert_eq!(members_offsets, vec![0, 2, 3, 4]);
+        assert_eq!(
+            csr_slice(&members_flat, &members_offsets, 0),
+            &[1, 3],
+            "positions 1 and 3, sharing SCC 0, must both appear in its slice"
+        );
+        assert_eq!(csr_slice(&members_flat, &members_offsets, 1), &[2]);
+        assert_eq!(csr_slice(&members_flat, &members_offsets, 2), &[4]);
     }
 
     #[test]
