@@ -969,10 +969,19 @@ fn verify_reachable_control_flow(
 }
 
 /// #1756 (FA-07-016): a compact fixed-size bitset over register numbers
-/// `0..domain_size`, the MUST-dataflow lattice element (a register set under
-/// intersection meet). `domain_size` is always bounded by the register-range
+/// `0..domain_size`. `domain_size` is always bounded by the register-range
 /// quota already enforced before this pass runs (see the caller), so this
 /// never allocates from an attacker-controlled unbounded register id.
+///
+/// #1756 Codex review round 8: this now represents the MAY-MISSING dataflow
+/// lattice element (a register set under UNION meet), not the original
+/// MUST-DEFINED one (intersection meet) - see `compute_missing_sets`'s doc
+/// comment for the full duality derivation. `RegSet` itself is an
+/// unopinionated bitset either way; only the meet operation used on it (now
+/// plain per-bit `insert`, driving the worklist in `compute_missing_sets`,
+/// rather than a whole-set `intersect_with`) and its initialization
+/// (BOTTOM=empty for non-entry nodes, the dual of the old TOP=full rule)
+/// changed.
 #[cfg(feature = "std")]
 #[derive(Clone)]
 struct RegSet {
@@ -985,12 +994,12 @@ impl RegSet {
         domain_size.saturating_add(63) / 64
     }
 
-    /// TOP: every register in the domain is (conservatively) considered
-    /// defined. Required initialization for every *non-entry* node in a
-    /// forward MUST analysis - starting from the empty set instead computes
-    /// the wrong fixed point for loops (a loop-carried definition would
-    /// never survive the still-unconverged first pass through its own
-    /// back-edge). This is the non-negotiable TOP-initialization rule.
+    /// Every register in the domain is set. Used only to compute `entry`'s
+    /// fixed MISSING set via complement (`full() `then removing
+    /// `ENTRY_DEFS` bits) - no node is ever initialized to this directly
+    /// under the round-8 MAY-missing formulation (see `compute_missing_
+    /// sets`'s doc comment for why BOTTOM/empty, not this, is every
+    /// non-entry node's correct starting point).
     fn full(domain_size: usize) -> Self {
         let mut words = vec![u64::MAX; Self::word_count(domain_size)];
         let rem = domain_size % 64;
@@ -1022,20 +1031,12 @@ impl RegSet {
         }
     }
 
-    fn intersect_with(&mut self, other: &RegSet) {
-        for (a, b) in self.words.iter_mut().zip(other.words.iter()) {
-            *a &= *b;
+    fn remove(&mut self, reg: usize) {
+        let word = reg / 64;
+        let bit = reg % 64;
+        if let Some(w) = self.words.get_mut(word) {
+            *w &= !(1u64 << bit);
         }
-    }
-
-    /// `true` iff every bit set in `self` is also set in `other` - i.e.
-    /// `self ∩ other == self`, so intersecting `self` with `other` would
-    /// change nothing. Used to detect a no-op meet without allocating.
-    fn is_subset_of(&self, other: &RegSet) -> bool {
-        self.words
-            .iter()
-            .zip(other.words.iter())
-            .all(|(a, b)| (a & !b) == 0)
     }
 }
 
@@ -1182,50 +1183,6 @@ fn csr_slice<'a, T>(flat: &'a [T], offsets: &[u32], pos: usize) -> &'a [T] {
     &flat[offsets[pos] as usize..offsets[pos + 1] as usize]
 }
 
-/// Returns `base` with every register in `writes` inserted, sharing `base`'s
-/// `Rc` (no allocation) whenever `writes` is empty or every register it
-/// names is already set in `base`. This is the structural-sharing half of
-/// the Codex-review-round-2 fix documented on `prove_definite_register_
-/// assignment`: a node whose write(s) introduce no new information never
-/// allocates its own `RegSet`, it just shares its input's.
-#[cfg(feature = "std")]
-fn apply_writes(
-    base: &std::rc::Rc<RegSet>,
-    writes: &[u16],
-    dense: &impl Fn(u16) -> usize,
-) -> std::rc::Rc<RegSet> {
-    if writes.iter().all(|&w| base.contains(dense(w))) {
-        return std::rc::Rc::clone(base);
-    }
-    let mut set = (**base).clone();
-    for &w in writes {
-        set.insert(dense(w));
-    }
-    std::rc::Rc::new(set)
-}
-
-/// Returns `current ∩ incoming`, sharing an existing `Rc` (no allocation)
-/// whenever the intersection turns out to equal one of the two inputs
-/// exactly - which it does whenever `current` is already a subset of
-/// `incoming` (the meet changes nothing) or the meet happens to equal
-/// `incoming` outright (the common case the first time a node - still at
-/// TOP - receives its first real value: `TOP ∩ incoming == incoming`).
-#[cfg(feature = "std")]
-fn intersect_rc(
-    current: &std::rc::Rc<RegSet>,
-    incoming: &std::rc::Rc<RegSet>,
-) -> std::rc::Rc<RegSet> {
-    if current.is_subset_of(incoming) {
-        return std::rc::Rc::clone(current);
-    }
-    let mut result = (**current).clone();
-    result.intersect_with(incoming);
-    if result.words == incoming.words {
-        return std::rc::Rc::clone(incoming);
-    }
-    std::rc::Rc::new(result)
-}
-
 /// Invokes `visit` once per REACHABLE successor position of raw instruction
 /// `idx`, resolved from the verifier's own `instruction_successors` (no
 /// second CFG) via `instr_starts`/`reachable_indices` binary search. A
@@ -1258,344 +1215,192 @@ fn for_each_reachable_successor(
     }
 }
 
-/// Compact DFS work-stack frame for `tarjan_scc`'s iterative traversal: the
-/// position being explored and which of its (at most two) successors to
-/// try next. Recomputing a position's successors on demand each time (see
-/// `nth_reachable_successor`) rather than caching them in the frame keeps
-/// this frame small - `(usize, u8)`, 16 bytes on a 64-bit target - since a
-/// long, non-branching reachable chain retains one frame per node for the
-/// chain's full depth before any frame pops.
-///
-/// #1756 Codex review round 6: round 5's `reverse_postorder_ranks` (this
-/// function's predecessor, since replaced) cached a `[Option<usize>; 2]`
-/// successor array per frame - 48 bytes - for exactly this reason; a
-/// several-million-node fully reachable, non-branching stream retained
-/// that many frames simultaneously before any could pop.
+/// Delivers `bit` to `target`'s MISSING set, in place - `target`'s `RegSet`
+/// is mutated directly (`insert`), never cloned or replaced, which is what
+/// eliminates the round-8 "duplicate live RegSet states" amplification (see
+/// `prove_definite_register_assignment`'s doc comment): there is exactly
+/// one `RegSet` per reachable position, period, so no number of branches
+/// independently computing the same result can ever duplicate it. Returns
+/// `true` iff this was new information (the bit wasn't already present) -
+/// the caller only enqueues `(target, bit)` for further propagation when
+/// this is `true`, which is what guarantees each (position, bit) pair is
+/// ever enqueued at most once (MISSING only ever grows, so once a bit is
+/// present it can never need re-delivery). Position 0 (entry) is never
+/// delivered to - its MISSING set is fixed, see the sibling doc comment for
+/// the soundness argument.
 #[cfg(feature = "std")]
-type TarjanFrame = (usize, u8);
-
-/// Returns the `slot`-th (0 or 1) reachable successor of position `pos`, or
-/// `None` if it has fewer than `slot + 1`. Recomputes via
-/// `for_each_reachable_successor` on demand each call rather than caching a
-/// successor array per DFS frame - see `TarjanFrame`'s doc comment.
-#[cfg(feature = "std")]
-fn nth_reachable_successor(
-    pos: usize,
-    slot: u8,
-    reachable_indices: &[usize],
-    instruction_successors: &[InstructionSuccessors],
-    instr_starts: &[usize],
-) -> Option<usize> {
-    let mut found: [Option<usize>; 2] = [None, None];
-    let mut count = 0u8;
-    for_each_reachable_successor(
-        reachable_indices[pos],
-        instruction_successors,
-        instr_starts,
-        reachable_indices,
-        |succ_pos| {
-            if (count as usize) < found.len() {
-                found[count as usize] = Some(succ_pos);
-            }
-            count += 1;
-        },
-    );
-    found.get(slot as usize).copied().flatten()
-}
-
-/// Strongly-connected-component id per reachable position, plus the SCC ids
-/// in Tarjan's own completion order - which is reverse-topological: if a
-/// node in SCC `A` has an edge to a node in a *different* SCC `B`, then `B`
-/// completes (and appears in this list) before `A` does. Position 0
-/// (entry) is included in the id assignment, but the caller never
-/// processes its own SCC bucket - its IN/OUT are fixed, see
-/// `prove_definite_register_assignment`.
-///
-/// #1756 Codex review round 6: round 5's RPO-based worklist only orders a
-/// join's *forward* (non-back-edge) predecessors ahead of it. For a
-/// genuine cycle - a loop header `H` fed by several sibling nodes `S_1..
-/// S_k` via back edges, each `S_i` also reachable from outside the loop -
-/// every `S_i`'s narrowing of `H` re-fires `H` (and anything downstream,
-/// e.g. a long loop-exit tail) again, since RPO gives `H` a *lower* rank
-/// than every `S_i` regardless: the exact same `O(k * tail_len)` blowup
-/// round 5 fixed, reached through a route RPO alone cannot close (RPO says
-/// nothing about `S_1..S_k`'s relative order, since none is an ancestor of
-/// another - only that each is ordered after `H`, the opposite of what's
-/// needed here).
-///
-/// SCC-restricted processing closes it: `H` and every `S_i` that
-/// participates in the cycle land in ONE SCC (they are mutually reachable),
-/// so their local fixed point - bounded by the SCC's own size and the
-/// register-domain height, never by anything downstream - settles once, as
-/// a unit, before anything after the loop (including the tail) is touched
-/// at all. See `prove_definite_register_assignment`'s SCC-processing loop
-/// for how this id assignment is consumed.
-///
-/// Iterative (non-recursive, so a long chain can't blow the stack) Tarjan's
-/// algorithm, reusing the same successor relation as
-/// `for_each_reachable_successor` - no predecessor structure is built, and
-/// the compact `TarjanFrame` work-stack keeps a long chain's peak memory
-/// small (see that type's doc comment).
-#[cfg(feature = "std")]
-struct SccInfo {
-    scc_id: Vec<u32>,
-    /// SCC ids in Tarjan's completion order (reverse-topological).
-    order: Vec<u32>,
-}
-
-#[cfg(feature = "std")]
-fn tarjan_scc(
-    reachable_indices: &[usize],
-    instruction_successors: &[InstructionSuccessors],
-    instr_starts: &[usize],
-) -> SccInfo {
-    let n = reachable_indices.len();
-    if n == 0 {
-        return SccInfo {
-            scc_id: Vec::new(),
-            order: Vec::new(),
-        };
-    }
-
-    let mut index: Vec<Option<u32>> = vec![None; n];
-    let mut lowlink: Vec<u32> = vec![0; n];
-    let mut on_stack: Vec<bool> = vec![false; n];
-    let mut tarjan_stack: Vec<usize> = Vec::new();
-    let mut scc_id: Vec<u32> = vec![u32::MAX; n];
-    let mut next_index: u32 = 0;
-    let mut next_scc: u32 = 0;
-    let mut work: Vec<TarjanFrame> = Vec::new();
-
-    // Every reachable position is, by construction, reachable from
-    // position 0 (see `verify_reachable_control_flow`) - one DFS tree
-    // covers all of them, no outer "for every unvisited start" loop
-    // needed.
-    index[0] = Some(next_index);
-    lowlink[0] = next_index;
-    next_index += 1;
-    tarjan_stack.push(0);
-    on_stack[0] = true;
-    work.push((0, 0));
-
-    while let Some(&(pos, slot)) = work.last() {
-        if slot < 2 {
-            work.last_mut()
-                .expect("work non-empty by the while-let condition just above")
-                .1 += 1;
-            if let Some(succ) = nth_reachable_successor(
-                pos,
-                slot,
-                reachable_indices,
-                instruction_successors,
-                instr_starts,
-            ) {
-                match index[succ] {
-                    None => {
-                        index[succ] = Some(next_index);
-                        lowlink[succ] = next_index;
-                        next_index += 1;
-                        tarjan_stack.push(succ);
-                        on_stack[succ] = true;
-                        work.push((succ, 0));
-                    }
-                    Some(succ_index) if on_stack[succ] => {
-                        lowlink[pos] = lowlink[pos].min(succ_index);
-                    }
-                    _ => {}
-                }
-            }
-        } else {
-            work.pop();
-            let pos_lowlink = lowlink[pos];
-            if let Some(&(parent, _)) = work.last() {
-                lowlink[parent] = lowlink[parent].min(pos_lowlink);
-            }
-            if pos_lowlink == index[pos].expect("visited node has an index") {
-                loop {
-                    let w = tarjan_stack
-                        .pop()
-                        .expect("this node's own SCC root is still on the stack");
-                    on_stack[w] = false;
-                    scc_id[w] = next_scc;
-                    if w == pos {
-                        break;
-                    }
-                }
-                next_scc += 1;
-            }
-        }
-    }
-
-    debug_assert!(
-        index.iter().all(Option::is_some),
-        "every reachable position must be visited from entry"
-    );
-    SccInfo {
-        scc_id,
-        order: (0..next_scc).rev().collect(),
-    }
-}
-
-/// Narrows `in_sets[pos]` toward `incoming` in place, sharing an `Rc`
-/// whenever possible (see `intersect_rc`). Returns `true` iff this actually
-/// changed the stored value. Position 0 (entry) is never narrowed: its IN
-/// is the fixed `ENTRY_DEFS`, never recomputed from any predecessor. This
-/// is provably safe even for a back edge that targets entry directly
-/// (structurally legal - a jump to instruction 0 is a valid instruction
-/// boundary): every reachable node's OUT is `entry_defs` narrowed only by
-/// intersections and widened only by writes (which only ever add bits,
-/// never remove them), so by induction every reachable OUT is a superset
-/// of `entry_defs` - intersecting `entry_defs` with any such OUT can only
-/// ever yield `entry_defs` back, unchanged. The explicit `pos == 0` guard
-/// below makes that invariant load-bearing rather than implicit.
-#[cfg(feature = "std")]
-fn narrow_in_place(
-    pos: usize,
-    incoming: &std::rc::Rc<RegSet>,
-    in_sets: &mut [std::rc::Rc<RegSet>],
-) -> bool {
-    if pos == 0 {
-        return false;
-    }
-    let narrowed = intersect_rc(&in_sets[pos], incoming);
-    if narrowed.words != in_sets[pos].words {
-        in_sets[pos] = narrowed;
+fn deliver(missing: &mut [RegSet], target: usize, bit: usize) -> bool {
+    if target != 0 && !missing[target].contains(bit) {
+        missing[target].insert(bit);
         true
     } else {
         false
     }
 }
 
-/// Reverse-postorder rank for one SCC's own members, computed via a DFS
-/// restricted to edges that stay WITHIN the SCC - an edge leaving it is
-/// simply not followed here (by the time this SCC is processed, per
-/// `tarjan_scc`'s topological order, an external predecessor has either
-/// already contributed via `narrow_in_place` or hasn't started yet and
-/// will feed this SCC when its own turn comes; this DFS only needs to
-/// order the SCC's own internal convergence). `members[0]` is a valid
-/// single-source start regardless of which member it is: by definition,
-/// every node in a strongly-connected component is mutually reachable from
-/// every other one via paths that stay entirely inside it.
+/// Core bit-level MAY-MISSING worklist - factored out from `prove_definite_
+/// register_assignment` so tests can assert directly on its `event_count`
+/// output (Codex review round 8's explicit request for allocation/
+/// relaxation counters, not timing alone) using small, hand-constructed
+/// `successors_of`/`writes_contains` closures rather than real SemCode
+/// bytes.
 ///
-/// Returns ranks parallel to `members` (`rank[i]` is `members[i]`'s local
-/// rank), not a dense array sized by total reachable count - allocating
-/// `O(reachable_count)` space per SCC would reproduce the exact
-/// amplification the CSR membership table in `prove_definite_register_
-/// assignment` exists to avoid.
+/// Returns `(missing, event_count)`: the converged MISSING set for every
+/// reachable position (position 0 = entry, whose value is `entry_missing`
+/// unchanged), and the total number of (position, bit) events the worklist
+/// processed after seeding.
 ///
-/// #1756 Codex review round 7: applies the exact fix round 5 applied to
-/// the whole reachable graph - a plain FIFO gives no guarantee a node's
-/// predecessors are drained before the node itself is first processed -
-/// to the INSIDE of one large SCC too. Without this, seeding an SCC's
-/// local worklist in arbitrary (ascending-position) order and draining it
-/// FIFO can suffer the identical `O(arms * cycle_size)` blowup round 5
-/// fixed at the top level, just contained to one large component instead
-/// of leaking into a downstream tail: many distinct external "entry arms"
-/// feeding different points of one big cycle, each contributing a
-/// different missing register, only advance the newly-missing information
-/// one hop per FIFO pass without this ordering.
+/// **Work bound.** Every `(position, bit)` pair is enqueued at MOST once,
+/// ever, across the whole computation - `deliver` only returns `true` (the
+/// caller's only enqueue trigger) the one time a bit transitions from
+/// absent to present in some position's `MISSING` set, and `MISSING` only
+/// ever grows (union, never shrinks) - so the total number of *distinct*
+/// (position, bit) pairs that can ever be enqueued is bounded by
+/// `reachable_count * domain_size`, REGARDLESS of the reachable subgraph's
+/// structure: cyclic, irreducible, arbitrary fan-in through a shared loop
+/// header, all of it is irrelevant, because a bit that is already present
+/// at a node can never need re-delivery to it. Each dequeued event costs
+/// O(1) amortized: a single `writes_contains` check (a linear scan over
+/// that position's own reads/writes list, which is small - at most a
+/// handful of registers per instruction, by construction, not tied to
+/// `domain_size`) plus O(out_degree) <= O(2) successor deliveries. This
+/// gives a provable `O(reachable_count * domain_size)` TOTAL bit-level
+/// work bound, independent of ordering - #1756 Codex review round 8's
+/// second finding (`local_reverse_postorder_ranks`, round 7's fix, does not
+/// bound convergence inside one large strongly-connected component against
+/// an adversarial backedge-fan-in shape) is closed by this property: there
+/// is no "large SCC" concept left to reprocess, because nothing at the bit
+/// level is ever reprocessed. `successors_of`/`writes_contains` need no
+/// predecessor structure, no reverse-postorder ranking, and no strongly-
+/// connected-component decomposition - `tarjan_scc`, `TarjanFrame`,
+/// `nth_reachable_successor`, `SccInfo`, `scc_membership_csr`, and
+/// `local_reverse_postorder_ranks` (rounds 6-7's SCC/ordering machinery)
+/// are removed entirely as of this round: they existed only to bound
+/// whole-`RegSet` reprocessing, which this formulation does not do in the
+/// first place.
 #[cfg(feature = "std")]
-fn local_reverse_postorder_ranks(
-    members: &[usize],
-    scc_id: &[u32],
-    this_scc: u32,
-    reachable_indices: &[usize],
-    instruction_successors: &[InstructionSuccessors],
-    instr_starts: &[usize],
-) -> Vec<u32> {
-    let m = members.len();
-    if m <= 1 {
-        return vec![0u32; m];
+fn compute_missing_sets(
+    reachable_count: usize,
+    domain_size: usize,
+    entry_missing: RegSet,
+    writes_contains: impl Fn(usize, usize) -> bool,
+    mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
+) -> (Vec<RegSet>, usize) {
+    let mut missing: Vec<RegSet> = (0..reachable_count)
+        .map(|pos| {
+            if pos == 0 {
+                entry_missing.clone()
+            } else {
+                RegSet::empty(domain_size)
+            }
+        })
+        .collect();
+    if reachable_count == 0 {
+        return (missing, 0);
     }
-    let mut visited = vec![false; m];
-    let mut postorder: Vec<usize> = Vec::with_capacity(m); // indices into `members`
-    let mut work: Vec<TarjanFrame> = Vec::new();
-    visited[0] = true;
-    work.push((0, 0));
 
-    while let Some(&(mi, slot)) = work.last() {
-        if slot < 2 {
-            work.last_mut()
-                .expect("work non-empty by the while-let condition just above")
-                .1 += 1;
-            let pos = members[mi];
-            if let Some(succ_pos) = nth_reachable_successor(
-                pos,
-                slot,
-                reachable_indices,
-                instruction_successors,
-                instr_starts,
-            ) {
-                if scc_id[succ_pos] == this_scc {
-                    if let Ok(succ_mi) = members.binary_search(&succ_pos) {
-                        if !visited[succ_mi] {
-                            visited[succ_mi] = true;
-                            work.push((succ_mi, 0));
-                        }
-                    }
+    let mut queue: std::collections::VecDeque<(usize, usize)> = std::collections::VecDeque::new();
+
+    // Seed from entry's own MISSING_OUT (post-write) - entry's own MISSING
+    // is fixed and never re-delivered to (see `deliver`), so this is the
+    // one place entry's contribution enters the worklist.
+    let entry_successors = successors_of(0);
+    for bit in 0..domain_size {
+        if missing[0].contains(bit) && !writes_contains(0, bit) {
+            for succ in entry_successors.into_iter().flatten() {
+                if deliver(&mut missing, succ, bit) {
+                    queue.push_back((succ, bit));
                 }
             }
-        } else {
-            postorder.push(mi);
-            work.pop();
         }
     }
 
-    debug_assert!(
-        visited.iter().all(|&v| v),
-        "every SCC member must be visited from members[0] - strongly connected components are \
-         mutually reachable via internal edges by definition"
-    );
-    let mut rank = vec![0u32; m];
-    for (r, &mi) in postorder.iter().rev().enumerate() {
-        rank[mi] = r as u32;
+    let mut event_count: usize = 0;
+    while let Some((pos, bit)) = queue.pop_front() {
+        event_count += 1;
+        if writes_contains(pos, bit) {
+            continue; // killed here - defined by this instruction's own write
+        }
+        for succ in successors_of(pos).into_iter().flatten() {
+            if deliver(&mut missing, succ, bit) {
+                queue.push_back((succ, bit));
+            }
+        }
     }
-    rank
+
+    (missing, event_count)
 }
 
-/// Builds CSR-encoded (flat, offsets) SCC membership from `scc_id` (dense
-/// over `0..scc_count`, one entry per reachable position - position 0's
-/// entry is present but never contributes a member, matching `entry`'s
-/// exclusion from SCC processing in `prove_definite_register_assignment`).
-/// Returns `(members_flat, members_offsets)`: every SCC's member positions
-/// back to back, plus a `scc_count + 1`-entry offset table marking each
-/// SCC's slice boundary - `csr_slice(&members_flat, &members_offsets,
-/// scc_ordinal)` reads a given SCC's members back out.
+/// #1756 (FA-07-016) Codex review round 8: the dual, MAY-MISSING
+/// formulation of definite-register-assignment, replacing the round 1-7
+/// MUST/DEFINED/intersection formulation entirely.
 ///
-/// #1756 Codex review round 7: a long, fully reachable, non-branching
-/// stream produces one trivial (singleton) SCC per node, so a
-/// `Vec<Vec<usize>>` here would cost one 24-byte header (plus a small heap
-/// allocation) per reachable node - the exact `Vec<Vec<T>>` amplification
-/// round 4 already eliminated for reads/writes. Built via a counting sort
-/// on `scc_id` instead - two allocations total, not one per SCC. Factored
-/// out from `prove_definite_register_assignment` so tests can assert
-/// directly on the returned arrays' exact contents, rather than relying
-/// only on timing.
+/// **Derivation** (De Morgan's law over the equations this replaces):
+///
+///   DEFINED[entry] = ENTRY_DEFS;  DEFINED[n] = intersect(OUT[p] for p in preds(n))
+///   OUT[n] = DEFINED[n] union WRITES[n]
+///
+/// Let MISSING[n] = U minus DEFINED[n]. Then:
+///
+///   MISSING[entry] = U minus ENTRY_DEFS   (fixed - see below)
+///   MISSING[n] = U minus intersect(OUT[p]) = union(U minus OUT[p]) = union(MISSING_OUT[p])
+///   MISSING_OUT[n] = U minus OUT[n] = U minus (DEFINED[n] union WRITES[n])
+///                  = (U minus DEFINED[n]) intersect (U minus WRITES[n])
+///                  = MISSING[n] minus WRITES[n]
+///
+/// A register `r` is read-safe at `n` iff `r` is not in MISSING[n] - the
+/// identical predicate as before (`r` in DEFINED[n]), just phrased via the
+/// complement; `decode_operands`'s per-opcode read/write classification
+/// (including MAP_GET's conservative `default_val` read, CALL/CLOSURE_CALL's
+/// has-dst-flag asymmetry, and same-instruction read-before-write - reads
+/// are validated against `MISSING[n]`, the PRE-write state, exactly as the
+/// original formulation validated against `DEFINED[n]` pre-write) is
+/// entirely unchanged; only the dataflow equations computing `MISSING`
+/// itself are new.
+///
+/// **Initialization**: non-entry nodes start at BOTTOM = empty (the dual of
+/// the non-negotiable TOP=U rule the original formulation required - union's
+/// identity element is the empty set, as intersection's was U). This is
+/// load-bearing for the identical reason `c1756_case12` proves for the
+/// original rule: under the wrong rule (non-entry nodes starting at U, the
+/// naive-looking mirror of the WRONG empty-init the original formulation
+/// explicitly rejected), a loop's first, still-unconverged pass through its
+/// own back edge would union with U (already everything, unable to add
+/// anything) and get permanently stuck reporting every register missing,
+/// even ones a real forward path (unrelated to the loop) already proves
+/// defined - the dual of case 12's own wrongly-empty-forever failure mode,
+/// under the DEFINED<->MISSING, intersect<->union, TOP<->BOTTOM
+/// substitution throughout. `c1756_case12_accepts_loop_read_requires_top_
+/// initialization` (kept, unmodified, as a regression) still exercises this
+/// exact property under the new formulation.
+///
+/// Entry (position 0) is never re-unioned by any predecessor, including a
+/// back edge that targets instruction 0 directly (structurally legal - a
+/// jump to offset 0 is a valid instruction boundary): by the dual of the
+/// round-6 argument, every reachable MISSING_OUT is provably a SUBSET of
+/// MISSING[entry] (writes only ever REMOVE bits from MISSING, monotonically,
+/// so by induction no reachable node's missing set can ever grow past what
+/// entry itself starts with) - unioning entry's fixed MISSING with any such
+/// subset changes nothing. `compute_missing_sets` encodes this as an
+/// explicit `target != 0` guard in `deliver`, rather than relying on the
+/// argument alone.
+///
+/// **Work bound**: see `compute_missing_sets`'s doc comment - this
+/// formulation's bit-level worklist is what makes reverse-postorder ranking
+/// and strongly-connected-component decomposition (rounds 5-7's successive
+/// fixes) unnecessary. Both existed solely to bound how many times a WHOLE
+/// `RegSet` could be re-narrowed and re-compared (an O(|U|/64)-per-event
+/// cost with no bound on event count without careful ordering); at the bit
+/// level, each (position, register) event is inherently processed at most
+/// once, so no adversarial ordering or fan-in can force "reprocessing" -
+/// there is nothing to reprocess. This also directly closes Codex review
+/// round 8's first finding (duplicate live `RegSet` states across
+/// branches): every reachable position owns exactly one `RegSet`, allocated
+/// once and mutated in place via `insert` - there is no clone-on-write, no
+/// structural-sharing bookkeeping, and therefore no way for independently-
+/// computed-but-equal branch states to duplicate memory, regardless of how
+/// many branches compute the identical result.
 #[cfg(feature = "std")]
-fn scc_membership_csr(scc_id: &[u32], scc_count: usize) -> (Vec<usize>, Vec<u32>) {
-    let mut scc_sizes: Vec<u32> = vec![0; scc_count];
-    for &s in &scc_id[1..] {
-        scc_sizes[s as usize] += 1;
-    }
-    let mut members_offsets: Vec<u32> = Vec::with_capacity(scc_count + 1);
-    let mut running = 0u32;
-    for &size in &scc_sizes {
-        members_offsets.push(running);
-        running += size;
-    }
-    members_offsets.push(running);
-    let mut members_flat: Vec<usize> = vec![0; running as usize];
-    let mut cursor: Vec<u32> = members_offsets[..scc_count].to_vec();
-    for (pos, &s) in scc_id.iter().enumerate().skip(1) {
-        let s = s as usize;
-        members_flat[cursor[s] as usize] = pos;
-        cursor[s] += 1;
-    }
-    (members_flat, members_offsets)
-}
-
-#[cfg(feature = "std")]
-#[allow(clippy::too_many_arguments)]
 fn prove_definite_register_assignment(
     function: &str,
     code: &[u8],
@@ -1643,163 +1448,42 @@ fn prove_definite_register_assignment(
             .binary_search(&raw)
             .expect("register must be in U by construction")
     };
-    let writes_at = |pos: usize| csr_slice(&writes_flat, &writes_offsets, pos);
 
-    let mut entry_defs = RegSet::empty(domain_size);
+    let mut entry_missing = RegSet::full(domain_size);
     for r in 0..entry_param_count {
-        entry_defs.insert(dense(r as u16));
+        entry_missing.remove(dense(r as u16));
     }
 
-    // #1756 Codex review round 2 (PR #1840) found two further issues in the
-    // round-1 fix, addressed together here:
-    //
-    // 1. A signature-bearing function that genuinely, reachably references
-    //    every register in a large domain (e.g. defines r0..r4095 then
-    //    continues through a long fallthrough chain) still allocated one
-    //    full `RegSet` per reachable node, since `reachable_count *
-    //    domain_size` was still the product driving memory.
-    // 2. The round-robin rescan (`while changed { for pos in 1.. }`)
-    //    propagates a changed value only one position per round when
-    //    information must flow against the ascending scan order (e.g. a
-    //    backward chain of jumps toward an early undefined read),
-    //    performing up to `O(reachable_count^2)` node visits.
-    //
-    // Fixed together: `Rc<RegSet>` gives cheap (`O(1)`, no allocation)
-    // structural sharing whenever a node's computed state turns out to
-    // equal one already held elsewhere - a node with exactly one
-    // predecessor and no write (or a write that only sets already-defined
-    // bits, as in the "continue writing already-defined registers" tail of
-    // finding 1's example) never allocates a new `RegSet` at all, it just
-    // clones the `Rc`.
-    //
-    // Codex review round 4 replaced the position-worklist (which still
-    // needed a `predecessors: Vec<Vec<usize>>` - another per-node heap
-    // container) with EDGE relaxation: since MUST/intersection is
-    // monotonically decreasing, repeatedly narrowing a node's `IN` by
-    // intersecting whatever predecessor `OUT` arrives - in any order, any
-    // number of times - converges to the exact same unique fixed point as
-    // computing the full meet over all predecessors at once (this is the
-    // standard, textbook worklist formulation; see `intersect_rc`'s doc
-    // comment for the no-op-sharing argument). This needs only SUCCESSOR
-    // edges, resolved on demand from the verifier's own
-    // `instruction_successors` via `for_each_reachable_successor` - no
-    // predecessor structure is ever built at all.
-    //
-    // Codex review round 5 found that plain FIFO order for that edge
-    // relaxation has no bound on how many times a single node is
-    // reprocessed: a join fed by many arms (a 512-way dispatch, each arm
-    // leaving a different register undefined) narrows the join's `IN` once
-    // per arm, and every narrowing that changes `OUT` re-propagates through
-    // the join's *entire* successor tail again - `O(arms * tail_len)`
-    // relaxations. Fixed (that round) by processing positions in
-    // reverse-postorder rank order via a min-heap, so every one of a
-    // join's non-back-edge predecessors is drained before the join itself
-    // is first popped.
-    //
-    // Codex review round 6 found that RPO ordering alone only bounds
-    // *acyclic* fan-in: a loop header `H` fed by several sibling nodes
-    // `S_1..S_k` via back edges (each also reachable from outside the
-    // loop) defeats it, since RPO gives `H` a *lower* rank than every
-    // `S_i` regardless of ordering - each `S_i`'s narrowing of `H`
-    // re-fires `H` and its exit tail again, the same blowup reached
-    // through a route RPO alone cannot close. Fixed by processing
-    // strongly-connected components (`tarjan_scc`) in topological order
-    // instead of individual positions by RPO rank: a cross-SCC edge is
-    // traversed exactly once (the standard property that makes
-    // SCC-restricted iteration sound and efficient for arbitrary,
-    // including irreducible, control flow), so nothing downstream of a
-    // loop - including a long exit tail - is ever touched more than once
-    // regardless of how many back-edge sources feed the loop's header; the
-    // loop's own internal convergence cost is bounded by the loop's own
-    // size and the register-domain height, never multiplied by anything
-    // downstream of it. See `tarjan_scc`'s and `TarjanFrame`'s doc
-    // comments for the full argument and `narrow_in_place`'s for why
-    // position 0 is always excluded from being narrowed.
-    let top: std::rc::Rc<RegSet> = std::rc::Rc::new(RegSet::full(domain_size));
-    let mut in_sets: Vec<std::rc::Rc<RegSet>> = (0..reachable_count)
-        .map(|pos| {
-            if pos == 0 {
-                std::rc::Rc::new(entry_defs.clone())
-            } else {
-                std::rc::Rc::clone(&top)
-            }
-        })
-        .collect();
-    let mut out_sets: Vec<std::rc::Rc<RegSet>> = in_sets.clone();
-    out_sets[0] = apply_writes(&in_sets[0], writes_at(0), &dense);
-
-    // Entry's IN/OUT are fixed inputs, never recomputed - push its
-    // contribution once, directly, rather than folding it into the
-    // SCC-processing loop below.
-    for_each_reachable_successor(
-        reachable_indices[0],
-        instruction_successors,
-        instr_starts,
-        &reachable_indices,
-        |succ_pos| {
-            narrow_in_place(succ_pos, &out_sets[0], &mut in_sets);
-        },
-    );
-
-    let scc = tarjan_scc(&reachable_indices, instruction_successors, instr_starts);
-    let (members_flat, members_offsets) = scc_membership_csr(&scc.scc_id, scc.order.len());
-
-    let mut queued = vec![false; reachable_count];
-    for &scc_ordinal in &scc.order {
-        let members = csr_slice(&members_flat, &members_offsets, scc_ordinal as usize);
-        if members.is_empty() {
-            continue; // entry's own excluded SCC bucket
-        }
-        // Codex review round 7: a plain FIFO over an SCC's members, seeded
-        // in arbitrary (ascending-position) order, gives no guarantee
-        // about how many hops one changed value takes to reach another
-        // member - the same ordering hazard round 5 fixed for the whole
-        // reachable graph, now scoped inside one large component instead.
-        // `local_reverse_postorder_ranks` orders this SCC's own internal
-        // convergence the same way `tarjan_scc`'s topological order
-        // already orders convergence ACROSS components.
-        let local_rank = local_reverse_postorder_ranks(
-            members,
-            &scc.scc_id,
-            scc_ordinal,
-            &reachable_indices,
+    let writes_contains = |pos: usize, bit: usize| -> bool {
+        csr_slice(&writes_flat, &writes_offsets, pos)
+            .iter()
+            .any(|&w| dense(w) == bit)
+    };
+    let successors_of = |pos: usize| -> [Option<usize>; 2] {
+        let mut out = [None, None];
+        let mut i = 0usize;
+        for_each_reachable_successor(
+            reachable_indices[pos],
             instruction_successors,
             instr_starts,
+            &reachable_indices,
+            |succ_pos| {
+                if i < 2 {
+                    out[i] = Some(succ_pos);
+                    i += 1;
+                }
+            },
         );
-        let mut local_heap: std::collections::BinaryHeap<std::cmp::Reverse<(u32, usize)>> =
-            std::collections::BinaryHeap::new();
-        for (mi, &pos) in members.iter().enumerate() {
-            queued[pos] = true;
-            local_heap.push(std::cmp::Reverse((local_rank[mi], pos)));
-        }
-        while let Some(std::cmp::Reverse((_, pos))) = local_heap.pop() {
-            queued[pos] = false;
-            let new_out = apply_writes(&in_sets[pos], writes_at(pos), &dense);
-            if new_out.words != out_sets[pos].words {
-                out_sets[pos] = new_out;
-                for_each_reachable_successor(
-                    reachable_indices[pos],
-                    instruction_successors,
-                    instr_starts,
-                    &reachable_indices,
-                    |succ_pos| {
-                        let changed = narrow_in_place(succ_pos, &out_sets[pos], &mut in_sets);
-                        // Only re-enqueue a member of THIS SCC - a push
-                        // into a later (not-yet-started) SCC is a one-time
-                        // external contribution, picked up when that
-                        // SCC's own members are seeded above.
-                        if changed && scc.scc_id[succ_pos] == scc_ordinal && !queued[succ_pos] {
-                            queued[succ_pos] = true;
-                            let succ_mi = members.binary_search(&succ_pos).expect(
-                                "a same-SCC successor must be a member of this SCC's own list",
-                            );
-                            local_heap.push(std::cmp::Reverse((local_rank[succ_mi], succ_pos)));
-                        }
-                    },
-                );
-            }
-        }
-    }
+        out
+    };
+
+    let (missing, _event_count) = compute_missing_sets(
+        reachable_count,
+        domain_size,
+        entry_missing,
+        writes_contains,
+        successors_of,
+    );
 
     // Validate reads against the converged fixed point only - never during
     // an unstable iteration, so the reported diagnostic always describes the
@@ -1811,7 +1495,7 @@ fn prove_definite_register_assignment(
     for pos in 0..reachable_count {
         let idx = reachable_indices[pos];
         for &r in csr_slice(&reads_flat, &reads_offsets, pos) {
-            if !in_sets[pos].contains(dense(r)) {
+            if missing[pos].contains(dense(r)) {
                 return Err(reject_one(
                     function,
                     VerificationCode::UndefinedRegisterRead,
@@ -4963,27 +4647,6 @@ mod tests {
         );
     }
 
-    /// Direct accounting evidence for the Codex-review round-6 stack-frame
-    /// finding, per the review's own request not to rely only on timing.
-    /// `TarjanFrame` is the compact `(position, next successor slot)` pair
-    /// retained once per DFS-stack depth in `tarjan_scc` - this asserts its
-    /// exact size directly, the quantity that bounds worst-case DFS-stack
-    /// memory for a long, non-branching reachable chain. Round 5's own
-    /// `reverse_postorder_ranks` (since replaced by `tarjan_scc`) cached a
-    /// `[Option<usize>; 2]` successor array per frame instead - 48 bytes;
-    /// this frame recomputes successors on demand via
-    /// `nth_reachable_successor` rather than caching them - 16.
-    #[test]
-    fn c1756_tarjan_frame_is_compact() {
-        assert_eq!(
-            std::mem::size_of::<TarjanFrame>(),
-            16,
-            "the DFS work-stack frame must stay small - a long, fully reachable, \
-             non-branching chain retains one frame per node for the chain's full depth \
-             before any frame pops"
-        );
-    }
-
     /// Codex review round 6 on PR #1840, second finding (a sibling to the
     /// frame-size one above): a loop header `H` fed by `ARMS` sibling
     /// nodes `S_0..S_{k-1}` via back edges, each defining every register
@@ -5241,6 +4904,180 @@ mod tests {
         );
     }
 
+    /// Codex review round 8 on PR #1840, first finding ("duplicate live
+    /// RegSet states across branches"): many branch arms each performing
+    /// the IDENTICAL state-changing write would, under every pre-round-8
+    /// scheme (`Rc`-sharing included - `Rc`-sharing only ever avoided
+    /// cloning along a *shared* predecessor path, it never interned
+    /// independently-computed-but-equal values from *different* branches),
+    /// each independently allocate an equal, duplicate `RegSet`. Under the
+    /// round-8 MAY-missing formulation this class of duplication is
+    /// structurally impossible: `compute_missing_sets` returns exactly one
+    /// `RegSet` per reachable position - `missing.len() == reachable_count`
+    /// always, by construction of the `Vec` it returns - mutated in place
+    /// via `deliver`, with no clone-on-write path for any number of
+    /// branches to trigger. This test uses `compute_missing_sets` directly
+    /// (bypassing full SemCode construction, per Codex's own request for
+    /// accounting evidence over timing) at Codex's stated scale
+    /// (`|U|` = 4096) with 2,000 arms, all writing the identical register -
+    /// direct accounting evidence that `event_count` scales with `arms +
+    /// domain_size`, never with `arms * domain_size` or any product
+    /// involving how many arms compute the same result.
+    #[test]
+    fn c1756_many_identical_branch_arms_allocate_exactly_one_regset_per_position() {
+        const DOMAIN_SIZE: usize = 4096;
+        const ARMS: usize = 2_000;
+        // Positions: 0 = entry; 1..=ARMS = a dispatch chain (position i's
+        // successors are [arm i's body, dispatch chain continues]); ARMS+1
+        // ..=2*ARMS = arm bodies (every one writes bit 0, and ONLY bit 0);
+        // 2*ARMS+1 = join (reached by every arm).
+        let dispatch_start = 1usize;
+        let arm_start = ARMS + 1;
+        let join = 2 * ARMS + 1;
+        let reachable_count = join + 1;
+
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(dispatch_start), None]
+            } else if (dispatch_start..arm_start).contains(&pos) {
+                let i = pos - dispatch_start;
+                let next_dispatch = if i + 1 < ARMS {
+                    Some(dispatch_start + i + 1)
+                } else {
+                    None
+                };
+                [Some(arm_start + i), next_dispatch]
+            } else if (arm_start..join).contains(&pos) {
+                [Some(join), None]
+            } else {
+                [None, None]
+            }
+        };
+        // Every arm body writes bit 0 - the identical write, in every arm.
+        let writes_contains = |pos: usize, bit: usize| (arm_start..join).contains(&pos) && bit == 0;
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // no SIG0 params: nothing defined at entry
+        let (missing, event_count) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+        );
+        assert_eq!(
+            missing.len(),
+            reachable_count,
+            "exactly one RegSet per reachable position, always - the structural property that \
+             makes duplicate live states impossible regardless of arm count"
+        );
+        assert!(
+            !missing[join].contains(0),
+            "bit 0 is written by every one of the 2,000 arms, so it must be defined (not \
+             missing) at the join"
+        );
+        assert!(
+            missing[join].contains(1),
+            "bit 1 is written by no arm, so it must still be missing at the join"
+        );
+        assert!(
+            event_count <= reachable_count * DOMAIN_SIZE,
+            "event_count ({event_count}) must be bounded by reachable_count * domain_size \
+             ({}), never multiplied further by how many arms compute the identical result",
+            reachable_count * DOMAIN_SIZE
+        );
+    }
+
+    /// Codex review round 8 on PR #1840, second finding ("local RPO still
+    /// reprocesses large SCC via backedges"): reproduces the same
+    /// adversarial shape as `c1756_rejects_reverse_physical_cycle_with_
+    /// many_external_arms_without_per_arm_blowup` - a ring laid out in
+    /// reverse propagation order, fed at many distinct points by external
+    /// arms each contributing a different missing register - directly via
+    /// `compute_missing_sets`, asserting `event_count` explicitly (Codex's
+    /// own request for a counter, not timing alone). Under the round-7
+    /// local-RPO worklist this shape could still force repeated whole-
+    /// component reprocessing (each backedge source re-queueing the header
+    /// before the others had all contributed); under the round-8 bit-level
+    /// worklist there is no "large SCC" concept left to reprocess, so the
+    /// event count stays bounded by `reachable_count * domain_size`
+    /// regardless of how many external arms feed the cycle or how it is
+    /// physically laid out.
+    #[test]
+    fn c1756_many_external_arms_feeding_one_cycle_via_backedges_bounds_event_count() {
+        const ARMS: usize = 200;
+        const RING_LEN: usize = 4_000;
+        const DOMAIN_SIZE: usize = ARMS;
+        // Positions: 0 = entry; 1..=ARMS = a dispatch chain (no writes -
+        // dispatch[i]'s successors are [arm i's body, dispatch[i+1]]);
+        // ARMS+1..=2*ARMS = arm bodies (arm i writes every register except
+        // i, then enters the ring at c_0); 2*ARMS+1..2*ARMS+RING_LEN = the
+        // ring c_0..c_{RING_LEN-1}, laid out so position 2*ARMS+1+k
+        // corresponds to LOGICAL ring index (RING_LEN-1-k) - reverse
+        // propagation order, matching the physically-reversed byte-level
+        // test - closing the loop from c_{RING_LEN-1} back to c_0.
+        let dispatch_start = 1usize;
+        let arm_start = ARMS + 1;
+        let ring_start = 2 * ARMS + 1;
+        let ring_pos = |logical_i: usize| -> usize { ring_start + (RING_LEN - 1 - logical_i) };
+        let reachable_count = ring_start + RING_LEN;
+
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(dispatch_start), None]
+            } else if (dispatch_start..arm_start).contains(&pos) {
+                let i = pos - dispatch_start;
+                let next_dispatch = if i + 1 < ARMS {
+                    Some(dispatch_start + i + 1)
+                } else {
+                    None
+                };
+                [Some(arm_start + i), next_dispatch]
+            } else if (arm_start..ring_start).contains(&pos) {
+                [Some(ring_pos(0)), None]
+            } else {
+                // A ring position at physical `pos` corresponds to logical
+                // index `logical_i` - find it by inverting `ring_pos`.
+                let logical_i = RING_LEN - 1 - (pos - ring_start);
+                if logical_i + 1 < RING_LEN {
+                    [Some(ring_pos(logical_i + 1)), None]
+                } else {
+                    [Some(ring_pos(0)), None] // c_{RING_LEN-1}: back edge to c_0
+                }
+            }
+        };
+        // Arm i writes every register in 0..ARMS except i - reached by
+        // every arm body position specifically (not the dispatch chain or
+        // the ring, neither of which write anything).
+        let writes_contains = |pos: usize, bit: usize| {
+            (arm_start..ring_start).contains(&pos) && bit != (pos - arm_start)
+        };
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE);
+        let (missing, event_count) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+        );
+        // Every arm excludes a different register (arm i excludes bit i),
+        // so the intersection over all ARMS arms - reflected at every ring
+        // position once converged - is empty.
+        for bit in 0..ARMS {
+            assert!(
+                missing[ring_pos(0)].contains(bit),
+                "bit {bit} is excluded by arm {bit} specifically, so no register in 0..ARMS \
+                 survives the ring's converged fixed point"
+            );
+        }
+        assert!(
+            event_count <= reachable_count * DOMAIN_SIZE,
+            "event_count ({event_count}) must be bounded by reachable_count * domain_size \
+             ({}), regardless of how many external arms feed the cycle via backedges",
+            reachable_count * DOMAIN_SIZE
+        );
+    }
+
     /// Codex review round 1 on PR #1840, second fix: the register domain
     /// must be the actual registers in use (`U`), densely packed, not the
     /// raw `0..=max_register_id` numeric span. This function references
@@ -5424,60 +5261,6 @@ mod tests {
             "the dense register domain must track the 2 registers actually referenced \
              ({{r0, r4095}}), not the raw 4096-wide numeric span between them: {universe:?}"
         );
-    }
-
-    /// Direct accounting evidence for the Codex-review round-7 "store SCC
-    /// membership without one Vec per component" fix, per the review's own
-    /// request not to rely only on timing. `scc_membership_csr` takes
-    /// plain, hand-constructible `scc_id` inputs - this asserts the
-    /// returned flat/offsets arrays' exact contents directly, proving the
-    /// membership table is one flat allocation plus one offset table (not
-    /// one `Vec<usize>` per SCC) for both a fully-linear-stream shape
-    /// (every position its own singleton SCC) and a mixed shape (multiple
-    /// members sharing one SCC).
-    #[test]
-    fn c1756_scc_membership_csr_bounds_by_flat_allocation_not_one_vec_per_component() {
-        // 5 reachable positions (0 = entry, excluded from membership),
-        // each its own singleton SCC - the exact "long linear reachable
-        // stream" shape Codex's finding described, just small enough to
-        // hand-construct and assert on directly.
-        let scc_id: Vec<u32> = vec![0, 1, 2, 3, 4];
-        let (members_flat, members_offsets) = scc_membership_csr(&scc_id, 5);
-        assert_eq!(
-            members_flat,
-            vec![1, 2, 3, 4],
-            "position 0 (entry) contributes no member; each of 1..4 is its own singleton SCC"
-        );
-        assert_eq!(
-            members_offsets,
-            vec![0, 0, 1, 2, 3, 4],
-            "one flat offset table sized scc_count+1, not one Vec per SCC"
-        );
-        for (ordinal, &pos) in [1usize, 2, 3, 4].iter().enumerate() {
-            assert_eq!(
-                csr_slice(&members_flat, &members_offsets, ordinal + 1),
-                &[pos]
-            );
-        }
-        assert_eq!(
-            csr_slice(&members_flat, &members_offsets, 0),
-            &[] as &[usize],
-            "position 0's own (entry-only) SCC bucket must be empty, never containing entry \
-             itself"
-        );
-
-        // A mixed shape: positions 1 and 3 share SCC 0 (a real cycle),
-        // positions 2 and 4 are singleton SCCs 1 and 2.
-        let scc_id: Vec<u32> = vec![u32::MAX, 0, 1, 0, 2];
-        let (members_flat, members_offsets) = scc_membership_csr(&scc_id, 3);
-        assert_eq!(members_offsets, vec![0, 2, 3, 4]);
-        assert_eq!(
-            csr_slice(&members_flat, &members_offsets, 0),
-            &[1, 3],
-            "positions 1 and 3, sharing SCC 0, must both appear in its slice"
-        );
-        assert_eq!(csr_slice(&members_flat, &members_offsets, 1), &[2]);
-        assert_eq!(csr_slice(&members_flat, &members_offsets, 2), &[4]);
     }
 
     #[test]
