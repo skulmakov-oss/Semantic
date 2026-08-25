@@ -1254,88 +1254,212 @@ fn for_each_reachable_successor(
     }
 }
 
-/// Reverse-postorder rank per reachable position (entry, position 0, always
-/// gets rank 0). Computed via one iterative (non-recursive, so a long linear
-/// reachable chain can't blow the stack) DFS over the reachable subgraph,
-/// reusing the verifier's own successor relation via
-/// `for_each_reachable_successor` - not a second CFG engine, just a
-/// traversal order the worklist below uses to bound how many times a node
-/// can be reprocessed.
+/// Compact DFS work-stack frame for `tarjan_scc`'s iterative traversal: the
+/// position being explored and which of its (at most two) successors to
+/// try next. Recomputing a position's successors on demand each time (see
+/// `nth_reachable_successor`) rather than caching them in the frame keeps
+/// this frame small - `(usize, u8)`, 16 bytes on a 64-bit target - since a
+/// long, non-branching reachable chain retains one frame per node for the
+/// chain's full depth before any frame pops.
 ///
-/// #1756 Codex review round 5: without this ordering, a plain FIFO worklist
-/// gives no guarantee that all of a node's predecessors are drained before
-/// the node itself is first processed, so a join fed by many arms (e.g. a
-/// 512-way dispatch, each arm leaving a different register undefined) could
-/// be re-narrowed and re-propagated through its entire successor tail once
-/// per incoming arm - up to `arms * tail_len` relaxations for a long
-/// fallthrough tail after the join. RPO rank has no bearing on
-/// correctness (the fixed point is unique regardless of processing order,
-/// per `intersect_rc`'s doc comment); it exists purely to bound the
-/// number of times each node is reprocessed: for any forward (non-loop)
-/// edge, DFS postorder always finishes a node's source strictly before (or,
-/// via a shared-descendant subtlety, at least no later than) the node
-/// itself, so every one of a join's non-back-edge predecessors is ordered
-/// ahead of it, and the worklist below (which processes strictly by
-/// ascending rank) drains them all before the join is popped for the first
-/// time.
+/// #1756 Codex review round 6: round 5's `reverse_postorder_ranks` (this
+/// function's predecessor, since replaced) cached a `[Option<usize>; 2]`
+/// successor array per frame - 48 bytes - for exactly this reason; a
+/// several-million-node fully reachable, non-branching stream retained
+/// that many frames simultaneously before any could pop.
 #[cfg(feature = "std")]
-fn reverse_postorder_ranks(
+type TarjanFrame = (usize, u8);
+
+/// Returns the `slot`-th (0 or 1) reachable successor of position `pos`, or
+/// `None` if it has fewer than `slot + 1`. Recomputes via
+/// `for_each_reachable_successor` on demand each call rather than caching a
+/// successor array per DFS frame - see `TarjanFrame`'s doc comment.
+#[cfg(feature = "std")]
+fn nth_reachable_successor(
+    pos: usize,
+    slot: u8,
     reachable_indices: &[usize],
     instruction_successors: &[InstructionSuccessors],
     instr_starts: &[usize],
-) -> Vec<u32> {
+) -> Option<usize> {
+    let mut found: [Option<usize>; 2] = [None, None];
+    let mut count = 0u8;
+    for_each_reachable_successor(
+        reachable_indices[pos],
+        instruction_successors,
+        instr_starts,
+        reachable_indices,
+        |succ_pos| {
+            if (count as usize) < found.len() {
+                found[count as usize] = Some(succ_pos);
+            }
+            count += 1;
+        },
+    );
+    found.get(slot as usize).copied().flatten()
+}
+
+/// Strongly-connected-component id per reachable position, plus the SCC ids
+/// in Tarjan's own completion order - which is reverse-topological: if a
+/// node in SCC `A` has an edge to a node in a *different* SCC `B`, then `B`
+/// completes (and appears in this list) before `A` does. Position 0
+/// (entry) is included in the id assignment, but the caller never
+/// processes its own SCC bucket - its IN/OUT are fixed, see
+/// `prove_definite_register_assignment`.
+///
+/// #1756 Codex review round 6: round 5's RPO-based worklist only orders a
+/// join's *forward* (non-back-edge) predecessors ahead of it. For a
+/// genuine cycle - a loop header `H` fed by several sibling nodes `S_1..
+/// S_k` via back edges, each `S_i` also reachable from outside the loop -
+/// every `S_i`'s narrowing of `H` re-fires `H` (and anything downstream,
+/// e.g. a long loop-exit tail) again, since RPO gives `H` a *lower* rank
+/// than every `S_i` regardless: the exact same `O(k * tail_len)` blowup
+/// round 5 fixed, reached through a route RPO alone cannot close (RPO says
+/// nothing about `S_1..S_k`'s relative order, since none is an ancestor of
+/// another - only that each is ordered after `H`, the opposite of what's
+/// needed here).
+///
+/// SCC-restricted processing closes it: `H` and every `S_i` that
+/// participates in the cycle land in ONE SCC (they are mutually reachable),
+/// so their local fixed point - bounded by the SCC's own size and the
+/// register-domain height, never by anything downstream - settles once, as
+/// a unit, before anything after the loop (including the tail) is touched
+/// at all. See `prove_definite_register_assignment`'s SCC-processing loop
+/// for how this id assignment is consumed.
+///
+/// Iterative (non-recursive, so a long chain can't blow the stack) Tarjan's
+/// algorithm, reusing the same successor relation as
+/// `for_each_reachable_successor` - no predecessor structure is built, and
+/// the compact `TarjanFrame` work-stack keeps a long chain's peak memory
+/// small (see that type's doc comment).
+#[cfg(feature = "std")]
+struct SccInfo {
+    scc_id: Vec<u32>,
+    /// SCC ids in Tarjan's completion order (reverse-topological).
+    order: Vec<u32>,
+}
+
+#[cfg(feature = "std")]
+fn tarjan_scc(
+    reachable_indices: &[usize],
+    instruction_successors: &[InstructionSuccessors],
+    instr_starts: &[usize],
+) -> SccInfo {
     let n = reachable_indices.len();
     if n == 0 {
-        return Vec::new();
+        return SccInfo {
+            scc_id: Vec::new(),
+            order: Vec::new(),
+        };
     }
-    let successors_of = |pos: usize| -> [Option<usize>; 2] {
-        let mut succs = [None, None];
-        let mut count = 0usize;
-        for_each_reachable_successor(
-            reachable_indices[pos],
-            instruction_successors,
-            instr_starts,
-            reachable_indices,
-            |succ_pos| {
-                if count < 2 {
-                    succs[count] = Some(succ_pos);
-                }
-                count += 1;
-            },
-        );
-        succs
-    };
 
-    let mut visited = vec![false; n];
-    let mut postorder: Vec<usize> = Vec::with_capacity(n);
-    // (position, its successor positions, next successor index to visit)
-    let mut stack: Vec<(usize, [Option<usize>; 2], usize)> = Vec::new();
-    visited[0] = true;
-    stack.push((0, successors_of(0), 0));
+    let mut index: Vec<Option<u32>> = vec![None; n];
+    let mut lowlink: Vec<u32> = vec![0; n];
+    let mut on_stack: Vec<bool> = vec![false; n];
+    let mut tarjan_stack: Vec<usize> = Vec::new();
+    let mut scc_id: Vec<u32> = vec![u32::MAX; n];
+    let mut next_index: u32 = 0;
+    let mut next_scc: u32 = 0;
+    let mut work: Vec<TarjanFrame> = Vec::new();
 
-    while let Some(&(pos, succs, next)) = stack.last() {
-        if next < 2 {
-            stack
-                .last_mut()
-                .expect("stack non-empty by the while-let condition just above")
-                .2 += 1;
-            if let Some(child) = succs[next] {
-                if !visited[child] {
-                    visited[child] = true;
-                    stack.push((child, successors_of(child), 0));
+    // Every reachable position is, by construction, reachable from
+    // position 0 (see `verify_reachable_control_flow`) - one DFS tree
+    // covers all of them, no outer "for every unvisited start" loop
+    // needed.
+    index[0] = Some(next_index);
+    lowlink[0] = next_index;
+    next_index += 1;
+    tarjan_stack.push(0);
+    on_stack[0] = true;
+    work.push((0, 0));
+
+    while let Some(&(pos, slot)) = work.last() {
+        if slot < 2 {
+            work.last_mut()
+                .expect("work non-empty by the while-let condition just above")
+                .1 += 1;
+            if let Some(succ) = nth_reachable_successor(
+                pos,
+                slot,
+                reachable_indices,
+                instruction_successors,
+                instr_starts,
+            ) {
+                match index[succ] {
+                    None => {
+                        index[succ] = Some(next_index);
+                        lowlink[succ] = next_index;
+                        next_index += 1;
+                        tarjan_stack.push(succ);
+                        on_stack[succ] = true;
+                        work.push((succ, 0));
+                    }
+                    Some(succ_index) if on_stack[succ] => {
+                        lowlink[pos] = lowlink[pos].min(succ_index);
+                    }
+                    _ => {}
                 }
             }
         } else {
-            postorder.push(pos);
-            stack.pop();
+            work.pop();
+            let pos_lowlink = lowlink[pos];
+            if let Some(&(parent, _)) = work.last() {
+                lowlink[parent] = lowlink[parent].min(pos_lowlink);
+            }
+            if pos_lowlink == index[pos].expect("visited node has an index") {
+                loop {
+                    let w = tarjan_stack
+                        .pop()
+                        .expect("this node's own SCC root is still on the stack");
+                    on_stack[w] = false;
+                    scc_id[w] = next_scc;
+                    if w == pos {
+                        break;
+                    }
+                }
+                next_scc += 1;
+            }
         }
     }
 
-    let mut rank = vec![0u32; n];
-    for (r, &pos) in postorder.iter().rev().enumerate() {
-        rank[pos] = r as u32;
+    debug_assert!(
+        index.iter().all(Option::is_some),
+        "every reachable position must be visited from entry"
+    );
+    SccInfo {
+        scc_id,
+        order: (0..next_scc).rev().collect(),
     }
-    rank
+}
+
+/// Narrows `in_sets[pos]` toward `incoming` in place, sharing an `Rc`
+/// whenever possible (see `intersect_rc`). Returns `true` iff this actually
+/// changed the stored value. Position 0 (entry) is never narrowed: its IN
+/// is the fixed `ENTRY_DEFS`, never recomputed from any predecessor. This
+/// is provably safe even for a back edge that targets entry directly
+/// (structurally legal - a jump to instruction 0 is a valid instruction
+/// boundary): every reachable node's OUT is `entry_defs` narrowed only by
+/// intersections and widened only by writes (which only ever add bits,
+/// never remove them), so by induction every reachable OUT is a superset
+/// of `entry_defs` - intersecting `entry_defs` with any such OUT can only
+/// ever yield `entry_defs` back, unchanged. The explicit `pos == 0` guard
+/// below makes that invariant load-bearing rather than implicit.
+#[cfg(feature = "std")]
+fn narrow_in_place(
+    pos: usize,
+    incoming: &std::rc::Rc<RegSet>,
+    in_sets: &mut [std::rc::Rc<RegSet>],
+) -> bool {
+    if pos == 0 {
+        return false;
+    }
+    let narrowed = intersect_rc(&in_sets[pos], incoming);
+    if narrowed.words != in_sets[pos].words {
+        in_sets[pos] = narrowed;
+        true
+    } else {
+        false
+    }
 }
 
 #[cfg(feature = "std")]
@@ -1435,22 +1559,30 @@ fn prove_definite_register_assignment(
     // leaving a different register undefined) narrows the join's `IN` once
     // per arm, and every narrowing that changes `OUT` re-propagates through
     // the join's *entire* successor tail again - `O(arms * tail_len)`
-    // relaxations. Fixed by processing POSITIONS (not edges) in
-    // `reverse_postorder_ranks` order via a min-heap: narrowing a
-    // successor's `IN` happens in place, immediately, the instant any
-    // predecessor's `OUT` changes (cheap - just the usual `intersect_rc`
-    // sharing, no propagation triggered by the narrowing itself), and a
-    // position is enqueued for actual (re)processing at most once at a
-    // time (`queued`). Because RPO rank orders every one of a join's
-    // non-back-edge predecessors ahead of the join, all `arms` have already
-    // narrowed `in_sets[join]` by the time `join` is first popped and
-    // actually processed (which is what triggers successor propagation) -
-    // so the join, and therefore its tail, is processed once, not once per
-    // arm. This changes only processing order, never the fixed point
-    // computed: intersection is monotone, so narrowing `in_sets[target]`
-    // immediately (rather than queuing the predecessor's `OUT` as a
-    // separate pending edge value) converges to the same unique meet either
-    // way (see `intersect_rc`'s doc comment).
+    // relaxations. Fixed (that round) by processing positions in
+    // reverse-postorder rank order via a min-heap, so every one of a
+    // join's non-back-edge predecessors is drained before the join itself
+    // is first popped.
+    //
+    // Codex review round 6 found that RPO ordering alone only bounds
+    // *acyclic* fan-in: a loop header `H` fed by several sibling nodes
+    // `S_1..S_k` via back edges (each also reachable from outside the
+    // loop) defeats it, since RPO gives `H` a *lower* rank than every
+    // `S_i` regardless of ordering - each `S_i`'s narrowing of `H`
+    // re-fires `H` and its exit tail again, the same blowup reached
+    // through a route RPO alone cannot close. Fixed by processing
+    // strongly-connected components (`tarjan_scc`) in topological order
+    // instead of individual positions by RPO rank: a cross-SCC edge is
+    // traversed exactly once (the standard property that makes
+    // SCC-restricted iteration sound and efficient for arbitrary,
+    // including irreducible, control flow), so nothing downstream of a
+    // loop - including a long exit tail - is ever touched more than once
+    // regardless of how many back-edge sources feed the loop's header; the
+    // loop's own internal convergence cost is bounded by the loop's own
+    // size and the register-domain height, never multiplied by anything
+    // downstream of it. See `tarjan_scc`'s and `TarjanFrame`'s doc
+    // comments for the full argument and `narrow_in_place`'s for why
+    // position 0 is always excluded from being narrowed.
     let top: std::rc::Rc<RegSet> = std::rc::Rc::new(RegSet::full(domain_size));
     let mut in_sets: Vec<std::rc::Rc<RegSet>> = (0..reachable_count)
         .map(|pos| {
@@ -1464,52 +1596,59 @@ fn prove_definite_register_assignment(
     let mut out_sets: Vec<std::rc::Rc<RegSet>> = in_sets.clone();
     out_sets[0] = apply_writes(&in_sets[0], writes_at(0), &dense);
 
-    let rpo_rank =
-        reverse_postorder_ranks(&reachable_indices, instruction_successors, instr_starts);
-    let mut queued = vec![false; reachable_count];
-    let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<(u32, usize)>> =
-        std::collections::BinaryHeap::new();
-
-    // Seed from entry's own outgoing edges - entry's IN/OUT are fixed
-    // inputs, never recomputed or enqueued themselves.
+    // Entry's IN/OUT are fixed inputs, never recomputed - push its
+    // contribution once, directly, rather than folding it into the
+    // SCC-processing loop below.
     for_each_reachable_successor(
         reachable_indices[0],
         instruction_successors,
         instr_starts,
         &reachable_indices,
         |succ_pos| {
-            let narrowed = intersect_rc(&in_sets[succ_pos], &out_sets[0]);
-            if narrowed.words != in_sets[succ_pos].words {
-                in_sets[succ_pos] = narrowed;
-                if !queued[succ_pos] {
-                    queued[succ_pos] = true;
-                    heap.push(std::cmp::Reverse((rpo_rank[succ_pos], succ_pos)));
-                }
-            }
+            narrow_in_place(succ_pos, &out_sets[0], &mut in_sets);
         },
     );
 
-    while let Some(std::cmp::Reverse((_, pos))) = heap.pop() {
-        queued[pos] = false;
-        let new_out = apply_writes(&in_sets[pos], writes_at(pos), &dense);
-        if new_out.words != out_sets[pos].words {
-            out_sets[pos] = new_out;
-            for_each_reachable_successor(
-                reachable_indices[pos],
-                instruction_successors,
-                instr_starts,
-                &reachable_indices,
-                |succ_pos| {
-                    let narrowed = intersect_rc(&in_sets[succ_pos], &out_sets[pos]);
-                    if narrowed.words != in_sets[succ_pos].words {
-                        in_sets[succ_pos] = narrowed;
-                        if !queued[succ_pos] {
+    let scc = tarjan_scc(&reachable_indices, instruction_successors, instr_starts);
+    let mut members_by_scc: Vec<Vec<usize>> = vec![Vec::new(); scc.order.len()];
+    for pos in 1..reachable_count {
+        members_by_scc[scc.scc_id[pos] as usize].push(pos);
+    }
+
+    let mut queued = vec![false; reachable_count];
+    let mut local_queue: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+    for &scc_ordinal in &scc.order {
+        let members = &members_by_scc[scc_ordinal as usize];
+        if members.is_empty() {
+            continue; // entry's own excluded SCC bucket
+        }
+        for &pos in members {
+            queued[pos] = true;
+            local_queue.push_back(pos);
+        }
+        while let Some(pos) = local_queue.pop_front() {
+            queued[pos] = false;
+            let new_out = apply_writes(&in_sets[pos], writes_at(pos), &dense);
+            if new_out.words != out_sets[pos].words {
+                out_sets[pos] = new_out;
+                for_each_reachable_successor(
+                    reachable_indices[pos],
+                    instruction_successors,
+                    instr_starts,
+                    &reachable_indices,
+                    |succ_pos| {
+                        let changed = narrow_in_place(succ_pos, &out_sets[pos], &mut in_sets);
+                        // Only re-enqueue a member of THIS SCC - a push
+                        // into a later (not-yet-started) SCC is a one-time
+                        // external contribution, picked up when that
+                        // SCC's own members are seeded above.
+                        if changed && scc.scc_id[succ_pos] == scc_ordinal && !queued[succ_pos] {
                             queued[succ_pos] = true;
-                            heap.push(std::cmp::Reverse((rpo_rank[succ_pos], succ_pos)));
+                            local_queue.push_back(succ_pos);
                         }
-                    }
-                },
-            );
+                    },
+                );
+            }
         }
     }
 
@@ -4668,6 +4807,158 @@ mod tests {
         let report = verify_semcode(&bytes).expect_err(
             "r0 is missing from arm 0's definitions, so no register in 0..ARMS survives the \
              128-arm join, and the tail read of r0 must be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Direct accounting evidence for the Codex-review round-6 stack-frame
+    /// finding, per the review's own request not to rely only on timing.
+    /// `TarjanFrame` is the compact `(position, next successor slot)` pair
+    /// retained once per DFS-stack depth in `tarjan_scc` - this asserts its
+    /// exact size directly, the quantity that bounds worst-case DFS-stack
+    /// memory for a long, non-branching reachable chain. Round 5's own
+    /// `reverse_postorder_ranks` (since replaced by `tarjan_scc`) cached a
+    /// `[Option<usize>; 2]` successor array per frame instead - 48 bytes;
+    /// this frame recomputes successors on demand via
+    /// `nth_reachable_successor` rather than caching them - 16.
+    #[test]
+    fn c1756_tarjan_frame_is_compact() {
+        assert_eq!(
+            std::mem::size_of::<TarjanFrame>(),
+            16,
+            "the DFS work-stack frame must stay small - a long, fully reachable, \
+             non-branching chain retains one frame per node for the chain's full depth \
+             before any frame pops"
+        );
+    }
+
+    /// Codex review round 6 on PR #1840, second finding (a sibling to the
+    /// frame-size one above): a loop header `H` fed by `ARMS` sibling
+    /// nodes `S_0..S_{k-1}` via back edges, each defining every register
+    /// in `0..ARMS` except a different one, `H` itself then feeding a
+    /// long exit tail - `dispatch` reaches every `S_i` (each writes,
+    /// jumps to `H`), and `H`'s own `JmpIf` back to `dispatch` closes the
+    /// cycle (`dispatch` is `H`'s DFS ancestor - `H` is discovered only
+    /// as some `S_i`'s descendant - so this is a genuine back edge; `H`
+    /// and every `S_i` that participates in the cycle land in ONE SCC,
+    /// mutually reachable through it). `H` has NO predecessor besides the
+    /// arms' back edges, so it starts at TOP (the standard non-entry
+    /// initialization) and needs a genuine, necessary contribution from
+    /// ALL `ARMS` arms - not something a single predecessor already
+    /// determines - before its fixed point is settled; `dispatch` itself
+    /// starts empty (straight from entry, no SIG0 params), so each arm's
+    /// own exclusion write is what determines its output, not something
+    /// inherited from a prior pass.
+    ///
+    /// Correctness: since `S_i` defines every register in `0..ARMS`
+    /// except `i`, the intersection over all `ARMS` arms at `H` is the
+    /// EMPTY set within that domain (the same argument as the round-5
+    /// test) - the read at the far end of the tail (`r0`) is correctly
+    /// rejected as undefined, regardless of the intervening loop or tail
+    /// length. This is the primary purpose of this regression: proving
+    /// the SCC-based worklist converges a genuine, multi-source cycle to
+    /// the mathematically correct fixed point. It is not, on its own,
+    /// strong TIMING evidence against round 5's pure-RPO ordering: in
+    /// this specific instruction layout, `dispatch` (and therefore every
+    /// arm) is discovered by DFS before `H` even exists, so plain RPO
+    /// rank already happens to order every arm ahead of `H` here too -
+    /// the round-6 reply documents this honestly, together with the
+    /// general, well-established argument for why SCC-restricted
+    /// processing bounds total work for the broader class of CFGs RPO
+    /// alone cannot.
+    #[test]
+    fn c1756_rejects_loop_header_fed_by_many_backedge_arms_without_per_arm_blowup() {
+        const ARMS: u16 = 128;
+        const TAIL_LEN: usize = 20_000;
+        const COND_REG: u16 = ARMS;
+
+        // `dispatch`'s own IN comes straight from entry (empty - no SIG0
+        // params), so it - and every arm reached only through it - starts
+        // genuinely empty, not full: each arm's "define everything except
+        // my own index" write is what actually determines its output,
+        // not something inherited from a prior loop pass. `header` has NO
+        // direct edge from entry or dispatch - its only predecessors are
+        // the arms' back edges - so it starts at TOP (the standard
+        // non-entry initialization) and is narrowed ONE MEANINGFUL STEP
+        // PER ARM as their outputs arrive, needing all `ARMS` of them
+        // before its fixed point is fully determined - a genuine,
+        // necessary multi-round convergence, not a value some single
+        // predecessor already fixes on its own.
+        let mut instrs: Vec<IrInstr> = vec![IrInstr::LoadBool {
+            dst: COND_REG,
+            val: true,
+        }];
+        instrs.push(IrInstr::Label {
+            name: "dispatch".to_string(),
+        });
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::JmpIf {
+                cond: COND_REG,
+                label: format!("arm{arm}"),
+            });
+        }
+        // Fallthrough arm (ARMS - 1): defines every register except
+        // itself, then jumps to the header - closing the loop, since
+        // header's own back edge (below) returns here.
+        for r in 0..ARMS {
+            if r != ARMS - 1 {
+                instrs.push(IrInstr::LoadI32 {
+                    dst: r,
+                    val: r as i32,
+                });
+            }
+        }
+        instrs.push(IrInstr::Jmp {
+            label: "header".to_string(),
+        });
+        // The remaining ARMS - 1 arms, each reached by its own JmpIf target
+        // above - defines every register except its own index, then jumps
+        // to the header too.
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::Label {
+                name: format!("arm{arm}"),
+            });
+            for r in 0..ARMS {
+                if r != arm {
+                    instrs.push(IrInstr::LoadI32 {
+                        dst: r,
+                        val: r as i32,
+                    });
+                }
+            }
+            instrs.push(IrInstr::Jmp {
+                label: "header".to_string(),
+            });
+        }
+        instrs.push(IrInstr::Label {
+            name: "header".to_string(),
+        });
+        // The back edge: `dispatch` is `header`'s DFS ancestor here (every
+        // arm was discovered as dispatch's descendant, and each leads to
+        // header), so this is a genuine back edge, not a forward join -
+        // `header` and every arm form one strongly-connected component.
+        instrs.push(IrInstr::JmpIf {
+            cond: COND_REG,
+            label: "dispatch".to_string(),
+        });
+        // Exit tail: header's fallthrough - reached only once the loop
+        // actually exits, with header's fully-converged fixed point.
+        for _ in 0..TAIL_LEN {
+            instrs.push(IrInstr::LoadI32 {
+                dst: COND_REG,
+                val: 0,
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0: undefined by arm 0
+
+        let bytes = emit_test_function(instrs);
+        let report = verify_semcode(&bytes).expect_err(
+            "r0 is missing from arm 0's definitions, so no register in 0..ARMS survives the \
+             header's intersection over all back-edge arms, and the tail read of r0 must be \
+             rejected",
         );
         assert_eq!(
             report.diagnostics[0].code,
