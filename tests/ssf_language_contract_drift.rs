@@ -42,6 +42,15 @@ fn ssf_01_language_contract_keeps_its_version_and_evidence_map() {
         "SEMCODE0` through `SEMCOD14`, or `SEMCOD18` when the program uses the",
         "std.quad` QTruth family",
         "not published stable",
+        // #1773 / FA-09-005: header selection stopped being opcode/capability-
+        // derived alone once every function envelope unconditionally carries a
+        // SIG0 callable-signature record. These pin the two-floor model so the
+        // profile can't silently regress to the pre-#1773 "oldest sufficient
+        // header from actual emitted use" claim (round-5 Codex finding on
+        // PR #1838).
+        "max(structural floor, opcode/capability floor)",
+        "(`SEMCOD19`, revision 20) can structurally carry",
+        "the current compiler emits `SEMCOD19` unconditionally for every compiled artifact",
     ] {
         assert!(
             profile.contains(required),
@@ -55,6 +64,10 @@ fn ssf_01_language_contract_keeps_its_version_and_evidence_map() {
         "Deferred",
         "SSF-02 entry conditions",
         "4de0b6eb1cd5d8e5dc37989e9b9b95a5a8e07e57",
+        // #1773 / FA-09-005: same two-floor synchronization, pinned on the
+        // evidence map's own "Version and compatibility relationship" copy.
+        "max(structural floor, opcode/capability floor)",
+        "`SEMCOD19` (revision 20) for every compiled artifact regardless of opcodes used",
     ] {
         assert!(
             evidence.contains(required),
