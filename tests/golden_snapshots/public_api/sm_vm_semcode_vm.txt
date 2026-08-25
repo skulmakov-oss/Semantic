@@ -23,6 +23,7 @@ pub debug_symbols: Vec<DebugSymbol>,
 pub borrowed_paths: Vec<AccessPath>,
 pub code: Vec<u8>,
 pub instr_start: usize,
+pub signature: Option<CallableSignature>,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugSymbol {
 pub pc: usize,

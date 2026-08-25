@@ -910,6 +910,7 @@ mod tests {
                 IrInstr::Ret { src: Some(5) },
             ],
             ownership_events: Vec::new(),
+            params: Vec::new(),
         };
 
         let mut m1 = IrModule {
@@ -945,6 +946,7 @@ mod tests {
                 IrInstr::Ret { src: Some(3) },
             ],
             ownership_events: Vec::new(),
+            params: Vec::new(),
         };
 
         let mut module = IrModule {
@@ -993,6 +995,7 @@ mod tests {
                     IrInstr::Ret { src: Some(8) },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
         };
 

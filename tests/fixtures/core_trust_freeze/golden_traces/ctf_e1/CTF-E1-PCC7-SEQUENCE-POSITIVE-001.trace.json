@@ -9,10 +9,10 @@
   "expected_status": "accept",
   "source_hash": "2881ddd5433113ef",
   "ir_hash": "60b2c1f62a42b3e7",
-  "semcode_hash": "78f164c2dc9f1111",
+  "semcode_hash": "f580dbc21cb7c4e2",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "8ce404860467cfdb",
+  "expected_output_hash": "ebd2a86a28605e39",
   "notes": "Selected Sequence baseline only; Map missing-key, iteration, and quota policy remain open."
 }

@@ -5,8 +5,9 @@
 #[allow(unused_imports)]
 mod semcode_format {
     pub use sm_format::semcode_format::{
-        read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8, Opcode,
-        SemcodeFormatError, SemcodeHeaderSpec,
+        read_f64_le, read_i32_le, read_u16_le, read_u32_le, read_u8, read_utf8, CallableSignature,
+        CallableValueFamily, Opcode, SemcodeFormatError, SemcodeHeaderSpec, MAGIC7,
+        SIGNATURE_SECTION_TAG,
     };
 }
 
@@ -28,10 +29,40 @@ pub use semcode_vm::*;
 #[cfg(all(test, feature = "std"))]
 mod tests {
     use super::*;
+    use crate::semcode_format::{CallableValueFamily, MAGIC7};
     use sm_emit::compile_program_to_semcode;
     use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
     use sm_runtime_core::RecordCarrier;
     use sm_verify::{verify_semcode, verify_semcode_token, VerificationCode};
+
+    /// #1773 (FA-09-005): rebuilds `bytes` under `target_magic` (always a
+    /// pre-V11 header in this file's use, below the mandatory-OWN0 floor),
+    /// dropping every function's OWN0/SIG0 sections entirely - not just
+    /// SIG0 - since a genuine artifact under a pre-V11 header carries
+    /// neither. `sm-verify`'s own test module has an analogous helper that
+    /// strips only SIG0, because its downgrade targets are all V11+ (where
+    /// OWN0 is still expected); this file's downgrade targets are not, so
+    /// keeping a real OWN0 here would trip the per-function
+    /// CAP_OWNERSHIP_PATHS check for an unrelated reason. Assumes no DBG0
+    /// section (none of this file's fixtures enable debug symbols).
+    fn downgrade_header_stripping_signature(bytes: &[u8], target_magic: [u8; 8]) -> Vec<u8> {
+        let (_, functions) = sm_format::semcode_decode::decode_semcode_envelope(bytes)
+            .expect("decode current bytes");
+        let mut out = Vec::new();
+        out.extend_from_slice(&target_magic);
+        for f in &functions {
+            debug_assert!(!f.has_debug_section, "fixture must not use debug symbols");
+            let mut code = Vec::new();
+            code.extend_from_slice(&f.code_slice[..f.string_table_end_offset]);
+            code.extend_from_slice(&f.code_slice[f.instr_start_offset..]);
+            let name_bytes = f.name.as_bytes();
+            out.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+            out.extend_from_slice(name_bytes);
+            out.extend_from_slice(&(code.len() as u32).to_le_bytes());
+            out.extend_from_slice(&code);
+        }
+        out
+    }
 
     #[test]
     fn test_1_invoke_function_returning_i32() {
@@ -262,6 +293,7 @@ mod tests {
                         IrInstr::Ret { src: Some(1) },
                     ],
                     ownership_events: Vec::new(),
+                    params: vec![CallableValueFamily::I32],
                 },
                 IrFunction {
                     name: "caller".to_string(),
@@ -274,6 +306,7 @@ mod tests {
                         IrInstr::Ret { src: Some(1) },
                     ],
                     ownership_events: Vec::new(),
+                    params: vec![CallableValueFamily::I32],
                 },
             ],
             false,
@@ -307,8 +340,8 @@ mod tests {
     /// to short-circuit on.
     #[test]
     fn internal_to_text_wins_and_verifier_accepts_without_text_capability() {
-        let mut bytes = hand_built_to_text_program();
-        bytes[7] = b'7'; // downgrade header to a spec lacking CAP_TEXT_VALUES
+        let bytes = hand_built_to_text_program();
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC7); // spec lacking CAP_TEXT_VALUES
         let report = verify_semcode(&bytes);
         assert!(
             report.is_ok(),
@@ -336,7 +369,7 @@ mod tests {
     /// to a known internal function.
     #[test]
     fn bare_builtin_to_text_call_still_requires_capability() {
-        let mut bytes = emit_ir_to_semcode(
+        let bytes = emit_ir_to_semcode(
             &[IrFunction {
                 name: "caller".to_string(),
                 instrs: vec![
@@ -349,11 +382,12 @@ mod tests {
                     IrInstr::Ret { src: Some(1) },
                 ],
                 ownership_events: Vec::new(),
+                params: Vec::new(),
             }],
             false,
         )
         .expect("emit");
-        bytes[7] = b'7'; // downgrade header to a spec lacking CAP_TEXT_VALUES
+        let bytes = downgrade_header_stripping_signature(&bytes, MAGIC7); // spec lacking CAP_TEXT_VALUES
         let report = verify_semcode(&bytes).expect_err("must reject: no known-function to_text");
         assert_eq!(
             report.diagnostics[0].code,

@@ -17,6 +17,7 @@ pub const MAGIC15: [u8; 8] = *b"SEMCOD15";
 pub const MAGIC16: [u8; 8] = *b"SEMCOD16";
 pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
 pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
+pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
 
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
@@ -44,6 +45,8 @@ pub const CAP_PATH_INSPECT: u32 = 1 << 22;
 pub const CAP_FS_READ: u32 = 1 << 23;
 pub const CAP_FS_WRITE: u32 = 1 << 24;
 pub const CAP_TIME_DURATION: u32 = 1 << 25;
+
+pub const SIGNATURE_SECTION_TAG: [u8; 4] = *b"SIG0";
 
 pub const OWNERSHIP_SECTION_TAG: [u8; 4] = *b"OWN0";
 pub const OWNERSHIP_EVENT_KIND_BORROW: u8 = 0;
@@ -351,11 +354,36 @@ pub const HEADER_V18: SemcodeHeaderSpec = SemcodeHeaderSpec {
     capabilities: HEADER_V17.capabilities,
 };
 
+/// #1773 (FA-09-005): the first header revision whose per-function envelope
+/// carries a canonical callable-signature record (`SIGNATURE_SECTION_TAG`,
+/// `parameter_count` + `parameter_family[parameter_count]`). Reuses
+/// `HEADER_V18`'s capability set unchanged - like `HEADER_V18` itself
+/// (#1732), this closes a missing *version identity* gate (every function's
+/// signature is now structurally present and provable), not a missing
+/// capability. Every function envelope under this revision carries a SIG0
+/// section deterministically (never sniffed - see `decode_semcode_envelope`
+/// and its doc comment on why signature presence is derived from the header
+/// revision rather than content-sniffed the way `DBG0`/`OWN0` are).
+pub const HEADER_V19: SemcodeHeaderSpec = SemcodeHeaderSpec {
+    magic: MAGIC19,
+    epoch: 0,
+    rev: 20,
+    capabilities: HEADER_V18.capabilities,
+};
+
+/// The minimum SemCode header revision whose per-function envelope carries a
+/// canonical callable-signature record (#1773 / FA-09-005). Any artifact
+/// decoded under a header with `rev < SEMCODE_SIGNATURE_MIN_REVISION` has no
+/// signature section for any function, by construction - old artifacts
+/// remain structurally decodable, but canonical typed callable execution
+/// cannot prove their contracts.
+pub const SEMCODE_SIGNATURE_MIN_REVISION: u16 = HEADER_V19.rev;
+
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
     &[
         HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
         HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
-        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18,
+        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19,
     ]
 }
 
@@ -670,6 +698,71 @@ impl Opcode {
             Self::StateQuery | Self::StateUpdate | Self::EventPost | Self::ClockRead => 1,
         }
     }
+}
+
+/// The executable runtime-value family a callable parameter belongs to
+/// (#1773 / FA-09-005). This describes the *runtime* shape a canonical
+/// callable's argument must have - not the source `Type` AST - so several
+/// distinct source types intentionally map to the same family (a `Measured`
+/// numeric erases to its base family; `Option`/`Result` both map to `Adt`,
+/// matching how they are actually lowered via `IrInstr::AdtTag`). Variants
+/// mirror `sm-vm::Value` 1:1; tag `0` is deliberately unused so a
+/// zero-initialized or truncated buffer never decodes as a valid family.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CallableValueFamily {
+    Quad = 1,
+    Bool = 2,
+    Text = 3,
+    Sequence = 4,
+    Map = 5,
+    Closure = 6,
+    I32 = 7,
+    U32 = 8,
+    Fx = 9,
+    F64 = 10,
+    Tuple = 11,
+    Record = 12,
+    Adt = 13,
+    Unit = 14,
+}
+
+impl CallableValueFamily {
+    pub fn byte(self) -> u8 {
+        self as u8
+    }
+
+    pub fn from_byte(v: u8) -> Result<Self, SemcodeFormatError> {
+        match v {
+            x if x == Self::Quad as u8 => Ok(Self::Quad),
+            x if x == Self::Bool as u8 => Ok(Self::Bool),
+            x if x == Self::Text as u8 => Ok(Self::Text),
+            x if x == Self::Sequence as u8 => Ok(Self::Sequence),
+            x if x == Self::Map as u8 => Ok(Self::Map),
+            x if x == Self::Closure as u8 => Ok(Self::Closure),
+            x if x == Self::I32 as u8 => Ok(Self::I32),
+            x if x == Self::U32 as u8 => Ok(Self::U32),
+            x if x == Self::Fx as u8 => Ok(Self::Fx),
+            x if x == Self::F64 as u8 => Ok(Self::F64),
+            x if x == Self::Tuple as u8 => Ok(Self::Tuple),
+            x if x == Self::Record as u8 => Ok(Self::Record),
+            x if x == Self::Adt as u8 => Ok(Self::Adt),
+            x if x == Self::Unit as u8 => Ok(Self::Unit),
+            _ => Err(SemcodeFormatError::UnknownOpcode(v)),
+        }
+    }
+}
+
+/// The canonical callable-signature record for one function envelope
+/// (#1773 / FA-09-005): parameter count and, for each parameter in
+/// declaration order, its executable runtime family. `families.len()` is
+/// the parameter count - there is no separate count field to disagree with
+/// it, so arity and family-count are structurally impossible to desync once
+/// a `CallableSignature` exists in memory. On the wire this is the `SIG0`
+/// section: tag, `u16` count, then `count` single-byte family tags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallableSignature {
+    pub families: Vec<CallableValueFamily>,
 }
 
 pub fn write_u16_le(out: &mut Vec<u8>, v: u16) {

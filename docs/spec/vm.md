@@ -165,8 +165,50 @@ Current function-bytecode model includes:
 - runtime symbol ids
 - optional debug symbols
 - tuple and direct record-field ownership path metadata admitted from `OWN0`
+- the decoded canonical callable-signature record admitted from `SIG0`
+  (`signature: Option<CallableSignature>`, #1773 / FA-09-005), retained
+  unchanged from the decoded envelope; `None` for an artifact whose header
+  predates canonical signatures
 - instruction stream
 - instruction start offset
+
+## Callable Runtime Family Enforcement
+
+`validate_call_arguments` is the one authoritative invocation validator,
+fused directly into `push_frame` itself rather than called separately at
+each of its callers. `push_frame` is the single choke point every real
+frame-entry path already funnels through - `Opcode::Call`, `Opcode::
+ClosureCall`, the public invocation helper
+(`run_verified_function_semcode_with_args_and_config`), and every other
+verified entry route (`run_verified_entry_semcode_with_config` and the
+PROMETHEUS/application host routes) - so fusing here closes every one of
+them at once, including any future call site, rather than relying on each
+caller to remember to call the validator separately. The raw/unverified
+execution path (`run_semcode_with_entry_and_config` and friends, which
+intentionally bypass `sm-verify` admission) shares `push_frame` too and is
+safe to include: it always passes empty args, so this only ever produces
+an earlier, cleaner rejection in place of a later, more confusing
+uninitialized-register error - never a false rejection of a scenario that
+path is trying to exercise.
+
+Given the callee's decoded `signature`:
+
+- `None` (pre-#1773 artifact): no contract to enforce, unchanged behavior
+- `Some(contract)`: reject if `args.len() != contract.families.len()`, and
+  reject if any supplied argument's runtime family
+  (`Value` variant, mapped 1:1 to `CallableValueFamily`) disagrees with the
+  contract's declared family at that position - including a parameter the
+  callee's body never reads, so no body instruction is needed to expose a
+  type mismatch
+
+This is the runtime half of the canonical callable contract; arity alone is
+also checked statically by the verifier (see
+[`verifier.md`](verifier.md#callable-arity-enforcement)) - the VM cannot
+skip its own family check on the assumption the verifier already proved
+arity, since the verifier cannot prove runtime family from register
+storage alone. Both checks independently agree with the same canonical
+signature (see [`semcode.md`](semcode.md#callable-signature-sig0)), never
+a caller-derived or independently-reconstructed one.
 
 ## Runtime Ownership Slice
 

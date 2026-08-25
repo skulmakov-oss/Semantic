@@ -53,6 +53,20 @@ Current top-level IR units:
 - `ImmutableIrProgram`
 - admitted ownership-path metadata attached to IR functions for the current
   runtime ownership slice
+- a canonical callable-signature record attached to each `IrFunction`
+  (`params: Vec<CallableValueFamily>`, #1773 / FA-09-005): one executable
+  runtime family per parameter, in declaration order, derived from the
+  function's typed source definition (`Function`/`FnSig`'s canonical
+  `params: Vec<(SymbolId, Type)>`) at the exact lowering boundary that
+  previously discarded it. This signature originates here and survives
+  unchanged into the SemCode wire format - see
+  [`semcode.md`](semcode.md#callable-signature-sig0) for the wire
+  representation and [`verifier.md`](verifier.md#callable-arity-enforcement)
+  / [`vm.md`](vm.md#callable-runtime-family-enforcement) for how it is
+  enforced downstream. A source type with no sound executable runtime
+  family (`qvec` is the one currently known case) is a deterministic
+  lowering-time rejection, not a wire-format tag and not deferred to VM
+  execution.
 
 Current `IrInstr` family includes explicit forms for:
 

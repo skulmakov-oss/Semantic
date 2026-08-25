@@ -9,10 +9,10 @@
   "expected_status": "accept",
   "source_hash": "ab07713734d22976",
   "ir_hash": "b419ef35fb669085",
-  "semcode_hash": "3e052eda00ea9591",
+  "semcode_hash": "89c1fd4a7a851f76",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "f86e5fe8a76915ad",
+  "expected_output_hash": "a91a6e8607c29a01",
   "notes": "Selected representative record fixture only; no project-root, Map, or 7hell coverage."
 }

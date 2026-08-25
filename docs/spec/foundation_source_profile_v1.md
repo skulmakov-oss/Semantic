@@ -341,21 +341,47 @@ Source contract version and SemCode header are separate dimensions:
 ```text
 semantic.foundation.source/1.2
   -> compile using ParserProfile semantic.foundation/1.0
-  -> select the oldest sufficient supported SemCode header from actual emitted use
+  -> select SemCode header: max(structural floor, opcode/capability floor)
   -> verify exact header, capabilities, structure, and instruction contract
   -> execute only after verifier admission
 ```
 
-Foundation Source 1.2 does not mandate one universal SemCode header. Current
-qualified programs may select a member of the documented supported family from
-`SEMCODE0` through `SEMCOD14`, or `SEMCOD18` when the program uses the
-`std.quad` QTruth family, according to actual emitted features — `SEMCOD14`
-is the header selected when a program actually uses the included `Map(K, V)`
-operations, and `SEMCOD18` is the header selected when a program actually
-uses `qtruth_and`/`qtruth_or`/`qtruth_not`/`qtruth_impl` (see #1732 /
-FA-05-002: no header before `SEMCOD18` legitimately admits those opcodes). A
-profile permission cannot add unused capabilities, and the VM cannot
-reinterpret an unknown header.
+Foundation Source 1.2 does not mandate one universal SemCode header, and
+header selection is no longer driven by opcode/capability requirements
+alone. Two independent floors combine, and the emitter selects the header
+for whichever is higher:
+
+- an **opcode/capability floor**: the oldest member of the documented supported family — `SEMCODE0` through `SEMCOD14`, or `SEMCOD18` when the program uses the `std.quad` QTruth family — sufficient for the opcodes a
+  program actually emits. `SEMCOD14` is the floor when a program actually
+  uses the included `Map(K, V)` operations, and `SEMCOD18` is the floor when
+  a program actually uses `qtruth_and`/`qtruth_or`/`qtruth_not`/`qtruth_impl`
+  (see #1732 / FA-05-002: no header before `SEMCOD18` legitimately admits
+  those opcodes).
+- a **structural floor**: since #1773 / FA-09-005, every compiled function
+  envelope unconditionally carries a canonical callable-signature record
+  (`SIG0`), which only a header at or above `SEMCODE_SIGNATURE_MIN_REVISION`
+  (`SEMCOD19`, revision 20) can structurally carry. This floor applies
+  regardless of which opcodes a program uses, including an ordinary
+  zero-argument function that uses neither `Map(K, V)` nor QTruth.
+
+The structural floor (`SEMCOD19`) is currently higher than every documented
+opcode/capability floor, so **the current compiler emits `SEMCOD19` unconditionally for every compiled artifact**.
+`SEMCOD19` is a structural requirement, not evidence that a program used a
+new opcode capability; the opcode/capability computation above is preserved
+unchanged beneath the structural floor so a future opcode needing a
+still-newer revision continues to promote correctly on top of it (mirrors
+the #1732 precedent: a header revision closing a version-identity gap, not a
+capability gap).
+
+This changes what the current compiler emits, not what the decoder and
+verifier still admit: `SEMCODE0` through `SEMCOD18` remain decodable and
+verifiable historical artifacts — an artifact compiled by an older toolchain
+build does not become invalid — but only `SEMCOD19` or newer carries the
+current trusted callable-contract guarantee (arity checked by the verifier,
+runtime family checked by the VM before `push_frame`; see
+`docs/spec/semcode.md`, `## Callable Signature (SIG0)`). A profile
+permission cannot add unused capabilities, and the VM cannot reinterpret an
+unknown header.
 
 SSF-10 owns the long-term source/SemCode compatibility window and artifact
 trust policy. Until that phase closes, this section is a version relationship,

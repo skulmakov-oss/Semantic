@@ -99,9 +99,9 @@ working experimental research merely to keep the stable contour small.
 
 - source contract: `semantic.foundation.source/1.2`;
 - parser acceptance envelope: `semantic.foundation` / `1.0`;
-- SemCode: capability-derived supported header, currently `SEMCODE0` through
-  `SEMCOD14` plus `SEMCOD18` for the `std.quad` QTruth family, never chosen
-  solely from profile permission;
+- SemCode: header selection is `max(structural floor, opcode/capability floor)`, not capability-derived alone (see `docs/spec/foundation_source_profile_v1.md`, "Source-to-SemCode relationship");
+  - the opcode/capability floor remains `SEMCODE0` through `SEMCOD14` plus `SEMCOD18` for the `std.quad` QTruth family, never chosen solely from profile permission;
+  - since #1773 / FA-09-005 a structural floor also applies: every compiled function envelope unconditionally carries a canonical callable-signature record, so the current compiler emits `SEMCOD19` (revision 20) for every compiled artifact regardless of opcodes used;
 - verifier: mandatory admission before standard execution;
 - compatibility retention window: deferred to SSF-10;
 - promotion: deferred to SSF-12 plus explicit human decision.

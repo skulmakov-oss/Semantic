@@ -124,11 +124,17 @@ fn g1_execution_integrity_stage_summaries_match_current_baseline() {
         observed.push('\n');
     }
 
+    // #1773 (FA-09-005): every compiled artifact now unconditionally
+    // carries a canonical callable-signature record per function, which
+    // only SEMCOD19/rev20 can structurally carry - so that's now the floor
+    // for all five programs below, regardless of which lesser features
+    // each one uses (was SEMCOD13/rev14, SEMCODE0/rev1, SEMCOD12/rev13
+    // respectively).
     let expected = "\
 program=cli_batch_core
 sema:warnings=0 laws=0
 ir:names=classify_exit,main
-semcode:magic=SEMCOD13 rev=14
+semcode:magic=SEMCOD19 rev=20
 verify:names=classify_exit,main
 disasm:names=classify_exit,main
 run=ok
@@ -136,7 +142,7 @@ run=ok
 program=rule_state_decision
 sema:warnings=0 laws=0
 ir:names=decide,main
-semcode:magic=SEMCODE0 rev=1
+semcode:magic=SEMCOD19 rev=20
 verify:names=decide,main
 disasm:names=decide,main
 run=ok
@@ -144,7 +150,7 @@ run=ok
 program=data_audit_record_iterable
 sema:warnings=0 laws=0
 ir:names=__impl::Iterable::Samples::next,main,summarize
-semcode:magic=SEMCOD12 rev=13
+semcode:magic=SEMCOD19 rev=20
 verify:names=__impl::Iterable::Samples::next,main,summarize
 disasm:names=__impl::Iterable::Samples::next,main,summarize
 run=ok
@@ -152,7 +158,7 @@ run=ok
 program=wave2_local_helper_import
 sema:warnings=0 laws=0
 ir:names=main,score
-semcode:magic=SEMCODE0 rev=1
+semcode:magic=SEMCOD19 rev=20
 verify:names=main,score
 disasm:names=main,score
 run=ok
@@ -160,7 +166,7 @@ run=ok
 program=positive_selected_import
 sema:warnings=0 laws=0
 ir:names=execsel_<stable>_scale,execsel_<stable>_score,main,score
-semcode:magic=SEMCODE0 rev=1
+semcode:magic=SEMCOD19 rev=20
 verify:names=execsel_<stable>_scale,execsel_<stable>_score,main,score
 disasm:names=execsel_<stable>_scale,execsel_<stable>_score,main,score
 run=ok

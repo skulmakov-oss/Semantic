@@ -18,6 +18,7 @@ pub const MAGIC15: [u8; 8] = *b"SEMCOD15";
 pub const MAGIC16: [u8; 8] = *b"SEMCOD16";
 pub const MAGIC17: [u8; 8] = *b"SEMCOD17";
 pub const MAGIC18: [u8; 8] = *b"SEMCOD18";
+pub const MAGIC19: [u8; 8] = *b"SEMCOD19";
 pub const CAP_DEBUG_SYMBOLS: u32 = 1 << 0;
 pub const CAP_F64_MATH: u32 = 1 << 1;
 pub const CAP_GATE_SURFACE: u32 = 1 << 2;
@@ -44,6 +45,7 @@ pub const CAP_PATH_INSPECT: u32 = 1 << 22;
 pub const CAP_FS_READ: u32 = 1 << 23;
 pub const CAP_FS_WRITE: u32 = 1 << 24;
 pub const CAP_TIME_DURATION: u32 = 1 << 25;
+pub const SIGNATURE_SECTION_TAG: [u8; 4] = *b"SIG0";
 pub const OWNERSHIP_SECTION_TAG: [u8; 4] = *b"OWN0";
 pub const OWNERSHIP_EVENT_KIND_BORROW: u8 = 0;
 pub const OWNERSHIP_EVENT_KIND_WRITE: u8 = 1;
@@ -76,6 +78,8 @@ pub const HEADER_V15: SemcodeHeaderSpec = SemcodeHeaderSpec {
 pub const HEADER_V16: SemcodeHeaderSpec = SemcodeHeaderSpec {
 pub const HEADER_V17: SemcodeHeaderSpec = SemcodeHeaderSpec {
 pub const HEADER_V18: SemcodeHeaderSpec = SemcodeHeaderSpec {
+pub const HEADER_V19: SemcodeHeaderSpec = SemcodeHeaderSpec {
+pub const SEMCODE_SIGNATURE_MIN_REVISION: u16 = HEADER_V19.rev;
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
 pub fn header_spec_from_magic(magic: &[u8; 8]) -> Option<SemcodeHeaderSpec> {
 #[repr(u8)]
@@ -86,6 +90,14 @@ pub enum SemcodeFormatError {
 pub fn byte(self) -> u8 {
 pub fn from_byte(v: u8) -> Result<Self, SemcodeFormatError> {
 pub fn minimum_semcode_revision(self) -> u16 {
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CallableValueFamily {
+pub fn byte(self) -> u8 {
+pub fn from_byte(v: u8) -> Result<Self, SemcodeFormatError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallableSignature {
+pub families: Vec<CallableValueFamily>,
 pub fn write_u16_le(out: &mut Vec<u8>, v: u16) {
 pub fn write_u32_le(out: &mut Vec<u8>, v: u32) {
 pub fn write_i32_le(out: &mut Vec<u8>, v: i32) {

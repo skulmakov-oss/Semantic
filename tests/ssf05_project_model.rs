@@ -53,7 +53,9 @@ fn project_verify_and_tests_use_the_canonical_root() {
         "verify failed: {}",
         String::from_utf8_lossy(&verify.stderr)
     );
-    assert!(String::from_utf8_lossy(&verify.stdout).contains("header=SEMCODE0"));
+    // #1773 (FA-09-005): SEMCOD19 is now the floor for every compiled
+    // artifact regardless of which opcodes it uses (was SEMCODE0).
+    assert!(String::from_utf8_lossy(&verify.stdout).contains("header=SEMCOD19"));
 
     let first = smc(&["test", &root_arg]);
     let second = smc(&["test", &root_arg]);

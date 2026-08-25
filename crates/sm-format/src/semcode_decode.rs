@@ -4,6 +4,7 @@ pub const MAX_FUNCTIONS: usize = 1024;
 pub const MAX_STRING_LEN: usize = 1024;
 pub const MAX_STRINGS_PER_FUNCTION: usize = 256;
 pub const MAX_DEBUG_SYMBOLS_PER_FUNCTION: usize = 8192;
+pub const MAX_SIGNATURE_PARAMETERS_PER_FUNCTION: usize = 4096;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
@@ -14,6 +15,7 @@ pub enum DecodeError {
     InvalidStringTable { offset: usize, msg: &'static str },
     InvalidDebugSection { offset: usize, msg: &'static str },
     InvalidOwnershipSection { offset: usize, msg: &'static str },
+    InvalidSignatureSection { offset: usize, msg: &'static str },
     ResourceLimit { offset: usize, msg: String },
 }
 
@@ -69,6 +71,19 @@ pub struct DecodedFunctionEnvelope<'a> {
     // well-defined; equals `instr_start_offset` when neither section is
     // present.
     pub string_table_end_offset: usize,
+    // #1773 (FA-09-005): the canonical callable-signature record for this
+    // function, if present. Unlike `has_debug_section`/`has_ownership_section`
+    // (which are content-sniffed - the DBG0/OWN0 tags are looked for
+    // regardless of header revision, see #1731's TupleGet/DBG0 byte
+    // collision), signature presence is derived *deterministically* from
+    // `header.rev >= SEMCODE_SIGNATURE_MIN_REVISION` and never sniffed: a
+    // pre-#1773 header structurally cannot carry a SIG0 section, so there is
+    // nothing to (mis)interpret in its instruction stream as one. `None`
+    // means "this artifact's header predates canonical callable signatures";
+    // it is never used to mean "signature section present but empty" - a
+    // present, zero-parameter signature decodes as `Some(CallableSignature
+    // { families: vec![] })`.
+    pub signature: Option<CallableSignature>,
     pub instr_start_offset: usize, // relative to code_slice
     pub code_slice: &'a [u8],      // the full code block for this function
 }
@@ -81,6 +96,7 @@ struct StringTableDebugOwnershipParse {
     has_ownership_section: bool,
     has_debug_section: bool,
     string_table_end_offset: usize,
+    signature: Option<CallableSignature>,
     instr_start_offset: usize,
 }
 
@@ -157,7 +173,7 @@ pub fn decode_semcode_envelope<'a>(
         let code_slice = &bytes[cursor..code_end];
         cursor = code_end;
 
-        let parsed = parse_string_table_debug_and_ownership(code_offset, code_slice)?;
+        let parsed = parse_string_table_debug_and_ownership(code_offset, code_slice, header.rev)?;
 
         functions.push(DecodedFunctionEnvelope {
             name,
@@ -171,6 +187,7 @@ pub fn decode_semcode_envelope<'a>(
             has_ownership_section: parsed.has_ownership_section,
             has_debug_section: parsed.has_debug_section,
             string_table_end_offset: parsed.string_table_end_offset,
+            signature: parsed.signature,
             instr_start_offset: parsed.instr_start_offset,
             code_slice,
         });
@@ -212,6 +229,7 @@ fn checked_end(cursor: usize, len: usize, total: usize) -> Option<usize> {
 fn parse_string_table_debug_and_ownership(
     base_offset: usize,
     code: &[u8],
+    header_rev: u16,
 ) -> Result<StringTableDebugOwnershipParse, DecodeError> {
     let mut cursor = 0usize;
     let string_count_offset = diag_offset(base_offset, cursor);
@@ -425,6 +443,93 @@ fn parse_string_table_debug_and_ownership(
         }
     }
 
+    // #1773 (FA-09-005): deliberately NOT a content-sniff like DBG0/OWN0
+    // above. Signature-record presence is a structural fact of the header
+    // revision alone, never of instruction-stream content, so a pre-#1773
+    // header's instruction stream is never even inspected for a coincidental
+    // "SIG0" byte match - closing off the collision class #1731 documented
+    // for DBG0 (TupleGet's opcode byte spells 'D') before it could recur
+    // here. `header_rev >= SEMCODE_SIGNATURE_MIN_REVISION` is exactly the
+    // condition `sm-ir`'s emitter uses to decide whether to write this
+    // section (see `emit_semcode_function`), so decode and emit agree by
+    // construction.
+    let signature = if header_rev >= SEMCODE_SIGNATURE_MIN_REVISION {
+        // #1773 review follow-up: every header at or above
+        // SEMCODE_SIGNATURE_MIN_REVISION carries CAP_OWNERSHIP_PATHS
+        // (HEADER_V19 inherits it unchanged from V18/V11, and capabilities
+        // only ever grow across revisions in this format - never shrink -
+        // so this holds for any future revision too), meaning OWN0 is
+        // just as mandatory per function as SIG0 is. Before this check,
+        // a function could omit or strip its own OWN0 section entirely
+        // and still decode a SIG0 placed right after the string table -
+        // sm-verify's program-wide ownership check only proves *some*
+        // function in the artifact has OWN0 (`.any(...)`), not that
+        // *this* one does, so a multi-function artifact could smuggle one
+        // OWN0-less function past admission and have the VM execute it
+        // with no borrow/write path enforcement at all. Rejecting here,
+        // before SIG0 is even inspected, closes that per-function gap
+        // structurally rather than relying on a coarser whole-program
+        // policy check.
+        if !has_ownership_section {
+            return Err(DecodeError::InvalidOwnershipSection {
+                offset: diag_offset(base_offset, cursor),
+                msg: "header requires per-function ownership-path metadata but no OWN0 section is present",
+            });
+        }
+        let tag_offset = diag_offset(base_offset, cursor);
+        let tag_end = checked_end(cursor, SIGNATURE_SECTION_TAG.len(), code.len()).ok_or(
+            DecodeError::InvalidSignatureSection {
+                offset: tag_offset,
+                msg: "missing SIG0 section tag",
+            },
+        )?;
+        if code[cursor..tag_end] != SIGNATURE_SECTION_TAG {
+            return Err(DecodeError::InvalidSignatureSection {
+                offset: tag_offset,
+                msg: "missing SIG0 section tag",
+            });
+        }
+        cursor = tag_end;
+
+        let count_offset = diag_offset(base_offset, cursor);
+        let count =
+            read_u16_le(code, &mut cursor).map_err(|_| DecodeError::InvalidSignatureSection {
+                offset: count_offset,
+                msg: "missing parameter count",
+            })? as usize;
+
+        if count > MAX_SIGNATURE_PARAMETERS_PER_FUNCTION {
+            return Err(DecodeError::ResourceLimit {
+                offset: diag_offset(base_offset, cursor),
+                msg: format!(
+                    "too many callable-signature parameters: {} (max {})",
+                    count, MAX_SIGNATURE_PARAMETERS_PER_FUNCTION
+                ),
+            });
+        }
+
+        let mut families = Vec::with_capacity(count);
+        for _ in 0..count {
+            let family_offset = diag_offset(base_offset, cursor);
+            let raw =
+                read_u8(code, &mut cursor).map_err(|_| DecodeError::InvalidSignatureSection {
+                    offset: family_offset,
+                    msg: "missing parameter family tag",
+                })?;
+            let family = CallableValueFamily::from_byte(raw).map_err(|_| {
+                DecodeError::InvalidSignatureSection {
+                    offset: family_offset,
+                    msg: "unknown parameter family tag",
+                }
+            })?;
+            families.push(family);
+        }
+
+        Some(CallableSignature { families })
+    } else {
+        None
+    };
+
     Ok(StringTableDebugOwnershipParse {
         strings,
         debug_symbols,
@@ -433,6 +538,7 @@ fn parse_string_table_debug_and_ownership(
         has_ownership_section,
         has_debug_section,
         string_table_end_offset,
+        signature,
         instr_start_offset: cursor,
     })
 }
@@ -604,6 +710,185 @@ mod tests {
             env.borrowed_paths[0].components,
             vec![DecodedAccessPathComponent::SequenceIndexStatic(7)]
         );
+    }
+
+    // #1773 (FA-09-005) format tests: the SIG0 section.
+
+    fn function_bytes_with_header(magic: [u8; 8], name: &str, code: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&magic);
+        bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        bytes.extend_from_slice(name.as_bytes());
+        bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(code);
+        bytes
+    }
+
+    #[test]
+    fn decode_rev20_header_roundtrips_multi_family_signature() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes()); // empty string table
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes()); // empty ownership path count
+        code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        code.extend_from_slice(&3u16.to_le_bytes());
+        code.push(CallableValueFamily::I32.byte());
+        code.push(CallableValueFamily::Bool.byte());
+        code.push(CallableValueFamily::Adt.byte());
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let (header, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        assert_eq!(header.rev, SEMCODE_SIGNATURE_MIN_REVISION);
+        let sig = functions[0].signature.as_ref().expect("signature present");
+        assert_eq!(
+            sig.families,
+            vec![
+                CallableValueFamily::I32,
+                CallableValueFamily::Bool,
+                CallableValueFamily::Adt,
+            ]
+        );
+    }
+
+    #[test]
+    fn decode_rev20_header_accepts_zero_parameter_signature() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes());
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        let sig = functions[0].signature.as_ref().expect("signature present");
+        assert!(sig.families.is_empty());
+    }
+
+    #[test]
+    fn decode_pre_rev20_header_never_has_a_signature() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+
+        let bytes = function_bytes_with_header(MAGIC18, "main", &code);
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        assert_eq!(functions[0].signature, None);
+    }
+
+    #[test]
+    fn decode_rev20_header_rejects_missing_signature_section() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes());
+        // No SIG0 tag follows, even though the header requires one.
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject, never fall back");
+        assert!(matches!(err, DecodeError::InvalidSignatureSection { .. }));
+    }
+
+    // #1773 review follow-up: a rev20+ function that strips its own OWN0
+    // section and places SIG0 immediately after the string table must be
+    // rejected, not silently decoded as "no ownership metadata for this
+    // function". Every header at SEMCODE_SIGNATURE_MIN_REVISION or above
+    // carries CAP_OWNERSHIP_PATHS, so OWN0 is exactly as mandatory per
+    // function as SIG0 is - without this check, sm-verify's program-wide
+    // `.any(has_ownership_section)` policy check could be satisfied by a
+    // sibling function in the same multi-function artifact while this one
+    // silently loses all borrow/write path enforcement.
+    #[test]
+    fn decode_rev20_header_rejects_function_with_sig0_but_no_own0() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes()); // empty string table
+                                                     // OWN0 deliberately omitted - SIG0 placed directly after it.
+        code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes());
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let err = decode_semcode_envelope(&bytes)
+            .expect_err("a rev20+ function missing OWN0 must be rejected before SIG0 is trusted");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    /// The same exploit, but with a second, well-formed function in the
+    /// same artifact - proving the rejection is genuinely per-function, not
+    /// something a sibling function's real OWN0 section could paper over
+    /// via sm-verify's whole-program `.any(...)` check.
+    #[test]
+    fn decode_rev20_header_rejects_own0_less_function_even_with_a_well_formed_sibling() {
+        let mut good_code = Vec::new();
+        good_code.extend_from_slice(&0u16.to_le_bytes());
+        good_code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        good_code.extend_from_slice(&0u16.to_le_bytes());
+        good_code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        good_code.extend_from_slice(&0u16.to_le_bytes());
+
+        let mut bad_code = Vec::new();
+        bad_code.extend_from_slice(&0u16.to_le_bytes());
+        bad_code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        bad_code.extend_from_slice(&0u16.to_le_bytes());
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&MAGIC19);
+        for (name, code) in [("good", &good_code), ("bad", &bad_code)] {
+            bytes.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            bytes.extend_from_slice(name.as_bytes());
+            bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(code);
+        }
+
+        let err = decode_semcode_envelope(&bytes)
+            .expect_err("a well-formed sibling function must not excuse this one's missing OWN0");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    #[test]
+    fn decode_rev20_header_rejects_truncated_signature_count() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        code.push(0x01); // truncated count (needs 2 bytes)
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject, never panic");
+        assert!(matches!(err, DecodeError::InvalidSignatureSection { .. }));
+    }
+
+    #[test]
+    fn decode_rev20_header_rejects_invalid_family_tag() {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(0); // family tag 0 is deliberately never valid
+        code.push(0xff); // pad so this isn't also a truncation
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject, never panic");
+        assert!(matches!(err, DecodeError::InvalidSignatureSection { .. }));
+    }
+
+    #[test]
+    fn decode_rev20_header_rejects_arity_family_count_desync_by_construction() {
+        // A SIG0 count of 2 but only one family byte on the wire: the decoder
+        // must reject rather than ever produce a `CallableSignature` whose
+        // `families.len()` disagrees with the declared count.
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&SIGNATURE_SECTION_TAG);
+        code.extend_from_slice(&2u16.to_le_bytes());
+        code.push(CallableValueFamily::I32.byte());
+
+        let bytes = function_bytes_with_header(MAGIC19, "main", &code);
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject, never panic");
+        assert!(matches!(err, DecodeError::InvalidSignatureSection { .. }));
     }
 
     #[test]

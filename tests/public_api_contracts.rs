@@ -177,10 +177,21 @@ fn normalize_snapshot_text(text: &str) -> String {
     text.replace("\r\n", "\n").trim_end().to_string()
 }
 
+fn update_mode() -> bool {
+    std::env::var("SM_UPDATE_PUBLIC_API_SNAPSHOTS")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 #[test]
 fn public_api_inventory_matches_checked_in_contract_snapshots() {
     for (source, snapshot) in TARGETS {
         let actual = normalized_public_surface(source).trim_end().to_string();
+        if update_mode() {
+            fs::write(snapshot, format!("{actual}\n"))
+                .unwrap_or_else(|err| panic!("write {snapshot}: {err}"));
+            continue;
+        }
         let expected =
             fs::read_to_string(snapshot).unwrap_or_else(|err| panic!("read {snapshot}: {err}"));
         assert_eq!(
@@ -214,6 +225,8 @@ fn verification_code_contract_name(code: sm_verify::VerificationCode) -> &'stati
         VerificationCode::AmbiguousInstructionFraming => "AmbiguousInstructionFraming",
         VerificationCode::OpcodeRequiresNewerHeader => "OpcodeRequiresNewerHeader",
         VerificationCode::ReachableFunctionFallthrough => "ReachableFunctionFallthrough",
+        VerificationCode::InvalidSignatureSection => "InvalidSignatureSection",
+        VerificationCode::CallArgumentCountMismatch => "CallArgumentCountMismatch",
     }
 }
 
@@ -241,6 +254,8 @@ fn verification_code_variants_match_public_contract() {
         VerificationCode::AmbiguousInstructionFraming,
         VerificationCode::OpcodeRequiresNewerHeader,
         VerificationCode::ReachableFunctionFallthrough,
+        VerificationCode::InvalidSignatureSection,
+        VerificationCode::CallArgumentCountMismatch,
     ];
 
     for variant in variants {
