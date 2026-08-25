@@ -1254,6 +1254,90 @@ fn for_each_reachable_successor(
     }
 }
 
+/// Reverse-postorder rank per reachable position (entry, position 0, always
+/// gets rank 0). Computed via one iterative (non-recursive, so a long linear
+/// reachable chain can't blow the stack) DFS over the reachable subgraph,
+/// reusing the verifier's own successor relation via
+/// `for_each_reachable_successor` - not a second CFG engine, just a
+/// traversal order the worklist below uses to bound how many times a node
+/// can be reprocessed.
+///
+/// #1756 Codex review round 5: without this ordering, a plain FIFO worklist
+/// gives no guarantee that all of a node's predecessors are drained before
+/// the node itself is first processed, so a join fed by many arms (e.g. a
+/// 512-way dispatch, each arm leaving a different register undefined) could
+/// be re-narrowed and re-propagated through its entire successor tail once
+/// per incoming arm - up to `arms * tail_len` relaxations for a long
+/// fallthrough tail after the join. RPO rank has no bearing on
+/// correctness (the fixed point is unique regardless of processing order,
+/// per `intersect_rc`'s doc comment); it exists purely to bound the
+/// number of times each node is reprocessed: for any forward (non-loop)
+/// edge, DFS postorder always finishes a node's source strictly before (or,
+/// via a shared-descendant subtlety, at least no later than) the node
+/// itself, so every one of a join's non-back-edge predecessors is ordered
+/// ahead of it, and the worklist below (which processes strictly by
+/// ascending rank) drains them all before the join is popped for the first
+/// time.
+#[cfg(feature = "std")]
+fn reverse_postorder_ranks(
+    reachable_indices: &[usize],
+    instruction_successors: &[InstructionSuccessors],
+    instr_starts: &[usize],
+) -> Vec<u32> {
+    let n = reachable_indices.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let successors_of = |pos: usize| -> [Option<usize>; 2] {
+        let mut succs = [None, None];
+        let mut count = 0usize;
+        for_each_reachable_successor(
+            reachable_indices[pos],
+            instruction_successors,
+            instr_starts,
+            reachable_indices,
+            |succ_pos| {
+                if count < 2 {
+                    succs[count] = Some(succ_pos);
+                }
+                count += 1;
+            },
+        );
+        succs
+    };
+
+    let mut visited = vec![false; n];
+    let mut postorder: Vec<usize> = Vec::with_capacity(n);
+    // (position, its successor positions, next successor index to visit)
+    let mut stack: Vec<(usize, [Option<usize>; 2], usize)> = Vec::new();
+    visited[0] = true;
+    stack.push((0, successors_of(0), 0));
+
+    while let Some(&(pos, succs, next)) = stack.last() {
+        if next < 2 {
+            stack
+                .last_mut()
+                .expect("stack non-empty by the while-let condition just above")
+                .2 += 1;
+            if let Some(child) = succs[next] {
+                if !visited[child] {
+                    visited[child] = true;
+                    stack.push((child, successors_of(child), 0));
+                }
+            }
+        } else {
+            postorder.push(pos);
+            stack.pop();
+        }
+    }
+
+    let mut rank = vec![0u32; n];
+    for (r, &pos) in postorder.iter().rev().enumerate() {
+        rank[pos] = r as u32;
+    }
+    rank
+}
+
 #[cfg(feature = "std")]
 #[allow(clippy::too_many_arguments)]
 fn prove_definite_register_assignment(
@@ -1344,6 +1428,29 @@ fn prove_definite_register_assignment(
     // edges, resolved on demand from the verifier's own
     // `instruction_successors` via `for_each_reachable_successor` - no
     // predecessor structure is ever built at all.
+    //
+    // Codex review round 5 found that plain FIFO order for that edge
+    // relaxation has no bound on how many times a single node is
+    // reprocessed: a join fed by many arms (a 512-way dispatch, each arm
+    // leaving a different register undefined) narrows the join's `IN` once
+    // per arm, and every narrowing that changes `OUT` re-propagates through
+    // the join's *entire* successor tail again - `O(arms * tail_len)`
+    // relaxations. Fixed by processing POSITIONS (not edges) in
+    // `reverse_postorder_ranks` order via a min-heap: narrowing a
+    // successor's `IN` happens in place, immediately, the instant any
+    // predecessor's `OUT` changes (cheap - just the usual `intersect_rc`
+    // sharing, no propagation triggered by the narrowing itself), and a
+    // position is enqueued for actual (re)processing at most once at a
+    // time (`queued`). Because RPO rank orders every one of a join's
+    // non-back-edge predecessors ahead of the join, all `arms` have already
+    // narrowed `in_sets[join]` by the time `join` is first popped and
+    // actually processed (which is what triggers successor propagation) -
+    // so the join, and therefore its tail, is processed once, not once per
+    // arm. This changes only processing order, never the fixed point
+    // computed: intersection is monotone, so narrowing `in_sets[target]`
+    // immediately (rather than queuing the predecessor's `OUT` as a
+    // separate pending edge value) converges to the same unique meet either
+    // way (see `intersect_rc`'s doc comment).
     let top: std::rc::Rc<RegSet> = std::rc::Rc::new(RegSet::full(domain_size));
     let mut in_sets: Vec<std::rc::Rc<RegSet>> = (0..reachable_count)
         .map(|pos| {
@@ -1357,25 +1464,33 @@ fn prove_definite_register_assignment(
     let mut out_sets: Vec<std::rc::Rc<RegSet>> = in_sets.clone();
     out_sets[0] = apply_writes(&in_sets[0], writes_at(0), &dense);
 
-    // Worklist of (target position, incoming value to intersect) edges,
-    // seeded from entry's own outgoing edges - entry's IN/OUT are fixed
-    // inputs, never recomputed.
-    let mut worklist: std::collections::VecDeque<(usize, std::rc::Rc<RegSet>)> =
-        std::collections::VecDeque::new();
+    let rpo_rank =
+        reverse_postorder_ranks(&reachable_indices, instruction_successors, instr_starts);
+    let mut queued = vec![false; reachable_count];
+    let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<(u32, usize)>> =
+        std::collections::BinaryHeap::new();
+
+    // Seed from entry's own outgoing edges - entry's IN/OUT are fixed
+    // inputs, never recomputed or enqueued themselves.
     for_each_reachable_successor(
         reachable_indices[0],
         instruction_successors,
         instr_starts,
         &reachable_indices,
-        |succ_pos| worklist.push_back((succ_pos, std::rc::Rc::clone(&out_sets[0]))),
+        |succ_pos| {
+            let narrowed = intersect_rc(&in_sets[succ_pos], &out_sets[0]);
+            if narrowed.words != in_sets[succ_pos].words {
+                in_sets[succ_pos] = narrowed;
+                if !queued[succ_pos] {
+                    queued[succ_pos] = true;
+                    heap.push(std::cmp::Reverse((rpo_rank[succ_pos], succ_pos)));
+                }
+            }
+        },
     );
 
-    while let Some((pos, incoming)) = worklist.pop_front() {
-        let new_in = intersect_rc(&in_sets[pos], &incoming);
-        if new_in.words == in_sets[pos].words {
-            continue;
-        }
-        in_sets[pos] = new_in;
+    while let Some(std::cmp::Reverse((_, pos))) = heap.pop() {
+        queued[pos] = false;
         let new_out = apply_writes(&in_sets[pos], writes_at(pos), &dense);
         if new_out.words != out_sets[pos].words {
             out_sets[pos] = new_out;
@@ -1384,7 +1499,16 @@ fn prove_definite_register_assignment(
                 instruction_successors,
                 instr_starts,
                 &reachable_indices,
-                |succ_pos| worklist.push_back((succ_pos, std::rc::Rc::clone(&out_sets[pos]))),
+                |succ_pos| {
+                    let narrowed = intersect_rc(&in_sets[succ_pos], &out_sets[pos]);
+                    if narrowed.words != in_sets[succ_pos].words {
+                        in_sets[succ_pos] = narrowed;
+                        if !queued[succ_pos] {
+                            queued[succ_pos] = true;
+                            heap.push(std::cmp::Reverse((rpo_rank[succ_pos], succ_pos)));
+                        }
+                    }
+                },
             );
         }
     }
@@ -4451,6 +4575,103 @@ mod tests {
         verify_semcode(&bytes).expect(
             "a long, fully reachable, non-branching stream that repeatedly writes the same \
              already-defined register must verify correctly and stay fast",
+        );
+    }
+
+    /// Codex review round 5 on PR #1840: reproduces the exact adversarial
+    /// shape described - a wide dispatch where every arm defines all but
+    /// one (a DIFFERENT one per arm) of a shared register domain, joining
+    /// into a single node, followed by a long fallthrough tail. Under a
+    /// plain FIFO edge-relaxation worklist, each of the `ARMS` arms
+    /// narrows the join's `IN` by exactly one more bit (regardless of
+    /// processing order, since it's a strict, growing set difference), and
+    /// every such narrowing that changes the join's `OUT` re-propagates
+    /// through the *entire* `TAIL_LEN`-node tail again -
+    /// `O(ARMS * TAIL_LEN)` relaxations. Fixed by processing positions in
+    /// `reverse_postorder_ranks` order (see that function's doc comment):
+    /// every arm is ordered ahead of the join it feeds, so all `ARMS`
+    /// contributions have already narrowed `in_sets[join]` in place by the
+    /// time the join is first popped and actually processed - the tail is
+    /// walked once, not once per arm.
+    ///
+    /// Correctness is exercised too, not just performance: since arm `i`
+    /// defines every register in `0..ARMS` except register `i`, the
+    /// intersection over all arms is the EMPTY set within that domain - no
+    /// register in `0..ARMS` survives the join, so the read at the far end
+    /// of the tail (`r0`) is correctly rejected as undefined, regardless of
+    /// how long the intervening tail is.
+    #[test]
+    fn c1756_rejects_wide_dispatch_join_feeding_long_tail_without_per_arm_blowup() {
+        const ARMS: u16 = 128;
+        const TAIL_LEN: usize = 20_000;
+        const COND_REG: u16 = ARMS; // outside the 0..ARMS join domain
+
+        let mut instrs: Vec<IrInstr> = vec![IrInstr::LoadBool {
+            dst: COND_REG,
+            val: true,
+        }];
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::JmpIf {
+                cond: COND_REG,
+                label: format!("arm{arm}"),
+            });
+        }
+        // Fallthrough arm (ARMS - 1): reached only once every JmpIf above
+        // has fallen through, so its body must be the next physical
+        // instruction after the dispatch chain - defines every register
+        // except r(ARMS - 1).
+        for r in 0..ARMS {
+            if r != ARMS - 1 {
+                instrs.push(IrInstr::LoadI32 {
+                    dst: r,
+                    val: r as i32,
+                });
+            }
+        }
+        instrs.push(IrInstr::Jmp {
+            label: "join".to_string(),
+        });
+        // The remaining ARMS - 1 arms, each reached by its own JmpIf target
+        // above - defines every register except its own index.
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::Label {
+                name: format!("arm{arm}"),
+            });
+            for r in 0..ARMS {
+                if r != arm {
+                    instrs.push(IrInstr::LoadI32 {
+                        dst: r,
+                        val: r as i32,
+                    });
+                }
+            }
+            instrs.push(IrInstr::Jmp {
+                label: "join".to_string(),
+            });
+        }
+        instrs.push(IrInstr::Label {
+            name: "join".to_string(),
+        });
+        for _ in 0..TAIL_LEN {
+            // Writes a register outside the 0..ARMS join domain - carries
+            // the join's (already-converged) state forward without adding
+            // new information, the same "cheap tail" shape as the other
+            // large stress regressions above.
+            instrs.push(IrInstr::LoadI32 {
+                dst: COND_REG,
+                val: 0,
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0: undefined by arm 0, so missing at the join
+
+        let bytes = emit_test_function(instrs);
+        let report = verify_semcode(&bytes).expect_err(
+            "r0 is missing from arm 0's definitions, so no register in 0..ARMS survives the \
+             128-arm join, and the tail read of r0 must be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
         );
     }
 
