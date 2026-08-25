@@ -6133,8 +6133,8 @@ mod tests {
     fn frame_reads_zero_arg_entry_register_as_uninitialized_error() {
         let bytes =
             build_register_init_test_program(vec![ret_only_function("main", Some(0), vec![])]);
-        let report =
-            verify_semcode_token(&bytes).expect_err("verifier must now reject the undefined r0 read (#1756)");
+        let report = verify_semcode_token(&bytes)
+            .expect_err("verifier must now reject the undefined r0 read (#1756)");
         assert_eq!(
             report.diagnostics[0].code,
             sm_verify::VerificationCode::UndefinedRegisterRead

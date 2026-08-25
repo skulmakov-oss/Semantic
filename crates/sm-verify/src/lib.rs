@@ -900,7 +900,6 @@ fn verify_function_code(
                 ),
             ));
         }
-        let domain_size = max_register.map_or(0, |m| m + 1).max(entry_param_count);
         prove_definite_register_assignment(
             name,
             &instr_starts,
@@ -909,7 +908,6 @@ fn verify_function_code(
             &instr_writes,
             &reachable_offsets,
             entry_param_count,
-            domain_size,
         )?;
     }
 
@@ -1055,14 +1053,75 @@ impl RegSet {
 /// register-storage capacity. Every other node initializes to TOP
 /// (`RegSet::full`), per the non-negotiable loop-correctness rule.
 ///
-/// Unreachable nodes are simply never revisited by the fixed-point loop
-/// below (it only iterates `reachable_offsets`), so they stay at TOP
-/// forever. That is intentionally harmless, not an approximation: TOP is the
-/// identity element for intersection, so an unreachable predecessor's
-/// (permanently-TOP) `OUT` set never narrows a reachable successor's `IN`.
-/// This preserves the verifier's existing, separate policy on structurally
-/// valid-but-unreachable code untouched - this pass only judges reachable
-/// reads.
+/// Unreachable nodes are never allocated per-node dataflow state at all (see
+/// the Codex-review note below): an unreachable predecessor's contribution
+/// to any meet would always be TOP (the identity element for intersection),
+/// so an edge from an unreachable node is simply never recorded rather than
+/// being represented and then ignored. This preserves the verifier's
+/// existing, separate policy on structurally valid-but-unreachable code
+/// untouched - this pass only judges reachable reads.
+///
+/// Codex review round 1 on this PR (#1840) found two independent
+/// amplification sources in an earlier revision, fixed together here:
+///
+/// 1. Allocating one `RegSet` per node for every structurally decoded
+///    instruction, reachable or not, let a structurally valid artifact (an
+///    entry `RET` followed by megabytes of never-executed trailing
+///    instructions, still legal per the verifier's reachable-control-flow
+///    policy) force memory proportional to total instruction count, with no
+///    existing quota bounding that count. Fixed: dataflow state below is
+///    allocated and indexed only for reachable nodes (by position within
+///    `reachable_indices`, not by raw instruction index) - the same
+///    reachable set the existing verifier already walks for its own
+///    reachability BFS, not a new, larger one.
+/// 2. Sizing the register domain from the raw numeric span
+///    (`0..=max_register_id`) rather than the registers actually in use
+///    meant a single reference to a high register number (still legal and
+///    in-budget) forced a full-width bitset even when only one or two
+///    registers mattered - a program referencing only `{r0, r4095}` needs a
+///    domain of size 2, not 4096. Fixed: the register universe `U` below is
+///    built densely, from the registers `ENTRY_DEFS` and reachable
+///    instructions actually reference, each remapped to a compact index;
+///    diagnostics still report the original raw register identity.
+///
+/// Both fixes only change how densely this pass's own bounded state is
+/// packed - `U`'s size can never exceed the pre-existing register-budget
+/// quota (every register `U` collects was already proven in-range by that
+/// check before this function runs), so neither fix relaxes or replaces
+/// that quota; it remains the only source of truth for the upper bound.
+///
+/// Computes the two quantities that bound `prove_definite_register_
+/// assignment`'s own memory use: the reachable node index set (ascending,
+/// position 0 = function entry) and the dense register universe `U`
+/// (ascending, deduplicated). Factored out from that function so tests can
+/// assert directly on `reachable_indices.len()` and `universe.len()` - the
+/// exact per-node and per-register-domain multipliers - rather than relying
+/// only on timing to demonstrate the Codex-review-round-1 fix above.
+#[cfg(feature = "std")]
+fn dataflow_domain_accounting(
+    instr_starts: &[usize],
+    instr_reads: &[Vec<u16>],
+    instr_writes: &[Vec<u16>],
+    reachable_offsets: &HashSet<usize>,
+    entry_param_count: usize,
+) -> (Vec<usize>, Vec<u16>) {
+    let mut reachable_indices: Vec<usize> = reachable_offsets
+        .iter()
+        .filter_map(|offset| instr_starts.binary_search(offset).ok())
+        .collect();
+    reachable_indices.sort_unstable();
+
+    let mut universe: Vec<u16> = (0..entry_param_count).map(|r| r as u16).collect();
+    for &idx in &reachable_indices {
+        universe.extend_from_slice(&instr_reads[idx]);
+        universe.extend_from_slice(&instr_writes[idx]);
+    }
+    universe.sort_unstable();
+    universe.dedup();
+
+    (reachable_indices, universe)
+}
+
 #[cfg(feature = "std")]
 #[allow(clippy::too_many_arguments)]
 fn prove_definite_register_assignment(
@@ -1073,17 +1132,36 @@ fn prove_definite_register_assignment(
     instr_writes: &[Vec<u16>],
     reachable_offsets: &HashSet<usize>,
     entry_param_count: usize,
-    domain_size: usize,
 ) -> Result<(), RejectReport> {
-    let node_count = instr_starts.len();
-    if node_count == 0 {
+    if instr_starts.is_empty() {
         return Ok(());
     }
 
+    let (reachable_indices, universe) = dataflow_domain_accounting(
+        instr_starts,
+        instr_reads,
+        instr_writes,
+        reachable_offsets,
+        entry_param_count,
+    );
+    let reachable_count = reachable_indices.len();
+    debug_assert_eq!(reachable_indices.first(), Some(&0));
+    let domain_size = universe.len();
+    let dense = |raw: u16| -> usize {
+        universe
+            .binary_search(&raw)
+            .expect("register must be in U by construction")
+    };
+
     // Predecessors, built from the SAME successor relation
     // `verify_reachable_control_flow` already walks - not a second CFG.
-    let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); node_count];
-    for (idx, successors) in instruction_successors.iter().enumerate() {
+    // Indexed and stored by REACHABLE POSITION (see the doc comment above):
+    // only reachable source nodes are visited (an edge from an unreachable
+    // node is never traversed by any real execution path), and only
+    // reachable targets are recorded (an unreachable target's dataflow
+    // state is never allocated, so no predecessor list for it is needed).
+    let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); reachable_count];
+    for (src_pos, &idx) in reachable_indices.iter().enumerate() {
         let mut link = |target: usize| {
             // A target that isn't a real instruction boundary can only
             // belong to an unreachable fallthrough off the end of the
@@ -1091,10 +1169,12 @@ fn prove_definite_register_assignment(
             // regardless of reachability, so this is never a real,
             // reachable edge silently dropped.
             if let Ok(target_idx) = instr_starts.binary_search(&target) {
-                predecessors[target_idx].push(idx);
+                if let Ok(target_pos) = reachable_indices.binary_search(&target_idx) {
+                    predecessors[target_pos].push(src_pos);
+                }
             }
         };
-        match successors {
+        match &instruction_successors[idx] {
             InstructionSuccessors::None => {}
             InstructionSuccessors::One(target) => link(*target),
             InstructionSuccessors::Two(first, second) => {
@@ -1104,26 +1184,14 @@ fn prove_definite_register_assignment(
         }
     }
 
-    // Reachable node INDICES, derived from the reachable OFFSET set
-    // `verify_reachable_control_flow` already computed - not re-derived.
-    // Ascending index order equals ascending offset order (`instr_starts` is
-    // built in strictly increasing cursor order during the single forward
-    // decode walk), which is exactly the deterministic diagnostic ordering
-    // this pass's final validation below relies on.
-    let mut reachable_indices: Vec<usize> = reachable_offsets
-        .iter()
-        .filter_map(|offset| instr_starts.binary_search(offset).ok())
-        .collect();
-    reachable_indices.sort_unstable();
-
     let mut entry_defs = RegSet::empty(domain_size);
     for r in 0..entry_param_count {
-        entry_defs.insert(r);
+        entry_defs.insert(dense(r as u16));
     }
 
-    let mut in_sets: Vec<RegSet> = (0..node_count)
-        .map(|idx| {
-            if idx == 0 {
+    let mut in_sets: Vec<RegSet> = (0..reachable_count)
+        .map(|pos| {
+            if pos == 0 {
                 entry_defs.clone()
             } else {
                 RegSet::full(domain_size)
@@ -1131,37 +1199,35 @@ fn prove_definite_register_assignment(
         })
         .collect();
     let mut out_sets: Vec<RegSet> = in_sets.clone();
-    for &w in &instr_writes[0] {
-        out_sets[0].insert(w as usize);
+    for &w in &instr_writes[reachable_indices[0]] {
+        out_sets[0].insert(dense(w));
     }
 
-    // Iterate to a fixed point over reachable nodes only. Entry's IN/OUT are
-    // fixed inputs (`ENTRY_DEFS` and its own writes), never recomputed. For
-    // a monotone framework iterated to a genuine fixed point (not stopped
-    // early), the converged result is independent of processing order
-    // within a round - only the round count is - so this simple round-robin
-    // re-scan never makes diagnostics order-dependent.
+    // Iterate to a fixed point over reachable positions only. Entry's IN/OUT
+    // are fixed inputs (`ENTRY_DEFS` and its own writes), never recomputed.
+    // For a monotone framework iterated to a genuine fixed point (not
+    // stopped early), the converged result is independent of processing
+    // order within a round - only the round count is - so this simple
+    // round-robin re-scan never makes diagnostics order-dependent.
     let mut changed = true;
     while changed {
         changed = false;
-        for &idx in &reachable_indices {
-            if idx == 0 {
-                continue;
-            }
+        for pos in 1..reachable_count {
+            let idx = reachable_indices[pos];
             let mut new_in = RegSet::full(domain_size);
-            for &pred in &predecessors[idx] {
-                new_in.intersect_with(&out_sets[pred]);
+            for &pred_pos in &predecessors[pos] {
+                new_in.intersect_with(&out_sets[pred_pos]);
             }
             let mut new_out = new_in.clone();
             for &w in &instr_writes[idx] {
-                new_out.insert(w as usize);
+                new_out.insert(dense(w));
             }
-            if new_in.words != in_sets[idx].words {
-                in_sets[idx] = new_in;
+            if new_in.words != in_sets[pos].words {
+                in_sets[pos] = new_in;
                 changed = true;
             }
-            if new_out.words != out_sets[idx].words {
-                out_sets[idx] = new_out;
+            if new_out.words != out_sets[pos].words {
+                out_sets[pos] = new_out;
                 changed = true;
             }
         }
@@ -1170,13 +1236,14 @@ fn prove_definite_register_assignment(
     // Validate reads against the converged fixed point only - never during
     // an unstable iteration, so the reported diagnostic always describes the
     // actual least/greatest fixed point, not transient worklist state.
-    // Iterating `reachable_indices` in ascending (offset) order, then each
+    // Iterating reachable positions in ascending (offset) order, then each
     // instruction's own reads in their fixed decode order, makes the first
     // reported diagnostic deterministic across repeated runs on identical
     // bytes, independent of any `HashSet`/`HashMap` iteration order.
-    for &idx in &reachable_indices {
+    for pos in 0..reachable_count {
+        let idx = reachable_indices[pos];
         for &r in &instr_reads[idx] {
-            if !in_sets[idx].contains(r as usize) {
+            if !in_sets[pos].contains(dense(r)) {
                 return Err(reject_one(
                     function,
                     VerificationCode::UndefinedRegisterRead,
@@ -4143,6 +4210,121 @@ mod tests {
         ]);
         verify_semcode(&bytes)
             .expect("an undefined read in unreachable code must not be judged by this pass");
+    }
+
+    /// Codex review round 1 on PR #1840: the original implementation
+    /// allocated one `domain_size`-sized `RegSet` per DECODED instruction,
+    /// reachable or not - so a structurally valid artifact consisting of an
+    /// entry `RET` followed by many unreachable instructions referencing a
+    /// high register number could force memory proportional to
+    /// `total_instruction_count * domain_size`, with no existing quota
+    /// bounding total instruction count. Fixed by allocating dataflow state
+    /// only for reachable nodes. This regression exercises exactly that
+    /// shape (reachable `RET` immediately, then many unreachable
+    /// instructions touching a near-budget register) and proves it still
+    /// verifies correctly - a real functional check on the fixed code path,
+    /// not just a memory-bound argument.
+    #[test]
+    fn c1756_rejects_unreachable_bloat_stays_cheap_and_correct() {
+        let mut instrs = vec![IrInstr::Ret { src: None }];
+        for _ in 0..500 {
+            instrs.push(IrInstr::AddI32 {
+                dst: 4000,
+                lhs: 4000,
+                rhs: 4000,
+            });
+        }
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "hundreds of unreachable instructions referencing a high register must not be \
+             judged by this pass, and must not meaningfully slow or bloat verification",
+        );
+    }
+
+    /// Codex review round 1 on PR #1840, second fix: the register domain
+    /// must be the actual registers in use (`U`), densely packed, not the
+    /// raw `0..=max_register_id` numeric span. This function references
+    /// only `r0` and `r4095` - two registers, nowhere near each other
+    /// numerically - so `U` must have exactly 2 entries, not 4096, while
+    /// still proving both cases correctly: `r0` (written, then read) is
+    /// accepted; `r4095` (read without being written) is rejected. A bug in
+    /// the dense-index remapping (an off-by-one, an unsorted `universe`, a
+    /// stale raw-index lookup) would most likely surface as exactly this
+    /// kind of correctness failure on sparse, wide-spanning register use.
+    #[test]
+    fn c1756_dense_domain_handles_sparse_wide_spanning_registers() {
+        let accepted = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 0, val: 1 },
+            IrInstr::Ret { src: Some(0) },
+        ]);
+        verify_semcode(&accepted).expect("r0 is written before it is read");
+
+        let rejected = emit_test_function(vec![IrInstr::Ret { src: Some(4095) }]);
+        let report = verify_semcode(&rejected)
+            .expect_err("r4095 is read but never written or entry-defined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Direct accounting evidence for the Codex-review-round-1 fix, per the
+    /// review's own request not to rely only on timing.
+    /// `dataflow_domain_accounting` takes plain, hand-constructible inputs -
+    /// this asserts its two outputs' exact lengths (the two quantities that
+    /// bound `prove_definite_register_assignment`'s memory) directly,
+    /// without needing to run a full decode walk.
+    #[test]
+    fn c1756_accounting_bounds_reachable_nodes_and_dense_universe_exactly() {
+        // 501 structurally decoded nodes (an entry RET plus 500 unreachable
+        // instructions), but only node 0 is reachable, and nothing is ever
+        // read or written - the exact "RET followed by unreachable bloat"
+        // shape Codex's finding described.
+        let instr_starts: Vec<usize> = (0..501).collect();
+        let instr_reads: Vec<Vec<u16>> = vec![Vec::new(); 501];
+        let instr_writes: Vec<Vec<u16>> = vec![Vec::new(); 501];
+        let mut reachable_offsets = HashSet::new();
+        reachable_offsets.insert(0);
+        let (reachable_indices, universe) = dataflow_domain_accounting(
+            &instr_starts,
+            &instr_reads,
+            &instr_writes,
+            &reachable_offsets,
+            0,
+        );
+        assert_eq!(
+            reachable_indices.len(),
+            1,
+            "500 unreachable nodes must not be allocated dataflow state"
+        );
+        assert_eq!(
+            universe.len(),
+            0,
+            "no register is ever read, written, or entry-defined"
+        );
+
+        // Two reachable nodes, referencing only r0 and r4095 - numerically
+        // 4095 apart, but only 2 distinct registers actually in use.
+        let instr_starts: Vec<usize> = vec![0, 1];
+        let instr_reads: Vec<Vec<u16>> = vec![Vec::new(), vec![4095]];
+        let instr_writes: Vec<Vec<u16>> = vec![vec![0], Vec::new()];
+        let mut reachable_offsets = HashSet::new();
+        reachable_offsets.insert(0);
+        reachable_offsets.insert(1);
+        let (reachable_indices, universe) = dataflow_domain_accounting(
+            &instr_starts,
+            &instr_reads,
+            &instr_writes,
+            &reachable_offsets,
+            0,
+        );
+        assert_eq!(reachable_indices.len(), 2);
+        assert_eq!(
+            universe.len(),
+            2,
+            "the dense register domain must track the 2 registers actually referenced \
+             ({{r0, r4095}}), not the raw 4096-wide numeric span between them: {universe:?}"
+        );
     }
 
     #[test]
