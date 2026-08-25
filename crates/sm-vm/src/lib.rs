@@ -162,11 +162,16 @@ mod tests {
     /// used by `AddI32`, so that rejection only proves a downstream
     /// arithmetic opcode can reject a bad runtime shape -- not that the
     /// call boundary itself checks the declared parameter type. Here `x` is
-    /// supplied correctly and `unused` is wrong-typed but never read by the
-    /// body: if `validate_call_arguments`'s family check were removed, this
-    /// call would never read the mistyped `unused` register and would
-    /// silently *succeed* with `Value::I32(8)` (`x + 1`), so a failure here
-    /// can only come from the invocation boundary, never from body
+    /// supplied correctly and `unused` is wrong-typed but never used in a
+    /// family-sensitive operation: like `b` above, `unused`'s parameter
+    /// register is still read by its own unconditional `StoreVar` binding,
+    /// but `StoreVar` does not inspect the stored `Value`'s family -- it
+    /// only fails on an undefined *source* register, not a wrong-family
+    /// one. So if `validate_call_arguments`'s family check were removed,
+    /// the mistyped value would be read and stored without complaint, the
+    /// body would never semantically use it, and the call would silently
+    /// *succeed* with `Value::I32(8)` (`x + 1`) -- a failure here can
+    /// therefore only come from the invocation boundary, never from body
     /// semantics.
     #[test]
     fn rejects_wrong_unused_argument_family_at_invocation_boundary() {
