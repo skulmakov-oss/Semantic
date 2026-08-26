@@ -433,6 +433,24 @@ never be conflated:
   governing VM execution after admission (`max_steps`, `max_calls`, and so
   on).
 
+**Scope of the two `VerificationLimits` fields differs, deliberately**
+(clarified in round 14 of #1756's own review history, after Codex found
+both fields' enforcement did not yet match this intended scope):
+
+- `max_work_units` bounds **one whole artifact verification call**,
+  cumulatively across every signature-bearing function it analyzes - not
+  a fresh allowance per function. A single counter is created once per
+  call and shared, by mutable reference, across every function; the
+  moment it is exceeded, verification of that artifact stops immediately
+  - no further function is analyzed, and no weaker analysis is attempted
+  merely to surface another diagnostic.
+- `max_state_words` bounds the **peak dense dataflow state simultaneously
+  live for one function's own analysis** - not a cumulative total across
+  an artifact's functions. Functions are verified sequentially and each
+  one's analysis state is released before the next function's begins, so
+  summing state across functions would overstate what is ever actually
+  live at once.
+
 `VerificationLimits` is never inferred from `RuntimeQuotas::max_steps`,
 `max_calls`, or any other execution quota, and is never attached to
 `RuntimeQuotas` for API convenience - #1751 established that conflating a

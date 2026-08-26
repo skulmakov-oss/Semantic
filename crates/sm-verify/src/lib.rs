@@ -184,27 +184,41 @@ pub struct VerificationLimits {
 impl VerificationLimits {
     /// #1756 Codex review round 13: CANDIDATE default profile pending
     /// explicit owner sign-off - not a frozen release value. Selected
-    /// from the benchmark table in this round's PR reply/commit message
+    /// from the benchmark table in round 13's PR reply/commit message
     /// (ordinary compiler-generated programs, the largest existing
     /// golden fixtures, the #1756 adversarial stress fixtures, and
     /// synthetic leader-count sweeps at register domains of 64, 4,096,
     /// and 8,192 - `max_registers`'s own ceiling, so `domain_size` can
-    /// never legitimately exceed it). Every measured ordinary/golden/
-    /// already-committed-adversarial shape needed at most a few million
-    /// state words and a few hundred million work units, several orders
-    /// of magnitude below these limits; these numbers instead target the
-    /// worst case directly - at `domain_size = 8,192` (the largest legal
-    /// domain), `max_state_words` admits up to ~65,536 genuine leaders
-    /// (`8_388_608 / word_count(8192)`) and `max_work_units` admits a
-    /// comparable order via the same domain factor - both landing at
-    /// roughly the same "tens of thousands of genuine branch/merge
-    /// points" ceiling by design, well above any real compiled program
-    /// this repository has produced, well below the round-13 finding's
-    /// 1M-leader pathological scale.
+    /// never legitimately exceed it).
+    ///
+    /// **Re-validated in round 14** after two accounting corrections
+    /// changed what these same numbers actually admit (see the round-14
+    /// PR reply/commit message for the updated table): `max_state_words`
+    /// now bounds `(2*leader_count + 1) * word_count(domain_size)` (P2 -
+    /// `chain_killed` and `missing` are simultaneously live, not just
+    /// one array), roughly HALVING the genuine-leader count this same
+    /// number admits at any given `domain_size` versus round 13's
+    /// formula - at `domain_size = 8,192` (the largest legal domain),
+    /// down from ~65,536 to ~32,767 genuine leaders, still several
+    /// orders of magnitude above every ordinary/golden/already-committed
+    /// -adversarial shape measured (at most tens of thousands of state
+    /// words) and comfortably above the round-13 stress fixture's own
+    /// ~2.56M words at that same domain size. `max_work_units` now
+    /// bounds the WHOLE ARTIFACT (P1), not one function - a many-
+    /// function program sharing this one budget is a materially
+    /// stricter (more protective) constraint than round 13's per-
+    /// function reset ever was, and remains comfortably above realistic
+    /// multi-function programs (thousands of ordinary functions cost
+    /// only millions of units combined) while now correctly bounding the
+    /// "many expensive functions in one artifact" shape P1 exists to
+    /// close. Kept UNCHANGED numerically pending owner confirmation - see
+    /// the round-14 reply for the honest re-validation against both
+    /// corrected formulas rather than a silent bump to keep old stress
+    /// tests passing.
     pub const fn default_profile() -> Self {
         Self {
             max_state_words: 8_388_608, // 2^23 - 64 MiB of dense RegSet backing storage, worst case
-            max_work_units: 536_870_912, // 2^29 - ~537M lattice-propagation steps
+            max_work_units: 536_870_912, // 2^29 - ~537M lattice-propagation steps, whole artifact
         }
     }
 }
@@ -436,6 +450,12 @@ pub fn verify_semcode_token_with_quotas_and_limits(
     limits: VerificationLimits,
 ) -> Result<VerifiedSemCode<'_>, RejectReport> {
     let mut diagnostics = Vec::new();
+    // #1756 Codex review round 14 (owner clarification): `max_work_units`
+    // is the budget for this ENTIRE artifact verification call, not a
+    // fresh allowance per function - created ONCE here and threaded by
+    // `&mut` reference into every signature-bearing function's analysis
+    // below, never recreated or reset. See `AnalysisWorkMeter`.
+    let mut work_meter = AnalysisWorkMeter::new(limits.max_work_units);
 
     let (header, decoded_functions) =
         match sm_format::semcode_decode::decode_semcode_envelope(bytes) {
@@ -531,12 +551,31 @@ pub fn verify_semcode_token_with_quotas_and_limits(
             break;
         }
 
-        match verify_function_code(env, &header, &quotas, &limits) {
+        match verify_function_code(env, &header, &quotas, &limits, &mut work_meter) {
             Ok(function) => {
                 functions.push(function.verified.clone());
                 pending_functions.push(function);
             }
-            Err(report) => diagnostics.extend(report.diagnostics),
+            Err(report) => {
+                // #1756 Codex review round 14 (owner decision): resource
+                // exhaustion means the proof cannot continue inside the
+                // selected verifier resource envelope, so admission
+                // terminates fail-closed immediately here - it must NOT
+                // continue verifying further functions merely to surface
+                // more diagnostics (every additional function would only
+                // spend MORE of an already-exhausted shared budget). Every
+                // OTHER per-function rejection reason keeps the existing,
+                // deliberate "collect every function's diagnostics in one
+                // pass" behavior unchanged.
+                let work_exhausted = report
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code == VerificationCode::AnalysisWorkLimitExceeded);
+                diagnostics.extend(report.diagnostics);
+                if work_exhausted {
+                    return Err(RejectReport { diagnostics });
+                }
+            }
         }
     }
 
@@ -725,6 +764,7 @@ fn verify_function_code(
     header: &SemcodeHeaderSpec,
     quotas: &RuntimeQuotas,
     limits: &VerificationLimits,
+    work_meter: &mut AnalysisWorkMeter,
 ) -> Result<PendingVerifiedFunction, RejectReport> {
     let name = env.name.as_str();
 
@@ -1035,6 +1075,7 @@ fn verify_function_code(
             &reachable_offsets,
             entry_param_count,
             limits,
+            work_meter,
         )?;
     }
 
@@ -1481,24 +1522,52 @@ fn deliver(missing: &mut [RegSet], target: usize, bit: usize) -> bool {
 /// positions whose missing set genuinely spans much of the domain cost
 /// anywhere close to the old unconditional `domain_size` width.
 ///
-/// **Work budget** (#1756 Codex review round 13, owner decision): a
-/// deterministic `work_units` counter - one unit per register checked
+/// #1756 Codex review round 14 (owner decision): the deterministic work
+/// budget for a WHOLE artifact verification call - `VerificationLimits.
+/// max_work_units` is "maximum deterministic analysis work for one
+/// artifact verification call," never per function. A single instance is
+/// created ONCE by `verify_semcode_token_with_quotas_and_limits` and a
+/// `&mut` reference is threaded through every signature-bearing
+/// function's analysis (`verify_function_code` ->
+/// `prove_definite_register_assignment` -> `compute_missing_sets`),
+/// never recreated or reset per function - `used` therefore always
+/// reflects the CUMULATIVE total across every function analyzed so far
+/// in this call, and comparing it against `limit` directly gives
+/// artifact-wide (not per-function) accounting for free, including in
+/// the diagnostic message when it is exceeded.
+#[cfg(feature = "std")]
+struct AnalysisWorkMeter {
+    used: usize,
+    limit: usize,
+}
+
+#[cfg(feature = "std")]
+impl AnalysisWorkMeter {
+    fn new(limit: usize) -> Self {
+        Self { used: 0, limit }
+    }
+}
+
+/// **Work budget** (#1756 Codex review round 13, owner decision; scope
+/// corrected to be artifact-wide in round 14 - see `AnalysisWorkMeter`):
+/// a deterministic `work_units` counter - one unit per register checked
 /// while seeding from entry, plus one per `(position, bit)` pair
 /// dequeued from the worklist (`event_count`'s own definition) - is
-/// checked against `max_work_units` after every increment, in BOTH
-/// loops below, aborting with `Err(work_units)` the instant it is
+/// charged against the CALLER-OWNED, POSSIBLY-ALREADY-PARTIALLY-SPENT
+/// `work_meter` after every increment, in BOTH loops below, aborting
+/// with `Err(work_meter.used)` (the cumulative artifact-wide total, not
+/// just this call's own contribution) the instant `work_meter.limit` is
 /// exceeded. This is deliberately machine-independent: it counts
 /// discrete lattice-propagation steps, never wall-clock time, allocator
 /// behavior, or CPU cycles, and it aborts mid-computation rather than
 /// only checking a final total - a genuinely unbounded input (e.g. the
 /// round-13 branch-dense construction with no budget) must never be
 /// allowed to run this loop to completion before being rejected. The
-/// bound this enforces is exactly the same one the doc comments above
-/// already prove: `work_units <= domain_size + reachable_count *
-/// domain_size`, so `max_work_units` need only be compared against that
-/// same formula (with `reachable_count` here being the CALLER's
-/// compressed `leader_count`, per `prove_definite_register_assignment`'s
-/// "Leader compression" doc comment) - it is never inferred separately.
+/// bound this enforces per call is exactly the same one the doc comments
+/// above already prove: `work_units <= domain_size + reachable_count *
+/// domain_size` (with `reachable_count` here being the CALLER's
+/// compressed `leader_count`) - summed across however many functions
+/// share this `work_meter` before it is exhausted.
 #[cfg(feature = "std")]
 fn compute_missing_sets(
     reachable_count: usize,
@@ -1506,7 +1575,7 @@ fn compute_missing_sets(
     entry_missing: RegSet,
     writes_contains: impl Fn(usize, usize) -> bool,
     mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
-    max_work_units: usize,
+    work_meter: &mut AnalysisWorkMeter,
 ) -> Result<(Vec<RegSet>, usize, usize), usize> {
     let mut missing: Vec<RegSet> = (0..reachable_count)
         .map(|pos| {
@@ -1526,16 +1595,15 @@ fn compute_missing_sets(
     // total-work bound at all.
     let mut stack: Vec<(usize, usize)> = Vec::new();
     let mut peak_queue_len: usize = 0;
-    let mut work_units: usize = 0;
 
     // Seed from entry's own MISSING_OUT (post-write) - entry's own MISSING
     // is fixed and never re-delivered to (see `deliver`), so this is the
     // one place entry's contribution enters the worklist.
     let entry_successors = successors_of(0);
     for bit in 0..domain_size {
-        work_units += 1;
-        if work_units > max_work_units {
-            return Err(work_units);
+        work_meter.used += 1;
+        if work_meter.used > work_meter.limit {
+            return Err(work_meter.used);
         }
         if missing[0].contains(bit) && !writes_contains(0, bit) {
             for succ in entry_successors.into_iter().flatten() {
@@ -1549,9 +1617,9 @@ fn compute_missing_sets(
 
     let mut event_count: usize = 0;
     while let Some((pos, bit)) = stack.pop() {
-        work_units += 1;
-        if work_units > max_work_units {
-            return Err(work_units);
+        work_meter.used += 1;
+        if work_meter.used > work_meter.limit {
+            return Err(work_meter.used);
         }
         event_count += 1;
         if writes_contains(pos, bit) {
@@ -1592,30 +1660,74 @@ fn dedup_successors(succs: [Option<usize>; 2]) -> [Option<usize>; 2] {
     }
 }
 
-/// #1756 Codex review round 13 (owner decision): the deterministic,
+/// #1756 Codex review round 14 (owner decision): the deterministic,
 /// verifier-OWNED pre-allocation admission check for the definite-
-/// register-assignment analysis's dense per-leader dataflow state -
-/// `leader_count * ceil(register_domain_size / 64)` words, the exact
-/// size of both `build_leader_chains`'s `chain_killed` array and
-/// `compute_missing_sets`'s `missing` array (the same order of
-/// magnitude either way, so one check before EITHER begins allocating
-/// covers both). `checked_mul` makes overflow itself a deterministic
-/// rejection rather than undefined/wrapping behavior - there is no
-/// finite word count to report in that case, only that the true count is
-/// unrepresentable and therefore certainly exceeds any finite
-/// `max_state_words`. Returns `Ok(state_words)` (the exact count, for
-/// accounting) when within budget, `Err(reported_words)` otherwise -
-/// `reported_words` is the real count when it didn't overflow, or
-/// `usize::MAX` as an honest "this would overflow" sentinel when it did.
+/// register-assignment analysis's PEAK simultaneously-live dense
+/// dataflow state.
+///
+/// **Full lifetime inventory** (every RegSet-backed structure `prove_
+/// definite_register_assignment` and its callees can hold, per the
+/// round-14 finding's own request):
+///
+/// - `chain_killed` (`build_leader_chains`): `leader_count` `RegSet`s,
+///   each up to `word_count(domain_size)` words. Built BEFORE
+///   `compute_missing_sets` runs, then BORROWED by its
+///   `compressed_writes_contains` closure for that call's ENTIRE
+///   duration - not freed early.
+/// - `missing` (`compute_missing_sets`): `leader_count` `RegSet`s, each
+///   up to `word_count(domain_size)` words. Allocated at the START of
+///   `compute_missing_sets` and mutated throughout it - SIMULTANEOUSLY
+///   live with `chain_killed` for that entire call, which is where round
+///   13's formula undercounted: it charged only one of these two
+///   leader-count-scaled arrays, not both.
+/// - `entry_missing` (`prove_definite_register_assignment`): exactly
+///   ONE `RegSet`, up to `word_count(domain_size)` words - moved into
+///   `compute_missing_sets`, where it is borrowed (not moved) by the
+///   seed-array-building closure and so remains allocated for that
+///   whole call too. O(1), not leader-count-scaled.
+/// - `killed` (`build_leader_chains`, per leader): exactly ONE `RegSet`
+///   live at a time, moved into `chain_killed` at the end of each loop
+///   iteration - already fully accounted for once pushed; contributes
+///   no simultaneous-live cost beyond `chain_killed` itself.
+/// - `local` (`find_first_violation`, per leader): exactly ONE `RegSet`
+///   live at a time (a clone of `missing[leader_idx]`), replaced each
+///   loop iteration. O(1), not leader-count-scaled, and this phase runs
+///   strictly after `compute_missing_sets` returns (a later point in
+///   time than the `chain_killed`+`missing` peak, never adding to it).
+///
+/// The `leader_count`-scaled terms (`chain_killed`, `missing`) are what
+/// dominate and must both be charged; the O(1) terms above never exceed
+/// one extra `word_count(domain_size)` at any single moment (they occupy
+/// different phases, so their contributions do not stack) - a single
+/// extra `word_count(domain_size)` conservatively covers all of them at
+/// once. This gives the peak-live formula `(2 * leader_count + 1) *
+/// word_count(domain_size)` - a PEAK-simultaneous-state envelope for ONE
+/// function's analysis, not a cumulative total across an artifact's
+/// functions (functions are verified sequentially and each one's
+/// analysis state is released before the next begins - see
+/// `AnalysisWorkMeter` for the DIFFERENT, genuinely cumulative-across-
+/// the-artifact accounting `max_work_units` uses instead).
+///
+/// Every multiplication and addition is `checked`; overflow at any step
+/// is treated as certainly exceeding any finite `max_state_words`, the
+/// same honest `usize::MAX` sentinel round 13 already established, not
+/// undefined or silently-wrapping behavior. Returns `Ok(required_words)`
+/// (the exact peak count, for accounting) when within budget,
+/// `Err(reported_words)` otherwise.
 #[cfg(feature = "std")]
 fn check_analysis_state_budget(
     leader_count: usize,
     domain_size: usize,
     max_state_words: usize,
 ) -> Result<usize, usize> {
-    match leader_count.checked_mul(RegSet::word_count(domain_size)) {
-        Some(state_words) if state_words <= max_state_words => Ok(state_words),
-        Some(state_words) => Err(state_words),
+    let words_per_leader = RegSet::word_count(domain_size);
+    let peak_leader_factor = leader_count
+        .checked_mul(2)
+        .and_then(|doubled| doubled.checked_add(1));
+    let required_words = peak_leader_factor.and_then(|factor| factor.checked_mul(words_per_leader));
+    match required_words {
+        Some(required_words) if required_words <= max_state_words => Ok(required_words),
+        Some(required_words) => Err(required_words),
         None => Err(usize::MAX),
     }
 }
@@ -1892,7 +2004,7 @@ fn find_first_violation(
 /// cumulative kill set (`build_leader_chains`) and, once the compressed
 /// worklist converges, to validate its reads (`find_first_violation`).
 #[cfg(feature = "std")]
-#[allow(clippy::too_many_arguments)] // private helper; `limits` (round 13) is the 8th, no natural grouping
+#[allow(clippy::too_many_arguments)] // private helper; `limits`/`work_meter` (rounds 13-14) have no natural grouping
 fn prove_definite_register_assignment(
     function: &str,
     code: &[u8],
@@ -1902,6 +2014,7 @@ fn prove_definite_register_assignment(
     reachable_offsets: &HashSet<usize>,
     entry_param_count: usize,
     limits: &VerificationLimits,
+    work_meter: &mut AnalysisWorkMeter,
 ) -> Result<(), RejectReport> {
     if instr_starts.is_empty() {
         return Ok(());
@@ -2027,16 +2140,21 @@ fn prove_definite_register_assignment(
         entry_missing,
         compressed_writes_contains,
         compressed_successors_of,
-        limits.max_work_units,
+        work_meter,
     ) {
         Ok(result) => result,
-        Err(work_units) => {
+        Err(used) => {
+            // #1756 Codex review round 14 (owner decision): `used` is the
+            // shared `work_meter`'s CUMULATIVE total across every
+            // function analyzed so far in this artifact verification
+            // call, not just this function's own contribution - see
+            // `AnalysisWorkMeter`'s doc comment.
             return Err(reject_one(
                 function,
                 VerificationCode::AnalysisWorkLimitExceeded,
                 0,
                 format!(
-                    "definite-register-assignment analysis performed {work_units} lattice-propagation work unit(s), exceeding the verification work budget of {}",
+                    "definite-register-assignment analysis performed {used} lattice-propagation work unit(s) across this verification call, exceeding the verification work budget of {}",
                     limits.max_work_units
                 ),
             ));
@@ -5533,7 +5651,7 @@ mod tests {
             entry_missing,
             writes_contains,
             successors_of,
-            usize::MAX,
+            &mut AnalysisWorkMeter::new(usize::MAX),
         )
         .expect("test-only call: no verification-resource budget under test here");
         assert_eq!(
@@ -5635,7 +5753,7 @@ mod tests {
             entry_missing,
             writes_contains,
             successors_of,
-            usize::MAX,
+            &mut AnalysisWorkMeter::new(usize::MAX),
         )
         .expect("test-only call: no verification-resource budget under test here");
         // Every arm excludes a different register (arm i excludes bit i),
@@ -5710,7 +5828,7 @@ mod tests {
             entry_missing,
             writes_contains,
             successors_of,
-            usize::MAX,
+            &mut AnalysisWorkMeter::new(usize::MAX),
         )
         .expect("test-only call: no verification-resource budget under test here");
 
@@ -5801,7 +5919,7 @@ mod tests {
             entry_missing,
             writes_contains,
             successors_of,
-            usize::MAX,
+            &mut AnalysisWorkMeter::new(usize::MAX),
         )
         .expect("test-only call: no verification-resource budget under test here");
 
@@ -5901,7 +6019,7 @@ mod tests {
             entry_missing,
             |leader_idx, bit| chain_killed[leader_idx].contains(bit),
             |leader_idx| chain_targets[leader_idx],
-            usize::MAX,
+            &mut AnalysisWorkMeter::new(usize::MAX),
         )
         .expect("test-only call: no verification-resource budget under test here");
         assert!(
@@ -5977,7 +6095,7 @@ mod tests {
             entry_missing,
             |leader_idx, bit| chain_killed[leader_idx].contains(bit),
             |leader_idx| chain_targets[leader_idx],
-            usize::MAX,
+            &mut AnalysisWorkMeter::new(usize::MAX),
         )
         .expect("test-only call: no verification-resource budget under test here");
 
@@ -6103,7 +6221,7 @@ mod tests {
             entry_missing,
             |leader_idx, bit| chain_killed[leader_idx].contains(bit),
             |leader_idx| chain_targets[leader_idx],
-            usize::MAX,
+            &mut AnalysisWorkMeter::new(usize::MAX),
         )
         .expect("test-only call: no verification-resource budget under test here");
         assert!(
@@ -6170,6 +6288,25 @@ mod tests {
         instrs
     }
 
+    /// #1756 Codex review round 14 (owner decision): like
+    /// `emit_test_function`, but for a MULTI-FUNCTION artifact - needed
+    /// to exercise the artifact-wide (not per-function) work budget.
+    fn emit_test_functions(names_and_instrs: Vec<(&str, Vec<IrInstr>)>) -> Vec<u8> {
+        emit_ir_to_semcode(
+            &names_and_instrs
+                .into_iter()
+                .map(|(name, instrs)| IrFunction {
+                    name: name.to_string(),
+                    instrs,
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                })
+                .collect::<Vec<_>>(),
+            false,
+        )
+        .expect("emit test functions")
+    }
+
     /// #1756 Codex review round 13 (owner decision): a small genuine-
     /// diamond program - real branches, real merges, nothing spurious -
     /// must still verify normally under the default resource envelope.
@@ -6187,24 +6324,27 @@ mod tests {
         .expect("a handful of genuine diamonds, entirely defined, must verify normally");
     }
 
-    /// #1756 Codex review round 13 (owner decision): a construction whose
-    /// exact `state_words` (`leader_count * ceil(domain_size / 64)` -
-    /// here `2*n+1`, verified by direct construction: `n` genuine
-    /// diamonds each contribute exactly 2 leaders, plus entry) exceeds
-    /// `max_state_words` must be rejected deterministically, with
+    /// #1756 Codex review round 13 (owner decision), formula corrected in
+    /// round 14 (see `check_analysis_state_budget`'s doc comment - peak
+    /// state charges BOTH `chain_killed` and `missing`, simultaneously
+    /// live, not just one): a construction whose exact `state_words`
+    /// (`(2*leader_count + 1) * ceil(domain_size / 64)` - here
+    /// `leader_count = 2*n+1` for `n` genuine diamonds, `domain_size = 3`
+    /// for this construction, so `state_words = 2*(2*n+1)+1 = 4*n+3`)
+    /// exceeds `max_state_words` must be rejected deterministically, with
     /// `AnalysisStateLimitExceeded` - and, by construction (see
     /// `prove_definite_register_assignment`'s round-13 pre-check), BEFORE
     /// `build_leader_chains` or `compute_missing_sets` ever allocates
     /// their leader_count-sized dense state.
     #[test]
     fn c1756_construction_exceeding_state_budget_rejects_before_large_allocation() {
-        const N: usize = 1_000; // state_words = leader_count = 2*N + 1 = 2001
+        const N: usize = 1_000; // leader_count = 2,001; state_words = 4*1000+3 = 4,003
         let bytes = emit_test_function(build_diamond_chain(N, false));
         let report = verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 2_000, // one below the exact 2,001 words this needs
+                max_state_words: 4_002, // one below the exact 4,003 words this needs
                 max_work_units: usize::MAX,
             },
         )
@@ -6213,8 +6353,12 @@ mod tests {
             report.diagnostics[0].code,
             VerificationCode::AnalysisStateLimitExceeded
         );
-        assert!(report.diagnostics[0].message.contains("2001"));
-        assert!(report.diagnostics[0].message.contains("2000"));
+        assert!(report.diagnostics[0]
+            .message
+            .contains("4003 dense-state word"));
+        assert!(report.diagnostics[0]
+            .message
+            .contains("state budget of 4002"));
     }
 
     /// #1756 Codex review round 13 (owner decision): a construction whose
@@ -6285,21 +6429,22 @@ mod tests {
         }
     }
 
-    /// #1756 Codex review round 13 (owner decision): exact boundary
-    /// behavior for the state-words budget - `usage == limit` is
-    /// accepted for resource accounting purposes (the state check itself
-    /// must not fire; the construction here is fully defined, so the
-    /// overall result is a genuine accept), `usage == limit + 1` is a
+    /// #1756 Codex review round 13 (owner decision), formula corrected in
+    /// round 14: exact boundary behavior for the (now `chain_killed` +
+    /// `missing` peak-live-aware) state-words budget - `usage == limit`
+    /// is accepted for resource accounting purposes (the state check
+    /// itself must not fire; the construction here is fully defined, so
+    /// the overall result is a genuine accept), `usage == limit + 1` is a
     /// deterministic resource rejection. No off-by-one ambiguity.
     #[test]
     fn c1756_state_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
-        const N: usize = 5; // state_words = 11 exactly
+        const N: usize = 5; // leader_count = 11; state_words = 4*5+3 = 23 exactly
         let bytes = emit_test_function(build_diamond_chain(N, false));
         verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 11,
+                max_state_words: 23,
                 max_work_units: usize::MAX,
             },
         )
@@ -6309,7 +6454,7 @@ mod tests {
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 10,
+                max_state_words: 22,
                 max_work_units: usize::MAX,
             },
         )
@@ -6436,7 +6581,7 @@ mod tests {
             entry_missing,
             |leader_idx, bit| chain_killed[leader_idx].contains(bit),
             |leader_idx| chain_targets[leader_idx],
-            usize::MAX,
+            &mut AnalysisWorkMeter::new(usize::MAX),
         )
         .expect("unbounded work budget must converge");
         let actual_words: usize = missing.iter().map(|s| s.words.len()).sum();
@@ -6454,6 +6599,221 @@ mod tests {
             "with nothing anywhere killing any bit, every leader's missing set genuinely spans \
              the full domain - this is the real, unavoidable cost this round's resource \
              envelope exists to bound, not a representation bug"
+        );
+    }
+
+    /// #1756 Codex review round 14 (owner decision), P1: `max_work_units`
+    /// is the budget for one WHOLE artifact verification call, not a
+    /// fresh allowance per function. Two functions whose own work
+    /// (`4*n+3` for `n` genuine diamonds, established in round 13) each
+    /// individually fits under a cap - but whose SUM does not - must
+    /// still reject the whole artifact with `AnalysisWorkLimitExceeded`,
+    /// and the exact cumulative boundary (`usage == limit` accepted,
+    /// `usage == limit + 1` rejected) must hold for the SUM, not either
+    /// function's own local count.
+    #[test]
+    fn c1756_artifact_wide_work_budget_shared_across_functions() {
+        const N_A: usize = 5; // work_units = 4*5+3 = 23
+        const N_B: usize = 10; // work_units = 4*10+3 = 43
+        const COMBINED: usize = 23 + 43; // = 66
+
+        let fn_a_alone = emit_test_functions(vec![("fnA", build_diamond_chain(N_A, false))]);
+        verify_semcode_token_with_quotas_and_limits(
+            &fn_a_alone,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 50,
+            },
+        )
+        .expect("fn A alone (23 units) fits comfortably under a 50-unit budget");
+        let fn_b_alone = emit_test_functions(vec![("fnB", build_diamond_chain(N_B, false))]);
+        verify_semcode_token_with_quotas_and_limits(
+            &fn_b_alone,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 50,
+            },
+        )
+        .expect("fn B alone (43 units) fits comfortably under a 50-unit budget");
+
+        let bytes = emit_test_functions(vec![
+            ("fnA", build_diamond_chain(N_A, false)),
+            ("fnB", build_diamond_chain(N_B, false)),
+        ]);
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 50,
+            },
+        )
+        .expect_err(
+            "combined 66 units must exceed a 50-unit artifact-wide budget even though each \
+             function individually fits under it",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded
+        );
+
+        // Exact cumulative boundary: usage == limit (66) is accepted...
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: COMBINED,
+            },
+        )
+        .expect("cumulative usage == limit (66) must be accepted");
+        // ...usage == limit + 1 (limit = 65) is a deterministic rejection.
+        let boundary_report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: COMBINED - 1,
+            },
+        )
+        .expect_err("cumulative usage == limit + 1 must be a deterministic resource rejection");
+        assert_eq!(
+            boundary_report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded
+        );
+        assert!(boundary_report.diagnostics[0].message.contains("66"));
+        assert!(boundary_report.diagnostics[0].message.contains("65"));
+    }
+
+    /// #1756 Codex review round 14 (owner decision), P1: once the
+    /// artifact-wide work budget is exhausted, verification must stop
+    /// immediately - not continue merely to discover another diagnostic.
+    /// `fnC` here would produce a DIFFERENT diagnostic
+    /// (`UndefinedRegisterRead`, reading an undefined `r99`) if it were
+    /// ever reached; the only way the final result can still be
+    /// `AnalysisWorkLimitExceeded` is if `fnC` was never analyzed at all.
+    #[test]
+    fn c1756_artifact_work_exhaustion_stops_before_later_functions_run() {
+        let bytes = emit_test_functions(vec![
+            ("fnA", build_diamond_chain(5, false)),
+            ("fnB", build_diamond_chain(10, false)),
+            ("fnC", vec![IrInstr::Ret { src: Some(99) }]),
+        ]);
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 50, // fnA (23) + fnB (43) alone already exceed this
+            },
+        )
+        .expect_err("fnA + fnB alone already exhaust the 50-unit artifact budget");
+        assert_eq!(
+            report.diagnostics.len(),
+            1,
+            "must stop immediately on exhaustion - no fnC diagnostic, no extra partial work: {:?}",
+            report.diagnostics
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded,
+            "the result must remain the work-limit error from the point of exhaustion, not \
+             fnC's UndefinedRegisterRead - proving fnC was never reached"
+        );
+    }
+
+    /// #1756 Codex review round 14 (owner decision), P2: reproduces
+    /// Codex's exact case directly - a zero-param leader whose entry
+    /// missing set is the full register domain, a genuine two-leader
+    /// diamond where one leader's chain kills nearly the entire register
+    /// universe (leaving exactly one register, the highest-numbered one,
+    /// never killed anywhere) - proving `chain_killed` and `missing` are
+    /// BOTH simultaneously dense (backing storage genuinely grown wide),
+    /// not just one of them, and that the corrected `(2*leader_count+1) *
+    /// word_count(domain_size)` formula (not round 13's undercounting
+    /// `leader_count * word_count(domain_size)`) is what
+    /// `check_analysis_state_budget` now enforces, with exact boundaries.
+    #[test]
+    fn c1756_peak_state_accounts_for_chain_killed_and_missing_simultaneously() {
+        const DOMAIN_SIZE: usize = 4096;
+        const REACHABLE_COUNT: usize = 3; // 0 = entry (folds a 2-way branch), 1 = false_arm, 2 = merge
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            match pos {
+                0 => [Some(2), Some(1)], // entry: direct-to-merge, fallthrough-to-false_arm
+                1 => [Some(2), None],    // false_arm -> merge
+                _ => [None, None],       // merge: dead end
+            }
+        };
+        let writes_of = |pos: usize, visit: &mut dyn FnMut(usize)| {
+            if pos == 1 {
+                // false_arm kills nearly the entire register universe -
+                // every register EXCEPT the highest-numbered one, which
+                // stays missing everywhere (including at `merge`, via the
+                // direct entry->merge edge this chain never touches).
+                for bit in 0..DOMAIN_SIZE - 1 {
+                    visit(bit);
+                }
+            }
+        };
+
+        let is_leader = compute_leaders(REACHABLE_COUNT, successors_of);
+        let leader_positions: Vec<usize> = (0..REACHABLE_COUNT).filter(|&p| is_leader[p]).collect();
+        assert_eq!(
+            leader_positions,
+            vec![0, 1, 2],
+            "entry, the branch target, and the genuine merge are all leaders"
+        );
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            writes_of,
+            leader_index_of,
+        );
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let mut work_meter = AnalysisWorkMeter::new(usize::MAX);
+        let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+            &mut work_meter,
+        )
+        .expect("unbounded work budget must converge");
+
+        let chain_killed_words: usize = chain_killed.iter().map(|s| s.words.len()).sum();
+        let missing_words: usize = missing.iter().map(|s| s.words.len()).sum();
+        assert!(
+            chain_killed_words > 0,
+            "chain_killed must retain dense backing words (false_arm's chain wrote nearly the \
+             whole domain)"
+        );
+        assert!(
+            missing_words > 0,
+            "missing must SIMULTANEOUSLY retain dense backing words - the highest register is \
+             never killed anywhere, so it stays missing (and wide) at every leader"
+        );
+
+        let leader_count = leader_positions.len();
+        let words_per_leader = RegSet::word_count(DOMAIN_SIZE);
+        let expected_required_words = (2 * leader_count + 1) * words_per_leader;
+        assert_eq!(
+            check_analysis_state_budget(leader_count, DOMAIN_SIZE, expected_required_words),
+            Ok(expected_required_words),
+            "usage == limit must be accepted for state-budget accounting"
+        );
+        assert_eq!(
+            check_analysis_state_budget(leader_count, DOMAIN_SIZE, expected_required_words - 1),
+            Err(expected_required_words),
+            "usage == limit + 1 must be a deterministic resource rejection reporting the true \
+             required word count"
         );
     }
 
