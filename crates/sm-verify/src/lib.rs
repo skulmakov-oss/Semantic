@@ -143,21 +143,31 @@ pub enum VerificationCode {
     /// (`SEMCODE_SIGNATURE_MIN_REVISION`+); a signature-less artifact has no
     /// sound `IN[entry]` to prove against and is unaffected by this code.
     UndefinedRegisterRead,
-    /// #1756 Codex review round 13 (owner decision): the definite-
-    /// register-assignment analysis would need to allocate dense per-
-    /// leader dataflow state - `leader_count * ceil(register_domain_size
-    /// / 64)` words - exceeding `VerificationLimits::max_state_words`, a
-    /// deterministic, verifier-OWNED resource bound checked via
-    /// `checked_mul` BEFORE that allocation ever happens (overflow
-    /// itself counts as exceeding it). This is a genuinely different
-    /// resource domain than `RuntimeQuotas` (#1751: execution resources
-    /// and static-verification resources are distinct and must not be
-    /// conflated) and different from `ResourceLimitExceeded` above
-    /// (which reports pre-existing decode/symbol-table budgets, not this
-    /// analysis's own working state). Exceeding this means the artifact
-    /// could not be PROVEN within the selected verification resource
-    /// envelope - it does not mean the program's semantics are actually
-    /// invalid, and admission still fails closed regardless.
+    /// The definite-register-assignment analysis's (#1756 / FA-07-016)
+    /// peak logical analysis-state requirement for one function exceeded
+    /// `VerificationLimits::max_state_words` - a deterministic, verifier-
+    /// OWNED resource bound checked via `checked` arithmetic BEFORE the
+    /// state it accounts for is ever allocated (overflow itself counts
+    /// as exceeding it). That requirement is the SUM of several
+    /// independently-scaling components - raw reachable-node
+    /// representation, leader-compressed dense dataflow state, and fixed
+    /// leader/structural/worklist overhead - so any one of them can
+    /// trigger this code on its own (for example, a genuinely branch-
+    /// free reachable chain can reject on raw-node cost alone while its
+    /// leader-compressed state stays negligible). See `VerificationLimits
+    /// ::max_state_words`'s own doc comment, `check_raw_node_state_
+    /// budget`'s and `check_analysis_state_budget`'s doc comments, and
+    /// `docs/spec/verifier.md` for the exact enforced formula - not
+    /// duplicated here to avoid a second copy that can drift from the
+    /// enforced one. This is a genuinely different resource domain than
+    /// `RuntimeQuotas` (#1751: execution resources and static-
+    /// verification resources are distinct and must not be conflated)
+    /// and different from `ResourceLimitExceeded` above (which reports
+    /// pre-existing decode/symbol-table budgets, not this analysis's own
+    /// working state). Exceeding this means the artifact could not be
+    /// PROVEN within the selected verification resource envelope - it
+    /// does not mean the program's semantics are actually invalid, and
+    /// admission still fails closed regardless.
     AnalysisStateLimitExceeded,
     /// #1756 Codex review round 13 (owner decision): the same analysis
     /// pass's own deterministic, machine-independent work-unit count
