@@ -1403,6 +1403,165 @@ fn compute_missing_sets(
     (missing, event_count, peak_queue_len)
 }
 
+/// #1756 Codex review round 11: identifies which reachable positions are
+/// "leaders" - the only positions that need their own entry in the
+/// compressed dataflow graph `compute_missing_sets` runs over (see
+/// `build_leader_chains` and `prove_definite_register_assignment`'s doc
+/// comment for the finding this closes). A position is a leader iff it
+/// is function entry (position 0), or it has more than one predecessor
+/// (a merge point), or it is one of two successors of some other
+/// position (a branch target). Every other position has exactly one
+/// predecessor, and that predecessor has exactly one successor - a
+/// genuine 1-to-1 edge - so its MISSING value is always identical to its
+/// predecessor's MISSING_OUT and never needs independent storage or
+/// worklist participation; `chain_step` walks straight past it instead.
+///
+/// This always terminates when traced backward from any non-leader
+/// position: a cycle reachable from entry must contain a node entered
+/// from outside the cycle too (giving that node in-degree >= 2, making
+/// it a leader by the first rule) unless the cycle passes through entry
+/// itself, which is unconditionally a leader regardless of its own
+/// in-degree - so no run of non-leader positions can loop back on itself
+/// without first hitting a leader.
+#[cfg(feature = "std")]
+fn compute_leaders(
+    reachable_count: usize,
+    mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
+) -> Vec<bool> {
+    let mut in_degree: Vec<u8> = vec![0; reachable_count];
+    let mut branch_target: Vec<bool> = vec![false; reachable_count];
+    for pos in 0..reachable_count {
+        let succs = successors_of(pos);
+        let out_degree = succs.iter().filter(|s| s.is_some()).count();
+        for succ in succs.into_iter().flatten() {
+            in_degree[succ] = in_degree[succ].saturating_add(1);
+            if out_degree > 1 {
+                branch_target[succ] = true;
+            }
+        }
+    }
+    (0..reachable_count)
+        .map(|pos| pos == 0 || in_degree[pos] != 1 || branch_target[pos])
+        .collect()
+}
+
+/// One step of a leader's compressed run (#1756 Codex review round 11):
+/// `Continue` while the current position has exactly one successor and
+/// that successor is not itself a leader (see `compute_leaders`);
+/// `End` once the run reaches a leader, a branch, or a dead end,
+/// carrying whichever successors it actually has (0, 1, or 2 - each
+/// `Some` one is guaranteed to be a leader by construction of
+/// `compute_leaders`). Shared by chain-summary building and final read
+/// validation so both agree, by construction, on exactly which
+/// positions belong to which leader's run.
+#[cfg(feature = "std")]
+enum ChainStep {
+    Continue(usize),
+    End([Option<usize>; 2]),
+}
+
+#[cfg(feature = "std")]
+fn chain_step(succs: [Option<usize>; 2], is_leader: &[bool]) -> ChainStep {
+    match succs {
+        [Some(s), None] if !is_leader[s] => ChainStep::Continue(s),
+        other => ChainStep::End(other),
+    }
+}
+
+/// #1756 Codex review round 11: walks each leader's compressed run once,
+/// folding every visited position's writes into ONE cumulative kill set
+/// per leader and recording which leader(s) (by compact leader-index,
+/// via `leader_index_of`) the run eventually reaches. This is what lets
+/// `compute_missing_sets` run over `leader_positions.len()` nodes instead
+/// of `reachable_count` - see `prove_definite_register_assignment`'s doc
+/// comment for the finding this closes and the accounting it restores.
+/// `writes_of` enumerates a position's own writes (dense bit indices) via
+/// callback, mirroring `for_each_reachable_successor`'s style - no
+/// per-position allocation regardless of how many positions a run visits.
+#[cfg(feature = "std")]
+fn build_leader_chains(
+    leader_positions: &[usize],
+    is_leader: &[bool],
+    mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
+    mut writes_of: impl FnMut(usize, &mut dyn FnMut(usize)),
+    mut leader_index_of: impl FnMut(usize) -> usize,
+) -> (Vec<RegSet>, Vec<[Option<usize>; 2]>) {
+    let mut chain_killed: Vec<RegSet> = Vec::with_capacity(leader_positions.len());
+    let mut chain_targets: Vec<[Option<usize>; 2]> = Vec::with_capacity(leader_positions.len());
+    for &leader_pos in leader_positions {
+        let mut killed = RegSet::empty();
+        let mut pos = leader_pos;
+        let targets = loop {
+            writes_of(pos, &mut |bit| killed.insert(bit));
+            match chain_step(successors_of(pos), is_leader) {
+                ChainStep::Continue(next) => pos = next,
+                ChainStep::End(succs) => {
+                    let mut out = [None, None];
+                    for (i, s) in succs.into_iter().flatten().enumerate() {
+                        out[i] = Some(leader_index_of(s));
+                    }
+                    break out;
+                }
+            }
+        };
+        chain_killed.push(killed);
+        chain_targets.push(targets);
+    }
+    (chain_killed, chain_targets)
+}
+
+/// #1756 Codex review round 11: finds the lowest-*position* violating
+/// read across every leader's compressed run, given each leader's own
+/// converged MISSING value (`missing`, indexed the same way
+/// `leader_positions` is). Each leader's run is walked in EXECUTION
+/// order (following successors), which is NOT guaranteed to match
+/// ascending position order (see
+/// `c1756_backward_propagating_chain_still_rejects_and_converges_promptly`
+/// for a genuine, pre-existing case where they're exact opposites) - so
+/// this tracks the minimum-position candidate across every run instead
+/// of returning on the first one any single walk happens to encounter,
+/// preserving the deterministic-first-diagnostic contract
+/// (`c1756_case25`/`c1756_case26`) regardless of which leader or which
+/// run reaches it first. Returns `(position, dense register bit)`.
+#[cfg(feature = "std")]
+fn find_first_violation(
+    leader_positions: &[usize],
+    is_leader: &[bool],
+    missing: &[RegSet],
+    mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
+    mut reads_of: impl FnMut(usize, &mut dyn FnMut(usize)),
+    mut writes_of: impl FnMut(usize, &mut dyn FnMut(usize)),
+) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for (leader_idx, &leader_pos) in leader_positions.iter().enumerate() {
+        let mut local = missing[leader_idx].clone();
+        let mut pos = leader_pos;
+        loop {
+            let mut found_here: Option<usize> = None;
+            reads_of(pos, &mut |bit| {
+                if found_here.is_none() && local.contains(bit) {
+                    found_here = Some(bit);
+                }
+            });
+            if let Some(bit) = found_here {
+                let better = match best {
+                    None => true,
+                    Some((best_pos, _)) => pos < best_pos,
+                };
+                if better {
+                    best = Some((pos, bit));
+                }
+            }
+            writes_of(pos, &mut |bit| local.remove(bit));
+            match chain_step(successors_of(pos), is_leader) {
+                ChainStep::Continue(next) => pos = next,
+                ChainStep::End(_) => break,
+            }
+        }
+    }
+    best
+}
+
 /// #1756 (FA-07-016) Codex review round 8: the dual, MAY-MISSING
 /// formulation of definite-register-assignment, replacing the round 1-7
 /// MUST/DEFINED/intersection formulation entirely.
@@ -1472,6 +1631,41 @@ fn compute_missing_sets(
 /// structural-sharing bookkeeping, and therefore no way for independently-
 /// computed-but-equal branch states to duplicate memory, regardless of how
 /// many branches compute the identical result.
+///
+/// **Leader compression** (#1756 Codex review round 11): round 10 fixed
+/// per-position storage that stayed accidentally wide (a chain converging
+/// to a small or empty missing set still paid full width per position
+/// until it converged); round 11's finding is the complementary case - a
+/// long, NON-branching run whose missing set stays wide THROUGHOUT,
+/// because nothing along it ever narrows enough (e.g. millions of
+/// redundant re-writes to an already-defined register, interleaved among
+/// many still-missing ones). Lazy growth doesn't help there: every
+/// position genuinely holds close to `domain_size` live bits, so each of
+/// `reachable_count` positions still costs close to the full width, and -
+/// independently - the bit-level worklist still delivers every one of
+/// those live bits at every one of those positions, one hop at a time,
+/// achieving close to the full `reachable_count * domain_size` EVENT
+/// bound too (not just the memory bound). Neither symptom is fixable by
+/// changing any ONE position's own representation, because the actual
+/// waste is redundant STORAGE AND PROPAGATION across MANY positions that
+/// all hold the identical value.
+///
+/// The fix: before running `compute_missing_sets` at all, collapse the
+/// reachable graph down to its "leaders" (`compute_leaders`) - a position
+/// needs its own slot only if it is entry, a merge point, or a branch
+/// target; every other position has exactly one predecessor with exactly
+/// one successor, so its value is always identical to that predecessor's
+/// MISSING_OUT and is derived on demand instead (`chain_step`,
+/// `build_leader_chains`, `find_first_violation`). `compute_missing_sets`
+/// itself is unchanged - it still runs the identical bit-level worklist,
+/// just over `leader_positions.len()` nodes instead of `reachable_count`.
+/// For a run with no internal branching at all, `leader_positions.len()`
+/// is 1, regardless of how long the run is - collapsing both the storage
+/// and the event count for Codex's adversarial shape to `O(domain_size)`,
+/// with the run's own length only costing a plain O(1)-per-instruction
+/// local walk (no `domain_size` factor) to fold its writes into one
+/// cumulative kill set (`build_leader_chains`) and, once the compressed
+/// worklist converges, to validate its reads (`find_first_violation`).
 #[cfg(feature = "std")]
 fn prove_definite_register_assignment(
     function: &str,
@@ -1526,11 +1720,6 @@ fn prove_definite_register_assignment(
         entry_missing.remove(dense(r as u16));
     }
 
-    let writes_contains = |pos: usize, bit: usize| -> bool {
-        csr_slice(&writes_flat, &writes_offsets, pos)
-            .iter()
-            .any(|&w| dense(w) == bit)
-    };
     let successors_of = |pos: usize| -> [Option<usize>; 2] {
         let mut out = [None, None];
         let mut i = 0usize;
@@ -1549,35 +1738,72 @@ fn prove_definite_register_assignment(
         out
     };
 
+    // #1756 Codex review round 11: see this function's own doc comment
+    // ("Leader compression") for the finding this closes.
+    let is_leader = compute_leaders(reachable_count, successors_of);
+    let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+    let leader_index_of = |pos: usize| -> usize {
+        leader_positions
+            .binary_search(&pos)
+            .expect("every chain-end successor is a leader by construction of compute_leaders")
+    };
+    let (chain_killed, chain_targets) = build_leader_chains(
+        &leader_positions,
+        &is_leader,
+        successors_of,
+        |pos, visit| {
+            for &w in csr_slice(&writes_flat, &writes_offsets, pos) {
+                visit(dense(w));
+            }
+        },
+        leader_index_of,
+    );
+    let compressed_writes_contains =
+        |leader_idx: usize, bit: usize| -> bool { chain_killed[leader_idx].contains(bit) };
+    let compressed_successors_of =
+        |leader_idx: usize| -> [Option<usize>; 2] { chain_targets[leader_idx] };
+
     let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
-        reachable_count,
+        leader_positions.len(),
         domain_size,
         entry_missing,
-        writes_contains,
-        successors_of,
+        compressed_writes_contains,
+        compressed_successors_of,
     );
 
     // Validate reads against the converged fixed point only - never during
     // an unstable iteration, so the reported diagnostic always describes the
-    // actual least/greatest fixed point, not transient worklist state.
-    // Iterating reachable positions in ascending (offset) order, then each
-    // instruction's own reads in their fixed decode order, makes the first
-    // reported diagnostic deterministic across repeated runs on identical
-    // bytes, independent of any `HashSet`/`HashMap` iteration order.
-    for pos in 0..reachable_count {
-        let idx = reachable_indices[pos];
-        for &r in csr_slice(&reads_flat, &reads_offsets, pos) {
-            if missing[pos].contains(dense(r)) {
-                return Err(reject_one(
-                    function,
-                    VerificationCode::UndefinedRegisterRead,
-                    instr_starts[idx],
-                    format!(
-                        "register r{r} is read but not definitely defined on every execution path reaching this instruction"
-                    ),
-                ));
+    // actual least/greatest fixed point, not transient worklist state. See
+    // `find_first_violation`'s own doc comment for why this can no longer
+    // be a simple single ascending scan with an early return: each
+    // leader's run is walked in execution order, not position order.
+    let violation = find_first_violation(
+        &leader_positions,
+        &is_leader,
+        &missing,
+        successors_of,
+        |pos, visit| {
+            for &r in csr_slice(&reads_flat, &reads_offsets, pos) {
+                visit(dense(r));
             }
-        }
+        },
+        |pos, visit| {
+            for &w in csr_slice(&writes_flat, &writes_offsets, pos) {
+                visit(dense(w));
+            }
+        },
+    );
+    if let Some((pos, bit)) = violation {
+        let idx = reachable_indices[pos];
+        let raw_reg = universe[bit];
+        return Err(reject_one(
+            function,
+            VerificationCode::UndefinedRegisterRead,
+            instr_starts[idx],
+            format!(
+                "register r{raw_reg} is read but not definitely defined on every execution path reaching this instruction"
+            ),
+        ));
     }
 
     Ok(())
@@ -5326,6 +5552,196 @@ mod tests {
         assert_eq!(
             tail_words, 0,
             "every tail position's missing set is genuinely empty and must allocate zero words"
+        );
+    }
+
+    /// #1756 Codex review round 11: "Bound aggregate growth of missing
+    /// sets" - round 10's lazy growth only helps a position whose OWN
+    /// content stays small; it does nothing when MANY positions share a
+    /// large, unchanging value, which is exactly what a long,
+    /// non-branching run of redundant re-writes produces (nothing besides
+    /// register 0 is ever written, so every position after the first
+    /// holds the identical 4,095-of-4,096-registers-missing value).
+    /// Leader compression (`compute_leaders`/`build_leader_chains`)
+    /// collapses this run to its single leader (entry) regardless of
+    /// length, since it never branches - closing both the per-position
+    /// storage amplification AND the independent per-hop bit-delivery
+    /// amplification (event_count) in one fix, measured directly here
+    /// rather than by timing.
+    #[test]
+    fn c1756_long_non_branching_run_with_wide_missing_set_collapses_to_few_leaders() {
+        const DOMAIN_SIZE: usize = 4_096;
+        const RUN_LEN: usize = 2_000_000;
+        let reachable_count = RUN_LEN + 1;
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos + 1 < reachable_count {
+                [Some(pos + 1), None]
+            } else {
+                [None, None]
+            }
+        };
+
+        let is_leader = compute_leaders(reachable_count, successors_of);
+        let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+        assert_eq!(
+            leader_positions,
+            vec![0],
+            "a run with no branching at all must collapse to exactly one leader (entry), \
+             regardless of how long the run is - the whole point of leader compression"
+        );
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            |pos, visit| {
+                if pos != 0 {
+                    visit(0); // every non-entry position redundantly re-writes register 0 only
+                }
+            },
+            leader_index_of,
+        );
+        assert_eq!(
+            chain_targets,
+            vec![[None, None]],
+            "the run dead-ends (no branch, no back edge), so entry's chain delivers nowhere"
+        );
+        assert!(chain_killed[0].contains(0));
+        assert!(
+            !chain_killed[0].contains(1),
+            "register 1 is never written anywhere in this run"
+        );
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let (missing, event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+        );
+        assert!(
+            missing[0].contains(1),
+            "register 1 is never written anywhere, so it must still be missing at entry"
+        );
+        // `missing[0]` is entry's own IN (pre-write) - it stays exactly
+        // `entry_missing`, unchanged (see `deliver`'s `target != 0` guard),
+        // so it still contains bit 0 too; `chain_killed[0]` (already
+        // asserted above) is where register 0 being defined shows up.
+        assert!(missing[0].contains(0));
+        // The claim under test: with leader_count collapsed to 1, total
+        // worklist events are bounded by domain_size alone, not
+        // reachable_count * domain_size (which for RUN_LEN = 2,000,000
+        // would be over 8 billion).
+        assert!(
+            event_count <= DOMAIN_SIZE,
+            "event_count ({event_count}) must stay within domain_size ({DOMAIN_SIZE}) alone - \
+             it must NOT scale with reachable_count * domain_size ({}), which is what round \
+             8-10's per-position worklist would have driven this to",
+            reachable_count * DOMAIN_SIZE
+        );
+    }
+
+    /// #1756 Codex review round 11: stresses `find_first_violation`'s
+    /// cross-leader minimum tracking. Leader A (position 1, processed
+    /// BEFORE leader B in ascending leader-position order) has its own
+    /// violation at position 3; leader B (position 4, processed AFTER A)
+    /// walks to position 2 - numerically LOWER than A's violation, even
+    /// though B's own leader position (4) is higher - which also
+    /// violates. The deterministic-first-diagnostic contract
+    /// (`c1756_case25`/`c1756_case26`) requires the lowest-position
+    /// violation overall (position 2) - only a full cross-leader scan,
+    /// not a per-chain short-circuit in leader-processing order, can
+    /// guarantee that. (Every position here is genuinely targeted by
+    /// something, matching the real caller's invariant that every
+    /// non-entry position in `0..reachable_count` has at least one
+    /// predecessor - `compute_leaders` treats an untargeted position as
+    /// its own trivial leader, which is correct but does not arise for
+    /// an actually-reachable graph, so this test avoids it.)
+    #[test]
+    fn c1756_cross_leader_scan_finds_the_true_lowest_position_violation() {
+        const DOMAIN_SIZE: usize = 8;
+        const REACHABLE_COUNT: usize = 5; // positions 0..4
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            match pos {
+                0 => [Some(1), Some(4)],
+                1 => [Some(3), None],
+                4 => [Some(2), None],
+                _ => [None, None], // 2 and 3 are dead ends
+            }
+        };
+        let no_writes = |_pos: usize, _visit: &mut dyn FnMut(usize)| {};
+
+        let is_leader = compute_leaders(REACHABLE_COUNT, successors_of);
+        let leader_positions: Vec<usize> = (0..REACHABLE_COUNT).filter(|&p| is_leader[p]).collect();
+        assert_eq!(leader_positions, vec![0, 1, 4]);
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            no_writes,
+            leader_index_of,
+        );
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+        );
+
+        let reads_of = |pos: usize, visit: &mut dyn FnMut(usize)| {
+            if pos == 3 || pos == 2 {
+                visit(6); // both "instructions" read the same still-missing register
+            }
+        };
+        let violation = find_first_violation(
+            &leader_positions,
+            &is_leader,
+            &missing,
+            successors_of,
+            reads_of,
+            no_writes,
+        );
+        assert_eq!(
+            violation,
+            Some((2, 6)),
+            "position 2's violation must win even though leader B (position 4) is processed \
+             after leader A (position 1), whose own violation at position 3 would incorrectly \
+             win under a per-chain-order short-circuit"
+        );
+    }
+
+    /// #1756 Codex review round 11: exercises the exact adversarial
+    /// ORDER through the real `verify_semcode` pipeline (not just the
+    /// standalone leader-compression functions) - many redundant
+    /// re-writes to r0 BEFORE r1.. are ever defined, so the missing set
+    /// stays wide for the whole prefix (the shape round 10's fix did not
+    /// help), followed by the actual definitions and a read of the last
+    /// one. Confirms `prove_definite_register_assignment`'s leader-
+    /// compression wiring produces the correct ACCEPT result end to end,
+    /// complementing the standalone accounting regressions above.
+    #[test]
+    fn c1756_redundant_prefix_then_late_definitions_verifies_correctly_through_full_pipeline() {
+        let mut instrs = Vec::new();
+        for _ in 0..5000 {
+            instrs.push(IrInstr::LoadI32 { dst: 0, val: 0 }); // redundant after the first
+        }
+        for r in 1..64u16 {
+            instrs.push(IrInstr::LoadI32 { dst: r, val: 0 });
+        }
+        instrs.push(IrInstr::Ret { src: Some(63) });
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "every register is genuinely defined by the time it's read, regardless of how long \
+             the redundant prefix that precedes its definition is",
         );
     }
 
