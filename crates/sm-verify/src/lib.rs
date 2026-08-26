@@ -164,13 +164,31 @@ pub struct VerifiedProgram {
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VerificationLimits {
-    /// Upper bound on `leader_count * ceil(register_domain_size / 64)` -
-    /// the exact word count the definite-register-assignment analysis's
-    /// dense per-leader `RegSet` state would need. Checked via
-    /// `checked_mul` BEFORE that state is allocated (see
-    /// `check_analysis_state_budget`); overflow itself counts as
-    /// exceeding this limit, since there is no finite word count to
-    /// compare against in that case.
+    /// Upper bound, in canonical 8-byte logical words, on the definite-
+    /// register-assignment analysis's PEAK simultaneously-live verifier-
+    /// analysis state for one function - not process RSS or an
+    /// allocator-exact byte count, and not cumulative across an
+    /// artifact's functions (see `max_work_units` below for the
+    /// genuinely cumulative counterpart).
+    ///
+    /// As of round 16 of #1756's own review history, this covers BOTH:
+    /// raw reachable-node representation (`reachable_indices`, `reads_
+    /// flat`/`writes_flat` and their offset tables, `is_leader` - all
+    /// scaling with `reachable_count` and the reachable instruction
+    /// stream's own byte length, checked by `check_raw_node_state_
+    /// budget` BEFORE any of them is allocated), and leader-compressed
+    /// dense dataflow state (`chain_killed`/`missing` and their headers,
+    /// `chain_targets`, `leader_positions`, the worklist stack's proven
+    /// peak - scaling with `leader_count` and `ceil(register_domain_
+    /// size / 64)`, checked by `check_analysis_state_budget`). Every
+    /// logical size is a canonical, MACHINE-INDEPENDENT constant, never
+    /// a host's actual `size_of::<T>()`, so admission is deterministic
+    /// across hosts regardless of target pointer width. See `check_raw_
+    /// node_state_budget`'s and `check_analysis_state_budget`'s own doc
+    /// comments for the full structural inventory and exact formula.
+    /// Every accounting step uses `checked` arithmetic; overflow anywhere
+    /// counts as exceeding this limit, since there is no finite word
+    /// count to compare against in that case.
     pub max_state_words: usize,
     /// Upper bound on the analysis's own deterministic work-unit count
     /// (see `compute_missing_sets`'s work-unit accounting), never
@@ -245,6 +263,40 @@ impl VerificationLimits {
     /// about 7.5x more than round 15's corrected 559,240, matching the
     /// severity of the gap this round closes. Kept numerically UNCHANGED
     /// again - see the round-15 reply for the full re-derivation.
+    ///
+    /// **Re-validated again in round 16** after `max_state_words` gained
+    /// a fourth accounting term: raw reachable-node representation
+    /// (`check_raw_node_state_budget`'s own doc comment has the full
+    /// inventory), closing a gap round 15 explicitly, but incorrectly,
+    /// excluded - a genuinely branch-FREE reachable chain has `leader_
+    /// count = 1` regardless of length, so rounds 13-15's leader/domain-
+    /// scaled formula alone charged almost nothing for it no matter how
+    /// large `reachable_count` grew. `max_state_words = 8_388_608`
+    /// (UNCHANGED numerically) now admits, exactly:
+    ///
+    /// | shape | max genuine size |
+    /// |---|---|
+    /// | long-linear (no branches), `domain_size = 1` | 2,684,347 reachable nodes |
+    /// | genuine diamonds, `domain_size = 1` | 453,437 leaders |
+    /// | genuine diamonds, `domain_size = 64` | 453,423 leaders |
+    /// | genuine diamonds, `domain_size = 4,096` | 57,937 leaders |
+    /// | genuine diamonds, `domain_size = 8,192` (largest legal) | 30,663 leaders |
+    ///
+    /// (the long-linear row has no meaningful "leader_count" - it stays 1
+    /// regardless of length, so its own ceiling is reported in reachable
+    /// nodes instead, the dimension raw-node accounting actually bounds).
+    /// At `max_state_words * 8 = 67,108,864` logical bytes (64 MiB) worst
+    /// case. Every genuine-diamond ceiling above is LOWER than round 15's
+    /// corresponding number (e.g. `domain_size = 8,192`: 30,663 versus
+    /// round 15's 31,062) since raw-node cost now competes for the same
+    /// budget as leader-state cost, for the SAME reason `domain_size = 1`
+    /// dropped from round 14's ~4.19 million to round 15's 559,240 - this
+    /// is the intended, honest effect of closing a real gap, not
+    /// regression. All ceilings remain several orders of magnitude above
+    /// every ordinary/golden/already-committed-adversarial shape measured
+    /// (at most tens of thousands of state words). Kept numerically
+    /// UNCHANGED again - see the round-16 reply for the full re-
+    /// derivation and the exact relationships used to compute this table.
     pub const fn default_profile() -> Self {
         Self {
             max_state_words: 8_388_608, // 2^23 - logical verifier-analysis words, worst case
@@ -1711,6 +1763,16 @@ fn dedup_successors(succs: [Option<usize>; 2]) -> [Option<usize>; 2] {
 ///   `leader_positions`.
 /// - `STACK_ENTRY_LOGICAL_BYTES`: one `(usize, usize)` entry in
 ///   `compute_missing_sets`'s worklist stack.
+/// - `REACHABLE_INDEX_LOGICAL_BYTES`: one `usize` entry in
+///   `reachable_indices` (round 16).
+/// - `CSR_OFFSET_LOGICAL_BYTES`: one `u32` entry in `reads_offsets` or
+///   `writes_offsets` (round 16).
+/// - `REGISTER_OPERAND_LOGICAL_BYTES`: one `u16` entry in `reads_flat`,
+///   `writes_flat`, or the transient `universe` buffer `dataflow_domain_
+///   accounting` builds before its own final dedup (round 16).
+/// - `LEADER_FLAG_LOGICAL_BYTES`: one `bool` entry in `is_leader` -
+///   Rust's `Vec<bool>` is not bit-packed, so this is a full byte per
+///   entry, not one bit (round 16).
 #[cfg(feature = "std")]
 const WORD_BYTES: usize = 8;
 #[cfg(feature = "std")]
@@ -1721,21 +1783,164 @@ const CHAIN_TARGET_LOGICAL_BYTES: usize = 2 * (2 * WORD_BYTES);
 const LEADER_INDEX_LOGICAL_BYTES: usize = WORD_BYTES;
 #[cfg(feature = "std")]
 const STACK_ENTRY_LOGICAL_BYTES: usize = 2 * WORD_BYTES;
+#[cfg(feature = "std")]
+const REACHABLE_INDEX_LOGICAL_BYTES: usize = WORD_BYTES;
+#[cfg(feature = "std")]
+const CSR_OFFSET_LOGICAL_BYTES: usize = WORD_BYTES / 2;
+#[cfg(feature = "std")]
+const REGISTER_OPERAND_LOGICAL_BYTES: usize = WORD_BYTES / 4;
+#[cfg(feature = "std")]
+const LEADER_FLAG_LOGICAL_BYTES: usize = 1;
 
-/// #1756 Codex review round 14 (owner decision), corrected in round 15:
-/// the deterministic, verifier-OWNED pre-allocation admission check for
-/// the definite-register-assignment analysis's PEAK simultaneously-live
-/// verifier-analysis state - now the FULL logical storage this analysis
-/// needs, not merely dense `RegSet` backing words.
+/// #1756 Codex review round 16 (owner decision): the deterministic,
+/// verifier-OWNED pre-allocation admission check for the RAW reachable-
+/// node representation `dataflow_domain_accounting` and `compute_
+/// leaders` build, BEFORE either one allocates - closing the gap round
+/// 15 explicitly, but incorrectly, excluded (see `check_analysis_state_
+/// budget`'s own doc comment for the corrected inventory).
+///
+/// A genuinely branch-FREE reachable stream (a long linear run of
+/// single-register instructions, no merges, no branch targets at all)
+/// has `leader_count = 1` REGARDLESS of how long it is - round 15's
+/// leader/domain-scaled formula alone charges almost nothing for it,
+/// even as `reachable_count` (and every structure sized by it) grows
+/// without bound. This is Codex's round-16 P1 finding: raw reachable-
+/// node state was never bounded by anything, independent of leader or
+/// domain structure.
+///
+/// **Why this check can run BEFORE `dataflow_domain_accounting`**:
+/// `reachable_count` is already known for free - `reachable_offsets`
+/// (from `verify_reachable_control_flow`, `HashSet<usize>`) reports its
+/// own `len()` in O(1), no CSR allocation required to learn it. `instr_
+/// len` (`code.len() - instr_start`) is likewise already known before
+/// any of this analysis runs. Both inputs exist strictly BEFORE `data
+/// flow_domain_accounting` or `compute_leaders` ever allocate anything,
+/// so this check can - and does - run first.
+///
+/// **Deriving a sound per-instruction-operand-count-independent bound**:
+/// rather than enumerate a "maximum registers per opcode" table (some
+/// opcodes, e.g. `Call`'s argument list and `MakeClosure`'s capture
+/// list, are genuinely variadic, bounded only by how many 2-byte `u16`
+/// register slots remain in the code buffer), this uses a strictly
+/// information-theoretic argument instead: every register operand this
+/// pass ever records - read or write, on any instruction - costs
+/// EXACTLY 2 bytes to encode (`read_u16_le`), and every such byte comes
+/// from the SAME reachable instruction stream, `instr_len` bytes long,
+/// that has already been fully decoded once (Codex review round 3's own
+/// `decode_operands` re-decode, see `dataflow_domain_accounting`'s doc
+/// comment). Therefore `reads_flat.len() + writes_flat.len() <=
+/// instr_len / 2` - a SOUND, provable, information-theoretic ceiling
+/// that holds no matter how those operands are distributed (one huge
+/// variadic instruction or many small fixed-arity ones cost the same
+/// either way), computed with zero per-opcode knowledge and zero CSR
+/// allocation. This is `operand_count_bound` below.
+///
+/// **What this bounds** (every raw-node structure `prove_definite_
+/// register_assignment` and its callees allocate whose size scales with
+/// `reachable_count` or `instr_len`, genuinely owned by THIS analysis -
+/// see `check_analysis_state_budget`'s own doc comment for the full,
+/// corrected inventory including what remains deliberately excluded):
+/// `reachable_indices`, `reads_offsets` + `writes_offsets`, `reads_
+/// flat` + `writes_flat` (bounded by `operand_count_bound` above), the
+/// transient `universe` buffer `dataflow_domain_accounting` builds
+/// before its own final dedup (also bounded by `operand_count_bound`,
+/// plus `entry_param_count`), and `is_leader`.
+///
+/// **Formula**: `raw_words = ceil(raw_bytes / WORD_BYTES)` for
+/// `raw_bytes = reachable_count * REACHABLE_INDEX_LOGICAL_BYTES +
+/// (reachable_count + 1) * 2 * CSR_OFFSET_LOGICAL_BYTES + reachable_
+/// count * LEADER_FLAG_LOGICAL_BYTES + (2 * operand_count_bound +
+/// entry_param_count) * REGISTER_OPERAND_LOGICAL_BYTES` - every
+/// multiplication and addition `checked`; overflow anywhere is the same
+/// `usize::MAX` sentinel used throughout this envelope.
+///
+/// Returns `Ok(raw_words)` when within budget, `Err(reported_words)`
+/// otherwise - the caller (`prove_definite_register_assignment`) rejects
+/// immediately on `Err`, before `dataflow_domain_accounting` or `compute_
+/// leaders` ever run, and reuses the `Ok` value as an input to the later,
+/// COMBINED `check_analysis_state_budget` call once `leader_count` and
+/// `domain_size` are also known.
+#[cfg(feature = "std")]
+fn check_raw_node_state_budget(
+    reachable_count: usize,
+    instr_len: usize,
+    entry_param_count: usize,
+    max_state_words: usize,
+) -> Result<usize, usize> {
+    let overflow = || Err(usize::MAX);
+
+    let operand_count_bound = instr_len / 2;
+
+    let reachable_index_bytes = reachable_count.checked_mul(REACHABLE_INDEX_LOGICAL_BYTES);
+    let Some(reachable_index_bytes) = reachable_index_bytes else {
+        return overflow();
+    };
+
+    let offset_entries = reachable_count.checked_add(1);
+    let Some(offset_entries) = offset_entries else {
+        return overflow();
+    };
+    let offset_bytes = offset_entries
+        .checked_mul(2) // reads_offsets + writes_offsets
+        .and_then(|doubled| doubled.checked_mul(CSR_OFFSET_LOGICAL_BYTES));
+    let Some(offset_bytes) = offset_bytes else {
+        return overflow();
+    };
+
+    let leader_flag_bytes = reachable_count.checked_mul(LEADER_FLAG_LOGICAL_BYTES);
+    let Some(leader_flag_bytes) = leader_flag_bytes else {
+        return overflow();
+    };
+
+    // reads_flat + writes_flat (operand_count_bound entries combined)
+    // plus the transient pre-dedup `universe` buffer (entry_param_count
+    // + operand_count_bound entries) - see the doc comment above.
+    let operand_bytes = operand_count_bound
+        .checked_mul(2)
+        .and_then(|doubled| doubled.checked_add(entry_param_count))
+        .and_then(|total_entries| total_entries.checked_mul(REGISTER_OPERAND_LOGICAL_BYTES));
+    let Some(operand_bytes) = operand_bytes else {
+        return overflow();
+    };
+
+    let raw_bytes = reachable_index_bytes
+        .checked_add(offset_bytes)
+        .and_then(|sum| sum.checked_add(leader_flag_bytes))
+        .and_then(|sum| sum.checked_add(operand_bytes));
+    let Some(raw_bytes) = raw_bytes else {
+        return overflow();
+    };
+
+    let raw_words = raw_bytes
+        .checked_add(WORD_BYTES - 1)
+        .map(|rounded| rounded / WORD_BYTES);
+    let Some(raw_words) = raw_words else {
+        return overflow();
+    };
+
+    match raw_words {
+        w if w <= max_state_words => Ok(w),
+        w => Err(w),
+    }
+}
+
+/// #1756 Codex review round 14 (owner decision), corrected in round 15,
+/// extended in round 16: the deterministic, verifier-OWNED pre-
+/// allocation admission check for the definite-register-assignment
+/// analysis's PEAK simultaneously-live verifier-analysis state - now
+/// the FULL logical storage this analysis needs, raw reachable-node
+/// representation included, not merely dense `RegSet` backing words.
 ///
 /// **Full lifetime inventory** (every allocation `prove_definite_
 /// register_assignment` and its callees own whose size scales with
-/// `leader_count`, `domain_size`, or worklist depth - round 15's own
-/// request, after round 14 covered only `RegSet` payloads):
+/// `reachable_count`, `leader_count`, `domain_size`, `instr_len`, or
+/// worklist depth - round 15's own request, extended in round 16 after
+/// Codex demonstrated the round-15 raw-node exclusion below was itself
+/// exploitable):
 ///
 /// - `chain_killed` / `missing` (`Vec<RegSet>`, `leader_count` entries
 ///   each): dense payload already charged by round 14's `(2 *
-///   leader_count + 1) * word_count(domain_size)` term; this round ADDS
+///   leader_count + 1) * word_count(domain_size)` term; round 15 added
 ///   their own `Vec<RegSet>` HEADERS - `REGSET_HEADER_LOGICAL_BYTES`
 ///   per entry, times 2 arrays, times `leader_count`. Simultaneously
 ///   live for `compute_missing_sets`'s entire call (round 14's finding).
@@ -1769,29 +1974,73 @@ const STACK_ENTRY_LOGICAL_BYTES: usize = 2 * WORD_BYTES;
 ///   `find_first_violation`'s per-leader `local` clone: O(1) each,
 ///   never overlapping in time (established in round 14) - covered by
 ///   the existing `+1` leader in the dense-payload term, unchanged.
-/// - Deliberately EXCLUDED, and NOT silently: `is_leader` (`Vec<bool>`,
-///   `reachable_count`-sized) and every CSR table `dataflow_domain_
-///   accounting` builds (`reachable_indices`, `reads_flat`,
-///   `writes_flat`, and their offset tables) are `reachable_count`-
-///   scaled, not `leader_count`- or `domain_size`-scaled. Bounding raw
-///   `reachable_count` (independent of leader/domain structure) has
-///   been an explicitly acknowledged, separate, out-of-scope gap since
-///   round 1 of this PR's review (no code-size/instruction-count quota
-///   exists anywhere in this verifier) - this round does not change
-///   that boundary, and does not claim to.
+/// - `reachable_indices` (`Vec<usize>`, `reachable_count` entries),
+///   `reads_offsets` / `writes_offsets` (`Vec<u32>`, `reachable_count +
+///   1` entries each), `reads_flat` / `writes_flat` (`Vec<u16>`,
+///   combined length bounded by `instr_len / 2` - see `check_raw_node_
+///   state_budget`'s doc comment for the exact information-theoretic
+///   argument), and the transient pre-dedup `universe` buffer (same
+///   bound, plus `entry_param_count`): all built by `dataflow_domain_
+///   accounting`, exclusively for THIS analysis - never allocated for a
+///   signature-less function, unlike the genuinely shared structures
+///   below. Round 16 (Codex P1): charged via the new, EARLIER `check_
+///   raw_node_state_budget`, which runs strictly before `dataflow_
+///   domain_accounting` itself, so this protection is real, not
+///   retroactive.
+/// - `is_leader` (`Vec<bool>`, `reachable_count` entries): `LEADER_FLAG_
+///   LOGICAL_BYTES` per entry. Round 15 grouped this with the CSR
+///   tables above under "excluded, reachable_count-scaled, pre-existing
+///   gap" - that grouping was IMPRECISE: `compute_leaders` (which
+///   allocates it) is called ONLY from within this analysis, exclusively
+///   for signature-bearing functions, exactly like the CSR tables, not
+///   shared with any check that runs regardless of signature. Corrected
+///   in round 16: charged by `check_raw_node_state_budget`, not
+///   excluded.
+/// - Genuinely still EXCLUDED, and NOT silently: `instr_starts` (`Vec<
+///   usize>`) and `instruction_successors` (`Vec<InstructionSuccessors>`),
+///   both sized to the function's TOTAL instruction count (not merely
+///   `reachable_count` - unreachable code is decoded once too), and
+///   `reachable_offsets` (`HashSet<usize>`, from `verify_reachable_
+///   control_flow`). All three are built, with their own independent
+///   verification work performed, for EVERY function `verify_function_
+///   code` processes - signature-bearing or not (debug-symbol placement,
+///   jump-target validity, and general reachable-control-flow validity
+///   all depend on them regardless of whether a canonical `SIG0`
+///   signature exists at all). #1756's analysis borrows all three BY
+///   REFERENCE rather than allocating its own copies, and they cost
+///   exactly the same whether or not this analysis ever runs on a given
+///   function. Bounding raw total-instruction-count (independent of
+///   reachability, leader, or domain structure) remains the SAME
+///   explicitly acknowledged, separate, out-of-scope gap since round 1
+///   of this PR's review (no code-size/instruction-count quota exists
+///   anywhere in this verifier) - this round does not change that
+///   boundary, and does not claim to.
 ///
-/// **Formula**: `required_state_words = dense_words + fixed_words`,
-/// where `dense_words` is round 14's unchanged `(2 * leader_count + 1) *
-/// word_count(domain_size)` and `fixed_words =
+/// **Formula**: `required_state_words = raw_words + dense_words +
+/// fixed_words`, where `raw_words` comes from the EARLIER `check_raw_
+/// node_state_budget` call (see its own doc comment), and `dense_words`/
+/// `fixed_words` are round 15's unchanged terms: `dense_words = (2 *
+/// leader_count + 1) * word_count(domain_size)`, `fixed_words =
 /// ceil(fixed_bytes / WORD_BYTES)` for `fixed_bytes = leader_count *
 /// (2 * REGSET_HEADER_LOGICAL_BYTES + CHAIN_TARGET_LOGICAL_BYTES +
 /// LEADER_INDEX_LOGICAL_BYTES) + (leader_count + 2 * domain_size) *
-/// STACK_ENTRY_LOGICAL_BYTES` - every multiplication and addition
+/// STACK_ENTRY_LOGICAL_BYTES`. Every multiplication and addition is
 /// `checked`, with the byte-to-word rounding also checked even though
 /// the chosen logical sizes happen to divide evenly. Overflow anywhere
 /// in the chain is treated as certainly exceeding any finite
 /// `max_state_words`, the same honest `usize::MAX` sentinel established
 /// in round 13, never undefined or silently-wrapping behavior.
+///
+/// `raw_words` and `dense_words + fixed_words` are SUMMED, never
+/// maxed: the raw-node structures above are never dropped before the
+/// leader-state phase begins - `reachable_indices`, `reads_flat`,
+/// `writes_flat`, their offset tables, and `is_leader` are all still
+/// read by `find_first_violation` at the very end of this analysis, so
+/// every structure this envelope charges for is simultaneously live for
+/// the analysis's ENTIRE remaining duration once allocated. Per the
+/// owner's own "peak, not double-counted lifetimes" rule: overlapping
+/// phases sum; only genuinely mutually-exclusive phases would take a
+/// max, and no phase here is ever dropped before the next begins.
 ///
 /// This remains a PEAK-simultaneous-state envelope for ONE function's
 /// analysis, not cumulative across an artifact's functions (functions
@@ -1802,6 +2051,7 @@ const STACK_ENTRY_LOGICAL_BYTES: usize = 2 * WORD_BYTES;
 /// for accounting) when within budget, `Err(reported_words)` otherwise.
 #[cfg(feature = "std")]
 fn check_analysis_state_budget(
+    raw_words: usize,
     leader_count: usize,
     domain_size: usize,
     max_state_words: usize,
@@ -1853,7 +2103,12 @@ fn check_analysis_state_budget(
         return overflow();
     };
 
-    let required_words = dense_words.checked_add(fixed_words);
+    let leader_words = dense_words.checked_add(fixed_words);
+    let Some(leader_words) = leader_words else {
+        return overflow();
+    };
+
+    let required_words = raw_words.checked_add(leader_words);
     match required_words {
         Some(required_words) if required_words <= max_state_words => Ok(required_words),
         Some(required_words) => Err(required_words),
@@ -2149,6 +2404,35 @@ fn prove_definite_register_assignment(
         return Ok(());
     }
 
+    // #1756 Codex review round 16 (owner decision): the raw-node state
+    // budget check runs FIRST, before `dataflow_domain_accounting`
+    // allocates any reachable-node CSR table - `reachable_count` and
+    // `instr_len` are both already known for free at this point (see
+    // `check_raw_node_state_budget`'s own doc comment), so this check
+    // never needs to build the very structures it exists to bound.
+    let reachable_count = reachable_offsets.len();
+    let instr_len = code.len().saturating_sub(instr_start);
+    let raw_words = match check_raw_node_state_budget(
+        reachable_count,
+        instr_len,
+        entry_param_count,
+        limits.max_state_words,
+    ) {
+        Ok(raw_words) => raw_words,
+        Err(raw_words) => {
+            return Err(reject_one(
+                function,
+                VerificationCode::AnalysisStateLimitExceeded,
+                0,
+                format!(
+                    "definite-register-assignment analysis needs at least {} logical verifier-analysis word(s) for raw reachable-node representation alone ({reachable_count} reachable node(s) over a {instr_len}-byte reachable instruction stream), exceeding the verification state budget of {} before any leader-compressed state is even computed",
+                    if raw_words == usize::MAX { "more than usize::MAX".to_string() } else { raw_words.to_string() },
+                    limits.max_state_words
+                ),
+            ));
+        }
+    };
+
     // Codex review round 3 on this PR (#1840): re-decodes exactly one
     // reachable instruction's operands on demand, via the same
     // `decode_operands` the main structural walk already used - never a
@@ -2175,7 +2459,10 @@ fn prove_definite_register_assignment(
             entry_param_count,
             reads_writes_of,
         );
-    let reachable_count = reachable_indices.len();
+    // `reachable_count` was already computed for free above, before
+    // `dataflow_domain_accounting` ran - confirm the two agree, rather
+    // than silently trusting it (round 16).
+    debug_assert_eq!(reachable_indices.len(), reachable_count);
     debug_assert_eq!(reachable_indices.first(), Some(&0));
     let domain_size = universe.len();
     let dense = |raw: u16| -> usize {
@@ -2216,25 +2503,28 @@ fn prove_definite_register_assignment(
     let is_leader = compute_leaders(reachable_count, successors_of);
     let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
 
-    // #1756 Codex review round 13 (owner decision): the deterministic
-    // verifier-resource admission check, BEFORE either `build_leader_
-    // chains` or `compute_missing_sets` allocates its leader_count-sized
-    // dense state - see `check_analysis_state_budget`'s own doc comment
-    // and `VerificationLimits`. A genuinely branch-dense reachable graph
-    // (round 13's finding) is not a bug in leader compression - it is
-    // the correct, minimal leader set an EXACT MUST-dataflow proof
-    // requires - so this is a resource-envelope decision, not a
-    // correctness fix.
+    // #1756 Codex review round 13 (owner decision), round 16: the
+    // deterministic verifier-resource admission check, BEFORE either
+    // `build_leader_chains` or `compute_missing_sets` allocates its
+    // leader_count-sized dense state - see `check_analysis_state_
+    // budget`'s own doc comment and `VerificationLimits`. A genuinely
+    // branch-dense reachable graph (round 13's finding) is not a bug in
+    // leader compression - it is the correct, minimal leader set an
+    // EXACT MUST-dataflow proof requires - so this is a resource-
+    // envelope decision, not a correctness fix. Round 16: now COMBINES
+    // the raw-node cost already proven safe above with this phase's own
+    // leader/domain-scaled cost, since both remain simultaneously live
+    // for the rest of this analysis.
     let leader_count = leader_positions.len();
     if let Err(state_words) =
-        check_analysis_state_budget(leader_count, domain_size, limits.max_state_words)
+        check_analysis_state_budget(raw_words, leader_count, domain_size, limits.max_state_words)
     {
         return Err(reject_one(
             function,
             VerificationCode::AnalysisStateLimitExceeded,
             0,
             format!(
-                "definite-register-assignment analysis needs {} logical verifier-analysis word(s) ({leader_count} leader(s) at a {domain_size}-register domain: dense lattice payload plus fixed per-leader/stack structural overhead), exceeding the verification state budget of {}",
+                "definite-register-assignment analysis needs {} logical verifier-analysis word(s) ({reachable_count} reachable node(s), {leader_count} leader(s) at a {domain_size}-register domain: raw reachable-node representation plus dense lattice payload plus fixed per-leader/stack structural overhead), exceeding the verification state budget of {}",
                 if state_words == usize::MAX { "more than usize::MAX".to_string() } else { state_words.to_string() },
                 limits.max_state_words
             ),
@@ -6064,7 +6354,7 @@ mod tests {
     /// to REPRESENT.
     #[test]
     fn c1756_low_domain_high_leader_count_rejects_on_state_not_work() {
-        const COUNT: usize = 500; // leader_count = 1,001; required_state_words = 15,020 exactly
+        const COUNT: usize = 500; // leader_count = 1,001; required_state_words = 18,528 exactly (round 16: 3,508 raw + 15,020 leader-state)
         let bytes = emit_test_function(build_domain_one_diamond_chain(COUNT));
 
         // Work stays tiny - accepted even under a small work cap.
@@ -6078,20 +6368,20 @@ mod tests {
         )
         .expect("work_units must stay tiny - r0 dies at entry, nothing ever propagates");
 
-        // But fixed leader-scaled structural overhead exceeds a state
-        // budget that round 13/14's dense-payload-only formula would
-        // have comfortably admitted.
+        // But fixed leader-scaled structural overhead plus raw reachable-
+        // node representation exceeds a state budget that round 13/14's
+        // dense-payload-only formula would have comfortably admitted.
         let report = verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 15_019, // one below the exact 15,020 words this needs
+                max_state_words: 18_527, // one below the exact 18,528 words this needs
                 max_work_units: 100,     // generous for work, tight for state
             },
         )
         .expect_err(
-            "fixed per-leader/stack structural overhead must exceed the state budget even \
-             though work stays trivially small",
+            "raw reachable-node representation plus fixed per-leader/stack structural overhead \
+             must exceed the state budget even though work stays trivially small",
         );
         assert_eq!(
             report.diagnostics[0].code,
@@ -6101,7 +6391,7 @@ mod tests {
         );
         assert!(report.diagnostics[0]
             .message
-            .contains("15020 logical verifier-analysis word"));
+            .contains("18528 logical verifier-analysis word"));
     }
 
     /// #1756 Codex review round 10: round 8's `missing: Vec<RegSet>` array
@@ -6553,6 +6843,186 @@ mod tests {
         instrs
     }
 
+    /// #1756 Codex review round 16 (owner decision): P1's own exact
+    /// prescribed shape - a genuinely branch-FREE reachable chain, no
+    /// `JmpIf` at all, so `compute_leaders` marks ONLY the entry
+    /// (position 0) as a leader regardless of `count`. `leader_count`
+    /// stays exactly 1 no matter how long this runs - the shape round
+    /// 15's leader/domain-scaled formula alone could not bound at all,
+    /// since it charges nothing beyond a fixed O(1) leader count however
+    /// large `reachable_count` grows. Closed by `check_raw_node_state_
+    /// budget`, which bounds `reachable_count` (and the reachable
+    /// instruction stream's own byte length) directly, independent of
+    /// leader or domain structure.
+    fn build_long_linear_chain(count: usize) -> Vec<IrInstr> {
+        let mut instrs = vec![IrInstr::LoadBool { dst: 0, val: true }]; // r0 defined at entry
+        for _ in 0..count {
+            instrs.push(IrInstr::LoadBool { dst: 0, val: false }); // redundant re-write, no branching at all
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0 is defined - accepts
+        instrs
+    }
+
+    /// #1756 Codex review round 16 (owner decision): Codex's own exact P1
+    /// regression - a signature-bearing, genuinely branch-free reachable
+    /// chain (`leader_count = 1` regardless of length), `domain_size =
+    /// 1`. `work_units` stays tiny (nothing to deliver - a single-leader
+    /// graph never even touches the worklist). Leader-state alone
+    /// (`dense_words = (2*1+1)*word_count(1) = 3`, `fixed_words = 17`,
+    /// `leader_words = 20` ALWAYS for this shape, for any chain length,
+    /// since `leader_count` and `domain_size` never change) comfortably
+    /// fits any real budget. Yet raw reachable-node representation
+    /// (`reachable_indices`, `reads_flat`/`writes_flat`, their offset
+    /// tables, `is_leader`) scales directly with `reachable_count`,
+    /// unbounded by leader or domain structure at all before this round -
+    /// proving this is a dimension the pre-round-16 envelope could not
+    /// bound, not merely under-charge.
+    #[test]
+    fn c1756_long_linear_low_domain_rejects_on_raw_state_not_leader_state() {
+        const COUNT: usize = 100_000; // reachable_count = 100,002; raw_words = 312,508; leader_words = 20 (leader_count=1, domain_size=1); combined = 312,528 exactly
+        let bytes = emit_test_function(build_long_linear_chain(COUNT));
+
+        // Work stays tiny - accepted even under a small work cap.
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 100,
+            },
+        )
+        .expect("work_units must stay tiny - a single-leader graph never touches the worklist");
+
+        // Leader-state alone (20 words, fixed for ANY chain length here)
+        // is nowhere near the problem - a budget of 1,000 is still far
+        // below the true raw-node cost (312,508), proving the rejection
+        // below is specifically about raw reachable-node representation,
+        // not about leader/domain-scaled state.
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 1_000,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err(
+            "raw reachable-node representation must exceed the state budget even though \
+             leader-state alone (20 words) is nowhere near it, and rejection must occur BEFORE \
+             dataflow_domain_accounting or compute_leaders ever allocates their reachable-node- \
+             sized structures",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded,
+            "must reject specifically on STATE, not work"
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("raw reachable-node representation alone"));
+
+        // Exact boundary: the raw check alone (before leader state is
+        // even computed) reports 312,508 words for this construction.
+        let raw_only = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 0,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err("must reject");
+        assert!(raw_only.diagnostics[0]
+            .message
+            .contains("312508 logical verifier-analysis word"));
+
+        // Exact combined boundary: raw_words (312,508) + leader_words
+        // (20) = 312,528 exactly, once leader state is also computed.
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 312_528,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect("usage == limit must be accepted for state-budget accounting");
+        let combined = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 312_527,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err("usage == limit + 1 must be a deterministic resource rejection");
+        assert!(combined.diagnostics[0]
+            .message
+            .contains("312528 logical verifier-analysis word"));
+    }
+
+    /// #1756 Codex review round 16: exact boundary behavior for `check_
+    /// raw_node_state_budget` in isolation, independently re-derived
+    /// from the named constants directly (not calling the production
+    /// formula), so this test can catch an implementation bug rather
+    /// than just confirming the function agrees with itself.
+    #[test]
+    fn c1756_raw_node_state_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
+        const REACHABLE_COUNT: usize = 1_000;
+        const INSTR_LEN: usize = 4_000;
+        const ENTRY_PARAM_COUNT: usize = 2;
+
+        let operand_count_bound = INSTR_LEN / 2;
+        let raw_bytes = REACHABLE_COUNT * REACHABLE_INDEX_LOGICAL_BYTES
+            + (REACHABLE_COUNT + 1) * 2 * CSR_OFFSET_LOGICAL_BYTES
+            + REACHABLE_COUNT * LEADER_FLAG_LOGICAL_BYTES
+            + (2 * operand_count_bound + ENTRY_PARAM_COUNT) * REGISTER_OPERAND_LOGICAL_BYTES;
+        let expected_raw_words = raw_bytes.div_ceil(WORD_BYTES);
+
+        assert_eq!(
+            check_raw_node_state_budget(
+                REACHABLE_COUNT,
+                INSTR_LEN,
+                ENTRY_PARAM_COUNT,
+                expected_raw_words
+            ),
+            Ok(expected_raw_words),
+            "usage == limit must be accepted"
+        );
+        assert_eq!(
+            check_raw_node_state_budget(
+                REACHABLE_COUNT,
+                INSTR_LEN,
+                ENTRY_PARAM_COUNT,
+                expected_raw_words - 1
+            ),
+            Err(expected_raw_words),
+            "usage == limit + 1 must be a deterministic resource rejection reporting the true \
+             required word count"
+        );
+    }
+
+    /// #1756 Codex review round 16: overflow specifically in the NEW
+    /// raw-node arithmetic (not the round-13/15 leader-side paths those
+    /// tests already cover) must also be a deterministic rejection.
+    #[test]
+    fn c1756_raw_node_state_budget_overflow_is_deterministic_rejection() {
+        let reachable_count = usize::MAX / 4;
+        assert!(
+            reachable_count
+                .checked_mul(REACHABLE_INDEX_LOGICAL_BYTES)
+                .is_none(),
+            "test premise: reachable_index_bytes must overflow"
+        );
+        let result = check_raw_node_state_budget(reachable_count, 0, 0, usize::MAX - 1);
+        assert_eq!(
+            result,
+            Err(usize::MAX),
+            "raw-node byte arithmetic overflowing usize must report the overflow sentinel, not \
+             panic or silently wrap"
+        );
+    }
+
     /// #1756 Codex review round 14 (owner decision): like
     /// `emit_test_function`, but for a MULTI-FUNCTION artifact - needed
     /// to exercise the artifact-wide (not per-function) work budget.
@@ -6593,27 +7063,31 @@ mod tests {
     /// round 14 (see `check_analysis_state_budget`'s doc comment - peak
     /// state charges BOTH `chain_killed` and `missing`, simultaneously
     /// live, not just one; corrected again in round 15 to also charge the
-    /// fixed per-leader/stack structural overhead `check_analysis_state_
-    /// budget`'s own doc comment inventories): a construction whose exact
-    /// `required_state_words` (dense payload `(2*leader_count + 1) *
-    /// ceil(domain_size / 64)` plus fixed structural overhead - here
-    /// `leader_count = 2*n+1` for `n` genuine diamonds, `domain_size = 3`,
-    /// giving dense = `4*n+3` and, following the same derivation,
-    /// required = 30,028 for `n = 1,000`) exceeds `max_state_words` must
-    /// be rejected deterministically, with `AnalysisStateLimitExceeded` -
-    /// and, by construction (see `prove_definite_register_assignment`'s
-    /// round-13 pre-check), BEFORE `build_leader_chains` or
-    /// `compute_missing_sets` ever allocates their leader_count-sized
-    /// dense state.
+    /// fixed per-leader/stack structural overhead, and again in round 16
+    /// to also charge raw reachable-node representation via `check_raw_
+    /// node_state_budget`, `check_analysis_state_budget`'s own doc
+    /// comment inventories): a construction whose exact `required_state_
+    /// words` (raw reachable-node words, from `check_raw_node_state_
+    /// budget`, plus dense payload `(2*leader_count + 1) * ceil(domain_
+    /// size / 64)` plus fixed structural overhead - here `leader_count =
+    /// 2*n+1` for `n` genuine diamonds, `domain_size = 3`, giving dense =
+    /// `4*n+3` and, following the same derivation, required = 37,039 for
+    /// `n = 1,000`) exceeds `max_state_words` must be rejected
+    /// deterministically, with `AnalysisStateLimitExceeded` - and, by
+    /// construction (see `prove_definite_register_assignment`'s round-13
+    /// pre-check, extended in round 16), BEFORE `dataflow_domain_
+    /// accounting`, `build_leader_chains`, or `compute_missing_sets` ever
+    /// allocates their reachable-node- or leader_count-sized dense
+    /// state.
     #[test]
     fn c1756_construction_exceeding_state_budget_rejects_before_large_allocation() {
-        const N: usize = 1_000; // leader_count = 2,001; required_state_words = 30,028 exactly
+        const N: usize = 1_000; // leader_count = 2,001; required_state_words = 37,039 exactly (round 16: 7,011 raw + 30,028 leader-state)
         let bytes = emit_test_function(build_diamond_chain(N, false));
         let report = verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 30_027, // one below the exact 30,028 words this needs
+                max_state_words: 37_038, // one below the exact 37,039 words this needs
                 max_work_units: usize::MAX,
             },
         )
@@ -6624,10 +7098,10 @@ mod tests {
         );
         assert!(report.diagnostics[0]
             .message
-            .contains("30028 logical verifier-analysis word"));
+            .contains("37039 logical verifier-analysis word"));
         assert!(report.diagnostics[0]
             .message
-            .contains("state budget of 30027"));
+            .contains("state budget of 37038"));
     }
 
     /// #1756 Codex review round 13 (owner decision): a construction whose
@@ -6699,24 +7173,26 @@ mod tests {
     }
 
     /// #1756 Codex review round 13 (owner decision), formula corrected in
-    /// rounds 14 and 15: exact boundary behavior for the (now fully
-    /// leader-scaled: `chain_killed` + `missing` dense payload, their
-    /// `Vec<RegSet>` headers, `chain_targets`, `leader_positions`, and
-    /// the worklist stack's `leader_count + 2*domain_size` peak) state-
-    /// words budget - `usage == limit` is accepted for resource
-    /// accounting purposes (the state check itself must not fire; the
-    /// construction here is fully defined, so the overall result is a
-    /// genuine accept), `usage == limit + 1` is a deterministic resource
-    /// rejection. No off-by-one ambiguity.
+    /// rounds 14, 15, and 16: exact boundary behavior for the (now fully
+    /// raw-reachable-node-plus-leader-scaled: `reachable_indices`,
+    /// `reads_flat`/`writes_flat`, their offset tables, `is_leader`,
+    /// `chain_killed` + `missing` dense payload, their `Vec<RegSet>`
+    /// headers, `chain_targets`, `leader_positions`, and the worklist
+    /// stack's `leader_count + 2*domain_size` peak) state-words budget -
+    /// `usage == limit` is accepted for resource accounting purposes
+    /// (the state check itself must not fire; the construction here is
+    /// fully defined, so the overall result is a genuine accept),
+    /// `usage == limit + 1` is a deterministic resource rejection. No
+    /// off-by-one ambiguity.
     #[test]
     fn c1756_state_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
-        const N: usize = 5; // leader_count = 11; required_state_words = 178 exactly
+        const N: usize = 5; // leader_count = 11; required_state_words = 225 exactly (round 16: 47 raw + 178 leader-state)
         let bytes = emit_test_function(build_diamond_chain(N, false));
         verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 178,
+                max_state_words: 225,
                 max_work_units: usize::MAX,
             },
         )
@@ -6726,7 +7202,7 @@ mod tests {
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 177,
+                max_state_words: 224,
                 max_work_units: usize::MAX,
             },
         )
@@ -6777,7 +7253,7 @@ mod tests {
     /// `max_state_words`.
     #[test]
     fn c1756_analysis_state_budget_checked_mul_overflow_is_deterministic_rejection() {
-        let result = check_analysis_state_budget(usize::MAX, 128, usize::MAX - 1);
+        let result = check_analysis_state_budget(0, usize::MAX, 128, usize::MAX - 1);
         assert_eq!(
             result,
             Err(usize::MAX),
@@ -6805,7 +7281,7 @@ mod tests {
             leader_count.checked_mul(88).is_none(),
             "test premise: per-leader fixed bytes must overflow"
         );
-        let result = check_analysis_state_budget(leader_count, 1, usize::MAX - 1);
+        let result = check_analysis_state_budget(0, leader_count, 1, usize::MAX - 1);
         assert_eq!(
             result,
             Err(usize::MAX),
@@ -7117,12 +7593,12 @@ mod tests {
         let fixed_words = fixed_bytes.div_ceil(WORD_BYTES);
         let expected_required_words = dense_words + fixed_words;
         assert_eq!(
-            check_analysis_state_budget(leader_count, DOMAIN_SIZE, expected_required_words),
+            check_analysis_state_budget(0, leader_count, DOMAIN_SIZE, expected_required_words),
             Ok(expected_required_words),
             "usage == limit must be accepted for state-budget accounting"
         );
         assert_eq!(
-            check_analysis_state_budget(leader_count, DOMAIN_SIZE, expected_required_words - 1),
+            check_analysis_state_budget(0, leader_count, DOMAIN_SIZE, expected_required_words - 1),
             Err(expected_required_words),
             "usage == limit + 1 must be a deterministic resource rejection reporting the true \
              required word count"

@@ -456,9 +456,29 @@ both fields' enforcement did not yet match this intended scope):
   actual `size_of::<T>()`, which can vary by target) - the same bytes are
   admitted or rejected on every host, deterministically.
 
-  As of round 15 of #1756's own review history, the enforced formula is
-  `required_state_words = dense_words + fixed_words`, where:
+  As of round 16 of #1756's own review history, the enforced formula is
+  `required_state_words = raw_words + dense_words + fixed_words`, where:
 
+  - `raw_words` (round 16) is the RAW reachable-node representation cost
+    `dataflow_domain_accounting` and `compute_leaders` build - scaling
+    with `reachable_count` (a `usize`-sized `reachable_indices` entry, a
+    `u32`-sized entry in each of the two CSR offset tables, and a
+    `bool`-sized `is_leader` entry, per reachable node) and with the
+    reachable instruction stream's own byte length (bounding `reads_
+    flat.len() + writes_flat.len()`, and the transient pre-dedup
+    `universe` buffer, via a sound information-theoretic argument: every
+    register operand costs exactly 2 bytes to encode, so the stream's own
+    byte length bounds how many can ever be decoded, independent of how
+    they are distributed across individual instructions - see `check_raw_
+    node_state_budget`'s doc comment for the exact derivation). Checked
+    BEFORE `dataflow_domain_accounting` allocates anything - `reachable_
+    count` and the reachable instruction stream's length are both already
+    known for free at that point, so this protection is real, not
+    retroactive. Closes a gap round 15 explicitly, but incorrectly,
+    excluded: a genuinely branch-FREE reachable chain has `leader_count =
+    1` regardless of length, so `dense_words`/`fixed_words` below alone
+    charge almost nothing for it no matter how large `reachable_count`
+    grows.
   - `dense_words = (2 * leader_count + 1) * ceil(domain_size / 64)` - the
     dense dataflow lattice payload (round 14: the analysis's `chain_
     killed` and `missing` arrays are simultaneously live, both scaled by
@@ -473,10 +493,16 @@ both fields' enforcement did not yet match this intended scope):
     every `RegSet`'s own backing payload is empty, which the dense-only
     formula above does not charge for at all. The worklist stack's own
     peak is `leader_count + 2 * domain_size` entries, proven (not merely
-    observed) via a settled-backlog-plus-active-frontier argument - see
-    `check_analysis_state_budget`'s doc comment in `sm-verify` for the
-    exact structural inventory, the named logical-size constants, and the
-    full derivation.
+    observed) via a settled-backlog-plus-active-frontier argument.
+
+  `raw_words` and `dense_words + fixed_words` are SUMMED, never maxed:
+  the raw-node structures above are never dropped before the leader-state
+  phase begins (several are read again by the final violation scan), so
+  every structure this envelope charges for is simultaneously live for
+  this analysis's entire remaining duration once allocated. See `check_
+  raw_node_state_budget`'s and `check_analysis_state_budget`'s own doc
+  comments in `sm-verify` for the exact structural inventory, the named
+  logical-size constants, and the full derivation.
 
 `VerificationLimits` is never inferred from `RuntimeQuotas::max_steps`,
 `max_calls`, or any other execution quota, and is never attached to
