@@ -982,6 +982,20 @@ fn verify_reachable_control_flow(
 /// rather than a whole-set `intersect_with`) and its initialization
 /// (BOTTOM=empty for non-entry nodes, the dual of the old TOP=full rule)
 /// changed.
+///
+/// #1756 Codex review round 10: `empty()` no longer eagerly allocates
+/// `word_count(domain_size)` words up front - it starts with zero words,
+/// and `insert` grows the backing `Vec<u64>` only as far as the highest
+/// bit index this PARTICULAR set has ever actually held (never past
+/// `word_count(domain_size)`, since every inserted `reg` is already
+/// guaranteed `< domain_size` by the invariant above). A set that never
+/// receives a single bit costs nothing beyond its own header; a set whose
+/// content genuinely spans the full domain still costs the same as before.
+/// This is what lets `compute_missing_sets` allocate one `RegSet` per
+/// reachable position (needed regardless - see its own doc comment)
+/// without that array's per-entry cost being `domain_size`-wide
+/// unconditionally, for positions whose actual missing set is small or
+/// empty.
 #[cfg(feature = "std")]
 #[derive(Clone)]
 struct RegSet {
@@ -1011,10 +1025,12 @@ impl RegSet {
         RegSet { words }
     }
 
-    fn empty(domain_size: usize) -> Self {
-        RegSet {
-            words: vec![0u64; Self::word_count(domain_size)],
-        }
+    /// #1756 Codex review round 10: starts genuinely empty (zero words,
+    /// zero heap allocation) rather than eagerly pre-sized to
+    /// `word_count(domain_size)` - `insert` grows the backing storage on
+    /// demand instead, so callers no longer need `domain_size` here.
+    fn empty() -> Self {
+        RegSet { words: Vec::new() }
     }
 
     fn contains(&self, reg: usize) -> bool {
@@ -1023,12 +1039,18 @@ impl RegSet {
         self.words.get(word).is_some_and(|w| (w >> bit) & 1 != 0)
     }
 
+    /// Grows the backing storage to cover `reg` if this set has never held
+    /// a bit that high before (#1756 Codex review round 10) - safe because
+    /// every `reg` this pass ever inserts is already guaranteed
+    /// `< domain_size` by the struct-level invariant, so this can never
+    /// grow past `word_count(domain_size)` regardless of call pattern.
     fn insert(&mut self, reg: usize) {
         let word = reg / 64;
         let bit = reg % 64;
-        if let Some(w) = self.words.get_mut(word) {
-            *w |= 1u64 << bit;
+        if self.words.len() <= word {
+            self.words.resize(word + 1, 0);
         }
+        self.words[word] |= 1u64 << bit;
     }
 
     fn remove(&mut self, reg: usize) {
@@ -1303,6 +1325,25 @@ fn deliver(missing: &mut [RegSet], target: usize, bit: usize) -> bool {
 /// completely unaffected by pop order, so this is a peak-memory
 /// representation choice, not a new correctness-load-bearing ordering
 /// heuristic of the kind rounds 5-7 tried and round 8 replaced.
+///
+/// **Per-node memory bound** (#1756 Codex review round 10): the `missing`
+/// array itself needs one `RegSet` slot per reachable position regardless,
+/// with no way around that minimum - it is exactly the same
+/// `O(reachable_count)` array `event_count`/`peak_queue_len` already cost
+/// nothing extra to track. What round 10 fixes is each slot's OWN backing
+/// storage: before this round, `RegSet::empty` eagerly allocated
+/// `word_count(domain_size)` words for every non-entry position, whether
+/// or not that position's missing set ever held a single bit, so a long,
+/// fully-reachable chain that finishes defining every register early and
+/// spends the rest of its length on cheap re-writes (see
+/// `c1756_reachable_full_domain_then_long_redefine_chain_stays_correct`)
+/// still forced `reachable_count * domain_size` bits of storage even
+/// though almost every position's real content, after convergence, is
+/// empty. `RegSet::insert` (see its own doc comment) now grows each set's
+/// storage only as far as the highest bit it has ever actually held, so
+/// an empty position costs nothing beyond its own array slot, and only
+/// positions whose missing set genuinely spans much of the domain cost
+/// anywhere close to the old unconditional `domain_size` width.
 #[cfg(feature = "std")]
 fn compute_missing_sets(
     reachable_count: usize,
@@ -1316,7 +1357,7 @@ fn compute_missing_sets(
             if pos == 0 {
                 entry_missing.clone()
             } else {
-                RegSet::empty(domain_size)
+                RegSet::empty()
             }
         })
         .collect();
@@ -5201,6 +5242,93 @@ mod tests {
         );
     }
 
+    /// #1756 Codex review round 10: round 8's `missing: Vec<RegSet>` array
+    /// eagerly allocated `RegSet::word_count(domain_size)` words for EVERY
+    /// reachable position, including ones whose missing set converges to
+    /// genuinely empty - a signature-less-params function that defines
+    /// every register `r0..DOMAIN_SIZE-1` once, then continues through a
+    /// long fallthrough tail of cheap re-writes to an already-defined
+    /// register (identical adversarial shape to
+    /// `c1756_reachable_full_domain_then_long_redefine_chain_stays_correct`,
+    /// which only checked correctness), forced `reachable_count *
+    /// domain_size` bits of storage even though almost the entire tail's
+    /// real content, after convergence, is empty. Fixed: `RegSet::insert`
+    /// now grows each set's own backing storage lazily, only as far as the
+    /// highest bit it has ever actually held - see the sibling doc
+    /// comments on `RegSet` and `compute_missing_sets` for the full
+    /// argument. This test measures real words allocated directly (Codex's
+    /// established preference for accounting evidence over timing alone),
+    /// not just correctness.
+    #[test]
+    fn c1756_long_redefine_chain_keeps_missing_sets_sparse_not_dense_per_node() {
+        const DOMAIN_SIZE: usize = 4_096;
+        const TAIL_LEN: usize = 100_000;
+        // Position 0 = entry (zero params: everything missing). Positions
+        // 1..=DOMAIN_SIZE each write exactly one, distinct, previously
+        // undefined register (position i writes register i-1), so the
+        // missing set shrinks by one bit per position until, by position
+        // DOMAIN_SIZE, nothing is left missing. Positions
+        // DOMAIN_SIZE+1..reachable_count re-write register 0 (already
+        // defined) TAIL_LEN times - Codex's "long chain of four-byte
+        // writes" tail that grows no new information at all.
+        let reachable_count = 1 + DOMAIN_SIZE + TAIL_LEN;
+
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos + 1 < reachable_count {
+                [Some(pos + 1), None]
+            } else {
+                [None, None]
+            }
+        };
+        let writes_contains = |pos: usize, bit: usize| -> bool {
+            if pos == 0 {
+                false
+            } else if pos <= DOMAIN_SIZE {
+                bit == pos - 1
+            } else {
+                bit == 0
+            }
+        };
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+        );
+
+        // Correctness: early on, most registers are still missing; by the
+        // end of the tail, nothing is.
+        assert!(missing[1].contains(DOMAIN_SIZE - 1));
+        assert!(!missing[reachable_count - 1].contains(0));
+        assert!(!missing[reachable_count - 1].contains(DOMAIN_SIZE - 1));
+
+        // The claim under test: real words allocated must stay far below
+        // what eagerly sizing every position to the full domain would
+        // cost, dominated here by the long, genuinely-empty tail.
+        let dense_baseline_words = reachable_count * RegSet::word_count(DOMAIN_SIZE);
+        let actual_words: usize = missing.iter().map(|s| s.words.len()).sum();
+        assert!(
+            actual_words < dense_baseline_words / 10,
+            "actual_words ({actual_words}) must stay far below the old eager-dense baseline \
+             ({dense_baseline_words}) - most of this chain's tail has a genuinely empty \
+             missing set and must cost close to nothing, not domain_size bits regardless of \
+             content"
+        );
+        // The tail itself (after every register is defined) must be
+        // exactly zero words, not just "smaller than before".
+        let tail_words: usize = missing[DOMAIN_SIZE + 1..]
+            .iter()
+            .map(|s| s.words.len())
+            .sum();
+        assert_eq!(
+            tail_words, 0,
+            "every tail position's missing set is genuinely empty and must allocate zero words"
+        );
+    }
+
     /// Codex review round 1 on PR #1840, second fix: the register domain
     /// must be the actual registers in use (`U`), densely packed, not the
     /// raw `0..=max_register_id` numeric span. This function references
@@ -5236,9 +5364,12 @@ mod tests {
     /// once, then continue through a long fallthrough chain of writes to
     /// registers already defined (the realistic form of "cheap writes" that
     /// doesn't grow `U` further) - and proves it still verifies correctly.
-    /// Fixed by `Rc`-sharing (see `apply_writes`): every node in the long
-    /// tail writes only already-defined bits, so it shares its
-    /// predecessor's `Rc<RegSet>` instead of allocating its own.
+    /// (The original fix here was `Rc`-sharing over a MUST/intersection
+    /// formulation; round 8 replaced that formulation entirely with the
+    /// MAY-missing/union dual, and round 10 separately bounds this exact
+    /// shape's memory in
+    /// `c1756_long_redefine_chain_keeps_missing_sets_sparse_not_dense_per_node`,
+    /// so this test now only asserts the correctness half.)
     #[test]
     fn c1756_reachable_full_domain_then_long_redefine_chain_stays_correct() {
         let mut instrs = Vec::new();
