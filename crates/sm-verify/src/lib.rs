@@ -21,6 +21,67 @@ pub mod hello_pending_admission;
 #[cfg(feature = "std")]
 pub mod hello_real_semcode_admission;
 
+/// #1756 Codex review round 18: a `System`-delegating global allocator
+/// that also counts allocation calls per THREAD, used only by `cfg(test)`
+/// to give `c1756_structural_decode_never_allocates_operand_storage_for_
+/// unreachable_padding` genuine allocator-instrumentation evidence (per
+/// the review's own preference for "instrument the operand collector/sink
+/// in tests" over wall-clock timing alone) rather than a wall-clock-only
+/// proxy. `thread_local!` counting - not a shared atomic - is what makes
+/// this safe under `cargo test`'s default parallel test execution: each
+/// test thread only ever observes allocations its OWN code caused, never
+/// another concurrently-running test's. Behaves identically to `System`
+/// in every other respect, so it does not change any other test's
+/// observable behavior - only adds a per-thread counter alongside every
+/// `alloc`/`realloc` call. Never active outside test builds: ordinary
+/// library consumers of this crate see no allocator override at all.
+// Kept flat at crate-root scope, with no `pub` modifier at all (rather than
+// a nested `mod` with `pub(crate)` items) - Rust's default privacy already
+// makes a crate-root item visible to every descendant module, including
+// `mod tests` below, and the repository's own public-API-surface snapshot
+// test (`tests/public_api_contracts.rs`) flags any line starting with
+// `pub`, regardless of restricted visibility like `pub(crate)`, as contract
+// drift - these items are genuinely never part of this crate's public API.
+#[cfg(all(test, feature = "std"))]
+use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(all(test, feature = "std"))]
+use std::cell::Cell;
+
+#[cfg(all(test, feature = "std"))]
+thread_local! {
+    static ALLOC_CALLS: Cell<u64> = const { Cell::new(0) };
+}
+
+#[cfg(all(test, feature = "std"))]
+struct CountingAllocator;
+
+// SAFETY: every method delegates directly to `System`, which already
+// upholds `GlobalAlloc`'s contract; the only addition is a same-thread,
+// non-reentrant counter increment around each call.
+#[cfg(all(test, feature = "std"))]
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOC_CALLS.with(|c| c.set(c.get() + 1));
+        unsafe { System.alloc(layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        ALLOC_CALLS.with(|c| c.set(c.get() + 1));
+        unsafe { System.realloc(ptr, layout, new_size) }
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+fn alloc_tracking_calls() -> u64 {
+    ALLOC_CALLS.with(|c| c.get())
+}
+
+#[cfg(all(test, feature = "std"))]
+#[global_allocator]
+static COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator;
+
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationCode {
@@ -73,6 +134,54 @@ pub enum VerificationCode {
     /// runtime family statically (registers are untyped storage), so family
     /// mismatches are rejected by the VM before `push_frame` instead.
     CallArgumentCountMismatch,
+    /// A register read is reachable from function entry on some execution
+    /// path where that register has not been definitely written (#1756 /
+    /// FA-07-016). Distinct from `InvalidRegisterReference`: the register
+    /// number is in range and within the configured quota - what's missing
+    /// is a proof that every incoming path defines it before this read.
+    /// Only checked for a function carrying a canonical `SIG0` signature
+    /// (`SEMCODE_SIGNATURE_MIN_REVISION`+); a signature-less artifact has no
+    /// sound `IN[entry]` to prove against and is unaffected by this code.
+    UndefinedRegisterRead,
+    /// The definite-register-assignment analysis's (#1756 / FA-07-016)
+    /// peak logical analysis-state requirement for one function exceeded
+    /// `VerificationLimits::max_state_words` - a deterministic, verifier-
+    /// OWNED resource bound checked via `checked` arithmetic BEFORE the
+    /// state it accounts for is ever allocated (overflow itself counts
+    /// as exceeding it). That requirement is the SUM of several
+    /// independently-scaling components - raw reachable-node
+    /// representation, leader-compressed dense dataflow state, and fixed
+    /// leader/structural/worklist overhead - so any one of them can
+    /// trigger this code on its own (for example, a genuinely branch-
+    /// free reachable chain can reject on raw-node cost alone while its
+    /// leader-compressed state stays negligible). See `VerificationLimits
+    /// ::max_state_words`'s own doc comment, `check_raw_node_state_
+    /// budget`'s and `check_analysis_state_budget`'s doc comments, and
+    /// `docs/spec/verifier.md` for the exact enforced formula - not
+    /// duplicated here to avoid a second copy that can drift from the
+    /// enforced one. This is a genuinely different resource domain than
+    /// `RuntimeQuotas` (#1751: execution resources and static-
+    /// verification resources are distinct and must not be conflated)
+    /// and different from `ResourceLimitExceeded` above (which reports
+    /// pre-existing decode/symbol-table budgets, not this analysis's own
+    /// working state). Exceeding this means the artifact could not be
+    /// PROVEN within the selected verification resource envelope - it
+    /// does not mean the program's semantics are actually invalid, and
+    /// admission still fails closed regardless.
+    AnalysisStateLimitExceeded,
+    /// #1756 Codex review round 13 (owner decision): the same analysis
+    /// pass's own deterministic, machine-independent work-unit count
+    /// (see `compute_missing_sets`'s work-unit accounting - one unit per
+    /// register checked at entry seeding, or per missing-bit delivery
+    /// dequeued from the worklist) exceeded
+    /// `VerificationLimits::max_work_units` before the dataflow fixed
+    /// point converged. Distinct from `AnalysisStateLimitExceeded`: this
+    /// can fire even when the state budget was never in danger, if
+    /// reaching convergence itself takes more propagation steps than the
+    /// configured envelope allows (a branch-dense CFG with a slowly-
+    /// narrowing register domain - see the round-13 finding). Never
+    /// inferred from wall-clock time, allocator behavior, or CPU cycles.
+    AnalysisWorkLimitExceeded,
 }
 
 #[cfg(feature = "std")]
@@ -104,6 +213,220 @@ pub struct VerifiedFunction {
 pub struct VerifiedProgram {
     pub header: SemcodeHeaderSpec,
     pub functions: Vec<VerifiedFunction>,
+}
+
+/// #1756 Codex review round 13 (owner decision): a deterministic,
+/// verifier-OWNED resource envelope for static analysis passes such as
+/// definite-register-assignment (#1756 / FA-07-016) - entirely distinct
+/// from `RuntimeQuotas` (`sm_runtime_core` - execution resources only,
+/// see #1751) and from the pre-existing decode/symbol-table budgets
+/// reported via `VerificationCode::ResourceLimitExceeded`. There are
+/// three distinct resource domains - artifact/decode resources,
+/// verifier-analysis resources, runtime-execution resources - and they
+/// must never be conflated (see `docs/spec/verifier.md`).
+///
+/// `verify_semcode_token`/`verify_semcode_token_with_quotas`/
+/// `verify_semcode` (the convenience entrypoints) admit against
+/// `VerificationLimits::default_profile()`; use
+/// `verify_semcode_token_with_quotas_and_limits` to admit against an
+/// explicit profile instead. No verifier limit here is ever inferred
+/// from `RuntimeQuotas::max_steps`/`max_calls` or any other execution
+/// quota.
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerificationLimits {
+    /// Upper bound, in canonical 8-byte logical words, on the definite-
+    /// register-assignment analysis's PEAK simultaneously-live verifier-
+    /// analysis state for one function - not process RSS or an
+    /// allocator-exact byte count, and not cumulative across an
+    /// artifact's functions (see `max_work_units` below for the
+    /// genuinely cumulative counterpart).
+    ///
+    /// As of round 21 of #1756's own review history, this covers BOTH:
+    /// raw reachable-node representation (`reachable_indices`, `reads_
+    /// flat`/`writes_flat` and their offset tables, `is_leader`,
+    /// `compute_leaders`'s own classification-state scratch array - all
+    /// scaling with `reachable_count` and the TOTAL ENCODED BYTES OF
+    /// REACHABLE INSTRUCTIONS specifically (`reachable_instruction_
+    /// bytes`) - deliberately NOT the total structural instruction-
+    /// section length, which may also include structurally valid but
+    /// unreachable trailing code this analysis never decodes (round 17's
+    /// correction) - checked by `check_raw_node_state_budget` BEFORE any
+    /// of them is allocated), and leader-compressed
+    /// dense dataflow state (`chain_killed`/`missing` and their headers,
+    /// `chain_targets`, `leader_positions`, the worklist stack's proven
+    /// peak - scaling with `leader_count` and `ceil(register_domain_
+    /// size / 64)`, checked by `check_analysis_state_budget`). Every
+    /// logical size is a canonical, MACHINE-INDEPENDENT constant, never
+    /// a host's actual `size_of::<T>()`, so admission is deterministic
+    /// across hosts regardless of target pointer width. See `check_raw_
+    /// node_state_budget`'s and `check_analysis_state_budget`'s own doc
+    /// comments for the full structural inventory and exact formula.
+    /// Every accounting step uses `checked` arithmetic; overflow anywhere
+    /// counts as exceeding this limit, since there is no finite word
+    /// count to compare against in that case.
+    pub max_state_words: usize,
+    /// Upper bound on the analysis's own deterministic work-unit count
+    /// (see `compute_missing_sets`'s work-unit accounting), never
+    /// inferred from wall-clock time, allocator behavior, or CPU cycles:
+    /// a purely combinatorial count of meaningful lattice-propagation
+    /// steps, machine-independent by construction.
+    pub max_work_units: usize,
+}
+
+#[cfg(feature = "std")]
+impl VerificationLimits {
+    /// #1756 Codex review round 13: CANDIDATE default profile pending
+    /// explicit owner sign-off - not a frozen release value. Selected
+    /// from the benchmark table in round 13's PR reply/commit message
+    /// (ordinary compiler-generated programs, the largest existing
+    /// golden fixtures, the #1756 adversarial stress fixtures, and
+    /// synthetic leader-count sweeps at register domains of 64, 4,096,
+    /// and 8,192 - `max_registers`'s own ceiling, so `domain_size` can
+    /// never legitimately exceed it).
+    ///
+    /// **Re-validated in round 14** after two accounting corrections
+    /// changed what these same numbers actually admit (see the round-14
+    /// PR reply/commit message for the updated table): `max_state_words`
+    /// now bounds `(2*leader_count + 1) * word_count(domain_size)` (P2 -
+    /// `chain_killed` and `missing` are simultaneously live, not just
+    /// one array), roughly HALVING the genuine-leader count this same
+    /// number admits at any given `domain_size` versus round 13's
+    /// formula - at `domain_size = 8,192` (the largest legal domain),
+    /// down from ~65,536 to ~32,767 genuine leaders, still several
+    /// orders of magnitude above every ordinary/golden/already-committed
+    /// -adversarial shape measured (at most tens of thousands of state
+    /// words) and comfortably above the round-13 stress fixture's own
+    /// ~2.56M words at that same domain size. `max_work_units` now
+    /// bounds the WHOLE ARTIFACT (P1), not one function - a many-
+    /// function program sharing this one budget is a materially
+    /// stricter (more protective) constraint than round 13's per-
+    /// function reset ever was, and remains comfortably above realistic
+    /// multi-function programs (thousands of ordinary functions cost
+    /// only millions of units combined) while now correctly bounding the
+    /// "many expensive functions in one artifact" shape P1 exists to
+    /// close. Kept UNCHANGED numerically pending owner confirmation - see
+    /// the round-14 reply for the honest re-validation against both
+    /// corrected formulas rather than a silent bump to keep old stress
+    /// tests passing.
+    ///
+    /// **Re-validated again in round 15** after `max_state_words` gained
+    /// a third accounting term: fixed per-leader/stack structural
+    /// overhead (`check_analysis_state_budget`'s own doc comment has the
+    /// full inventory), closing a gap that specifically hurt LOW-
+    /// `domain_size`, HIGH-`leader_count` artifacts - round 14's dense-
+    /// payload-only formula scaled with `domain_size`, so a `domain_size
+    /// = 1` artifact could drive `leader_count` into the millions before
+    /// that term alone objected, even though each leader still costs
+    /// real, fixed bytes regardless of how few registers are live.
+    /// `max_state_words = 8_388_608` (UNCHANGED numerically) now admits,
+    /// exactly (`required_words <= max_state_words` at the reported
+    /// `leader_count`, `Err` one leader past it):
+    ///
+    /// | `domain_size` | max genuine `leader_count` |
+    /// |---|---|
+    /// | 1 | 559,240 |
+    /// | 64 | 559,223 |
+    /// | 4,096 | 59,377 |
+    /// | 8,192 (largest legal) | 31,062 |
+    ///
+    /// Still several orders of magnitude above every ordinary/golden/
+    /// already-committed-adversarial shape measured (at most tens of
+    /// thousands of state words), and the `domain_size = 1` ceiling in
+    /// particular is now a REAL, meaningful bound rather than an
+    /// effectively-unbounded one - round 14's formula alone would have
+    /// admitted `leader_count` up to ~4.19 million at `domain_size = 1`,
+    /// about 7.5x more than round 15's corrected 559,240, matching the
+    /// severity of the gap this round closes. Kept numerically UNCHANGED
+    /// again - see the round-15 reply for the full re-derivation.
+    ///
+    /// **Re-validated again in round 16** after `max_state_words` gained
+    /// a fourth accounting term: raw reachable-node representation
+    /// (`check_raw_node_state_budget`'s own doc comment has the full
+    /// inventory), closing a gap round 15 explicitly, but incorrectly,
+    /// excluded - a genuinely branch-FREE reachable chain has `leader_
+    /// count = 1` regardless of length, so rounds 13-15's leader/domain-
+    /// scaled formula alone charged almost nothing for it no matter how
+    /// large `reachable_count` grew. `max_state_words = 8_388_608`
+    /// (UNCHANGED numerically) now admits, exactly:
+    ///
+    /// | shape | max genuine size |
+    /// |---|---|
+    /// | long-linear (no branches), `domain_size = 1` | 2,684,347 reachable nodes |
+    /// | genuine diamonds, `domain_size = 1` | 453,437 leaders |
+    /// | genuine diamonds, `domain_size = 64` | 453,423 leaders |
+    /// | genuine diamonds, `domain_size = 4,096` | 57,937 leaders |
+    /// | genuine diamonds, `domain_size = 8,192` (largest legal) | 30,663 leaders |
+    ///
+    /// (the long-linear row has no meaningful "leader_count" - it stays 1
+    /// regardless of length, so its own ceiling is reported in reachable
+    /// nodes instead, the dimension raw-node accounting actually bounds).
+    /// At `max_state_words * 8 = 67,108,864` logical bytes (64 MiB) worst
+    /// case. Every genuine-diamond ceiling above is LOWER than round 15's
+    /// corresponding number (e.g. `domain_size = 8,192`: 30,663 versus
+    /// round 15's 31,062) since raw-node cost now competes for the same
+    /// budget as leader-state cost, for the SAME reason `domain_size = 1`
+    /// dropped from round 14's ~4.19 million to round 15's 559,240 - this
+    /// is the intended, honest effect of closing a real gap, not
+    /// regression. All ceilings remain several orders of magnitude above
+    /// every ordinary/golden/already-committed-adversarial shape measured
+    /// (at most tens of thousands of state words). Kept numerically
+    /// UNCHANGED again - see the round-16 reply for the full re-
+    /// derivation and the exact relationships used to compute this table.
+    ///
+    /// **Re-checked in round 17** after `raw_words` was corrected to
+    /// scale with `reachable_instruction_bytes` (total encoded bytes of
+    /// REACHABLE instructions only) rather than `instr_len` (the total
+    /// structural instruction-section length, unreachable padding
+    /// included) - every construction in the table above is fully
+    /// reachable, with zero unreachable padding, so `reachable_
+    /// instruction_bytes == instr_len` exactly for each of them; this
+    /// table's numbers are therefore UNCHANGED by round 17, confirmed by
+    /// the full c1756 suite continuing to pass with the SAME hardcoded
+    /// exact numbers after the round-17 fix, with no test needing
+    /// recomputation.
+    ///
+    /// **Re-validated again in round 21** after `raw_words` gained a
+    /// fifth accounting term: `compute_leaders`'s own consolidated
+    /// classification-state scratch array (`check_raw_node_state_
+    /// budget`'s own doc comment has the full inventory), one `u8` per
+    /// reachable node, simultaneously live with `is_leader` while
+    /// `is_leader` is being built. `max_state_words = 8_388_608`
+    /// (UNCHANGED numerically) now admits, exactly (measured directly
+    /// against `check_raw_node_state_budget`/`check_analysis_state_
+    /// budget`, not hand-derived - see the round-21 PR reply for the
+    /// calibration method):
+    ///
+    /// | shape | max genuine size |
+    /// |---|---|
+    /// | long-linear (no branches), `domain_size = 1` | 2,581,103 reachable nodes |
+    /// | genuine diamonds, `domain_size = 1` | 450,393 leaders |
+    /// | genuine diamonds, `domain_size = 64` | 450,379 leaders |
+    /// | genuine diamonds, `domain_size = 4,096` | 57,887 leaders |
+    /// | genuine diamonds, `domain_size = 8,192` (largest legal) | 30,649 leaders |
+    ///
+    /// Every ceiling above is LOWER than round 16/17's corresponding
+    /// number (e.g. `domain_size = 8,192`: 30,649 versus 30,663) since
+    /// the new classifier-scratch term now also competes for the same
+    /// budget - the same kind of honest, intended tightening round 16
+    /// itself produced over round 15. Still several orders of magnitude
+    /// above every ordinary/golden/already-committed-adversarial shape
+    /// measured (at most tens of thousands of state words). Kept
+    /// numerically UNCHANGED again - see the round-21 reply for the full
+    /// re-derivation.
+    pub const fn default_profile() -> Self {
+        Self {
+            max_state_words: 8_388_608, // 2^23 - logical verifier-analysis words, worst case
+            max_work_units: 536_870_912, // 2^29 - ~537M lattice-propagation steps, whole artifact
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Default for VerificationLimits {
+    fn default() -> Self {
+        Self::default_profile()
+    }
 }
 
 #[cfg(feature = "std")]
@@ -287,12 +610,51 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
 /// tokens whose register/symbol usage exceeds `VerifiedLocal`'s budget but
 /// stays within its own. The returned token's admission proof reflects only
 /// the quotas passed here - it says nothing about any other profile.
+///
+/// #1756 Codex review round 13 (owner decision): admits against
+/// `VerificationLimits::default_profile()` - use
+/// `verify_semcode_token_with_quotas_and_limits` to admit against an
+/// explicit verification-resource profile instead. `RuntimeQuotas` and
+/// `VerificationLimits` are deliberately separate parameters, not
+/// combined into one profile: they govern different resource domains
+/// (execution vs. static-verification, see `VerificationLimits`'s own
+/// doc comment) and must not be conflated.
 #[cfg(feature = "std")]
 pub fn verify_semcode_token_with_quotas(
     bytes: &[u8],
     quotas: RuntimeQuotas,
 ) -> Result<VerifiedSemCode<'_>, RejectReport> {
+    verify_semcode_token_with_quotas_and_limits(
+        bytes,
+        quotas,
+        VerificationLimits::default_profile(),
+    )
+}
+
+/// Admission gate for SemCode bytes against an explicit quota profile AND
+/// an explicit verification-resource profile.
+///
+/// #1756 Codex review round 13 (owner decision): the quota-aware entry
+/// point that binds the exact `VerificationLimits` admission is checked
+/// against, for callers that need control over the definite-register-
+/// assignment analysis's own resource envelope (`max_state_words`,
+/// `max_work_units`) rather than the default profile
+/// `verify_semcode_token_with_quotas` uses. `quotas` and `limits` remain
+/// two separate parameters on purpose - see `VerificationLimits`'s own
+/// doc comment for why they must not be merged into one profile.
+#[cfg(feature = "std")]
+pub fn verify_semcode_token_with_quotas_and_limits(
+    bytes: &[u8],
+    quotas: RuntimeQuotas,
+    limits: VerificationLimits,
+) -> Result<VerifiedSemCode<'_>, RejectReport> {
     let mut diagnostics = Vec::new();
+    // #1756 Codex review round 14 (owner clarification): `max_work_units`
+    // is the budget for this ENTIRE artifact verification call, not a
+    // fresh allowance per function - created ONCE here and threaded by
+    // `&mut` reference into every signature-bearing function's analysis
+    // below, never recreated or reset. See `AnalysisWorkMeter`.
+    let mut work_meter = AnalysisWorkMeter::new(limits.max_work_units);
 
     let (header, decoded_functions) =
         match sm_format::semcode_decode::decode_semcode_envelope(bytes) {
@@ -388,12 +750,31 @@ pub fn verify_semcode_token_with_quotas(
             break;
         }
 
-        match verify_function_code(env, &header, &quotas) {
+        match verify_function_code(env, &header, &quotas, &limits, &mut work_meter) {
             Ok(function) => {
                 functions.push(function.verified.clone());
                 pending_functions.push(function);
             }
-            Err(report) => diagnostics.extend(report.diagnostics),
+            Err(report) => {
+                // #1756 Codex review round 14 (owner decision): resource
+                // exhaustion means the proof cannot continue inside the
+                // selected verifier resource envelope, so admission
+                // terminates fail-closed immediately here - it must NOT
+                // continue verifying further functions merely to surface
+                // more diagnostics (every additional function would only
+                // spend MORE of an already-exhausted shared budget). Every
+                // OTHER per-function rejection reason keeps the existing,
+                // deliberate "collect every function's diagnostics in one
+                // pass" behavior unchanged.
+                let work_exhausted = report
+                    .diagnostics
+                    .iter()
+                    .any(|d| d.code == VerificationCode::AnalysisWorkLimitExceeded);
+                diagnostics.extend(report.diagnostics);
+                if work_exhausted {
+                    return Err(RejectReport { diagnostics });
+                }
+            }
         }
     }
 
@@ -569,7 +950,18 @@ fn instruction_stream_parses_fully(name: &str, code: &[u8], start: usize) -> boo
         let Ok(opcode) = Opcode::from_byte(raw_opcode) else {
             return false;
         };
-        if decode_operands(name, code, &mut cursor, offset, opcode, false).is_err() {
+        if decode_operands(
+            name,
+            code,
+            &mut cursor,
+            offset,
+            opcode,
+            false,
+            &mut NoCollect,
+            &mut NoCollect,
+        )
+        .is_err()
+        {
             return false;
         }
     }
@@ -581,6 +973,8 @@ fn verify_function_code(
     env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
     header: &SemcodeHeaderSpec,
     quotas: &RuntimeQuotas,
+    limits: &VerificationLimits,
+    work_meter: &mut AnalysisWorkMeter,
 ) -> Result<PendingVerifiedFunction, RejectReport> {
     let name = env.name.as_str();
 
@@ -685,9 +1079,33 @@ fn verify_function_code(
                 err.to_string(),
             ),
         })?;
-        let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
+        // #1756 Codex review round 21: `MetadataCollector` appends
+        // directly into these outer `jump_targets`/`string_refs`/
+        // `call_argcs` accumulators - no per-instruction `Vec` is built
+        // and then `.extend()`-ed in and dropped, mirroring `FlatSink`'s
+        // own "write straight into the final destination" design.
+        // `jump_targets_before` lets this loop recover "this specific
+        // instruction's own jump target" (at most one is ever pushed per
+        // instruction - only `Jmp`/`JmpIf` ever call `jump_target`, each
+        // exactly once) without `OperandRefs` needing to carry it.
+        let jump_targets_before = jump_targets.len();
+        let mut metadata_collector = MetadataCollector {
+            jump_targets: &mut jump_targets,
+            string_refs: &mut string_refs,
+            call_argcs: &mut call_argcs,
+        };
+        let refs = decode_operands(
+            name,
+            code,
+            &mut cursor,
+            offset,
+            opcode,
+            true,
+            &mut NoCollect,
+            &mut metadata_collector,
+        )?;
         let next_offset = cursor - instr_start;
-        let jump_target = refs.jump_targets.first().copied();
+        let jump_target = jump_targets.get(jump_targets_before).copied();
         let successors = match (opcode, jump_target) {
             (Opcode::Ret, _) => InstructionSuccessors::None,
             (Opcode::Jmp, Some(target)) => InstructionSuccessors::One(target),
@@ -716,9 +1134,6 @@ fn verify_function_code(
                 ),
             ));
         }
-        jump_targets.extend(refs.jump_targets);
-        string_refs.extend(refs.string_refs);
-        call_argcs.extend(refs.call_argcs);
         used_caps |= refs.required_capabilities;
         max_register = match (max_register, refs.max_register) {
             (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
@@ -801,7 +1216,8 @@ fn verify_function_code(
         }
     }
 
-    verify_reachable_control_flow(name, instr_len, &instr_starts, &instruction_successors)?;
+    let reachable_offsets =
+        verify_reachable_control_flow(name, instr_len, &instr_starts, &instruction_successors)?;
 
     // #1773 (FA-09-005): argc, keyed by the Call instruction's own offset -
     // only "call target" entries (real `Opcode::Call` sites) ever have an
@@ -849,6 +1265,51 @@ fn verify_function_code(
         }
     }
 
+    // #1756 (FA-07-016): forward MUST definite-assignment proof - every
+    // reachable register read must be definitely defined on every incoming
+    // execution path, not merely in range. Runs only when this function has
+    // a canonical `SIG0` signature (`env.signature.is_some()`): a pre-#1773
+    // artifact's header predates canonical per-function arity metadata, so
+    // `IN[entry]` cannot be soundly determined for it - caller-inferred or
+    // convention-inferred entry definitions are exactly the unsound
+    // heuristic #1756's own research explicitly rejected (see the issue's
+    // Phase B checkpoint). This preserves pre-#1756 admission behavior for
+    // signature-less artifacts exactly, mirroring how #1773's own
+    // `validate_call_arguments`/arity check already treats `signature: None`
+    // as "nothing new to enforce" - not a new decision, the same one
+    // continued.
+    if let Some(signature) = env.signature.as_ref() {
+        let entry_param_count = signature.families.len();
+        // #1756: the domain must be bounded by the already-established
+        // register quota before any allocation sized by it - an
+        // attacker-controlled SIG0 parameter count (bounded only by the
+        // decoder's own MAX_SIGNATURE_PARAMETERS_PER_FUNCTION, independent
+        // of this verification call's actual `quotas.max_registers`) must
+        // not be allowed to size a per-node bitset on its own.
+        if entry_param_count > quotas.max_registers {
+            return Err(reject_one(
+                name,
+                VerificationCode::InvalidRegisterReference,
+                0,
+                format!(
+                    "canonical signature declares {} parameter register(s), exceeding the register budget of {}",
+                    entry_param_count, quotas.max_registers
+                ),
+            ));
+        }
+        prove_definite_register_assignment(
+            name,
+            code,
+            instr_start,
+            &instr_starts,
+            &instruction_successors,
+            &reachable_offsets,
+            entry_param_count,
+            limits,
+            work_meter,
+        )?;
+    }
+
     Ok(PendingVerifiedFunction {
         verified: VerifiedFunction {
             name: name.to_string(),
@@ -868,13 +1329,17 @@ enum InstructionSuccessors {
     Two(usize, usize),
 }
 
+/// Returns the set of reachable instruction offsets on success. #1756
+/// (FA-07-016) reuses this exact return value as the authoritative
+/// reachable-node set for its definite-assignment pass, rather than
+/// re-deriving reachability with a second traversal.
 #[cfg(feature = "std")]
 fn verify_reachable_control_flow(
     function: &str,
     instr_len: usize,
     instr_starts: &[usize],
     instruction_successors: &[InstructionSuccessors],
-) -> Result<(), RejectReport> {
+) -> Result<HashSet<usize>, RejectReport> {
     let mut pending = vec![0usize];
     let mut reachable = HashSet::new();
 
@@ -906,6 +1371,1686 @@ fn verify_reachable_control_flow(
                 pending.push(*second);
             }
         }
+    }
+
+    Ok(reachable)
+}
+
+/// #1756 (FA-07-016): a compact fixed-size bitset over register numbers
+/// `0..domain_size`. `domain_size` is always bounded by the register-range
+/// quota already enforced before this pass runs (see the caller), so this
+/// never allocates from an attacker-controlled unbounded register id.
+///
+/// #1756 Codex review round 8: this now represents the MAY-MISSING dataflow
+/// lattice element (a register set under UNION meet), not the original
+/// MUST-DEFINED one (intersection meet) - see `compute_missing_sets`'s doc
+/// comment for the full duality derivation. `RegSet` itself is an
+/// unopinionated bitset either way; only the meet operation used on it (now
+/// plain per-bit `insert`, driving the worklist in `compute_missing_sets`,
+/// rather than a whole-set `intersect_with`) and its initialization
+/// (BOTTOM=empty for non-entry nodes, the dual of the old TOP=full rule)
+/// changed.
+///
+/// #1756 Codex review round 10: `empty()` no longer eagerly allocates
+/// `word_count(domain_size)` words up front - it starts with zero words,
+/// and `insert` grows the backing `Vec<u64>` only as far as the highest
+/// bit index this PARTICULAR set has ever actually held (never past
+/// `word_count(domain_size)`, since every inserted `reg` is already
+/// guaranteed `< domain_size` by the invariant above). A set that never
+/// receives a single bit costs nothing beyond its own header; a set whose
+/// content genuinely spans the full domain still costs the same as before.
+/// This is what lets `compute_missing_sets` allocate one `RegSet` per
+/// reachable position (needed regardless - see its own doc comment)
+/// without that array's per-entry cost being `domain_size`-wide
+/// unconditionally, for positions whose actual missing set is small or
+/// empty.
+#[cfg(feature = "std")]
+#[derive(Clone)]
+struct RegSet {
+    words: Vec<u64>,
+}
+
+#[cfg(feature = "std")]
+impl RegSet {
+    fn word_count(domain_size: usize) -> usize {
+        domain_size.saturating_add(63) / 64
+    }
+
+    /// Every register in the domain is set. Used only to compute `entry`'s
+    /// fixed MISSING set via complement (`full() `then removing
+    /// `ENTRY_DEFS` bits) - no node is ever initialized to this directly
+    /// under the round-8 MAY-missing formulation (see `compute_missing_
+    /// sets`'s doc comment for why BOTTOM/empty, not this, is every
+    /// non-entry node's correct starting point).
+    fn full(domain_size: usize) -> Self {
+        let mut words = vec![u64::MAX; Self::word_count(domain_size)];
+        let rem = domain_size % 64;
+        if rem != 0 {
+            if let Some(last) = words.last_mut() {
+                *last &= (1u64 << rem) - 1;
+            }
+        }
+        RegSet { words }
+    }
+
+    /// #1756 Codex review round 10: starts genuinely empty (zero words,
+    /// zero heap allocation) rather than eagerly pre-sized to
+    /// `word_count(domain_size)` - `insert` grows the backing storage on
+    /// demand instead, so callers no longer need `domain_size` here.
+    fn empty() -> Self {
+        RegSet { words: Vec::new() }
+    }
+
+    fn contains(&self, reg: usize) -> bool {
+        let word = reg / 64;
+        let bit = reg % 64;
+        self.words.get(word).is_some_and(|w| (w >> bit) & 1 != 0)
+    }
+
+    /// Grows the backing storage to cover `reg` if this set has never held
+    /// a bit that high before (#1756 Codex review round 10) - safe because
+    /// every `reg` this pass ever inserts is already guaranteed
+    /// `< domain_size` by the struct-level invariant, so this can never
+    /// grow past `word_count(domain_size)` regardless of call pattern.
+    fn insert(&mut self, reg: usize) {
+        let word = reg / 64;
+        let bit = reg % 64;
+        if self.words.len() <= word {
+            self.words.resize(word + 1, 0);
+        }
+        self.words[word] |= 1u64 << bit;
+    }
+
+    fn remove(&mut self, reg: usize) {
+        let word = reg / 64;
+        let bit = reg % 64;
+        if let Some(w) = self.words.get_mut(word) {
+            *w &= !(1u64 << bit);
+        }
+    }
+}
+
+/// #1756 (FA-07-016): forward MUST dataflow proving every reachable register
+/// read is definitely defined on every incoming execution path (meet =
+/// intersection). Reuses the verifier's own successor relation
+/// (`instruction_successors`) to build predecessors, and its own computed
+/// reachable-offset set (`reachable_offsets`, from
+/// `verify_reachable_control_flow`) to decide which nodes this proof
+/// actually applies to - no second CFG/branch-target engine, no
+/// re-derivation of reachability.
+///
+/// `entry_param_count` registers `0..entry_param_count` are `IN[entry]`
+/// (`ENTRY_DEFS`, from the caller's canonical `SIG0` signature) - the only
+/// registers defined at function entry, regardless of numeric range or
+/// register-storage capacity. Every other node initializes to TOP
+/// (`RegSet::full`), per the non-negotiable loop-correctness rule.
+///
+/// Unreachable nodes are never allocated per-node dataflow state at all (see
+/// the Codex-review note below): an unreachable predecessor's contribution
+/// to any meet would always be TOP (the identity element for intersection),
+/// so an edge from an unreachable node is simply never recorded rather than
+/// being represented and then ignored. This preserves the verifier's
+/// existing, separate policy on structurally valid-but-unreachable code
+/// untouched - this pass only judges reachable reads.
+///
+/// Codex review round 1 on this PR (#1840) found two independent
+/// amplification sources in an earlier revision, fixed together here:
+///
+/// 1. Allocating one `RegSet` per node for every structurally decoded
+///    instruction, reachable or not, let a structurally valid artifact (an
+///    entry `RET` followed by megabytes of never-executed trailing
+///    instructions, still legal per the verifier's reachable-control-flow
+///    policy) force memory proportional to total instruction count, with no
+///    existing quota bounding that count. Fixed: dataflow state below is
+///    allocated and indexed only for reachable nodes (by position within
+///    `reachable_indices`, not by raw instruction index) - the same
+///    reachable set the existing verifier already walks for its own
+///    reachability BFS, not a new, larger one.
+/// 2. Sizing the register domain from the raw numeric span
+///    (`0..=max_register_id`) rather than the registers actually in use
+///    meant a single reference to a high register number (still legal and
+///    in-budget) forced a full-width bitset even when only one or two
+///    registers mattered - a program referencing only `{r0, r4095}` needs a
+///    domain of size 2, not 4096. Fixed: the register universe `U` below is
+///    built densely, from the registers `ENTRY_DEFS` and reachable
+///    instructions actually reference, each remapped to a compact index;
+///    diagnostics still report the original raw register identity.
+///
+/// Both fixes only change how densely this pass's own bounded state is
+/// packed - `U`'s size can never exceed the pre-existing register-budget
+/// quota (every register `U` collects was already proven in-range by that
+/// check before this function runs), so neither fix relaxes or replaces
+/// that quota; it remains the only source of truth for the upper bound.
+///
+/// Computes the two quantities that bound `prove_definite_register_
+/// assignment`'s own memory use: the reachable node index set (ascending,
+/// position 0 = function entry), the reachable nodes' own reads/writes (also
+/// position-indexed), and the dense register universe `U` (ascending,
+/// deduplicated). Factored out from that function so tests can assert
+/// directly on the returned lengths - the exact per-node and per-register-
+/// domain multipliers - rather than relying only on timing to demonstrate
+/// the Codex-review fixes above.
+///
+/// `reads_writes_of` is called exactly once per REACHABLE raw instruction
+/// index, never for an unreachable one (Codex review round 3 on this PR,
+/// #1840: the prior revision built dense `instr_reads`/`instr_writes: Vec<
+/// Vec<u16>>` for every structurally decoded instruction in the caller,
+/// before reachability was even known - a `Vec<u16>` costs 24 bytes even
+/// empty, so millions of unreachable instructions cost hundreds of MB for
+/// these two arrays alone. The real caller's closure re-decodes just that
+/// one reachable instruction's operands on demand via `decode_operands`;
+/// tests can supply a trivial closure over a small, hand-built map instead).
+///
+/// Codex review round 4 on this PR: even after round 3 removed the
+/// unreachable-instruction cost, storing each reachable node's reads/writes
+/// as its OWN `Vec<u16>` (one 24-byte header plus a separate heap
+/// allocation, per node, per array) still meant a large fully REACHABLE
+/// straight-line stream (e.g. millions of `LOAD_BOOL r0` in a row, no
+/// branching, no unreachable padding at all) cost dozens of bytes of
+/// heap-container overhead per instruction. Fixed: reads and writes are now
+/// returned CSR-style - one flat `Vec<u16>` holding every reachable
+/// instruction's registers back to back, plus an offset table
+/// (`reads_offsets`/`writes_offsets`, `u32` per node, `reachable_count + 1`
+/// entries) marking each node's slice boundaries - a single allocation per
+/// array instead of one per node. Use `csr_slice` to read a given
+/// position's slice back out.
+///
+/// Codex review round 18: `reads_writes_of` no longer RETURNS a `(Vec<u16>,
+/// Vec<u16>)` pair per reachable instruction - it now takes an `&mut dyn
+/// OperandSink` and emits directly into it. `FlatSink` (below) is that
+/// sink here, appending straight into this function's own `reads_flat`/
+/// `writes_flat` - the temporary per-instruction `Vec<u16>` pair round 4
+/// already eliminated from the FLAT ARRAYS' own representation existed one
+/// layer further out, in the closure boundary itself (build a pair, hand
+/// it back, `extend_from_slice` it in, drop it) - this removes that too,
+/// so a reachable instruction's registers go straight from `decode_
+/// operands`'s match arms into `reads_flat`/`writes_flat` with no
+/// intermediate collection at all.
+///
+/// Returns `(reachable_indices, reads_flat, reads_offsets, writes_flat,
+/// writes_offsets, universe)`.
+#[cfg(feature = "std")]
+type DataflowDomainAccounting = (Vec<usize>, Vec<u16>, Vec<u32>, Vec<u16>, Vec<u32>, Vec<u16>);
+
+/// #1756 Codex review round 18: `dataflow_domain_accounting`'s own sink -
+/// appends each emitted register straight into the CALLER's `reads_flat`/
+/// `writes_flat` CSR buffers, so a reachable instruction's operands never
+/// pass through any intermediate `Vec<u16>` on their way from `decode_
+/// operands` into the flat arrays this pass ultimately needs.
+#[cfg(feature = "std")]
+struct FlatSink<'a> {
+    reads: &'a mut Vec<u16>,
+    writes: &'a mut Vec<u16>,
+}
+
+#[cfg(feature = "std")]
+impl OperandSink for FlatSink<'_> {
+    fn read(&mut self, reg: u16) {
+        self.reads.push(reg);
+    }
+    fn write(&mut self, reg: u16) {
+        self.writes.push(reg);
+    }
+}
+
+#[cfg(feature = "std")]
+fn dataflow_domain_accounting(
+    instr_starts: &[usize],
+    reachable_offsets: &HashSet<usize>,
+    entry_param_count: usize,
+    mut reads_writes_of: impl FnMut(usize, &mut dyn OperandSink),
+) -> DataflowDomainAccounting {
+    let mut reachable_indices: Vec<usize> = reachable_offsets
+        .iter()
+        .filter_map(|offset| instr_starts.binary_search(offset).ok())
+        .collect();
+    reachable_indices.sort_unstable();
+
+    let mut reads_flat: Vec<u16> = Vec::new();
+    let mut reads_offsets: Vec<u32> = Vec::with_capacity(reachable_indices.len() + 1);
+    let mut writes_flat: Vec<u16> = Vec::new();
+    let mut writes_offsets: Vec<u32> = Vec::with_capacity(reachable_indices.len() + 1);
+    let mut universe: Vec<u16> = (0..entry_param_count).map(|r| r as u16).collect();
+    for &idx in &reachable_indices {
+        let reads_start = reads_flat.len();
+        let writes_start = writes_flat.len();
+        reads_offsets.push(reads_start as u32);
+        writes_offsets.push(writes_start as u32);
+        {
+            let mut sink = FlatSink {
+                reads: &mut reads_flat,
+                writes: &mut writes_flat,
+            };
+            reads_writes_of(idx, &mut sink);
+        }
+        universe.extend_from_slice(&reads_flat[reads_start..]);
+        universe.extend_from_slice(&writes_flat[writes_start..]);
+    }
+    reads_offsets.push(reads_flat.len() as u32);
+    writes_offsets.push(writes_flat.len() as u32);
+    universe.sort_unstable();
+    universe.dedup();
+
+    (
+        reachable_indices,
+        reads_flat,
+        reads_offsets,
+        writes_flat,
+        writes_offsets,
+        universe,
+    )
+}
+
+/// Reads position `pos`'s slice back out of a CSR-encoded (flat, offsets)
+/// pair - built by `dataflow_domain_accounting` for register lists, and (as
+/// of #1756 Codex review round 7) by the SCC-membership table in
+/// `prove_definite_register_assignment` for reachable positions - generic
+/// over the element type since both callers share the identical
+/// flat-Vec-plus-offset-table shape.
+#[cfg(feature = "std")]
+fn csr_slice<'a, T>(flat: &'a [T], offsets: &[u32], pos: usize) -> &'a [T] {
+    &flat[offsets[pos] as usize..offsets[pos + 1] as usize]
+}
+
+/// Invokes `visit` once per REACHABLE successor position of raw instruction
+/// `idx`, resolved from the verifier's own `instruction_successors` (no
+/// second CFG) via `instr_starts`/`reachable_indices` binary search. A
+/// target that isn't a real instruction boundary can only belong to an
+/// unreachable fallthrough off the end of the stream - every jump target
+/// was already fully validated above regardless of reachability, so this is
+/// never a real, reachable edge silently dropped.
+#[cfg(feature = "std")]
+fn for_each_reachable_successor(
+    idx: usize,
+    instruction_successors: &[InstructionSuccessors],
+    instr_starts: &[usize],
+    reachable_indices: &[usize],
+    mut visit: impl FnMut(usize),
+) {
+    let mut link = |target: usize| {
+        if let Ok(target_idx) = instr_starts.binary_search(&target) {
+            if let Ok(target_pos) = reachable_indices.binary_search(&target_idx) {
+                visit(target_pos);
+            }
+        }
+    };
+    match &instruction_successors[idx] {
+        InstructionSuccessors::None => {}
+        InstructionSuccessors::One(target) => link(*target),
+        InstructionSuccessors::Two(first, second) => {
+            link(*first);
+            link(*second);
+        }
+    }
+}
+
+/// Delivers `bit` to `target`'s MISSING set, in place - `target`'s `RegSet`
+/// is mutated directly (`insert`), never cloned or replaced, which is what
+/// eliminates the round-8 "duplicate live RegSet states" amplification (see
+/// `prove_definite_register_assignment`'s doc comment): there is exactly
+/// one `RegSet` per reachable position, period, so no number of branches
+/// independently computing the same result can ever duplicate it. Returns
+/// `true` iff this was new information (the bit wasn't already present) -
+/// the caller only enqueues `(target, bit)` for further propagation when
+/// this is `true`, which is what guarantees each (position, bit) pair is
+/// ever enqueued at most once (MISSING only ever grows, so once a bit is
+/// present it can never need re-delivery). Position 0 (entry) is never
+/// delivered to - its MISSING set is fixed, see the sibling doc comment for
+/// the soundness argument.
+#[cfg(feature = "std")]
+fn deliver(missing: &mut [RegSet], target: usize, bit: usize) -> bool {
+    if target != 0 && !missing[target].contains(bit) {
+        missing[target].insert(bit);
+        true
+    } else {
+        false
+    }
+}
+
+/// Core bit-level MAY-MISSING worklist - factored out from `prove_definite_
+/// register_assignment` so tests can assert directly on its `event_count`/
+/// `peak_queue_len` outputs (Codex review round 8's explicit request for
+/// allocation/relaxation counters, not timing alone) using small, hand-
+/// constructed `successors_of`/`writes_contains` closures rather than real
+/// SemCode bytes.
+///
+/// Returns `(missing, event_count, peak_queue_len)`: the converged MISSING
+/// set for every reachable position (position 0 = entry, whose value is
+/// `entry_missing` unchanged), the total number of (position, bit) events
+/// the worklist processed after seeding, and the largest the worklist ever
+/// grew to at any one moment.
+///
+/// **Total work bound.** Every `(position, bit)` pair is enqueued at MOST
+/// once, ever, across the whole computation - `deliver` only returns `true`
+/// (the caller's only enqueue trigger) the one time a bit transitions from
+/// absent to present in some position's `MISSING` set, and `MISSING` only
+/// ever grows (union, never shrinks) - so the total number of *distinct*
+/// (position, bit) pairs that can ever be enqueued is bounded by
+/// `reachable_count * domain_size`, REGARDLESS of the reachable subgraph's
+/// structure: cyclic, irreducible, arbitrary fan-in through a shared loop
+/// header, all of it is irrelevant, because a bit that is already present
+/// at a node can never need re-delivery to it. Each dequeued event costs
+/// O(1) amortized: a single `writes_contains` check (a linear scan over
+/// that position's own reads/writes list, which is small - at most a
+/// handful of registers per instruction, by construction, not tied to
+/// `domain_size`) plus O(out_degree) <= O(2) successor deliveries. This
+/// gives a provable `O(reachable_count * domain_size)` TOTAL bit-level
+/// work bound, independent of ordering - #1756 Codex review round 8's
+/// second finding (`local_reverse_postorder_ranks`, round 7's fix, does not
+/// bound convergence inside one large strongly-connected component against
+/// an adversarial backedge-fan-in shape) is closed by this property: there
+/// is no "large SCC" concept left to reprocess, because nothing at the bit
+/// level is ever reprocessed. `successors_of`/`writes_contains` need no
+/// predecessor structure, no reverse-postorder ranking, and no strongly-
+/// connected-component decomposition - `tarjan_scc`, `TarjanFrame`,
+/// `nth_reachable_successor`, `SccInfo`, `scc_membership_csr`, and
+/// `local_reverse_postorder_ranks` (rounds 6-7's SCC/ordering machinery)
+/// are removed entirely as of this round: they existed only to bound
+/// whole-`RegSet` reprocessing, which this formulation does not do in the
+/// first place.
+///
+/// **Peak live-memory bound** (#1756 Codex review round 9): the total-work
+/// bound above says nothing about how large the worklist can grow at any
+/// one moment - a wide fan-out (e.g. a balanced binary dispatch tree with
+/// many leaves) can, under FIFO order, accumulate an entire breadth level
+/// (up to `domain_size` bits at EACH of that level's nodes) before any of
+/// it drains, peaking near the full `reachable_count * domain_size` bound.
+/// This worklist processes LIFO (a stack, popping the MOST recently pushed
+/// item) instead: popping `(pos, bit)` pushes at most `out_degree(pos) <=
+/// 2` new items for that SAME bit, so once a bit's delivery begins it runs
+/// to completion - reaching nodes with no further successors, or nodes
+/// that already have it - before any sibling branch (for that same bit, or
+/// any other) is touched, exactly the standard DFS depth bound. Peak
+/// worklist size is therefore bounded by the current bit's own delivery
+/// depth (`O(reachable_count)`, the same order `missing` itself already
+/// costs) PLUS the not-yet-started backlog waiting beneath it on the stack
+/// (bounded by how many `(pos, bit)` pairs any single pop can contribute -
+/// `O(out_degree) <= O(2)` - times how many pops are pending, not by
+/// `domain_size` multiplied across an entire wide level at once). This
+/// changes only which end of the worklist is popped from - `deliver`'s
+/// "already delivered, skip" guard (hence the total-work bound above) is
+/// completely unaffected by pop order, so this is a peak-memory
+/// representation choice, not a new correctness-load-bearing ordering
+/// heuristic of the kind rounds 5-7 tried and round 8 replaced.
+///
+/// **Per-node memory bound** (#1756 Codex review round 10): the `missing`
+/// array itself needs one `RegSet` slot per reachable position regardless,
+/// with no way around that minimum - it is exactly the same
+/// `O(reachable_count)` array `event_count`/`peak_queue_len` already cost
+/// nothing extra to track. What round 10 fixes is each slot's OWN backing
+/// storage: before this round, `RegSet::empty` eagerly allocated
+/// `word_count(domain_size)` words for every non-entry position, whether
+/// or not that position's missing set ever held a single bit, so a long,
+/// fully-reachable chain that finishes defining every register early and
+/// spends the rest of its length on cheap re-writes (see
+/// `c1756_reachable_full_domain_then_long_redefine_chain_stays_correct`)
+/// still forced `reachable_count * domain_size` bits of storage even
+/// though almost every position's real content, after convergence, is
+/// empty. `RegSet::insert` (see its own doc comment) now grows each set's
+/// storage only as far as the highest bit it has ever actually held, so
+/// an empty position costs nothing beyond its own array slot, and only
+/// positions whose missing set genuinely spans much of the domain cost
+/// anywhere close to the old unconditional `domain_size` width.
+///
+/// #1756 Codex review round 14 (owner decision): the deterministic work
+/// budget for a WHOLE artifact verification call - `VerificationLimits.
+/// max_work_units` is "maximum deterministic analysis work for one
+/// artifact verification call," never per function. A single instance is
+/// created ONCE by `verify_semcode_token_with_quotas_and_limits` and a
+/// `&mut` reference is threaded through every signature-bearing
+/// function's analysis (`verify_function_code` ->
+/// `prove_definite_register_assignment` -> `compute_missing_sets`),
+/// never recreated or reset per function - `used` therefore always
+/// reflects the CUMULATIVE total across every function analyzed so far
+/// in this call, and comparing it against `limit` directly gives
+/// artifact-wide (not per-function) accounting for free, including in
+/// the diagnostic message when it is exceeded.
+#[cfg(feature = "std")]
+struct AnalysisWorkMeter {
+    used: usize,
+    limit: usize,
+}
+
+#[cfg(feature = "std")]
+impl AnalysisWorkMeter {
+    fn new(limit: usize) -> Self {
+        Self { used: 0, limit }
+    }
+
+    /// #1756 Codex review round 19 (owner decision): the ONLY sanctioned
+    /// way to increment `used` - every charge site in this crate must
+    /// call this, never mutate `self.used` directly, so there is no
+    /// bypass of the checked-arithmetic guarantee below. `used` is
+    /// artifact-CUMULATIVE (see this struct's own doc comment) and
+    /// `max_work_units` is a caller-supplied `usize`, so on a 32-bit
+    /// target a caller can legally configure `max_work_units =
+    /// usize::MAX` and enough individually state-bounded functions can
+    /// still cumulatively drive `used` to `usize::MAX` before this call -
+    /// an unchecked `self.used += 1` at that point is build-dependent
+    /// (`debug`: panic; `release`: silently wrap to `0`, after which the
+    /// verifier would resume accepting further work UNDER the configured
+    /// limit) rather than deterministic, violating the whole point of
+    /// this being a deterministic, machine-independent resource budget
+    /// (see `VerificationLimits`'s own doc comment on why this
+    /// distinction matters at all).
+    ///
+    /// Returns `Ok(used)` (the new cumulative total, exactly as before,
+    /// for the caller's own diagnostic reporting) when charging one unit
+    /// keeps `used <= limit`. Returns `Err(used)` - the ordinary, exact
+    /// attempted usage - when charging one more unit would exceed
+    /// `limit` but is still representable. Returns `Err(usize::MAX)` -
+    /// the same overflow sentinel `check_analysis_state_budget` and
+    /// `check_raw_node_state_budget` already use for their own `checked_
+    /// add` failures - when `used + 1` itself cannot be represented as a
+    /// `usize` at all: the true attempted usage would be `usize::MAX +
+    /// 1`, which has no finite representation, so it is treated as
+    /// certainly exceeding any finite `limit`, exactly like every other
+    /// overflow path in this verifier's resource envelope. Never panics,
+    /// never wraps, never saturates-and-continues - overflow fails
+    /// closed, immediately, as an ordinary `AnalysisWorkLimitExceeded`
+    /// rejection at the caller, not a host-dependent crash or silent
+    /// reset.
+    fn charge_one(&mut self) -> Result<usize, usize> {
+        let Some(used) = self.used.checked_add(1) else {
+            return Err(usize::MAX);
+        };
+        self.used = used;
+        if used > self.limit {
+            return Err(used);
+        }
+        Ok(used)
+    }
+}
+
+/// **Work budget** (#1756 Codex review round 13, owner decision; scope
+/// corrected to be artifact-wide in round 14 - see `AnalysisWorkMeter`):
+/// a deterministic `work_units` counter - one unit per register checked
+/// while seeding from entry, plus one per `(position, bit)` pair
+/// dequeued from the worklist (`event_count`'s own definition) - is
+/// charged against the CALLER-OWNED, POSSIBLY-ALREADY-PARTIALLY-SPENT
+/// `work_meter` after every increment, in BOTH loops below, aborting
+/// with `Err(work_meter.used)` (the cumulative artifact-wide total, not
+/// just this call's own contribution) the instant `work_meter.limit` is
+/// exceeded. This is deliberately machine-independent: it counts
+/// discrete lattice-propagation steps, never wall-clock time, allocator
+/// behavior, or CPU cycles, and it aborts mid-computation rather than
+/// only checking a final total - a genuinely unbounded input (e.g. the
+/// round-13 branch-dense construction with no budget) must never be
+/// allowed to run this loop to completion before being rejected. The
+/// bound this enforces per call is exactly the same one the doc comments
+/// above already prove: `work_units <= domain_size + reachable_count *
+/// domain_size` (with `reachable_count` here being the CALLER's
+/// compressed `leader_count`) - summed across however many functions
+/// share this `work_meter` before it is exhausted.
+#[cfg(feature = "std")]
+fn compute_missing_sets(
+    reachable_count: usize,
+    domain_size: usize,
+    entry_missing: RegSet,
+    writes_contains: impl Fn(usize, usize) -> bool,
+    mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
+    work_meter: &mut AnalysisWorkMeter,
+) -> Result<(Vec<RegSet>, usize, usize), usize> {
+    let mut missing: Vec<RegSet> = (0..reachable_count)
+        .map(|pos| {
+            if pos == 0 {
+                entry_missing.clone()
+            } else {
+                RegSet::empty()
+            }
+        })
+        .collect();
+    if reachable_count == 0 {
+        return Ok((missing, 0, 0));
+    }
+
+    // A stack (LIFO), not a FIFO queue - see the peak-live-memory doc
+    // comment above for why this bounds peak size without weakening the
+    // total-work bound at all.
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    let mut peak_queue_len: usize = 0;
+
+    // Seed from entry's own MISSING_OUT (post-write) - entry's own MISSING
+    // is fixed and never re-delivered to (see `deliver`), so this is the
+    // one place entry's contribution enters the worklist.
+    let entry_successors = successors_of(0);
+    for bit in 0..domain_size {
+        work_meter.charge_one()?;
+        if missing[0].contains(bit) && !writes_contains(0, bit) {
+            for succ in entry_successors.into_iter().flatten() {
+                if deliver(&mut missing, succ, bit) {
+                    stack.push((succ, bit));
+                }
+            }
+        }
+    }
+    peak_queue_len = peak_queue_len.max(stack.len());
+
+    let mut event_count: usize = 0;
+    while let Some((pos, bit)) = stack.pop() {
+        work_meter.charge_one()?;
+        event_count += 1;
+        if writes_contains(pos, bit) {
+            continue; // killed here - defined by this instruction's own write
+        }
+        for succ in successors_of(pos).into_iter().flatten() {
+            if deliver(&mut missing, succ, bit) {
+                stack.push((succ, bit));
+            }
+        }
+        peak_queue_len = peak_queue_len.max(stack.len());
+    }
+
+    Ok((missing, event_count, peak_queue_len))
+}
+
+/// #1756 Codex review round 12: `JMP_IF` unconditionally records
+/// `InstructionSuccessors::Two(target, next_offset)` - if its taken
+/// branch happens to target the very next instruction (a legal, if
+/// pointless, no-op conditional branch), `target == next_offset` and
+/// `for_each_reachable_successor` reports the SAME reachable position
+/// twice. Left as-is, every consumer of `[Option<usize>; 2]` successors
+/// below (`compute_leaders`, `chain_step`, `build_leader_chains`,
+/// `find_first_violation`) would see that as two edges rather than one -
+/// `compute_leaders` in particular would double-count the shared
+/// target's in-degree AND treat it as a branch target, forcing it (and,
+/// for a whole chain of such instructions, every one of their targets)
+/// to become its own leader, defeating round 11's compression entirely
+/// for that chain. Collapsing it back to a single logical edge here,
+/// once, is what lets every downstream consumer keep treating the two
+/// slots as "distinct successors, if both present" as a precondition
+/// rather than a fact they each have to re-derive.
+#[cfg(feature = "std")]
+fn dedup_successors(succs: [Option<usize>; 2]) -> [Option<usize>; 2] {
+    match succs {
+        [Some(a), Some(b)] if a == b => [Some(a), None],
+        other => other,
+    }
+}
+
+/// #1756 Codex review round 15: canonical, MACHINE-INDEPENDENT logical
+/// byte sizes for the fixed (non-`RegSet`-payload) structural overhead
+/// `check_analysis_state_budget` charges per leader / per stack entry -
+/// deliberately NOT `size_of::<T>()` (a host-dependent Rust ABI detail
+/// that could vary by target), so admission is deterministic across
+/// hosts. Each ties to the exact accounted structure, per the review's
+/// own request to avoid one opaque magic constant:
+///
+/// - `REGSET_HEADER_LOGICAL_BYTES`: one `RegSet { words: Vec<u64> }`'s
+///   OWN header (a `Vec`'s canonical ptr+len+cap triple, 3 words) - NOT
+///   its backing payload, which `word_count(domain_size)` already
+///   charges separately. `chain_killed` and `missing` each hold
+///   `leader_count` of these.
+/// - `CHAIN_TARGET_LOGICAL_BYTES`: one `[Option<usize>; 2]` entry in
+///   `chain_targets` - two canonical `Option<usize>` slots (no niche
+///   optimization for a bare `usize` payload, so 2 words each: a
+///   discriminant plus the value).
+/// - `LEADER_INDEX_LOGICAL_BYTES`: one `usize` entry in
+///   `leader_positions`.
+/// - `STACK_ENTRY_LOGICAL_BYTES`: one `(usize, usize)` entry in
+///   `compute_missing_sets`'s worklist stack.
+/// - `REACHABLE_INDEX_LOGICAL_BYTES`: one `usize` entry in
+///   `reachable_indices` (round 16).
+/// - `CSR_OFFSET_LOGICAL_BYTES`: one `u32` entry in `reads_offsets` or
+///   `writes_offsets` (round 16).
+/// - `REGISTER_OPERAND_LOGICAL_BYTES`: one `u16` entry in `reads_flat`,
+///   `writes_flat`, or the transient `universe` buffer `dataflow_domain_
+///   accounting` builds before its own final dedup (round 16).
+/// - `LEADER_FLAG_LOGICAL_BYTES`: one `bool` entry in `is_leader` -
+///   Rust's `Vec<bool>` is not bit-packed, so this is a full byte per
+///   entry, not one bit (round 16).
+/// - `LEADER_CLASSIFICATION_STATE_LOGICAL_BYTES`: one `u8` entry in
+///   `compute_leaders`'s own `state` scratch array - simultaneously
+///   live with `is_leader` while `is_leader` is being built (round 21;
+///   see `compute_leaders`'s own doc comment for why one consolidated
+///   array replaces the two, `in_degree`/`branch_target`, an earlier
+///   revision used).
+#[cfg(feature = "std")]
+const WORD_BYTES: usize = 8;
+#[cfg(feature = "std")]
+const REGSET_HEADER_LOGICAL_BYTES: usize = 3 * WORD_BYTES;
+#[cfg(feature = "std")]
+const CHAIN_TARGET_LOGICAL_BYTES: usize = 2 * (2 * WORD_BYTES);
+#[cfg(feature = "std")]
+const LEADER_INDEX_LOGICAL_BYTES: usize = WORD_BYTES;
+#[cfg(feature = "std")]
+const STACK_ENTRY_LOGICAL_BYTES: usize = 2 * WORD_BYTES;
+#[cfg(feature = "std")]
+const REACHABLE_INDEX_LOGICAL_BYTES: usize = WORD_BYTES;
+#[cfg(feature = "std")]
+const CSR_OFFSET_LOGICAL_BYTES: usize = WORD_BYTES / 2;
+#[cfg(feature = "std")]
+const REGISTER_OPERAND_LOGICAL_BYTES: usize = WORD_BYTES / 4;
+#[cfg(feature = "std")]
+const LEADER_FLAG_LOGICAL_BYTES: usize = 1;
+#[cfg(feature = "std")]
+const LEADER_CLASSIFICATION_STATE_LOGICAL_BYTES: usize = 1;
+
+/// #1756 Codex review round 17 (owner decision): the exact sum of
+/// encoded byte lengths of every REACHABLE structural instruction,
+/// computed from already-known instruction boundaries (`instr_starts`),
+/// requiring no second decoder, no opcode-specific length heuristics,
+/// and no new large allocation (in particular, never a sorted copy of
+/// `reachable_offsets`, and never `dataflow_domain_accounting`'s CSR
+/// tables, which this value exists to bound BEFORE they're built).
+///
+/// Round 16's `check_raw_node_state_budget` bounded `reads_flat.len() +
+/// writes_flat.len()` using the TOTAL structural instruction-section
+/// length (`instr_len = code.len() - instr_start`) as a proxy for "bytes
+/// available to encode reachable operands" - a SOUND upper bound, but
+/// one that overcharges whenever structurally valid but UNREACHABLE
+/// trailing code exists. `dataflow_domain_accounting` only ever decodes
+/// and stores operands for REACHABLE instructions (Codex review round
+/// 3's own fix), so unreachable bytes contribute nothing to the real
+/// `reads_flat`/`writes_flat` cost - yet round 16's `instr_len` proxy
+/// charged the WHOLE section regardless, letting a construction like
+/// "entry `RET` followed by megabytes of valid unreachable `RET`
+/// padding" (the exact shape `c1756_rejects_large_unreachable_ret_
+/// padding_without_dense_metadata` already exercises for a DIFFERENT
+/// reason) drive `AnalysisStateLimitExceeded` from padding alone -
+/// Codex review round 17's finding, changing this verifier's pre-
+/// existing, deliberate "unreachable code is not judged by this pass"
+/// policy for the FIRST time since #1756 began.
+///
+/// For each reachable instruction start offset, its encoded length is
+/// the distance to the NEXT structural instruction start, or to the end
+/// of the instruction section for the last structural instruction - the
+/// same canonical boundary every other structural check in this
+/// verifier already trusts (jump-target validation, debug-symbol
+/// placement), never re-derived via opcode-specific arithmetic. Every
+/// reachable offset is looked up in `instr_starts` via `binary_search`
+/// (the identical lookup `dataflow_domain_accounting` itself performs,
+/// via `filter_map`, to build `reachable_indices`), so this costs
+/// O(reachable_count * log(total_instruction_count)) time and O(1)
+/// additional space.
+///
+/// Sound invariant, not merely assumed: every reachable instruction's
+/// byte span is a disjoint sub-range of the single `[0, instr_len)`
+/// structural instruction section, so this sum can never exceed
+/// `instr_len` itself. `checked_add`/`checked_sub` are used throughout
+/// regardless, consistent with this codebase's established practice,
+/// even though overflow is not reachable given that invariant.
+#[cfg(feature = "std")]
+fn reachable_instruction_bytes(
+    instr_starts: &[usize],
+    reachable_offsets: &HashSet<usize>,
+    instr_len: usize,
+) -> Option<usize> {
+    reachable_offsets
+        .iter()
+        .filter_map(|offset| instr_starts.binary_search(offset).ok())
+        .try_fold(0usize, |total, idx| {
+            let start = instr_starts[idx];
+            let end = instr_starts.get(idx + 1).copied().unwrap_or(instr_len);
+            let len = end.checked_sub(start)?;
+            total.checked_add(len)
+        })
+}
+
+/// #1756 Codex review round 16 (owner decision), corrected in round 17:
+/// the deterministic, verifier-OWNED pre-allocation admission check for
+/// the RAW reachable-node representation `dataflow_domain_accounting`
+/// and `compute_leaders` build, BEFORE either one allocates - closing
+/// the gap round 15 explicitly, but incorrectly, excluded (see `check_
+/// analysis_state_budget`'s own doc comment for the corrected
+/// inventory).
+///
+/// A genuinely branch-FREE reachable stream (a long linear run of
+/// single-register instructions, no merges, no branch targets at all)
+/// has `leader_count = 1` REGARDLESS of how long it is - round 15's
+/// leader/domain-scaled formula alone charges almost nothing for it,
+/// even as `reachable_count` (and every structure sized by it) grows
+/// without bound. This is Codex's round-16 P1 finding: raw reachable-
+/// node state was never bounded by anything, independent of leader or
+/// domain structure.
+///
+/// **Why this check can run BEFORE `dataflow_domain_accounting`**:
+/// `reachable_count` is already known for free - `reachable_offsets`
+/// (from `verify_reachable_control_flow`, `HashSet<usize>`) reports its
+/// own `len()` in O(1), no CSR allocation required to learn it. The
+/// caller computes `reachable_instruction_bytes` (see that function's
+/// own doc comment - round 17's correction) from the SAME already-known
+/// `instr_starts`/`reachable_offsets` inputs, likewise before any of
+/// this analysis's own allocations exist. Both inputs exist strictly
+/// BEFORE `dataflow_domain_accounting` or `compute_leaders` ever
+/// allocate anything, so this check can - and does - run first.
+///
+/// **Deriving a sound per-instruction-operand-count-independent bound**:
+/// rather than enumerate a "maximum registers per opcode" table (some
+/// opcodes, e.g. `Call`'s argument list and `MakeClosure`'s capture
+/// list, are genuinely variadic, bounded only by how many 2-byte `u16`
+/// register slots remain in the code buffer), this uses a strictly
+/// information-theoretic argument instead: every register operand this
+/// pass ever records - read or write, on any instruction - costs
+/// EXACTLY 2 bytes to encode (`read_u16_le`), and every such byte comes
+/// from the reachable instructions' own encoded byte spans (Codex review
+/// round 3's own `decode_operands` re-decode, see `dataflow_domain_
+/// accounting`'s doc comment) - NOT the total structural instruction
+/// section, which may also contain unreachable bytes this analysis never
+/// decodes (round 17's correction; see `reachable_instruction_bytes`'s
+/// own doc comment for why `instr_len` alone overcharged). Therefore
+/// `reads_flat.len() + writes_flat.len() <= reachable_instruction_bytes
+/// / 2` - a SOUND, provable, information-theoretic ceiling that holds no
+/// matter how those operands are distributed (one huge variadic
+/// instruction or many small fixed-arity ones cost the same either way),
+/// computed with zero per-opcode knowledge and zero CSR allocation. This
+/// is `operand_count_bound` below.
+///
+/// **What this bounds** (every raw-node structure `prove_definite_
+/// register_assignment` and its callees allocate whose size scales with
+/// `reachable_count` or `reachable_instruction_bytes`, genuinely owned
+/// by THIS analysis - see `check_analysis_state_budget`'s own doc
+/// comment for the full, corrected inventory including what remains
+/// deliberately excluded): `reachable_indices`, `reads_offsets` +
+/// `writes_offsets`, `reads_flat` + `writes_flat` (bounded by `operand_
+/// count_bound` above), the transient `universe` buffer `dataflow_
+/// domain_accounting` builds before its own final dedup (also bounded
+/// by `operand_count_bound`, plus `entry_param_count`), and `is_leader`.
+///
+/// **Formula**: `raw_words = ceil(raw_bytes / WORD_BYTES)` for
+/// `raw_bytes = reachable_count * REACHABLE_INDEX_LOGICAL_BYTES +
+/// (reachable_count + 1) * 2 * CSR_OFFSET_LOGICAL_BYTES + reachable_
+/// count * LEADER_FLAG_LOGICAL_BYTES + (2 * operand_count_bound +
+/// entry_param_count) * REGISTER_OPERAND_LOGICAL_BYTES`, where `operand_
+/// count_bound = reachable_instruction_bytes / 2` (round 17 - NOT total
+/// `instr_len / 2`) - every multiplication and addition `checked`;
+/// overflow anywhere is the same `usize::MAX` sentinel used throughout
+/// this envelope.
+///
+/// Returns `Ok(raw_words)` when within budget, `Err(reported_words)`
+/// otherwise - the caller (`prove_definite_register_assignment`) rejects
+/// immediately on `Err`, before `dataflow_domain_accounting` or `compute_
+/// leaders` ever run, and reuses the `Ok` value as an input to the later,
+/// COMBINED `check_analysis_state_budget` call once `leader_count` and
+/// `domain_size` are also known.
+#[cfg(feature = "std")]
+fn check_raw_node_state_budget(
+    reachable_count: usize,
+    reachable_instruction_bytes: usize,
+    entry_param_count: usize,
+    max_state_words: usize,
+) -> Result<usize, usize> {
+    let overflow = || Err(usize::MAX);
+
+    let operand_count_bound = reachable_instruction_bytes / 2;
+
+    let reachable_index_bytes = reachable_count.checked_mul(REACHABLE_INDEX_LOGICAL_BYTES);
+    let Some(reachable_index_bytes) = reachable_index_bytes else {
+        return overflow();
+    };
+
+    let offset_entries = reachable_count.checked_add(1);
+    let Some(offset_entries) = offset_entries else {
+        return overflow();
+    };
+    let offset_bytes = offset_entries
+        .checked_mul(2) // reads_offsets + writes_offsets
+        .and_then(|doubled| doubled.checked_mul(CSR_OFFSET_LOGICAL_BYTES));
+    let Some(offset_bytes) = offset_bytes else {
+        return overflow();
+    };
+
+    let leader_flag_bytes = reachable_count.checked_mul(LEADER_FLAG_LOGICAL_BYTES);
+    let Some(leader_flag_bytes) = leader_flag_bytes else {
+        return overflow();
+    };
+
+    // #1756 Codex review round 21 (owner decision), P2: `compute_
+    // leaders`'s own `state` scratch array (see its doc comment) is
+    // simultaneously live with `is_leader` while `is_leader` is being
+    // built - the genuine peak moment for the "raw" phase of this
+    // analysis - so its cost is summed in here too, not omitted.
+    let leader_classification_state_bytes =
+        reachable_count.checked_mul(LEADER_CLASSIFICATION_STATE_LOGICAL_BYTES);
+    let Some(leader_classification_state_bytes) = leader_classification_state_bytes else {
+        return overflow();
+    };
+
+    // reads_flat + writes_flat (operand_count_bound entries combined)
+    // plus the transient pre-dedup `universe` buffer (entry_param_count
+    // + operand_count_bound entries) - see the doc comment above.
+    let operand_bytes = operand_count_bound
+        .checked_mul(2)
+        .and_then(|doubled| doubled.checked_add(entry_param_count))
+        .and_then(|total_entries| total_entries.checked_mul(REGISTER_OPERAND_LOGICAL_BYTES));
+    let Some(operand_bytes) = operand_bytes else {
+        return overflow();
+    };
+
+    let raw_bytes = reachable_index_bytes
+        .checked_add(offset_bytes)
+        .and_then(|sum| sum.checked_add(leader_flag_bytes))
+        .and_then(|sum| sum.checked_add(leader_classification_state_bytes))
+        .and_then(|sum| sum.checked_add(operand_bytes));
+    let Some(raw_bytes) = raw_bytes else {
+        return overflow();
+    };
+
+    let raw_words = raw_bytes
+        .checked_add(WORD_BYTES - 1)
+        .map(|rounded| rounded / WORD_BYTES);
+    let Some(raw_words) = raw_words else {
+        return overflow();
+    };
+
+    match raw_words {
+        w if w <= max_state_words => Ok(w),
+        w => Err(w),
+    }
+}
+
+/// #1756 Codex review round 14 (owner decision), corrected in round 15,
+/// extended in round 16, corrected again in round 17: the deterministic,
+/// verifier-OWNED pre-allocation admission check for the definite-
+/// register-assignment analysis's PEAK simultaneously-live verifier-
+/// analysis state - now the FULL logical storage this analysis needs,
+/// raw reachable-node representation included, not merely dense
+/// `RegSet` backing words.
+///
+/// **Full lifetime inventory** (every allocation `prove_definite_
+/// register_assignment` and its callees own whose size scales with
+/// `reachable_count`, `leader_count`, `domain_size`, the total encoded
+/// bytes of REACHABLE instructions (`reachable_instruction_bytes` -
+/// round 17: NOT the total structural instruction-section length,
+/// which may also include unreachable bytes this analysis never
+/// decodes), or worklist depth - round 15's own request, extended in
+/// round 16 after Codex demonstrated the round-15 raw-node exclusion
+/// below was itself exploitable, corrected in round 17 after Codex
+/// demonstrated round 16's own total-byte proxy overcharged unreachable
+/// padding):
+///
+/// - `chain_killed` / `missing` (`Vec<RegSet>`, `leader_count` entries
+///   each): dense payload already charged by round 14's `(2 *
+///   leader_count + 1) * word_count(domain_size)` term; round 15 added
+///   their own `Vec<RegSet>` HEADERS - `REGSET_HEADER_LOGICAL_BYTES`
+///   per entry, times 2 arrays, times `leader_count`. Simultaneously
+///   live for `compute_missing_sets`'s entire call (round 14's finding).
+/// - `chain_targets` (`Vec<[Option<usize>; 2]>`, `leader_count`
+///   entries): `CHAIN_TARGET_LOGICAL_BYTES` per entry. Built before
+///   `compute_missing_sets` runs and read throughout it via
+///   `compressed_successors_of`.
+/// - `leader_positions` (`Vec<usize>`, `leader_count` entries):
+///   `LEADER_INDEX_LOGICAL_BYTES` per entry. Round 20 (Codex P2)
+///   corrected an earlier belief (rounds 15-19: "necessarily built
+///   BEFORE this very check can run at all... the one structure this
+///   check cannot gate ahead of itself by construction") - that was
+///   never actually true. `leader_count` is derived by counting `is_
+///   leader`'s true bits (`is_leader.iter().filter(..).count()`, zero
+///   additional allocation - `is_leader` itself is already `raw_words`-
+///   authorized, see `check_raw_node_state_budget`'s own doc comment),
+///   so this check CAN and DOES gate ahead of `leader_positions`'s own
+///   materialization: the check runs first, using only the count, and
+///   `leader_positions` is collected (via the identical `.filter(..).
+///   collect()` expression as before) only once this check has already
+///   authorized its cost. No exception remains in this envelope.
+/// - `compute_missing_sets`'s worklist stack (`Vec<(usize, usize)>`):
+///   proven (see `c1756_reversed_order_diamond_chain_stack_peak_
+///   scales_with_leader_count` for the adversarial construction and
+///   the argument below) to peak at `leader_count + 2 * domain_size`
+///   entries, NOT the domain_size-only "generous ceiling" round 9's own
+///   test happened to observe (that test never stressed successor
+///   ORDER, which is what actually controls this). Proof sketch: at any
+///   moment the stack is `settled_backlog` (items from the seed phase
+///   or earlier bits, bounded by the seed loop's own `2 * domain_size`
+///   push ceiling, and never regrown once shrunk since only the
+///   CURRENTLY active bit's traversal pushes new items) plus
+///   `active_frontier` (the one currently-being-traced bit's own unresolved
+///   siblings, bounded by `leader_count` via `deliver`'s "each position
+///   visited at most once per bit" guarantee) - `STACK_ENTRY_LOGICAL_
+///   BYTES` per entry.
+/// - `entry_missing` / `build_leader_chains`'s in-progress `killed` /
+///   `find_first_violation`'s per-leader `local` clone: O(1) each,
+///   never overlapping in time (established in round 14) - covered by
+///   the existing `+1` leader in the dense-payload term, unchanged.
+/// - `reachable_indices` (`Vec<usize>`, `reachable_count` entries),
+///   `reads_offsets` / `writes_offsets` (`Vec<u32>`, `reachable_count +
+///   1` entries each), `reads_flat` / `writes_flat` (`Vec<u16>`,
+///   combined length bounded by `reachable_instruction_bytes / 2` -
+///   round 17: NOT total `instr_len / 2`, see `reachable_instruction_
+///   bytes`'s and `check_raw_node_state_budget`'s doc comments for the
+///   exact information-theoretic argument and why the distinction
+///   matters), and the transient pre-dedup `universe` buffer (same
+///   bound, plus `entry_param_count`): all built by `dataflow_domain_
+///   accounting`, exclusively for THIS analysis - never allocated for a
+///   signature-less function, unlike the genuinely shared structures
+///   below. Round 16 (Codex P1): charged via the new, EARLIER `check_
+///   raw_node_state_budget`, which runs strictly before `dataflow_
+///   domain_accounting` itself, so this protection is real, not
+///   retroactive.
+/// - `is_leader` (`Vec<bool>`, `reachable_count` entries): `LEADER_FLAG_
+///   LOGICAL_BYTES` per entry. Round 15 grouped this with the CSR
+///   tables above under "excluded, reachable_count-scaled, pre-existing
+///   gap" - that grouping was IMPRECISE: `compute_leaders` (which
+///   allocates it) is called ONLY from within this analysis, exclusively
+///   for signature-bearing functions, exactly like the CSR tables, not
+///   shared with any check that runs regardless of signature. Corrected
+///   in round 16: charged by `check_raw_node_state_budget`, not
+///   excluded.
+/// - `compute_leaders`'s own `state` scratch array (`Vec<u8>`,
+///   `reachable_count` entries): `LEADER_CLASSIFICATION_STATE_LOGICAL_
+///   BYTES` per entry. Round 21 (Codex P2) found this consolidated
+///   classification-state array (which replaced two separate `in_
+///   degree`/`branch_target` scratch arrays of the same `reachable_
+///   count` size - see `compute_leaders`'s own doc comment) simultaneously
+///   live with `is_leader` while `is_leader` is being built, the genuine
+///   peak moment for the raw phase, yet uncharged by any check. Charged
+///   in `check_raw_node_state_budget` alongside `is_leader`, not
+///   excluded - same reasoning as `is_leader` above: `compute_leaders`
+///   is called only from within this analysis, exclusively for
+///   signature-bearing functions.
+/// - Genuinely still EXCLUDED, and NOT silently: `instr_starts` (`Vec<
+///   usize>`) and `instruction_successors` (`Vec<InstructionSuccessors>`),
+///   both sized to the function's TOTAL instruction count (not merely
+///   `reachable_count` - unreachable code is decoded once too), and
+///   `reachable_offsets` (`HashSet<usize>`, from `verify_reachable_
+///   control_flow`). All three are built, with their own independent
+///   verification work performed, for EVERY function `verify_function_
+///   code` processes - signature-bearing or not (debug-symbol placement,
+///   jump-target validity, and general reachable-control-flow validity
+///   all depend on them regardless of whether a canonical `SIG0`
+///   signature exists at all). #1756's analysis borrows all three BY
+///   REFERENCE rather than allocating its own copies, and they cost
+///   exactly the same whether or not this analysis ever runs on a given
+///   function. Bounding raw total-instruction-count (independent of
+///   reachability, leader, or domain structure) remains the SAME
+///   explicitly acknowledged, separate, out-of-scope gap since round 1
+///   of this PR's review (no code-size/instruction-count quota exists
+///   anywhere in this verifier) - this round does not change that
+///   boundary, and does not claim to.
+///
+/// **Formula**: `required_state_words = raw_words + dense_words +
+/// fixed_words`, where `raw_words` comes from the EARLIER `check_raw_
+/// node_state_budget` call (see its own doc comment), and `dense_words`/
+/// `fixed_words` are round 15's unchanged terms: `dense_words = (2 *
+/// leader_count + 1) * word_count(domain_size)`, `fixed_words =
+/// ceil(fixed_bytes / WORD_BYTES)` for `fixed_bytes = leader_count *
+/// (2 * REGSET_HEADER_LOGICAL_BYTES + CHAIN_TARGET_LOGICAL_BYTES +
+/// LEADER_INDEX_LOGICAL_BYTES) + (leader_count + 2 * domain_size) *
+/// STACK_ENTRY_LOGICAL_BYTES`. Every multiplication and addition is
+/// `checked`, with the byte-to-word rounding also checked even though
+/// the chosen logical sizes happen to divide evenly. Overflow anywhere
+/// in the chain is treated as certainly exceeding any finite
+/// `max_state_words`, the same honest `usize::MAX` sentinel established
+/// in round 13, never undefined or silently-wrapping behavior.
+///
+/// `raw_words` and `dense_words + fixed_words` are SUMMED, never
+/// maxed: the raw-node structures above are never dropped before the
+/// leader-state phase begins - `reachable_indices`, `reads_flat`,
+/// `writes_flat`, their offset tables, and `is_leader` are all still
+/// read by `find_first_violation` at the very end of this analysis, so
+/// every structure this envelope charges for is simultaneously live for
+/// the analysis's ENTIRE remaining duration once allocated. Per the
+/// owner's own "peak, not double-counted lifetimes" rule: overlapping
+/// phases sum; only genuinely mutually-exclusive phases would take a
+/// max, and no phase here is ever dropped before the next begins.
+///
+/// This remains a PEAK-simultaneous-state envelope for ONE function's
+/// analysis, not cumulative across an artifact's functions (functions
+/// are verified sequentially and each one's analysis state is released
+/// before the next begins - see `AnalysisWorkMeter` for the DIFFERENT,
+/// genuinely cumulative-across-the-artifact accounting `max_work_units`
+/// uses instead). Returns `Ok(required_words)` (the exact peak count,
+/// for accounting) when within budget, `Err(reported_words)` otherwise.
+#[cfg(feature = "std")]
+fn check_analysis_state_budget(
+    raw_words: usize,
+    leader_count: usize,
+    domain_size: usize,
+    max_state_words: usize,
+) -> Result<usize, usize> {
+    let overflow = || Err(usize::MAX);
+
+    let words_per_leader = RegSet::word_count(domain_size);
+    let dense_words = leader_count
+        .checked_mul(2)
+        .and_then(|doubled| doubled.checked_add(1))
+        .and_then(|factor| factor.checked_mul(words_per_leader));
+    let Some(dense_words) = dense_words else {
+        return overflow();
+    };
+
+    let per_leader_fixed_bytes = REGSET_HEADER_LOGICAL_BYTES
+        .checked_mul(2)
+        .and_then(|regset_headers| regset_headers.checked_add(CHAIN_TARGET_LOGICAL_BYTES))
+        .and_then(|sum| sum.checked_add(LEADER_INDEX_LOGICAL_BYTES));
+    let Some(per_leader_fixed_bytes) = per_leader_fixed_bytes else {
+        return overflow();
+    };
+    let leader_fixed_bytes = leader_count.checked_mul(per_leader_fixed_bytes);
+    let Some(leader_fixed_bytes) = leader_fixed_bytes else {
+        return overflow();
+    };
+
+    // Stack peak: `leader_count + 2 * domain_size` entries (see the doc
+    // comment's proof sketch), each `STACK_ENTRY_LOGICAL_BYTES`.
+    let stack_peak_entries = domain_size
+        .checked_mul(2)
+        .and_then(|doubled| doubled.checked_add(leader_count));
+    let Some(stack_peak_entries) = stack_peak_entries else {
+        return overflow();
+    };
+    let stack_bytes = stack_peak_entries.checked_mul(STACK_ENTRY_LOGICAL_BYTES);
+    let Some(stack_bytes) = stack_bytes else {
+        return overflow();
+    };
+
+    let fixed_bytes = leader_fixed_bytes.checked_add(stack_bytes);
+    let Some(fixed_bytes) = fixed_bytes else {
+        return overflow();
+    };
+    let fixed_words = fixed_bytes
+        .checked_add(WORD_BYTES - 1)
+        .map(|rounded| rounded / WORD_BYTES);
+    let Some(fixed_words) = fixed_words else {
+        return overflow();
+    };
+
+    let leader_words = dense_words.checked_add(fixed_words);
+    let Some(leader_words) = leader_words else {
+        return overflow();
+    };
+
+    let required_words = raw_words.checked_add(leader_words);
+    match required_words {
+        Some(required_words) if required_words <= max_state_words => Ok(required_words),
+        Some(required_words) => Err(required_words),
+        None => Err(usize::MAX),
+    }
+}
+
+/// #1756 Codex review round 11: identifies which reachable positions are
+/// "leaders" - the only positions that need their own entry in the
+/// compressed dataflow graph `compute_missing_sets` runs over (see
+/// `build_leader_chains` and `prove_definite_register_assignment`'s doc
+/// comment for the finding this closes). A position is a leader iff it
+/// is function entry (position 0), or it has more than one predecessor
+/// (a merge point), or it is one of two successors of some other
+/// position (a branch target). Every other position has exactly one
+/// predecessor, and that predecessor has exactly one successor - a
+/// genuine 1-to-1 edge - so its MISSING value is always identical to its
+/// predecessor's MISSING_OUT and never needs independent storage or
+/// worklist participation; `chain_step` walks straight past it instead.
+///
+/// **Precondition** (#1756 Codex review round 12): `successors_of`'s two
+/// slots, when both `Some`, must already be DISTINCT positions - a
+/// source with only one true logical successor (e.g. a self-targeting
+/// `JMP_IF`, see `dedup_successors`) must present that as `[Some(x),
+/// None]`, never `[Some(x), Some(x)]`. This function trusts that
+/// precondition rather than re-deriving it, so every caller must run
+/// raw successors through `dedup_successors` first.
+///
+/// This always terminates when traced backward from any non-leader
+/// position: a cycle reachable from entry must contain a node entered
+/// from outside the cycle too (giving that node in-degree >= 2, making
+/// it a leader by the first rule) unless the cycle passes through entry
+/// itself, which is unconditionally a leader regardless of its own
+/// in-degree - so no run of non-leader positions can loop back on itself
+/// without first hitting a leader.
+///
+/// #1756 Codex review round 21 (owner decision), P2: classification uses
+/// ONE `reachable_count`-sized `Vec<u8>` (`state`), not the two separate
+/// arrays (`in_degree: Vec<u8>`, `branch_target: Vec<bool>`) an earlier
+/// revision used - a genuine reduction in peak scratch storage, not
+/// merely a relabeling. This is sound because `branch_target[pos]` only
+/// ever changes the final `is_leader` verdict when `in_degree[pos] ==
+/// 1` (once in-degree reaches 2, `in_degree[pos] != 1` alone already
+/// makes `pos` a leader, so a separate branch-target bit adds no new
+/// information for that position ever again) - the two pieces of
+/// per-position information are never independently needed at the SAME
+/// time, so they fit in one small enum-like state instead of two full
+/// arrays. Four states: `0` = never yet visited (in-degree 0), `1` =
+/// visited exactly once via a non-branching edge (in-degree 1, not a
+/// branch target), `2` = visited exactly once via a branching edge
+/// (in-degree 1, IS a branch target), `3` = visited two or more times
+/// (in-degree >= 2, already a leader regardless of any branch-target
+/// bit). `is_leader[pos] = (pos == 0) || (state[pos] != STATE_IN_DEGREE
+/// _ONE)` - state `1` is the ONLY "not yet proven a leader by these
+/// rules" value; every other state already implies leader status,
+/// collapsing the original two-condition check (`in_degree[pos] != 1 ||
+/// branch_target[pos]`) into one comparison.
+#[cfg(feature = "std")]
+const STATE_UNVISITED: u8 = 0;
+#[cfg(feature = "std")]
+const STATE_IN_DEGREE_ONE: u8 = 1;
+#[cfg(feature = "std")]
+const STATE_IN_DEGREE_ONE_BRANCH_TARGET: u8 = 2;
+#[cfg(feature = "std")]
+const STATE_IN_DEGREE_MANY: u8 = 3;
+
+#[cfg(feature = "std")]
+fn compute_leaders(
+    reachable_count: usize,
+    mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
+) -> Vec<bool> {
+    let mut state: Vec<u8> = vec![STATE_UNVISITED; reachable_count];
+    for pos in 0..reachable_count {
+        let succs = successors_of(pos);
+        let out_degree = succs.iter().filter(|s| s.is_some()).count();
+        for succ in succs.into_iter().flatten() {
+            state[succ] = match state[succ] {
+                STATE_UNVISITED if out_degree > 1 => STATE_IN_DEGREE_ONE_BRANCH_TARGET,
+                STATE_UNVISITED => STATE_IN_DEGREE_ONE,
+                STATE_IN_DEGREE_ONE | STATE_IN_DEGREE_ONE_BRANCH_TARGET => STATE_IN_DEGREE_MANY,
+                STATE_IN_DEGREE_MANY => STATE_IN_DEGREE_MANY,
+                _ => unreachable!("state is always one of the four named constants above"),
+            };
+        }
+    }
+    (0..reachable_count)
+        .map(|pos| pos == 0 || state[pos] != STATE_IN_DEGREE_ONE)
+        .collect()
+}
+
+/// One step of a leader's compressed run (#1756 Codex review round 11):
+/// `Continue` while the current position has exactly one successor and
+/// that successor is not itself a leader (see `compute_leaders`);
+/// `End` once the run reaches a leader, a branch, or a dead end,
+/// carrying whichever successors it actually has (0, 1, or 2 - each
+/// `Some` one is guaranteed to be a leader by construction of
+/// `compute_leaders`). Shared by chain-summary building and final read
+/// validation so both agree, by construction, on exactly which
+/// positions belong to which leader's run.
+#[cfg(feature = "std")]
+enum ChainStep {
+    Continue(usize),
+    End([Option<usize>; 2]),
+}
+
+#[cfg(feature = "std")]
+fn chain_step(succs: [Option<usize>; 2], is_leader: &[bool]) -> ChainStep {
+    match succs {
+        [Some(s), None] if !is_leader[s] => ChainStep::Continue(s),
+        other => ChainStep::End(other),
+    }
+}
+
+/// #1756 Codex review round 11: walks each leader's compressed run once,
+/// folding every visited position's writes into ONE cumulative kill set
+/// per leader and recording which leader(s) (by compact leader-index,
+/// via `leader_index_of`) the run eventually reaches. This is what lets
+/// `compute_missing_sets` run over `leader_positions.len()` nodes instead
+/// of `reachable_count` - see `prove_definite_register_assignment`'s doc
+/// comment for the finding this closes and the accounting it restores.
+/// `writes_of` enumerates a position's own writes (dense bit indices) via
+/// callback, mirroring `for_each_reachable_successor`'s style - no
+/// per-position allocation regardless of how many positions a run visits.
+#[cfg(feature = "std")]
+fn build_leader_chains(
+    leader_positions: &[usize],
+    is_leader: &[bool],
+    mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
+    mut writes_of: impl FnMut(usize, &mut dyn FnMut(usize)),
+    mut leader_index_of: impl FnMut(usize) -> usize,
+) -> (Vec<RegSet>, Vec<[Option<usize>; 2]>) {
+    let mut chain_killed: Vec<RegSet> = Vec::with_capacity(leader_positions.len());
+    let mut chain_targets: Vec<[Option<usize>; 2]> = Vec::with_capacity(leader_positions.len());
+    for &leader_pos in leader_positions {
+        let mut killed = RegSet::empty();
+        let mut pos = leader_pos;
+        let targets = loop {
+            writes_of(pos, &mut |bit| killed.insert(bit));
+            match chain_step(successors_of(pos), is_leader) {
+                ChainStep::Continue(next) => pos = next,
+                ChainStep::End(succs) => {
+                    let mut out = [None, None];
+                    for (i, s) in succs.into_iter().flatten().enumerate() {
+                        out[i] = Some(leader_index_of(s));
+                    }
+                    break out;
+                }
+            }
+        };
+        chain_killed.push(killed);
+        chain_targets.push(targets);
+    }
+    (chain_killed, chain_targets)
+}
+
+/// #1756 Codex review round 11: finds the lowest-*position* violating
+/// read across every leader's compressed run, given each leader's own
+/// converged MISSING value (`missing`, indexed the same way
+/// `leader_positions` is). Each leader's run is walked in EXECUTION
+/// order (following successors), which is NOT guaranteed to match
+/// ascending position order (see
+/// `c1756_backward_propagating_chain_still_rejects_and_converges_promptly`
+/// for a genuine, pre-existing case where they're exact opposites) - so
+/// this tracks the minimum-position candidate across every run instead
+/// of returning on the first one any single walk happens to encounter,
+/// preserving the deterministic-first-diagnostic contract
+/// (`c1756_case25`/`c1756_case26`) regardless of which leader or which
+/// run reaches it first. Returns `(position, dense register bit)`.
+#[cfg(feature = "std")]
+fn find_first_violation(
+    leader_positions: &[usize],
+    is_leader: &[bool],
+    missing: &[RegSet],
+    mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
+    mut reads_of: impl FnMut(usize, &mut dyn FnMut(usize)),
+    mut writes_of: impl FnMut(usize, &mut dyn FnMut(usize)),
+) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for (leader_idx, &leader_pos) in leader_positions.iter().enumerate() {
+        let mut local = missing[leader_idx].clone();
+        let mut pos = leader_pos;
+        loop {
+            let mut found_here: Option<usize> = None;
+            reads_of(pos, &mut |bit| {
+                if found_here.is_none() && local.contains(bit) {
+                    found_here = Some(bit);
+                }
+            });
+            if let Some(bit) = found_here {
+                let better = match best {
+                    None => true,
+                    Some((best_pos, _)) => pos < best_pos,
+                };
+                if better {
+                    best = Some((pos, bit));
+                }
+            }
+            writes_of(pos, &mut |bit| local.remove(bit));
+            match chain_step(successors_of(pos), is_leader) {
+                ChainStep::Continue(next) => pos = next,
+                ChainStep::End(_) => break,
+            }
+        }
+    }
+    best
+}
+
+/// #1756 (FA-07-016) Codex review round 8: the dual, MAY-MISSING
+/// formulation of definite-register-assignment, replacing the round 1-7
+/// MUST/DEFINED/intersection formulation entirely.
+///
+/// **Derivation** (De Morgan's law over the equations this replaces):
+///
+///   DEFINED[entry] = ENTRY_DEFS;  DEFINED[n] = intersect(OUT[p] for p in preds(n))
+///   OUT[n] = DEFINED[n] union WRITES[n]
+///
+/// Let MISSING[n] = U minus DEFINED[n]. Then:
+///
+///   MISSING[entry] = U minus ENTRY_DEFS   (fixed - see below)
+///   MISSING[n] = U minus intersect(OUT[p]) = union(U minus OUT[p]) = union(MISSING_OUT[p])
+///   MISSING_OUT[n] = U minus OUT[n] = U minus (DEFINED[n] union WRITES[n])
+///                  = (U minus DEFINED[n]) intersect (U minus WRITES[n])
+///                  = MISSING[n] minus WRITES[n]
+///
+/// A register `r` is read-safe at `n` iff `r` is not in MISSING[n] - the
+/// identical predicate as before (`r` in DEFINED[n]), just phrased via the
+/// complement; `decode_operands`'s per-opcode read/write classification
+/// (including MAP_GET's conservative `default_val` read, CALL/CLOSURE_CALL's
+/// has-dst-flag asymmetry, and same-instruction read-before-write - reads
+/// are validated against `MISSING[n]`, the PRE-write state, exactly as the
+/// original formulation validated against `DEFINED[n]` pre-write) is
+/// entirely unchanged; only the dataflow equations computing `MISSING`
+/// itself are new.
+///
+/// **Initialization**: non-entry nodes start at BOTTOM = empty (the dual of
+/// the non-negotiable TOP=U rule the original formulation required - union's
+/// identity element is the empty set, as intersection's was U). This is
+/// load-bearing for the identical reason `c1756_case12` proves for the
+/// original rule: under the wrong rule (non-entry nodes starting at U, the
+/// naive-looking mirror of the WRONG empty-init the original formulation
+/// explicitly rejected), a loop's first, still-unconverged pass through its
+/// own back edge would union with U (already everything, unable to add
+/// anything) and get permanently stuck reporting every register missing,
+/// even ones a real forward path (unrelated to the loop) already proves
+/// defined - the dual of case 12's own wrongly-empty-forever failure mode,
+/// under the DEFINED<->MISSING, intersect<->union, TOP<->BOTTOM
+/// substitution throughout. `c1756_case12_accepts_loop_read_requires_top_
+/// initialization` (kept, unmodified, as a regression) still exercises this
+/// exact property under the new formulation.
+///
+/// Entry (position 0) is never re-unioned by any predecessor, including a
+/// back edge that targets instruction 0 directly (structurally legal - a
+/// jump to offset 0 is a valid instruction boundary): by the dual of the
+/// round-6 argument, every reachable MISSING_OUT is provably a SUBSET of
+/// MISSING[entry] (writes only ever REMOVE bits from MISSING, monotonically,
+/// so by induction no reachable node's missing set can ever grow past what
+/// entry itself starts with) - unioning entry's fixed MISSING with any such
+/// subset changes nothing. `compute_missing_sets` encodes this as an
+/// explicit `target != 0` guard in `deliver`, rather than relying on the
+/// argument alone.
+///
+/// **Work bound**: see `compute_missing_sets`'s doc comment - this
+/// formulation's bit-level worklist is what makes reverse-postorder ranking
+/// and strongly-connected-component decomposition (rounds 5-7's successive
+/// fixes) unnecessary. Both existed solely to bound how many times a WHOLE
+/// `RegSet` could be re-narrowed and re-compared (an O(|U|/64)-per-event
+/// cost with no bound on event count without careful ordering); at the bit
+/// level, each (position, register) event is inherently processed at most
+/// once, so no adversarial ordering or fan-in can force "reprocessing" -
+/// there is nothing to reprocess. This also directly closes Codex review
+/// round 8's first finding (duplicate live `RegSet` states across
+/// branches): every reachable position owns exactly one `RegSet`, allocated
+/// once and mutated in place via `insert` - there is no clone-on-write, no
+/// structural-sharing bookkeeping, and therefore no way for independently-
+/// computed-but-equal branch states to duplicate memory, regardless of how
+/// many branches compute the identical result.
+///
+/// **Leader compression** (#1756 Codex review round 11): round 10 fixed
+/// per-position storage that stayed accidentally wide (a chain converging
+/// to a small or empty missing set still paid full width per position
+/// until it converged); round 11's finding is the complementary case - a
+/// long, NON-branching run whose missing set stays wide THROUGHOUT,
+/// because nothing along it ever narrows enough (e.g. millions of
+/// redundant re-writes to an already-defined register, interleaved among
+/// many still-missing ones). Lazy growth doesn't help there: every
+/// position genuinely holds close to `domain_size` live bits, so each of
+/// `reachable_count` positions still costs close to the full width, and -
+/// independently - the bit-level worklist still delivers every one of
+/// those live bits at every one of those positions, one hop at a time,
+/// achieving close to the full `reachable_count * domain_size` EVENT
+/// bound too (not just the memory bound). Neither symptom is fixable by
+/// changing any ONE position's own representation, because the actual
+/// waste is redundant STORAGE AND PROPAGATION across MANY positions that
+/// all hold the identical value.
+///
+/// The fix: before running `compute_missing_sets` at all, collapse the
+/// reachable graph down to its "leaders" (`compute_leaders`) - a position
+/// needs its own slot only if it is entry, a merge point, or a branch
+/// target; every other position has exactly one predecessor with exactly
+/// one successor, so its value is always identical to that predecessor's
+/// MISSING_OUT and is derived on demand instead (`chain_step`,
+/// `build_leader_chains`, `find_first_violation`). `compute_missing_sets`
+/// itself is unchanged - it still runs the identical bit-level worklist,
+/// just over `leader_positions.len()` nodes instead of `reachable_count`.
+/// For a run with no internal branching at all, `leader_positions.len()`
+/// is 1, regardless of how long the run is - collapsing both the storage
+/// and the event count for Codex's adversarial shape to `O(domain_size)`,
+/// with the run's own length only costing a plain O(1)-per-instruction
+/// local walk (no `domain_size` factor) to fold its writes into one
+/// cumulative kill set (`build_leader_chains`) and, once the compressed
+/// worklist converges, to validate its reads (`find_first_violation`).
+#[cfg(feature = "std")]
+#[allow(clippy::too_many_arguments)] // private helper; `limits`/`work_meter` (rounds 13-14) have no natural grouping
+fn prove_definite_register_assignment(
+    function: &str,
+    code: &[u8],
+    instr_start: usize,
+    instr_starts: &[usize],
+    instruction_successors: &[InstructionSuccessors],
+    reachable_offsets: &HashSet<usize>,
+    entry_param_count: usize,
+    limits: &VerificationLimits,
+    work_meter: &mut AnalysisWorkMeter,
+) -> Result<(), RejectReport> {
+    if instr_starts.is_empty() {
+        return Ok(());
+    }
+
+    // #1756 Codex review round 16 (owner decision), corrected in round
+    // 17: the raw-node state budget check runs FIRST, before `dataflow_
+    // domain_accounting` allocates any reachable-node CSR table -
+    // `reachable_count` and `reachable_instruction_bytes` (round 17: the
+    // exact reachable-only byte sum, NOT the total structural
+    // instruction-section length - see `reachable_instruction_bytes`'s
+    // own doc comment for why that distinction matters) are both already
+    // known for free at this point (see `check_raw_node_state_budget`'s
+    // own doc comment), so this check never needs to build the very
+    // structures it exists to bound.
+    let reachable_count = reachable_offsets.len();
+    let instr_len = code.len().saturating_sub(instr_start);
+    let Some(reachable_bytes) =
+        reachable_instruction_bytes(instr_starts, reachable_offsets, instr_len)
+    else {
+        return Err(reject_one(
+            function,
+            VerificationCode::AnalysisStateLimitExceeded,
+            0,
+            "definite-register-assignment analysis could not determine the reachable \
+             instruction stream's byte length without overflow, exceeding any finite \
+             verification state budget"
+                .to_string(),
+        ));
+    };
+    let raw_words = match check_raw_node_state_budget(
+        reachable_count,
+        reachable_bytes,
+        entry_param_count,
+        limits.max_state_words,
+    ) {
+        Ok(raw_words) => raw_words,
+        Err(raw_words) => {
+            return Err(reject_one(
+                function,
+                VerificationCode::AnalysisStateLimitExceeded,
+                0,
+                format!(
+                    "definite-register-assignment analysis needs at least {} logical verifier-analysis word(s) for raw reachable-node representation alone ({reachable_count} reachable node(s) totaling {reachable_bytes} encoded byte(s) of reachable instructions), exceeding the verification state budget of {} before any leader-compressed state is even computed",
+                    if raw_words == usize::MAX { "more than usize::MAX".to_string() } else { raw_words.to_string() },
+                    limits.max_state_words
+                ),
+            ));
+        }
+    };
+
+    // Codex review round 3 on this PR (#1840): re-decodes exactly one
+    // reachable instruction's operands on demand, via the same
+    // `decode_operands` the main structural walk already used - never a
+    // second decoder, and never materialized for an unreachable
+    // instruction. Every byte here already passed full structural
+    // validation earlier in `verify_function_code` (opcode recognition,
+    // operand shape, canonical domains), so a decode failure here would be
+    // an internal invariant violation, not an attacker-reachable outcome.
+    //
+    // #1756 Codex review round 18 (owner decision): forwards whichever
+    // sink `dataflow_domain_accounting` supplies (a `FlatSink` writing
+    // straight into its own `reads_flat`/`writes_flat`) rather than
+    // collecting into a temporary `Vec<u16>` pair per reachable
+    // instruction and copying that into the flat arrays afterward.
+    let reads_writes_of = |idx: usize, sink: &mut dyn OperandSink| {
+        let offset = instr_starts[idx];
+        let mut cursor = instr_start + offset;
+        let opcode_byte =
+            read_u8(code, &mut cursor).expect("previously-decoded instruction must re-decode");
+        let opcode =
+            Opcode::from_byte(opcode_byte).expect("previously-decoded instruction must re-decode");
+        decode_operands(
+            function,
+            code,
+            &mut cursor,
+            offset,
+            opcode,
+            true,
+            sink,
+            &mut NoCollect,
+        )
+        .expect("previously-decoded instruction must re-decode");
+    };
+    let (reachable_indices, reads_flat, reads_offsets, writes_flat, writes_offsets, universe) =
+        dataflow_domain_accounting(
+            instr_starts,
+            reachable_offsets,
+            entry_param_count,
+            reads_writes_of,
+        );
+    // `reachable_count` was already computed for free above, before
+    // `dataflow_domain_accounting` ran - confirm the two agree, rather
+    // than silently trusting it (round 16).
+    debug_assert_eq!(reachable_indices.len(), reachable_count);
+    debug_assert_eq!(reachable_indices.first(), Some(&0));
+    let domain_size = universe.len();
+    let dense = |raw: u16| -> usize {
+        universe
+            .binary_search(&raw)
+            .expect("register must be in U by construction")
+    };
+
+    let mut entry_missing = RegSet::full(domain_size);
+    for r in 0..entry_param_count {
+        entry_missing.remove(dense(r as u16));
+    }
+
+    let successors_of = |pos: usize| -> [Option<usize>; 2] {
+        let mut out = [None, None];
+        let mut i = 0usize;
+        for_each_reachable_successor(
+            reachable_indices[pos],
+            instruction_successors,
+            instr_starts,
+            &reachable_indices,
+            |succ_pos| {
+                if i < 2 {
+                    out[i] = Some(succ_pos);
+                    i += 1;
+                }
+            },
+        );
+        // #1756 Codex review round 12: a self-targeting JMP_IF reports
+        // its one true successor twice - collapse it to a single edge
+        // here, upholding the precondition `compute_leaders` (and every
+        // other leader-compression consumer) documents and trusts.
+        dedup_successors(out)
+    };
+
+    // #1756 Codex review round 11: see this function's own doc comment
+    // ("Leader compression") for the finding this closes.
+    let is_leader = compute_leaders(reachable_count, successors_of);
+
+    // #1756 Codex review round 20 (owner decision): `leader_count` is
+    // derived by counting `is_leader`'s true bits - a plain iterator
+    // `.filter(..).count()`, zero additional allocation - rather than by
+    // first materializing `leader_positions` and taking its `.len()`.
+    // `is_leader` itself (`reachable_count`-sized, `Vec<bool>`) was
+    // already allocated under the EARLIER raw-node check's own
+    // authorization (`LEADER_FLAG_LOGICAL_BYTES * reachable_count`, part
+    // of `raw_words` above); counting its bits reads that already-
+    // authorized memory, allocating nothing new. This is what lets the
+    // combined check below run, and potentially reject, BEFORE
+    // `leader_positions` - a SEPARATE, `leader_count`-sized `Vec<usize>`
+    // allocation this check's own `fixed_bytes` term also charges for -
+    // is ever constructed. Closes the last remaining pre-allocation
+    // timing hole in this envelope: round 15 charged `leader_positions`
+    // honestly because building it BEFORE the check was, at the time,
+    // believed unavoidable ("the one structure this check cannot gate
+    // ahead of itself by construction") - round 20's finding is that
+    // this was never actually true, since `is_leader` already contains
+    // everything needed to compute `leader_count` without collecting
+    // positions at all.
+    let leader_count = is_leader.iter().filter(|&&leader| leader).count();
+
+    // #1756 Codex review round 13 (owner decision), round 16, round 20:
+    // the deterministic verifier-resource admission check, BEFORE
+    // `leader_positions`, `build_leader_chains`, or `compute_missing_
+    // sets` allocates any leader_count-sized state - see `check_
+    // analysis_state_budget`'s own doc comment and `VerificationLimits`.
+    // A genuinely branch-dense reachable graph (round 13's finding) is
+    // not a bug in leader compression - it is the correct, minimal
+    // leader set an EXACT MUST-dataflow proof requires - so this is a
+    // resource-envelope decision, not a correctness fix. Round 16: now
+    // COMBINES the raw-node cost already proven safe above with this
+    // phase's own leader/domain-scaled cost, since both remain
+    // simultaneously live for the rest of this analysis.
+    if let Err(state_words) =
+        check_analysis_state_budget(raw_words, leader_count, domain_size, limits.max_state_words)
+    {
+        return Err(reject_one(
+            function,
+            VerificationCode::AnalysisStateLimitExceeded,
+            0,
+            format!(
+                "definite-register-assignment analysis needs {} logical verifier-analysis word(s) ({reachable_count} reachable node(s), {leader_count} leader(s) at a {domain_size}-register domain: raw reachable-node representation plus dense lattice payload plus fixed per-leader/stack structural overhead), exceeding the verification state budget of {}",
+                if state_words == usize::MAX { "more than usize::MAX".to_string() } else { state_words.to_string() },
+                limits.max_state_words
+            ),
+        ));
+    }
+
+    // #1756 Codex review round 20: only NOW, with the combined check
+    // above having authorized `leader_count`'s own storage cost, is
+    // `leader_positions` actually materialized.
+    let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+
+    let leader_index_of = |pos: usize| -> usize {
+        leader_positions
+            .binary_search(&pos)
+            .expect("every chain-end successor is a leader by construction of compute_leaders")
+    };
+    let (chain_killed, chain_targets) = build_leader_chains(
+        &leader_positions,
+        &is_leader,
+        successors_of,
+        |pos, visit| {
+            for &w in csr_slice(&writes_flat, &writes_offsets, pos) {
+                visit(dense(w));
+            }
+        },
+        leader_index_of,
+    );
+    let compressed_writes_contains =
+        |leader_idx: usize, bit: usize| -> bool { chain_killed[leader_idx].contains(bit) };
+    let compressed_successors_of =
+        |leader_idx: usize| -> [Option<usize>; 2] { chain_targets[leader_idx] };
+
+    let (missing, _event_count, _peak_queue_len) = match compute_missing_sets(
+        leader_count,
+        domain_size,
+        entry_missing,
+        compressed_writes_contains,
+        compressed_successors_of,
+        work_meter,
+    ) {
+        Ok(result) => result,
+        Err(used) => {
+            // #1756 Codex review round 14 (owner decision): `used` is the
+            // shared `work_meter`'s CUMULATIVE total across every
+            // function analyzed so far in this artifact verification
+            // call, not just this function's own contribution - see
+            // `AnalysisWorkMeter`'s doc comment. Round 19: `used ==
+            // usize::MAX` specifically means `AnalysisWorkMeter::charge_
+            // one`'s own `checked_add` overflowed - the true attempted
+            // usage (`usize::MAX + 1`) has no finite representation, so
+            // it is reported with the same "more than usize::MAX"
+            // wording the state-budget overflow paths already use,
+            // rather than printing the sentinel value as if it were a
+            // real, representable work-unit count.
+            return Err(reject_one(
+                function,
+                VerificationCode::AnalysisWorkLimitExceeded,
+                0,
+                format!(
+                    "definite-register-assignment analysis performed {} lattice-propagation work unit(s) across this verification call, exceeding the verification work budget of {}",
+                    if used == usize::MAX { "more than usize::MAX".to_string() } else { used.to_string() },
+                    limits.max_work_units
+                ),
+            ));
+        }
+    };
+
+    // Validate reads against the converged fixed point only - never during
+    // an unstable iteration, so the reported diagnostic always describes the
+    // actual least/greatest fixed point, not transient worklist state. See
+    // `find_first_violation`'s own doc comment for why this can no longer
+    // be a simple single ascending scan with an early return: each
+    // leader's run is walked in execution order, not position order.
+    let violation = find_first_violation(
+        &leader_positions,
+        &is_leader,
+        &missing,
+        successors_of,
+        |pos, visit| {
+            for &r in csr_slice(&reads_flat, &reads_offsets, pos) {
+                visit(dense(r));
+            }
+        },
+        |pos, visit| {
+            for &w in csr_slice(&writes_flat, &writes_offsets, pos) {
+                visit(dense(w));
+            }
+        },
+    );
+    if let Some((pos, bit)) = violation {
+        let idx = reachable_indices[pos];
+        let raw_reg = universe[bit];
+        return Err(reject_one(
+            function,
+            VerificationCode::UndefinedRegisterRead,
+            instr_starts[idx],
+            format!(
+                "register r{raw_reg} is read but not definitely defined on every execution path reaching this instruction"
+            ),
+        ));
     }
 
     Ok(())
@@ -946,7 +3091,16 @@ fn verify_reachable_control_flow(
 /// instruction-shaped reading any less structurally real - so it passes
 /// `false`. This keeps both concerns on one shared opcode-shape match
 /// rather than duplicating it.
+// #1756 Codex review round 21: gained an 8th parameter (`metadata_sink`)
+// when `jump_targets`/`string_refs`/`call_argcs` moved from `OperandRefs`
+// to the same caller-directed sink pattern round 18 already applied to
+// `reads`/`writes` (see `MetadataSink`'s own doc comment) - each parameter
+// is independently meaningful (the decode target, the canonical-domain
+// policy switch, and the two orthogonal sink roles), and bundling them
+// into a struct purely to satisfy this lint would add indirection without
+// reducing real complexity.
 #[cfg(feature = "std")]
+#[allow(clippy::too_many_arguments)]
 fn decode_operands(
     function: &str,
     code: &[u8],
@@ -954,6 +3108,8 @@ fn decode_operands(
     offset: usize,
     opcode: Opcode,
     enforce_canonical_domains: bool,
+    sink: &mut dyn OperandSink,
+    metadata_sink: &mut dyn MetadataSink,
 ) -> Result<OperandRefs, RejectReport> {
     let invalid =
         |msg: &str| reject_one(function, VerificationCode::OperandOutOfBounds, offset, msg);
@@ -967,6 +3123,7 @@ fn decode_operands(
         Opcode::LoadQ => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             let literal = read_u8(code, cursor).map_err(|_| invalid("truncated quad literal"))?;
             if enforce_canonical_domains && literal > 3 {
                 return Err(invalid("non-canonical quad literal: must be 0..=3"));
@@ -975,6 +3132,7 @@ fn decode_operands(
         Opcode::LoadBool => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             let literal = read_u8(code, cursor).map_err(|_| invalid("truncated bool literal"))?;
             if enforce_canonical_domains && literal > 1 {
                 return Err(invalid("non-canonical bool literal: must be 0 or 1"));
@@ -983,6 +3141,7 @@ fn decode_operands(
         Opcode::LoadI32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             read_i32_le(code, cursor).map_err(|_| invalid("truncated i32 literal"))?;
         }
         Opcode::AddI32 => {
@@ -992,6 +3151,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
+            sink.read(lhs);
+            sink.read(rhs);
+            sink.write(dst);
         }
         Opcode::SubI32 | Opcode::MulI32 | Opcode::DivI32 | Opcode::ModI32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
@@ -1000,32 +3162,38 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
+            sink.read(lhs);
+            sink.read(rhs);
+            sink.write(dst);
         }
         Opcode::LoadU32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             read_u32_le(code, cursor).map_err(|_| invalid("truncated u32 literal"))?;
         }
         Opcode::LoadF64 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_F64_MATH;
             read_f64_le(code, cursor).map_err(|_| invalid("truncated f64 literal"))?;
         }
         Opcode::LoadFx => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_FX_VALUES;
             read_i32_le(code, cursor).map_err(|_| invalid("truncated fx literal"))?;
         }
         Opcode::LoadText => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_TEXT_VALUES;
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated text literal string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "text literal"));
+            metadata_sink.string_ref(offset, sid as usize, "text literal");
         }
         Opcode::ConcatText => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
@@ -1034,12 +3202,16 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
+            sink.read(lhs);
+            sink.read(rhs);
+            sink.write(dst);
             refs.required_capabilities |= CAP_TEXT_VALUES;
         }
         Opcode::MakeSequence => {
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated sequence dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated sequence arity"))? as usize;
@@ -1047,12 +3219,14 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated sequence item register"))?;
                 mark_reg(src);
+                sink.read(src);
             }
         }
         Opcode::MakeTuple => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             let count =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple arity"))? as usize;
             if enforce_canonical_domains && count < 2 {
@@ -1062,16 +3236,17 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated tuple item register"))?;
                 mark_reg(src);
+                sink.read(src);
             }
         }
         Opcode::MakeRecord => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated record dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated record type string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "record type name"));
+            metadata_sink.string_ref(offset, sid as usize, "record type name");
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated record slot count"))?
                 as usize;
@@ -1082,20 +3257,20 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated record slot register"))?;
                 mark_reg(src);
+                sink.read(src);
             }
         }
         Opcode::MakeAdt => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated enum dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated enum type string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "enum type name"));
+            metadata_sink.string_ref(offset, sid as usize, "enum type name");
             let variant_sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated enum variant string id"))?;
-            refs.string_refs
-                .push((offset, variant_sid as usize, "enum variant name"));
+            metadata_sink.string_ref(offset, variant_sid as usize, "enum variant name");
             read_u16_le(code, cursor).map_err(|_| invalid("truncated enum tag"))?;
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated enum payload count"))?
@@ -1104,6 +3279,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated enum payload register"))?;
                 mark_reg(src);
+                sink.read(src);
             }
         }
         Opcode::AdtTag => {
@@ -1115,8 +3291,9 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated adt-tag type string id"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.string_refs
-                .push((offset, sid as usize, "enum type name"));
+            sink.read(src);
+            sink.write(dst);
+            metadata_sink.string_ref(offset, sid as usize, "enum type name");
         }
         Opcode::AdtGet => {
             let dst =
@@ -1128,8 +3305,9 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated adt-get payload index"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.string_refs
-                .push((offset, sid as usize, "enum type name"));
+            sink.read(src);
+            sink.write(dst);
+            metadata_sink.string_ref(offset, sid as usize, "enum type name");
         }
         Opcode::RecordGet => {
             let dst = read_u16_le(code, cursor)
@@ -1141,8 +3319,9 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated record-get slot index"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.string_refs
-                .push((offset, sid as usize, "record type name"));
+            sink.read(src);
+            sink.write(dst);
+            metadata_sink.string_ref(offset, sid as usize, "record type name");
         }
         Opcode::TupleGet => {
             let dst = read_u16_le(code, cursor)
@@ -1152,6 +3331,8 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple-get index"))?;
             mark_reg(dst);
             mark_reg(src);
+            sink.read(src);
+            sink.write(dst);
         }
         Opcode::SequenceGet => {
             let dst = read_u16_le(code, cursor)
@@ -1163,6 +3344,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(src);
             mark_reg(index);
+            sink.read(src);
+            sink.read(index);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
         }
         Opcode::SequenceLen => {
@@ -1172,6 +3356,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-len src register"))?;
             mark_reg(dst);
             mark_reg(src);
+            sink.read(src);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1182,6 +3368,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-is-empty src register"))?;
             mark_reg(dst);
             mark_reg(src);
+            sink.read(src);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1195,6 +3383,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
+            sink.read(seq);
+            sink.read(val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1208,6 +3399,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
+            sink.read(seq);
+            sink.read(val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1221,6 +3415,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
+            sink.read(seq);
+            sink.read(val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1231,6 +3428,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-pop src register"))?;
             mark_reg(dst);
             mark_reg(src);
+            sink.read(src);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -1238,6 +3437,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated map-empty dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapContains => {
@@ -1250,6 +3450,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(map);
             mark_reg(key);
+            sink.read(map);
+            sink.read(key);
+            sink.write(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapGet => {
@@ -1265,6 +3468,15 @@ fn decode_operands(
             mark_reg(map);
             mark_reg(key);
             mark_reg(default_val);
+            sink.read(map);
+            sink.read(key);
+            // #1756 (FA-07-016): MAP_GET reads `default_val` lazily at
+            // runtime, only on a key miss (see #1771). The verifier cannot
+            // soundly prove key presence, so this pass conservatively
+            // requires `default_val` definitely defined unconditionally -
+            // never a value-sensitive "only on the miss path" proof.
+            sink.read(default_val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapSet => {
@@ -1280,6 +3492,10 @@ fn decode_operands(
             mark_reg(map);
             mark_reg(key);
             mark_reg(val);
+            sink.read(map);
+            sink.read(key);
+            sink.read(val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::RngSeed => {
@@ -1289,6 +3505,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated rng-seed seed register"))?;
             mark_reg(dst);
             mark_reg(seed);
+            sink.read(seed);
+            sink.write(dst);
             refs.required_capabilities |= CAP_PRNG;
         }
         Opcode::RngNextI32 => {
@@ -1301,17 +3519,20 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lo);
             mark_reg(hi);
+            sink.read(lo);
+            sink.read(hi);
+            sink.write(dst);
             refs.required_capabilities |= CAP_PRNG;
         }
         Opcode::MakeClosure => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated closure dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_CLOSURE_VALUES;
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated closure function string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "closure function name"));
+            metadata_sink.string_ref(offset, sid as usize, "closure function name");
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated closure capture arity"))?
                 as usize;
@@ -1319,6 +3540,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure capture register"))?;
                 mark_reg(src);
+                sink.read(src);
             }
         }
         Opcode::ClosureCall => {
@@ -1334,7 +3556,13 @@ fn decode_operands(
                 let dst = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure-call dst register"))?;
                 mark_reg(dst);
+                sink.write(dst);
             } else {
+                // #1756 (FA-07-016): matches the pre-existing `mark_reg`
+                // asymmetry below - the encoded dummy dst register bytes are
+                // still consumed from the stream, but this opcode form
+                // defines no register at all, so the dummy dst is neither a
+                // read nor a write.
                 let _ = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure-call dst register"))?;
             }
@@ -1344,29 +3572,38 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated closure-call arg register"))?;
             mark_reg(closure);
             mark_reg(arg);
+            sink.read(closure);
+            sink.read(arg);
             refs.required_capabilities |= CAP_CLOSURE_VALUES;
         }
         Opcode::LoadVar => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated variable string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "variable reference"));
+            metadata_sink.string_ref(offset, sid as usize, "variable reference");
         }
         Opcode::StoreVar => {
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated variable string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "variable reference"));
+            metadata_sink.string_ref(offset, sid as usize, "variable reference");
             let src = read_u16_le(code, cursor).map_err(|_| invalid("truncated src register"))?;
             mark_reg(src);
+            // #1756 (FA-07-016): reads the source register into the named
+            // local-variable slot. Register dataflow only - the variable
+            // store itself is outside this pass's domain (see LOAD_VAR,
+            // which writes only its destination register, not a register
+            // form of the variable it names).
+            sink.read(src);
         }
         Opcode::QNot | Opcode::BoolNot | Opcode::QTruthNot => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             let src = read_u16_le(code, cursor).map_err(|_| invalid("truncated src register"))?;
             mark_reg(dst);
             mark_reg(src);
+            sink.read(src);
+            sink.write(dst);
         }
         Opcode::QAnd
         | Opcode::QOr
@@ -1394,6 +3631,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
+            sink.read(lhs);
+            sink.read(rhs);
+            sink.write(dst);
             if matches!(
                 opcode,
                 Opcode::AddF64 | Opcode::SubF64 | Opcode::MulF64 | Opcode::DivF64
@@ -1409,14 +3649,15 @@ fn decode_operands(
         }
         Opcode::Jmp => {
             let target = read_u32_le(code, cursor).map_err(|_| invalid("truncated jump target"))?;
-            refs.jump_targets.push(target as usize);
+            metadata_sink.jump_target(target as usize);
         }
         Opcode::JmpIf => {
             let cond =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated condition register"))?;
             mark_reg(cond);
+            sink.read(cond);
             let target = read_u32_le(code, cursor).map_err(|_| invalid("truncated jump target"))?;
-            refs.jump_targets.push(target as usize);
+            metadata_sink.jump_target(target as usize);
         }
         Opcode::Call => {
             let has_dst_flag =
@@ -1431,34 +3672,41 @@ fn decode_operands(
                 let dst = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call dst register"))?;
                 mark_reg(dst);
+                sink.write(dst);
             } else {
+                // #1756 (FA-07-016): same asymmetry as `ClosureCall` above -
+                // the dummy dst register bytes are consumed but define
+                // nothing; this form's `CALL` defines no register.
                 let _ = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call dst register"))?;
             }
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated callee string id"))?;
-            refs.string_refs.push((offset, sid as usize, "call target"));
+            metadata_sink.string_ref(offset, sid as usize, "call target");
             let argc = read_u16_le(code, cursor).map_err(|_| invalid("truncated argc"))? as usize;
             // #1773 (FA-09-005): recorded alongside the "call target" string
             // ref above, keyed by the same `offset`, so the cross-function
             // pass can enforce arity against the callee's canonical
             // signature without re-decoding operands.
-            refs.call_argcs.push((offset, argc));
+            metadata_sink.call_argc(offset, argc);
             for _ in 0..argc {
                 let arg = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call arg register"))?;
                 mark_reg(arg);
+                sink.read(arg);
             }
         }
         Opcode::Assert => {
             let cond = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated assert condition register"))?;
             mark_reg(cond);
+            sink.read(cond);
         }
         Opcode::GateRead => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated gate dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_GATE_SURFACE;
             read_u16_le(code, cursor).map_err(|_| invalid("truncated gate device id"))?;
             read_u16_le(code, cursor).map_err(|_| invalid("truncated gate port"))?;
@@ -1470,45 +3718,45 @@ fn decode_operands(
             let src =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated gate src register"))?;
             mark_reg(src);
+            sink.read(src);
         }
         Opcode::PulseEmit => {
             refs.required_capabilities |= CAP_GATE_SURFACE;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated signal string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "pulse signal"));
+            metadata_sink.string_ref(offset, sid as usize, "pulse signal");
         }
         Opcode::StateQuery => {
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated state-query dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_STATE_QUERY;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated state query key id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "state query key"));
+            metadata_sink.string_ref(offset, sid as usize, "state query key");
         }
         Opcode::StateUpdate => {
             refs.required_capabilities |= CAP_STATE_UPDATE;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated state update key id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "state update key"));
+            metadata_sink.string_ref(offset, sid as usize, "state update key");
             let src = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated state-update src register"))?;
             mark_reg(src);
+            sink.read(src);
         }
         Opcode::EventPost => {
             refs.required_capabilities |= CAP_EVENT_POST;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated event-post signal id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "event post signal"));
+            metadata_sink.string_ref(offset, sid as usize, "event post signal");
         }
         Opcode::ClockRead => {
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated clock-read dst register"))?;
             mark_reg(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_CLOCK_READ;
         }
         Opcode::Ret => {
@@ -1520,6 +3768,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated return src register"))?;
                 mark_reg(src);
+                sink.read(src);
             }
         }
     }
@@ -1545,16 +3794,145 @@ fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
     }
 }
 
+/// #1756 Codex review round 21: no longer holds `jump_targets`/`string_
+/// refs`/`call_argcs` - those are now emitted through `MetadataSink`
+/// (below), exactly like `reads`/`writes` moved to `OperandSink` in
+/// round 18, for the identical reason: the reachable-only re-decode pass
+/// never reads them, so building and dropping fresh `Vec`s for them on
+/// every re-decoded instruction was pure waste (Codex's round-21 P1
+/// finding). What remains here (`max_register`, `required_capabilities`)
+/// is cheap regardless of mode - neither is heap-backed - so both stay
+/// direct fields, always populated, never routed through a sink.
 #[cfg(feature = "std")]
 #[derive(Default)]
 struct OperandRefs {
-    jump_targets: Vec<usize>,
-    string_refs: Vec<(usize, usize, &'static str)>,
     max_register: Option<usize>,
     required_capabilities: u32,
-    // #1773 (FA-09-005): (offset, argc) for each `Opcode::Call` site, keyed
-    // by the same offset as its "call target" string_refs entry.
-    call_argcs: Vec<(usize, usize)>,
+}
+
+/// #1756 Codex review round 18 (owner decision): every register an
+/// instruction reads or writes, in the order fixed by `decode_operands`'s
+/// exhaustive `Opcode` match (the same match that already classifies every
+/// operand for the register-range quota), is now emitted through this
+/// sink rather than collected into an `OperandRefs`-owned `Vec<u16>` - the
+/// main structural decode pass (`verify_function_code`'s first walk)
+/// never reads a decoded instruction's reads/writes at all (it only
+/// consumes `jump_targets`/`string_refs`/`call_argcs`/`max_register`/
+/// `required_capabilities`), so building and immediately dropping a
+/// `Vec<u16>` pair for EVERY structurally decoded instruction - reachable
+/// or not - cost one to two heap allocation/deallocation cycles per
+/// instruction for no reason: an artifact shaped as a reachable entry
+/// `RET` followed by millions of structurally valid but unreachable
+/// `LOAD_BOOL` instructions paid millions of allocator cycles that
+/// `max_state_words`/`max_work_units` (both #1756-analysis-only budgets,
+/// scoped to REACHABLE state) could never see or bound, since this cost
+/// happens earlier, in the shared structural walk every function pays
+/// regardless of signature. `read`/`write` are independent - a register
+/// can appear in both (e.g. an opcode reading and writing the same
+/// numeric register would report it to both) - never merged, so the
+/// definite-assignment pass can still validate reads against `IN[n]`
+/// before folding writes into `OUT[n]`.
+///
+/// Two implementations: `NoCollect` (below) does nothing at all - the
+/// structural pass's sink, zero heap allocation, zero storage, a plain
+/// virtual-call-and-return per register mention. `FlatSink` (in
+/// `dataflow_domain_accounting`) appends straight into the CALLER's own
+/// `reads_flat`/`writes_flat` CSR buffers - the reachable-only re-decode's
+/// sink, avoiding even a temporary per-instruction `Vec<u16>` that would
+/// otherwise be built and then copied into the flat arrays and dropped.
+/// `&mut dyn OperandSink` (dynamic dispatch, not a generic parameter) lets
+/// ONE closure type (`reads_writes_of` in `prove_definite_register_
+/// assignment`) forward whichever sink its own caller supplies, without
+/// needing to be generic itself - the indirection costs one vtable call
+/// per register mention, never a heap allocation, so it does not
+/// reintroduce the cost this round removes.
+#[cfg(feature = "std")]
+trait OperandSink {
+    fn read(&mut self, reg: u16);
+    fn write(&mut self, reg: u16);
+}
+
+/// The main structural decode pass's sink (`verify_function_code`'s first
+/// walk over every instruction, reachable or not) - this pass never reads
+/// a decoded instruction's register reads/writes, only `jump_targets`/
+/// `string_refs`/`call_argcs`/`max_register`/`required_capabilities`, so
+/// recording reads/writes at all would be pure waste. Both methods are
+/// empty; with `&mut dyn OperandSink` this is a vtable call to a no-op,
+/// never a heap allocation - the property this round exists to establish.
+#[cfg(feature = "std")]
+struct NoCollect;
+
+#[cfg(feature = "std")]
+impl OperandSink for NoCollect {
+    fn read(&mut self, _reg: u16) {}
+    fn write(&mut self, _reg: u16) {}
+}
+
+/// #1756 Codex review round 21 (owner decision): the SAME sink pattern
+/// `OperandSink` established in round 18, extended to `decode_operands`'s
+/// three remaining heap-backed fields - `jump_targets`, `string_refs`,
+/// `call_argcs` - which round 18 left untouched (it addressed only
+/// `reads`/`writes`). The reachable-only re-decode pass (`reads_writes_
+/// of` in `prove_definite_register_assignment`) never reads ANY of these
+/// three either - it discards the whole returned `OperandRefs` via
+/// `.expect(...)`, keeping only what its own `FlatSink` captured - so a
+/// zero-argument, no-destination `CALL` (which still populates `string_
+/// refs` with its callee name and `call_argcs` with `0`) paid a fresh
+/// heap allocation for each, per reachable instruction, for metadata
+/// nobody ever reads (Codex's round-21 P1 finding: roughly two allocator
+/// cycles per reachable no-op `CALL`, unbounded by `max_state_words`/
+/// `max_work_units` for the identical reason round 18's `reads`/`writes`
+/// gap was: this cost happens in the shared structural re-decode, not in
+/// anything either budget scopes).
+///
+/// `NoCollect` (same zero-field marker type as `OperandSink`'s no-op
+/// impl) also implements this trait with empty bodies - one universal
+/// "collect nothing" sink for BOTH operand and metadata suppression, so
+/// callers that need neither (like the reachable re-decode) pass exactly
+/// one shared no-op value for both parameters. `MetadataCollector`
+/// (below) is the structural pass's real collector - it appends directly
+/// into the CALLER's own outer accumulator `Vec`s (mirroring `FlatSink`'s
+/// own "write straight into the final destination, never a throwaway
+/// per-call `Vec`" design), rather than collecting into `OperandRefs`
+/// fields that the caller would then have to `.extend()` into its own
+/// accumulators and drop - eliminating that whole intermediate round-trip
+/// for the structural pass too, not just suppressing it for re-decode.
+#[cfg(feature = "std")]
+trait MetadataSink {
+    fn jump_target(&mut self, target: usize);
+    fn string_ref(&mut self, offset: usize, sid: usize, usage: &'static str);
+    fn call_argc(&mut self, offset: usize, argc: usize);
+}
+
+#[cfg(feature = "std")]
+impl MetadataSink for NoCollect {
+    fn jump_target(&mut self, _target: usize) {}
+    fn string_ref(&mut self, _offset: usize, _sid: usize, _usage: &'static str) {}
+    fn call_argc(&mut self, _offset: usize, _argc: usize) {}
+}
+
+/// #1756 Codex review round 21: the main structural decode pass's real
+/// metadata sink - appends directly into the CALLER's (`verify_function_
+/// code`'s) own outer `jump_targets`/`string_refs`/`call_argcs`
+/// accumulators, borrowed for the duration of one `decode_operands` call.
+#[cfg(feature = "std")]
+struct MetadataCollector<'a> {
+    jump_targets: &'a mut Vec<usize>,
+    string_refs: &'a mut Vec<(usize, usize, &'static str)>,
+    call_argcs: &'a mut Vec<(usize, usize)>,
+}
+
+#[cfg(feature = "std")]
+impl MetadataSink for MetadataCollector<'_> {
+    fn jump_target(&mut self, target: usize) {
+        self.jump_targets.push(target);
+    }
+    fn string_ref(&mut self, offset: usize, sid: usize, usage: &'static str) {
+        self.string_refs.push((offset, sid, usage));
+    }
+    fn call_argc(&mut self, offset: usize, argc: usize) {
+        self.call_argcs.push((offset, argc));
+    }
 }
 
 #[cfg(feature = "std")]
@@ -1616,6 +3994,317 @@ mod tests {
                 instrs,
                 ownership_events: Vec::new(),
                 params: Vec::new(),
+            }],
+            false,
+        )
+        .expect("emit test function")
+    }
+
+    /// #1756 Codex review round 18: like `emit_test_function`, but with a
+    /// second, callable "helper" function (`RET`, no operands) - needed to
+    /// build a real `CALL`/`MAKE_CLOSURE` instruction that references a
+    /// resolvable callee name.
+    fn emit_test_function_with_helper(main_instrs: Vec<IrInstr>) -> Vec<u8> {
+        emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "helper".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: main_instrs,
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit test function with helper")
+    }
+
+    /// #1756 Codex review round 18: a test-only `OperandSink` that
+    /// collects every emitted register into its own `Vec<u16>`, exactly
+    /// matching the shape `decode_operands` used to return directly (via
+    /// `OperandRefs.reads`/`.writes`) before this round's refactor - used
+    /// ONLY to assert the sink-based path still reports the identical
+    /// read/write identities `decode_operands`'s match arms always
+    /// produced, never in the structural or reachable-dataflow production
+    /// paths themselves.
+    struct RecordingSink {
+        reads: Vec<u16>,
+        writes: Vec<u16>,
+    }
+
+    impl OperandSink for RecordingSink {
+        fn read(&mut self, reg: u16) {
+            self.reads.push(reg);
+        }
+        fn write(&mut self, reg: u16) {
+            self.writes.push(reg);
+        }
+    }
+
+    /// #1756 Codex review round 18: decodes real SemCode bytes' FIRST
+    /// structural instruction directly via `decode_operands` and a
+    /// `RecordingSink`, returning `(reads, writes)` exactly as `OperandRefs`
+    /// used to expose them - direct design-test evidence that the round-18
+    /// sink refactor produces IDENTICAL register identities to the pre-
+    /// refactor `Vec`-returning shape, for opcode categories ranging from
+    /// zero-operand to genuinely variadic.
+    fn decode_first_instruction_operands(
+        bytes: &[u8],
+        function_name: &str,
+    ) -> (Vec<u16>, Vec<u16>) {
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode semcode");
+        let env = functions
+            .iter()
+            .find(|f| f.name == function_name)
+            .unwrap_or_else(|| panic!("function '{function_name}' not found"));
+        let code = env.code_slice;
+        let mut cursor = env.instr_start_offset;
+        let opcode_byte = read_u8(code, &mut cursor).expect("read opcode byte");
+        let opcode = Opcode::from_byte(opcode_byte).expect("valid opcode");
+        let mut sink = RecordingSink {
+            reads: Vec::new(),
+            writes: Vec::new(),
+        };
+        decode_operands(
+            function_name,
+            code,
+            &mut cursor,
+            0,
+            opcode,
+            true,
+            &mut sink,
+            &mut NoCollect,
+        )
+        .expect("decode operands");
+        (sink.reads, sink.writes)
+    }
+
+    /// #1756 Codex review round 21: a test-only `MetadataSink` that
+    /// collects every emitted item into its own `Vec` - the metadata
+    /// analogue of `RecordingSink` (round 18), used ONLY to assert the
+    /// sink-based path still reports the identical structural metadata
+    /// `decode_operands`'s match arms always produced, for opcodes that
+    /// populate `jump_targets`/`string_refs`/`call_argcs`.
+    struct RecordingMetadataSink {
+        jump_targets: Vec<usize>,
+        string_refs: Vec<(usize, usize, &'static str)>,
+        call_argcs: Vec<(usize, usize)>,
+    }
+
+    impl MetadataSink for RecordingMetadataSink {
+        fn jump_target(&mut self, target: usize) {
+            self.jump_targets.push(target);
+        }
+        fn string_ref(&mut self, offset: usize, sid: usize, usage: &'static str) {
+            self.string_refs.push((offset, sid, usage));
+        }
+        fn call_argc(&mut self, offset: usize, argc: usize) {
+            self.call_argcs.push((offset, argc));
+        }
+    }
+
+    /// #1756 Codex review round 21: decodes real SemCode bytes' FIRST
+    /// structural instruction directly via `decode_operands` and a
+    /// `RecordingMetadataSink`, returning `(jump_targets, string_refs,
+    /// call_argcs)` - direct design-test evidence that the round-21
+    /// metadata-sink refactor produces IDENTICAL structural metadata to
+    /// the pre-refactor `OperandRefs`-field shape.
+    #[allow(clippy::type_complexity)]
+    fn decode_first_instruction_metadata(
+        bytes: &[u8],
+        function_name: &str,
+    ) -> (
+        Vec<usize>,
+        Vec<(usize, usize, &'static str)>,
+        Vec<(usize, usize)>,
+    ) {
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode semcode");
+        let env = functions
+            .iter()
+            .find(|f| f.name == function_name)
+            .unwrap_or_else(|| panic!("function '{function_name}' not found"));
+        let code = env.code_slice;
+        let mut cursor = env.instr_start_offset;
+        let opcode_byte = read_u8(code, &mut cursor).expect("read opcode byte");
+        let opcode = Opcode::from_byte(opcode_byte).expect("valid opcode");
+        let mut metadata_sink = RecordingMetadataSink {
+            jump_targets: Vec::new(),
+            string_refs: Vec::new(),
+            call_argcs: Vec::new(),
+        };
+        decode_operands(
+            function_name,
+            code,
+            &mut cursor,
+            0,
+            opcode,
+            true,
+            &mut NoCollect,
+            &mut metadata_sink,
+        )
+        .expect("decode operands");
+        (
+            metadata_sink.jump_targets,
+            metadata_sink.string_refs,
+            metadata_sink.call_argcs,
+        )
+    }
+
+    /// #1756 Codex review round 21 (owner decision): "prove structural
+    /// decoding still sees identical metadata" - the metadata analogue
+    /// of round 18's read/write identity test, covering every opcode
+    /// category that populates `jump_targets`/`string_refs`/`call_argcs`:
+    /// `JMP` (one jump target, no string/argc metadata), variadic `CALL`
+    /// (one "call target" string ref AND one argc entry together - the
+    /// exact shape Codex's P1 finding cites), and `MAKE_ADT` (TWO
+    /// distinct string refs from a single instruction - "enum type name"
+    /// and "enum variant name" - proving multi-metadata opcodes are not
+    /// truncated to one entry).
+    #[test]
+    fn c1756_decode_operands_metadata_sink_matches_pre_refactor_identities_across_opcode_shapes() {
+        // JMP: one jump target, no string_refs/call_argcs at all.
+        let bytes = emit_test_function(vec![
+            IrInstr::Jmp {
+                label: "target".to_string(),
+            },
+            IrInstr::Label {
+                name: "target".to_string(),
+            },
+            IrInstr::Ret { src: None },
+        ]);
+        let (jump_targets, string_refs, call_argcs) =
+            decode_first_instruction_metadata(&bytes, "main");
+        assert_eq!(jump_targets.len(), 1, "JMP: exactly one jump target");
+        assert!(string_refs.is_empty(), "JMP: no string refs");
+        assert!(call_argcs.is_empty(), "JMP: no call argcs");
+
+        // Variadic CALL with 3 arguments: exactly one "call target"
+        // string ref AND one call_argc entry, together, from one
+        // instruction - the exact shape Codex's round-21 P1 finding
+        // cites (a no-destination, zero-argument CALL is the same shape
+        // with argc = 0).
+        let bytes = emit_test_function_with_helper(vec![IrInstr::Call {
+            dst: None,
+            name: "helper".to_string(),
+            args: vec![1, 2, 3],
+        }]);
+        let (jump_targets, string_refs, call_argcs) =
+            decode_first_instruction_metadata(&bytes, "main");
+        assert!(jump_targets.is_empty(), "CALL: no jump targets");
+        assert_eq!(
+            string_refs
+                .iter()
+                .map(|(_, _, usage)| *usage)
+                .collect::<Vec<_>>(),
+            vec!["call target"],
+            "CALL: exactly one call-target string ref"
+        );
+        assert_eq!(
+            call_argcs.iter().map(|(_, argc)| *argc).collect::<Vec<_>>(),
+            vec![3],
+            "CALL: exactly one call_argc entry with the true argument count"
+        );
+
+        // MAKE_ADT: TWO distinct string refs from ONE instruction (enum
+        // type name, enum variant name) - proves a multi-metadata opcode
+        // is not truncated to a single entry.
+        let bytes = emit_test_function(vec![IrInstr::MakeAdt {
+            dst: 0,
+            adt_name: "MyEnum".to_string(),
+            variant_name: "Variant".to_string(),
+            tag: 0,
+            items: vec![],
+        }]);
+        let (_, string_refs, _) = decode_first_instruction_metadata(&bytes, "main");
+        assert_eq!(
+            string_refs
+                .iter()
+                .map(|(_, _, usage)| *usage)
+                .collect::<Vec<_>>(),
+            vec!["enum type name", "enum variant name"],
+            "MAKE_ADT: both string refs present, in order, neither dropped"
+        );
+    }
+
+    /// #1756 Codex review round 18 (owner decision): "direct design test" -
+    /// proves the sink-based `decode_operands` produces the exact same
+    /// read/write register identities, in the exact same order, as the
+    /// pre-round-18 `Vec`-returning shape did, across four representative
+    /// opcode categories: fixed-arity (`ADD_I32`), zero-operand (`RET`),
+    /// and both genuinely VARIADIC forms (`CALL`'s argument list, `MAKE_
+    /// CLOSURE`'s capture list) - the variadic cases are the ones most at
+    /// risk of truncation or loss from an allocation-avoidance refactor,
+    /// since they are exactly why a small fixed-capacity inline buffer was
+    /// rejected as a design (see `OperandSink`'s own doc comment).
+    #[test]
+    fn c1756_decode_operands_sink_matches_pre_refactor_identities_across_opcode_shapes() {
+        // Fixed-arity: ADD_I32 dst=2, lhs=10, rhs=11.
+        let bytes = emit_test_function(vec![IrInstr::AddI32 {
+            dst: 2,
+            lhs: 10,
+            rhs: 11,
+        }]);
+        let (reads, writes) = decode_first_instruction_operands(&bytes, "main");
+        assert_eq!(reads, vec![10, 11], "fixed-arity: reads in lhs, rhs order");
+        assert_eq!(writes, vec![2], "fixed-arity: writes dst only");
+
+        // Zero-operand: RET with no source register at all.
+        let bytes = emit_test_function(vec![IrInstr::Ret { src: None }]);
+        let (reads, writes) = decode_first_instruction_operands(&bytes, "main");
+        assert_eq!(reads, Vec::<u16>::new(), "zero-operand: no reads");
+        assert_eq!(writes, Vec::<u16>::new(), "zero-operand: no writes");
+
+        // Variadic CALL: 5 argument registers, one destination register.
+        let bytes = emit_test_function_with_helper(vec![IrInstr::Call {
+            dst: Some(9),
+            name: "helper".to_string(),
+            args: vec![1, 2, 3, 4, 5],
+        }]);
+        let (reads, writes) = decode_first_instruction_operands(&bytes, "main");
+        assert_eq!(
+            reads,
+            vec![1, 2, 3, 4, 5],
+            "variadic CALL: every argument register, in order, none truncated"
+        );
+        assert_eq!(writes, vec![9], "variadic CALL: the dst register");
+
+        // Variadic MAKE_CLOSURE: 5 capture registers, one destination
+        // register.
+        let bytes = emit_test_function_with_helper(vec![IrInstr::MakeClosure {
+            dst: 0,
+            name: "helper".to_string(),
+            captures: vec![1, 2, 3, 4, 5],
+        }]);
+        let (reads, writes) = decode_first_instruction_operands(&bytes, "main");
+        assert_eq!(
+            reads,
+            vec![1, 2, 3, 4, 5],
+            "variadic MAKE_CLOSURE: every capture register, in order, none truncated"
+        );
+        assert_eq!(writes, vec![0], "variadic MAKE_CLOSURE: the dst register");
+    }
+
+    // #1756 (FA-07-016): like `emit_test_function`, but with a caller-chosen
+    // canonical SIG0 parameter list, for regressions that need a non-empty
+    // `ENTRY_DEFS`.
+    fn emit_test_function_with_params(
+        params: Vec<CallableValueFamily>,
+        instrs: Vec<IrInstr>,
+    ) -> Vec<u8> {
+        emit_ir_to_semcode(
+            &[IrFunction {
+                name: "main".to_string(),
+                instrs,
+                ownership_events: Vec::new(),
+                params,
             }],
             false,
         )
@@ -2352,9 +5041,18 @@ mod tests {
     fn verify_semcode_token_with_quotas_accepts_register_within_kernel_bound_budget() {
         let mut bytes = compile_program_to_semcode("fn main() { let a: bool = true; return; }")
             .expect("compile");
-        let opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
-        let dst_pos = opcode_pos + 1;
-        bytes[dst_pos..dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        let load_opcode_pos = find_instruction(&bytes, "main", Opcode::LoadBool, 0);
+        let load_dst_pos = load_opcode_pos + 1;
+        bytes[load_dst_pos..load_dst_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
+        // #1756 (FA-07-016): the compiled body also has `StoreVar "a" src=r0`
+        // reading whatever register `LoadBool` originally wrote. Patching
+        // only `LoadBool`'s dst would leave that `StoreVar` reading a
+        // register nothing ever defines - repoint it at the same patched
+        // register so this fixture keeps proving "r5000 is within budget",
+        // not "an undefined read happens to still be in range".
+        let store_opcode_pos = find_instruction(&bytes, "main", Opcode::StoreVar, 0);
+        let store_src_pos = store_opcode_pos + 1 + 2;
+        bytes[store_src_pos..store_src_pos + 2].copy_from_slice(&5000u16.to_le_bytes());
         verify_semcode_token_with_quotas(&bytes, RuntimeQuotas::kernel_bound())
             .expect("r5000 must be within KernelBound's register budget");
     }
@@ -3171,6 +5869,3537 @@ mod tests {
         assert_eq!(verified.functions.len(), 2);
     }
 
+    // --- #1756 (FA-07-016, umbrella #1617) regression matrix -------------
+    //
+    // Forward MUST dataflow proving every reachable register read is
+    // definitely defined on every incoming execution path. `ENTRY_DEFS` is
+    // exactly `{r0..signature.families.len()-1}` from the function's
+    // canonical SIG0 signature (#1773); every other register starts
+    // undefined until an instruction actually writes it. Cases 1-26 below
+    // match the campaign's required regression matrix one-to-one.
+
+    #[test]
+    fn c1756_case1_rejects_zero_arg_entry_undefined_read() {
+        let bytes = emit_test_function(vec![IrInstr::Ret { src: Some(0) }]);
+        let report =
+            verify_semcode(&bytes).expect_err("r0 undefined at a zero-arg entry must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case2_accepts_one_parameter_entry_read() {
+        let bytes = emit_test_function_with_params(
+            vec![CallableValueFamily::I32],
+            vec![IrInstr::Ret { src: Some(0) }],
+        );
+        verify_semcode(&bytes).expect("r0 is entry-defined by SIG0's one parameter");
+    }
+
+    #[test]
+    fn c1756_case3_accepts_multiple_parameter_entry_reads() {
+        let bytes = emit_test_function_with_params(
+            vec![
+                CallableValueFamily::I32,
+                CallableValueFamily::I32,
+                CallableValueFamily::I32,
+            ],
+            vec![
+                IrInstr::AddI32 {
+                    dst: 3,
+                    lhs: 0,
+                    rhs: 1,
+                },
+                IrInstr::AddI32 {
+                    dst: 3,
+                    lhs: 3,
+                    rhs: 2,
+                },
+                IrInstr::Ret { src: Some(3) },
+            ],
+        );
+        verify_semcode(&bytes).expect("r0..r2 are all entry-defined by SIG0's three parameters");
+    }
+
+    #[test]
+    fn c1756_case4_rejects_register_just_past_parameter_prefix() {
+        let bytes = emit_test_function_with_params(
+            vec![CallableValueFamily::I32],
+            vec![IrInstr::Ret { src: Some(1) }],
+        );
+        let report = verify_semcode(&bytes)
+            .expect_err("r1 is not entry-defined by a one-parameter signature");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case5_rejects_read_before_write_same_register() {
+        let bytes = emit_test_function(vec![
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            },
+            IrInstr::LoadI32 { dst: 5, val: 1 },
+            IrInstr::Ret { src: Some(6) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("r5 is read before any write reaches it");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case6_accepts_write_before_read_same_register() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 5, val: 1 },
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            },
+            IrInstr::Ret { src: Some(6) },
+        ]);
+        verify_semcode(&bytes).expect("r5 is written before it is read");
+    }
+
+    #[test]
+    fn c1756_case7_accepts_read_when_both_branches_define() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadBool { dst: 0, val: true },
+            IrInstr::JmpIf {
+                cond: 0,
+                label: "then".to_string(),
+            },
+            IrInstr::LoadI32 { dst: 5, val: 1 }, // else path
+            IrInstr::Jmp {
+                label: "join".to_string(),
+            },
+            IrInstr::Label {
+                name: "then".to_string(),
+            },
+            IrInstr::LoadI32 { dst: 5, val: 2 }, // then path
+            IrInstr::Label {
+                name: "join".to_string(),
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        verify_semcode(&bytes).expect("both branches define r5 before the join reads it");
+    }
+
+    #[test]
+    fn c1756_case8_rejects_read_when_only_one_branch_defines() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadBool { dst: 0, val: true },
+            IrInstr::JmpIf {
+                cond: 0,
+                label: "then".to_string(),
+            },
+            IrInstr::Jmp {
+                label: "join".to_string(),
+            }, // else path: no write
+            IrInstr::Label {
+                name: "then".to_string(),
+            },
+            IrInstr::LoadI32 { dst: 5, val: 2 }, // only the then path writes r5
+            IrInstr::Label {
+                name: "join".to_string(),
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("only the 'then' branch defines r5");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case9_accepts_definition_before_branch_survives_join() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 5, val: 1 },
+            IrInstr::LoadBool { dst: 0, val: true },
+            IrInstr::JmpIf {
+                cond: 0,
+                label: "join".to_string(),
+            },
+            IrInstr::Label {
+                name: "join".to_string(),
+            },
+            IrInstr::Ret { src: Some(5) },
+        ]);
+        verify_semcode(&bytes).expect("r5 defined before the branch remains defined on both paths");
+    }
+
+    #[test]
+    fn c1756_case10_accepts_dominating_definition_before_loop() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 5, val: 1 },
+            IrInstr::Label {
+                name: "loop_head".to_string(),
+            },
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            },
+            IrInstr::Jmp {
+                label: "loop_head".to_string(),
+            },
+        ]);
+        verify_semcode(&bytes)
+            .expect("r5 defined once before the loop remains valid on every iteration");
+    }
+
+    #[test]
+    fn c1756_case11_rejects_first_iteration_reading_loop_carried_undefined_register() {
+        let bytes = emit_test_function(vec![
+            IrInstr::Label {
+                name: "loop_head".to_string(),
+            },
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            }, // reads r5, which no path yet defines on entry to loop_head
+            IrInstr::LoadI32 { dst: 5, val: 1 }, // defines r5 only for the NEXT iteration
+            IrInstr::Jmp {
+                label: "loop_head".to_string(),
+            },
+        ]);
+        let report = verify_semcode(&bytes)
+            .expect_err("the first iteration reads r5 before any path has defined it");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Case 12 proves the non-negotiable TOP-initialization rule is load-
+    /// bearing, not merely a stated preference. `loop_head` (the `AddI32`)
+    /// has two predecessors: the entry `LoadI32` and the back-edge `JmpIf`.
+    /// `r5` is written exactly once, before the loop, and never rewritten
+    /// inside it - nothing inside the loop body ever re-adds `r5` to a set
+    /// that excludes it. Under the correct rule (non-entry nodes start at
+    /// `TOP = U`), `IN[loop_head]` in the very first fixed-point round is
+    /// `OUT[entry] ∩ TOP = OUT[entry]`, which already (correctly) contains
+    /// `r5`. Under the incorrect rule (non-entry nodes start at `∅`),
+    /// `OUT[back-edge]` starts at `∅`, so `IN[loop_head] = OUT[entry] ∩ ∅ =
+    /// ∅` in round one - and because MUST-intersection only ever shrinks a
+    /// set and nothing in this loop ever re-adds `r5`, that wrongly-empty
+    /// result can never self-correct in any later round: it is the loop's
+    /// actual (wrong) converged fixed point, not a transient one. This is
+    /// exactly the "correct fixed point" vs. "wrong fixed point" failure
+    /// the rule exists to prevent - not just a slower convergence.
+    #[test]
+    fn c1756_case12_accepts_loop_read_requires_top_initialization() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 5, val: 1 }, // entry: the only write to r5 anywhere
+            IrInstr::Label {
+                name: "loop_head".to_string(),
+            },
+            IrInstr::AddI32 {
+                dst: 6,
+                lhs: 5,
+                rhs: 5,
+            }, // loop_head: reads r5 every iteration
+            IrInstr::JmpIf {
+                cond: 6,
+                label: "loop_head".to_string(),
+            }, // conditional back-edge
+            IrInstr::Ret { src: Some(6) }, // exit path
+        ]);
+        verify_semcode(&bytes).expect(
+            "r5, defined once before the loop and never invalidated inside it, must remain \
+             provably defined at loop_head - this is exactly the case that would incorrectly \
+             reject under a non-entry-nodes-start-at-empty-set initialization strategy",
+        );
+    }
+
+    #[test]
+    fn c1756_case13_rejects_call_argument_undefined() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: vec![CallableValueFamily::I32],
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: None,
+                            name: "callee".to_string(),
+                            args: vec![7],
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        let report = verify_semcode(&bytes).expect_err("call argument r7 is undefined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case14_accepts_call_argument_defined() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: vec![CallableValueFamily::I32],
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadI32 { dst: 7, val: 1 },
+                        IrInstr::Call {
+                            dst: None,
+                            name: "callee".to_string(),
+                            args: vec![7],
+                        },
+                        IrInstr::Ret { src: None },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        verify_semcode(&bytes).expect("call argument r7 is defined");
+    }
+
+    #[test]
+    fn c1756_case15_accepts_call_destination_defined_after_call() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![
+                        IrInstr::LoadI32 { dst: 0, val: 1 },
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: Some(0),
+                            name: "callee".to_string(),
+                            args: vec![],
+                        },
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        verify_semcode(&bytes).expect("a CALL with a destination defines it on fallthrough");
+    }
+
+    #[test]
+    fn c1756_case16_rejects_reading_call_without_destination_placeholder() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "callee".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: None,
+                            name: "callee".to_string(),
+                            args: vec![],
+                        },
+                        // r0 was never defined - the no-dst CALL's encoded
+                        // dummy destination must not have defined it.
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        let report = verify_semcode(&bytes)
+            .expect_err("no-dst CALL must not define its encoded placeholder register");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case17_rejects_undefined_return_source() {
+        let bytes = emit_test_function_with_params(
+            vec![CallableValueFamily::I32, CallableValueFamily::I32],
+            vec![IrInstr::Ret { src: Some(5) }],
+        );
+        let report = verify_semcode(&bytes)
+            .expect_err("return source r5 is unrelated to either declared parameter");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Case 18 is distinct from case 15: it specifically proves that
+    /// `Value::Unit` is an ordinary defined value for this pass's purposes,
+    /// not an "undefined register" sentinel - the callee explicitly returns
+    /// `Unit` (`Ret { src: None }`), and reading the caller's destination
+    /// register afterward must still be accepted purely because the
+    /// register was *written*, independent of what runtime value it holds.
+    #[test]
+    fn c1756_case18_accepts_reading_register_defined_by_unit_returning_call() {
+        let bytes = emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "returns_unit".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: vec![
+                        IrInstr::Call {
+                            dst: Some(0),
+                            name: "returns_unit".to_string(),
+                            args: vec![],
+                        },
+                        IrInstr::Ret { src: Some(0) },
+                    ],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit");
+        verify_semcode(&bytes)
+            .expect("r0 is defined by the call regardless of its runtime value being Unit");
+    }
+
+    #[test]
+    fn c1756_case19_accepts_unit_parameter_entry_read() {
+        let bytes = emit_test_function_with_params(
+            vec![CallableValueFamily::Unit],
+            vec![IrInstr::Ret { src: Some(0) }],
+        );
+        verify_semcode(&bytes)
+            .expect("r0 is entry-defined even though its declared family is Unit");
+    }
+
+    #[test]
+    fn c1756_case20_rejects_map_get_default_undefined() {
+        let bytes = emit_test_function(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::MapGet {
+                dst: 2,
+                map: 0,
+                key: 1,
+                default_val: 9, // never written anywhere
+            },
+            IrInstr::Ret { src: Some(2) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err(
+            "MAP_GET's default register is a conservative, unconditional read (#1756) - key \
+             presence is never statically proven, matching the runtime laziness rule (#1771) \
+             being distinct from this static proof",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case21_accepts_map_get_default_defined() {
+        let bytes = emit_test_function(vec![
+            IrInstr::MapEmpty { dst: 0 },
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 9, val: 0 },
+            IrInstr::MapGet {
+                dst: 2,
+                map: 0,
+                key: 1,
+                default_val: 9,
+            },
+            IrInstr::Ret { src: Some(2) },
+        ]);
+        verify_semcode(&bytes).expect("MAP_GET's default register is defined");
+    }
+
+    #[test]
+    fn c1756_case22_rejects_map_get_map_source_undefined() {
+        let bytes = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 1, val: 1 },
+            IrInstr::LoadI32 { dst: 9, val: 0 },
+            IrInstr::MapGet {
+                dst: 2,
+                map: 0, // never written
+                key: 1,
+                default_val: 9,
+            },
+            IrInstr::Ret { src: Some(2) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("MAP_GET's map register is undefined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case23_rejects_conditional_branch_condition_undefined() {
+        let bytes = emit_test_function(vec![
+            IrInstr::JmpIf {
+                cond: 0, // never written
+                label: "target".to_string(),
+            },
+            IrInstr::Label {
+                name: "target".to_string(),
+            },
+            IrInstr::Ret { src: None },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("branch condition r0 is undefined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    #[test]
+    fn c1756_case24_ignores_undefined_read_in_unreachable_code() {
+        let bytes = emit_test_function(vec![
+            IrInstr::Ret { src: None },
+            // Unreachable (RET has no successor). r99 is undefined, but
+            // this pass only judges reachable reads, matching the
+            // verifier's existing, separate policy on structurally valid
+            // but unreachable code (see `verifier_accepts_structurally_
+            // closed_infinite_loop`'s trailing-code precedent).
+            IrInstr::AddI32 {
+                dst: 1,
+                lhs: 99,
+                rhs: 99,
+            },
+        ]);
+        verify_semcode(&bytes)
+            .expect("an undefined read in unreachable code must not be judged by this pass");
+    }
+
+    /// Codex review round 1 on PR #1840: the original implementation
+    /// allocated one `domain_size`-sized `RegSet` per DECODED instruction,
+    /// reachable or not - so a structurally valid artifact consisting of an
+    /// entry `RET` followed by many unreachable instructions referencing a
+    /// high register number could force memory proportional to
+    /// `total_instruction_count * domain_size`, with no existing quota
+    /// bounding total instruction count. Fixed by allocating dataflow state
+    /// only for reachable nodes. This regression exercises exactly that
+    /// shape (reachable `RET` immediately, then many unreachable
+    /// instructions touching a near-budget register) and proves it still
+    /// verifies correctly - a real functional check on the fixed code path,
+    /// not just a memory-bound argument.
+    #[test]
+    fn c1756_rejects_unreachable_bloat_stays_cheap_and_correct() {
+        let mut instrs = vec![IrInstr::Ret { src: None }];
+        for _ in 0..500 {
+            instrs.push(IrInstr::AddI32 {
+                dst: 4000,
+                lhs: 4000,
+                rhs: 4000,
+            });
+        }
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "hundreds of unreachable instructions referencing a high register must not be \
+             judged by this pass, and must not meaningfully slow or bloat verification",
+        );
+    }
+
+    /// Codex review round 3 on PR #1840: even after round 1's reachable-only
+    /// `RegSet` allocation fix, `verify_function_code`'s main decode loop
+    /// still built a dense `Vec<Vec<u16>>` of reads/writes for every
+    /// structurally decoded instruction, reachable or not - an empty
+    /// `Vec<u16>` costs 24 bytes even with no heap allocation, so a
+    /// signature-bearing function padded with a large number of cheap
+    /// unreachable instructions (their own example: an entry `RET` followed
+    /// by megabytes of two-byte `RET`s) still cost hundreds of MB for these
+    /// two arrays alone, despite only one reachable node. Fixed by no longer
+    /// building them at all in the main decode loop; `prove_definite_
+    /// register_assignment` re-decodes only the instructions `reachable_
+    /// offsets` actually names. 50,000 unreachable `RET`s (100 KB of dead
+    /// code) is enough to prove this stays fast and correct without
+    /// literally allocating gigabytes in a unit test.
+    #[test]
+    fn c1756_rejects_large_unreachable_ret_padding_without_dense_metadata() {
+        let mut instrs = vec![IrInstr::Ret { src: None }];
+        for _ in 0..50_000 {
+            instrs.push(IrInstr::Ret { src: None });
+        }
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "tens of thousands of unreachable two-byte RETs must not require per-instruction \
+             reads/writes metadata to be materialized for every one of them",
+        );
+    }
+
+    /// #1756 Codex review round 17 (owner decision): Codex's own exact
+    /// P2 shape - an entry `RET` (the only reachable instruction)
+    /// followed by a large amount of structurally valid but UNREACHABLE
+    /// `RET` padding (the same construction `c1756_rejects_large_
+    /// unreachable_ret_padding_without_dense_metadata` already uses for
+    /// a different reason - this pass never even attempts to judge
+    /// unreachable code). Proves `reachable_count` stays 1 and the raw-
+    /// state requirement stays fixed at 17 words (4 raw + 13 leader-
+    /// state, both independently measured) no matter how much
+    /// unreachable padding follows - preserving the verifier's pre-
+    /// existing, deliberate "unreachable code is not judged by this
+    /// pass" admission policy that round 16's `instr_len`-based proxy
+    /// would otherwise have broken by charging the WHOLE structural
+    /// instruction section, unreachable padding included. Also serves as
+    /// the review's requested direct accounting comparison: padding = 0
+    /// and padding = 1,000,000 must report the IDENTICAL exact word
+    /// count, proving `reachable_instruction_bytes` genuinely does not
+    /// grow with unreachable padding size.
+    #[test]
+    fn c1756_unreachable_padding_does_not_inflate_raw_state() {
+        fn padded(padding: usize) -> Vec<u8> {
+            let mut instrs = vec![IrInstr::Ret { src: None }];
+            for _ in 0..padding {
+                instrs.push(IrInstr::Ret { src: None });
+            }
+            emit_test_function(instrs)
+        }
+
+        for padding in [0usize, 1_000_000] {
+            let bytes = padded(padding);
+
+            // usage == limit (17 words) must be accepted regardless of
+            // padding size.
+            verify_semcode_token_with_quotas_and_limits(
+                &bytes,
+                RuntimeQuotas::verified_local(),
+                VerificationLimits {
+                    max_state_words: 17,
+                    max_work_units: usize::MAX,
+                },
+            )
+            .unwrap_or_else(|report| {
+                panic!(
+                    "padding={padding}: unreachable padding must not inflate the raw-state \
+                     requirement past the single reachable RET's own cost: {report:?}"
+                )
+            });
+
+            // usage == limit + 1 must still reject deterministically,
+            // reporting the SAME exact word count regardless of padding.
+            let report = verify_semcode_token_with_quotas_and_limits(
+                &bytes,
+                RuntimeQuotas::verified_local(),
+                VerificationLimits {
+                    max_state_words: 16,
+                    max_work_units: usize::MAX,
+                },
+            )
+            .expect_err("usage == limit + 1 must still reject deterministically");
+            assert_eq!(
+                report.diagnostics[0].code,
+                VerificationCode::AnalysisStateLimitExceeded
+            );
+            assert!(
+                report.diagnostics[0]
+                    .message
+                    .contains("17 logical verifier-analysis word"),
+                "padding={padding}: exact required word count must stay 17 regardless of \
+                 unreachable padding size, got: {}",
+                report.diagnostics[0].message
+            );
+            assert!(
+                report.diagnostics[0].message.contains("1 reachable node"),
+                "padding={padding}: reachable_count must stay 1 regardless of unreachable \
+                 padding size"
+            );
+        }
+    }
+
+    /// #1756 Codex review round 18 (owner decision): Codex's own exact P1
+    /// shape - a reachable entry `RET` followed by millions of
+    /// structurally valid but UNREACHABLE `LOAD_BOOL` instructions. Round
+    /// 17 already proved unreachable padding cannot inflate the #1756
+    /// resource-envelope's WORD accounting; this proves the earlier,
+    /// SHARED structural decode pass (`verify_function_code`'s first walk,
+    /// which every function pays regardless of signature, and which
+    /// neither `max_state_words` nor `max_work_units` can see, since both
+    /// are #1756-analysis-only budgets scoped to reachable state) does not
+    /// pay one heap allocation per unreachable instruction either - the
+    /// actual CPU/allocator-churn cost Codex's round-18 finding
+    /// identified, one layer beneath what rounds 16-17 could bound at
+    /// all. Uses genuine allocator instrumentation (`alloc_tracking`, a
+    /// `System`-delegating counting `#[global_allocator]` active only in
+    /// `cfg(test)` builds), not wall-clock timing, per the review's own
+    /// explicit preference.
+    #[test]
+    fn c1756_structural_decode_never_allocates_operand_storage_for_unreachable_padding() {
+        let mut instrs = vec![IrInstr::Ret { src: None }];
+        for _ in 0..2_000_000 {
+            instrs.push(IrInstr::LoadBool { dst: 0, val: true });
+        }
+        let bytes = emit_test_function(instrs);
+
+        let before = alloc_tracking_calls();
+        verify_semcode(&bytes)
+            .expect("unreachable code is not judged by this pass and must still admit");
+        let after = alloc_tracking_calls();
+
+        // Every OTHER allocation this call legitimately makes (instr_
+        // starts/instruction_successors/jump_targets/etc. growing via
+        // amortized Vec doubling, HashSet growth for reachable_offsets,
+        // the #1756 analysis's own O(1)-scaled structures for the single
+        // reachable node) is bounded by O(log(instruction_count)) per
+        // growing container, not O(instruction_count) - comfortably under
+        // 1,000 total calls even at 2,000,001 instructions. Under the
+        // pre-round-18 behavior, `writes.push(dst)` alone would have
+        // triggered one allocation PER unreachable LOAD_BOOL (an empty
+        // `Vec<u16>` allocates on its first push), i.e. ~2,000,000 - a
+        // three-order-of-magnitude gap this threshold cannot miss.
+        let allocations_during_verify = after.saturating_sub(before);
+        assert!(
+            allocations_during_verify < 1_000,
+            "structural decode must not allocate operand storage per unreachable instruction - \
+             saw {allocations_during_verify} allocator calls while verifying 2,000,000 \
+             unreachable LOAD_BOOL instructions, expected a small O(log n) constant, not \
+             one-or-more per instruction"
+        );
+    }
+
+    /// #1756 Codex review round 21 (owner decision): Codex's own exact P1
+    /// shape - a REACHABLE stream of zero-argument, no-destination `CALL`
+    /// instructions to a real callee. Round 18 already proved the shared
+    /// structural pass doesn't allocate per-instruction for `reads`/
+    /// `writes`; this proves the SEPARATE reachable-only re-decode pass
+    /// (which every reachable `CALL` also goes through, to obtain its
+    /// register reads/writes for the definite-assignment CSR) does not
+    /// pay a fresh `string_refs`/`call_argcs` allocation per call either,
+    /// for metadata that re-decode pass never reads at all (it discards
+    /// the whole `OperandRefs` via `.expect(...)`, keeping only what its
+    /// `FlatSink` captured).
+    #[test]
+    fn c1756_reachable_redecode_never_allocates_metadata_for_ignored_fields() {
+        let mut main_instrs = Vec::new();
+        for _ in 0..2_000_000 {
+            main_instrs.push(IrInstr::Call {
+                dst: None,
+                name: "helper".to_string(),
+                args: Vec::new(),
+            });
+        }
+        main_instrs.push(IrInstr::Ret { src: None });
+        let bytes = emit_test_function_with_helper(main_instrs);
+
+        // Explicit, generous limits - this test's own concern is decode-
+        // time allocation behavior, not resource-limit correctness, so
+        // it deliberately does not depend on wherever the candidate
+        // default `max_state_words`/`max_work_units` happen to sit.
+        let before = alloc_tracking_calls();
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect("2,000,000 reachable no-op calls, zero-register domain, must still admit cheaply");
+        let after = alloc_tracking_calls();
+
+        // Unlike the round-18/round-20 allocation tests, this construction
+        // has a genuine, UNRELATED, pre-existing O(reachable_count)
+        // allocation baseline that is NOT part of round 21's fix and is
+        // out of scope for it: `verify_function_code`'s own `call_
+        // targets` construction (`env.strings[sid].clone()`, once per
+        // "call target" `string_refs` entry) clones the callee name
+        // string once per reachable CALL - unavoidable with real CALL
+        // instructions, regardless of decode_operands's own behavior.
+        // Measured directly: ~2,000,188 allocator calls with this
+        // round's fix applied, matching that baseline almost exactly
+        // (2,000,000 clones + a small O(log n) margin from every OTHER
+        // growing container). The threshold below is generous relative
+        // to that TRUE baseline, while remaining far below what
+        // reverting round 21's fix would add on top: the reachable re-
+        // decode pass would then ALSO allocate `string_refs` and `call_
+        // argcs` storage per reachable CALL (each field's first push on
+        // a freshly `Default::default()`d `OperandRefs` allocates),
+        // roughly DOUBLING or more the total - a clear, discriminating
+        // gap this threshold is chosen to catch (see the mutation
+        // evidence in the PR reply for the exact reverted-order count).
+        let allocations_during_verify = after.saturating_sub(before);
+        assert!(
+            allocations_during_verify < 2_200_000,
+            "the reachable re-decode pass must not allocate string_refs/call_argcs storage per \
+             reachable CALL on TOP of the unrelated call_targets string-cloning baseline - saw \
+             {allocations_during_verify} allocator calls while verifying 2,000,000 reachable \
+             no-op calls, expected close to the ~2,000,188-call baseline, not roughly double it"
+        );
+    }
+
+    /// #1756 Codex review round 17's own requested "control test": the
+    /// SAME long instruction stream, made genuinely REACHABLE instead of
+    /// unreachable (no branch-free-but-unreachable padding - see
+    /// `c1756_long_linear_low_domain_rejects_on_raw_state_not_leader_
+    /// state`, unchanged by this round since it has no unreachable code
+    /// at all, so `reachable_instruction_bytes == instr_len` for it
+    /// exactly) still drives the raw-state requirement up and can still
+    /// be rejected - proving round 17 narrowed accounting to genuinely
+    /// REACHABLE bytes, not accidentally made instruction bytes free in
+    /// general. That existing test's exact numbers were originally
+    /// 312,508 raw-only / 312,528 combined; round 21's own P2 fix added
+    /// a `leader_classification_state` term to the raw formula (charging
+    /// `compute_leaders`'s consolidated scratch array), raising them to
+    /// 325,008 raw-only / 325,028 combined - the STRUCTURAL claim this
+    /// test makes (reachable-only byte scoping) is unaffected by that
+    /// change and re-verified unchanged by this round's own full c1756
+    /// suite run; only the unrelated numeric total moved.
+    #[test]
+    fn c1756_reachable_instruction_bytes_counts_only_reachable_spans() {
+        // Five structural instructions at offsets 0, 4, 8, 20, 24; the
+        // instruction section ends at offset 28 (the fifth instruction
+        // is 4 bytes). Reachable: 0 (len 4), 4 (len 4), 24 (len 4, to
+        // the section end) - 8 and 20 are unreachable and must not
+        // count.
+        let instr_starts = vec![0usize, 4, 8, 20, 24];
+        let instr_len = 28usize;
+        let mut reachable = HashSet::new();
+        reachable.insert(0usize);
+        reachable.insert(4usize);
+        reachable.insert(24usize);
+
+        assert_eq!(
+            reachable_instruction_bytes(&instr_starts, &reachable, instr_len),
+            Some(12),
+            "must sum only the three reachable spans (4+4+4=12), ignoring the two \
+             unreachable instructions at offsets 8 and 20 entirely"
+        );
+    }
+
+    /// Codex review round 4 on PR #1840: even after round 3 stopped
+    /// materializing metadata for unreachable instructions, a large fully
+    /// REACHABLE straight-line stream (their example: millions of
+    /// `LOAD_BOOL r0` in a row, no branching, no unreachable padding at
+    /// all) still cost dozens of bytes of `Vec<Vec<u16>>`/`Vec<Vec<usize>>`
+    /// heap-container overhead per instruction, from the reads/writes
+    /// arrays AND the predecessor/successor lists. Fixed by CSR-flattening
+    /// reads/writes (`dataflow_domain_accounting`) and eliminating the
+    /// predecessor structure entirely in favor of edge relaxation over the
+    /// verifier's own `instruction_successors` (`for_each_reachable_
+    /// successor`). 300,000 reachable `LOAD_BOOL r0` instructions - every
+    /// one of them a repeated write to the same already-defined register,
+    /// so `Rc`-sharing (round 2) also keeps every `RegSet` after the first
+    /// shared - is enough to prove this stays fast and correct without
+    /// literally constructing a multi-million-instruction artifact in a
+    /// unit test.
+    #[test]
+    fn c1756_accepts_large_fully_reachable_linear_stream() {
+        let mut instrs: Vec<IrInstr> = Vec::new();
+        for _ in 0..300_000 {
+            instrs.push(IrInstr::LoadBool { dst: 0, val: true });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) });
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "a long, fully reachable, non-branching stream that repeatedly writes the same \
+             already-defined register must verify correctly and stay fast",
+        );
+    }
+
+    /// Codex review round 5 on PR #1840: reproduces the exact adversarial
+    /// shape described - a wide dispatch where every arm defines all but
+    /// one (a DIFFERENT one per arm) of a shared register domain, joining
+    /// into a single node, followed by a long fallthrough tail. Under a
+    /// plain FIFO edge-relaxation worklist, each of the `ARMS` arms
+    /// narrows the join's `IN` by exactly one more bit (regardless of
+    /// processing order, since it's a strict, growing set difference), and
+    /// every such narrowing that changes the join's `OUT` re-propagates
+    /// through the *entire* `TAIL_LEN`-node tail again -
+    /// `O(ARMS * TAIL_LEN)` relaxations. Fixed by processing positions in
+    /// `reverse_postorder_ranks` order (see that function's doc comment):
+    /// every arm is ordered ahead of the join it feeds, so all `ARMS`
+    /// contributions have already narrowed `in_sets[join]` in place by the
+    /// time the join is first popped and actually processed - the tail is
+    /// walked once, not once per arm.
+    ///
+    /// Correctness is exercised too, not just performance: since arm `i`
+    /// defines every register in `0..ARMS` except register `i`, the
+    /// intersection over all arms is the EMPTY set within that domain - no
+    /// register in `0..ARMS` survives the join, so the read at the far end
+    /// of the tail (`r0`) is correctly rejected as undefined, regardless of
+    /// how long the intervening tail is.
+    #[test]
+    fn c1756_rejects_wide_dispatch_join_feeding_long_tail_without_per_arm_blowup() {
+        const ARMS: u16 = 128;
+        const TAIL_LEN: usize = 20_000;
+        const COND_REG: u16 = ARMS; // outside the 0..ARMS join domain
+
+        let mut instrs: Vec<IrInstr> = vec![IrInstr::LoadBool {
+            dst: COND_REG,
+            val: true,
+        }];
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::JmpIf {
+                cond: COND_REG,
+                label: format!("arm{arm}"),
+            });
+        }
+        // Fallthrough arm (ARMS - 1): reached only once every JmpIf above
+        // has fallen through, so its body must be the next physical
+        // instruction after the dispatch chain - defines every register
+        // except r(ARMS - 1).
+        for r in 0..ARMS {
+            if r != ARMS - 1 {
+                instrs.push(IrInstr::LoadI32 {
+                    dst: r,
+                    val: r as i32,
+                });
+            }
+        }
+        instrs.push(IrInstr::Jmp {
+            label: "join".to_string(),
+        });
+        // The remaining ARMS - 1 arms, each reached by its own JmpIf target
+        // above - defines every register except its own index.
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::Label {
+                name: format!("arm{arm}"),
+            });
+            for r in 0..ARMS {
+                if r != arm {
+                    instrs.push(IrInstr::LoadI32 {
+                        dst: r,
+                        val: r as i32,
+                    });
+                }
+            }
+            instrs.push(IrInstr::Jmp {
+                label: "join".to_string(),
+            });
+        }
+        instrs.push(IrInstr::Label {
+            name: "join".to_string(),
+        });
+        for _ in 0..TAIL_LEN {
+            // Writes a register outside the 0..ARMS join domain - carries
+            // the join's (already-converged) state forward without adding
+            // new information, the same "cheap tail" shape as the other
+            // large stress regressions above.
+            instrs.push(IrInstr::LoadI32 {
+                dst: COND_REG,
+                val: 0,
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0: undefined by arm 0, so missing at the join
+
+        let bytes = emit_test_function(instrs);
+        let report = verify_semcode(&bytes).expect_err(
+            "r0 is missing from arm 0's definitions, so no register in 0..ARMS survives the \
+             128-arm join, and the tail read of r0 must be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Codex review round 6 on PR #1840, second finding (a sibling to the
+    /// frame-size one above): a loop header `H` fed by `ARMS` sibling
+    /// nodes `S_0..S_{k-1}` via back edges, each defining every register
+    /// in `0..ARMS` except a different one, `H` itself then feeding a
+    /// long exit tail - `dispatch` reaches every `S_i` (each writes,
+    /// jumps to `H`), and `H`'s own `JmpIf` back to `dispatch` closes the
+    /// cycle (`dispatch` is `H`'s DFS ancestor - `H` is discovered only
+    /// as some `S_i`'s descendant - so this is a genuine back edge; `H`
+    /// and every `S_i` that participates in the cycle land in ONE SCC,
+    /// mutually reachable through it). `H` has NO predecessor besides the
+    /// arms' back edges, so it starts at TOP (the standard non-entry
+    /// initialization) and needs a genuine, necessary contribution from
+    /// ALL `ARMS` arms - not something a single predecessor already
+    /// determines - before its fixed point is settled; `dispatch` itself
+    /// starts empty (straight from entry, no SIG0 params), so each arm's
+    /// own exclusion write is what determines its output, not something
+    /// inherited from a prior pass.
+    ///
+    /// Correctness: since `S_i` defines every register in `0..ARMS`
+    /// except `i`, the intersection over all `ARMS` arms at `H` is the
+    /// EMPTY set within that domain (the same argument as the round-5
+    /// test) - the read at the far end of the tail (`r0`) is correctly
+    /// rejected as undefined, regardless of the intervening loop or tail
+    /// length. This is the primary purpose of this regression: proving
+    /// the SCC-based worklist converges a genuine, multi-source cycle to
+    /// the mathematically correct fixed point. It is not, on its own,
+    /// strong TIMING evidence against round 5's pure-RPO ordering: in
+    /// this specific instruction layout, `dispatch` (and therefore every
+    /// arm) is discovered by DFS before `H` even exists, so plain RPO
+    /// rank already happens to order every arm ahead of `H` here too -
+    /// the round-6 reply documents this honestly, together with the
+    /// general, well-established argument for why SCC-restricted
+    /// processing bounds total work for the broader class of CFGs RPO
+    /// alone cannot.
+    #[test]
+    fn c1756_rejects_loop_header_fed_by_many_backedge_arms_without_per_arm_blowup() {
+        const ARMS: u16 = 128;
+        const TAIL_LEN: usize = 20_000;
+        const COND_REG: u16 = ARMS;
+
+        // `dispatch`'s own IN comes straight from entry (empty - no SIG0
+        // params), so it - and every arm reached only through it - starts
+        // genuinely empty, not full: each arm's "define everything except
+        // my own index" write is what actually determines its output,
+        // not something inherited from a prior loop pass. `header` has NO
+        // direct edge from entry or dispatch - its only predecessors are
+        // the arms' back edges - so it starts at TOP (the standard
+        // non-entry initialization) and is narrowed ONE MEANINGFUL STEP
+        // PER ARM as their outputs arrive, needing all `ARMS` of them
+        // before its fixed point is fully determined - a genuine,
+        // necessary multi-round convergence, not a value some single
+        // predecessor already fixes on its own.
+        let mut instrs: Vec<IrInstr> = vec![IrInstr::LoadBool {
+            dst: COND_REG,
+            val: true,
+        }];
+        instrs.push(IrInstr::Label {
+            name: "dispatch".to_string(),
+        });
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::JmpIf {
+                cond: COND_REG,
+                label: format!("arm{arm}"),
+            });
+        }
+        // Fallthrough arm (ARMS - 1): defines every register except
+        // itself, then jumps to the header - closing the loop, since
+        // header's own back edge (below) returns here.
+        for r in 0..ARMS {
+            if r != ARMS - 1 {
+                instrs.push(IrInstr::LoadI32 {
+                    dst: r,
+                    val: r as i32,
+                });
+            }
+        }
+        instrs.push(IrInstr::Jmp {
+            label: "header".to_string(),
+        });
+        // The remaining ARMS - 1 arms, each reached by its own JmpIf target
+        // above - defines every register except its own index, then jumps
+        // to the header too.
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::Label {
+                name: format!("arm{arm}"),
+            });
+            for r in 0..ARMS {
+                if r != arm {
+                    instrs.push(IrInstr::LoadI32 {
+                        dst: r,
+                        val: r as i32,
+                    });
+                }
+            }
+            instrs.push(IrInstr::Jmp {
+                label: "header".to_string(),
+            });
+        }
+        instrs.push(IrInstr::Label {
+            name: "header".to_string(),
+        });
+        // The back edge: `dispatch` is `header`'s DFS ancestor here (every
+        // arm was discovered as dispatch's descendant, and each leads to
+        // header), so this is a genuine back edge, not a forward join -
+        // `header` and every arm form one strongly-connected component.
+        instrs.push(IrInstr::JmpIf {
+            cond: COND_REG,
+            label: "dispatch".to_string(),
+        });
+        // Exit tail: header's fallthrough - reached only once the loop
+        // actually exits, with header's fully-converged fixed point.
+        for _ in 0..TAIL_LEN {
+            instrs.push(IrInstr::LoadI32 {
+                dst: COND_REG,
+                val: 0,
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0: undefined by arm 0
+
+        let bytes = emit_test_function(instrs);
+        let report = verify_semcode(&bytes).expect_err(
+            "r0 is missing from arm 0's definitions, so no register in 0..ARMS survives the \
+             header's intersection over all back-edge arms, and the tail read of r0 must be \
+             rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Codex review round 7 on PR #1840: reproduces the "bound convergence
+    /// work inside each SCC" shape - one big cycle `c_0 -> c_1 -> ... ->
+    /// c_{CHAIN_LEN-1} -> back to c_0`, laid out in REVERSE physical order
+    /// (`c_{CHAIN_LEN-1}`'s bytes come first, `c_0`'s come last - the exact
+    /// technique `c1756_backward_propagating_chain_still_rejects_and_
+    /// converges_promptly` already uses for the whole-graph case), where
+    /// the first `ARMS` cycle nodes (`c_0..c_{ARMS-1}`) each also have
+    /// their own external arm `arm_i` (reached from a shared dispatch off
+    /// entry) contributing "every register except r_i" within the `0..
+    /// ARMS` domain - `arm_i`'s own write cost is bounded by `ARMS`, not
+    /// `CHAIN_LEN`, so the ring can be made long independently of how many
+    /// distinct exclusions feed it. `c_i`'s true fixed point (for `i <
+    /// ARMS`) is the intersection of `arm_0..arm_i`'s contributions -
+    /// genuinely cumulative along the ring, not something any single arm
+    /// already determines. A plain FIFO seeded in ascending-position (=
+    /// descending logical-index, per the reversed layout) order only
+    /// advances newly-arriving information one hop per pass against that
+    /// mismatch - round 5's exact ordering hazard, reproduced entirely
+    /// INSIDE one SCC where round 6's cross-SCC isolation cannot help.
+    /// Fixed by `local_reverse_postorder_ranks`: the same RPO-ordering
+    /// technique round 5 applied to the whole graph, now applied to each
+    /// SCC's own internal convergence.
+    ///
+    /// Correctness: the converged fixed point at the far end of the ring
+    /// is the intersection of every arm's contribution - the empty set
+    /// within `0..ARMS`, since `arm_i` excludes `r_i` for every `i` - so
+    /// the tail read of `r0` is correctly rejected regardless of ring
+    /// length or physical layout.
+    #[test]
+    fn c1756_rejects_reverse_physical_cycle_with_many_external_arms_without_per_arm_blowup() {
+        const ARMS: u16 = 64;
+        const CHAIN_LEN: u32 = 40_000;
+        const COND_REG: u16 = ARMS;
+        const TAIL_LEN: usize = 20_000;
+
+        let mut instrs: Vec<IrInstr> = vec![IrInstr::LoadBool {
+            dst: COND_REG,
+            val: true,
+        }];
+        instrs.push(IrInstr::Label {
+            name: "dispatch".to_string(),
+        });
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::JmpIf {
+                cond: COND_REG,
+                label: format!("arm{arm}"),
+            });
+        }
+        // Fallthrough arm (ARMS - 1): defines every register in 0..ARMS
+        // except itself, then jumps into the ring at c_{ARMS - 1}.
+        for r in 0..ARMS {
+            if r != ARMS - 1 {
+                instrs.push(IrInstr::LoadI32 {
+                    dst: r,
+                    val: r as i32,
+                });
+            }
+        }
+        instrs.push(IrInstr::Jmp {
+            label: format!("c{}", ARMS - 1),
+        });
+        // The remaining arms, each reached by its own JmpIf target above -
+        // defines every register in 0..ARMS except its own index, then
+        // jumps into the ring at the matching c_i.
+        for arm in 0..ARMS - 1 {
+            instrs.push(IrInstr::Label {
+                name: format!("arm{arm}"),
+            });
+            for r in 0..ARMS {
+                if r != arm {
+                    instrs.push(IrInstr::LoadI32 {
+                        dst: r,
+                        val: r as i32,
+                    });
+                }
+            }
+            instrs.push(IrInstr::Jmp {
+                label: format!("c{arm}"),
+            });
+        }
+        // c_{CHAIN_LEN - 1}: the ring's last logical node - back edge to
+        // c_0 (closing the loop) or fallthrough to the exit tail. Emitted
+        // FIRST physically (lowest position), even though it's LAST in
+        // logical/control-flow order.
+        instrs.push(IrInstr::Label {
+            name: format!("c{}", CHAIN_LEN - 1),
+        });
+        instrs.push(IrInstr::JmpIf {
+            cond: COND_REG,
+            label: "c0".to_string(),
+        });
+        for _ in 0..TAIL_LEN {
+            instrs.push(IrInstr::LoadI32 {
+                dst: COND_REG,
+                val: 0,
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0: undefined by arm 0
+                                                    // c_{CHAIN_LEN - 2} down to c_0: each jumps to its logical
+                                                    // successor - emitted in DESCENDING index order, so ascending
+                                                    // physical position is the exact reverse of logical/control-flow
+                                                    // order (c_{CHAIN_LEN - 1} lowest position .. c_0 highest).
+                                                    // Positions ARMS..CHAIN_LEN-1 have no external arm at all - pure
+                                                    // pass-through, carrying the already-converging state forward
+                                                    // without adding new information - so the ring's own length can
+                                                    // grow far beyond ARMS at negligible construction cost.
+        for i in (0..CHAIN_LEN - 1).rev() {
+            instrs.push(IrInstr::Label {
+                name: format!("c{i}"),
+            });
+            instrs.push(IrInstr::Jmp {
+                label: format!("c{}", i + 1),
+            });
+        }
+
+        let bytes = emit_test_function(instrs);
+        let report = verify_semcode(&bytes).expect_err(
+            "each arm_i excludes r_i, so the intersection over all ARMS arms at the far end \
+             of the ring is empty within 0..ARMS, and the tail read of r0 must be rejected",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Codex review round 8 on PR #1840, first finding ("duplicate live
+    /// RegSet states across branches"): many branch arms each performing
+    /// the IDENTICAL state-changing write would, under every pre-round-8
+    /// scheme (`Rc`-sharing included - `Rc`-sharing only ever avoided
+    /// cloning along a *shared* predecessor path, it never interned
+    /// independently-computed-but-equal values from *different* branches),
+    /// each independently allocate an equal, duplicate `RegSet`. Under the
+    /// round-8 MAY-missing formulation this class of duplication is
+    /// structurally impossible: `compute_missing_sets` returns exactly one
+    /// `RegSet` per reachable position - `missing.len() == reachable_count`
+    /// always, by construction of the `Vec` it returns - mutated in place
+    /// via `deliver`, with no clone-on-write path for any number of
+    /// branches to trigger. This test uses `compute_missing_sets` directly
+    /// (bypassing full SemCode construction, per Codex's own request for
+    /// accounting evidence over timing) at Codex's stated scale
+    /// (`|U|` = 4096) with 2,000 arms, all writing the identical register -
+    /// direct accounting evidence that `event_count` scales with `arms +
+    /// domain_size`, never with `arms * domain_size` or any product
+    /// involving how many arms compute the same result.
+    #[test]
+    fn c1756_many_identical_branch_arms_allocate_exactly_one_regset_per_position() {
+        const DOMAIN_SIZE: usize = 4096;
+        const ARMS: usize = 2_000;
+        // Positions: 0 = entry; 1..=ARMS = a dispatch chain (position i's
+        // successors are [arm i's body, dispatch chain continues]); ARMS+1
+        // ..=2*ARMS = arm bodies (every one writes bit 0, and ONLY bit 0);
+        // 2*ARMS+1 = join (reached by every arm).
+        let dispatch_start = 1usize;
+        let arm_start = ARMS + 1;
+        let join = 2 * ARMS + 1;
+        let reachable_count = join + 1;
+
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(dispatch_start), None]
+            } else if (dispatch_start..arm_start).contains(&pos) {
+                let i = pos - dispatch_start;
+                let next_dispatch = if i + 1 < ARMS {
+                    Some(dispatch_start + i + 1)
+                } else {
+                    None
+                };
+                [Some(arm_start + i), next_dispatch]
+            } else if (arm_start..join).contains(&pos) {
+                [Some(join), None]
+            } else {
+                [None, None]
+            }
+        };
+        // Every arm body writes bit 0 - the identical write, in every arm.
+        let writes_contains = |pos: usize, bit: usize| (arm_start..join).contains(&pos) && bit == 0;
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // no SIG0 params: nothing defined at entry
+        let (missing, event_count, peak_queue_len) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("test-only call: no verification-resource budget under test here");
+        assert_eq!(
+            missing.len(),
+            reachable_count,
+            "exactly one RegSet per reachable position, always - the structural property that \
+             makes duplicate live states impossible regardless of arm count"
+        );
+        assert!(
+            !missing[join].contains(0),
+            "bit 0 is written by every one of the 2,000 arms, so it must be defined (not \
+             missing) at the join"
+        );
+        assert!(
+            missing[join].contains(1),
+            "bit 1 is written by no arm, so it must still be missing at the join"
+        );
+        assert!(
+            event_count <= reachable_count * DOMAIN_SIZE,
+            "event_count ({event_count}) must be bounded by reachable_count * domain_size \
+             ({}), never multiplied further by how many arms compute the identical result",
+            reachable_count * DOMAIN_SIZE
+        );
+        assert!(
+            peak_queue_len <= reachable_count * DOMAIN_SIZE,
+            "peak_queue_len ({peak_queue_len}) must never exceed the total-work bound either"
+        );
+    }
+
+    /// Codex review round 8 on PR #1840, second finding ("local RPO still
+    /// reprocesses large SCC via backedges"): reproduces the same
+    /// adversarial shape as `c1756_rejects_reverse_physical_cycle_with_
+    /// many_external_arms_without_per_arm_blowup` - a ring laid out in
+    /// reverse propagation order, fed at many distinct points by external
+    /// arms each contributing a different missing register - directly via
+    /// `compute_missing_sets`, asserting `event_count` explicitly (Codex's
+    /// own request for a counter, not timing alone). Under the round-7
+    /// local-RPO worklist this shape could still force repeated whole-
+    /// component reprocessing (each backedge source re-queueing the header
+    /// before the others had all contributed); under the round-8 bit-level
+    /// worklist there is no "large SCC" concept left to reprocess, so the
+    /// event count stays bounded by `reachable_count * domain_size`
+    /// regardless of how many external arms feed the cycle or how it is
+    /// physically laid out.
+    #[test]
+    fn c1756_many_external_arms_feeding_one_cycle_via_backedges_bounds_event_count() {
+        const ARMS: usize = 200;
+        const RING_LEN: usize = 4_000;
+        const DOMAIN_SIZE: usize = ARMS;
+        // Positions: 0 = entry; 1..=ARMS = a dispatch chain (no writes -
+        // dispatch[i]'s successors are [arm i's body, dispatch[i+1]]);
+        // ARMS+1..=2*ARMS = arm bodies (arm i writes every register except
+        // i, then enters the ring at c_0); 2*ARMS+1..2*ARMS+RING_LEN = the
+        // ring c_0..c_{RING_LEN-1}, laid out so position 2*ARMS+1+k
+        // corresponds to LOGICAL ring index (RING_LEN-1-k) - reverse
+        // propagation order, matching the physically-reversed byte-level
+        // test - closing the loop from c_{RING_LEN-1} back to c_0.
+        let dispatch_start = 1usize;
+        let arm_start = ARMS + 1;
+        let ring_start = 2 * ARMS + 1;
+        let ring_pos = |logical_i: usize| -> usize { ring_start + (RING_LEN - 1 - logical_i) };
+        let reachable_count = ring_start + RING_LEN;
+
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(dispatch_start), None]
+            } else if (dispatch_start..arm_start).contains(&pos) {
+                let i = pos - dispatch_start;
+                let next_dispatch = if i + 1 < ARMS {
+                    Some(dispatch_start + i + 1)
+                } else {
+                    None
+                };
+                [Some(arm_start + i), next_dispatch]
+            } else if (arm_start..ring_start).contains(&pos) {
+                [Some(ring_pos(0)), None]
+            } else {
+                // A ring position at physical `pos` corresponds to logical
+                // index `logical_i` - find it by inverting `ring_pos`.
+                let logical_i = RING_LEN - 1 - (pos - ring_start);
+                if logical_i + 1 < RING_LEN {
+                    [Some(ring_pos(logical_i + 1)), None]
+                } else {
+                    [Some(ring_pos(0)), None] // c_{RING_LEN-1}: back edge to c_0
+                }
+            }
+        };
+        // Arm i writes every register in 0..ARMS except i - reached by
+        // every arm body position specifically (not the dispatch chain or
+        // the ring, neither of which write anything).
+        let writes_contains = |pos: usize, bit: usize| {
+            (arm_start..ring_start).contains(&pos) && bit != (pos - arm_start)
+        };
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE);
+        let (missing, event_count, peak_queue_len) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("test-only call: no verification-resource budget under test here");
+        // Every arm excludes a different register (arm i excludes bit i),
+        // so the intersection over all ARMS arms - reflected at every ring
+        // position once converged - is empty.
+        for bit in 0..ARMS {
+            assert!(
+                missing[ring_pos(0)].contains(bit),
+                "bit {bit} is excluded by arm {bit} specifically, so no register in 0..ARMS \
+                 survives the ring's converged fixed point"
+            );
+        }
+        assert!(
+            event_count <= reachable_count * DOMAIN_SIZE,
+            "event_count ({event_count}) must be bounded by reachable_count * domain_size \
+             ({}), regardless of how many external arms feed the cycle via backedges",
+            reachable_count * DOMAIN_SIZE
+        );
+        assert!(
+            peak_queue_len <= reachable_count * DOMAIN_SIZE,
+            "peak_queue_len ({peak_queue_len}) must never exceed the total-work bound either"
+        );
+    }
+
+    /// Codex review round 9 on PR #1840: reproduces the exact adversarial
+    /// shape described - a zero-parameter function (so `domain_size` = the
+    /// full 4,096-register quota, all missing at entry) entering a wide,
+    /// balanced binary dispatch tree with `LEAVES` = 32,768 leaves (~65,535
+    /// total tree nodes), where nothing anywhere writes anything - every
+    /// one of the 4,096 missing registers survives, unkilled, all the way
+    /// down to every leaf. Under FIFO order, this accumulates an entire
+    /// breadth level - up to `domain_size` bits at EACH of that level's
+    /// nodes - before draining any of it, peaking near the full
+    /// `reachable_count * domain_size` total-work bound (Codex's own
+    /// figure: "about 134 million two-usize tuples, over 2 GiB"). Fixed by
+    /// switching `compute_missing_sets`'s worklist from FIFO to LIFO (see
+    /// its own doc comment for the full argument): popping `(pos, bit)`
+    /// pushes at most 2 new items for that SAME bit, so a bit's delivery
+    /// runs to completion - down to a leaf - before any sibling branch is
+    /// touched, bounding peak size by the current delivery's own depth
+    /// plus a bounded backlog, not by an entire wide level's width times
+    /// `domain_size` at once.
+    #[test]
+    fn c1756_wide_binary_dispatch_tree_bounds_peak_queue_not_just_total_work() {
+        const DOMAIN_SIZE: usize = 2_048;
+        const LEAVES: usize = 4_096;
+        // 1-indexed heap-array tree: position 1 = root, position i's
+        // children are 2*i and 2*i+1. Internal nodes are 1..LEAVES
+        // (32,767 of them - a complete binary tree with LEAVES leaves has
+        // exactly LEAVES-1 internal nodes); leaves are LEAVES..2*LEAVES.
+        // Position 0 = entry, whose only successor is the root (position
+        // 1) - `reachable_count` = 1 (entry) + (2*LEAVES - 1) (tree).
+        let reachable_count = 1 + (2 * LEAVES - 1);
+
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(1), None]
+            } else if pos < LEAVES {
+                [Some(2 * pos), Some(2 * pos + 1)]
+            } else {
+                [None, None] // a leaf
+            }
+        };
+        // Nothing anywhere writes anything - the worst case for how many
+        // registers survive, unkilled, all the way to every leaf.
+        let writes_contains = |_pos: usize, _bit: usize| false;
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let (missing, event_count, peak_queue_len) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("test-only call: no verification-resource budget under test here");
+
+        // Correctness: every register is still missing at every leaf,
+        // since nothing anywhere ever defines any of them.
+        for leaf in [LEAVES, LEAVES + 1, 2 * LEAVES - 1] {
+            assert!(
+                missing[leaf].contains(0),
+                "nothing writes anything anywhere in this tree, so every register must still \
+                 be missing at every leaf"
+            );
+        }
+        assert!(
+            event_count <= reachable_count * DOMAIN_SIZE,
+            "event_count ({event_count}) must stay within the total-work bound \
+             ({}) - this is the property round 8 already established, unaffected by \
+             switching from FIFO to LIFO",
+            reachable_count * DOMAIN_SIZE
+        );
+        // The actual claim under test: LIFO keeps the LIVE queue dramatically
+        // smaller than the total-work bound, not just bounded by it - a
+        // generous but far-from-total-work ceiling (tree depth ~16, times a
+        // small constant, plus domain_size for the initial seed) rules out
+        // the "peaks near the full total-work bound" failure mode Codex
+        // described without pinning an exact formula.
+        let generous_ceiling = DOMAIN_SIZE * 64;
+        assert!(
+            peak_queue_len <= generous_ceiling,
+            "peak_queue_len ({peak_queue_len}) must stay far below the total-work bound \
+             ({}) - LIFO order should keep it within a small multiple of domain_size \
+             ({DOMAIN_SIZE}), not anywhere near reachable_count * domain_size",
+            reachable_count * DOMAIN_SIZE
+        );
+    }
+
+    /// #1756 Codex review round 15: proves the work-stack's peak size
+    /// genuinely scales with `leader_count`, independent of
+    /// `domain_size` - not just the `domain_size`-only bound round 9's
+    /// own test happened to observe. This construction's successor
+    /// ORDER matters: each node's two successors are `[dead_end (pushed
+    /// first/bottom), continue (pushed second/top)]`. LIFO always pops
+    /// the most-recently-pushed item, so it dives into `continue`
+    /// immediately, leaving `dead_end` buried and unresolved - and this
+    /// repeats at every one of `d` nodes along the chain, so the buried
+    /// backlog grows by one entry per node, independent of how many
+    /// (or how few) registers are actually live. Measured directly:
+    /// `peak_queue_len` tracks `d` almost exactly (within a small,
+    /// domain_size-bounded margin from the seed phase), confirming the
+    /// `leader_count + 2*domain_size` bound `check_analysis_state_
+    /// budget` now enforces is both necessary (an attacker really can
+    /// force this) and sound (it never exceeds the bound).
+    #[test]
+    fn c1756_reversed_order_diamond_chain_stack_peak_scales_with_leader_count() {
+        const D: usize = 100_000;
+        const DOMAIN_SIZE: usize = 64;
+        let reachable_count = 2 * D;
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos % 2 == 1 {
+                return [None, None]; // dead_end
+            }
+            let i = pos / 2;
+            let dead_end = pos + 1;
+            if i + 1 < D {
+                [Some(dead_end), Some(pos + 2)] // dead_end first, continue second
+            } else {
+                [Some(dead_end), None]
+            }
+        };
+        let writes_contains = |_pos: usize, _bit: usize| false;
+        let entry_missing = RegSet::full(DOMAIN_SIZE);
+        let (_missing, _event_count, peak_queue_len) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("unbounded");
+        assert!(
+            peak_queue_len > D / 2,
+            "peak_queue_len ({peak_queue_len}) must scale with D ({D}), not stay near \
+             domain_size ({DOMAIN_SIZE}) - this is exactly the gap round 15's state-budget \
+             correction closes"
+        );
+        assert!(
+            peak_queue_len <= D + 2 * DOMAIN_SIZE,
+            "peak_queue_len ({peak_queue_len}) must still respect the proven sound bound \
+             leader_count + 2*domain_size ({})",
+            D + 2 * DOMAIN_SIZE
+        );
+    }
+
+    /// #1756 Codex review round 15 (owner decision): P1's own exact
+    /// prescribed adversarial regression - `domain_size = 1`, a long
+    /// chain of genuine diamonds, the condition register defined at
+    /// entry (so it dies immediately and essentially nothing propagates
+    /// on the lattice side). `work_units` stays tiny (there is nothing
+    /// to deliver), while `leader_count = 2*count + 1` still drives real
+    /// fixed structural overhead (`Vec<RegSet>` headers, `chain_
+    /// targets`, `leader_positions`, and the worklist stack) that round
+    /// 13/14's dense-payload-only formula charged almost nothing for.
+    /// Proves the corrected state budget protects a dimension the work
+    /// budget cannot: an artifact can be cheap to COMPUTE yet expensive
+    /// to REPRESENT.
+    #[test]
+    fn c1756_low_domain_high_leader_count_rejects_on_state_not_work() {
+        const COUNT: usize = 500; // leader_count = 1,001; required_state_words = 18,653 exactly (round 21: 3,633 raw + 15,020 leader-state)
+        let bytes = emit_test_function(build_domain_one_diamond_chain(COUNT));
+
+        // Work stays tiny - accepted even under a small work cap.
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 100,
+            },
+        )
+        .expect("work_units must stay tiny - r0 dies at entry, nothing ever propagates");
+
+        // But fixed leader-scaled structural overhead plus raw reachable-
+        // node representation exceeds a state budget that round 13/14's
+        // dense-payload-only formula would have comfortably admitted.
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 18_652, // one below the exact 18,653 words this needs
+                max_work_units: 100,     // generous for work, tight for state
+            },
+        )
+        .expect_err(
+            "raw reachable-node representation plus fixed per-leader/stack structural overhead \
+             must exceed the state budget even though work stays trivially small",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded,
+            "must reject specifically on STATE, not work - proving this budget protects a \
+             dimension the work budget cannot"
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("18653 logical verifier-analysis word"));
+    }
+
+    /// #1756 Codex review round 10: round 8's `missing: Vec<RegSet>` array
+    /// eagerly allocated `RegSet::word_count(domain_size)` words for EVERY
+    /// reachable position, including ones whose missing set converges to
+    /// genuinely empty - a signature-less-params function that defines
+    /// every register `r0..DOMAIN_SIZE-1` once, then continues through a
+    /// long fallthrough tail of cheap re-writes to an already-defined
+    /// register (identical adversarial shape to
+    /// `c1756_reachable_full_domain_then_long_redefine_chain_stays_correct`,
+    /// which only checked correctness), forced `reachable_count *
+    /// domain_size` bits of storage even though almost the entire tail's
+    /// real content, after convergence, is empty. Fixed: `RegSet::insert`
+    /// now grows each set's own backing storage lazily, only as far as the
+    /// highest bit it has ever actually held - see the sibling doc
+    /// comments on `RegSet` and `compute_missing_sets` for the full
+    /// argument. This test measures real words allocated directly (Codex's
+    /// established preference for accounting evidence over timing alone),
+    /// not just correctness.
+    #[test]
+    fn c1756_long_redefine_chain_keeps_missing_sets_sparse_not_dense_per_node() {
+        const DOMAIN_SIZE: usize = 4_096;
+        const TAIL_LEN: usize = 100_000;
+        // Position 0 = entry (zero params: everything missing). Positions
+        // 1..=DOMAIN_SIZE each write exactly one, distinct, previously
+        // undefined register (position i writes register i-1), so the
+        // missing set shrinks by one bit per position until, by position
+        // DOMAIN_SIZE, nothing is left missing. Positions
+        // DOMAIN_SIZE+1..reachable_count re-write register 0 (already
+        // defined) TAIL_LEN times - Codex's "long chain of four-byte
+        // writes" tail that grows no new information at all.
+        let reachable_count = 1 + DOMAIN_SIZE + TAIL_LEN;
+
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos + 1 < reachable_count {
+                [Some(pos + 1), None]
+            } else {
+                [None, None]
+            }
+        };
+        let writes_contains = |pos: usize, bit: usize| -> bool {
+            if pos == 0 {
+                false
+            } else if pos <= DOMAIN_SIZE {
+                bit == pos - 1
+            } else {
+                bit == 0
+            }
+        };
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("test-only call: no verification-resource budget under test here");
+
+        // Correctness: early on, most registers are still missing; by the
+        // end of the tail, nothing is.
+        assert!(missing[1].contains(DOMAIN_SIZE - 1));
+        assert!(!missing[reachable_count - 1].contains(0));
+        assert!(!missing[reachable_count - 1].contains(DOMAIN_SIZE - 1));
+
+        // The claim under test: real words allocated must stay far below
+        // what eagerly sizing every position to the full domain would
+        // cost, dominated here by the long, genuinely-empty tail.
+        let dense_baseline_words = reachable_count * RegSet::word_count(DOMAIN_SIZE);
+        let actual_words: usize = missing.iter().map(|s| s.words.len()).sum();
+        assert!(
+            actual_words < dense_baseline_words / 10,
+            "actual_words ({actual_words}) must stay far below the old eager-dense baseline \
+             ({dense_baseline_words}) - most of this chain's tail has a genuinely empty \
+             missing set and must cost close to nothing, not domain_size bits regardless of \
+             content"
+        );
+        // The tail itself (after every register is defined) must be
+        // exactly zero words, not just "smaller than before".
+        let tail_words: usize = missing[DOMAIN_SIZE + 1..]
+            .iter()
+            .map(|s| s.words.len())
+            .sum();
+        assert_eq!(
+            tail_words, 0,
+            "every tail position's missing set is genuinely empty and must allocate zero words"
+        );
+    }
+
+    /// #1756 Codex review round 11: "Bound aggregate growth of missing
+    /// sets" - round 10's lazy growth only helps a position whose OWN
+    /// content stays small; it does nothing when MANY positions share a
+    /// large, unchanging value, which is exactly what a long,
+    /// non-branching run of redundant re-writes produces (nothing besides
+    /// register 0 is ever written, so every position after the first
+    /// holds the identical 4,095-of-4,096-registers-missing value).
+    /// Leader compression (`compute_leaders`/`build_leader_chains`)
+    /// collapses this run to its single leader (entry) regardless of
+    /// length, since it never branches - closing both the per-position
+    /// storage amplification AND the independent per-hop bit-delivery
+    /// amplification (event_count) in one fix, measured directly here
+    /// rather than by timing.
+    #[test]
+    fn c1756_long_non_branching_run_with_wide_missing_set_collapses_to_few_leaders() {
+        const DOMAIN_SIZE: usize = 4_096;
+        const RUN_LEN: usize = 2_000_000;
+        let reachable_count = RUN_LEN + 1;
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos + 1 < reachable_count {
+                [Some(pos + 1), None]
+            } else {
+                [None, None]
+            }
+        };
+
+        let is_leader = compute_leaders(reachable_count, successors_of);
+        let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+        assert_eq!(
+            leader_positions,
+            vec![0],
+            "a run with no branching at all must collapse to exactly one leader (entry), \
+             regardless of how long the run is - the whole point of leader compression"
+        );
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            |pos, visit| {
+                if pos != 0 {
+                    visit(0); // every non-entry position redundantly re-writes register 0 only
+                }
+            },
+            leader_index_of,
+        );
+        assert_eq!(
+            chain_targets,
+            vec![[None, None]],
+            "the run dead-ends (no branch, no back edge), so entry's chain delivers nowhere"
+        );
+        assert!(chain_killed[0].contains(0));
+        assert!(
+            !chain_killed[0].contains(1),
+            "register 1 is never written anywhere in this run"
+        );
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let (missing, event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("test-only call: no verification-resource budget under test here");
+        assert!(
+            missing[0].contains(1),
+            "register 1 is never written anywhere, so it must still be missing at entry"
+        );
+        // `missing[0]` is entry's own IN (pre-write) - it stays exactly
+        // `entry_missing`, unchanged (see `deliver`'s `target != 0` guard),
+        // so it still contains bit 0 too; `chain_killed[0]` (already
+        // asserted above) is where register 0 being defined shows up.
+        assert!(missing[0].contains(0));
+        // The claim under test: with leader_count collapsed to 1, total
+        // worklist events are bounded by domain_size alone, not
+        // reachable_count * domain_size (which for RUN_LEN = 2,000,000
+        // would be over 8 billion).
+        assert!(
+            event_count <= DOMAIN_SIZE,
+            "event_count ({event_count}) must stay within domain_size ({DOMAIN_SIZE}) alone - \
+             it must NOT scale with reachable_count * domain_size ({}), which is what round \
+             8-10's per-position worklist would have driven this to",
+            reachable_count * DOMAIN_SIZE
+        );
+    }
+
+    /// #1756 Codex review round 11: stresses `find_first_violation`'s
+    /// cross-leader minimum tracking. Leader A (position 1, processed
+    /// BEFORE leader B in ascending leader-position order) has its own
+    /// violation at position 3; leader B (position 4, processed AFTER A)
+    /// walks to position 2 - numerically LOWER than A's violation, even
+    /// though B's own leader position (4) is higher - which also
+    /// violates. The deterministic-first-diagnostic contract
+    /// (`c1756_case25`/`c1756_case26`) requires the lowest-position
+    /// violation overall (position 2) - only a full cross-leader scan,
+    /// not a per-chain short-circuit in leader-processing order, can
+    /// guarantee that. (Every position here is genuinely targeted by
+    /// something, matching the real caller's invariant that every
+    /// non-entry position in `0..reachable_count` has at least one
+    /// predecessor - `compute_leaders` treats an untargeted position as
+    /// its own trivial leader, which is correct but does not arise for
+    /// an actually-reachable graph, so this test avoids it.)
+    #[test]
+    fn c1756_cross_leader_scan_finds_the_true_lowest_position_violation() {
+        const DOMAIN_SIZE: usize = 8;
+        const REACHABLE_COUNT: usize = 5; // positions 0..4
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            match pos {
+                0 => [Some(1), Some(4)],
+                1 => [Some(3), None],
+                4 => [Some(2), None],
+                _ => [None, None], // 2 and 3 are dead ends
+            }
+        };
+        let no_writes = |_pos: usize, _visit: &mut dyn FnMut(usize)| {};
+
+        let is_leader = compute_leaders(REACHABLE_COUNT, successors_of);
+        let leader_positions: Vec<usize> = (0..REACHABLE_COUNT).filter(|&p| is_leader[p]).collect();
+        assert_eq!(leader_positions, vec![0, 1, 4]);
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            no_writes,
+            leader_index_of,
+        );
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("test-only call: no verification-resource budget under test here");
+
+        let reads_of = |pos: usize, visit: &mut dyn FnMut(usize)| {
+            if pos == 3 || pos == 2 {
+                visit(6); // both "instructions" read the same still-missing register
+            }
+        };
+        let violation = find_first_violation(
+            &leader_positions,
+            &is_leader,
+            &missing,
+            successors_of,
+            reads_of,
+            no_writes,
+        );
+        assert_eq!(
+            violation,
+            Some((2, 6)),
+            "position 2's violation must win even though leader B (position 4) is processed \
+             after leader A (position 1), whose own violation at position 3 would incorrectly \
+             win under a per-chain-order short-circuit"
+        );
+    }
+
+    /// #1756 Codex review round 11: exercises the exact adversarial
+    /// ORDER through the real `verify_semcode` pipeline (not just the
+    /// standalone leader-compression functions) - many redundant
+    /// re-writes to r0 BEFORE r1.. are ever defined, so the missing set
+    /// stays wide for the whole prefix (the shape round 10's fix did not
+    /// help), followed by the actual definitions and a read of the last
+    /// one. Confirms `prove_definite_register_assignment`'s leader-
+    /// compression wiring produces the correct ACCEPT result end to end,
+    /// complementing the standalone accounting regressions above.
+    #[test]
+    fn c1756_redundant_prefix_then_late_definitions_verifies_correctly_through_full_pipeline() {
+        let mut instrs = Vec::new();
+        for _ in 0..5000 {
+            instrs.push(IrInstr::LoadI32 { dst: 0, val: 0 }); // redundant after the first
+        }
+        for r in 1..64u16 {
+            instrs.push(IrInstr::LoadI32 { dst: r, val: 0 });
+        }
+        instrs.push(IrInstr::Ret { src: Some(63) });
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "every register is genuinely defined by the time it's read, regardless of how long \
+             the redundant prefix that precedes its definition is",
+        );
+    }
+
+    /// #1756 Codex review round 12: "Deduplicate identical branch
+    /// successors before choosing leaders" - a `JMP_IF` whose taken
+    /// branch targets its own fallthrough (a legal, if pointless, no-op
+    /// conditional branch) makes `for_each_reachable_successor` report
+    /// that one true successor twice. Before `dedup_successors`,
+    /// `compute_leaders` would see that as out-degree 2 (a branch) and
+    /// double-count the shared target's in-degree, forcing it to become
+    /// a leader - repeated over a long chain of such instructions, this
+    /// defeats round 11's compression entirely, exactly reproducing its
+    /// adversarial shape. This test proves BOTH halves directly: the raw
+    /// (undeduplicated) successors really do blow leader compression
+    /// back open, and running them through `dedup_successors` first (as
+    /// the real caller now does) collapses the chain back to a single
+    /// leader.
+    #[test]
+    fn c1756_self_targeting_branch_chain_collapses_via_dedup_successors() {
+        const CHAIN_LEN: usize = 500_000;
+        let reachable_count = CHAIN_LEN + 2; // entry, then CHAIN_LEN self-targeting branches, then a dead end
+                                             // Position 0 = entry -> 1. Positions 1..reachable_count-1 each
+                                             // mimic a self-targeting JMP_IF: `for_each_reachable_successor`
+                                             // reports its next position as BOTH the taken and fallthrough
+                                             // successor, i.e. the SAME position twice, before dedup.
+        let raw_successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(1), None]
+            } else if pos < reachable_count - 1 {
+                [Some(pos + 1), Some(pos + 1)]
+            } else {
+                [None, None]
+            }
+        };
+
+        let undeduped_leaders = compute_leaders(reachable_count, raw_successors_of);
+        let undeduped_leader_positions: Vec<usize> = (0..reachable_count)
+            .filter(|&p| undeduped_leaders[p])
+            .collect();
+        assert!(
+            undeduped_leader_positions.len() > CHAIN_LEN / 2,
+            "reproducing the finding: WITHOUT dedup, a chain of self-targeting branches must \
+             blow leader compression back open (got {} leaders for a {CHAIN_LEN}-instruction \
+             chain, expected close to all of them)",
+            undeduped_leader_positions.len()
+        );
+
+        let successors_of =
+            |pos: usize| -> [Option<usize>; 2] { dedup_successors(raw_successors_of(pos)) };
+        let is_leader = compute_leaders(reachable_count, successors_of);
+        let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+        assert_eq!(
+            leader_positions,
+            vec![0],
+            "the fix under test: once raw successors are deduplicated, a chain of self-targeting \
+             branches must collapse to exactly one leader (entry), same as any other \
+             non-branching run"
+        );
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let no_writes = |_pos: usize, _visit: &mut dyn FnMut(usize)| {};
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            no_writes,
+            leader_index_of,
+        );
+        const DOMAIN_SIZE: usize = 4096;
+        let entry_missing = RegSet::full(DOMAIN_SIZE);
+        let (_missing, event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("test-only call: no verification-resource budget under test here");
+        assert!(
+            event_count <= DOMAIN_SIZE,
+            "event_count ({event_count}) must stay within domain_size ({DOMAIN_SIZE}) alone, \
+             not scale with CHAIN_LEN * DOMAIN_SIZE - Codex's own figure for this shape at \
+             32,768 branches was ~134 million events"
+        );
+    }
+
+    /// #1756 Codex review round 12: the same finding exercised through
+    /// the real `verify_semcode` pipeline - a real `JMP_IF` whose label
+    /// resolves to the very next instruction, repeated many times,
+    /// confirming `for_each_reachable_successor` really does produce the
+    /// duplicate-successor shape `dedup_successors` is fixing, and that
+    /// the real caller's wiring wasn't the untested half of the fix.
+    #[test]
+    fn c1756_self_targeting_conditional_branch_chain_verifies_correctly_through_full_pipeline() {
+        let mut instrs = vec![IrInstr::LoadBool { dst: 0, val: true }];
+        for i in 0..2000 {
+            instrs.push(IrInstr::JmpIf {
+                cond: 0,
+                label: format!("l{i}"),
+            });
+            instrs.push(IrInstr::Label {
+                name: format!("l{i}"),
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) });
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "r0 is defined before any read, regardless of how long the self-targeting \
+             conditional-branch chain is",
+        );
+    }
+
+    /// #1756 Codex review round 13 (owner decision): builds `count` real
+    /// genuine diamonds (`JMP_IF` with one arm jumping straight to the
+    /// merge, the other falling through one no-op instruction first) -
+    /// `r0` is the always-defined condition register; every diamond's
+    /// arms are otherwise vacuous. If `undefined_tail_read` is `true`,
+    /// the function ends by reading `r1` without ever defining it
+    /// (pulling `r1` into the register domain and keeping it missing
+    /// across the whole chain, inflating work-unit propagation);
+    /// otherwise it ends by defining `r1` then reading it (an accepting
+    /// program, `r1` dying at entry just like `r0` - domain stays wide
+    /// only in shape, not in propagated content).
+    fn build_diamond_chain(count: usize, undefined_tail_read: bool) -> Vec<IrInstr> {
+        let mut instrs = vec![IrInstr::LoadBool { dst: 0, val: true }];
+        for i in 0..count {
+            instrs.push(IrInstr::JmpIf {
+                cond: 0,
+                label: format!("merge{i}"),
+            });
+            instrs.push(IrInstr::LoadBool { dst: 2, val: false }); // false-arm body: one no-op write to an unrelated register
+            instrs.push(IrInstr::Label {
+                name: format!("merge{i}"),
+            });
+        }
+        if !undefined_tail_read {
+            instrs.push(IrInstr::LoadI32 { dst: 1, val: 0 });
+        }
+        instrs.push(IrInstr::Ret { src: Some(1) });
+        instrs
+    }
+
+    /// #1756 Codex review round 15 (owner decision), P1's own exact
+    /// prescribed case: `count` genuine diamonds referencing ONLY `r0`
+    /// (the always-defined condition register - the false arm
+    /// redundantly re-writes it, and the final read is of the same,
+    /// already-defined register) - so `domain_size = 1` and `r0` dies at
+    /// entry's own write, before any propagation ever begins. `leader_
+    /// count = 2*count + 1` genuine leaders still exist (real branches,
+    /// real merges), so fixed structural overhead scales with `count`
+    /// even though almost nothing is happening on the lattice side.
+    fn build_domain_one_diamond_chain(count: usize) -> Vec<IrInstr> {
+        let mut instrs = vec![IrInstr::LoadBool { dst: 0, val: true }]; // r0 defined at entry
+        for i in 0..count {
+            instrs.push(IrInstr::JmpIf {
+                cond: 0,
+                label: format!("merge{i}"),
+            });
+            instrs.push(IrInstr::LoadBool { dst: 0, val: false }); // false arm: redundant re-write of r0
+            instrs.push(IrInstr::Label {
+                name: format!("merge{i}"),
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0 is defined - accepts
+        instrs
+    }
+
+    /// #1756 Codex review round 16 (owner decision): P1's own exact
+    /// prescribed shape - a genuinely branch-FREE reachable chain, no
+    /// `JmpIf` at all, so `compute_leaders` marks ONLY the entry
+    /// (position 0) as a leader regardless of `count`. `leader_count`
+    /// stays exactly 1 no matter how long this runs - the shape round
+    /// 15's leader/domain-scaled formula alone could not bound at all,
+    /// since it charges nothing beyond a fixed O(1) leader count however
+    /// large `reachable_count` grows. Closed by `check_raw_node_state_
+    /// budget`, which bounds `reachable_count` (and the reachable
+    /// instruction stream's own byte length) directly, independent of
+    /// leader or domain structure.
+    fn build_long_linear_chain(count: usize) -> Vec<IrInstr> {
+        let mut instrs = vec![IrInstr::LoadBool { dst: 0, val: true }]; // r0 defined at entry
+        for _ in 0..count {
+            instrs.push(IrInstr::LoadBool { dst: 0, val: false }); // redundant re-write, no branching at all
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0 is defined - accepts
+        instrs
+    }
+
+    /// #1756 Codex review round 16 (owner decision): Codex's own exact P1
+    /// regression - a signature-bearing, genuinely branch-free reachable
+    /// chain (`leader_count = 1` regardless of length), `domain_size =
+    /// 1`. `work_units` stays tiny (nothing to deliver - a single-leader
+    /// graph never even touches the worklist). Leader-state alone
+    /// (`dense_words = (2*1+1)*word_count(1) = 3`, `fixed_words = 17`,
+    /// `leader_words = 20` ALWAYS for this shape, for any chain length,
+    /// since `leader_count` and `domain_size` never change) comfortably
+    /// fits any real budget. Yet raw reachable-node representation
+    /// (`reachable_indices`, `reads_flat`/`writes_flat`, their offset
+    /// tables, `is_leader`) scales directly with `reachable_count`,
+    /// unbounded by leader or domain structure at all before this round -
+    /// proving this is a dimension the pre-round-16 envelope could not
+    /// bound, not merely under-charge.
+    #[test]
+    fn c1756_long_linear_low_domain_rejects_on_raw_state_not_leader_state() {
+        const COUNT: usize = 100_000; // reachable_count = 100,002; raw_words = 325,008; leader_words = 20 (leader_count=1, domain_size=1); combined = 325,028 exactly
+        let bytes = emit_test_function(build_long_linear_chain(COUNT));
+
+        // Work stays tiny - accepted even under a small work cap.
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 100,
+            },
+        )
+        .expect("work_units must stay tiny - a single-leader graph never touches the worklist");
+
+        // Leader-state alone (20 words, fixed for ANY chain length here)
+        // is nowhere near the problem - a budget of 1,000 is still far
+        // below the true raw-node cost (325,008), proving the rejection
+        // below is specifically about raw reachable-node representation,
+        // not about leader/domain-scaled state.
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 1_000,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err(
+            "raw reachable-node representation must exceed the state budget even though \
+             leader-state alone (20 words) is nowhere near it, and rejection must occur BEFORE \
+             dataflow_domain_accounting or compute_leaders ever allocates their reachable-node- \
+             sized structures",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded,
+            "must reject specifically on STATE, not work"
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("raw reachable-node representation alone"));
+
+        // Exact boundary: the raw check alone (before leader state is
+        // even computed) reports 325,008 words for this construction.
+        let raw_only = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 0,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err("must reject");
+        assert!(raw_only.diagnostics[0]
+            .message
+            .contains("325008 logical verifier-analysis word"));
+
+        // Exact combined boundary: raw_words (325,008) + leader_words
+        // (20) = 325,028 exactly, once leader state is also computed.
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 325_028,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect("usage == limit must be accepted for state-budget accounting");
+        let combined = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 325_027,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err("usage == limit + 1 must be a deterministic resource rejection");
+        assert!(combined.diagnostics[0]
+            .message
+            .contains("325028 logical verifier-analysis word"));
+    }
+
+    /// #1756 Codex review round 21 (owner decision), P2's own required
+    /// regression: "construct a low-domain/high-reachable-count shape
+    /// where: old raw formula passes, corrected scratch-aware raw
+    /// formula rejects, and prove rejection occurs before classifier
+    /// scratch allocation." Reuses `c1756_long_linear_low_domain_
+    /// rejects_on_raw_state_not_leader_state`'s exact construction
+    /// (100,000 unreachable-free branch-free `LOAD_BOOL`s, `domain_size
+    /// = 1`, `reachable_count = 100,002`) and that same test's own
+    /// already-established pre-round-21 exact raw-only requirement of
+    /// 312,508 words (what this construction needed before this round's
+    /// P2 fix added the `leader_classification_state` term).
+    ///
+    /// Setting `max_state_words` to exactly that OLD value proves the
+    /// point directly: a verifier still running the pre-round-21 formula
+    /// would compute `raw_words == 312,508 == limit` and ACCEPT - this
+    /// construction would sail through the raw precheck, then let
+    /// `compute_leaders` allocate its consolidated `state: Vec<u8>`
+    /// classifier scratch (`reachable_count` = 100,002 bytes nobody
+    /// charged for). The corrected, round-21 formula instead computes
+    /// `raw_words == 325,008 > 312,508` and rejects - and the verifier's
+    /// own diagnostic text asserted below ("before any leader-compressed
+    /// state is even computed") is produced ONLY by `check_raw_node_
+    /// state_budget`'s own error path, never by the later combined
+    /// check, so its presence here is direct evidence, from the
+    /// verifier's own reporting, that this rejection fires strictly
+    /// before `compute_leaders` (or `dataflow_domain_accounting`) ever
+    /// runs - i.e. before the classifier scratch array they would
+    /// allocate exists at all.
+    #[test]
+    fn c1756_pre_round21_raw_formula_would_have_admitted_uncharged_classifier_scratch() {
+        const COUNT: usize = 100_000;
+        const OLD_RAW_WORDS_BEFORE_ROUND21_FIX: usize = 312_508;
+        let bytes = emit_test_function(build_long_linear_chain(COUNT));
+
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: OLD_RAW_WORDS_BEFORE_ROUND21_FIX,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err(
+            "a limit that exactly equalled the pre-round-21 raw-only requirement must now be \
+             rejected by the corrected, scratch-aware raw formula - proving the old formula \
+             would have admitted a construction whose true raw cost (including classifier \
+             scratch) exceeds it",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded
+        );
+        assert!(
+            report.diagnostics[0]
+                .message
+                .contains("before any leader-compressed state is even computed"),
+            "this exact phrase is emitted only by check_raw_node_state_budget's own error path, \
+             never by the later combined check - its presence proves rejection happened strictly \
+             before compute_leaders (or dataflow_domain_accounting) ever ran, i.e. before the \
+             classifier scratch array they would allocate exists at all"
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("325008 logical verifier-analysis word"));
+    }
+
+    /// #1756 Codex review round 20 (owner decision): the "linear control
+    /// case" - proves this round's reordering did NOT regress to
+    /// charging `reachable_count` in place of `leader_count` (which
+    /// would silently undo round 11's entire leader-compression
+    /// benefit). Reuses `c1756_long_linear_low_domain_rejects_on_raw_
+    /// state_not_leader_state`'s exact construction and numbers (100,000
+    /// unreachable-free `LOAD_BOOL`s, `reachable_count = 100,002`,
+    /// `leader_count = 1` always for a branch-free stream). Round 21's P2
+    /// fix added a `leader_classification_state` term to the raw
+    /// formula, raising `raw_words` from 312,508 to 325,008 and true
+    /// combined from 312,528 to 325,028 - `500,000` still sits
+    /// comfortably above the TRUE (post-round-21) combined requirement
+    /// but far below what the combined requirement would be if
+    /// `leader_count` were wrongly substituted with `reachable_count`
+    /// (`dense_words = (2*100_002+1)*1 = 200,005`, `fixed_bytes =
+    /// 100_002*88 + (100_002+2)*16 = 10,400,240`, `fixed_words =
+    /// 1,300,030`, wrong combined = `325,008 + 200,005 + 1,300,030 =
+    /// 1,825,043`) - if the reordering had accidentally substituted the
+    /// wrong count, this construction would reject at `500,000`; it must
+    /// still accept.
+    #[test]
+    fn c1756_linear_control_case_still_uses_leader_count_not_reachable_count() {
+        let bytes = emit_test_function(build_long_linear_chain(100_000));
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 500_000,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect(
+            "a branch-free stream's TRUE leader_count (1) must still admit this construction - \
+             a limit this low would reject if leader_count had regressed to reachable_count \
+             (100,002)",
+        );
+    }
+
+    /// #1756 Codex review round 20 (owner decision): Codex's own exact
+    /// regression - a branch-dense signature-bearing function where the
+    /// raw-only precheck passes but the COMBINED check (which needs
+    /// `leader_count`, and therefore needs `leader_positions`
+    /// authorized) rejects. Reuses `build_diamond_chain`'s already-
+    /// established exact numbers (`N = 1,000` genuine diamonds:
+    /// `reachable_count = 2,003`, `leader_count = 2,001`, `raw_words =
+    /// 7,262`, true combined = `37,290`, re-verified after round 21's
+    /// formula extension). `max_state_words = 20_000` sits strictly
+    /// between `raw_words` (7,262 - the precheck alone passes) and the
+    /// combined requirement (37,290 - the combined check must reject), proving
+    /// the combined check's own rejection is what fires, using the
+    /// CORRECTLY count-derived `leader_count = 2,001` (asserted in the
+    /// message) - not a stale or wrong value, and specifically NOT by
+    /// way of ever materializing `leader_positions` first (see the
+    /// companion direct/low-level test below for the strongest form of
+    /// this proof: an equivalent construction that never once calls
+    /// `.filter().collect()` for leader positions anywhere in the test's
+    /// own code, mirroring the production call order exactly).
+    #[test]
+    fn c1756_branch_dense_combined_check_rejects_using_count_only_leader_count() {
+        const N: usize = 1_000;
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 20_000,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err(
+            "the combined check must reject even though the raw-only precheck alone (7,262) \
+             would pass at this limit",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded
+        );
+        assert!(
+            report.diagnostics[0].message.contains("2001 leader(s)"),
+            "the exact leader_count must still be correctly derived and reported via the \
+             count-only path, proving it produces the right number: {}",
+            report.diagnostics[0].message
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("37290 logical verifier-analysis word"));
+    }
+
+    /// #1756 Codex review round 20 (owner decision): the STRONGEST form
+    /// of "leader_positions has not yet been allocated" evidence - a
+    /// direct, low-level mirror of the production call order
+    /// (`compute_leaders` -> count `is_leader`'s true bits -> `check_
+    /// analysis_state_budget`) that NEVER calls `.filter().collect()` to
+    /// build a `Vec<usize>` of leader positions anywhere in this test's
+    /// own code, exactly as `prove_definite_register_assignment` no
+    /// longer does before this same check. Deliberately does NOT use
+    /// allocator-size instrumentation for this specific claim: unlike
+    /// round 18's per-INSTRUCTION allocation count (a multi-order-of-
+    /// magnitude gap, cleanly separable from every other legitimate
+    /// allocation this call makes), a single `leader_positions` `Vec`
+    /// among several other legitimately reachable_count/leader_count-
+    /// scaled allocations (`reachable_indices`, `is_leader`, `chain_
+    /// killed`, etc., several of comparable size) is not reliably
+    /// distinguishable by allocation COUNT or even peak SIZE alone - a
+    /// direct call-order proof is the honest, non-brittle choice instead
+    /// (matching round 18's own precedent of preferring a structural
+    /// proof when instrumentation would not cleanly discriminate).
+    #[test]
+    fn c1756_leader_count_derived_without_collecting_positions_before_combined_check() {
+        const DIAMOND_COUNT: usize = 1_000;
+        const DOMAIN_SIZE: usize = 3;
+        let reachable_count = 1 + 3 * DIAMOND_COUNT;
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(1), None]
+            } else {
+                let rel = pos - 1;
+                let diamond = rel / 3;
+                let slot = rel % 3;
+                match slot {
+                    0 => {
+                        let merge = 1 + 3 * diamond + 2;
+                        let false_arm = 1 + 3 * diamond + 1;
+                        [Some(merge), Some(false_arm)]
+                    }
+                    1 => {
+                        let merge = 1 + 3 * diamond + 2;
+                        [Some(merge), None]
+                    }
+                    2 => {
+                        if diamond + 1 < DIAMOND_COUNT {
+                            [Some(1 + 3 * (diamond + 1)), None]
+                        } else {
+                            [None, None]
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        };
+
+        let is_leader = compute_leaders(reachable_count, successors_of);
+        // Zero-allocation count - no `Vec<usize>` of positions exists at
+        // this point, matching production exactly.
+        let leader_count = is_leader.iter().filter(|&&leader| leader).count();
+        assert_eq!(
+            leader_count,
+            2 * DIAMOND_COUNT + 1,
+            "exact leader count must still be correct via the count-only path"
+        );
+
+        // This test bypasses real SemCode decoding entirely, so
+        // `reachable_instruction_bytes` is a synthetic, small (relative
+        // to the leader-scaled cost below) placeholder - only its
+        // relationship to the chosen limit matters here, not its exact
+        // real-world value.
+        let reachable_instruction_bytes = reachable_count * 4;
+        let raw_words = check_raw_node_state_budget(
+            reachable_count,
+            reachable_instruction_bytes,
+            0,
+            usize::MAX,
+        )
+        .expect("raw precheck must pass at usize::MAX");
+
+        let limit = raw_words + 100; // comfortably above raw alone, comfortably below the combined requirement
+        assert!(
+            check_raw_node_state_budget(reachable_count, reachable_instruction_bytes, 0, limit)
+                .is_ok(),
+            "raw-only precheck must pass at this limit"
+        );
+        let result = check_analysis_state_budget(raw_words, leader_count, DOMAIN_SIZE, limit);
+        assert!(
+            result.is_err(),
+            "the combined check must reject once leader-state is included, even though raw \
+             alone fit - and it does so here using ONLY the count-derived leader_count, with no \
+             leader_positions Vec ever constructed anywhere in this test"
+        );
+    }
+
+    /// #1756 Codex review round 20 (owner decision): "count/collect
+    /// consistency" - across representative CFG shapes, the zero-
+    /// allocation count (`is_leader.iter().filter(..).count()`) and the
+    /// materialized position list (`(0..n).filter(..).collect()`) must
+    /// never disagree. Both views read the SAME already-computed
+    /// `is_leader: Vec<bool>` in this implementation (not two separate
+    /// traversals), so this is provable by construction rather than
+    /// merely tested - but the test still guards against a FUTURE change
+    /// accidentally introducing a second, independently-computed
+    /// counting path that could drift from `compute_leaders`'s own
+    /// classification.
+    #[test]
+    fn c1756_leader_count_and_collected_positions_agree_across_cfg_shapes() {
+        // Linear: no branches at all - exactly one leader (entry).
+        {
+            let reachable_count = 6;
+            let successors_of = |pos: usize| -> [Option<usize>; 2] {
+                if pos + 1 < reachable_count {
+                    [Some(pos + 1), None]
+                } else {
+                    [None, None]
+                }
+            };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(count_only, collected.len(), "linear");
+            assert_eq!(collected, vec![0], "linear: entry only");
+        }
+
+        // Genuine diamond: entry branches to two arms, both merge - every
+        // position is a leader (entry, 2 branch targets, 1 merge).
+        {
+            let reachable_count = 4;
+            let successors_of = |pos: usize| -> [Option<usize>; 2] {
+                match pos {
+                    0 => [Some(1), Some(2)],
+                    1 => [Some(3), None],
+                    2 => [Some(3), None],
+                    3 => [None, None],
+                    _ => unreachable!(),
+                }
+            };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(count_only, collected.len(), "genuine diamond");
+            assert_eq!(
+                collected,
+                vec![0, 1, 2, 3],
+                "genuine diamond: all 4 positions"
+            );
+        }
+
+        // Merge with non-leader interior: two arms each with an extra
+        // non-branching hop before converging - the hops (2 and 4) must
+        // NOT be leaders.
+        {
+            let reachable_count = 6;
+            let successors_of = |pos: usize| -> [Option<usize>; 2] {
+                match pos {
+                    0 => [Some(1), Some(3)],
+                    1 => [Some(2), None],
+                    2 => [Some(5), None],
+                    3 => [Some(4), None],
+                    4 => [Some(5), None],
+                    5 => [None, None],
+                    _ => unreachable!(),
+                }
+            };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(
+                count_only,
+                collected.len(),
+                "merge with non-leader interior"
+            );
+            assert_eq!(
+                collected,
+                vec![0, 1, 3, 5],
+                "merge: entry, both branch targets, and the merge point - the two single-\
+                 predecessor hops (2, 4) stay non-leaders"
+            );
+        }
+
+        // Self-targeting JMP_IF with duplicate (undeduplicated-then-
+        // deduplicated) successors - round 12's own fix.
+        {
+            let reachable_count = 5;
+            let raw_successors_of = |pos: usize| -> [Option<usize>; 2] {
+                if pos == 0 {
+                    [Some(1), None]
+                } else if pos + 1 < reachable_count {
+                    [Some(pos + 1), Some(pos + 1)]
+                } else {
+                    [None, None]
+                }
+            };
+            let successors_of =
+                |pos: usize| -> [Option<usize>; 2] { dedup_successors(raw_successors_of(pos)) };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(count_only, collected.len(), "self-targeting JMP_IF");
+            assert_eq!(
+                collected,
+                vec![0],
+                "self-targeting JMP_IF chain collapses to exactly one leader (entry) once \
+                 deduplicated"
+            );
+        }
+
+        // Loop: entry -> header (2 predecessors: entry, body) -> body
+        // (branches back to header or forward to exit).
+        {
+            let reachable_count = 4;
+            let successors_of = |pos: usize| -> [Option<usize>; 2] {
+                match pos {
+                    0 => [Some(1), None],
+                    1 => [Some(2), None],
+                    2 => [Some(1), Some(3)],
+                    3 => [None, None],
+                    _ => unreachable!(),
+                }
+            };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(count_only, collected.len(), "loop");
+            assert_eq!(
+                collected,
+                vec![0, 1, 3],
+                "loop: entry, the header (merge point via the back-edge), and the exit branch \
+                 target - the loop body itself (2) stays non-leader"
+            );
+        }
+    }
+
+    /// #1756 Codex review round 16: exact boundary behavior for `check_
+    /// raw_node_state_budget` in isolation, independently re-derived
+    /// from the named constants directly (not calling the production
+    /// formula), so this test can catch an implementation bug rather
+    /// than just confirming the function agrees with itself.
+    #[test]
+    fn c1756_raw_node_state_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
+        const REACHABLE_COUNT: usize = 1_000;
+        const INSTR_LEN: usize = 4_000;
+        const ENTRY_PARAM_COUNT: usize = 2;
+
+        let operand_count_bound = INSTR_LEN / 2;
+        let raw_bytes = REACHABLE_COUNT * REACHABLE_INDEX_LOGICAL_BYTES
+            + (REACHABLE_COUNT + 1) * 2 * CSR_OFFSET_LOGICAL_BYTES
+            + REACHABLE_COUNT * LEADER_FLAG_LOGICAL_BYTES
+            + REACHABLE_COUNT * LEADER_CLASSIFICATION_STATE_LOGICAL_BYTES
+            + (2 * operand_count_bound + ENTRY_PARAM_COUNT) * REGISTER_OPERAND_LOGICAL_BYTES;
+        let expected_raw_words = raw_bytes.div_ceil(WORD_BYTES);
+
+        assert_eq!(
+            check_raw_node_state_budget(
+                REACHABLE_COUNT,
+                INSTR_LEN,
+                ENTRY_PARAM_COUNT,
+                expected_raw_words
+            ),
+            Ok(expected_raw_words),
+            "usage == limit must be accepted"
+        );
+        assert_eq!(
+            check_raw_node_state_budget(
+                REACHABLE_COUNT,
+                INSTR_LEN,
+                ENTRY_PARAM_COUNT,
+                expected_raw_words - 1
+            ),
+            Err(expected_raw_words),
+            "usage == limit + 1 must be a deterministic resource rejection reporting the true \
+             required word count"
+        );
+    }
+
+    /// #1756 Codex review round 16: overflow specifically in the NEW
+    /// raw-node arithmetic (not the round-13/15 leader-side paths those
+    /// tests already cover) must also be a deterministic rejection.
+    #[test]
+    fn c1756_raw_node_state_budget_overflow_is_deterministic_rejection() {
+        let reachable_count = usize::MAX / 4;
+        assert!(
+            reachable_count
+                .checked_mul(REACHABLE_INDEX_LOGICAL_BYTES)
+                .is_none(),
+            "test premise: reachable_index_bytes must overflow"
+        );
+        let result = check_raw_node_state_budget(reachable_count, 0, 0, usize::MAX - 1);
+        assert_eq!(
+            result,
+            Err(usize::MAX),
+            "raw-node byte arithmetic overflowing usize must report the overflow sentinel, not \
+             panic or silently wrap"
+        );
+    }
+
+    /// #1756 Codex review round 19 (owner decision): direct, isolated
+    /// unit coverage for `AnalysisWorkMeter::charge_one` - proves the
+    /// checked-arithmetic overflow guarantee without actually executing
+    /// `usize::MAX` units of real work (which would never finish). Every
+    /// case here is a plain function call in a normal (non-panicking)
+    /// test - `charge_one` is built entirely on `checked_add`, which by
+    /// construction can never panic, so the absence of a `#[should_
+    /// panic]` anywhere in this test IS part of the proof, not an
+    /// oversight: the correct behavior is an ordinary `Err` return, never
+    /// a panic, on any target or build profile.
+    #[test]
+    fn c1756_analysis_work_meter_charge_one_boundary_and_overflow() {
+        // (1) Normal exact boundary: used = limit - 1, charge -> used ==
+        // limit, accepted.
+        let mut meter = AnalysisWorkMeter { used: 9, limit: 10 };
+        assert_eq!(
+            meter.charge_one(),
+            Ok(10),
+            "charging up to the exact limit must be accepted"
+        );
+        assert_eq!(meter.used, 10);
+
+        // (2) Limit exceed: used = limit, charge -> rejected, attempted
+        // usage == limit + 1 (representable, so reported exactly).
+        let mut meter = AnalysisWorkMeter {
+            used: 10,
+            limit: 10,
+        };
+        assert_eq!(
+            meter.charge_one(),
+            Err(11),
+            "charging past the limit must report the exact attempted usage (limit + 1) when \
+             representable"
+        );
+
+        // (3) Arithmetic overflow: used = usize::MAX, limit = usize::MAX,
+        // charge -> deterministic rejection via the overflow sentinel,
+        // never a panic, never a silent wrap to 0.
+        let mut meter = AnalysisWorkMeter {
+            used: usize::MAX,
+            limit: usize::MAX,
+        };
+        assert_eq!(
+            meter.charge_one(),
+            Err(usize::MAX),
+            "used + 1 overflowing usize must report the overflow sentinel, never panic or \
+             silently wrap to 0"
+        );
+        assert_eq!(
+            meter.used,
+            usize::MAX,
+            "an overflowing charge must leave `used` exactly as it was - never wrapped to 0, \
+             which would let the verifier resume accepting work UNDER the configured limit"
+        );
+
+        // (4) Near-overflow: used = usize::MAX - 1, limit = usize::MAX,
+        // charge -> accepted (used becomes exactly usize::MAX, the last
+        // representable unit); the VERY NEXT charge must then overflow
+        // deterministically.
+        let mut meter = AnalysisWorkMeter {
+            used: usize::MAX - 1,
+            limit: usize::MAX,
+        };
+        assert_eq!(
+            meter.charge_one(),
+            Ok(usize::MAX),
+            "the last representable unit of work must still be accepted"
+        );
+        assert_eq!(
+            meter.charge_one(),
+            Err(usize::MAX),
+            "the NEXT charge, now genuinely overflowing usize::MAX + 1, must be a deterministic \
+             rejection, not a panic or a wrap back to a small, still-under-limit number"
+        );
+    }
+
+    /// #1756 Codex review round 14 (owner decision): like
+    /// `emit_test_function`, but for a MULTI-FUNCTION artifact - needed
+    /// to exercise the artifact-wide (not per-function) work budget.
+    fn emit_test_functions(names_and_instrs: Vec<(&str, Vec<IrInstr>)>) -> Vec<u8> {
+        emit_ir_to_semcode(
+            &names_and_instrs
+                .into_iter()
+                .map(|(name, instrs)| IrFunction {
+                    name: name.to_string(),
+                    instrs,
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                })
+                .collect::<Vec<_>>(),
+            false,
+        )
+        .expect("emit test functions")
+    }
+
+    /// #1756 Codex review round 13 (owner decision): a small genuine-
+    /// diamond program - real branches, real merges, nothing spurious -
+    /// must still verify normally under the default resource envelope.
+    /// The round-13 finding is about a resource BOUND, not a
+    /// correctness defect; ordinary, modest programs must be entirely
+    /// unaffected.
+    #[test]
+    fn c1756_small_genuine_diamond_program_verifies_normally() {
+        let bytes = emit_test_function(build_diamond_chain(2, false));
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits::default_profile(),
+        )
+        .expect("a handful of genuine diamonds, entirely defined, must verify normally");
+    }
+
+    /// #1756 Codex review round 13 (owner decision), formula corrected in
+    /// round 14 (see `check_analysis_state_budget`'s doc comment - peak
+    /// state charges BOTH `chain_killed` and `missing`, simultaneously
+    /// live, not just one; corrected again in round 15 to also charge the
+    /// fixed per-leader/stack structural overhead, and again in round 16
+    /// to also charge raw reachable-node representation via `check_raw_
+    /// node_state_budget`, `check_analysis_state_budget`'s own doc
+    /// comment inventories): a construction whose exact `required_state_
+    /// words` (raw reachable-node words, from `check_raw_node_state_
+    /// budget`, plus dense payload `(2*leader_count + 1) * ceil(domain_
+    /// size / 64)` plus fixed structural overhead - here `leader_count =
+    /// 2*n+1` for `n` genuine diamonds, `domain_size = 3`, giving dense =
+    /// `4*n+3` and, following the same derivation, required = 37,290 for
+    /// `n = 1,000`) exceeds `max_state_words` must be rejected
+    /// deterministically, with `AnalysisStateLimitExceeded` - and, by
+    /// construction (see `prove_definite_register_assignment`'s round-13
+    /// pre-check, extended in round 16), BEFORE `dataflow_domain_
+    /// accounting`, `build_leader_chains`, or `compute_missing_sets` ever
+    /// allocates their reachable-node- or leader_count-sized dense
+    /// state.
+    #[test]
+    fn c1756_construction_exceeding_state_budget_rejects_before_large_allocation() {
+        const N: usize = 1_000; // leader_count = 2,001; required_state_words = 37,290 exactly (round 21: 7,262 raw + 30,028 leader-state)
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 37_289, // one below the exact 37,290 words this needs
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err("must reject on the state budget before any large allocation");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("37290 logical verifier-analysis word"));
+        assert!(report.diagnostics[0]
+            .message
+            .contains("state budget of 37289"));
+    }
+
+    /// #1756 Codex review round 13 (owner decision): a construction whose
+    /// `state_words` stays comfortably within budget but whose
+    /// `work_units` (verified exactly, by binary search against the real
+    /// pipeline, to be `4*n+3` for `n` genuine vacuous diamonds with an
+    /// undefined tail read) exceeds `max_work_units` must be rejected
+    /// deterministically on the work budget specifically -
+    /// `AnalysisWorkLimitExceeded`, not `AnalysisStateLimitExceeded`.
+    #[test]
+    fn c1756_construction_within_state_budget_exceeding_work_budget_rejects_on_work() {
+        const N: usize = 5; // state_words = 11, work_units = 4*5+3 = 23 exactly
+        let bytes = emit_test_function(build_diamond_chain(N, true));
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 1_000, // far above the 11 words this actually needs
+                max_work_units: 22,     // one below the exact 23 units this needs
+            },
+        )
+        .expect_err("must reject on the work budget, state budget was never in danger");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded
+        );
+        assert!(report.diagnostics[0].message.contains("23"));
+        assert!(report.diagnostics[0].message.contains("22"));
+    }
+
+    /// #1756 Codex review round 13 (owner decision): repeated
+    /// verification of identical bytes against an identical resource
+    /// envelope must yield an identical diagnostic every time - same
+    /// error code, same resource-kind identity (`AnalysisStateLimitExceeded`
+    /// vs `AnalysisWorkLimitExceeded` are distinct, stable variants,
+    /// precisely so this is a plain code comparison), same used/limit
+    /// accounting (the message text), and the diagnostic carries no
+    /// per-function identity here because this is a whole-function
+    /// admission decision (mirrors
+    /// `c1756_case26_repeated_verification_yields_identical_diagnostic`
+    /// for the definite-assignment code path itself).
+    #[test]
+    fn c1756_repeated_verification_of_resource_limit_yields_identical_diagnostic() {
+        const N: usize = 1_000;
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        let limits = VerificationLimits {
+            max_state_words: 2_000,
+            max_work_units: usize::MAX,
+        };
+        let first = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            limits,
+        )
+        .expect_err("must reject");
+        for _ in 0..9 {
+            let again = verify_semcode_token_with_quotas_and_limits(
+                &bytes,
+                RuntimeQuotas::verified_local(),
+                limits,
+            )
+            .expect_err("must reject");
+            assert_eq!(
+                again, first,
+                "repeated verification against an identical resource envelope must produce an \
+                 identical diagnostic"
+            );
+        }
+    }
+
+    /// #1756 Codex review round 13 (owner decision), formula corrected in
+    /// rounds 14, 15, and 16: exact boundary behavior for the (now fully
+    /// raw-reachable-node-plus-leader-scaled: `reachable_indices`,
+    /// `reads_flat`/`writes_flat`, their offset tables, `is_leader`,
+    /// `chain_killed` + `missing` dense payload, their `Vec<RegSet>`
+    /// headers, `chain_targets`, `leader_positions`, and the worklist
+    /// stack's `leader_count + 2*domain_size` peak) state-words budget -
+    /// `usage == limit` is accepted for resource accounting purposes
+    /// (the state check itself must not fire; the construction here is
+    /// fully defined, so the overall result is a genuine accept),
+    /// `usage == limit + 1` is a deterministic resource rejection. No
+    /// off-by-one ambiguity.
+    #[test]
+    fn c1756_state_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
+        const N: usize = 5; // leader_count = 11; required_state_words = 226 exactly (round 21: 48 raw + 178 leader-state)
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 226,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect("usage == limit must be accepted for state-budget accounting");
+
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 225,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err("usage == limit + 1 must be a deterministic resource rejection");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded
+        );
+    }
+
+    /// #1756 Codex review round 13 (owner decision): exact boundary
+    /// behavior for the work-units budget, mirroring the state-budget
+    /// boundary test above.
+    #[test]
+    fn c1756_work_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
+        const N: usize = 5; // work_units = 23 exactly (state_words = 11, well within budget)
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 1_000,
+                max_work_units: 23,
+            },
+        )
+        .expect("usage == limit must be accepted for work-budget accounting");
+
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 1_000,
+                max_work_units: 22,
+            },
+        )
+        .expect_err("usage == limit + 1 must be a deterministic resource rejection");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded
+        );
+    }
+
+    /// #1756 Codex review round 13 (owner decision): `checked_mul`
+    /// overflow itself must be treated as a deterministic rejection, not
+    /// a panic or wrapping miscalculation - there is no finite word
+    /// count to report in that case, only that the true count is
+    /// unrepresentable and therefore certainly exceeds any finite
+    /// `max_state_words`.
+    #[test]
+    fn c1756_analysis_state_budget_checked_mul_overflow_is_deterministic_rejection() {
+        let result = check_analysis_state_budget(0, usize::MAX, 128, usize::MAX - 1);
+        assert_eq!(
+            result,
+            Err(usize::MAX),
+            "leader_count * word_count(domain_size) overflowing usize must report the \
+             overflow sentinel, not panic or silently wrap"
+        );
+    }
+
+    /// #1756 Codex review round 15: overflow specifically in the NEW
+    /// fixed-structural-overhead arithmetic (not the round-13 dense-
+    /// payload path the test above already covers) must also be a
+    /// deterministic rejection. `leader_count` here is chosen small
+    /// enough that `2 * leader_count + 1` (the dense-payload factor)
+    /// does NOT overflow, but large enough that `leader_count *
+    /// per_leader_fixed_bytes` does - proving every checked step in the
+    /// chain is actually load-bearing, not just the first one.
+    #[test]
+    fn c1756_analysis_state_budget_fixed_overhead_overflow_is_deterministic_rejection() {
+        let leader_count = usize::MAX / 50; // 2*leader_count+1 fits; leader_count*88 does not
+        assert!(
+            leader_count.checked_mul(2).is_some(),
+            "test premise: dense factor must not overflow"
+        );
+        assert!(
+            leader_count.checked_mul(88).is_none(),
+            "test premise: per-leader fixed bytes must overflow"
+        );
+        let result = check_analysis_state_budget(0, leader_count, 1, usize::MAX - 1);
+        assert_eq!(
+            result,
+            Err(usize::MAX),
+            "fixed structural overhead overflowing usize must report the overflow sentinel too, \
+             not panic, silently wrap, or fall through to only the dense-payload term"
+        );
+    }
+
+    /// #1756 Codex review round 13 (owner decision): a permanent
+    /// reproduction of Codex's genuine-diamond construction - direct
+    /// accounting evidence (leader_count, event_count, real memory) via
+    /// `compute_leaders`/`build_leader_chains`/`compute_missing_sets`,
+    /// confirming the underlying solver's behavior on this shape is
+    /// unchanged by round 13 (a resource envelope was added around it;
+    /// the solver itself was not touched) and matches the finding's own
+    /// figures at scale.
+    #[test]
+    fn c1756_genuine_diamond_chain_accounting_matches_finding() {
+        const DOMAIN_SIZE: usize = 4096;
+        const DIAMOND_COUNT: usize = 10_000;
+        let reachable_count = 1 + 3 * DIAMOND_COUNT;
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(1), None]
+            } else {
+                let rel = pos - 1;
+                let diamond = rel / 3;
+                let slot = rel % 3;
+                match slot {
+                    0 => {
+                        let merge = 1 + 3 * diamond + 2;
+                        let false_arm = 1 + 3 * diamond + 1;
+                        [Some(merge), Some(false_arm)]
+                    }
+                    1 => {
+                        let merge = 1 + 3 * diamond + 2;
+                        [Some(merge), None]
+                    }
+                    2 => {
+                        if diamond + 1 < DIAMOND_COUNT {
+                            [Some(1 + 3 * (diamond + 1)), None]
+                        } else {
+                            [None, None]
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        };
+        let no_writes = |_pos: usize, _visit: &mut dyn FnMut(usize)| {};
+
+        let is_leader = compute_leaders(reachable_count, successors_of);
+        let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+        assert_eq!(
+            leader_positions.len(),
+            2 * DIAMOND_COUNT + 1,
+            "each genuine diamond contributes exactly 2 leaders (branch target + merge), plus entry"
+        );
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            no_writes,
+            leader_index_of,
+        );
+        let entry_missing = RegSet::full(DOMAIN_SIZE);
+        let (missing, event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("unbounded work budget must converge");
+        let actual_words: usize = missing.iter().map(|s| s.words.len()).sum();
+
+        assert_eq!(
+            event_count,
+            2 * DIAMOND_COUNT * DOMAIN_SIZE,
+            "each diamond delivers every one of the domain's still-missing bits across exactly \
+             2 dequeued events (branch-target and merge), matching the finding's own \
+             ~2*leader_count*domain_size accounting"
+        );
+        assert_eq!(
+            actual_words,
+            leader_positions.len() * RegSet::word_count(DOMAIN_SIZE),
+            "with nothing anywhere killing any bit, every leader's missing set genuinely spans \
+             the full domain - this is the real, unavoidable cost this round's resource \
+             envelope exists to bound, not a representation bug"
+        );
+    }
+
+    /// #1756 Codex review round 14 (owner decision), P1: `max_work_units`
+    /// is the budget for one WHOLE artifact verification call, not a
+    /// fresh allowance per function. Two functions whose own work
+    /// (`4*n+3` for `n` genuine diamonds, established in round 13) each
+    /// individually fits under a cap - but whose SUM does not - must
+    /// still reject the whole artifact with `AnalysisWorkLimitExceeded`,
+    /// and the exact cumulative boundary (`usage == limit` accepted,
+    /// `usage == limit + 1` rejected) must hold for the SUM, not either
+    /// function's own local count.
+    #[test]
+    fn c1756_artifact_wide_work_budget_shared_across_functions() {
+        const N_A: usize = 5; // work_units = 4*5+3 = 23
+        const N_B: usize = 10; // work_units = 4*10+3 = 43
+        const COMBINED: usize = 23 + 43; // = 66
+
+        let fn_a_alone = emit_test_functions(vec![("fnA", build_diamond_chain(N_A, false))]);
+        verify_semcode_token_with_quotas_and_limits(
+            &fn_a_alone,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 50,
+            },
+        )
+        .expect("fn A alone (23 units) fits comfortably under a 50-unit budget");
+        let fn_b_alone = emit_test_functions(vec![("fnB", build_diamond_chain(N_B, false))]);
+        verify_semcode_token_with_quotas_and_limits(
+            &fn_b_alone,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 50,
+            },
+        )
+        .expect("fn B alone (43 units) fits comfortably under a 50-unit budget");
+
+        let bytes = emit_test_functions(vec![
+            ("fnA", build_diamond_chain(N_A, false)),
+            ("fnB", build_diamond_chain(N_B, false)),
+        ]);
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 50,
+            },
+        )
+        .expect_err(
+            "combined 66 units must exceed a 50-unit artifact-wide budget even though each \
+             function individually fits under it",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded
+        );
+
+        // Exact cumulative boundary: usage == limit (66) is accepted...
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: COMBINED,
+            },
+        )
+        .expect("cumulative usage == limit (66) must be accepted");
+        // ...usage == limit + 1 (limit = 65) is a deterministic rejection.
+        let boundary_report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: COMBINED - 1,
+            },
+        )
+        .expect_err("cumulative usage == limit + 1 must be a deterministic resource rejection");
+        assert_eq!(
+            boundary_report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded
+        );
+        assert!(boundary_report.diagnostics[0].message.contains("66"));
+        assert!(boundary_report.diagnostics[0].message.contains("65"));
+    }
+
+    /// #1756 Codex review round 14 (owner decision), P1: once the
+    /// artifact-wide work budget is exhausted, verification must stop
+    /// immediately - not continue merely to discover another diagnostic.
+    /// `fnC` here would produce a DIFFERENT diagnostic
+    /// (`UndefinedRegisterRead`, reading an undefined `r99`) if it were
+    /// ever reached; the only way the final result can still be
+    /// `AnalysisWorkLimitExceeded` is if `fnC` was never analyzed at all.
+    #[test]
+    fn c1756_artifact_work_exhaustion_stops_before_later_functions_run() {
+        let bytes = emit_test_functions(vec![
+            ("fnA", build_diamond_chain(5, false)),
+            ("fnB", build_diamond_chain(10, false)),
+            ("fnC", vec![IrInstr::Ret { src: Some(99) }]),
+        ]);
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 50, // fnA (23) + fnB (43) alone already exceed this
+            },
+        )
+        .expect_err("fnA + fnB alone already exhaust the 50-unit artifact budget");
+        assert_eq!(
+            report.diagnostics.len(),
+            1,
+            "must stop immediately on exhaustion - no fnC diagnostic, no extra partial work: {:?}",
+            report.diagnostics
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded,
+            "the result must remain the work-limit error from the point of exhaustion, not \
+             fnC's UndefinedRegisterRead - proving fnC was never reached"
+        );
+    }
+
+    /// #1756 Codex review round 14 (owner decision), P2: reproduces
+    /// Codex's exact case directly - a zero-param leader whose entry
+    /// missing set is the full register domain, a genuine two-leader
+    /// diamond where one leader's chain kills nearly the entire register
+    /// universe (leaving exactly one register, the highest-numbered one,
+    /// never killed anywhere) - proving `chain_killed` and `missing` are
+    /// BOTH simultaneously dense (backing storage genuinely grown wide),
+    /// not just one of them, and that the corrected `(2*leader_count+1) *
+    /// word_count(domain_size)` formula (not round 13's undercounting
+    /// `leader_count * word_count(domain_size)`) is what
+    /// `check_analysis_state_budget` now enforces, with exact boundaries.
+    #[test]
+    fn c1756_peak_state_accounts_for_chain_killed_and_missing_simultaneously() {
+        const DOMAIN_SIZE: usize = 4096;
+        const REACHABLE_COUNT: usize = 3; // 0 = entry (folds a 2-way branch), 1 = false_arm, 2 = merge
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            match pos {
+                0 => [Some(2), Some(1)], // entry: direct-to-merge, fallthrough-to-false_arm
+                1 => [Some(2), None],    // false_arm -> merge
+                _ => [None, None],       // merge: dead end
+            }
+        };
+        let writes_of = |pos: usize, visit: &mut dyn FnMut(usize)| {
+            if pos == 1 {
+                // false_arm kills nearly the entire register universe -
+                // every register EXCEPT the highest-numbered one, which
+                // stays missing everywhere (including at `merge`, via the
+                // direct entry->merge edge this chain never touches).
+                for bit in 0..DOMAIN_SIZE - 1 {
+                    visit(bit);
+                }
+            }
+        };
+
+        let is_leader = compute_leaders(REACHABLE_COUNT, successors_of);
+        let leader_positions: Vec<usize> = (0..REACHABLE_COUNT).filter(|&p| is_leader[p]).collect();
+        assert_eq!(
+            leader_positions,
+            vec![0, 1, 2],
+            "entry, the branch target, and the genuine merge are all leaders"
+        );
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            writes_of,
+            leader_index_of,
+        );
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let mut work_meter = AnalysisWorkMeter::new(usize::MAX);
+        let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+            &mut work_meter,
+        )
+        .expect("unbounded work budget must converge");
+
+        let chain_killed_words: usize = chain_killed.iter().map(|s| s.words.len()).sum();
+        let missing_words: usize = missing.iter().map(|s| s.words.len()).sum();
+        assert!(
+            chain_killed_words > 0,
+            "chain_killed must retain dense backing words (false_arm's chain wrote nearly the \
+             whole domain)"
+        );
+        assert!(
+            missing_words > 0,
+            "missing must SIMULTANEOUSLY retain dense backing words - the highest register is \
+             never killed anywhere, so it stays missing (and wide) at every leader"
+        );
+
+        let leader_count = leader_positions.len();
+        // Independent re-derivation of `check_analysis_state_budget`'s
+        // round-15 formula (not a call into it), so this test can catch
+        // an implementation bug rather than just confirming the function
+        // agrees with itself.
+        let words_per_leader = RegSet::word_count(DOMAIN_SIZE);
+        let dense_words = (2 * leader_count + 1) * words_per_leader;
+        let per_leader_fixed_bytes = 2 * REGSET_HEADER_LOGICAL_BYTES
+            + CHAIN_TARGET_LOGICAL_BYTES
+            + LEADER_INDEX_LOGICAL_BYTES;
+        let stack_peak_entries = 2 * DOMAIN_SIZE + leader_count;
+        let fixed_bytes =
+            leader_count * per_leader_fixed_bytes + stack_peak_entries * STACK_ENTRY_LOGICAL_BYTES;
+        let fixed_words = fixed_bytes.div_ceil(WORD_BYTES);
+        let expected_required_words = dense_words + fixed_words;
+        assert_eq!(
+            check_analysis_state_budget(0, leader_count, DOMAIN_SIZE, expected_required_words),
+            Ok(expected_required_words),
+            "usage == limit must be accepted for state-budget accounting"
+        );
+        assert_eq!(
+            check_analysis_state_budget(0, leader_count, DOMAIN_SIZE, expected_required_words - 1),
+            Err(expected_required_words),
+            "usage == limit + 1 must be a deterministic resource rejection reporting the true \
+             required word count"
+        );
+    }
+
+    /// Codex review round 1 on PR #1840, second fix: the register domain
+    /// must be the actual registers in use (`U`), densely packed, not the
+    /// raw `0..=max_register_id` numeric span. This function references
+    /// only `r0` and `r4095` - two registers, nowhere near each other
+    /// numerically - so `U` must have exactly 2 entries, not 4096, while
+    /// still proving both cases correctly: `r0` (written, then read) is
+    /// accepted; `r4095` (read without being written) is rejected. A bug in
+    /// the dense-index remapping (an off-by-one, an unsorted `universe`, a
+    /// stale raw-index lookup) would most likely surface as exactly this
+    /// kind of correctness failure on sparse, wide-spanning register use.
+    #[test]
+    fn c1756_dense_domain_handles_sparse_wide_spanning_registers() {
+        let accepted = emit_test_function(vec![
+            IrInstr::LoadI32 { dst: 0, val: 1 },
+            IrInstr::Ret { src: Some(0) },
+        ]);
+        verify_semcode(&accepted).expect("r0 is written before it is read");
+
+        let rejected = emit_test_function(vec![IrInstr::Ret { src: Some(4095) }]);
+        let report = verify_semcode(&rejected)
+            .expect_err("r4095 is read but never written or entry-defined");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Codex review round 2 on PR #1840, finding 1: making the padding
+    /// reachable still amplified memory under round 1's fix, because
+    /// `domain_size` scales with *actual* register usage, and a program can
+    /// genuinely, reachably use every register in the budget. This
+    /// reproduces exactly that shape - define every register `r0..r4095`
+    /// once, then continue through a long fallthrough chain of writes to
+    /// registers already defined (the realistic form of "cheap writes" that
+    /// doesn't grow `U` further) - and proves it still verifies correctly.
+    /// (The original fix here was `Rc`-sharing over a MUST/intersection
+    /// formulation; round 8 replaced that formulation entirely with the
+    /// MAY-missing/union dual, and round 10 separately bounds this exact
+    /// shape's memory in
+    /// `c1756_long_redefine_chain_keeps_missing_sets_sparse_not_dense_per_node`,
+    /// so this test now only asserts the correctness half.)
+    #[test]
+    fn c1756_reachable_full_domain_then_long_redefine_chain_stays_correct() {
+        let mut instrs = Vec::new();
+        for r in 0..4096u16 {
+            instrs.push(IrInstr::LoadI32 { dst: r, val: 0 });
+        }
+        for _ in 0..4000 {
+            // Re-writes r0, already defined above - grows no new
+            // information, the exact "cheap write" tail the finding
+            // describes.
+            instrs.push(IrInstr::LoadI32 { dst: 0, val: 1 });
+        }
+        instrs.push(IrInstr::Ret { src: Some(4095) });
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "every register 0..4095 is genuinely defined before the final read, regardless of \
+             how long the redefine tail is",
+        );
+    }
+
+    /// Codex review round 2 on PR #1840, finding 2: the round-1 fixed-point
+    /// loop rescanned reachable positions in ascending (offset) order every
+    /// round, so information propagating *against* that order (as it does
+    /// here: entry jumps to the LAST instruction, and each subsequent
+    /// instruction jumps one step backward toward an early, undefined
+    /// `RET`) only advanced one node per round - `O(reachable_count)`
+    /// rounds of `O(reachable_count)` work each. Fixed by a genuine
+    /// predecessor/successor worklist: each node's `IN` is computed
+    /// directly from its actual predecessor(s)' `OUT`, propagated forward
+    /// along real edges regardless of node-index order, so this chain
+    /// converges in a single pass over its edges, not a quadratic scan.
+    #[test]
+    fn c1756_backward_propagating_chain_still_rejects_and_converges_promptly() {
+        const CHAIN_LEN: usize = 3000;
+        let mut instrs = vec![IrInstr::Jmp {
+            label: format!("l{CHAIN_LEN}"),
+        }];
+        // "l1" resolves to the very next real instruction, this RET.
+        instrs.push(IrInstr::Label {
+            name: "l1".to_string(),
+        });
+        instrs.push(IrInstr::Ret { src: Some(0) }); // never defined
+        for i in 2..=CHAIN_LEN {
+            instrs.push(IrInstr::Label {
+                name: format!("l{i}"),
+            });
+            instrs.push(IrInstr::Jmp {
+                label: format!("l{}", i - 1),
+            });
+        }
+        // Physical/offset order: entry, l1(RET), l2(Jmp l1), l3(Jmp l2), ...,
+        // l{CHAIN_LEN}(Jmp l{CHAIN_LEN-1}). Execution/propagation order is
+        // the reverse: entry -> l{CHAIN_LEN} -> l{CHAIN_LEN-1} -> ... -> l2
+        // -> l1(RET) - directly opposite the ascending-offset scan order
+        // the pre-fix round-robin loop used.
+        let bytes = emit_test_function(instrs);
+        let report = verify_semcode(&bytes).expect_err(
+            "r0 is read by the RET at the far end of the backward chain and is never defined",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+    }
+
+    /// Direct accounting evidence for the Codex-review round-1, round-3, and
+    /// round-4 fixes, per the review's own request not to rely only on
+    /// timing. `dataflow_domain_accounting` takes plain, hand-constructible
+    /// inputs - this asserts its outputs' exact lengths (the quantities
+    /// that bound `prove_definite_register_assignment`'s memory) directly,
+    /// without needing to run a full decode walk. The `reads_writes_of`
+    /// closure is backed by a small map covering ONLY the reachable indices
+    /// actually queried - proving directly that unreachable indices are
+    /// never even looked up, let alone materialized as a dense per-
+    /// instruction entry (round 3's fix). The offsets arrays' lengths
+    /// (`reachable_count + 1`, a `u32` each - not one `Vec<u16>` per node)
+    /// are round 4's fix: reads/writes are now one flat allocation each,
+    /// not `reachable_count` separate heap-container allocations.
+    #[test]
+    fn c1756_accounting_bounds_reachable_nodes_and_dense_universe_exactly() {
+        // 501 structurally decoded nodes (an entry RET plus 500 unreachable
+        // instructions), but only node 0 is reachable, and nothing is ever
+        // read or written - the exact "RET followed by unreachable bloat"
+        // shape Codex's finding described.
+        let instr_starts: Vec<usize> = (0..501).collect();
+        let mut reachable_offsets = HashSet::new();
+        reachable_offsets.insert(0);
+        let reads_writes: std::collections::HashMap<usize, (Vec<u16>, Vec<u16>)> =
+            std::collections::HashMap::from([(0, (Vec::new(), Vec::new()))]);
+        let (reachable_indices, reads_flat, reads_offsets, writes_flat, writes_offsets, universe) =
+            dataflow_domain_accounting(&instr_starts, &reachable_offsets, 0, |idx, sink| {
+                let (reads, writes) = reads_writes
+                    .get(&idx)
+                    .expect("must only be queried for the one reachable index");
+                for &r in reads {
+                    sink.read(r);
+                }
+                for &w in writes {
+                    sink.write(w);
+                }
+            });
+        assert_eq!(
+            reachable_indices.len(),
+            1,
+            "500 unreachable nodes must not be allocated dataflow state"
+        );
+        assert_eq!(reads_flat.len(), 0, "nothing is ever read");
+        assert_eq!(writes_flat.len(), 0, "nothing is ever written");
+        assert_eq!(
+            reads_offsets.len(),
+            2,
+            "one flat offset table sized reachable_count+1, not one Vec per node"
+        );
+        assert_eq!(writes_offsets.len(), 2);
+        assert_eq!(
+            universe.len(),
+            0,
+            "no register is ever read, written, or entry-defined"
+        );
+
+        // Two reachable nodes, referencing only r0 and r4095 - numerically
+        // 4095 apart, but only 2 distinct registers actually in use.
+        let instr_starts: Vec<usize> = vec![0, 1];
+        let mut reachable_offsets = HashSet::new();
+        reachable_offsets.insert(0);
+        reachable_offsets.insert(1);
+        let reads_writes: std::collections::HashMap<usize, (Vec<u16>, Vec<u16>)> =
+            std::collections::HashMap::from([
+                (0, (Vec::new(), vec![0])),
+                (1, (vec![4095], Vec::new())),
+            ]);
+        let (reachable_indices, reads_flat, reads_offsets, writes_flat, writes_offsets, universe) =
+            dataflow_domain_accounting(&instr_starts, &reachable_offsets, 0, |idx, sink| {
+                let (reads, writes) = reads_writes.get(&idx).expect("both are reachable");
+                for &r in reads {
+                    sink.read(r);
+                }
+                for &w in writes {
+                    sink.write(w);
+                }
+            });
+        assert_eq!(reachable_indices.len(), 2);
+        assert_eq!(reads_flat, vec![4095], "only node 1's one read");
+        assert_eq!(writes_flat, vec![0], "only node 0's one write");
+        assert_eq!(reads_offsets, vec![0, 0, 1]);
+        assert_eq!(writes_offsets, vec![0, 1, 1]);
+        assert_eq!(csr_slice(&reads_flat, &reads_offsets, 0), &[] as &[u16]);
+        assert_eq!(csr_slice(&reads_flat, &reads_offsets, 1), &[4095]);
+        assert_eq!(csr_slice(&writes_flat, &writes_offsets, 0), &[0]);
+        assert_eq!(csr_slice(&writes_flat, &writes_offsets, 1), &[] as &[u16]);
+        assert_eq!(
+            universe.len(),
+            2,
+            "the dense register domain must track the 2 registers actually referenced \
+             ({{r0, r4095}}), not the raw 4096-wide numeric span between them: {universe:?}"
+        );
+    }
+
+    #[test]
+    fn c1756_case25_reports_deterministic_first_diagnostic_among_multiple_undefined_reads() {
+        let bytes = emit_test_function(vec![
+            IrInstr::AddI32 {
+                dst: 2,
+                lhs: 10,
+                rhs: 11,
+            }, // r10, r11 both undefined
+            IrInstr::AddI32 {
+                dst: 3,
+                lhs: 20,
+                rhs: 21,
+            }, // r20, r21 also undefined
+            IrInstr::Ret { src: Some(3) },
+        ]);
+        let report = verify_semcode(&bytes).expect_err("must reject");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::UndefinedRegisterRead
+        );
+        assert_eq!(report.diagnostics[0].offset, Some(0));
+        assert!(
+            report.diagnostics[0].message.contains("r10"),
+            "the first reported undefined register must be the lowest-offset, first-decoded \
+             operand (r10, not r11/r20/r21): {}",
+            report.diagnostics[0].message
+        );
+    }
+
+    #[test]
+    fn c1756_case26_repeated_verification_yields_identical_diagnostic() {
+        let bytes = emit_test_function(vec![
+            IrInstr::AddI32 {
+                dst: 2,
+                lhs: 10,
+                rhs: 11,
+            },
+            IrInstr::Ret { src: Some(2) },
+        ]);
+        let first = verify_semcode(&bytes).expect_err("must reject");
+        for _ in 0..9 {
+            let again = verify_semcode(&bytes).expect_err("must reject");
+            assert_eq!(
+                again, first,
+                "repeated verification of identical bytes must produce an identical diagnostic"
+            );
+        }
+    }
+
     #[test]
     fn verifier_rejects_unknown_closure_target() {
         let mut bytes = compile_program_to_semcode(
@@ -3783,6 +10012,8 @@ mod tests {
                 instr_offset,
                 decoded,
                 true,
+                &mut NoCollect,
+                &mut NoCollect,
             )
             .expect("decode operands");
         }
@@ -4169,6 +10400,13 @@ mod tests {
             &[IrFunction {
                 name: "main".to_string(),
                 instrs: vec![
+                    // #1756 (FA-07-016): r0 must be definitely defined before
+                    // `QTruthAnd` reads it as both `lhs` and `rhs` - this
+                    // fixture only exercises header-revision promotion for
+                    // the opcode, not runtime QTruth semantics, so a plain
+                    // `LoadI32` satisfies definedness without needing this
+                    // module to import `QuadVal` for a real `LoadQ`.
+                    IrInstr::LoadI32 { dst: 0, val: 0 },
                     IrInstr::QTruthAnd {
                         dst: 0,
                         lhs: 0,

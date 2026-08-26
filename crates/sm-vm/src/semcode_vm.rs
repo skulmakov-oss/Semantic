@@ -5873,6 +5873,37 @@ mod tests {
         run_verified_function_semcode_with_args(&entry, vec![])
     }
 
+    /// #1756 (FA-07-016): raw/unverified execution with caller-supplied
+    /// arguments - bypasses `sm-verify` admission (via `parse_semcode`
+    /// rather than a verified token) but exercises the exact same
+    /// `push_frame`/`validate_call_arguments`/`get_reg` VM machinery a
+    /// verified call would. Several #1770/#1771 regressions constructed a
+    /// program whose #1756 proof now correctly fails canonical
+    /// verification entirely (that is the intended, documented
+    /// consequence: the new static proof subsumes what used to be a
+    /// runtime-only VM defense) - this lets those regressions keep proving
+    /// their original claim about the VM's own independent execution
+    /// semantics, on the identical bytes, without a verified token.
+    fn run_raw_semcode_with_args(
+        bytes: &[u8],
+        entry: &str,
+        args: Vec<Value>,
+    ) -> Result<Value, RuntimeError> {
+        let program = parse_semcode(bytes).expect("parse");
+        let mut vm = VM {
+            functions: program.functions,
+            callstack: Vec::new(),
+            config: ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+            effect_calls: 0,
+            symbols: program.runtime_symbols,
+            prng_state: 0,
+        };
+        push_frame(&mut vm, entry, args, None)?;
+        let mut host = LegacyVmHost;
+        let mut observation = HelloObservationRuntime::discard();
+        exec_loop(&mut vm, &mut host, &mut observation)
+    }
+
     /// A5.1: missing key + valid initialized default register -> exact
     /// default value.
     #[test]
@@ -5929,7 +5960,12 @@ mod tests {
             },
             IrInstr::Ret { src: Some(5) },
         ]);
-        let err = run_map_get_test_program(&bytes).expect_err("must propagate the read error");
+        // #1756 (FA-07-016): an unwritten `default_reg` is now rejected by
+        // canonical verification itself (conservative - key presence is
+        // never statically proven), so this program's #1771 runtime-
+        // laziness claim is exercised via the raw/unverified path instead.
+        let err = run_raw_semcode_with_args(&bytes, "main", Vec::new())
+            .expect_err("must propagate the read error");
         assert_eq!(
             err,
             RuntimeError::BadFormat("read invalid reg r100".to_string())
@@ -5960,7 +5996,11 @@ mod tests {
             },
             IrInstr::Ret { src: Some(5) },
         ]);
-        let res = run_map_get_test_program(&bytes).expect("run");
+        // #1756 (FA-07-016): see the doc comment on
+        // `run_raw_semcode_with_args` - the verifier's conservative MAP_GET
+        // rule now rejects this program regardless of the present-key
+        // runtime path, so #1771's laziness claim is exercised raw.
+        let res = run_raw_semcode_with_args(&bytes, "main", Vec::new()).expect("run");
         assert_eq!(res, Value::I32(10));
     }
 
@@ -6078,28 +6118,47 @@ mod tests {
         }
     }
 
-    /// B12.1 + B13 cross-layer defense: a zero-arg entry reading `r0` with
-    /// no preceding definition must be rejected by the VM even though the
-    /// verifier (lacking #1756's definite-assignment proof) admits it.
+    /// B12.1 + B13 cross-layer defense, updated for #1756 (FA-07-016): a
+    /// zero-arg entry reading `r0` with no preceding definition is now
+    /// rejected by the verifier itself (`prove_definite_register_assignment`
+    /// proves `ENTRY_DEFS` is empty for a zero-parameter signature, so `r0`
+    /// is never definitely defined). The canonical verified route therefore
+    /// never reaches the VM for this artifact at all - but the VM's own
+    /// independent defense (#1770's `RegisterSlot::Uninitialized`) must
+    /// still catch the identical malformed bytes if some other, unverified
+    /// path reaches them, which the second half of this test proves via the
+    /// raw/unverified execution route that intentionally bypasses
+    /// `sm-verify` admission.
     #[test]
     fn frame_reads_zero_arg_entry_register_as_uninitialized_error() {
         let bytes =
             build_register_init_test_program(vec![ret_only_function("main", Some(0), vec![])]);
-        let token = verify_semcode_token(&bytes)
-            .expect("verifier currently has no definite-assignment proof (#1756) and must accept");
-        let entry = token.require_entry("main").expect("entry");
-        let err = run_verified_function_semcode_with_args(&entry, vec![])
-            .expect_err("VM must independently reject the undefined read");
+        let report = verify_semcode_token(&bytes)
+            .expect_err("verifier must now reject the undefined r0 read (#1756)");
+        assert_eq!(
+            report.diagnostics[0].code,
+            sm_verify::VerificationCode::UndefinedRegisterRead
+        );
+
+        let err = run_semcode_with_entry_and_config(
+            &bytes,
+            "main",
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        )
+        .expect_err("VM must independently reject the undefined read on the raw/unverified path");
         assert_eq!(
             err,
             RuntimeError::BadFormat("read uninitialized reg r0".to_string())
         );
     }
 
-    /// B12.2: a write to a high register must not materialize the gap
-    /// below it as legitimate values; a never-written register in that gap
-    /// must still fail as uninitialized (not succeed with a fabricated
-    /// `Unit`).
+    /// B12.2, updated for #1756 (FA-07-016): a write to a high register must
+    /// not materialize the gap below it as legitimate values. The verifier
+    /// now proves this statically too (r50 is read but never written on any
+    /// path reaching the `RET`, so it is never definitely defined), so the
+    /// canonical verified route rejects before the VM ever runs; the VM's
+    /// own independent defense against the identical bytes is proven
+    /// separately via the raw/unverified execution route.
     #[test]
     fn write_high_register_then_read_gap_is_uninitialized_error() {
         let bytes = build_register_init_test_program(vec![IrFunction {
@@ -6111,10 +6170,19 @@ mod tests {
             ownership_events: Vec::new(),
             params: Vec::new(),
         }]);
-        let token = verify_semcode_token(&bytes).expect("verify");
-        let entry = token.require_entry("main").expect("entry");
-        let err = run_verified_function_semcode_with_args(&entry, vec![])
-            .expect_err("gap register must remain uninitialized");
+        let report = verify_semcode_token(&bytes)
+            .expect_err("verifier must now reject the undefined r50 read (#1756)");
+        assert_eq!(
+            report.diagnostics[0].code,
+            sm_verify::VerificationCode::UndefinedRegisterRead
+        );
+
+        let err = run_semcode_with_entry_and_config(
+            &bytes,
+            "main",
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        )
+        .expect_err("gap register must remain uninitialized on the raw/unverified path");
         assert_eq!(
             err,
             RuntimeError::BadFormat("read uninitialized reg r50".to_string())
@@ -6150,29 +6218,48 @@ mod tests {
         assert_eq!(res, Value::Unit);
     }
 
-    /// B12.4 + B12.5 (single-argument half): exactly one supplied argument
-    /// defines `r0`; a sibling register that was never supplied and never
-    /// written must remain uninitialized, not "magically" defined.
+    /// B12.4 + B12.5 (single-argument half), updated for #1756 (FA-07-016):
+    /// exactly one supplied argument defines `r0`; a sibling register that
+    /// was never supplied and never written must remain uninitialized, not
+    /// "magically" defined. `read_r1`'s canonical signature declares one
+    /// parameter (`ENTRY_DEFS = {r0}`), yet its body reads `r1` - the
+    /// verifier now proves that read undefined and rejects the whole
+    /// artifact containing it (verification is per-artifact, not
+    /// per-function), so the "sibling register" half of this claim can no
+    /// longer share one verified token with the well-formed half; it is
+    /// proven on its own via the raw/unverified execution path instead,
+    /// preserving the VM's own independent defense.
     #[test]
     fn single_argument_initializes_only_r0() {
-        let bytes = build_register_init_test_program(vec![
+        let good_bytes = build_register_init_test_program(vec![
             ret_only_function("main", None, vec![]),
             ret_only_function("read_r0", Some(0), vec![CallableValueFamily::I32]),
-            ret_only_function("read_r1", Some(1), vec![CallableValueFamily::I32]),
         ]);
-        let token = verify_semcode_token(&bytes).expect("verify");
-
-        // Each target function gets its own entry-bound token (#1772: the
-        // execution target is always token.entry(), never an independent
-        // string), so this test resolves "read_r0" and "read_r1" separately
-        // rather than reusing one token across two different targets.
+        let token = verify_semcode_token(&good_bytes).expect("verify");
         let entry_r0 = token.require_entry("read_r0").expect("entry read_r0");
         let ok = run_verified_function_semcode_with_args(&entry_r0, vec![Value::I32(42)])
             .expect("supplied arg register must be defined");
         assert_eq!(ok, Value::I32(42));
 
-        let entry_r1 = token.require_entry("read_r1").expect("entry read_r1");
-        let err = run_verified_function_semcode_with_args(&entry_r1, vec![Value::I32(42)])
+        let bad_bytes = build_register_init_test_program(vec![ret_only_function(
+            "read_r1",
+            Some(1),
+            vec![CallableValueFamily::I32],
+        )]);
+        let report = verify_semcode_token(&bad_bytes)
+            .expect_err("verifier must now reject the undefined r1 read (#1756)");
+        assert_eq!(
+            report.diagnostics[0].code,
+            sm_verify::VerificationCode::UndefinedRegisterRead
+        );
+        // #1756: `run_semcode_with_entry_and_config` always supplies zero
+        // args (see its own doc comment on why that's safe for #1773's
+        // fused `push_frame` arity check), which would reject on argc
+        // mismatch before ever reaching the register read this test needs
+        // to observe. `run_raw_semcode_with_args` bypasses only
+        // verification, not argument supply, so the real one-argument call
+        // shape is preserved.
+        let err = run_raw_semcode_with_args(&bad_bytes, "read_r1", vec![Value::I32(42)])
             .expect_err("unsupplied sibling register must not be magically defined");
         assert_eq!(
             err,
@@ -6180,35 +6267,44 @@ mod tests {
         );
     }
 
-    /// B12.5 (multiple-arguments half): exactly the supplied registers are
-    /// initialized -- not one more.
+    /// B12.5 (multiple-arguments half), updated for #1756 (FA-07-016):
+    /// exactly the supplied registers are initialized -- not one more.
+    /// `read_r2`'s canonical signature declares two parameters
+    /// (`ENTRY_DEFS = {r0, r1}`), yet its body reads `r2` - the verifier now
+    /// proves that read undefined and rejects the whole artifact containing
+    /// it, so (as in `single_argument_initializes_only_r0` above) the two
+    /// halves of this claim can no longer share one verified artifact; the
+    /// "past the supplied count" half is proven via the raw/unverified path.
     #[test]
     fn multiple_arguments_initialize_exactly_supplied_registers() {
-        let bytes = build_register_init_test_program(vec![
+        let args = vec![Value::I32(1), Value::I32(2)];
+
+        let good_bytes = build_register_init_test_program(vec![
             ret_only_function("main", None, vec![]),
             ret_only_function(
                 "read_r1",
                 Some(1),
                 vec![CallableValueFamily::I32, CallableValueFamily::I32],
             ),
-            ret_only_function(
-                "read_r2",
-                Some(2),
-                vec![CallableValueFamily::I32, CallableValueFamily::I32],
-            ),
         ]);
-        let token = verify_semcode_token(&bytes).expect("verify");
-        let args = vec![Value::I32(1), Value::I32(2)];
-
-        // As above (#1772): resolve each target function's own entry-bound
-        // token rather than reusing one token across two different targets.
+        let token = verify_semcode_token(&good_bytes).expect("verify");
         let entry_r1 = token.require_entry("read_r1").expect("entry read_r1");
         let ok = run_verified_function_semcode_with_args(&entry_r1, args.clone())
             .expect("second supplied arg register must be defined");
         assert_eq!(ok, Value::I32(2));
 
-        let entry_r2 = token.require_entry("read_r2").expect("entry read_r2");
-        let err = run_verified_function_semcode_with_args(&entry_r2, args)
+        let bad_bytes = build_register_init_test_program(vec![ret_only_function(
+            "read_r2",
+            Some(2),
+            vec![CallableValueFamily::I32, CallableValueFamily::I32],
+        )]);
+        let report = verify_semcode_token(&bad_bytes)
+            .expect_err("verifier must now reject the undefined r2 read (#1756)");
+        assert_eq!(
+            report.diagnostics[0].code,
+            sm_verify::VerificationCode::UndefinedRegisterRead
+        );
+        let err = run_raw_semcode_with_args(&bad_bytes, "read_r2", args)
             .expect_err("register past the supplied argument count must be uninitialized");
         assert_eq!(
             err,
@@ -6216,8 +6312,12 @@ mod tests {
         );
     }
 
-    /// B12.10: a `CALL` with no destination operand must define no
-    /// register at all -- not even incidentally.
+    /// B12.10, updated for #1756 (FA-07-016): a `CALL` with no destination
+    /// operand must define no register at all -- not even incidentally. The
+    /// verifier now proves this too (`r7` is read but nothing on any path
+    /// writes it, since the no-dst `CALL` correctly defines nothing), so the
+    /// canonical route rejects before the VM runs; the VM's own defense
+    /// against the identical bytes is proven via the raw/unverified path.
     #[test]
     fn call_without_destination_creates_no_register_definition() {
         let bytes = build_register_init_test_program(vec![
@@ -6236,10 +6336,19 @@ mod tests {
                 params: Vec::new(),
             },
         ]);
-        let token = verify_semcode_token(&bytes).expect("verify");
-        let entry = token.require_entry("main").expect("entry");
-        let err = run_verified_function_semcode_with_args(&entry, vec![])
-            .expect_err("no-dst call must not define r7");
+        let report = verify_semcode_token(&bytes)
+            .expect_err("verifier must now reject the undefined r7 read (#1756)");
+        assert_eq!(
+            report.diagnostics[0].code,
+            sm_verify::VerificationCode::UndefinedRegisterRead
+        );
+
+        let err = run_semcode_with_entry_and_config(
+            &bytes,
+            "main",
+            ExecutionConfig::for_context(ExecutionContext::VerifiedLocal),
+        )
+        .expect_err("no-dst call must not define r7, proven on the raw/unverified path");
         assert_eq!(
             err,
             RuntimeError::BadFormat("read uninitialized reg r7".to_string())

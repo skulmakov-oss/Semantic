@@ -57,6 +57,9 @@ Current SemCode verification checks include:
 - string and debug reference validity
 - register-budget validity (against the caller-selected `RuntimeQuotas`
   profile; see Public Surface)
+- definite register assignment for functions carrying a canonical `SIG0`
+  signature (every reachable register read is defined on every incoming
+  path; see [Definite Register Assignment](#definite-register-assignment-1756--fa-07-016))
 - program-wide runtime symbol-table budget validity (the number of *distinct*
   strings the VM will intern across every function, deduplicated by exact
   string value program-wide - not a per-function string-table entry count;
@@ -311,6 +314,228 @@ rejecting a mismatch with `CallArgumentCountMismatch`. This is arity only:
 Calls to builtins are out of scope for this check; only calls that resolve
 to a known internal function (with a decoded canonical signature to check
 against) are covered.
+
+## Definite Register Assignment (#1756 / FA-07-016)
+
+An in-range register identity (see the register-budget check above) is
+necessary but not sufficient for admission. The verifier additionally
+proves, for every function carrying a canonical `SIG0` signature: **every
+reachable register read is definitely defined on every execution path that
+can reach it** - not merely that the register number is within budget, and
+not merely that *some* path defines it before that read.
+
+This is a forward **MUST** dataflow analysis, not a MAY/reachability
+analysis: the property proved is "definitely defined on *every* incoming
+path," not "defined on *some* path." A future implementation that only
+proves the latter (MAY semantics) does not satisfy this contract and must
+not be described as equivalent - MUST is strictly stronger, and is the
+property `RegisterSlot::Uninitialized` in `sm-vm` (#1770) already enforces
+at runtime; this pass proves the same property statically, ahead of
+execution.
+
+The implementation computes this MUST guarantee via its logical dual: not
+`DEFINED[n] = intersect(predecessor OUT)` directly, but `MISSING[n] = U \
+DEFINED[n] = union(predecessor MISSING_OUT)` (De Morgan's law over the same
+equations) - a register is rejected iff it is in `MISSING[n]` at the point
+of read, the identical predicate phrased via the complement. This is an
+implementation choice, not a semantic relaxation: the MAY-missing/union
+formulation computes the exact same MUST fixed point as the MAY-defined/
+intersection one it replaced, and gives every (reachable position, register)
+pair a work bound that does not depend on control-flow shape (see
+"Control-flow reuse" below) - it must not be confused with a MAY/
+reachability analysis over *defined* registers, which is a genuinely
+different, weaker property this section explicitly rejects above.
+
+**Entry definitions.** For a function whose canonical signature declares `N`
+parameters, `ENTRY_DEFS = {r0, r1, ..., r(N-1)}` - exactly the registers
+`sm-vm`'s `push_frame` initializes from successfully validated call
+arguments (#1770, #1773). No other register is defined at entry merely
+because it is numerically in range, because register storage has capacity
+for it, or because some call site happens to supply that many arguments;
+`Value::Unit` remains an ordinary defined value once genuinely written, not
+an "undefined register" sentinel.
+
+**Scope: signature-bearing functions only.** This proof runs only when
+`env.signature` is `Some` (a canonical `SIG0` record was decoded - see
+[`semcode.md`](semcode.md#callable-signature-sig0)). A function whose header
+predates canonical signatures (`signature: None`) has no sound way to
+determine `ENTRY_DEFS` - inferring it from caller-supplied `argc`, from
+`STORE_VAR` prologue shape, or from any other convention would be an unsound
+heuristic (caller `argc` is not even self-consistent across independent call
+sites prior to #1773's arity enforcement). This mirrors exactly how the
+callable arity check above treats `signature: None`: nothing new to enforce,
+unchanged pre-#1756 admission behavior for signature-less artifacts.
+
+**MAP_GET's default register is conservative.** `MAP_GET` reads its default
+register lazily at runtime, only on a key miss (#1771). The verifier cannot
+soundly prove key presence, so this pass does not attempt a value-sensitive
+"only on the miss path" proof: `MAP_GET`'s default register is treated as an
+unconditional read, required to be definitely defined regardless of which
+runtime path a given key would actually take. Runtime laziness (#1771) and
+this static proof (#1756) are deliberately distinct guarantees, not
+restatements of each other.
+
+**Control-flow reuse.** This pass reuses the same instruction boundaries and
+successor relation the reachable-control-flow check above already computes
+(and that same check's reachable-offset result). Missing-register
+information is propagated forward *only* along that one successor relation -
+a bit-level worklist delivers each (reachable position, register) pair to
+that position's successors, at most once ever, with no predecessor
+structure built at all. It judges only reachable register reads, matching
+the reachable-control-flow check's own reachability boundary; a register
+read inside structurally valid but unreachable code is not judged by this
+pass, matching the verifier's existing, separate policy on such code.
+
+**Non-entry nodes start at BOTTOM** (no register in the function's register
+domain considered missing yet, provisionally), never at the full set. This
+is a correctness requirement, not a style preference - the dual of the
+MUST-formulation's own non-negotiable rule (non-entry nodes start at TOP,
+never empty, under `DEFINED`/intersection): initializing non-entry nodes'
+`MISSING` set to the full domain instead computes the wrong converged fixed
+point for a register defined once outside a loop and never invalidated
+inside it, incorrectly rejecting reads that are actually always defined.
+
+A violation rejects with `VerificationCode::UndefinedRegisterRead` -
+deliberately distinct from `InvalidRegisterReference`, which is a numeric
+range/quota failure. `UndefinedRegisterRead` means the register number is
+in range but at least one reachable incoming execution path has not proven
+the register definitely defined before this read - consistent with the
+MUST quantification above: a register defined on some paths to a join but
+not others is still rejected, since it is not defined on *every* path.
+
+**Resource envelope.** Even fully compressed (see rounds 11-12 of #1756's
+own review history: non-branching runs and duplicate-successor artifacts
+both collapse to a small leader set), a genuinely branch-dense function
+still needs one dense dataflow slot per real decision point - `leader_count
+* ceil(register_domain_size / 64)` words of state, and a proportional
+amount of propagation work to reach the fixed point. Neither quantity is
+bounded by any *other* existing admission check (register-domain size is
+capped by the register-budget quota, but `leader_count` - the number of
+genuine branch/merge points a function can contain - is not), so this pass
+admits only within an explicit `VerificationLimits` envelope; see "Verifier
+resource budgets" below.
+
+## Verifier resource budgets
+
+There are three distinct resource domains in this codebase, and they must
+never be conflated:
+
+- **Artifact/decode resources** - byte-level limits enforced during
+  `sm_format::semcode_decode` (header size, section lengths, and similar),
+  reported as `VerificationCode::ResourceLimitExceeded` alongside the
+  pre-existing `RuntimeQuotas`-derived checks (register/symbol-table
+  budgets) in `verify_function_code`/`verify_semcode_token_with_quotas`.
+- **Verifier-analysis resources** - the deterministic working-state and
+  work-unit envelope a static analysis pass (currently: definite register
+  assignment, #1756 / FA-07-016) needs to reach its proof, expressed as
+  `VerificationLimits` (`sm-verify`). Reported as
+  `VerificationCode::AnalysisStateLimitExceeded` /
+  `AnalysisWorkLimitExceeded`.
+- **Runtime-execution resources** - `RuntimeQuotas` (`sm_runtime_core`),
+  governing VM execution after admission (`max_steps`, `max_calls`, and so
+  on).
+
+**Scope of the two `VerificationLimits` fields differs, deliberately**
+(clarified in round 14 of #1756's own review history, after Codex found
+both fields' enforcement did not yet match this intended scope):
+
+- `max_work_units` bounds **one whole artifact verification call**,
+  cumulatively across every signature-bearing function it analyzes - not
+  a fresh allowance per function. A single counter is created once per
+  call and shared, by mutable reference, across every function; the
+  moment it is exceeded, verification of that artifact stops immediately
+  - no further function is analyzed, and no weaker analysis is attempted
+  merely to surface another diagnostic.
+- `max_state_words` bounds the **peak LOGICAL verifier-analysis state
+  storage simultaneously live for one function's own analysis**, measured
+  in canonical 8-byte logical words - not a cumulative total across an
+  artifact's functions (functions are verified sequentially and each
+  one's analysis state is released before the next function's begins, so
+  summing state across functions would overstate what is ever actually
+  live at once), and not process RSS or an allocator-exact byte count.
+  "Logical" here means the accounting model uses fixed, documented,
+  MACHINE-INDEPENDENT sizes for the structures it charges (never a host's
+  actual `size_of::<T>()`, which can vary by target) - the same bytes are
+  admitted or rejected on every host, deterministically.
+
+  As of round 21 of #1756's own review history, the enforced formula is
+  `required_state_words = raw_words + dense_words + fixed_words`, where:
+
+  - `raw_words` (round 16, corrected round 17, extended round 21) is the
+    RAW reachable-node representation cost `dataflow_domain_accounting`
+    and `compute_leaders` build - scaling with `reachable_count` (a
+    `usize`-sized `reachable_indices` entry, a `u32`-sized entry in each
+    of the two CSR offset tables, a `bool`-sized `is_leader` entry, and a
+    `u8`-sized entry in `compute_leaders`'s own consolidated
+    classification-state scratch array (round 21), per reachable node)
+    and with `reachable_instruction_bytes` - the TOTAL ENCODED
+    BYTES OF REACHABLE INSTRUCTIONS ONLY, deliberately NOT the total
+    structural instruction-section length (`instr_len`), which may also
+    include structurally valid but unreachable trailing code this
+    analysis never decodes (round 17's correction, after round 16's own
+    `instr_len`-based proxy overcharged unreachable padding, changing
+    this verifier's pre-existing "unreachable code is not judged by this
+    pass" admission policy). `reachable_instruction_bytes` bounds `reads_
+    flat.len() + writes_flat.len()`, and the transient pre-dedup
+    `universe` buffer, via a sound information-theoretic argument: every
+    register operand costs exactly 2 bytes to encode, so the reachable
+    instructions' own combined byte length bounds how many can ever be
+    decoded, independent of how they are distributed across individual
+    instructions - see `check_raw_node_state_budget`'s and `reachable_
+    instruction_bytes`'s own doc comments for the exact derivation. Both
+    `reachable_count` and `reachable_instruction_bytes` are computed BEFORE
+    `dataflow_domain_accounting` allocates anything, from already-known
+    instruction boundaries (`instr_starts`) and the reachable-offset set
+    (`reachable_offsets`) - no CSR table, and no sorted copy of `
+    reachable_offsets`, is ever built merely to learn this number - so
+    this protection is real, not retroactive. Closes a gap round 15
+    explicitly, but incorrectly, excluded: a genuinely branch-FREE
+    reachable chain has `leader_count = 1` regardless of length, so
+    `dense_words`/`fixed_words` below alone charge almost nothing for it
+    no matter how large `reachable_count` grows.
+  - `dense_words = (2 * leader_count + 1) * ceil(domain_size / 64)` - the
+    dense dataflow lattice payload (round 14: the analysis's `chain_
+    killed` and `missing` arrays are simultaneously live, both scaled by
+    `leader_count * domain_size`, plus a small constant margin for the
+    handful of non-leader-scaled `RegSet`s that can also be transiently
+    live).
+  - `fixed_words = ceil(fixed_bytes / 8)` for `fixed_bytes = leader_count
+    * (per-leader `Vec<RegSet>` header, `chain_targets`, and `leader_
+    positions` overhead) + (leader_count + 2 * domain_size) * (worklist
+    stack entry size)` - round 15's correction: leader-scaled FIXED
+    structural overhead that exists even when `domain_size` is tiny and
+    every `RegSet`'s own backing payload is empty, which the dense-only
+    formula above does not charge for at all. The worklist stack's own
+    peak is `leader_count + 2 * domain_size` entries, proven (not merely
+    observed) via a settled-backlog-plus-active-frontier argument.
+
+  `raw_words` and `dense_words + fixed_words` are SUMMED, never maxed:
+  the raw-node structures above are never dropped before the leader-state
+  phase begins (several are read again by the final violation scan), so
+  every structure this envelope charges for is simultaneously live for
+  this analysis's entire remaining duration once allocated. See `check_
+  raw_node_state_budget`'s and `check_analysis_state_budget`'s own doc
+  comments in `sm-verify` for the exact structural inventory, the named
+  logical-size constants, and the full derivation.
+
+`VerificationLimits` is never inferred from `RuntimeQuotas::max_steps`,
+`max_calls`, or any other execution quota, and is never attached to
+`RuntimeQuotas` for API convenience - #1751 established that conflating a
+dynamic execution resource with a static verifier bound is unsound, and
+that ruling remains authoritative. Exact (non-approximating) static
+verification is performed only within the selected, explicitly-bound
+`VerificationLimits` envelope; the convenience entry points
+(`verify_semcode_token`, `verify_semcode_token_with_quotas`,
+`verify_semcode`) admit against `VerificationLimits::default_profile()`,
+and `verify_semcode_token_with_quotas_and_limits` binds an explicit
+profile instead. Exceeding either bound fails closed, deterministically,
+before the corresponding unsafe allocation or work begins - never via a
+timeout, an OS/RSS memory observation, or any other non-portable,
+machine-dependent signal. Resource exhaustion means the analysis could not
+be proven within the selected envelope; it does not mean the program's
+semantics are actually invalid, and canonical admission still fails closed
+either way - there is no fallback to a weaker analysis, no "assume
+defined," and no partial-proof acceptance.
 
 ## Verified Execution Rule
 
