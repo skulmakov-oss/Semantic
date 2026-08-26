@@ -456,15 +456,17 @@ both fields' enforcement did not yet match this intended scope):
   actual `size_of::<T>()`, which can vary by target) - the same bytes are
   admitted or rejected on every host, deterministically.
 
-  As of round 17 of #1756's own review history, the enforced formula is
+  As of round 21 of #1756's own review history, the enforced formula is
   `required_state_words = raw_words + dense_words + fixed_words`, where:
 
-  - `raw_words` (round 16, corrected round 17) is the RAW reachable-node
-    representation cost `dataflow_domain_accounting` and `compute_
-    leaders` build - scaling with `reachable_count` (a `usize`-sized
-    `reachable_indices` entry, a `u32`-sized entry in each of the two CSR
-    offset tables, and a `bool`-sized `is_leader` entry, per reachable
-    node) and with `reachable_instruction_bytes` - the TOTAL ENCODED
+  - `raw_words` (round 16, corrected round 17, extended round 21) is the
+    RAW reachable-node representation cost `dataflow_domain_accounting`
+    and `compute_leaders` build - scaling with `reachable_count` (a
+    `usize`-sized `reachable_indices` entry, a `u32`-sized entry in each
+    of the two CSR offset tables, a `bool`-sized `is_leader` entry, and a
+    `u8`-sized entry in `compute_leaders`'s own consolidated
+    classification-state scratch array (round 21), per reachable node)
+    and with `reachable_instruction_bytes` - the TOTAL ENCODED
     BYTES OF REACHABLE INSTRUCTIONS ONLY, deliberately NOT the total
     structural instruction-section length (`instr_len`), which may also
     include structurally valid but unreachable trailing code this

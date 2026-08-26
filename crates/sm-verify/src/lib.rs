@@ -232,9 +232,10 @@ pub struct VerificationLimits {
     /// artifact's functions (see `max_work_units` below for the
     /// genuinely cumulative counterpart).
     ///
-    /// As of round 17 of #1756's own review history, this covers BOTH:
+    /// As of round 21 of #1756's own review history, this covers BOTH:
     /// raw reachable-node representation (`reachable_indices`, `reads_
-    /// flat`/`writes_flat` and their offset tables, `is_leader` - all
+    /// flat`/`writes_flat` and their offset tables, `is_leader`,
+    /// `compute_leaders`'s own classification-state scratch array - all
     /// scaling with `reachable_count` and the TOTAL ENCODED BYTES OF
     /// REACHABLE INSTRUCTIONS specifically (`reachable_instruction_
     /// bytes`) - deliberately NOT the total structural instruction-
@@ -374,6 +375,35 @@ impl VerificationLimits {
     /// the full c1756 suite continuing to pass with the SAME hardcoded
     /// exact numbers after the round-17 fix, with no test needing
     /// recomputation.
+    ///
+    /// **Re-validated again in round 21** after `raw_words` gained a
+    /// fifth accounting term: `compute_leaders`'s own consolidated
+    /// classification-state scratch array (`check_raw_node_state_
+    /// budget`'s own doc comment has the full inventory), one `u8` per
+    /// reachable node, simultaneously live with `is_leader` while
+    /// `is_leader` is being built. `max_state_words = 8_388_608`
+    /// (UNCHANGED numerically) now admits, exactly (measured directly
+    /// against `check_raw_node_state_budget`/`check_analysis_state_
+    /// budget`, not hand-derived - see the round-21 PR reply for the
+    /// calibration method):
+    ///
+    /// | shape | max genuine size |
+    /// |---|---|
+    /// | long-linear (no branches), `domain_size = 1` | 2,581,103 reachable nodes |
+    /// | genuine diamonds, `domain_size = 1` | 450,393 leaders |
+    /// | genuine diamonds, `domain_size = 64` | 450,379 leaders |
+    /// | genuine diamonds, `domain_size = 4,096` | 57,887 leaders |
+    /// | genuine diamonds, `domain_size = 8,192` (largest legal) | 30,649 leaders |
+    ///
+    /// Every ceiling above is LOWER than round 16/17's corresponding
+    /// number (e.g. `domain_size = 8,192`: 30,649 versus 30,663) since
+    /// the new classifier-scratch term now also competes for the same
+    /// budget - the same kind of honest, intended tightening round 16
+    /// itself produced over round 15. Still several orders of magnitude
+    /// above every ordinary/golden/already-committed-adversarial shape
+    /// measured (at most tens of thousands of state words). Kept
+    /// numerically UNCHANGED again - see the round-21 reply for the full
+    /// re-derivation.
     pub const fn default_profile() -> Self {
         Self {
             max_state_words: 8_388_608, // 2^23 - logical verifier-analysis words, worst case
@@ -918,6 +948,7 @@ fn instruction_stream_parses_fully(name: &str, code: &[u8], start: usize) -> boo
             opcode,
             false,
             &mut NoCollect,
+            &mut NoCollect,
         )
         .is_err()
         {
@@ -1038,6 +1069,21 @@ fn verify_function_code(
                 err.to_string(),
             ),
         })?;
+        // #1756 Codex review round 21: `MetadataCollector` appends
+        // directly into these outer `jump_targets`/`string_refs`/
+        // `call_argcs` accumulators - no per-instruction `Vec` is built
+        // and then `.extend()`-ed in and dropped, mirroring `FlatSink`'s
+        // own "write straight into the final destination" design.
+        // `jump_targets_before` lets this loop recover "this specific
+        // instruction's own jump target" (at most one is ever pushed per
+        // instruction - only `Jmp`/`JmpIf` ever call `jump_target`, each
+        // exactly once) without `OperandRefs` needing to carry it.
+        let jump_targets_before = jump_targets.len();
+        let mut metadata_collector = MetadataCollector {
+            jump_targets: &mut jump_targets,
+            string_refs: &mut string_refs,
+            call_argcs: &mut call_argcs,
+        };
         let refs = decode_operands(
             name,
             code,
@@ -1046,9 +1092,10 @@ fn verify_function_code(
             opcode,
             true,
             &mut NoCollect,
+            &mut metadata_collector,
         )?;
         let next_offset = cursor - instr_start;
-        let jump_target = refs.jump_targets.first().copied();
+        let jump_target = jump_targets.get(jump_targets_before).copied();
         let successors = match (opcode, jump_target) {
             (Opcode::Ret, _) => InstructionSuccessors::None,
             (Opcode::Jmp, Some(target)) => InstructionSuccessors::One(target),
@@ -1077,9 +1124,6 @@ fn verify_function_code(
                 ),
             ));
         }
-        jump_targets.extend(refs.jump_targets);
-        string_refs.extend(refs.string_refs);
-        call_argcs.extend(refs.call_argcs);
         used_caps |= refs.required_capabilities;
         max_register = match (max_register, refs.max_register) {
             (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
@@ -1945,6 +1989,12 @@ fn dedup_successors(succs: [Option<usize>; 2]) -> [Option<usize>; 2] {
 /// - `LEADER_FLAG_LOGICAL_BYTES`: one `bool` entry in `is_leader` -
 ///   Rust's `Vec<bool>` is not bit-packed, so this is a full byte per
 ///   entry, not one bit (round 16).
+/// - `LEADER_CLASSIFICATION_STATE_LOGICAL_BYTES`: one `u8` entry in
+///   `compute_leaders`'s own `state` scratch array - simultaneously
+///   live with `is_leader` while `is_leader` is being built (round 21;
+///   see `compute_leaders`'s own doc comment for why one consolidated
+///   array replaces the two, `in_degree`/`branch_target`, an earlier
+///   revision used).
 #[cfg(feature = "std")]
 const WORD_BYTES: usize = 8;
 #[cfg(feature = "std")]
@@ -1963,6 +2013,8 @@ const CSR_OFFSET_LOGICAL_BYTES: usize = WORD_BYTES / 2;
 const REGISTER_OPERAND_LOGICAL_BYTES: usize = WORD_BYTES / 4;
 #[cfg(feature = "std")]
 const LEADER_FLAG_LOGICAL_BYTES: usize = 1;
+#[cfg(feature = "std")]
+const LEADER_CLASSIFICATION_STATE_LOGICAL_BYTES: usize = 1;
 
 /// #1756 Codex review round 17 (owner decision): the exact sum of
 /// encoded byte lengths of every REACHABLE structural instruction,
@@ -2133,6 +2185,17 @@ fn check_raw_node_state_budget(
         return overflow();
     };
 
+    // #1756 Codex review round 21 (owner decision), P2: `compute_
+    // leaders`'s own `state` scratch array (see its doc comment) is
+    // simultaneously live with `is_leader` while `is_leader` is being
+    // built - the genuine peak moment for the "raw" phase of this
+    // analysis - so its cost is summed in here too, not omitted.
+    let leader_classification_state_bytes =
+        reachable_count.checked_mul(LEADER_CLASSIFICATION_STATE_LOGICAL_BYTES);
+    let Some(leader_classification_state_bytes) = leader_classification_state_bytes else {
+        return overflow();
+    };
+
     // reads_flat + writes_flat (operand_count_bound entries combined)
     // plus the transient pre-dedup `universe` buffer (entry_param_count
     // + operand_count_bound entries) - see the doc comment above.
@@ -2147,6 +2210,7 @@ fn check_raw_node_state_budget(
     let raw_bytes = reachable_index_bytes
         .checked_add(offset_bytes)
         .and_then(|sum| sum.checked_add(leader_flag_bytes))
+        .and_then(|sum| sum.checked_add(leader_classification_state_bytes))
         .and_then(|sum| sum.checked_add(operand_bytes));
     let Some(raw_bytes) = raw_bytes else {
         return overflow();
@@ -2252,6 +2316,18 @@ fn check_raw_node_state_budget(
 ///   shared with any check that runs regardless of signature. Corrected
 ///   in round 16: charged by `check_raw_node_state_budget`, not
 ///   excluded.
+/// - `compute_leaders`'s own `state` scratch array (`Vec<u8>`,
+///   `reachable_count` entries): `LEADER_CLASSIFICATION_STATE_LOGICAL_
+///   BYTES` per entry. Round 21 (Codex P2) found this consolidated
+///   classification-state array (which replaced two separate `in_
+///   degree`/`branch_target` scratch arrays of the same `reachable_
+///   count` size - see `compute_leaders`'s own doc comment) simultaneously
+///   live with `is_leader` while `is_leader` is being built, the genuine
+///   peak moment for the raw phase, yet uncharged by any check. Charged
+///   in `check_raw_node_state_budget` alongside `is_leader`, not
+///   excluded - same reasoning as `is_leader` above: `compute_leaders`
+///   is called only from within this analysis, exclusively for
+///   signature-bearing functions.
 /// - Genuinely still EXCLUDED, and NOT silently: `instr_starts` (`Vec<
 ///   usize>`) and `instruction_successors` (`Vec<InstructionSuccessors>`),
 ///   both sized to the function's TOTAL instruction count (not merely
@@ -2400,25 +2476,58 @@ fn check_analysis_state_budget(
 /// itself, which is unconditionally a leader regardless of its own
 /// in-degree - so no run of non-leader positions can loop back on itself
 /// without first hitting a leader.
+///
+/// #1756 Codex review round 21 (owner decision), P2: classification uses
+/// ONE `reachable_count`-sized `Vec<u8>` (`state`), not the two separate
+/// arrays (`in_degree: Vec<u8>`, `branch_target: Vec<bool>`) an earlier
+/// revision used - a genuine reduction in peak scratch storage, not
+/// merely a relabeling. This is sound because `branch_target[pos]` only
+/// ever changes the final `is_leader` verdict when `in_degree[pos] ==
+/// 1` (once in-degree reaches 2, `in_degree[pos] != 1` alone already
+/// makes `pos` a leader, so a separate branch-target bit adds no new
+/// information for that position ever again) - the two pieces of
+/// per-position information are never independently needed at the SAME
+/// time, so they fit in one small enum-like state instead of two full
+/// arrays. Four states: `0` = never yet visited (in-degree 0), `1` =
+/// visited exactly once via a non-branching edge (in-degree 1, not a
+/// branch target), `2` = visited exactly once via a branching edge
+/// (in-degree 1, IS a branch target), `3` = visited two or more times
+/// (in-degree >= 2, already a leader regardless of any branch-target
+/// bit). `is_leader[pos] = (pos == 0) || (state[pos] != STATE_IN_DEGREE
+/// _ONE)` - state `1` is the ONLY "not yet proven a leader by these
+/// rules" value; every other state already implies leader status,
+/// collapsing the original two-condition check (`in_degree[pos] != 1 ||
+/// branch_target[pos]`) into one comparison.
+#[cfg(feature = "std")]
+const STATE_UNVISITED: u8 = 0;
+#[cfg(feature = "std")]
+const STATE_IN_DEGREE_ONE: u8 = 1;
+#[cfg(feature = "std")]
+const STATE_IN_DEGREE_ONE_BRANCH_TARGET: u8 = 2;
+#[cfg(feature = "std")]
+const STATE_IN_DEGREE_MANY: u8 = 3;
+
 #[cfg(feature = "std")]
 fn compute_leaders(
     reachable_count: usize,
     mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
 ) -> Vec<bool> {
-    let mut in_degree: Vec<u8> = vec![0; reachable_count];
-    let mut branch_target: Vec<bool> = vec![false; reachable_count];
+    let mut state: Vec<u8> = vec![STATE_UNVISITED; reachable_count];
     for pos in 0..reachable_count {
         let succs = successors_of(pos);
         let out_degree = succs.iter().filter(|s| s.is_some()).count();
         for succ in succs.into_iter().flatten() {
-            in_degree[succ] = in_degree[succ].saturating_add(1);
-            if out_degree > 1 {
-                branch_target[succ] = true;
-            }
+            state[succ] = match state[succ] {
+                STATE_UNVISITED if out_degree > 1 => STATE_IN_DEGREE_ONE_BRANCH_TARGET,
+                STATE_UNVISITED => STATE_IN_DEGREE_ONE,
+                STATE_IN_DEGREE_ONE | STATE_IN_DEGREE_ONE_BRANCH_TARGET => STATE_IN_DEGREE_MANY,
+                STATE_IN_DEGREE_MANY => STATE_IN_DEGREE_MANY,
+                _ => unreachable!("state is always one of the four named constants above"),
+            };
         }
     }
     (0..reachable_count)
-        .map(|pos| pos == 0 || in_degree[pos] != 1 || branch_target[pos])
+        .map(|pos| pos == 0 || state[pos] != STATE_IN_DEGREE_ONE)
         .collect()
 }
 
@@ -2727,8 +2836,17 @@ fn prove_definite_register_assignment(
             read_u8(code, &mut cursor).expect("previously-decoded instruction must re-decode");
         let opcode =
             Opcode::from_byte(opcode_byte).expect("previously-decoded instruction must re-decode");
-        decode_operands(function, code, &mut cursor, offset, opcode, true, sink)
-            .expect("previously-decoded instruction must re-decode");
+        decode_operands(
+            function,
+            code,
+            &mut cursor,
+            offset,
+            opcode,
+            true,
+            sink,
+            &mut NoCollect,
+        )
+        .expect("previously-decoded instruction must re-decode");
     };
     let (reachable_indices, reads_flat, reads_offsets, writes_flat, writes_offsets, universe) =
         dataflow_domain_accounting(
@@ -2963,7 +3081,16 @@ fn prove_definite_register_assignment(
 /// instruction-shaped reading any less structurally real - so it passes
 /// `false`. This keeps both concerns on one shared opcode-shape match
 /// rather than duplicating it.
+// #1756 Codex review round 21: gained an 8th parameter (`metadata_sink`)
+// when `jump_targets`/`string_refs`/`call_argcs` moved from `OperandRefs`
+// to the same caller-directed sink pattern round 18 already applied to
+// `reads`/`writes` (see `MetadataSink`'s own doc comment) - each parameter
+// is independently meaningful (the decode target, the canonical-domain
+// policy switch, and the two orthogonal sink roles), and bundling them
+// into a struct purely to satisfy this lint would add indirection without
+// reducing real complexity.
 #[cfg(feature = "std")]
+#[allow(clippy::too_many_arguments)]
 fn decode_operands(
     function: &str,
     code: &[u8],
@@ -2972,6 +3099,7 @@ fn decode_operands(
     opcode: Opcode,
     enforce_canonical_domains: bool,
     sink: &mut dyn OperandSink,
+    metadata_sink: &mut dyn MetadataSink,
 ) -> Result<OperandRefs, RejectReport> {
     let invalid =
         |msg: &str| reject_one(function, VerificationCode::OperandOutOfBounds, offset, msg);
@@ -3055,8 +3183,7 @@ fn decode_operands(
             refs.required_capabilities |= CAP_TEXT_VALUES;
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated text literal string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "text literal"));
+            metadata_sink.string_ref(offset, sid as usize, "text literal");
         }
         Opcode::ConcatText => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
@@ -3109,8 +3236,7 @@ fn decode_operands(
             sink.write(dst);
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated record type string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "record type name"));
+            metadata_sink.string_ref(offset, sid as usize, "record type name");
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated record slot count"))?
                 as usize;
@@ -3131,12 +3257,10 @@ fn decode_operands(
             sink.write(dst);
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated enum type string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "enum type name"));
+            metadata_sink.string_ref(offset, sid as usize, "enum type name");
             let variant_sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated enum variant string id"))?;
-            refs.string_refs
-                .push((offset, variant_sid as usize, "enum variant name"));
+            metadata_sink.string_ref(offset, variant_sid as usize, "enum variant name");
             read_u16_le(code, cursor).map_err(|_| invalid("truncated enum tag"))?;
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated enum payload count"))?
@@ -3159,8 +3283,7 @@ fn decode_operands(
             mark_reg(src);
             sink.read(src);
             sink.write(dst);
-            refs.string_refs
-                .push((offset, sid as usize, "enum type name"));
+            metadata_sink.string_ref(offset, sid as usize, "enum type name");
         }
         Opcode::AdtGet => {
             let dst =
@@ -3174,8 +3297,7 @@ fn decode_operands(
             mark_reg(src);
             sink.read(src);
             sink.write(dst);
-            refs.string_refs
-                .push((offset, sid as usize, "enum type name"));
+            metadata_sink.string_ref(offset, sid as usize, "enum type name");
         }
         Opcode::RecordGet => {
             let dst = read_u16_le(code, cursor)
@@ -3189,8 +3311,7 @@ fn decode_operands(
             mark_reg(src);
             sink.read(src);
             sink.write(dst);
-            refs.string_refs
-                .push((offset, sid as usize, "record type name"));
+            metadata_sink.string_ref(offset, sid as usize, "record type name");
         }
         Opcode::TupleGet => {
             let dst = read_u16_le(code, cursor)
@@ -3401,8 +3522,7 @@ fn decode_operands(
             refs.required_capabilities |= CAP_CLOSURE_VALUES;
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated closure function string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "closure function name"));
+            metadata_sink.string_ref(offset, sid as usize, "closure function name");
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated closure capture arity"))?
                 as usize;
@@ -3452,14 +3572,12 @@ fn decode_operands(
             sink.write(dst);
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated variable string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "variable reference"));
+            metadata_sink.string_ref(offset, sid as usize, "variable reference");
         }
         Opcode::StoreVar => {
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated variable string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "variable reference"));
+            metadata_sink.string_ref(offset, sid as usize, "variable reference");
             let src = read_u16_le(code, cursor).map_err(|_| invalid("truncated src register"))?;
             mark_reg(src);
             // #1756 (FA-07-016): reads the source register into the named
@@ -3521,7 +3639,7 @@ fn decode_operands(
         }
         Opcode::Jmp => {
             let target = read_u32_le(code, cursor).map_err(|_| invalid("truncated jump target"))?;
-            refs.jump_targets.push(target as usize);
+            metadata_sink.jump_target(target as usize);
         }
         Opcode::JmpIf => {
             let cond =
@@ -3529,7 +3647,7 @@ fn decode_operands(
             mark_reg(cond);
             sink.read(cond);
             let target = read_u32_le(code, cursor).map_err(|_| invalid("truncated jump target"))?;
-            refs.jump_targets.push(target as usize);
+            metadata_sink.jump_target(target as usize);
         }
         Opcode::Call => {
             let has_dst_flag =
@@ -3554,13 +3672,13 @@ fn decode_operands(
             }
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated callee string id"))?;
-            refs.string_refs.push((offset, sid as usize, "call target"));
+            metadata_sink.string_ref(offset, sid as usize, "call target");
             let argc = read_u16_le(code, cursor).map_err(|_| invalid("truncated argc"))? as usize;
             // #1773 (FA-09-005): recorded alongside the "call target" string
             // ref above, keyed by the same `offset`, so the cross-function
             // pass can enforce arity against the callee's canonical
             // signature without re-decoding operands.
-            refs.call_argcs.push((offset, argc));
+            metadata_sink.call_argc(offset, argc);
             for _ in 0..argc {
                 let arg = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call arg register"))?;
@@ -3596,8 +3714,7 @@ fn decode_operands(
             refs.required_capabilities |= CAP_GATE_SURFACE;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated signal string id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "pulse signal"));
+            metadata_sink.string_ref(offset, sid as usize, "pulse signal");
         }
         Opcode::StateQuery => {
             let dst = read_u16_le(code, cursor)
@@ -3607,15 +3724,13 @@ fn decode_operands(
             refs.required_capabilities |= CAP_STATE_QUERY;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated state query key id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "state query key"));
+            metadata_sink.string_ref(offset, sid as usize, "state query key");
         }
         Opcode::StateUpdate => {
             refs.required_capabilities |= CAP_STATE_UPDATE;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated state update key id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "state update key"));
+            metadata_sink.string_ref(offset, sid as usize, "state update key");
             let src = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated state-update src register"))?;
             mark_reg(src);
@@ -3625,8 +3740,7 @@ fn decode_operands(
             refs.required_capabilities |= CAP_EVENT_POST;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated event-post signal id"))?;
-            refs.string_refs
-                .push((offset, sid as usize, "event post signal"));
+            metadata_sink.string_ref(offset, sid as usize, "event post signal");
         }
         Opcode::ClockRead => {
             let dst = read_u16_le(code, cursor)
@@ -3670,16 +3784,20 @@ fn builtin_call_required_capabilities(name: &str) -> Option<u32> {
     }
 }
 
+/// #1756 Codex review round 21: no longer holds `jump_targets`/`string_
+/// refs`/`call_argcs` - those are now emitted through `MetadataSink`
+/// (below), exactly like `reads`/`writes` moved to `OperandSink` in
+/// round 18, for the identical reason: the reachable-only re-decode pass
+/// never reads them, so building and dropping fresh `Vec`s for them on
+/// every re-decoded instruction was pure waste (Codex's round-21 P1
+/// finding). What remains here (`max_register`, `required_capabilities`)
+/// is cheap regardless of mode - neither is heap-backed - so both stay
+/// direct fields, always populated, never routed through a sink.
 #[cfg(feature = "std")]
 #[derive(Default)]
 struct OperandRefs {
-    jump_targets: Vec<usize>,
-    string_refs: Vec<(usize, usize, &'static str)>,
     max_register: Option<usize>,
     required_capabilities: u32,
-    // #1773 (FA-09-005): (offset, argc) for each `Opcode::Call` site, keyed
-    // by the same offset as its "call target" string_refs entry.
-    call_argcs: Vec<(usize, usize)>,
 }
 
 /// #1756 Codex review round 18 (owner decision): every register an
@@ -3738,6 +3856,73 @@ struct NoCollect;
 impl OperandSink for NoCollect {
     fn read(&mut self, _reg: u16) {}
     fn write(&mut self, _reg: u16) {}
+}
+
+/// #1756 Codex review round 21 (owner decision): the SAME sink pattern
+/// `OperandSink` established in round 18, extended to `decode_operands`'s
+/// three remaining heap-backed fields - `jump_targets`, `string_refs`,
+/// `call_argcs` - which round 18 left untouched (it addressed only
+/// `reads`/`writes`). The reachable-only re-decode pass (`reads_writes_
+/// of` in `prove_definite_register_assignment`) never reads ANY of these
+/// three either - it discards the whole returned `OperandRefs` via
+/// `.expect(...)`, keeping only what its own `FlatSink` captured - so a
+/// zero-argument, no-destination `CALL` (which still populates `string_
+/// refs` with its callee name and `call_argcs` with `0`) paid a fresh
+/// heap allocation for each, per reachable instruction, for metadata
+/// nobody ever reads (Codex's round-21 P1 finding: roughly two allocator
+/// cycles per reachable no-op `CALL`, unbounded by `max_state_words`/
+/// `max_work_units` for the identical reason round 18's `reads`/`writes`
+/// gap was: this cost happens in the shared structural re-decode, not in
+/// anything either budget scopes).
+///
+/// `NoCollect` (same zero-field marker type as `OperandSink`'s no-op
+/// impl) also implements this trait with empty bodies - one universal
+/// "collect nothing" sink for BOTH operand and metadata suppression, so
+/// callers that need neither (like the reachable re-decode) pass exactly
+/// one shared no-op value for both parameters. `MetadataCollector`
+/// (below) is the structural pass's real collector - it appends directly
+/// into the CALLER's own outer accumulator `Vec`s (mirroring `FlatSink`'s
+/// own "write straight into the final destination, never a throwaway
+/// per-call `Vec`" design), rather than collecting into `OperandRefs`
+/// fields that the caller would then have to `.extend()` into its own
+/// accumulators and drop - eliminating that whole intermediate round-trip
+/// for the structural pass too, not just suppressing it for re-decode.
+#[cfg(feature = "std")]
+trait MetadataSink {
+    fn jump_target(&mut self, target: usize);
+    fn string_ref(&mut self, offset: usize, sid: usize, usage: &'static str);
+    fn call_argc(&mut self, offset: usize, argc: usize);
+}
+
+#[cfg(feature = "std")]
+impl MetadataSink for NoCollect {
+    fn jump_target(&mut self, _target: usize) {}
+    fn string_ref(&mut self, _offset: usize, _sid: usize, _usage: &'static str) {}
+    fn call_argc(&mut self, _offset: usize, _argc: usize) {}
+}
+
+/// #1756 Codex review round 21: the main structural decode pass's real
+/// metadata sink - appends directly into the CALLER's (`verify_function_
+/// code`'s) own outer `jump_targets`/`string_refs`/`call_argcs`
+/// accumulators, borrowed for the duration of one `decode_operands` call.
+#[cfg(feature = "std")]
+struct MetadataCollector<'a> {
+    jump_targets: &'a mut Vec<usize>,
+    string_refs: &'a mut Vec<(usize, usize, &'static str)>,
+    call_argcs: &'a mut Vec<(usize, usize)>,
+}
+
+#[cfg(feature = "std")]
+impl MetadataSink for MetadataCollector<'_> {
+    fn jump_target(&mut self, target: usize) {
+        self.jump_targets.push(target);
+    }
+    fn string_ref(&mut self, offset: usize, sid: usize, usage: &'static str) {
+        self.string_refs.push((offset, sid, usage));
+    }
+    fn call_argc(&mut self, offset: usize, argc: usize) {
+        self.call_argcs.push((offset, argc));
+    }
 }
 
 #[cfg(feature = "std")]
@@ -3877,9 +4062,166 @@ mod tests {
             reads: Vec::new(),
             writes: Vec::new(),
         };
-        decode_operands(function_name, code, &mut cursor, 0, opcode, true, &mut sink)
-            .expect("decode operands");
+        decode_operands(
+            function_name,
+            code,
+            &mut cursor,
+            0,
+            opcode,
+            true,
+            &mut sink,
+            &mut NoCollect,
+        )
+        .expect("decode operands");
         (sink.reads, sink.writes)
+    }
+
+    /// #1756 Codex review round 21: a test-only `MetadataSink` that
+    /// collects every emitted item into its own `Vec` - the metadata
+    /// analogue of `RecordingSink` (round 18), used ONLY to assert the
+    /// sink-based path still reports the identical structural metadata
+    /// `decode_operands`'s match arms always produced, for opcodes that
+    /// populate `jump_targets`/`string_refs`/`call_argcs`.
+    struct RecordingMetadataSink {
+        jump_targets: Vec<usize>,
+        string_refs: Vec<(usize, usize, &'static str)>,
+        call_argcs: Vec<(usize, usize)>,
+    }
+
+    impl MetadataSink for RecordingMetadataSink {
+        fn jump_target(&mut self, target: usize) {
+            self.jump_targets.push(target);
+        }
+        fn string_ref(&mut self, offset: usize, sid: usize, usage: &'static str) {
+            self.string_refs.push((offset, sid, usage));
+        }
+        fn call_argc(&mut self, offset: usize, argc: usize) {
+            self.call_argcs.push((offset, argc));
+        }
+    }
+
+    /// #1756 Codex review round 21: decodes real SemCode bytes' FIRST
+    /// structural instruction directly via `decode_operands` and a
+    /// `RecordingMetadataSink`, returning `(jump_targets, string_refs,
+    /// call_argcs)` - direct design-test evidence that the round-21
+    /// metadata-sink refactor produces IDENTICAL structural metadata to
+    /// the pre-refactor `OperandRefs`-field shape.
+    #[allow(clippy::type_complexity)]
+    fn decode_first_instruction_metadata(
+        bytes: &[u8],
+        function_name: &str,
+    ) -> (
+        Vec<usize>,
+        Vec<(usize, usize, &'static str)>,
+        Vec<(usize, usize)>,
+    ) {
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode semcode");
+        let env = functions
+            .iter()
+            .find(|f| f.name == function_name)
+            .unwrap_or_else(|| panic!("function '{function_name}' not found"));
+        let code = env.code_slice;
+        let mut cursor = env.instr_start_offset;
+        let opcode_byte = read_u8(code, &mut cursor).expect("read opcode byte");
+        let opcode = Opcode::from_byte(opcode_byte).expect("valid opcode");
+        let mut metadata_sink = RecordingMetadataSink {
+            jump_targets: Vec::new(),
+            string_refs: Vec::new(),
+            call_argcs: Vec::new(),
+        };
+        decode_operands(
+            function_name,
+            code,
+            &mut cursor,
+            0,
+            opcode,
+            true,
+            &mut NoCollect,
+            &mut metadata_sink,
+        )
+        .expect("decode operands");
+        (
+            metadata_sink.jump_targets,
+            metadata_sink.string_refs,
+            metadata_sink.call_argcs,
+        )
+    }
+
+    /// #1756 Codex review round 21 (owner decision): "prove structural
+    /// decoding still sees identical metadata" - the metadata analogue
+    /// of round 18's read/write identity test, covering every opcode
+    /// category that populates `jump_targets`/`string_refs`/`call_argcs`:
+    /// `JMP` (one jump target, no string/argc metadata), variadic `CALL`
+    /// (one "call target" string ref AND one argc entry together - the
+    /// exact shape Codex's P1 finding cites), and `MAKE_ADT` (TWO
+    /// distinct string refs from a single instruction - "enum type name"
+    /// and "enum variant name" - proving multi-metadata opcodes are not
+    /// truncated to one entry).
+    #[test]
+    fn c1756_decode_operands_metadata_sink_matches_pre_refactor_identities_across_opcode_shapes() {
+        // JMP: one jump target, no string_refs/call_argcs at all.
+        let bytes = emit_test_function(vec![
+            IrInstr::Jmp {
+                label: "target".to_string(),
+            },
+            IrInstr::Label {
+                name: "target".to_string(),
+            },
+            IrInstr::Ret { src: None },
+        ]);
+        let (jump_targets, string_refs, call_argcs) =
+            decode_first_instruction_metadata(&bytes, "main");
+        assert_eq!(jump_targets.len(), 1, "JMP: exactly one jump target");
+        assert!(string_refs.is_empty(), "JMP: no string refs");
+        assert!(call_argcs.is_empty(), "JMP: no call argcs");
+
+        // Variadic CALL with 3 arguments: exactly one "call target"
+        // string ref AND one call_argc entry, together, from one
+        // instruction - the exact shape Codex's round-21 P1 finding
+        // cites (a no-destination, zero-argument CALL is the same shape
+        // with argc = 0).
+        let bytes = emit_test_function_with_helper(vec![IrInstr::Call {
+            dst: None,
+            name: "helper".to_string(),
+            args: vec![1, 2, 3],
+        }]);
+        let (jump_targets, string_refs, call_argcs) =
+            decode_first_instruction_metadata(&bytes, "main");
+        assert!(jump_targets.is_empty(), "CALL: no jump targets");
+        assert_eq!(
+            string_refs
+                .iter()
+                .map(|(_, _, usage)| *usage)
+                .collect::<Vec<_>>(),
+            vec!["call target"],
+            "CALL: exactly one call-target string ref"
+        );
+        assert_eq!(
+            call_argcs.iter().map(|(_, argc)| *argc).collect::<Vec<_>>(),
+            vec![3],
+            "CALL: exactly one call_argc entry with the true argument count"
+        );
+
+        // MAKE_ADT: TWO distinct string refs from ONE instruction (enum
+        // type name, enum variant name) - proves a multi-metadata opcode
+        // is not truncated to a single entry.
+        let bytes = emit_test_function(vec![IrInstr::MakeAdt {
+            dst: 0,
+            adt_name: "MyEnum".to_string(),
+            variant_name: "Variant".to_string(),
+            tag: 0,
+            items: vec![],
+        }]);
+        let (_, string_refs, _) = decode_first_instruction_metadata(&bytes, "main");
+        assert_eq!(
+            string_refs
+                .iter()
+                .map(|(_, _, usage)| *usage)
+                .collect::<Vec<_>>(),
+            vec!["enum type name", "enum variant name"],
+            "MAKE_ADT: both string refs present, in order, neither dropped"
+        );
     }
 
     /// #1756 Codex review round 18 (owner decision): "direct design test" -
@@ -6250,6 +6592,76 @@ mod tests {
         );
     }
 
+    /// #1756 Codex review round 21 (owner decision): Codex's own exact P1
+    /// shape - a REACHABLE stream of zero-argument, no-destination `CALL`
+    /// instructions to a real callee. Round 18 already proved the shared
+    /// structural pass doesn't allocate per-instruction for `reads`/
+    /// `writes`; this proves the SEPARATE reachable-only re-decode pass
+    /// (which every reachable `CALL` also goes through, to obtain its
+    /// register reads/writes for the definite-assignment CSR) does not
+    /// pay a fresh `string_refs`/`call_argcs` allocation per call either,
+    /// for metadata that re-decode pass never reads at all (it discards
+    /// the whole `OperandRefs` via `.expect(...)`, keeping only what its
+    /// `FlatSink` captured).
+    #[test]
+    fn c1756_reachable_redecode_never_allocates_metadata_for_ignored_fields() {
+        let mut main_instrs = Vec::new();
+        for _ in 0..2_000_000 {
+            main_instrs.push(IrInstr::Call {
+                dst: None,
+                name: "helper".to_string(),
+                args: Vec::new(),
+            });
+        }
+        main_instrs.push(IrInstr::Ret { src: None });
+        let bytes = emit_test_function_with_helper(main_instrs);
+
+        // Explicit, generous limits - this test's own concern is decode-
+        // time allocation behavior, not resource-limit correctness, so
+        // it deliberately does not depend on wherever the candidate
+        // default `max_state_words`/`max_work_units` happen to sit.
+        let before = alloc_tracking_calls();
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect("2,000,000 reachable no-op calls, zero-register domain, must still admit cheaply");
+        let after = alloc_tracking_calls();
+
+        // Unlike the round-18/round-20 allocation tests, this construction
+        // has a genuine, UNRELATED, pre-existing O(reachable_count)
+        // allocation baseline that is NOT part of round 21's fix and is
+        // out of scope for it: `verify_function_code`'s own `call_
+        // targets` construction (`env.strings[sid].clone()`, once per
+        // "call target" `string_refs` entry) clones the callee name
+        // string once per reachable CALL - unavoidable with real CALL
+        // instructions, regardless of decode_operands's own behavior.
+        // Measured directly: ~2,000,188 allocator calls with this
+        // round's fix applied, matching that baseline almost exactly
+        // (2,000,000 clones + a small O(log n) margin from every OTHER
+        // growing container). The threshold below is generous relative
+        // to that TRUE baseline, while remaining far below what
+        // reverting round 21's fix would add on top: the reachable re-
+        // decode pass would then ALSO allocate `string_refs` and `call_
+        // argcs` storage per reachable CALL (each field's first push on
+        // a freshly `Default::default()`d `OperandRefs` allocates),
+        // roughly DOUBLING or more the total - a clear, discriminating
+        // gap this threshold is chosen to catch (see the mutation
+        // evidence in the PR reply for the exact reverted-order count).
+        let allocations_during_verify = after.saturating_sub(before);
+        assert!(
+            allocations_during_verify < 2_200_000,
+            "the reachable re-decode pass must not allocate string_refs/call_argcs storage per \
+             reachable CALL on TOP of the unrelated call_targets string-cloning baseline - saw \
+             {allocations_during_verify} allocator calls while verifying 2,000,000 reachable \
+             no-op calls, expected close to the ~2,000,188-call baseline, not roughly double it"
+        );
+    }
+
     /// #1756 Codex review round 17's own requested "control test": the
     /// SAME long instruction stream, made genuinely REACHABLE instead of
     /// unreachable (no branch-free-but-unreachable padding - see
@@ -6259,9 +6671,14 @@ mod tests {
     /// exactly) still drives the raw-state requirement up and can still
     /// be rejected - proving round 17 narrowed accounting to genuinely
     /// REACHABLE bytes, not accidentally made instruction bytes free in
-    /// general. That existing test's exact numbers (312,508 raw-only;
-    /// 312,528 combined) are re-verified unchanged by this round's own
-    /// full c1756 suite run, confirming this directly.
+    /// general. That existing test's exact numbers were originally
+    /// 312,508 raw-only / 312,528 combined; round 21's own P2 fix added
+    /// a `leader_classification_state` term to the raw formula (charging
+    /// `compute_leaders`'s consolidated scratch array), raising them to
+    /// 325,008 raw-only / 325,028 combined - the STRUCTURAL claim this
+    /// test makes (reachable-only byte scoping) is unaffected by that
+    /// change and re-verified unchanged by this round's own full c1756
+    /// suite run; only the unrelated numeric total moved.
     #[test]
     fn c1756_reachable_instruction_bytes_counts_only_reachable_spans() {
         // Five structural instructions at offsets 0, 4, 8, 20, 24; the
@@ -7012,7 +7429,7 @@ mod tests {
     /// to REPRESENT.
     #[test]
     fn c1756_low_domain_high_leader_count_rejects_on_state_not_work() {
-        const COUNT: usize = 500; // leader_count = 1,001; required_state_words = 18,528 exactly (round 16: 3,508 raw + 15,020 leader-state)
+        const COUNT: usize = 500; // leader_count = 1,001; required_state_words = 18,653 exactly (round 21: 3,633 raw + 15,020 leader-state)
         let bytes = emit_test_function(build_domain_one_diamond_chain(COUNT));
 
         // Work stays tiny - accepted even under a small work cap.
@@ -7033,7 +7450,7 @@ mod tests {
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 18_527, // one below the exact 18,528 words this needs
+                max_state_words: 18_652, // one below the exact 18,653 words this needs
                 max_work_units: 100,     // generous for work, tight for state
             },
         )
@@ -7049,7 +7466,7 @@ mod tests {
         );
         assert!(report.diagnostics[0]
             .message
-            .contains("18528 logical verifier-analysis word"));
+            .contains("18653 logical verifier-analysis word"));
     }
 
     /// #1756 Codex review round 10: round 8's `missing: Vec<RegSet>` array
@@ -7537,7 +7954,7 @@ mod tests {
     /// bound, not merely under-charge.
     #[test]
     fn c1756_long_linear_low_domain_rejects_on_raw_state_not_leader_state() {
-        const COUNT: usize = 100_000; // reachable_count = 100,002; raw_words = 312,508; leader_words = 20 (leader_count=1, domain_size=1); combined = 312,528 exactly
+        const COUNT: usize = 100_000; // reachable_count = 100,002; raw_words = 325,008; leader_words = 20 (leader_count=1, domain_size=1); combined = 325,028 exactly
         let bytes = emit_test_function(build_long_linear_chain(COUNT));
 
         // Work stays tiny - accepted even under a small work cap.
@@ -7553,7 +7970,7 @@ mod tests {
 
         // Leader-state alone (20 words, fixed for ANY chain length here)
         // is nowhere near the problem - a budget of 1,000 is still far
-        // below the true raw-node cost (312,508), proving the rejection
+        // below the true raw-node cost (325,008), proving the rejection
         // below is specifically about raw reachable-node representation,
         // not about leader/domain-scaled state.
         let report = verify_semcode_token_with_quotas_and_limits(
@@ -7580,7 +7997,7 @@ mod tests {
             .contains("raw reachable-node representation alone"));
 
         // Exact boundary: the raw check alone (before leader state is
-        // even computed) reports 312,508 words for this construction.
+        // even computed) reports 325,008 words for this construction.
         let raw_only = verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
@@ -7592,15 +8009,15 @@ mod tests {
         .expect_err("must reject");
         assert!(raw_only.diagnostics[0]
             .message
-            .contains("312508 logical verifier-analysis word"));
+            .contains("325008 logical verifier-analysis word"));
 
-        // Exact combined boundary: raw_words (312,508) + leader_words
-        // (20) = 312,528 exactly, once leader state is also computed.
+        // Exact combined boundary: raw_words (325,008) + leader_words
+        // (20) = 325,028 exactly, once leader state is also computed.
         verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 312_528,
+                max_state_words: 325_028,
                 max_work_units: usize::MAX,
             },
         )
@@ -7609,14 +8026,80 @@ mod tests {
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 312_527,
+                max_state_words: 325_027,
                 max_work_units: usize::MAX,
             },
         )
         .expect_err("usage == limit + 1 must be a deterministic resource rejection");
         assert!(combined.diagnostics[0]
             .message
-            .contains("312528 logical verifier-analysis word"));
+            .contains("325028 logical verifier-analysis word"));
+    }
+
+    /// #1756 Codex review round 21 (owner decision), P2's own required
+    /// regression: "construct a low-domain/high-reachable-count shape
+    /// where: old raw formula passes, corrected scratch-aware raw
+    /// formula rejects, and prove rejection occurs before classifier
+    /// scratch allocation." Reuses `c1756_long_linear_low_domain_
+    /// rejects_on_raw_state_not_leader_state`'s exact construction
+    /// (100,000 unreachable-free branch-free `LOAD_BOOL`s, `domain_size
+    /// = 1`, `reachable_count = 100,002`) and that same test's own
+    /// already-established pre-round-21 exact raw-only requirement of
+    /// 312,508 words (what this construction needed before this round's
+    /// P2 fix added the `leader_classification_state` term).
+    ///
+    /// Setting `max_state_words` to exactly that OLD value proves the
+    /// point directly: a verifier still running the pre-round-21 formula
+    /// would compute `raw_words == 312,508 == limit` and ACCEPT - this
+    /// construction would sail through the raw precheck, then let
+    /// `compute_leaders` allocate its consolidated `state: Vec<u8>`
+    /// classifier scratch (`reachable_count` = 100,002 bytes nobody
+    /// charged for). The corrected, round-21 formula instead computes
+    /// `raw_words == 325,008 > 312,508` and rejects - and the verifier's
+    /// own diagnostic text asserted below ("before any leader-compressed
+    /// state is even computed") is produced ONLY by `check_raw_node_
+    /// state_budget`'s own error path, never by the later combined
+    /// check, so its presence here is direct evidence, from the
+    /// verifier's own reporting, that this rejection fires strictly
+    /// before `compute_leaders` (or `dataflow_domain_accounting`) ever
+    /// runs - i.e. before the classifier scratch array they would
+    /// allocate exists at all.
+    #[test]
+    fn c1756_pre_round21_raw_formula_would_have_admitted_uncharged_classifier_scratch() {
+        const COUNT: usize = 100_000;
+        const OLD_RAW_WORDS_BEFORE_ROUND21_FIX: usize = 312_508;
+        let bytes = emit_test_function(build_long_linear_chain(COUNT));
+
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: OLD_RAW_WORDS_BEFORE_ROUND21_FIX,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err(
+            "a limit that exactly equalled the pre-round-21 raw-only requirement must now be \
+             rejected by the corrected, scratch-aware raw formula - proving the old formula \
+             would have admitted a construction whose true raw cost (including classifier \
+             scratch) exceeds it",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded
+        );
+        assert!(
+            report.diagnostics[0]
+                .message
+                .contains("before any leader-compressed state is even computed"),
+            "this exact phrase is emitted only by check_raw_node_state_budget's own error path, \
+             never by the later combined check - its presence proves rejection happened strictly \
+             before compute_leaders (or dataflow_domain_accounting) ever ran, i.e. before the \
+             classifier scratch array they would allocate exists at all"
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("325008 logical verifier-analysis word"));
     }
 
     /// #1756 Codex review round 20 (owner decision): the "linear control
@@ -7626,15 +8109,17 @@ mod tests {
     /// benefit). Reuses `c1756_long_linear_low_domain_rejects_on_raw_
     /// state_not_leader_state`'s exact construction and numbers (100,000
     /// unreachable-free `LOAD_BOOL`s, `reachable_count = 100,002`,
-    /// `leader_count = 1` always for a branch-free stream, `raw_words =
-    /// 312,508`, true `leader_words = 20`, true combined = 312,528).
-    /// `500,000` sits comfortably above the TRUE combined requirement
+    /// `leader_count = 1` always for a branch-free stream). Round 21's P2
+    /// fix added a `leader_classification_state` term to the raw
+    /// formula, raising `raw_words` from 312,508 to 325,008 and true
+    /// combined from 312,528 to 325,028 - `500,000` still sits
+    /// comfortably above the TRUE (post-round-21) combined requirement
     /// but far below what the combined requirement would be if
     /// `leader_count` were wrongly substituted with `reachable_count`
     /// (`dense_words = (2*100_002+1)*1 = 200,005`, `fixed_bytes =
     /// 100_002*88 + (100_002+2)*16 = 10,400,240`, `fixed_words =
-    /// 1,300,030`, wrong combined = `312,508 + 200,005 + 1,300,030 =
-    /// 1,812,543`) - if the reordering had accidentally substituted the
+    /// 1,300,030`, wrong combined = `325,008 + 200,005 + 1,300,030 =
+    /// 1,825,043`) - if the reordering had accidentally substituted the
     /// wrong count, this construction would reject at `500,000`; it must
     /// still accept.
     #[test]
@@ -7662,10 +8147,10 @@ mod tests {
     /// authorized) rejects. Reuses `build_diamond_chain`'s already-
     /// established exact numbers (`N = 1,000` genuine diamonds:
     /// `reachable_count = 2,003`, `leader_count = 2,001`, `raw_words =
-    /// 7,011`, true combined = `37,039`, all independently verified in
-    /// rounds 16-17). `max_state_words = 20_000` sits strictly between
-    /// `raw_words` (7,011 - the precheck alone passes) and the combined
-    /// requirement (37,039 - the combined check must reject), proving
+    /// 7,262`, true combined = `37,290`, re-verified after round 21's
+    /// formula extension). `max_state_words = 20_000` sits strictly
+    /// between `raw_words` (7,262 - the precheck alone passes) and the
+    /// combined requirement (37,290 - the combined check must reject), proving
     /// the combined check's own rejection is what fires, using the
     /// CORRECTLY count-derived `leader_count = 2,001` (asserted in the
     /// message) - not a stale or wrong value, and specifically NOT by
@@ -7687,7 +8172,7 @@ mod tests {
             },
         )
         .expect_err(
-            "the combined check must reject even though the raw-only precheck alone (7,011) \
+            "the combined check must reject even though the raw-only precheck alone (7,262) \
              would pass at this limit",
         );
         assert_eq!(
@@ -7702,7 +8187,7 @@ mod tests {
         );
         assert!(report.diagnostics[0]
             .message
-            .contains("37039 logical verifier-analysis word"));
+            .contains("37290 logical verifier-analysis word"));
     }
 
     /// #1756 Codex review round 20 (owner decision): the STRONGEST form
@@ -7951,6 +8436,7 @@ mod tests {
         let raw_bytes = REACHABLE_COUNT * REACHABLE_INDEX_LOGICAL_BYTES
             + (REACHABLE_COUNT + 1) * 2 * CSR_OFFSET_LOGICAL_BYTES
             + REACHABLE_COUNT * LEADER_FLAG_LOGICAL_BYTES
+            + REACHABLE_COUNT * LEADER_CLASSIFICATION_STATE_LOGICAL_BYTES
             + (2 * operand_count_bound + ENTRY_PARAM_COUNT) * REGISTER_OPERAND_LOGICAL_BYTES;
         let expected_raw_words = raw_bytes.div_ceil(WORD_BYTES);
 
@@ -8122,7 +8608,7 @@ mod tests {
     /// budget`, plus dense payload `(2*leader_count + 1) * ceil(domain_
     /// size / 64)` plus fixed structural overhead - here `leader_count =
     /// 2*n+1` for `n` genuine diamonds, `domain_size = 3`, giving dense =
-    /// `4*n+3` and, following the same derivation, required = 37,039 for
+    /// `4*n+3` and, following the same derivation, required = 37,290 for
     /// `n = 1,000`) exceeds `max_state_words` must be rejected
     /// deterministically, with `AnalysisStateLimitExceeded` - and, by
     /// construction (see `prove_definite_register_assignment`'s round-13
@@ -8132,13 +8618,13 @@ mod tests {
     /// state.
     #[test]
     fn c1756_construction_exceeding_state_budget_rejects_before_large_allocation() {
-        const N: usize = 1_000; // leader_count = 2,001; required_state_words = 37,039 exactly (round 16: 7,011 raw + 30,028 leader-state)
+        const N: usize = 1_000; // leader_count = 2,001; required_state_words = 37,290 exactly (round 21: 7,262 raw + 30,028 leader-state)
         let bytes = emit_test_function(build_diamond_chain(N, false));
         let report = verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 37_038, // one below the exact 37,039 words this needs
+                max_state_words: 37_289, // one below the exact 37,290 words this needs
                 max_work_units: usize::MAX,
             },
         )
@@ -8149,10 +8635,10 @@ mod tests {
         );
         assert!(report.diagnostics[0]
             .message
-            .contains("37039 logical verifier-analysis word"));
+            .contains("37290 logical verifier-analysis word"));
         assert!(report.diagnostics[0]
             .message
-            .contains("state budget of 37038"));
+            .contains("state budget of 37289"));
     }
 
     /// #1756 Codex review round 13 (owner decision): a construction whose
@@ -8237,13 +8723,13 @@ mod tests {
     /// off-by-one ambiguity.
     #[test]
     fn c1756_state_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
-        const N: usize = 5; // leader_count = 11; required_state_words = 225 exactly (round 16: 47 raw + 178 leader-state)
+        const N: usize = 5; // leader_count = 11; required_state_words = 226 exactly (round 21: 48 raw + 178 leader-state)
         let bytes = emit_test_function(build_diamond_chain(N, false));
         verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 225,
+                max_state_words: 226,
                 max_work_units: usize::MAX,
             },
         )
@@ -8253,7 +8739,7 @@ mod tests {
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 224,
+                max_state_words: 225,
                 max_work_units: usize::MAX,
             },
         )
@@ -9516,6 +10002,7 @@ mod tests {
                 instr_offset,
                 decoded,
                 true,
+                &mut NoCollect,
                 &mut NoCollect,
             )
             .expect("decode operands");
