@@ -444,12 +444,39 @@ both fields' enforcement did not yet match this intended scope):
   moment it is exceeded, verification of that artifact stops immediately
   - no further function is analyzed, and no weaker analysis is attempted
   merely to surface another diagnostic.
-- `max_state_words` bounds the **peak dense dataflow state simultaneously
-  live for one function's own analysis** - not a cumulative total across
-  an artifact's functions. Functions are verified sequentially and each
+- `max_state_words` bounds the **peak LOGICAL verifier-analysis state
+  storage simultaneously live for one function's own analysis**, measured
+  in canonical 8-byte logical words - not a cumulative total across an
+  artifact's functions (functions are verified sequentially and each
   one's analysis state is released before the next function's begins, so
   summing state across functions would overstate what is ever actually
-  live at once.
+  live at once), and not process RSS or an allocator-exact byte count.
+  "Logical" here means the accounting model uses fixed, documented,
+  MACHINE-INDEPENDENT sizes for the structures it charges (never a host's
+  actual `size_of::<T>()`, which can vary by target) - the same bytes are
+  admitted or rejected on every host, deterministically.
+
+  As of round 15 of #1756's own review history, the enforced formula is
+  `required_state_words = dense_words + fixed_words`, where:
+
+  - `dense_words = (2 * leader_count + 1) * ceil(domain_size / 64)` - the
+    dense dataflow lattice payload (round 14: the analysis's `chain_
+    killed` and `missing` arrays are simultaneously live, both scaled by
+    `leader_count * domain_size`, plus a small constant margin for the
+    handful of non-leader-scaled `RegSet`s that can also be transiently
+    live).
+  - `fixed_words = ceil(fixed_bytes / 8)` for `fixed_bytes = leader_count
+    * (per-leader `Vec<RegSet>` header, `chain_targets`, and `leader_
+    positions` overhead) + (leader_count + 2 * domain_size) * (worklist
+    stack entry size)` - round 15's correction: leader-scaled FIXED
+    structural overhead that exists even when `domain_size` is tiny and
+    every `RegSet`'s own backing payload is empty, which the dense-only
+    formula above does not charge for at all. The worklist stack's own
+    peak is `leader_count + 2 * domain_size` entries, proven (not merely
+    observed) via a settled-backlog-plus-active-frontier argument - see
+    `check_analysis_state_budget`'s doc comment in `sm-verify` for the
+    exact structural inventory, the named logical-size constants, and the
+    full derivation.
 
 `VerificationLimits` is never inferred from `RuntimeQuotas::max_steps`,
 `max_calls`, or any other execution quota, and is never attached to

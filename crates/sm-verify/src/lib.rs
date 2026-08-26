@@ -215,9 +215,39 @@ impl VerificationLimits {
     /// the round-14 reply for the honest re-validation against both
     /// corrected formulas rather than a silent bump to keep old stress
     /// tests passing.
+    ///
+    /// **Re-validated again in round 15** after `max_state_words` gained
+    /// a third accounting term: fixed per-leader/stack structural
+    /// overhead (`check_analysis_state_budget`'s own doc comment has the
+    /// full inventory), closing a gap that specifically hurt LOW-
+    /// `domain_size`, HIGH-`leader_count` artifacts - round 14's dense-
+    /// payload-only formula scaled with `domain_size`, so a `domain_size
+    /// = 1` artifact could drive `leader_count` into the millions before
+    /// that term alone objected, even though each leader still costs
+    /// real, fixed bytes regardless of how few registers are live.
+    /// `max_state_words = 8_388_608` (UNCHANGED numerically) now admits,
+    /// exactly (`required_words <= max_state_words` at the reported
+    /// `leader_count`, `Err` one leader past it):
+    ///
+    /// | `domain_size` | max genuine `leader_count` |
+    /// |---|---|
+    /// | 1 | 559,240 |
+    /// | 64 | 559,223 |
+    /// | 4,096 | 59,377 |
+    /// | 8,192 (largest legal) | 31,062 |
+    ///
+    /// Still several orders of magnitude above every ordinary/golden/
+    /// already-committed-adversarial shape measured (at most tens of
+    /// thousands of state words), and the `domain_size = 1` ceiling in
+    /// particular is now a REAL, meaningful bound rather than an
+    /// effectively-unbounded one - round 14's formula alone would have
+    /// admitted `leader_count` up to ~4.19 million at `domain_size = 1`,
+    /// about 7.5x more than round 15's corrected 559,240, matching the
+    /// severity of the gap this round closes. Kept numerically UNCHANGED
+    /// again - see the round-15 reply for the full re-derivation.
     pub const fn default_profile() -> Self {
         Self {
-            max_state_words: 8_388_608, // 2^23 - 64 MiB of dense RegSet backing storage, worst case
+            max_state_words: 8_388_608, // 2^23 - logical verifier-analysis words, worst case
             max_work_units: 536_870_912, // 2^29 - ~537M lattice-propagation steps, whole artifact
         }
     }
@@ -1660,71 +1690,170 @@ fn dedup_successors(succs: [Option<usize>; 2]) -> [Option<usize>; 2] {
     }
 }
 
-/// #1756 Codex review round 14 (owner decision): the deterministic,
-/// verifier-OWNED pre-allocation admission check for the definite-
-/// register-assignment analysis's PEAK simultaneously-live dense
-/// dataflow state.
+/// #1756 Codex review round 15: canonical, MACHINE-INDEPENDENT logical
+/// byte sizes for the fixed (non-`RegSet`-payload) structural overhead
+/// `check_analysis_state_budget` charges per leader / per stack entry -
+/// deliberately NOT `size_of::<T>()` (a host-dependent Rust ABI detail
+/// that could vary by target), so admission is deterministic across
+/// hosts. Each ties to the exact accounted structure, per the review's
+/// own request to avoid one opaque magic constant:
 ///
-/// **Full lifetime inventory** (every RegSet-backed structure `prove_
-/// definite_register_assignment` and its callees can hold, per the
-/// round-14 finding's own request):
+/// - `REGSET_HEADER_LOGICAL_BYTES`: one `RegSet { words: Vec<u64> }`'s
+///   OWN header (a `Vec`'s canonical ptr+len+cap triple, 3 words) - NOT
+///   its backing payload, which `word_count(domain_size)` already
+///   charges separately. `chain_killed` and `missing` each hold
+///   `leader_count` of these.
+/// - `CHAIN_TARGET_LOGICAL_BYTES`: one `[Option<usize>; 2]` entry in
+///   `chain_targets` - two canonical `Option<usize>` slots (no niche
+///   optimization for a bare `usize` payload, so 2 words each: a
+///   discriminant plus the value).
+/// - `LEADER_INDEX_LOGICAL_BYTES`: one `usize` entry in
+///   `leader_positions`.
+/// - `STACK_ENTRY_LOGICAL_BYTES`: one `(usize, usize)` entry in
+///   `compute_missing_sets`'s worklist stack.
+#[cfg(feature = "std")]
+const WORD_BYTES: usize = 8;
+#[cfg(feature = "std")]
+const REGSET_HEADER_LOGICAL_BYTES: usize = 3 * WORD_BYTES;
+#[cfg(feature = "std")]
+const CHAIN_TARGET_LOGICAL_BYTES: usize = 2 * (2 * WORD_BYTES);
+#[cfg(feature = "std")]
+const LEADER_INDEX_LOGICAL_BYTES: usize = WORD_BYTES;
+#[cfg(feature = "std")]
+const STACK_ENTRY_LOGICAL_BYTES: usize = 2 * WORD_BYTES;
+
+/// #1756 Codex review round 14 (owner decision), corrected in round 15:
+/// the deterministic, verifier-OWNED pre-allocation admission check for
+/// the definite-register-assignment analysis's PEAK simultaneously-live
+/// verifier-analysis state - now the FULL logical storage this analysis
+/// needs, not merely dense `RegSet` backing words.
 ///
-/// - `chain_killed` (`build_leader_chains`): `leader_count` `RegSet`s,
-///   each up to `word_count(domain_size)` words. Built BEFORE
-///   `compute_missing_sets` runs, then BORROWED by its
-///   `compressed_writes_contains` closure for that call's ENTIRE
-///   duration - not freed early.
-/// - `missing` (`compute_missing_sets`): `leader_count` `RegSet`s, each
-///   up to `word_count(domain_size)` words. Allocated at the START of
-///   `compute_missing_sets` and mutated throughout it - SIMULTANEOUSLY
-///   live with `chain_killed` for that entire call, which is where round
-///   13's formula undercounted: it charged only one of these two
-///   leader-count-scaled arrays, not both.
-/// - `entry_missing` (`prove_definite_register_assignment`): exactly
-///   ONE `RegSet`, up to `word_count(domain_size)` words - moved into
-///   `compute_missing_sets`, where it is borrowed (not moved) by the
-///   seed-array-building closure and so remains allocated for that
-///   whole call too. O(1), not leader-count-scaled.
-/// - `killed` (`build_leader_chains`, per leader): exactly ONE `RegSet`
-///   live at a time, moved into `chain_killed` at the end of each loop
-///   iteration - already fully accounted for once pushed; contributes
-///   no simultaneous-live cost beyond `chain_killed` itself.
-/// - `local` (`find_first_violation`, per leader): exactly ONE `RegSet`
-///   live at a time (a clone of `missing[leader_idx]`), replaced each
-///   loop iteration. O(1), not leader-count-scaled, and this phase runs
-///   strictly after `compute_missing_sets` returns (a later point in
-///   time than the `chain_killed`+`missing` peak, never adding to it).
+/// **Full lifetime inventory** (every allocation `prove_definite_
+/// register_assignment` and its callees own whose size scales with
+/// `leader_count`, `domain_size`, or worklist depth - round 15's own
+/// request, after round 14 covered only `RegSet` payloads):
 ///
-/// The `leader_count`-scaled terms (`chain_killed`, `missing`) are what
-/// dominate and must both be charged; the O(1) terms above never exceed
-/// one extra `word_count(domain_size)` at any single moment (they occupy
-/// different phases, so their contributions do not stack) - a single
-/// extra `word_count(domain_size)` conservatively covers all of them at
-/// once. This gives the peak-live formula `(2 * leader_count + 1) *
-/// word_count(domain_size)` - a PEAK-simultaneous-state envelope for ONE
-/// function's analysis, not a cumulative total across an artifact's
-/// functions (functions are verified sequentially and each one's
-/// analysis state is released before the next begins - see
-/// `AnalysisWorkMeter` for the DIFFERENT, genuinely cumulative-across-
-/// the-artifact accounting `max_work_units` uses instead).
+/// - `chain_killed` / `missing` (`Vec<RegSet>`, `leader_count` entries
+///   each): dense payload already charged by round 14's `(2 *
+///   leader_count + 1) * word_count(domain_size)` term; this round ADDS
+///   their own `Vec<RegSet>` HEADERS - `REGSET_HEADER_LOGICAL_BYTES`
+///   per entry, times 2 arrays, times `leader_count`. Simultaneously
+///   live for `compute_missing_sets`'s entire call (round 14's finding).
+/// - `chain_targets` (`Vec<[Option<usize>; 2]>`, `leader_count`
+///   entries): `CHAIN_TARGET_LOGICAL_BYTES` per entry. Built before
+///   `compute_missing_sets` runs and read throughout it via
+///   `compressed_successors_of`.
+/// - `leader_positions` (`Vec<usize>`, `leader_count` entries):
+///   `LEADER_INDEX_LOGICAL_BYTES` per entry. Necessarily built BEFORE
+///   this very check can run at all (the check needs `leader_count` as
+///   an input) - the one structure this check cannot gate ahead of
+///   itself by construction, but it costs only O(leader_count), not
+///   O(leader_count * domain_size), so it is charged honestly rather
+///   than pretended away.
+/// - `compute_missing_sets`'s worklist stack (`Vec<(usize, usize)>`):
+///   proven (see `c1756_reversed_order_diamond_chain_stack_peak_
+///   scales_with_leader_count` for the adversarial construction and
+///   the argument below) to peak at `leader_count + 2 * domain_size`
+///   entries, NOT the domain_size-only "generous ceiling" round 9's own
+///   test happened to observe (that test never stressed successor
+///   ORDER, which is what actually controls this). Proof sketch: at any
+///   moment the stack is `settled_backlog` (items from the seed phase
+///   or earlier bits, bounded by the seed loop's own `2 * domain_size`
+///   push ceiling, and never regrown once shrunk since only the
+///   CURRENTLY active bit's traversal pushes new items) plus
+///   `active_frontier` (the one currently-being-traced bit's own unresolved
+///   siblings, bounded by `leader_count` via `deliver`'s "each position
+///   visited at most once per bit" guarantee) - `STACK_ENTRY_LOGICAL_
+///   BYTES` per entry.
+/// - `entry_missing` / `build_leader_chains`'s in-progress `killed` /
+///   `find_first_violation`'s per-leader `local` clone: O(1) each,
+///   never overlapping in time (established in round 14) - covered by
+///   the existing `+1` leader in the dense-payload term, unchanged.
+/// - Deliberately EXCLUDED, and NOT silently: `is_leader` (`Vec<bool>`,
+///   `reachable_count`-sized) and every CSR table `dataflow_domain_
+///   accounting` builds (`reachable_indices`, `reads_flat`,
+///   `writes_flat`, and their offset tables) are `reachable_count`-
+///   scaled, not `leader_count`- or `domain_size`-scaled. Bounding raw
+///   `reachable_count` (independent of leader/domain structure) has
+///   been an explicitly acknowledged, separate, out-of-scope gap since
+///   round 1 of this PR's review (no code-size/instruction-count quota
+///   exists anywhere in this verifier) - this round does not change
+///   that boundary, and does not claim to.
 ///
-/// Every multiplication and addition is `checked`; overflow at any step
-/// is treated as certainly exceeding any finite `max_state_words`, the
-/// same honest `usize::MAX` sentinel round 13 already established, not
-/// undefined or silently-wrapping behavior. Returns `Ok(required_words)`
-/// (the exact peak count, for accounting) when within budget,
-/// `Err(reported_words)` otherwise.
+/// **Formula**: `required_state_words = dense_words + fixed_words`,
+/// where `dense_words` is round 14's unchanged `(2 * leader_count + 1) *
+/// word_count(domain_size)` and `fixed_words =
+/// ceil(fixed_bytes / WORD_BYTES)` for `fixed_bytes = leader_count *
+/// (2 * REGSET_HEADER_LOGICAL_BYTES + CHAIN_TARGET_LOGICAL_BYTES +
+/// LEADER_INDEX_LOGICAL_BYTES) + (leader_count + 2 * domain_size) *
+/// STACK_ENTRY_LOGICAL_BYTES` - every multiplication and addition
+/// `checked`, with the byte-to-word rounding also checked even though
+/// the chosen logical sizes happen to divide evenly. Overflow anywhere
+/// in the chain is treated as certainly exceeding any finite
+/// `max_state_words`, the same honest `usize::MAX` sentinel established
+/// in round 13, never undefined or silently-wrapping behavior.
+///
+/// This remains a PEAK-simultaneous-state envelope for ONE function's
+/// analysis, not cumulative across an artifact's functions (functions
+/// are verified sequentially and each one's analysis state is released
+/// before the next begins - see `AnalysisWorkMeter` for the DIFFERENT,
+/// genuinely cumulative-across-the-artifact accounting `max_work_units`
+/// uses instead). Returns `Ok(required_words)` (the exact peak count,
+/// for accounting) when within budget, `Err(reported_words)` otherwise.
 #[cfg(feature = "std")]
 fn check_analysis_state_budget(
     leader_count: usize,
     domain_size: usize,
     max_state_words: usize,
 ) -> Result<usize, usize> {
+    let overflow = || Err(usize::MAX);
+
     let words_per_leader = RegSet::word_count(domain_size);
-    let peak_leader_factor = leader_count
+    let dense_words = leader_count
         .checked_mul(2)
-        .and_then(|doubled| doubled.checked_add(1));
-    let required_words = peak_leader_factor.and_then(|factor| factor.checked_mul(words_per_leader));
+        .and_then(|doubled| doubled.checked_add(1))
+        .and_then(|factor| factor.checked_mul(words_per_leader));
+    let Some(dense_words) = dense_words else {
+        return overflow();
+    };
+
+    let per_leader_fixed_bytes = REGSET_HEADER_LOGICAL_BYTES
+        .checked_mul(2)
+        .and_then(|regset_headers| regset_headers.checked_add(CHAIN_TARGET_LOGICAL_BYTES))
+        .and_then(|sum| sum.checked_add(LEADER_INDEX_LOGICAL_BYTES));
+    let Some(per_leader_fixed_bytes) = per_leader_fixed_bytes else {
+        return overflow();
+    };
+    let leader_fixed_bytes = leader_count.checked_mul(per_leader_fixed_bytes);
+    let Some(leader_fixed_bytes) = leader_fixed_bytes else {
+        return overflow();
+    };
+
+    // Stack peak: `leader_count + 2 * domain_size` entries (see the doc
+    // comment's proof sketch), each `STACK_ENTRY_LOGICAL_BYTES`.
+    let stack_peak_entries = domain_size
+        .checked_mul(2)
+        .and_then(|doubled| doubled.checked_add(leader_count));
+    let Some(stack_peak_entries) = stack_peak_entries else {
+        return overflow();
+    };
+    let stack_bytes = stack_peak_entries.checked_mul(STACK_ENTRY_LOGICAL_BYTES);
+    let Some(stack_bytes) = stack_bytes else {
+        return overflow();
+    };
+
+    let fixed_bytes = leader_fixed_bytes.checked_add(stack_bytes);
+    let Some(fixed_bytes) = fixed_bytes else {
+        return overflow();
+    };
+    let fixed_words = fixed_bytes
+        .checked_add(WORD_BYTES - 1)
+        .map(|rounded| rounded / WORD_BYTES);
+    let Some(fixed_words) = fixed_words else {
+        return overflow();
+    };
+
+    let required_words = dense_words.checked_add(fixed_words);
     match required_words {
         Some(required_words) if required_words <= max_state_words => Ok(required_words),
         Some(required_words) => Err(required_words),
@@ -2105,9 +2234,8 @@ fn prove_definite_register_assignment(
             VerificationCode::AnalysisStateLimitExceeded,
             0,
             format!(
-                "definite-register-assignment analysis needs {} dense-state word(s) ({leader_count} leader(s) x {} word(s)/leader for a {domain_size}-register domain), exceeding the verification state budget of {}",
+                "definite-register-assignment analysis needs {} logical verifier-analysis word(s) ({leader_count} leader(s) at a {domain_size}-register domain: dense lattice payload plus fixed per-leader/stack structural overhead), exceeding the verification state budget of {}",
                 if state_words == usize::MAX { "more than usize::MAX".to_string() } else { state_words.to_string() },
-                RegSet::word_count(domain_size),
                 limits.max_state_words
             ),
         ));
@@ -5864,6 +5992,118 @@ mod tests {
         );
     }
 
+    /// #1756 Codex review round 15: proves the work-stack's peak size
+    /// genuinely scales with `leader_count`, independent of
+    /// `domain_size` - not just the `domain_size`-only bound round 9's
+    /// own test happened to observe. This construction's successor
+    /// ORDER matters: each node's two successors are `[dead_end (pushed
+    /// first/bottom), continue (pushed second/top)]`. LIFO always pops
+    /// the most-recently-pushed item, so it dives into `continue`
+    /// immediately, leaving `dead_end` buried and unresolved - and this
+    /// repeats at every one of `d` nodes along the chain, so the buried
+    /// backlog grows by one entry per node, independent of how many
+    /// (or how few) registers are actually live. Measured directly:
+    /// `peak_queue_len` tracks `d` almost exactly (within a small,
+    /// domain_size-bounded margin from the seed phase), confirming the
+    /// `leader_count + 2*domain_size` bound `check_analysis_state_
+    /// budget` now enforces is both necessary (an attacker really can
+    /// force this) and sound (it never exceeds the bound).
+    #[test]
+    fn c1756_reversed_order_diamond_chain_stack_peak_scales_with_leader_count() {
+        const D: usize = 100_000;
+        const DOMAIN_SIZE: usize = 64;
+        let reachable_count = 2 * D;
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos % 2 == 1 {
+                return [None, None]; // dead_end
+            }
+            let i = pos / 2;
+            let dead_end = pos + 1;
+            if i + 1 < D {
+                [Some(dead_end), Some(pos + 2)] // dead_end first, continue second
+            } else {
+                [Some(dead_end), None]
+            }
+        };
+        let writes_contains = |_pos: usize, _bit: usize| false;
+        let entry_missing = RegSet::full(DOMAIN_SIZE);
+        let (_missing, _event_count, peak_queue_len) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+            &mut AnalysisWorkMeter::new(usize::MAX),
+        )
+        .expect("unbounded");
+        assert!(
+            peak_queue_len > D / 2,
+            "peak_queue_len ({peak_queue_len}) must scale with D ({D}), not stay near \
+             domain_size ({DOMAIN_SIZE}) - this is exactly the gap round 15's state-budget \
+             correction closes"
+        );
+        assert!(
+            peak_queue_len <= D + 2 * DOMAIN_SIZE,
+            "peak_queue_len ({peak_queue_len}) must still respect the proven sound bound \
+             leader_count + 2*domain_size ({})",
+            D + 2 * DOMAIN_SIZE
+        );
+    }
+
+    /// #1756 Codex review round 15 (owner decision): P1's own exact
+    /// prescribed adversarial regression - `domain_size = 1`, a long
+    /// chain of genuine diamonds, the condition register defined at
+    /// entry (so it dies immediately and essentially nothing propagates
+    /// on the lattice side). `work_units` stays tiny (there is nothing
+    /// to deliver), while `leader_count = 2*count + 1` still drives real
+    /// fixed structural overhead (`Vec<RegSet>` headers, `chain_
+    /// targets`, `leader_positions`, and the worklist stack) that round
+    /// 13/14's dense-payload-only formula charged almost nothing for.
+    /// Proves the corrected state budget protects a dimension the work
+    /// budget cannot: an artifact can be cheap to COMPUTE yet expensive
+    /// to REPRESENT.
+    #[test]
+    fn c1756_low_domain_high_leader_count_rejects_on_state_not_work() {
+        const COUNT: usize = 500; // leader_count = 1,001; required_state_words = 15,020 exactly
+        let bytes = emit_test_function(build_domain_one_diamond_chain(COUNT));
+
+        // Work stays tiny - accepted even under a small work cap.
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: usize::MAX,
+                max_work_units: 100,
+            },
+        )
+        .expect("work_units must stay tiny - r0 dies at entry, nothing ever propagates");
+
+        // But fixed leader-scaled structural overhead exceeds a state
+        // budget that round 13/14's dense-payload-only formula would
+        // have comfortably admitted.
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 15_019, // one below the exact 15,020 words this needs
+                max_work_units: 100,     // generous for work, tight for state
+            },
+        )
+        .expect_err(
+            "fixed per-leader/stack structural overhead must exceed the state budget even \
+             though work stays trivially small",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded,
+            "must reject specifically on STATE, not work - proving this budget protects a \
+             dimension the work budget cannot"
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("15020 logical verifier-analysis word"));
+    }
+
     /// #1756 Codex review round 10: round 8's `missing: Vec<RegSet>` array
     /// eagerly allocated `RegSet::word_count(domain_size)` words for EVERY
     /// reachable position, including ones whose missing set converges to
@@ -6288,6 +6528,31 @@ mod tests {
         instrs
     }
 
+    /// #1756 Codex review round 15 (owner decision), P1's own exact
+    /// prescribed case: `count` genuine diamonds referencing ONLY `r0`
+    /// (the always-defined condition register - the false arm
+    /// redundantly re-writes it, and the final read is of the same,
+    /// already-defined register) - so `domain_size = 1` and `r0` dies at
+    /// entry's own write, before any propagation ever begins. `leader_
+    /// count = 2*count + 1` genuine leaders still exist (real branches,
+    /// real merges), so fixed structural overhead scales with `count`
+    /// even though almost nothing is happening on the lattice side.
+    fn build_domain_one_diamond_chain(count: usize) -> Vec<IrInstr> {
+        let mut instrs = vec![IrInstr::LoadBool { dst: 0, val: true }]; // r0 defined at entry
+        for i in 0..count {
+            instrs.push(IrInstr::JmpIf {
+                cond: 0,
+                label: format!("merge{i}"),
+            });
+            instrs.push(IrInstr::LoadBool { dst: 0, val: false }); // false arm: redundant re-write of r0
+            instrs.push(IrInstr::Label {
+                name: format!("merge{i}"),
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) }); // r0 is defined - accepts
+        instrs
+    }
+
     /// #1756 Codex review round 14 (owner decision): like
     /// `emit_test_function`, but for a MULTI-FUNCTION artifact - needed
     /// to exercise the artifact-wide (not per-function) work budget.
@@ -6327,24 +6592,28 @@ mod tests {
     /// #1756 Codex review round 13 (owner decision), formula corrected in
     /// round 14 (see `check_analysis_state_budget`'s doc comment - peak
     /// state charges BOTH `chain_killed` and `missing`, simultaneously
-    /// live, not just one): a construction whose exact `state_words`
-    /// (`(2*leader_count + 1) * ceil(domain_size / 64)` - here
-    /// `leader_count = 2*n+1` for `n` genuine diamonds, `domain_size = 3`
-    /// for this construction, so `state_words = 2*(2*n+1)+1 = 4*n+3`)
-    /// exceeds `max_state_words` must be rejected deterministically, with
-    /// `AnalysisStateLimitExceeded` - and, by construction (see
-    /// `prove_definite_register_assignment`'s round-13 pre-check), BEFORE
-    /// `build_leader_chains` or `compute_missing_sets` ever allocates
-    /// their leader_count-sized dense state.
+    /// live, not just one; corrected again in round 15 to also charge the
+    /// fixed per-leader/stack structural overhead `check_analysis_state_
+    /// budget`'s own doc comment inventories): a construction whose exact
+    /// `required_state_words` (dense payload `(2*leader_count + 1) *
+    /// ceil(domain_size / 64)` plus fixed structural overhead - here
+    /// `leader_count = 2*n+1` for `n` genuine diamonds, `domain_size = 3`,
+    /// giving dense = `4*n+3` and, following the same derivation,
+    /// required = 30,028 for `n = 1,000`) exceeds `max_state_words` must
+    /// be rejected deterministically, with `AnalysisStateLimitExceeded` -
+    /// and, by construction (see `prove_definite_register_assignment`'s
+    /// round-13 pre-check), BEFORE `build_leader_chains` or
+    /// `compute_missing_sets` ever allocates their leader_count-sized
+    /// dense state.
     #[test]
     fn c1756_construction_exceeding_state_budget_rejects_before_large_allocation() {
-        const N: usize = 1_000; // leader_count = 2,001; state_words = 4*1000+3 = 4,003
+        const N: usize = 1_000; // leader_count = 2,001; required_state_words = 30,028 exactly
         let bytes = emit_test_function(build_diamond_chain(N, false));
         let report = verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 4_002, // one below the exact 4,003 words this needs
+                max_state_words: 30_027, // one below the exact 30,028 words this needs
                 max_work_units: usize::MAX,
             },
         )
@@ -6355,10 +6624,10 @@ mod tests {
         );
         assert!(report.diagnostics[0]
             .message
-            .contains("4003 dense-state word"));
+            .contains("30028 logical verifier-analysis word"));
         assert!(report.diagnostics[0]
             .message
-            .contains("state budget of 4002"));
+            .contains("state budget of 30027"));
     }
 
     /// #1756 Codex review round 13 (owner decision): a construction whose
@@ -6430,21 +6699,24 @@ mod tests {
     }
 
     /// #1756 Codex review round 13 (owner decision), formula corrected in
-    /// round 14: exact boundary behavior for the (now `chain_killed` +
-    /// `missing` peak-live-aware) state-words budget - `usage == limit`
-    /// is accepted for resource accounting purposes (the state check
-    /// itself must not fire; the construction here is fully defined, so
-    /// the overall result is a genuine accept), `usage == limit + 1` is a
-    /// deterministic resource rejection. No off-by-one ambiguity.
+    /// rounds 14 and 15: exact boundary behavior for the (now fully
+    /// leader-scaled: `chain_killed` + `missing` dense payload, their
+    /// `Vec<RegSet>` headers, `chain_targets`, `leader_positions`, and
+    /// the worklist stack's `leader_count + 2*domain_size` peak) state-
+    /// words budget - `usage == limit` is accepted for resource
+    /// accounting purposes (the state check itself must not fire; the
+    /// construction here is fully defined, so the overall result is a
+    /// genuine accept), `usage == limit + 1` is a deterministic resource
+    /// rejection. No off-by-one ambiguity.
     #[test]
     fn c1756_state_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
-        const N: usize = 5; // leader_count = 11; state_words = 4*5+3 = 23 exactly
+        const N: usize = 5; // leader_count = 11; required_state_words = 178 exactly
         let bytes = emit_test_function(build_diamond_chain(N, false));
         verify_semcode_token_with_quotas_and_limits(
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 23,
+                max_state_words: 178,
                 max_work_units: usize::MAX,
             },
         )
@@ -6454,7 +6726,7 @@ mod tests {
             &bytes,
             RuntimeQuotas::verified_local(),
             VerificationLimits {
-                max_state_words: 22,
+                max_state_words: 177,
                 max_work_units: usize::MAX,
             },
         )
@@ -6511,6 +6783,34 @@ mod tests {
             Err(usize::MAX),
             "leader_count * word_count(domain_size) overflowing usize must report the \
              overflow sentinel, not panic or silently wrap"
+        );
+    }
+
+    /// #1756 Codex review round 15: overflow specifically in the NEW
+    /// fixed-structural-overhead arithmetic (not the round-13 dense-
+    /// payload path the test above already covers) must also be a
+    /// deterministic rejection. `leader_count` here is chosen small
+    /// enough that `2 * leader_count + 1` (the dense-payload factor)
+    /// does NOT overflow, but large enough that `leader_count *
+    /// per_leader_fixed_bytes` does - proving every checked step in the
+    /// chain is actually load-bearing, not just the first one.
+    #[test]
+    fn c1756_analysis_state_budget_fixed_overhead_overflow_is_deterministic_rejection() {
+        let leader_count = usize::MAX / 50; // 2*leader_count+1 fits; leader_count*88 does not
+        assert!(
+            leader_count.checked_mul(2).is_some(),
+            "test premise: dense factor must not overflow"
+        );
+        assert!(
+            leader_count.checked_mul(88).is_none(),
+            "test premise: per-leader fixed bytes must overflow"
+        );
+        let result = check_analysis_state_budget(leader_count, 1, usize::MAX - 1);
+        assert_eq!(
+            result,
+            Err(usize::MAX),
+            "fixed structural overhead overflowing usize must report the overflow sentinel too, \
+             not panic, silently wrap, or fall through to only the dense-payload term"
         );
     }
 
@@ -6802,8 +7102,20 @@ mod tests {
         );
 
         let leader_count = leader_positions.len();
+        // Independent re-derivation of `check_analysis_state_budget`'s
+        // round-15 formula (not a call into it), so this test can catch
+        // an implementation bug rather than just confirming the function
+        // agrees with itself.
         let words_per_leader = RegSet::word_count(DOMAIN_SIZE);
-        let expected_required_words = (2 * leader_count + 1) * words_per_leader;
+        let dense_words = (2 * leader_count + 1) * words_per_leader;
+        let per_leader_fixed_bytes = 2 * REGSET_HEADER_LOGICAL_BYTES
+            + CHAIN_TARGET_LOGICAL_BYTES
+            + LEADER_INDEX_LOGICAL_BYTES;
+        let stack_peak_entries = 2 * DOMAIN_SIZE + leader_count;
+        let fixed_bytes =
+            leader_count * per_leader_fixed_bytes + stack_peak_entries * STACK_ENTRY_LOGICAL_BYTES;
+        let fixed_words = fixed_bytes.div_ceil(WORD_BYTES);
+        let expected_required_words = dense_words + fixed_words;
         assert_eq!(
             check_analysis_state_budget(leader_count, DOMAIN_SIZE, expected_required_words),
             Ok(expected_required_words),
