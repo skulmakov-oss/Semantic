@@ -21,6 +21,67 @@ pub mod hello_pending_admission;
 #[cfg(feature = "std")]
 pub mod hello_real_semcode_admission;
 
+/// #1756 Codex review round 18: a `System`-delegating global allocator
+/// that also counts allocation calls per THREAD, used only by `cfg(test)`
+/// to give `c1756_structural_decode_never_allocates_operand_storage_for_
+/// unreachable_padding` genuine allocator-instrumentation evidence (per
+/// the review's own preference for "instrument the operand collector/sink
+/// in tests" over wall-clock timing alone) rather than a wall-clock-only
+/// proxy. `thread_local!` counting - not a shared atomic - is what makes
+/// this safe under `cargo test`'s default parallel test execution: each
+/// test thread only ever observes allocations its OWN code caused, never
+/// another concurrently-running test's. Behaves identically to `System`
+/// in every other respect, so it does not change any other test's
+/// observable behavior - only adds a per-thread counter alongside every
+/// `alloc`/`realloc` call. Never active outside test builds: ordinary
+/// library consumers of this crate see no allocator override at all.
+// Kept flat at crate-root scope, with no `pub` modifier at all (rather than
+// a nested `mod` with `pub(crate)` items) - Rust's default privacy already
+// makes a crate-root item visible to every descendant module, including
+// `mod tests` below, and the repository's own public-API-surface snapshot
+// test (`tests/public_api_contracts.rs`) flags any line starting with
+// `pub`, regardless of restricted visibility like `pub(crate)`, as contract
+// drift - these items are genuinely never part of this crate's public API.
+#[cfg(all(test, feature = "std"))]
+use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(all(test, feature = "std"))]
+use std::cell::Cell;
+
+#[cfg(all(test, feature = "std"))]
+thread_local! {
+    static ALLOC_CALLS: Cell<u64> = const { Cell::new(0) };
+}
+
+#[cfg(all(test, feature = "std"))]
+struct CountingAllocator;
+
+// SAFETY: every method delegates directly to `System`, which already
+// upholds `GlobalAlloc`'s contract; the only addition is a same-thread,
+// non-reentrant counter increment around each call.
+#[cfg(all(test, feature = "std"))]
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOC_CALLS.with(|c| c.set(c.get() + 1));
+        unsafe { System.alloc(layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        ALLOC_CALLS.with(|c| c.set(c.get() + 1));
+        unsafe { System.realloc(ptr, layout, new_size) }
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+fn alloc_tracking_calls() -> u64 {
+    ALLOC_CALLS.with(|c| c.get())
+}
+
+#[cfg(all(test, feature = "std"))]
+#[global_allocator]
+static COUNTING_ALLOCATOR: CountingAllocator = CountingAllocator;
+
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationCode {
@@ -849,7 +910,17 @@ fn instruction_stream_parses_fully(name: &str, code: &[u8], start: usize) -> boo
         let Ok(opcode) = Opcode::from_byte(raw_opcode) else {
             return false;
         };
-        if decode_operands(name, code, &mut cursor, offset, opcode, false).is_err() {
+        if decode_operands(
+            name,
+            code,
+            &mut cursor,
+            offset,
+            opcode,
+            false,
+            &mut NoCollect,
+        )
+        .is_err()
+        {
             return false;
         }
     }
@@ -967,7 +1038,15 @@ fn verify_function_code(
                 err.to_string(),
             ),
         })?;
-        let refs = decode_operands(name, code, &mut cursor, offset, opcode, true)?;
+        let refs = decode_operands(
+            name,
+            code,
+            &mut cursor,
+            offset,
+            opcode,
+            true,
+            &mut NoCollect,
+        )?;
         let next_offset = cursor - instr_start;
         let jump_target = refs.jump_targets.first().copied();
         let successors = match (opcode, jump_target) {
@@ -1422,17 +1501,50 @@ impl RegSet {
 /// array instead of one per node. Use `csr_slice` to read a given
 /// position's slice back out.
 ///
+/// Codex review round 18: `reads_writes_of` no longer RETURNS a `(Vec<u16>,
+/// Vec<u16>)` pair per reachable instruction - it now takes an `&mut dyn
+/// OperandSink` and emits directly into it. `FlatSink` (below) is that
+/// sink here, appending straight into this function's own `reads_flat`/
+/// `writes_flat` - the temporary per-instruction `Vec<u16>` pair round 4
+/// already eliminated from the FLAT ARRAYS' own representation existed one
+/// layer further out, in the closure boundary itself (build a pair, hand
+/// it back, `extend_from_slice` it in, drop it) - this removes that too,
+/// so a reachable instruction's registers go straight from `decode_
+/// operands`'s match arms into `reads_flat`/`writes_flat` with no
+/// intermediate collection at all.
+///
 /// Returns `(reachable_indices, reads_flat, reads_offsets, writes_flat,
 /// writes_offsets, universe)`.
 #[cfg(feature = "std")]
 type DataflowDomainAccounting = (Vec<usize>, Vec<u16>, Vec<u32>, Vec<u16>, Vec<u32>, Vec<u16>);
+
+/// #1756 Codex review round 18: `dataflow_domain_accounting`'s own sink -
+/// appends each emitted register straight into the CALLER's `reads_flat`/
+/// `writes_flat` CSR buffers, so a reachable instruction's operands never
+/// pass through any intermediate `Vec<u16>` on their way from `decode_
+/// operands` into the flat arrays this pass ultimately needs.
+#[cfg(feature = "std")]
+struct FlatSink<'a> {
+    reads: &'a mut Vec<u16>,
+    writes: &'a mut Vec<u16>,
+}
+
+#[cfg(feature = "std")]
+impl OperandSink for FlatSink<'_> {
+    fn read(&mut self, reg: u16) {
+        self.reads.push(reg);
+    }
+    fn write(&mut self, reg: u16) {
+        self.writes.push(reg);
+    }
+}
 
 #[cfg(feature = "std")]
 fn dataflow_domain_accounting(
     instr_starts: &[usize],
     reachable_offsets: &HashSet<usize>,
     entry_param_count: usize,
-    mut reads_writes_of: impl FnMut(usize) -> (Vec<u16>, Vec<u16>),
+    mut reads_writes_of: impl FnMut(usize, &mut dyn OperandSink),
 ) -> DataflowDomainAccounting {
     let mut reachable_indices: Vec<usize> = reachable_offsets
         .iter()
@@ -1446,13 +1558,19 @@ fn dataflow_domain_accounting(
     let mut writes_offsets: Vec<u32> = Vec::with_capacity(reachable_indices.len() + 1);
     let mut universe: Vec<u16> = (0..entry_param_count).map(|r| r as u16).collect();
     for &idx in &reachable_indices {
-        reads_offsets.push(reads_flat.len() as u32);
-        writes_offsets.push(writes_flat.len() as u32);
-        let (reads, writes) = reads_writes_of(idx);
-        universe.extend_from_slice(&reads);
-        universe.extend_from_slice(&writes);
-        reads_flat.extend_from_slice(&reads);
-        writes_flat.extend_from_slice(&writes);
+        let reads_start = reads_flat.len();
+        let writes_start = writes_flat.len();
+        reads_offsets.push(reads_start as u32);
+        writes_offsets.push(writes_start as u32);
+        {
+            let mut sink = FlatSink {
+                reads: &mut reads_flat,
+                writes: &mut writes_flat,
+            };
+            reads_writes_of(idx, &mut sink);
+        }
+        universe.extend_from_slice(&reads_flat[reads_start..]);
+        universe.extend_from_slice(&writes_flat[writes_start..]);
     }
     reads_offsets.push(reads_flat.len() as u32);
     writes_offsets.push(writes_flat.len() as u32);
@@ -2551,16 +2669,21 @@ fn prove_definite_register_assignment(
     // validation earlier in `verify_function_code` (opcode recognition,
     // operand shape, canonical domains), so a decode failure here would be
     // an internal invariant violation, not an attacker-reachable outcome.
-    let reads_writes_of = |idx: usize| -> (Vec<u16>, Vec<u16>) {
+    //
+    // #1756 Codex review round 18 (owner decision): forwards whichever
+    // sink `dataflow_domain_accounting` supplies (a `FlatSink` writing
+    // straight into its own `reads_flat`/`writes_flat`) rather than
+    // collecting into a temporary `Vec<u16>` pair per reachable
+    // instruction and copying that into the flat arrays afterward.
+    let reads_writes_of = |idx: usize, sink: &mut dyn OperandSink| {
         let offset = instr_starts[idx];
         let mut cursor = instr_start + offset;
         let opcode_byte =
             read_u8(code, &mut cursor).expect("previously-decoded instruction must re-decode");
         let opcode =
             Opcode::from_byte(opcode_byte).expect("previously-decoded instruction must re-decode");
-        let refs = decode_operands(function, code, &mut cursor, offset, opcode, true)
+        decode_operands(function, code, &mut cursor, offset, opcode, true, sink)
             .expect("previously-decoded instruction must re-decode");
-        (refs.reads, refs.writes)
     };
     let (reachable_indices, reads_flat, reads_offsets, writes_flat, writes_offsets, universe) =
         dataflow_domain_accounting(
@@ -2770,6 +2893,7 @@ fn decode_operands(
     offset: usize,
     opcode: Opcode,
     enforce_canonical_domains: bool,
+    sink: &mut dyn OperandSink,
 ) -> Result<OperandRefs, RejectReport> {
     let invalid =
         |msg: &str| reject_one(function, VerificationCode::OperandOutOfBounds, offset, msg);
@@ -2783,7 +2907,7 @@ fn decode_operands(
         Opcode::LoadQ => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             let literal = read_u8(code, cursor).map_err(|_| invalid("truncated quad literal"))?;
             if enforce_canonical_domains && literal > 3 {
                 return Err(invalid("non-canonical quad literal: must be 0..=3"));
@@ -2792,7 +2916,7 @@ fn decode_operands(
         Opcode::LoadBool => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             let literal = read_u8(code, cursor).map_err(|_| invalid("truncated bool literal"))?;
             if enforce_canonical_domains && literal > 1 {
                 return Err(invalid("non-canonical bool literal: must be 0 or 1"));
@@ -2801,7 +2925,7 @@ fn decode_operands(
         Opcode::LoadI32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             read_i32_le(code, cursor).map_err(|_| invalid("truncated i32 literal"))?;
         }
         Opcode::AddI32 => {
@@ -2811,9 +2935,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
-            refs.reads.push(lhs);
-            refs.reads.push(rhs);
-            refs.writes.push(dst);
+            sink.read(lhs);
+            sink.read(rhs);
+            sink.write(dst);
         }
         Opcode::SubI32 | Opcode::MulI32 | Opcode::DivI32 | Opcode::ModI32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
@@ -2822,34 +2946,34 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
-            refs.reads.push(lhs);
-            refs.reads.push(rhs);
-            refs.writes.push(dst);
+            sink.read(lhs);
+            sink.read(rhs);
+            sink.write(dst);
         }
         Opcode::LoadU32 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             read_u32_le(code, cursor).map_err(|_| invalid("truncated u32 literal"))?;
         }
         Opcode::LoadF64 => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_F64_MATH;
             read_f64_le(code, cursor).map_err(|_| invalid("truncated f64 literal"))?;
         }
         Opcode::LoadFx => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_FX_VALUES;
             read_i32_le(code, cursor).map_err(|_| invalid("truncated fx literal"))?;
         }
         Opcode::LoadText => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_TEXT_VALUES;
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated text literal string id"))?;
@@ -2863,16 +2987,16 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
-            refs.reads.push(lhs);
-            refs.reads.push(rhs);
-            refs.writes.push(dst);
+            sink.read(lhs);
+            sink.read(rhs);
+            sink.write(dst);
             refs.required_capabilities |= CAP_TEXT_VALUES;
         }
         Opcode::MakeSequence => {
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated sequence dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             let count = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated sequence arity"))? as usize;
@@ -2880,14 +3004,14 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated sequence item register"))?;
                 mark_reg(src);
-                refs.reads.push(src);
+                sink.read(src);
             }
         }
         Opcode::MakeTuple => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             let count =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple arity"))? as usize;
             if enforce_canonical_domains && count < 2 {
@@ -2897,14 +3021,14 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated tuple item register"))?;
                 mark_reg(src);
-                refs.reads.push(src);
+                sink.read(src);
             }
         }
         Opcode::MakeRecord => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated record dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated record type string id"))?;
             refs.string_refs
@@ -2919,14 +3043,14 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated record slot register"))?;
                 mark_reg(src);
-                refs.reads.push(src);
+                sink.read(src);
             }
         }
         Opcode::MakeAdt => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated enum dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated enum type string id"))?;
             refs.string_refs
@@ -2943,7 +3067,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated enum payload register"))?;
                 mark_reg(src);
-                refs.reads.push(src);
+                sink.read(src);
             }
         }
         Opcode::AdtTag => {
@@ -2955,8 +3079,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated adt-tag type string id"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.reads.push(src);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.write(dst);
             refs.string_refs
                 .push((offset, sid as usize, "enum type name"));
         }
@@ -2970,8 +3094,8 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated adt-get payload index"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.reads.push(src);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.write(dst);
             refs.string_refs
                 .push((offset, sid as usize, "enum type name"));
         }
@@ -2985,8 +3109,8 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated record-get slot index"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.reads.push(src);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.write(dst);
             refs.string_refs
                 .push((offset, sid as usize, "record type name"));
         }
@@ -2998,8 +3122,8 @@ fn decode_operands(
             read_u16_le(code, cursor).map_err(|_| invalid("truncated tuple-get index"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.reads.push(src);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.write(dst);
         }
         Opcode::SequenceGet => {
             let dst = read_u16_le(code, cursor)
@@ -3011,9 +3135,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(src);
             mark_reg(index);
-            refs.reads.push(src);
-            refs.reads.push(index);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.read(index);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
         }
         Opcode::SequenceLen => {
@@ -3023,8 +3147,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-len src register"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.reads.push(src);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -3035,8 +3159,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-is-empty src register"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.reads.push(src);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -3050,9 +3174,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
-            refs.reads.push(seq);
-            refs.reads.push(val);
-            refs.writes.push(dst);
+            sink.read(seq);
+            sink.read(val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -3066,9 +3190,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
-            refs.reads.push(seq);
-            refs.reads.push(val);
-            refs.writes.push(dst);
+            sink.read(seq);
+            sink.read(val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -3082,9 +3206,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(seq);
             mark_reg(val);
-            refs.reads.push(seq);
-            refs.reads.push(val);
-            refs.writes.push(dst);
+            sink.read(seq);
+            sink.read(val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -3095,8 +3219,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated sequence-pop src register"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.reads.push(src);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.write(dst);
             refs.required_capabilities |= CAP_SEQUENCE_VALUES;
             refs.required_capabilities |= CAP_SEQUENCE_ITERATION;
         }
@@ -3104,7 +3228,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated map-empty dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapContains => {
@@ -3117,9 +3241,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(map);
             mark_reg(key);
-            refs.reads.push(map);
-            refs.reads.push(key);
-            refs.writes.push(dst);
+            sink.read(map);
+            sink.read(key);
+            sink.write(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapGet => {
@@ -3135,15 +3259,15 @@ fn decode_operands(
             mark_reg(map);
             mark_reg(key);
             mark_reg(default_val);
-            refs.reads.push(map);
-            refs.reads.push(key);
+            sink.read(map);
+            sink.read(key);
             // #1756 (FA-07-016): MAP_GET reads `default_val` lazily at
             // runtime, only on a key miss (see #1771). The verifier cannot
             // soundly prove key presence, so this pass conservatively
             // requires `default_val` definitely defined unconditionally -
             // never a value-sensitive "only on the miss path" proof.
-            refs.reads.push(default_val);
-            refs.writes.push(dst);
+            sink.read(default_val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::MapSet => {
@@ -3159,10 +3283,10 @@ fn decode_operands(
             mark_reg(map);
             mark_reg(key);
             mark_reg(val);
-            refs.reads.push(map);
-            refs.reads.push(key);
-            refs.reads.push(val);
-            refs.writes.push(dst);
+            sink.read(map);
+            sink.read(key);
+            sink.read(val);
+            sink.write(dst);
             refs.required_capabilities |= CAP_MAP_VALUES;
         }
         Opcode::RngSeed => {
@@ -3172,8 +3296,8 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated rng-seed seed register"))?;
             mark_reg(dst);
             mark_reg(seed);
-            refs.reads.push(seed);
-            refs.writes.push(dst);
+            sink.read(seed);
+            sink.write(dst);
             refs.required_capabilities |= CAP_PRNG;
         }
         Opcode::RngNextI32 => {
@@ -3186,16 +3310,16 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lo);
             mark_reg(hi);
-            refs.reads.push(lo);
-            refs.reads.push(hi);
-            refs.writes.push(dst);
+            sink.read(lo);
+            sink.read(hi);
+            sink.write(dst);
             refs.required_capabilities |= CAP_PRNG;
         }
         Opcode::MakeClosure => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated closure dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_CLOSURE_VALUES;
             let sid = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated closure function string id"))?;
@@ -3208,7 +3332,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure capture register"))?;
                 mark_reg(src);
-                refs.reads.push(src);
+                sink.read(src);
             }
         }
         Opcode::ClosureCall => {
@@ -3224,7 +3348,7 @@ fn decode_operands(
                 let dst = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated closure-call dst register"))?;
                 mark_reg(dst);
-                refs.writes.push(dst);
+                sink.write(dst);
             } else {
                 // #1756 (FA-07-016): matches the pre-existing `mark_reg`
                 // asymmetry below - the encoded dummy dst register bytes are
@@ -3240,14 +3364,14 @@ fn decode_operands(
                 .map_err(|_| invalid("truncated closure-call arg register"))?;
             mark_reg(closure);
             mark_reg(arg);
-            refs.reads.push(closure);
-            refs.reads.push(arg);
+            sink.read(closure);
+            sink.read(arg);
             refs.required_capabilities |= CAP_CLOSURE_VALUES;
         }
         Opcode::LoadVar => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated variable string id"))?;
             refs.string_refs
@@ -3265,15 +3389,15 @@ fn decode_operands(
             // store itself is outside this pass's domain (see LOAD_VAR,
             // which writes only its destination register, not a register
             // form of the variable it names).
-            refs.reads.push(src);
+            sink.read(src);
         }
         Opcode::QNot | Opcode::BoolNot | Opcode::QTruthNot => {
             let dst = read_u16_le(code, cursor).map_err(|_| invalid("truncated dst register"))?;
             let src = read_u16_le(code, cursor).map_err(|_| invalid("truncated src register"))?;
             mark_reg(dst);
             mark_reg(src);
-            refs.reads.push(src);
-            refs.writes.push(dst);
+            sink.read(src);
+            sink.write(dst);
         }
         Opcode::QAnd
         | Opcode::QOr
@@ -3301,9 +3425,9 @@ fn decode_operands(
             mark_reg(dst);
             mark_reg(lhs);
             mark_reg(rhs);
-            refs.reads.push(lhs);
-            refs.reads.push(rhs);
-            refs.writes.push(dst);
+            sink.read(lhs);
+            sink.read(rhs);
+            sink.write(dst);
             if matches!(
                 opcode,
                 Opcode::AddF64 | Opcode::SubF64 | Opcode::MulF64 | Opcode::DivF64
@@ -3325,7 +3449,7 @@ fn decode_operands(
             let cond =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated condition register"))?;
             mark_reg(cond);
-            refs.reads.push(cond);
+            sink.read(cond);
             let target = read_u32_le(code, cursor).map_err(|_| invalid("truncated jump target"))?;
             refs.jump_targets.push(target as usize);
         }
@@ -3342,7 +3466,7 @@ fn decode_operands(
                 let dst = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call dst register"))?;
                 mark_reg(dst);
-                refs.writes.push(dst);
+                sink.write(dst);
             } else {
                 // #1756 (FA-07-016): same asymmetry as `ClosureCall` above -
                 // the dummy dst register bytes are consumed but define
@@ -3363,20 +3487,20 @@ fn decode_operands(
                 let arg = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated call arg register"))?;
                 mark_reg(arg);
-                refs.reads.push(arg);
+                sink.read(arg);
             }
         }
         Opcode::Assert => {
             let cond = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated assert condition register"))?;
             mark_reg(cond);
-            refs.reads.push(cond);
+            sink.read(cond);
         }
         Opcode::GateRead => {
             let dst =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated gate dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_GATE_SURFACE;
             read_u16_le(code, cursor).map_err(|_| invalid("truncated gate device id"))?;
             read_u16_le(code, cursor).map_err(|_| invalid("truncated gate port"))?;
@@ -3388,7 +3512,7 @@ fn decode_operands(
             let src =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated gate src register"))?;
             mark_reg(src);
-            refs.reads.push(src);
+            sink.read(src);
         }
         Opcode::PulseEmit => {
             refs.required_capabilities |= CAP_GATE_SURFACE;
@@ -3401,7 +3525,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated state-query dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_STATE_QUERY;
             let sid =
                 read_u16_le(code, cursor).map_err(|_| invalid("truncated state query key id"))?;
@@ -3417,7 +3541,7 @@ fn decode_operands(
             let src = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated state-update src register"))?;
             mark_reg(src);
-            refs.reads.push(src);
+            sink.read(src);
         }
         Opcode::EventPost => {
             refs.required_capabilities |= CAP_EVENT_POST;
@@ -3430,7 +3554,7 @@ fn decode_operands(
             let dst = read_u16_le(code, cursor)
                 .map_err(|_| invalid("truncated clock-read dst register"))?;
             mark_reg(dst);
-            refs.writes.push(dst);
+            sink.write(dst);
             refs.required_capabilities |= CAP_CLOCK_READ;
         }
         Opcode::Ret => {
@@ -3442,7 +3566,7 @@ fn decode_operands(
                 let src = read_u16_le(code, cursor)
                     .map_err(|_| invalid("truncated return src register"))?;
                 mark_reg(src);
-                refs.reads.push(src);
+                sink.read(src);
             }
         }
     }
@@ -3478,16 +3602,64 @@ struct OperandRefs {
     // #1773 (FA-09-005): (offset, argc) for each `Opcode::Call` site, keyed
     // by the same offset as its "call target" string_refs entry.
     call_argcs: Vec<(usize, usize)>,
-    // #1756 (FA-07-016): every register this instruction reads/writes, in
-    // the order fixed by `decode_operands`'s exhaustive `Opcode` match below
-    // (the same match that already classifies every operand for the
-    // register-range quota). `reads` and `writes` are independent - a
-    // register can appear in both (e.g. an opcode reading and writing the
-    // same numeric register would list it in both), never merged, so the
-    // definite-assignment pass can validate reads against `IN[n]` before
-    // folding writes into `OUT[n]`.
-    reads: Vec<u16>,
-    writes: Vec<u16>,
+}
+
+/// #1756 Codex review round 18 (owner decision): every register an
+/// instruction reads or writes, in the order fixed by `decode_operands`'s
+/// exhaustive `Opcode` match (the same match that already classifies every
+/// operand for the register-range quota), is now emitted through this
+/// sink rather than collected into an `OperandRefs`-owned `Vec<u16>` - the
+/// main structural decode pass (`verify_function_code`'s first walk)
+/// never reads a decoded instruction's reads/writes at all (it only
+/// consumes `jump_targets`/`string_refs`/`call_argcs`/`max_register`/
+/// `required_capabilities`), so building and immediately dropping a
+/// `Vec<u16>` pair for EVERY structurally decoded instruction - reachable
+/// or not - cost one to two heap allocation/deallocation cycles per
+/// instruction for no reason: an artifact shaped as a reachable entry
+/// `RET` followed by millions of structurally valid but unreachable
+/// `LOAD_BOOL` instructions paid millions of allocator cycles that
+/// `max_state_words`/`max_work_units` (both #1756-analysis-only budgets,
+/// scoped to REACHABLE state) could never see or bound, since this cost
+/// happens earlier, in the shared structural walk every function pays
+/// regardless of signature. `read`/`write` are independent - a register
+/// can appear in both (e.g. an opcode reading and writing the same
+/// numeric register would report it to both) - never merged, so the
+/// definite-assignment pass can still validate reads against `IN[n]`
+/// before folding writes into `OUT[n]`.
+///
+/// Two implementations: `NoCollect` (below) does nothing at all - the
+/// structural pass's sink, zero heap allocation, zero storage, a plain
+/// virtual-call-and-return per register mention. `FlatSink` (in
+/// `dataflow_domain_accounting`) appends straight into the CALLER's own
+/// `reads_flat`/`writes_flat` CSR buffers - the reachable-only re-decode's
+/// sink, avoiding even a temporary per-instruction `Vec<u16>` that would
+/// otherwise be built and then copied into the flat arrays and dropped.
+/// `&mut dyn OperandSink` (dynamic dispatch, not a generic parameter) lets
+/// ONE closure type (`reads_writes_of` in `prove_definite_register_
+/// assignment`) forward whichever sink its own caller supplies, without
+/// needing to be generic itself - the indirection costs one vtable call
+/// per register mention, never a heap allocation, so it does not
+/// reintroduce the cost this round removes.
+#[cfg(feature = "std")]
+trait OperandSink {
+    fn read(&mut self, reg: u16);
+    fn write(&mut self, reg: u16);
+}
+
+/// The main structural decode pass's sink (`verify_function_code`'s first
+/// walk over every instruction, reachable or not) - this pass never reads
+/// a decoded instruction's register reads/writes, only `jump_targets`/
+/// `string_refs`/`call_argcs`/`max_register`/`required_capabilities`, so
+/// recording reads/writes at all would be pure waste. Both methods are
+/// empty; with `&mut dyn OperandSink` this is a vtable call to a no-op,
+/// never a heap allocation - the property this round exists to establish.
+#[cfg(feature = "std")]
+struct NoCollect;
+
+#[cfg(feature = "std")]
+impl OperandSink for NoCollect {
+    fn read(&mut self, _reg: u16) {}
+    fn write(&mut self, _reg: u16) {}
 }
 
 #[cfg(feature = "std")]
@@ -3553,6 +3725,141 @@ mod tests {
             false,
         )
         .expect("emit test function")
+    }
+
+    /// #1756 Codex review round 18: like `emit_test_function`, but with a
+    /// second, callable "helper" function (`RET`, no operands) - needed to
+    /// build a real `CALL`/`MAKE_CLOSURE` instruction that references a
+    /// resolvable callee name.
+    fn emit_test_function_with_helper(main_instrs: Vec<IrInstr>) -> Vec<u8> {
+        emit_ir_to_semcode(
+            &[
+                IrFunction {
+                    name: "helper".to_string(),
+                    instrs: vec![IrInstr::Ret { src: None }],
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+                IrFunction {
+                    name: "main".to_string(),
+                    instrs: main_instrs,
+                    ownership_events: Vec::new(),
+                    params: Vec::new(),
+                },
+            ],
+            false,
+        )
+        .expect("emit test function with helper")
+    }
+
+    /// #1756 Codex review round 18: a test-only `OperandSink` that
+    /// collects every emitted register into its own `Vec<u16>`, exactly
+    /// matching the shape `decode_operands` used to return directly (via
+    /// `OperandRefs.reads`/`.writes`) before this round's refactor - used
+    /// ONLY to assert the sink-based path still reports the identical
+    /// read/write identities `decode_operands`'s match arms always
+    /// produced, never in the structural or reachable-dataflow production
+    /// paths themselves.
+    struct RecordingSink {
+        reads: Vec<u16>,
+        writes: Vec<u16>,
+    }
+
+    impl OperandSink for RecordingSink {
+        fn read(&mut self, reg: u16) {
+            self.reads.push(reg);
+        }
+        fn write(&mut self, reg: u16) {
+            self.writes.push(reg);
+        }
+    }
+
+    /// #1756 Codex review round 18: decodes real SemCode bytes' FIRST
+    /// structural instruction directly via `decode_operands` and a
+    /// `RecordingSink`, returning `(reads, writes)` exactly as `OperandRefs`
+    /// used to expose them - direct design-test evidence that the round-18
+    /// sink refactor produces IDENTICAL register identities to the pre-
+    /// refactor `Vec`-returning shape, for opcode categories ranging from
+    /// zero-operand to genuinely variadic.
+    fn decode_first_instruction_operands(
+        bytes: &[u8],
+        function_name: &str,
+    ) -> (Vec<u16>, Vec<u16>) {
+        let (_, functions) =
+            sm_format::semcode_decode::decode_semcode_envelope(bytes).expect("decode semcode");
+        let env = functions
+            .iter()
+            .find(|f| f.name == function_name)
+            .unwrap_or_else(|| panic!("function '{function_name}' not found"));
+        let code = env.code_slice;
+        let mut cursor = env.instr_start_offset;
+        let opcode_byte = read_u8(code, &mut cursor).expect("read opcode byte");
+        let opcode = Opcode::from_byte(opcode_byte).expect("valid opcode");
+        let mut sink = RecordingSink {
+            reads: Vec::new(),
+            writes: Vec::new(),
+        };
+        decode_operands(function_name, code, &mut cursor, 0, opcode, true, &mut sink)
+            .expect("decode operands");
+        (sink.reads, sink.writes)
+    }
+
+    /// #1756 Codex review round 18 (owner decision): "direct design test" -
+    /// proves the sink-based `decode_operands` produces the exact same
+    /// read/write register identities, in the exact same order, as the
+    /// pre-round-18 `Vec`-returning shape did, across four representative
+    /// opcode categories: fixed-arity (`ADD_I32`), zero-operand (`RET`),
+    /// and both genuinely VARIADIC forms (`CALL`'s argument list, `MAKE_
+    /// CLOSURE`'s capture list) - the variadic cases are the ones most at
+    /// risk of truncation or loss from an allocation-avoidance refactor,
+    /// since they are exactly why a small fixed-capacity inline buffer was
+    /// rejected as a design (see `OperandSink`'s own doc comment).
+    #[test]
+    fn c1756_decode_operands_sink_matches_pre_refactor_identities_across_opcode_shapes() {
+        // Fixed-arity: ADD_I32 dst=2, lhs=10, rhs=11.
+        let bytes = emit_test_function(vec![IrInstr::AddI32 {
+            dst: 2,
+            lhs: 10,
+            rhs: 11,
+        }]);
+        let (reads, writes) = decode_first_instruction_operands(&bytes, "main");
+        assert_eq!(reads, vec![10, 11], "fixed-arity: reads in lhs, rhs order");
+        assert_eq!(writes, vec![2], "fixed-arity: writes dst only");
+
+        // Zero-operand: RET with no source register at all.
+        let bytes = emit_test_function(vec![IrInstr::Ret { src: None }]);
+        let (reads, writes) = decode_first_instruction_operands(&bytes, "main");
+        assert_eq!(reads, Vec::<u16>::new(), "zero-operand: no reads");
+        assert_eq!(writes, Vec::<u16>::new(), "zero-operand: no writes");
+
+        // Variadic CALL: 5 argument registers, one destination register.
+        let bytes = emit_test_function_with_helper(vec![IrInstr::Call {
+            dst: Some(9),
+            name: "helper".to_string(),
+            args: vec![1, 2, 3, 4, 5],
+        }]);
+        let (reads, writes) = decode_first_instruction_operands(&bytes, "main");
+        assert_eq!(
+            reads,
+            vec![1, 2, 3, 4, 5],
+            "variadic CALL: every argument register, in order, none truncated"
+        );
+        assert_eq!(writes, vec![9], "variadic CALL: the dst register");
+
+        // Variadic MAKE_CLOSURE: 5 capture registers, one destination
+        // register.
+        let bytes = emit_test_function_with_helper(vec![IrInstr::MakeClosure {
+            dst: 0,
+            name: "helper".to_string(),
+            captures: vec![1, 2, 3, 4, 5],
+        }]);
+        let (reads, writes) = decode_first_instruction_operands(&bytes, "main");
+        assert_eq!(
+            reads,
+            vec![1, 2, 3, 4, 5],
+            "variadic MAKE_CLOSURE: every capture register, in order, none truncated"
+        );
+        assert_eq!(writes, vec![0], "variadic MAKE_CLOSURE: the dst register");
     }
 
     // #1756 (FA-07-016): like `emit_test_function`, but with a caller-chosen
@@ -5815,6 +6122,56 @@ mod tests {
         }
     }
 
+    /// #1756 Codex review round 18 (owner decision): Codex's own exact P1
+    /// shape - a reachable entry `RET` followed by millions of
+    /// structurally valid but UNREACHABLE `LOAD_BOOL` instructions. Round
+    /// 17 already proved unreachable padding cannot inflate the #1756
+    /// resource-envelope's WORD accounting; this proves the earlier,
+    /// SHARED structural decode pass (`verify_function_code`'s first walk,
+    /// which every function pays regardless of signature, and which
+    /// neither `max_state_words` nor `max_work_units` can see, since both
+    /// are #1756-analysis-only budgets scoped to reachable state) does not
+    /// pay one heap allocation per unreachable instruction either - the
+    /// actual CPU/allocator-churn cost Codex's round-18 finding
+    /// identified, one layer beneath what rounds 16-17 could bound at
+    /// all. Uses genuine allocator instrumentation (`alloc_tracking`, a
+    /// `System`-delegating counting `#[global_allocator]` active only in
+    /// `cfg(test)` builds), not wall-clock timing, per the review's own
+    /// explicit preference.
+    #[test]
+    fn c1756_structural_decode_never_allocates_operand_storage_for_unreachable_padding() {
+        let mut instrs = vec![IrInstr::Ret { src: None }];
+        for _ in 0..2_000_000 {
+            instrs.push(IrInstr::LoadBool { dst: 0, val: true });
+        }
+        let bytes = emit_test_function(instrs);
+
+        let before = alloc_tracking_calls();
+        verify_semcode(&bytes)
+            .expect("unreachable code is not judged by this pass and must still admit");
+        let after = alloc_tracking_calls();
+
+        // Every OTHER allocation this call legitimately makes (instr_
+        // starts/instruction_successors/jump_targets/etc. growing via
+        // amortized Vec doubling, HashSet growth for reachable_offsets,
+        // the #1756 analysis's own O(1)-scaled structures for the single
+        // reachable node) is bounded by O(log(instruction_count)) per
+        // growing container, not O(instruction_count) - comfortably under
+        // 1,000 total calls even at 2,000,001 instructions. Under the
+        // pre-round-18 behavior, `writes.push(dst)` alone would have
+        // triggered one allocation PER unreachable LOAD_BOOL (an empty
+        // `Vec<u16>` allocates on its first push), i.e. ~2,000,000 - a
+        // three-order-of-magnitude gap this threshold cannot miss.
+        let allocations_during_verify = after.saturating_sub(before);
+        assert!(
+            allocations_during_verify < 1_000,
+            "structural decode must not allocate operand storage per unreachable instruction - \
+             saw {allocations_during_verify} allocator calls while verifying 2,000,000 \
+             unreachable LOAD_BOOL instructions, expected a small O(log n) constant, not \
+             one-or-more per instruction"
+        );
+    }
+
     /// #1756 Codex review round 17's own requested "control test": the
     /// SAME long instruction stream, made genuinely REACHABLE instead of
     /// unreachable (no branch-free-but-unreachable padding - see
@@ -7959,11 +8316,16 @@ mod tests {
         let reads_writes: std::collections::HashMap<usize, (Vec<u16>, Vec<u16>)> =
             std::collections::HashMap::from([(0, (Vec::new(), Vec::new()))]);
         let (reachable_indices, reads_flat, reads_offsets, writes_flat, writes_offsets, universe) =
-            dataflow_domain_accounting(&instr_starts, &reachable_offsets, 0, |idx| {
-                reads_writes
+            dataflow_domain_accounting(&instr_starts, &reachable_offsets, 0, |idx, sink| {
+                let (reads, writes) = reads_writes
                     .get(&idx)
-                    .cloned()
-                    .expect("must only be queried for the one reachable index")
+                    .expect("must only be queried for the one reachable index");
+                for &r in reads {
+                    sink.read(r);
+                }
+                for &w in writes {
+                    sink.write(w);
+                }
             });
         assert_eq!(
             reachable_indices.len(),
@@ -7996,8 +8358,14 @@ mod tests {
                 (1, (vec![4095], Vec::new())),
             ]);
         let (reachable_indices, reads_flat, reads_offsets, writes_flat, writes_offsets, universe) =
-            dataflow_domain_accounting(&instr_starts, &reachable_offsets, 0, |idx| {
-                reads_writes.get(&idx).cloned().expect("both are reachable")
+            dataflow_domain_accounting(&instr_starts, &reachable_offsets, 0, |idx, sink| {
+                let (reads, writes) = reads_writes.get(&idx).expect("both are reachable");
+                for &r in reads {
+                    sink.read(r);
+                }
+                for &w in writes {
+                    sink.write(w);
+                }
             });
         assert_eq!(reachable_indices.len(), 2);
         assert_eq!(reads_flat, vec![4095], "only node 1's one read");
@@ -8677,6 +9045,7 @@ mod tests {
                 instr_offset,
                 decoded,
                 true,
+                &mut NoCollect,
             )
             .expect("decode operands");
         }
