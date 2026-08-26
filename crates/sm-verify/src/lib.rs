@@ -1762,6 +1762,50 @@ impl AnalysisWorkMeter {
     fn new(limit: usize) -> Self {
         Self { used: 0, limit }
     }
+
+    /// #1756 Codex review round 19 (owner decision): the ONLY sanctioned
+    /// way to increment `used` - every charge site in this crate must
+    /// call this, never mutate `self.used` directly, so there is no
+    /// bypass of the checked-arithmetic guarantee below. `used` is
+    /// artifact-CUMULATIVE (see this struct's own doc comment) and
+    /// `max_work_units` is a caller-supplied `usize`, so on a 32-bit
+    /// target a caller can legally configure `max_work_units =
+    /// usize::MAX` and enough individually state-bounded functions can
+    /// still cumulatively drive `used` to `usize::MAX` before this call -
+    /// an unchecked `self.used += 1` at that point is build-dependent
+    /// (`debug`: panic; `release`: silently wrap to `0`, after which the
+    /// verifier would resume accepting further work UNDER the configured
+    /// limit) rather than deterministic, violating the whole point of
+    /// this being a deterministic, machine-independent resource budget
+    /// (see `VerificationLimits`'s own doc comment on why this
+    /// distinction matters at all).
+    ///
+    /// Returns `Ok(used)` (the new cumulative total, exactly as before,
+    /// for the caller's own diagnostic reporting) when charging one unit
+    /// keeps `used <= limit`. Returns `Err(used)` - the ordinary, exact
+    /// attempted usage - when charging one more unit would exceed
+    /// `limit` but is still representable. Returns `Err(usize::MAX)` -
+    /// the same overflow sentinel `check_analysis_state_budget` and
+    /// `check_raw_node_state_budget` already use for their own `checked_
+    /// add` failures - when `used + 1` itself cannot be represented as a
+    /// `usize` at all: the true attempted usage would be `usize::MAX +
+    /// 1`, which has no finite representation, so it is treated as
+    /// certainly exceeding any finite `limit`, exactly like every other
+    /// overflow path in this verifier's resource envelope. Never panics,
+    /// never wraps, never saturates-and-continues - overflow fails
+    /// closed, immediately, as an ordinary `AnalysisWorkLimitExceeded`
+    /// rejection at the caller, not a host-dependent crash or silent
+    /// reset.
+    fn charge_one(&mut self) -> Result<usize, usize> {
+        let Some(used) = self.used.checked_add(1) else {
+            return Err(usize::MAX);
+        };
+        self.used = used;
+        if used > self.limit {
+            return Err(used);
+        }
+        Ok(used)
+    }
 }
 
 /// **Work budget** (#1756 Codex review round 13, owner decision; scope
@@ -1817,10 +1861,7 @@ fn compute_missing_sets(
     // one place entry's contribution enters the worklist.
     let entry_successors = successors_of(0);
     for bit in 0..domain_size {
-        work_meter.used += 1;
-        if work_meter.used > work_meter.limit {
-            return Err(work_meter.used);
-        }
+        work_meter.charge_one()?;
         if missing[0].contains(bit) && !writes_contains(0, bit) {
             for succ in entry_successors.into_iter().flatten() {
                 if deliver(&mut missing, succ, bit) {
@@ -1833,10 +1874,7 @@ fn compute_missing_sets(
 
     let mut event_count: usize = 0;
     while let Some((pos, bit)) = stack.pop() {
-        work_meter.used += 1;
-        if work_meter.used > work_meter.limit {
-            return Err(work_meter.used);
-        }
+        work_meter.charge_one()?;
         event_count += 1;
         if writes_contains(pos, bit) {
             continue; // killed here - defined by this instruction's own write
@@ -2799,13 +2837,21 @@ fn prove_definite_register_assignment(
             // shared `work_meter`'s CUMULATIVE total across every
             // function analyzed so far in this artifact verification
             // call, not just this function's own contribution - see
-            // `AnalysisWorkMeter`'s doc comment.
+            // `AnalysisWorkMeter`'s doc comment. Round 19: `used ==
+            // usize::MAX` specifically means `AnalysisWorkMeter::charge_
+            // one`'s own `checked_add` overflowed - the true attempted
+            // usage (`usize::MAX + 1`) has no finite representation, so
+            // it is reported with the same "more than usize::MAX"
+            // wording the state-budget overflow paths already use,
+            // rather than printing the sentinel value as if it were a
+            // real, representable work-unit count.
             return Err(reject_one(
                 function,
                 VerificationCode::AnalysisWorkLimitExceeded,
                 0,
                 format!(
-                    "definite-register-assignment analysis performed {used} lattice-propagation work unit(s) across this verification call, exceeding the verification work budget of {}",
+                    "definite-register-assignment analysis performed {} lattice-propagation work unit(s) across this verification call, exceeding the verification work budget of {}",
+                    if used == usize::MAX { "more than usize::MAX".to_string() } else { used.to_string() },
                     limits.max_work_units
                 ),
             ));
@@ -7600,6 +7646,82 @@ mod tests {
             Err(usize::MAX),
             "raw-node byte arithmetic overflowing usize must report the overflow sentinel, not \
              panic or silently wrap"
+        );
+    }
+
+    /// #1756 Codex review round 19 (owner decision): direct, isolated
+    /// unit coverage for `AnalysisWorkMeter::charge_one` - proves the
+    /// checked-arithmetic overflow guarantee without actually executing
+    /// `usize::MAX` units of real work (which would never finish). Every
+    /// case here is a plain function call in a normal (non-panicking)
+    /// test - `charge_one` is built entirely on `checked_add`, which by
+    /// construction can never panic, so the absence of a `#[should_
+    /// panic]` anywhere in this test IS part of the proof, not an
+    /// oversight: the correct behavior is an ordinary `Err` return, never
+    /// a panic, on any target or build profile.
+    #[test]
+    fn c1756_analysis_work_meter_charge_one_boundary_and_overflow() {
+        // (1) Normal exact boundary: used = limit - 1, charge -> used ==
+        // limit, accepted.
+        let mut meter = AnalysisWorkMeter { used: 9, limit: 10 };
+        assert_eq!(
+            meter.charge_one(),
+            Ok(10),
+            "charging up to the exact limit must be accepted"
+        );
+        assert_eq!(meter.used, 10);
+
+        // (2) Limit exceed: used = limit, charge -> rejected, attempted
+        // usage == limit + 1 (representable, so reported exactly).
+        let mut meter = AnalysisWorkMeter {
+            used: 10,
+            limit: 10,
+        };
+        assert_eq!(
+            meter.charge_one(),
+            Err(11),
+            "charging past the limit must report the exact attempted usage (limit + 1) when \
+             representable"
+        );
+
+        // (3) Arithmetic overflow: used = usize::MAX, limit = usize::MAX,
+        // charge -> deterministic rejection via the overflow sentinel,
+        // never a panic, never a silent wrap to 0.
+        let mut meter = AnalysisWorkMeter {
+            used: usize::MAX,
+            limit: usize::MAX,
+        };
+        assert_eq!(
+            meter.charge_one(),
+            Err(usize::MAX),
+            "used + 1 overflowing usize must report the overflow sentinel, never panic or \
+             silently wrap to 0"
+        );
+        assert_eq!(
+            meter.used,
+            usize::MAX,
+            "an overflowing charge must leave `used` exactly as it was - never wrapped to 0, \
+             which would let the verifier resume accepting work UNDER the configured limit"
+        );
+
+        // (4) Near-overflow: used = usize::MAX - 1, limit = usize::MAX,
+        // charge -> accepted (used becomes exactly usize::MAX, the last
+        // representable unit); the VERY NEXT charge must then overflow
+        // deterministically.
+        let mut meter = AnalysisWorkMeter {
+            used: usize::MAX - 1,
+            limit: usize::MAX,
+        };
+        assert_eq!(
+            meter.charge_one(),
+            Ok(usize::MAX),
+            "the last representable unit of work must still be accepted"
+        );
+        assert_eq!(
+            meter.charge_one(),
+            Err(usize::MAX),
+            "the NEXT charge, now genuinely overflowing usize::MAX + 1, must be a deterministic \
+             rejection, not a panic or a wrap back to a small, still-under-limit number"
         );
     }
 
