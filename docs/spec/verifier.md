@@ -398,8 +398,10 @@ inside it, incorrectly rejecting reads that are actually always defined.
 A violation rejects with `VerificationCode::UndefinedRegisterRead` -
 deliberately distinct from `InvalidRegisterReference`, which is a numeric
 range/quota failure. `UndefinedRegisterRead` means the register number is
-in range but no incoming execution path has been proven to define it before
-this read.
+in range but at least one reachable incoming execution path has not proven
+the register definitely defined before this read - consistent with the
+MUST quantification above: a register defined on some paths to a join but
+not others is still rejected, since it is not defined on *every* path.
 
 **Resource envelope.** Even fully compressed (see rounds 11-12 of #1756's
 own review history: non-branching runs and duplicate-successor artifacts
