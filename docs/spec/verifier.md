@@ -324,13 +324,27 @@ reachable register read is definitely defined on every execution path that
 can reach it** - not merely that the register number is within budget, and
 not merely that *some* path defines it before that read.
 
-This is a forward **MUST** dataflow analysis (meet = set intersection), not
-a MAY/reachability analysis. A future implementation that only proves "some
-path defines this register" (MAY semantics) does not satisfy this contract
-and must not be described as equivalent - MUST is strictly stronger, and is
-the property `RegisterSlot::Uninitialized` in `sm-vm` (#1770) already
-enforces at runtime; this pass proves the same property statically, ahead
-of execution.
+This is a forward **MUST** dataflow analysis, not a MAY/reachability
+analysis: the property proved is "definitely defined on *every* incoming
+path," not "defined on *some* path." A future implementation that only
+proves the latter (MAY semantics) does not satisfy this contract and must
+not be described as equivalent - MUST is strictly stronger, and is the
+property `RegisterSlot::Uninitialized` in `sm-vm` (#1770) already enforces
+at runtime; this pass proves the same property statically, ahead of
+execution.
+
+The implementation computes this MUST guarantee via its logical dual: not
+`DEFINED[n] = intersect(predecessor OUT)` directly, but `MISSING[n] = U \
+DEFINED[n] = union(predecessor MISSING_OUT)` (De Morgan's law over the same
+equations) - a register is rejected iff it is in `MISSING[n]` at the point
+of read, the identical predicate phrased via the complement. This is an
+implementation choice, not a semantic relaxation: the MAY-missing/union
+formulation computes the exact same MUST fixed point as the MAY-defined/
+intersection one it replaced, and gives every (reachable position, register)
+pair a work bound that does not depend on control-flow shape (see
+"Control-flow reuse" below) - it must not be confused with a MAY/
+reachability analysis over *defined* registers, which is a genuinely
+different, weaker property this section explicitly rejects above.
 
 **Entry definitions.** For a function whose canonical signature declares `N`
 parameters, `ENTRY_DEFS = {r0, r1, ..., r(N-1)}` - exactly the registers
@@ -363,19 +377,23 @@ restatements of each other.
 
 **Control-flow reuse.** This pass reuses the same instruction boundaries and
 successor relation the reachable-control-flow check above already computes
-(and that same check's reachable-offset result), building predecessors from
-that one successor relation rather than a second CFG or branch-target
-engine. It judges only reachable register reads, matching the reachable-
-control-flow check's own reachability boundary; a register read inside
-structurally valid but unreachable code is not judged by this pass, matching
-the verifier's existing, separate policy on such code.
+(and that same check's reachable-offset result). Missing-register
+information is propagated forward *only* along that one successor relation -
+a bit-level worklist delivers each (reachable position, register) pair to
+that position's successors, at most once ever, with no predecessor
+structure built at all. It judges only reachable register reads, matching
+the reachable-control-flow check's own reachability boundary; a register
+read inside structurally valid but unreachable code is not judged by this
+pass, matching the verifier's existing, separate policy on such code.
 
-**Non-entry nodes start at TOP** (every register in the function's register
-domain, provisionally), never at the empty set. This is a correctness
-requirement, not a style preference: initializing non-entry nodes to empty
-computes the wrong converged fixed point for a register defined once outside
-a loop and never invalidated inside it, incorrectly rejecting reads that are
-actually always defined.
+**Non-entry nodes start at BOTTOM** (no register in the function's register
+domain considered missing yet, provisionally), never at the full set. This
+is a correctness requirement, not a style preference - the dual of the
+MUST-formulation's own non-negotiable rule (non-entry nodes start at TOP,
+never empty, under `DEFINED`/intersection): initializing non-entry nodes'
+`MISSING` set to the full domain instead computes the wrong converged fixed
+point for a register defined once outside a loop and never invalidated
+inside it, incorrectly rejecting reads that are actually always defined.
 
 A violation rejects with `VerificationCode::UndefinedRegisterRead` -
 deliberately distinct from `InvalidRegisterReference`, which is a numeric

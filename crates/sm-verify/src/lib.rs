@@ -1239,20 +1239,21 @@ fn deliver(missing: &mut [RegSet], target: usize, bit: usize) -> bool {
 }
 
 /// Core bit-level MAY-MISSING worklist - factored out from `prove_definite_
-/// register_assignment` so tests can assert directly on its `event_count`
-/// output (Codex review round 8's explicit request for allocation/
-/// relaxation counters, not timing alone) using small, hand-constructed
-/// `successors_of`/`writes_contains` closures rather than real SemCode
-/// bytes.
+/// register_assignment` so tests can assert directly on its `event_count`/
+/// `peak_queue_len` outputs (Codex review round 8's explicit request for
+/// allocation/relaxation counters, not timing alone) using small, hand-
+/// constructed `successors_of`/`writes_contains` closures rather than real
+/// SemCode bytes.
 ///
-/// Returns `(missing, event_count)`: the converged MISSING set for every
-/// reachable position (position 0 = entry, whose value is `entry_missing`
-/// unchanged), and the total number of (position, bit) events the worklist
-/// processed after seeding.
+/// Returns `(missing, event_count, peak_queue_len)`: the converged MISSING
+/// set for every reachable position (position 0 = entry, whose value is
+/// `entry_missing` unchanged), the total number of (position, bit) events
+/// the worklist processed after seeding, and the largest the worklist ever
+/// grew to at any one moment.
 ///
-/// **Work bound.** Every `(position, bit)` pair is enqueued at MOST once,
-/// ever, across the whole computation - `deliver` only returns `true` (the
-/// caller's only enqueue trigger) the one time a bit transitions from
+/// **Total work bound.** Every `(position, bit)` pair is enqueued at MOST
+/// once, ever, across the whole computation - `deliver` only returns `true`
+/// (the caller's only enqueue trigger) the one time a bit transitions from
 /// absent to present in some position's `MISSING` set, and `MISSING` only
 /// ever grows (union, never shrinks) - so the total number of *distinct*
 /// (position, bit) pairs that can ever be enqueued is bounded by
@@ -1278,6 +1279,30 @@ fn deliver(missing: &mut [RegSet], target: usize, bit: usize) -> bool {
 /// are removed entirely as of this round: they existed only to bound
 /// whole-`RegSet` reprocessing, which this formulation does not do in the
 /// first place.
+///
+/// **Peak live-memory bound** (#1756 Codex review round 9): the total-work
+/// bound above says nothing about how large the worklist can grow at any
+/// one moment - a wide fan-out (e.g. a balanced binary dispatch tree with
+/// many leaves) can, under FIFO order, accumulate an entire breadth level
+/// (up to `domain_size` bits at EACH of that level's nodes) before any of
+/// it drains, peaking near the full `reachable_count * domain_size` bound.
+/// This worklist processes LIFO (a stack, popping the MOST recently pushed
+/// item) instead: popping `(pos, bit)` pushes at most `out_degree(pos) <=
+/// 2` new items for that SAME bit, so once a bit's delivery begins it runs
+/// to completion - reaching nodes with no further successors, or nodes
+/// that already have it - before any sibling branch (for that same bit, or
+/// any other) is touched, exactly the standard DFS depth bound. Peak
+/// worklist size is therefore bounded by the current bit's own delivery
+/// depth (`O(reachable_count)`, the same order `missing` itself already
+/// costs) PLUS the not-yet-started backlog waiting beneath it on the stack
+/// (bounded by how many `(pos, bit)` pairs any single pop can contribute -
+/// `O(out_degree) <= O(2)` - times how many pops are pending, not by
+/// `domain_size` multiplied across an entire wide level at once). This
+/// changes only which end of the worklist is popped from - `deliver`'s
+/// "already delivered, skip" guard (hence the total-work bound above) is
+/// completely unaffected by pop order, so this is a peak-memory
+/// representation choice, not a new correctness-load-bearing ordering
+/// heuristic of the kind rounds 5-7 tried and round 8 replaced.
 #[cfg(feature = "std")]
 fn compute_missing_sets(
     reachable_count: usize,
@@ -1285,7 +1310,7 @@ fn compute_missing_sets(
     entry_missing: RegSet,
     writes_contains: impl Fn(usize, usize) -> bool,
     mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
-) -> (Vec<RegSet>, usize) {
+) -> (Vec<RegSet>, usize, usize) {
     let mut missing: Vec<RegSet> = (0..reachable_count)
         .map(|pos| {
             if pos == 0 {
@@ -1296,10 +1321,14 @@ fn compute_missing_sets(
         })
         .collect();
     if reachable_count == 0 {
-        return (missing, 0);
+        return (missing, 0, 0);
     }
 
-    let mut queue: std::collections::VecDeque<(usize, usize)> = std::collections::VecDeque::new();
+    // A stack (LIFO), not a FIFO queue - see the peak-live-memory doc
+    // comment above for why this bounds peak size without weakening the
+    // total-work bound at all.
+    let mut stack: Vec<(usize, usize)> = Vec::new();
+    let mut peak_queue_len: usize = 0;
 
     // Seed from entry's own MISSING_OUT (post-write) - entry's own MISSING
     // is fixed and never re-delivered to (see `deliver`), so this is the
@@ -1309,26 +1338,28 @@ fn compute_missing_sets(
         if missing[0].contains(bit) && !writes_contains(0, bit) {
             for succ in entry_successors.into_iter().flatten() {
                 if deliver(&mut missing, succ, bit) {
-                    queue.push_back((succ, bit));
+                    stack.push((succ, bit));
                 }
             }
         }
     }
+    peak_queue_len = peak_queue_len.max(stack.len());
 
     let mut event_count: usize = 0;
-    while let Some((pos, bit)) = queue.pop_front() {
+    while let Some((pos, bit)) = stack.pop() {
         event_count += 1;
         if writes_contains(pos, bit) {
             continue; // killed here - defined by this instruction's own write
         }
         for succ in successors_of(pos).into_iter().flatten() {
             if deliver(&mut missing, succ, bit) {
-                queue.push_back((succ, bit));
+                stack.push((succ, bit));
             }
         }
+        peak_queue_len = peak_queue_len.max(stack.len());
     }
 
-    (missing, event_count)
+    (missing, event_count, peak_queue_len)
 }
 
 /// #1756 (FA-07-016) Codex review round 8: the dual, MAY-MISSING
@@ -1477,7 +1508,7 @@ fn prove_definite_register_assignment(
         out
     };
 
-    let (missing, _event_count) = compute_missing_sets(
+    let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
         reachable_count,
         domain_size,
         entry_missing,
@@ -4957,7 +4988,7 @@ mod tests {
         let writes_contains = |pos: usize, bit: usize| (arm_start..join).contains(&pos) && bit == 0;
 
         let entry_missing = RegSet::full(DOMAIN_SIZE); // no SIG0 params: nothing defined at entry
-        let (missing, event_count) = compute_missing_sets(
+        let (missing, event_count, peak_queue_len) = compute_missing_sets(
             reachable_count,
             DOMAIN_SIZE,
             entry_missing,
@@ -4984,6 +5015,10 @@ mod tests {
             "event_count ({event_count}) must be bounded by reachable_count * domain_size \
              ({}), never multiplied further by how many arms compute the identical result",
             reachable_count * DOMAIN_SIZE
+        );
+        assert!(
+            peak_queue_len <= reachable_count * DOMAIN_SIZE,
+            "peak_queue_len ({peak_queue_len}) must never exceed the total-work bound either"
         );
     }
 
@@ -5053,7 +5088,7 @@ mod tests {
         };
 
         let entry_missing = RegSet::full(DOMAIN_SIZE);
-        let (missing, event_count) = compute_missing_sets(
+        let (missing, event_count, peak_queue_len) = compute_missing_sets(
             reachable_count,
             DOMAIN_SIZE,
             entry_missing,
@@ -5074,6 +5109,94 @@ mod tests {
             event_count <= reachable_count * DOMAIN_SIZE,
             "event_count ({event_count}) must be bounded by reachable_count * domain_size \
              ({}), regardless of how many external arms feed the cycle via backedges",
+            reachable_count * DOMAIN_SIZE
+        );
+        assert!(
+            peak_queue_len <= reachable_count * DOMAIN_SIZE,
+            "peak_queue_len ({peak_queue_len}) must never exceed the total-work bound either"
+        );
+    }
+
+    /// Codex review round 9 on PR #1840: reproduces the exact adversarial
+    /// shape described - a zero-parameter function (so `domain_size` = the
+    /// full 4,096-register quota, all missing at entry) entering a wide,
+    /// balanced binary dispatch tree with `LEAVES` = 32,768 leaves (~65,535
+    /// total tree nodes), where nothing anywhere writes anything - every
+    /// one of the 4,096 missing registers survives, unkilled, all the way
+    /// down to every leaf. Under FIFO order, this accumulates an entire
+    /// breadth level - up to `domain_size` bits at EACH of that level's
+    /// nodes - before draining any of it, peaking near the full
+    /// `reachable_count * domain_size` total-work bound (Codex's own
+    /// figure: "about 134 million two-usize tuples, over 2 GiB"). Fixed by
+    /// switching `compute_missing_sets`'s worklist from FIFO to LIFO (see
+    /// its own doc comment for the full argument): popping `(pos, bit)`
+    /// pushes at most 2 new items for that SAME bit, so a bit's delivery
+    /// runs to completion - down to a leaf - before any sibling branch is
+    /// touched, bounding peak size by the current delivery's own depth
+    /// plus a bounded backlog, not by an entire wide level's width times
+    /// `domain_size` at once.
+    #[test]
+    fn c1756_wide_binary_dispatch_tree_bounds_peak_queue_not_just_total_work() {
+        const DOMAIN_SIZE: usize = 2_048;
+        const LEAVES: usize = 4_096;
+        // 1-indexed heap-array tree: position 1 = root, position i's
+        // children are 2*i and 2*i+1. Internal nodes are 1..LEAVES
+        // (32,767 of them - a complete binary tree with LEAVES leaves has
+        // exactly LEAVES-1 internal nodes); leaves are LEAVES..2*LEAVES.
+        // Position 0 = entry, whose only successor is the root (position
+        // 1) - `reachable_count` = 1 (entry) + (2*LEAVES - 1) (tree).
+        let reachable_count = 1 + (2 * LEAVES - 1);
+
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(1), None]
+            } else if pos < LEAVES {
+                [Some(2 * pos), Some(2 * pos + 1)]
+            } else {
+                [None, None] // a leaf
+            }
+        };
+        // Nothing anywhere writes anything - the worst case for how many
+        // registers survive, unkilled, all the way to every leaf.
+        let writes_contains = |_pos: usize, _bit: usize| false;
+
+        let entry_missing = RegSet::full(DOMAIN_SIZE); // zero params: everything missing
+        let (missing, event_count, peak_queue_len) = compute_missing_sets(
+            reachable_count,
+            DOMAIN_SIZE,
+            entry_missing,
+            writes_contains,
+            successors_of,
+        );
+
+        // Correctness: every register is still missing at every leaf,
+        // since nothing anywhere ever defines any of them.
+        for leaf in [LEAVES, LEAVES + 1, 2 * LEAVES - 1] {
+            assert!(
+                missing[leaf].contains(0),
+                "nothing writes anything anywhere in this tree, so every register must still \
+                 be missing at every leaf"
+            );
+        }
+        assert!(
+            event_count <= reachable_count * DOMAIN_SIZE,
+            "event_count ({event_count}) must stay within the total-work bound \
+             ({}) - this is the property round 8 already established, unaffected by \
+             switching from FIFO to LIFO",
+            reachable_count * DOMAIN_SIZE
+        );
+        // The actual claim under test: LIFO keeps the LIVE queue dramatically
+        // smaller than the total-work bound, not just bounded by it - a
+        // generous but far-from-total-work ceiling (tree depth ~16, times a
+        // small constant, plus domain_size for the initial seed) rules out
+        // the "peaks near the full total-work bound" failure mode Codex
+        // described without pinning an exact formula.
+        let generous_ceiling = DOMAIN_SIZE * 64;
+        assert!(
+            peak_queue_len <= generous_ceiling,
+            "peak_queue_len ({peak_queue_len}) must stay far below the total-work bound \
+             ({}) - LIFO order should keep it within a small multiple of domain_size \
+             ({DOMAIN_SIZE}), not anywhere near reachable_count * domain_size",
             reachable_count * DOMAIN_SIZE
         );
     }
