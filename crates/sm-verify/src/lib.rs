@@ -82,6 +82,35 @@ pub enum VerificationCode {
     /// (`SEMCODE_SIGNATURE_MIN_REVISION`+); a signature-less artifact has no
     /// sound `IN[entry]` to prove against and is unaffected by this code.
     UndefinedRegisterRead,
+    /// #1756 Codex review round 13 (owner decision): the definite-
+    /// register-assignment analysis would need to allocate dense per-
+    /// leader dataflow state - `leader_count * ceil(register_domain_size
+    /// / 64)` words - exceeding `VerificationLimits::max_state_words`, a
+    /// deterministic, verifier-OWNED resource bound checked via
+    /// `checked_mul` BEFORE that allocation ever happens (overflow
+    /// itself counts as exceeding it). This is a genuinely different
+    /// resource domain than `RuntimeQuotas` (#1751: execution resources
+    /// and static-verification resources are distinct and must not be
+    /// conflated) and different from `ResourceLimitExceeded` above
+    /// (which reports pre-existing decode/symbol-table budgets, not this
+    /// analysis's own working state). Exceeding this means the artifact
+    /// could not be PROVEN within the selected verification resource
+    /// envelope - it does not mean the program's semantics are actually
+    /// invalid, and admission still fails closed regardless.
+    AnalysisStateLimitExceeded,
+    /// #1756 Codex review round 13 (owner decision): the same analysis
+    /// pass's own deterministic, machine-independent work-unit count
+    /// (see `compute_missing_sets`'s work-unit accounting - one unit per
+    /// register checked at entry seeding, or per missing-bit delivery
+    /// dequeued from the worklist) exceeded
+    /// `VerificationLimits::max_work_units` before the dataflow fixed
+    /// point converged. Distinct from `AnalysisStateLimitExceeded`: this
+    /// can fire even when the state budget was never in danger, if
+    /// reaching convergence itself takes more propagation steps than the
+    /// configured envelope allows (a branch-dense CFG with a slowly-
+    /// narrowing register domain - see the round-13 finding). Never
+    /// inferred from wall-clock time, allocator behavior, or CPU cycles.
+    AnalysisWorkLimitExceeded,
 }
 
 #[cfg(feature = "std")]
@@ -113,6 +142,78 @@ pub struct VerifiedFunction {
 pub struct VerifiedProgram {
     pub header: SemcodeHeaderSpec,
     pub functions: Vec<VerifiedFunction>,
+}
+
+/// #1756 Codex review round 13 (owner decision): a deterministic,
+/// verifier-OWNED resource envelope for static analysis passes such as
+/// definite-register-assignment (#1756 / FA-07-016) - entirely distinct
+/// from `RuntimeQuotas` (`sm_runtime_core` - execution resources only,
+/// see #1751) and from the pre-existing decode/symbol-table budgets
+/// reported via `VerificationCode::ResourceLimitExceeded`. There are
+/// three distinct resource domains - artifact/decode resources,
+/// verifier-analysis resources, runtime-execution resources - and they
+/// must never be conflated (see `docs/spec/verifier.md`).
+///
+/// `verify_semcode_token`/`verify_semcode_token_with_quotas`/
+/// `verify_semcode` (the convenience entrypoints) admit against
+/// `VerificationLimits::default_profile()`; use
+/// `verify_semcode_token_with_quotas_and_limits` to admit against an
+/// explicit profile instead. No verifier limit here is ever inferred
+/// from `RuntimeQuotas::max_steps`/`max_calls` or any other execution
+/// quota.
+#[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerificationLimits {
+    /// Upper bound on `leader_count * ceil(register_domain_size / 64)` -
+    /// the exact word count the definite-register-assignment analysis's
+    /// dense per-leader `RegSet` state would need. Checked via
+    /// `checked_mul` BEFORE that state is allocated (see
+    /// `check_analysis_state_budget`); overflow itself counts as
+    /// exceeding this limit, since there is no finite word count to
+    /// compare against in that case.
+    pub max_state_words: usize,
+    /// Upper bound on the analysis's own deterministic work-unit count
+    /// (see `compute_missing_sets`'s work-unit accounting), never
+    /// inferred from wall-clock time, allocator behavior, or CPU cycles:
+    /// a purely combinatorial count of meaningful lattice-propagation
+    /// steps, machine-independent by construction.
+    pub max_work_units: usize,
+}
+
+#[cfg(feature = "std")]
+impl VerificationLimits {
+    /// #1756 Codex review round 13: CANDIDATE default profile pending
+    /// explicit owner sign-off - not a frozen release value. Selected
+    /// from the benchmark table in this round's PR reply/commit message
+    /// (ordinary compiler-generated programs, the largest existing
+    /// golden fixtures, the #1756 adversarial stress fixtures, and
+    /// synthetic leader-count sweeps at register domains of 64, 4,096,
+    /// and 8,192 - `max_registers`'s own ceiling, so `domain_size` can
+    /// never legitimately exceed it). Every measured ordinary/golden/
+    /// already-committed-adversarial shape needed at most a few million
+    /// state words and a few hundred million work units, several orders
+    /// of magnitude below these limits; these numbers instead target the
+    /// worst case directly - at `domain_size = 8,192` (the largest legal
+    /// domain), `max_state_words` admits up to ~65,536 genuine leaders
+    /// (`8_388_608 / word_count(8192)`) and `max_work_units` admits a
+    /// comparable order via the same domain factor - both landing at
+    /// roughly the same "tens of thousands of genuine branch/merge
+    /// points" ceiling by design, well above any real compiled program
+    /// this repository has produced, well below the round-13 finding's
+    /// 1M-leader pathological scale.
+    pub const fn default_profile() -> Self {
+        Self {
+            max_state_words: 8_388_608, // 2^23 - 64 MiB of dense RegSet backing storage, worst case
+            max_work_units: 536_870_912, // 2^29 - ~537M lattice-propagation steps
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl Default for VerificationLimits {
+    fn default() -> Self {
+        Self::default_profile()
+    }
 }
 
 #[cfg(feature = "std")]
@@ -296,10 +397,43 @@ pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectR
 /// tokens whose register/symbol usage exceeds `VerifiedLocal`'s budget but
 /// stays within its own. The returned token's admission proof reflects only
 /// the quotas passed here - it says nothing about any other profile.
+///
+/// #1756 Codex review round 13 (owner decision): admits against
+/// `VerificationLimits::default_profile()` - use
+/// `verify_semcode_token_with_quotas_and_limits` to admit against an
+/// explicit verification-resource profile instead. `RuntimeQuotas` and
+/// `VerificationLimits` are deliberately separate parameters, not
+/// combined into one profile: they govern different resource domains
+/// (execution vs. static-verification, see `VerificationLimits`'s own
+/// doc comment) and must not be conflated.
 #[cfg(feature = "std")]
 pub fn verify_semcode_token_with_quotas(
     bytes: &[u8],
     quotas: RuntimeQuotas,
+) -> Result<VerifiedSemCode<'_>, RejectReport> {
+    verify_semcode_token_with_quotas_and_limits(
+        bytes,
+        quotas,
+        VerificationLimits::default_profile(),
+    )
+}
+
+/// Admission gate for SemCode bytes against an explicit quota profile AND
+/// an explicit verification-resource profile.
+///
+/// #1756 Codex review round 13 (owner decision): the quota-aware entry
+/// point that binds the exact `VerificationLimits` admission is checked
+/// against, for callers that need control over the definite-register-
+/// assignment analysis's own resource envelope (`max_state_words`,
+/// `max_work_units`) rather than the default profile
+/// `verify_semcode_token_with_quotas` uses. `quotas` and `limits` remain
+/// two separate parameters on purpose - see `VerificationLimits`'s own
+/// doc comment for why they must not be merged into one profile.
+#[cfg(feature = "std")]
+pub fn verify_semcode_token_with_quotas_and_limits(
+    bytes: &[u8],
+    quotas: RuntimeQuotas,
+    limits: VerificationLimits,
 ) -> Result<VerifiedSemCode<'_>, RejectReport> {
     let mut diagnostics = Vec::new();
 
@@ -397,7 +531,7 @@ pub fn verify_semcode_token_with_quotas(
             break;
         }
 
-        match verify_function_code(env, &header, &quotas) {
+        match verify_function_code(env, &header, &quotas, &limits) {
             Ok(function) => {
                 functions.push(function.verified.clone());
                 pending_functions.push(function);
@@ -590,6 +724,7 @@ fn verify_function_code(
     env: &sm_format::semcode_decode::DecodedFunctionEnvelope,
     header: &SemcodeHeaderSpec,
     quotas: &RuntimeQuotas,
+    limits: &VerificationLimits,
 ) -> Result<PendingVerifiedFunction, RejectReport> {
     let name = env.name.as_str();
 
@@ -899,6 +1034,7 @@ fn verify_function_code(
             &instruction_successors,
             &reachable_offsets,
             entry_param_count,
+            limits,
         )?;
     }
 
@@ -1344,6 +1480,25 @@ fn deliver(missing: &mut [RegSet], target: usize, bit: usize) -> bool {
 /// an empty position costs nothing beyond its own array slot, and only
 /// positions whose missing set genuinely spans much of the domain cost
 /// anywhere close to the old unconditional `domain_size` width.
+///
+/// **Work budget** (#1756 Codex review round 13, owner decision): a
+/// deterministic `work_units` counter - one unit per register checked
+/// while seeding from entry, plus one per `(position, bit)` pair
+/// dequeued from the worklist (`event_count`'s own definition) - is
+/// checked against `max_work_units` after every increment, in BOTH
+/// loops below, aborting with `Err(work_units)` the instant it is
+/// exceeded. This is deliberately machine-independent: it counts
+/// discrete lattice-propagation steps, never wall-clock time, allocator
+/// behavior, or CPU cycles, and it aborts mid-computation rather than
+/// only checking a final total - a genuinely unbounded input (e.g. the
+/// round-13 branch-dense construction with no budget) must never be
+/// allowed to run this loop to completion before being rejected. The
+/// bound this enforces is exactly the same one the doc comments above
+/// already prove: `work_units <= domain_size + reachable_count *
+/// domain_size`, so `max_work_units` need only be compared against that
+/// same formula (with `reachable_count` here being the CALLER's
+/// compressed `leader_count`, per `prove_definite_register_assignment`'s
+/// "Leader compression" doc comment) - it is never inferred separately.
 #[cfg(feature = "std")]
 fn compute_missing_sets(
     reachable_count: usize,
@@ -1351,7 +1506,8 @@ fn compute_missing_sets(
     entry_missing: RegSet,
     writes_contains: impl Fn(usize, usize) -> bool,
     mut successors_of: impl FnMut(usize) -> [Option<usize>; 2],
-) -> (Vec<RegSet>, usize, usize) {
+    max_work_units: usize,
+) -> Result<(Vec<RegSet>, usize, usize), usize> {
     let mut missing: Vec<RegSet> = (0..reachable_count)
         .map(|pos| {
             if pos == 0 {
@@ -1362,7 +1518,7 @@ fn compute_missing_sets(
         })
         .collect();
     if reachable_count == 0 {
-        return (missing, 0, 0);
+        return Ok((missing, 0, 0));
     }
 
     // A stack (LIFO), not a FIFO queue - see the peak-live-memory doc
@@ -1370,12 +1526,17 @@ fn compute_missing_sets(
     // total-work bound at all.
     let mut stack: Vec<(usize, usize)> = Vec::new();
     let mut peak_queue_len: usize = 0;
+    let mut work_units: usize = 0;
 
     // Seed from entry's own MISSING_OUT (post-write) - entry's own MISSING
     // is fixed and never re-delivered to (see `deliver`), so this is the
     // one place entry's contribution enters the worklist.
     let entry_successors = successors_of(0);
     for bit in 0..domain_size {
+        work_units += 1;
+        if work_units > max_work_units {
+            return Err(work_units);
+        }
         if missing[0].contains(bit) && !writes_contains(0, bit) {
             for succ in entry_successors.into_iter().flatten() {
                 if deliver(&mut missing, succ, bit) {
@@ -1388,6 +1549,10 @@ fn compute_missing_sets(
 
     let mut event_count: usize = 0;
     while let Some((pos, bit)) = stack.pop() {
+        work_units += 1;
+        if work_units > max_work_units {
+            return Err(work_units);
+        }
         event_count += 1;
         if writes_contains(pos, bit) {
             continue; // killed here - defined by this instruction's own write
@@ -1400,7 +1565,7 @@ fn compute_missing_sets(
         peak_queue_len = peak_queue_len.max(stack.len());
     }
 
-    (missing, event_count, peak_queue_len)
+    Ok((missing, event_count, peak_queue_len))
 }
 
 /// #1756 Codex review round 12: `JMP_IF` unconditionally records
@@ -1424,6 +1589,34 @@ fn dedup_successors(succs: [Option<usize>; 2]) -> [Option<usize>; 2] {
     match succs {
         [Some(a), Some(b)] if a == b => [Some(a), None],
         other => other,
+    }
+}
+
+/// #1756 Codex review round 13 (owner decision): the deterministic,
+/// verifier-OWNED pre-allocation admission check for the definite-
+/// register-assignment analysis's dense per-leader dataflow state -
+/// `leader_count * ceil(register_domain_size / 64)` words, the exact
+/// size of both `build_leader_chains`'s `chain_killed` array and
+/// `compute_missing_sets`'s `missing` array (the same order of
+/// magnitude either way, so one check before EITHER begins allocating
+/// covers both). `checked_mul` makes overflow itself a deterministic
+/// rejection rather than undefined/wrapping behavior - there is no
+/// finite word count to report in that case, only that the true count is
+/// unrepresentable and therefore certainly exceeds any finite
+/// `max_state_words`. Returns `Ok(state_words)` (the exact count, for
+/// accounting) when within budget, `Err(reported_words)` otherwise -
+/// `reported_words` is the real count when it didn't overflow, or
+/// `usize::MAX` as an honest "this would overflow" sentinel when it did.
+#[cfg(feature = "std")]
+fn check_analysis_state_budget(
+    leader_count: usize,
+    domain_size: usize,
+    max_state_words: usize,
+) -> Result<usize, usize> {
+    match leader_count.checked_mul(RegSet::word_count(domain_size)) {
+        Some(state_words) if state_words <= max_state_words => Ok(state_words),
+        Some(state_words) => Err(state_words),
+        None => Err(usize::MAX),
     }
 }
 
@@ -1699,6 +1892,7 @@ fn find_first_violation(
 /// cumulative kill set (`build_leader_chains`) and, once the compressed
 /// worklist converges, to validate its reads (`find_first_violation`).
 #[cfg(feature = "std")]
+#[allow(clippy::too_many_arguments)] // private helper; `limits` (round 13) is the 8th, no natural grouping
 fn prove_definite_register_assignment(
     function: &str,
     code: &[u8],
@@ -1707,6 +1901,7 @@ fn prove_definite_register_assignment(
     instruction_successors: &[InstructionSuccessors],
     reachable_offsets: &HashSet<usize>,
     entry_param_count: usize,
+    limits: &VerificationLimits,
 ) -> Result<(), RejectReport> {
     if instr_starts.is_empty() {
         return Ok(());
@@ -1778,6 +1973,33 @@ fn prove_definite_register_assignment(
     // ("Leader compression") for the finding this closes.
     let is_leader = compute_leaders(reachable_count, successors_of);
     let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+
+    // #1756 Codex review round 13 (owner decision): the deterministic
+    // verifier-resource admission check, BEFORE either `build_leader_
+    // chains` or `compute_missing_sets` allocates its leader_count-sized
+    // dense state - see `check_analysis_state_budget`'s own doc comment
+    // and `VerificationLimits`. A genuinely branch-dense reachable graph
+    // (round 13's finding) is not a bug in leader compression - it is
+    // the correct, minimal leader set an EXACT MUST-dataflow proof
+    // requires - so this is a resource-envelope decision, not a
+    // correctness fix.
+    let leader_count = leader_positions.len();
+    if let Err(state_words) =
+        check_analysis_state_budget(leader_count, domain_size, limits.max_state_words)
+    {
+        return Err(reject_one(
+            function,
+            VerificationCode::AnalysisStateLimitExceeded,
+            0,
+            format!(
+                "definite-register-assignment analysis needs {} dense-state word(s) ({leader_count} leader(s) x {} word(s)/leader for a {domain_size}-register domain), exceeding the verification state budget of {}",
+                if state_words == usize::MAX { "more than usize::MAX".to_string() } else { state_words.to_string() },
+                RegSet::word_count(domain_size),
+                limits.max_state_words
+            ),
+        ));
+    }
+
     let leader_index_of = |pos: usize| -> usize {
         leader_positions
             .binary_search(&pos)
@@ -1799,13 +2021,27 @@ fn prove_definite_register_assignment(
     let compressed_successors_of =
         |leader_idx: usize| -> [Option<usize>; 2] { chain_targets[leader_idx] };
 
-    let (missing, _event_count, _peak_queue_len) = compute_missing_sets(
-        leader_positions.len(),
+    let (missing, _event_count, _peak_queue_len) = match compute_missing_sets(
+        leader_count,
         domain_size,
         entry_missing,
         compressed_writes_contains,
         compressed_successors_of,
-    );
+        limits.max_work_units,
+    ) {
+        Ok(result) => result,
+        Err(work_units) => {
+            return Err(reject_one(
+                function,
+                VerificationCode::AnalysisWorkLimitExceeded,
+                0,
+                format!(
+                    "definite-register-assignment analysis performed {work_units} lattice-propagation work unit(s), exceeding the verification work budget of {}",
+                    limits.max_work_units
+                ),
+            ));
+        }
+    };
 
     // Validate reads against the converged fixed point only - never during
     // an unstable iteration, so the reported diagnostic always describes the
@@ -5297,7 +5533,9 @@ mod tests {
             entry_missing,
             writes_contains,
             successors_of,
-        );
+            usize::MAX,
+        )
+        .expect("test-only call: no verification-resource budget under test here");
         assert_eq!(
             missing.len(),
             reachable_count,
@@ -5397,7 +5635,9 @@ mod tests {
             entry_missing,
             writes_contains,
             successors_of,
-        );
+            usize::MAX,
+        )
+        .expect("test-only call: no verification-resource budget under test here");
         // Every arm excludes a different register (arm i excludes bit i),
         // so the intersection over all ARMS arms - reflected at every ring
         // position once converged - is empty.
@@ -5470,7 +5710,9 @@ mod tests {
             entry_missing,
             writes_contains,
             successors_of,
-        );
+            usize::MAX,
+        )
+        .expect("test-only call: no verification-resource budget under test here");
 
         // Correctness: every register is still missing at every leaf,
         // since nothing anywhere ever defines any of them.
@@ -5559,7 +5801,9 @@ mod tests {
             entry_missing,
             writes_contains,
             successors_of,
-        );
+            usize::MAX,
+        )
+        .expect("test-only call: no verification-resource budget under test here");
 
         // Correctness: early on, most registers are still missing; by the
         // end of the tail, nothing is.
@@ -5657,7 +5901,9 @@ mod tests {
             entry_missing,
             |leader_idx, bit| chain_killed[leader_idx].contains(bit),
             |leader_idx| chain_targets[leader_idx],
-        );
+            usize::MAX,
+        )
+        .expect("test-only call: no verification-resource budget under test here");
         assert!(
             missing[0].contains(1),
             "register 1 is never written anywhere, so it must still be missing at entry"
@@ -5731,7 +5977,9 @@ mod tests {
             entry_missing,
             |leader_idx, bit| chain_killed[leader_idx].contains(bit),
             |leader_idx| chain_targets[leader_idx],
-        );
+            usize::MAX,
+        )
+        .expect("test-only call: no verification-resource budget under test here");
 
         let reads_of = |pos: usize, visit: &mut dyn FnMut(usize)| {
             if pos == 3 || pos == 2 {
@@ -5855,7 +6103,9 @@ mod tests {
             entry_missing,
             |leader_idx, bit| chain_killed[leader_idx].contains(bit),
             |leader_idx| chain_targets[leader_idx],
-        );
+            usize::MAX,
+        )
+        .expect("test-only call: no verification-resource budget under test here");
         assert!(
             event_count <= DOMAIN_SIZE,
             "event_count ({event_count}) must stay within domain_size ({DOMAIN_SIZE}) alone, \
@@ -5887,6 +6137,323 @@ mod tests {
         verify_semcode(&bytes).expect(
             "r0 is defined before any read, regardless of how long the self-targeting \
              conditional-branch chain is",
+        );
+    }
+
+    /// #1756 Codex review round 13 (owner decision): builds `count` real
+    /// genuine diamonds (`JMP_IF` with one arm jumping straight to the
+    /// merge, the other falling through one no-op instruction first) -
+    /// `r0` is the always-defined condition register; every diamond's
+    /// arms are otherwise vacuous. If `undefined_tail_read` is `true`,
+    /// the function ends by reading `r1` without ever defining it
+    /// (pulling `r1` into the register domain and keeping it missing
+    /// across the whole chain, inflating work-unit propagation);
+    /// otherwise it ends by defining `r1` then reading it (an accepting
+    /// program, `r1` dying at entry just like `r0` - domain stays wide
+    /// only in shape, not in propagated content).
+    fn build_diamond_chain(count: usize, undefined_tail_read: bool) -> Vec<IrInstr> {
+        let mut instrs = vec![IrInstr::LoadBool { dst: 0, val: true }];
+        for i in 0..count {
+            instrs.push(IrInstr::JmpIf {
+                cond: 0,
+                label: format!("merge{i}"),
+            });
+            instrs.push(IrInstr::LoadBool { dst: 2, val: false }); // false-arm body: one no-op write to an unrelated register
+            instrs.push(IrInstr::Label {
+                name: format!("merge{i}"),
+            });
+        }
+        if !undefined_tail_read {
+            instrs.push(IrInstr::LoadI32 { dst: 1, val: 0 });
+        }
+        instrs.push(IrInstr::Ret { src: Some(1) });
+        instrs
+    }
+
+    /// #1756 Codex review round 13 (owner decision): a small genuine-
+    /// diamond program - real branches, real merges, nothing spurious -
+    /// must still verify normally under the default resource envelope.
+    /// The round-13 finding is about a resource BOUND, not a
+    /// correctness defect; ordinary, modest programs must be entirely
+    /// unaffected.
+    #[test]
+    fn c1756_small_genuine_diamond_program_verifies_normally() {
+        let bytes = emit_test_function(build_diamond_chain(2, false));
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits::default_profile(),
+        )
+        .expect("a handful of genuine diamonds, entirely defined, must verify normally");
+    }
+
+    /// #1756 Codex review round 13 (owner decision): a construction whose
+    /// exact `state_words` (`leader_count * ceil(domain_size / 64)` -
+    /// here `2*n+1`, verified by direct construction: `n` genuine
+    /// diamonds each contribute exactly 2 leaders, plus entry) exceeds
+    /// `max_state_words` must be rejected deterministically, with
+    /// `AnalysisStateLimitExceeded` - and, by construction (see
+    /// `prove_definite_register_assignment`'s round-13 pre-check), BEFORE
+    /// `build_leader_chains` or `compute_missing_sets` ever allocates
+    /// their leader_count-sized dense state.
+    #[test]
+    fn c1756_construction_exceeding_state_budget_rejects_before_large_allocation() {
+        const N: usize = 1_000; // state_words = leader_count = 2*N + 1 = 2001
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 2_000, // one below the exact 2,001 words this needs
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err("must reject on the state budget before any large allocation");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded
+        );
+        assert!(report.diagnostics[0].message.contains("2001"));
+        assert!(report.diagnostics[0].message.contains("2000"));
+    }
+
+    /// #1756 Codex review round 13 (owner decision): a construction whose
+    /// `state_words` stays comfortably within budget but whose
+    /// `work_units` (verified exactly, by binary search against the real
+    /// pipeline, to be `4*n+3` for `n` genuine vacuous diamonds with an
+    /// undefined tail read) exceeds `max_work_units` must be rejected
+    /// deterministically on the work budget specifically -
+    /// `AnalysisWorkLimitExceeded`, not `AnalysisStateLimitExceeded`.
+    #[test]
+    fn c1756_construction_within_state_budget_exceeding_work_budget_rejects_on_work() {
+        const N: usize = 5; // state_words = 11, work_units = 4*5+3 = 23 exactly
+        let bytes = emit_test_function(build_diamond_chain(N, true));
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 1_000, // far above the 11 words this actually needs
+                max_work_units: 22,     // one below the exact 23 units this needs
+            },
+        )
+        .expect_err("must reject on the work budget, state budget was never in danger");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded
+        );
+        assert!(report.diagnostics[0].message.contains("23"));
+        assert!(report.diagnostics[0].message.contains("22"));
+    }
+
+    /// #1756 Codex review round 13 (owner decision): repeated
+    /// verification of identical bytes against an identical resource
+    /// envelope must yield an identical diagnostic every time - same
+    /// error code, same resource-kind identity (`AnalysisStateLimitExceeded`
+    /// vs `AnalysisWorkLimitExceeded` are distinct, stable variants,
+    /// precisely so this is a plain code comparison), same used/limit
+    /// accounting (the message text), and the diagnostic carries no
+    /// per-function identity here because this is a whole-function
+    /// admission decision (mirrors
+    /// `c1756_case26_repeated_verification_yields_identical_diagnostic`
+    /// for the definite-assignment code path itself).
+    #[test]
+    fn c1756_repeated_verification_of_resource_limit_yields_identical_diagnostic() {
+        const N: usize = 1_000;
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        let limits = VerificationLimits {
+            max_state_words: 2_000,
+            max_work_units: usize::MAX,
+        };
+        let first = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            limits,
+        )
+        .expect_err("must reject");
+        for _ in 0..9 {
+            let again = verify_semcode_token_with_quotas_and_limits(
+                &bytes,
+                RuntimeQuotas::verified_local(),
+                limits,
+            )
+            .expect_err("must reject");
+            assert_eq!(
+                again, first,
+                "repeated verification against an identical resource envelope must produce an \
+                 identical diagnostic"
+            );
+        }
+    }
+
+    /// #1756 Codex review round 13 (owner decision): exact boundary
+    /// behavior for the state-words budget - `usage == limit` is
+    /// accepted for resource accounting purposes (the state check itself
+    /// must not fire; the construction here is fully defined, so the
+    /// overall result is a genuine accept), `usage == limit + 1` is a
+    /// deterministic resource rejection. No off-by-one ambiguity.
+    #[test]
+    fn c1756_state_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
+        const N: usize = 5; // state_words = 11 exactly
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 11,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect("usage == limit must be accepted for state-budget accounting");
+
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 10,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err("usage == limit + 1 must be a deterministic resource rejection");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded
+        );
+    }
+
+    /// #1756 Codex review round 13 (owner decision): exact boundary
+    /// behavior for the work-units budget, mirroring the state-budget
+    /// boundary test above.
+    #[test]
+    fn c1756_work_budget_boundary_usage_equals_limit_vs_limit_plus_one() {
+        const N: usize = 5; // work_units = 23 exactly (state_words = 11, well within budget)
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 1_000,
+                max_work_units: 23,
+            },
+        )
+        .expect("usage == limit must be accepted for work-budget accounting");
+
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 1_000,
+                max_work_units: 22,
+            },
+        )
+        .expect_err("usage == limit + 1 must be a deterministic resource rejection");
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisWorkLimitExceeded
+        );
+    }
+
+    /// #1756 Codex review round 13 (owner decision): `checked_mul`
+    /// overflow itself must be treated as a deterministic rejection, not
+    /// a panic or wrapping miscalculation - there is no finite word
+    /// count to report in that case, only that the true count is
+    /// unrepresentable and therefore certainly exceeds any finite
+    /// `max_state_words`.
+    #[test]
+    fn c1756_analysis_state_budget_checked_mul_overflow_is_deterministic_rejection() {
+        let result = check_analysis_state_budget(usize::MAX, 128, usize::MAX - 1);
+        assert_eq!(
+            result,
+            Err(usize::MAX),
+            "leader_count * word_count(domain_size) overflowing usize must report the \
+             overflow sentinel, not panic or silently wrap"
+        );
+    }
+
+    /// #1756 Codex review round 13 (owner decision): a permanent
+    /// reproduction of Codex's genuine-diamond construction - direct
+    /// accounting evidence (leader_count, event_count, real memory) via
+    /// `compute_leaders`/`build_leader_chains`/`compute_missing_sets`,
+    /// confirming the underlying solver's behavior on this shape is
+    /// unchanged by round 13 (a resource envelope was added around it;
+    /// the solver itself was not touched) and matches the finding's own
+    /// figures at scale.
+    #[test]
+    fn c1756_genuine_diamond_chain_accounting_matches_finding() {
+        const DOMAIN_SIZE: usize = 4096;
+        const DIAMOND_COUNT: usize = 10_000;
+        let reachable_count = 1 + 3 * DIAMOND_COUNT;
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(1), None]
+            } else {
+                let rel = pos - 1;
+                let diamond = rel / 3;
+                let slot = rel % 3;
+                match slot {
+                    0 => {
+                        let merge = 1 + 3 * diamond + 2;
+                        let false_arm = 1 + 3 * diamond + 1;
+                        [Some(merge), Some(false_arm)]
+                    }
+                    1 => {
+                        let merge = 1 + 3 * diamond + 2;
+                        [Some(merge), None]
+                    }
+                    2 => {
+                        if diamond + 1 < DIAMOND_COUNT {
+                            [Some(1 + 3 * (diamond + 1)), None]
+                        } else {
+                            [None, None]
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        };
+        let no_writes = |_pos: usize, _visit: &mut dyn FnMut(usize)| {};
+
+        let is_leader = compute_leaders(reachable_count, successors_of);
+        let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+        assert_eq!(
+            leader_positions.len(),
+            2 * DIAMOND_COUNT + 1,
+            "each genuine diamond contributes exactly 2 leaders (branch target + merge), plus entry"
+        );
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            no_writes,
+            leader_index_of,
+        );
+        let entry_missing = RegSet::full(DOMAIN_SIZE);
+        let (missing, event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+            usize::MAX,
+        )
+        .expect("unbounded work budget must converge");
+        let actual_words: usize = missing.iter().map(|s| s.words.len()).sum();
+
+        assert_eq!(
+            event_count,
+            2 * DIAMOND_COUNT * DOMAIN_SIZE,
+            "each diamond delivers every one of the domain's still-missing bits across exactly \
+             2 dequeued events (branch-target and merge), matching the finding's own \
+             ~2*leader_count*domain_size accounting"
+        );
+        assert_eq!(
+            actual_words,
+            leader_positions.len() * RegSet::word_count(DOMAIN_SIZE),
+            "with nothing anywhere killing any bit, every leader's missing set genuinely spans \
+             the full domain - this is the real, unavoidable cost this round's resource \
+             envelope exists to bound, not a representation bug"
         );
     }
 

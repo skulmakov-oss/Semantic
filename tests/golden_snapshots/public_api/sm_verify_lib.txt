@@ -30,6 +30,12 @@ pub struct VerifiedProgram {
 pub header: SemcodeHeaderSpec,
 pub functions: Vec<VerifiedFunction>,
 #[cfg(feature = "std")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VerificationLimits {
+pub max_state_words: usize,
+pub max_work_units: usize,
+pub const fn default_profile() -> Self {
+#[cfg(feature = "std")]
 #[derive(Debug)]
 pub struct VerifiedSemCode<'a> {
 #[cfg(feature = "std")]
@@ -54,5 +60,7 @@ pub fn with_decoded_envelopes<R, F>(&self, f: F) -> R where F: for<'scope> FnOnc
 pub fn verify_semcode_token(bytes: &[u8]) -> Result<VerifiedSemCode<'_>, RejectReport> {
 #[cfg(feature = "std")]
 pub fn verify_semcode_token_with_quotas( bytes: &[u8], quotas: RuntimeQuotas, ) -> Result<VerifiedSemCode<'_>, RejectReport> {
+#[cfg(feature = "std")]
+pub fn verify_semcode_token_with_quotas_and_limits( bytes: &[u8], quotas: RuntimeQuotas, limits: VerificationLimits, ) -> Result<VerifiedSemCode<'_>, RejectReport> {
 #[cfg(feature = "std")]
 pub fn verify_semcode(bytes: &[u8]) -> Result<VerifiedProgram, RejectReport> {

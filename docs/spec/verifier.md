@@ -401,6 +401,57 @@ range/quota failure. `UndefinedRegisterRead` means the register number is
 in range but no incoming execution path has been proven to define it before
 this read.
 
+**Resource envelope.** Even fully compressed (see rounds 11-12 of #1756's
+own review history: non-branching runs and duplicate-successor artifacts
+both collapse to a small leader set), a genuinely branch-dense function
+still needs one dense dataflow slot per real decision point - `leader_count
+* ceil(register_domain_size / 64)` words of state, and a proportional
+amount of propagation work to reach the fixed point. Neither quantity is
+bounded by any *other* existing admission check (register-domain size is
+capped by the register-budget quota, but `leader_count` - the number of
+genuine branch/merge points a function can contain - is not), so this pass
+admits only within an explicit `VerificationLimits` envelope; see "Verifier
+resource budgets" below.
+
+## Verifier resource budgets
+
+There are three distinct resource domains in this codebase, and they must
+never be conflated:
+
+- **Artifact/decode resources** - byte-level limits enforced during
+  `sm_format::semcode_decode` (header size, section lengths, and similar),
+  reported as `VerificationCode::ResourceLimitExceeded` alongside the
+  pre-existing `RuntimeQuotas`-derived checks (register/symbol-table
+  budgets) in `verify_function_code`/`verify_semcode_token_with_quotas`.
+- **Verifier-analysis resources** - the deterministic working-state and
+  work-unit envelope a static analysis pass (currently: definite register
+  assignment, #1756 / FA-07-016) needs to reach its proof, expressed as
+  `VerificationLimits` (`sm-verify`). Reported as
+  `VerificationCode::AnalysisStateLimitExceeded` /
+  `AnalysisWorkLimitExceeded`.
+- **Runtime-execution resources** - `RuntimeQuotas` (`sm_runtime_core`),
+  governing VM execution after admission (`max_steps`, `max_calls`, and so
+  on).
+
+`VerificationLimits` is never inferred from `RuntimeQuotas::max_steps`,
+`max_calls`, or any other execution quota, and is never attached to
+`RuntimeQuotas` for API convenience - #1751 established that conflating a
+dynamic execution resource with a static verifier bound is unsound, and
+that ruling remains authoritative. Exact (non-approximating) static
+verification is performed only within the selected, explicitly-bound
+`VerificationLimits` envelope; the convenience entry points
+(`verify_semcode_token`, `verify_semcode_token_with_quotas`,
+`verify_semcode`) admit against `VerificationLimits::default_profile()`,
+and `verify_semcode_token_with_quotas_and_limits` binds an explicit
+profile instead. Exceeding either bound fails closed, deterministically,
+before the corresponding unsafe allocation or work begins - never via a
+timeout, an OS/RSS memory observation, or any other non-portable,
+machine-dependent signal. Resource exhaustion means the analysis could not
+be proven within the selected envelope; it does not mean the program's
+semantics are actually invalid, and canonical admission still fails closed
+either way - there is no fallback to a weaker analysis, no "assume
+defined," and no partial-proof acceptance.
+
 ## Verified Execution Rule
 
 The standard `.smc` execution route must require `sm-verify` admission.
