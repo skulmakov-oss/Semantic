@@ -456,29 +456,39 @@ both fields' enforcement did not yet match this intended scope):
   actual `size_of::<T>()`, which can vary by target) - the same bytes are
   admitted or rejected on every host, deterministically.
 
-  As of round 16 of #1756's own review history, the enforced formula is
+  As of round 17 of #1756's own review history, the enforced formula is
   `required_state_words = raw_words + dense_words + fixed_words`, where:
 
-  - `raw_words` (round 16) is the RAW reachable-node representation cost
-    `dataflow_domain_accounting` and `compute_leaders` build - scaling
-    with `reachable_count` (a `usize`-sized `reachable_indices` entry, a
-    `u32`-sized entry in each of the two CSR offset tables, and a
-    `bool`-sized `is_leader` entry, per reachable node) and with the
-    reachable instruction stream's own byte length (bounding `reads_
+  - `raw_words` (round 16, corrected round 17) is the RAW reachable-node
+    representation cost `dataflow_domain_accounting` and `compute_
+    leaders` build - scaling with `reachable_count` (a `usize`-sized
+    `reachable_indices` entry, a `u32`-sized entry in each of the two CSR
+    offset tables, and a `bool`-sized `is_leader` entry, per reachable
+    node) and with `reachable_instruction_bytes` - the TOTAL ENCODED
+    BYTES OF REACHABLE INSTRUCTIONS ONLY, deliberately NOT the total
+    structural instruction-section length (`instr_len`), which may also
+    include structurally valid but unreachable trailing code this
+    analysis never decodes (round 17's correction, after round 16's own
+    `instr_len`-based proxy overcharged unreachable padding, changing
+    this verifier's pre-existing "unreachable code is not judged by this
+    pass" admission policy). `reachable_instruction_bytes` bounds `reads_
     flat.len() + writes_flat.len()`, and the transient pre-dedup
     `universe` buffer, via a sound information-theoretic argument: every
-    register operand costs exactly 2 bytes to encode, so the stream's own
-    byte length bounds how many can ever be decoded, independent of how
-    they are distributed across individual instructions - see `check_raw_
-    node_state_budget`'s doc comment for the exact derivation). Checked
-    BEFORE `dataflow_domain_accounting` allocates anything - `reachable_
-    count` and the reachable instruction stream's length are both already
-    known for free at that point, so this protection is real, not
-    retroactive. Closes a gap round 15 explicitly, but incorrectly,
-    excluded: a genuinely branch-FREE reachable chain has `leader_count =
-    1` regardless of length, so `dense_words`/`fixed_words` below alone
-    charge almost nothing for it no matter how large `reachable_count`
-    grows.
+    register operand costs exactly 2 bytes to encode, so the reachable
+    instructions' own combined byte length bounds how many can ever be
+    decoded, independent of how they are distributed across individual
+    instructions - see `check_raw_node_state_budget`'s and `reachable_
+    instruction_bytes`'s own doc comments for the exact derivation. Both
+    `reachable_count` and `reachable_instruction_bytes` are computed BEFORE
+    `dataflow_domain_accounting` allocates anything, from already-known
+    instruction boundaries (`instr_starts`) and the reachable-offset set
+    (`reachable_offsets`) - no CSR table, and no sorted copy of `
+    reachable_offsets`, is ever built merely to learn this number - so
+    this protection is real, not retroactive. Closes a gap round 15
+    explicitly, but incorrectly, excluded: a genuinely branch-FREE
+    reachable chain has `leader_count = 1` regardless of length, so
+    `dense_words`/`fixed_words` below alone charge almost nothing for it
+    no matter how large `reachable_count` grows.
   - `dense_words = (2 * leader_count + 1) * ceil(domain_size / 64)` - the
     dense dataflow lattice payload (round 14: the analysis's `chain_
     killed` and `missing` arrays are simultaneously live, both scaled by

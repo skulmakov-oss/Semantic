@@ -171,12 +171,16 @@ pub struct VerificationLimits {
     /// artifact's functions (see `max_work_units` below for the
     /// genuinely cumulative counterpart).
     ///
-    /// As of round 16 of #1756's own review history, this covers BOTH:
+    /// As of round 17 of #1756's own review history, this covers BOTH:
     /// raw reachable-node representation (`reachable_indices`, `reads_
     /// flat`/`writes_flat` and their offset tables, `is_leader` - all
-    /// scaling with `reachable_count` and the reachable instruction
-    /// stream's own byte length, checked by `check_raw_node_state_
-    /// budget` BEFORE any of them is allocated), and leader-compressed
+    /// scaling with `reachable_count` and the TOTAL ENCODED BYTES OF
+    /// REACHABLE INSTRUCTIONS specifically (`reachable_instruction_
+    /// bytes`) - deliberately NOT the total structural instruction-
+    /// section length, which may also include structurally valid but
+    /// unreachable trailing code this analysis never decodes (round 17's
+    /// correction) - checked by `check_raw_node_state_budget` BEFORE any
+    /// of them is allocated), and leader-compressed
     /// dense dataflow state (`chain_killed`/`missing` and their headers,
     /// `chain_targets`, `leader_positions`, the worklist stack's proven
     /// peak - scaling with `leader_count` and `ceil(register_domain_
@@ -297,6 +301,18 @@ impl VerificationLimits {
     /// (at most tens of thousands of state words). Kept numerically
     /// UNCHANGED again - see the round-16 reply for the full re-
     /// derivation and the exact relationships used to compute this table.
+    ///
+    /// **Re-checked in round 17** after `raw_words` was corrected to
+    /// scale with `reachable_instruction_bytes` (total encoded bytes of
+    /// REACHABLE instructions only) rather than `instr_len` (the total
+    /// structural instruction-section length, unreachable padding
+    /// included) - every construction in the table above is fully
+    /// reachable, with zero unreachable padding, so `reachable_
+    /// instruction_bytes == instr_len` exactly for each of them; this
+    /// table's numbers are therefore UNCHANGED by round 17, confirmed by
+    /// the full c1756 suite continuing to pass with the SAME hardcoded
+    /// exact numbers after the round-17 fix, with no test needing
+    /// recomputation.
     pub const fn default_profile() -> Self {
         Self {
             max_state_words: 8_388_608, // 2^23 - logical verifier-analysis words, worst case
@@ -1792,12 +1808,74 @@ const REGISTER_OPERAND_LOGICAL_BYTES: usize = WORD_BYTES / 4;
 #[cfg(feature = "std")]
 const LEADER_FLAG_LOGICAL_BYTES: usize = 1;
 
-/// #1756 Codex review round 16 (owner decision): the deterministic,
-/// verifier-OWNED pre-allocation admission check for the RAW reachable-
-/// node representation `dataflow_domain_accounting` and `compute_
-/// leaders` build, BEFORE either one allocates - closing the gap round
-/// 15 explicitly, but incorrectly, excluded (see `check_analysis_state_
-/// budget`'s own doc comment for the corrected inventory).
+/// #1756 Codex review round 17 (owner decision): the exact sum of
+/// encoded byte lengths of every REACHABLE structural instruction,
+/// computed from already-known instruction boundaries (`instr_starts`),
+/// requiring no second decoder, no opcode-specific length heuristics,
+/// and no new large allocation (in particular, never a sorted copy of
+/// `reachable_offsets`, and never `dataflow_domain_accounting`'s CSR
+/// tables, which this value exists to bound BEFORE they're built).
+///
+/// Round 16's `check_raw_node_state_budget` bounded `reads_flat.len() +
+/// writes_flat.len()` using the TOTAL structural instruction-section
+/// length (`instr_len = code.len() - instr_start`) as a proxy for "bytes
+/// available to encode reachable operands" - a SOUND upper bound, but
+/// one that overcharges whenever structurally valid but UNREACHABLE
+/// trailing code exists. `dataflow_domain_accounting` only ever decodes
+/// and stores operands for REACHABLE instructions (Codex review round
+/// 3's own fix), so unreachable bytes contribute nothing to the real
+/// `reads_flat`/`writes_flat` cost - yet round 16's `instr_len` proxy
+/// charged the WHOLE section regardless, letting a construction like
+/// "entry `RET` followed by megabytes of valid unreachable `RET`
+/// padding" (the exact shape `c1756_rejects_large_unreachable_ret_
+/// padding_without_dense_metadata` already exercises for a DIFFERENT
+/// reason) drive `AnalysisStateLimitExceeded` from padding alone -
+/// Codex review round 17's finding, changing this verifier's pre-
+/// existing, deliberate "unreachable code is not judged by this pass"
+/// policy for the FIRST time since #1756 began.
+///
+/// For each reachable instruction start offset, its encoded length is
+/// the distance to the NEXT structural instruction start, or to the end
+/// of the instruction section for the last structural instruction - the
+/// same canonical boundary every other structural check in this
+/// verifier already trusts (jump-target validation, debug-symbol
+/// placement), never re-derived via opcode-specific arithmetic. Every
+/// reachable offset is looked up in `instr_starts` via `binary_search`
+/// (the identical lookup `dataflow_domain_accounting` itself performs,
+/// via `filter_map`, to build `reachable_indices`), so this costs
+/// O(reachable_count * log(total_instruction_count)) time and O(1)
+/// additional space.
+///
+/// Sound invariant, not merely assumed: every reachable instruction's
+/// byte span is a disjoint sub-range of the single `[0, instr_len)`
+/// structural instruction section, so this sum can never exceed
+/// `instr_len` itself. `checked_add`/`checked_sub` are used throughout
+/// regardless, consistent with this codebase's established practice,
+/// even though overflow is not reachable given that invariant.
+#[cfg(feature = "std")]
+fn reachable_instruction_bytes(
+    instr_starts: &[usize],
+    reachable_offsets: &HashSet<usize>,
+    instr_len: usize,
+) -> Option<usize> {
+    reachable_offsets
+        .iter()
+        .filter_map(|offset| instr_starts.binary_search(offset).ok())
+        .try_fold(0usize, |total, idx| {
+            let start = instr_starts[idx];
+            let end = instr_starts.get(idx + 1).copied().unwrap_or(instr_len);
+            let len = end.checked_sub(start)?;
+            total.checked_add(len)
+        })
+}
+
+/// #1756 Codex review round 16 (owner decision), corrected in round 17:
+/// the deterministic, verifier-OWNED pre-allocation admission check for
+/// the RAW reachable-node representation `dataflow_domain_accounting`
+/// and `compute_leaders` build, BEFORE either one allocates - closing
+/// the gap round 15 explicitly, but incorrectly, excluded (see `check_
+/// analysis_state_budget`'s own doc comment for the corrected
+/// inventory).
 ///
 /// A genuinely branch-FREE reachable stream (a long linear run of
 /// single-register instructions, no merges, no branch targets at all)
@@ -1811,11 +1889,13 @@ const LEADER_FLAG_LOGICAL_BYTES: usize = 1;
 /// **Why this check can run BEFORE `dataflow_domain_accounting`**:
 /// `reachable_count` is already known for free - `reachable_offsets`
 /// (from `verify_reachable_control_flow`, `HashSet<usize>`) reports its
-/// own `len()` in O(1), no CSR allocation required to learn it. `instr_
-/// len` (`code.len() - instr_start`) is likewise already known before
-/// any of this analysis runs. Both inputs exist strictly BEFORE `data
-/// flow_domain_accounting` or `compute_leaders` ever allocate anything,
-/// so this check can - and does - run first.
+/// own `len()` in O(1), no CSR allocation required to learn it. The
+/// caller computes `reachable_instruction_bytes` (see that function's
+/// own doc comment - round 17's correction) from the SAME already-known
+/// `instr_starts`/`reachable_offsets` inputs, likewise before any of
+/// this analysis's own allocations exist. Both inputs exist strictly
+/// BEFORE `dataflow_domain_accounting` or `compute_leaders` ever
+/// allocate anything, so this check can - and does - run first.
 ///
 /// **Deriving a sound per-instruction-operand-count-independent bound**:
 /// rather than enumerate a "maximum registers per opcode" table (some
@@ -1825,34 +1905,39 @@ const LEADER_FLAG_LOGICAL_BYTES: usize = 1;
 /// information-theoretic argument instead: every register operand this
 /// pass ever records - read or write, on any instruction - costs
 /// EXACTLY 2 bytes to encode (`read_u16_le`), and every such byte comes
-/// from the SAME reachable instruction stream, `instr_len` bytes long,
-/// that has already been fully decoded once (Codex review round 3's own
-/// `decode_operands` re-decode, see `dataflow_domain_accounting`'s doc
-/// comment). Therefore `reads_flat.len() + writes_flat.len() <=
-/// instr_len / 2` - a SOUND, provable, information-theoretic ceiling
-/// that holds no matter how those operands are distributed (one huge
-/// variadic instruction or many small fixed-arity ones cost the same
-/// either way), computed with zero per-opcode knowledge and zero CSR
-/// allocation. This is `operand_count_bound` below.
+/// from the reachable instructions' own encoded byte spans (Codex review
+/// round 3's own `decode_operands` re-decode, see `dataflow_domain_
+/// accounting`'s doc comment) - NOT the total structural instruction
+/// section, which may also contain unreachable bytes this analysis never
+/// decodes (round 17's correction; see `reachable_instruction_bytes`'s
+/// own doc comment for why `instr_len` alone overcharged). Therefore
+/// `reads_flat.len() + writes_flat.len() <= reachable_instruction_bytes
+/// / 2` - a SOUND, provable, information-theoretic ceiling that holds no
+/// matter how those operands are distributed (one huge variadic
+/// instruction or many small fixed-arity ones cost the same either way),
+/// computed with zero per-opcode knowledge and zero CSR allocation. This
+/// is `operand_count_bound` below.
 ///
 /// **What this bounds** (every raw-node structure `prove_definite_
 /// register_assignment` and its callees allocate whose size scales with
-/// `reachable_count` or `instr_len`, genuinely owned by THIS analysis -
-/// see `check_analysis_state_budget`'s own doc comment for the full,
-/// corrected inventory including what remains deliberately excluded):
-/// `reachable_indices`, `reads_offsets` + `writes_offsets`, `reads_
-/// flat` + `writes_flat` (bounded by `operand_count_bound` above), the
-/// transient `universe` buffer `dataflow_domain_accounting` builds
-/// before its own final dedup (also bounded by `operand_count_bound`,
-/// plus `entry_param_count`), and `is_leader`.
+/// `reachable_count` or `reachable_instruction_bytes`, genuinely owned
+/// by THIS analysis - see `check_analysis_state_budget`'s own doc
+/// comment for the full, corrected inventory including what remains
+/// deliberately excluded): `reachable_indices`, `reads_offsets` +
+/// `writes_offsets`, `reads_flat` + `writes_flat` (bounded by `operand_
+/// count_bound` above), the transient `universe` buffer `dataflow_
+/// domain_accounting` builds before its own final dedup (also bounded
+/// by `operand_count_bound`, plus `entry_param_count`), and `is_leader`.
 ///
 /// **Formula**: `raw_words = ceil(raw_bytes / WORD_BYTES)` for
 /// `raw_bytes = reachable_count * REACHABLE_INDEX_LOGICAL_BYTES +
 /// (reachable_count + 1) * 2 * CSR_OFFSET_LOGICAL_BYTES + reachable_
 /// count * LEADER_FLAG_LOGICAL_BYTES + (2 * operand_count_bound +
-/// entry_param_count) * REGISTER_OPERAND_LOGICAL_BYTES` - every
-/// multiplication and addition `checked`; overflow anywhere is the same
-/// `usize::MAX` sentinel used throughout this envelope.
+/// entry_param_count) * REGISTER_OPERAND_LOGICAL_BYTES`, where `operand_
+/// count_bound = reachable_instruction_bytes / 2` (round 17 - NOT total
+/// `instr_len / 2`) - every multiplication and addition `checked`;
+/// overflow anywhere is the same `usize::MAX` sentinel used throughout
+/// this envelope.
 ///
 /// Returns `Ok(raw_words)` when within budget, `Err(reported_words)`
 /// otherwise - the caller (`prove_definite_register_assignment`) rejects
@@ -1863,13 +1948,13 @@ const LEADER_FLAG_LOGICAL_BYTES: usize = 1;
 #[cfg(feature = "std")]
 fn check_raw_node_state_budget(
     reachable_count: usize,
-    instr_len: usize,
+    reachable_instruction_bytes: usize,
     entry_param_count: usize,
     max_state_words: usize,
 ) -> Result<usize, usize> {
     let overflow = || Err(usize::MAX);
 
-    let operand_count_bound = instr_len / 2;
+    let operand_count_bound = reachable_instruction_bytes / 2;
 
     let reachable_index_bytes = reachable_count.checked_mul(REACHABLE_INDEX_LOGICAL_BYTES);
     let Some(reachable_index_bytes) = reachable_index_bytes else {
@@ -1925,18 +2010,24 @@ fn check_raw_node_state_budget(
 }
 
 /// #1756 Codex review round 14 (owner decision), corrected in round 15,
-/// extended in round 16: the deterministic, verifier-OWNED pre-
-/// allocation admission check for the definite-register-assignment
-/// analysis's PEAK simultaneously-live verifier-analysis state - now
-/// the FULL logical storage this analysis needs, raw reachable-node
-/// representation included, not merely dense `RegSet` backing words.
+/// extended in round 16, corrected again in round 17: the deterministic,
+/// verifier-OWNED pre-allocation admission check for the definite-
+/// register-assignment analysis's PEAK simultaneously-live verifier-
+/// analysis state - now the FULL logical storage this analysis needs,
+/// raw reachable-node representation included, not merely dense
+/// `RegSet` backing words.
 ///
 /// **Full lifetime inventory** (every allocation `prove_definite_
 /// register_assignment` and its callees own whose size scales with
-/// `reachable_count`, `leader_count`, `domain_size`, `instr_len`, or
-/// worklist depth - round 15's own request, extended in round 16 after
-/// Codex demonstrated the round-15 raw-node exclusion below was itself
-/// exploitable):
+/// `reachable_count`, `leader_count`, `domain_size`, the total encoded
+/// bytes of REACHABLE instructions (`reachable_instruction_bytes` -
+/// round 17: NOT the total structural instruction-section length,
+/// which may also include unreachable bytes this analysis never
+/// decodes), or worklist depth - round 15's own request, extended in
+/// round 16 after Codex demonstrated the round-15 raw-node exclusion
+/// below was itself exploitable, corrected in round 17 after Codex
+/// demonstrated round 16's own total-byte proxy overcharged unreachable
+/// padding):
 ///
 /// - `chain_killed` / `missing` (`Vec<RegSet>`, `leader_count` entries
 ///   each): dense payload already charged by round 14's `(2 *
@@ -1977,9 +2068,11 @@ fn check_raw_node_state_budget(
 /// - `reachable_indices` (`Vec<usize>`, `reachable_count` entries),
 ///   `reads_offsets` / `writes_offsets` (`Vec<u32>`, `reachable_count +
 ///   1` entries each), `reads_flat` / `writes_flat` (`Vec<u16>`,
-///   combined length bounded by `instr_len / 2` - see `check_raw_node_
-///   state_budget`'s doc comment for the exact information-theoretic
-///   argument), and the transient pre-dedup `universe` buffer (same
+///   combined length bounded by `reachable_instruction_bytes / 2` -
+///   round 17: NOT total `instr_len / 2`, see `reachable_instruction_
+///   bytes`'s and `check_raw_node_state_budget`'s doc comments for the
+///   exact information-theoretic argument and why the distinction
+///   matters), and the transient pre-dedup `universe` buffer (same
 ///   bound, plus `entry_param_count`): all built by `dataflow_domain_
 ///   accounting`, exclusively for THIS analysis - never allocated for a
 ///   signature-less function, unlike the genuinely shared structures
@@ -2404,17 +2497,34 @@ fn prove_definite_register_assignment(
         return Ok(());
     }
 
-    // #1756 Codex review round 16 (owner decision): the raw-node state
-    // budget check runs FIRST, before `dataflow_domain_accounting`
-    // allocates any reachable-node CSR table - `reachable_count` and
-    // `instr_len` are both already known for free at this point (see
-    // `check_raw_node_state_budget`'s own doc comment), so this check
-    // never needs to build the very structures it exists to bound.
+    // #1756 Codex review round 16 (owner decision), corrected in round
+    // 17: the raw-node state budget check runs FIRST, before `dataflow_
+    // domain_accounting` allocates any reachable-node CSR table -
+    // `reachable_count` and `reachable_instruction_bytes` (round 17: the
+    // exact reachable-only byte sum, NOT the total structural
+    // instruction-section length - see `reachable_instruction_bytes`'s
+    // own doc comment for why that distinction matters) are both already
+    // known for free at this point (see `check_raw_node_state_budget`'s
+    // own doc comment), so this check never needs to build the very
+    // structures it exists to bound.
     let reachable_count = reachable_offsets.len();
     let instr_len = code.len().saturating_sub(instr_start);
+    let Some(reachable_bytes) =
+        reachable_instruction_bytes(instr_starts, reachable_offsets, instr_len)
+    else {
+        return Err(reject_one(
+            function,
+            VerificationCode::AnalysisStateLimitExceeded,
+            0,
+            "definite-register-assignment analysis could not determine the reachable \
+             instruction stream's byte length without overflow, exceeding any finite \
+             verification state budget"
+                .to_string(),
+        ));
+    };
     let raw_words = match check_raw_node_state_budget(
         reachable_count,
-        instr_len,
+        reachable_bytes,
         entry_param_count,
         limits.max_state_words,
     ) {
@@ -2425,7 +2535,7 @@ fn prove_definite_register_assignment(
                 VerificationCode::AnalysisStateLimitExceeded,
                 0,
                 format!(
-                    "definite-register-assignment analysis needs at least {} logical verifier-analysis word(s) for raw reachable-node representation alone ({reachable_count} reachable node(s) over a {instr_len}-byte reachable instruction stream), exceeding the verification state budget of {} before any leader-compressed state is even computed",
+                    "definite-register-assignment analysis needs at least {} logical verifier-analysis word(s) for raw reachable-node representation alone ({reachable_count} reachable node(s) totaling {reachable_bytes} encoded byte(s) of reachable instructions), exceeding the verification state budget of {} before any leader-compressed state is even computed",
                     if raw_words == usize::MAX { "more than usize::MAX".to_string() } else { raw_words.to_string() },
                     limits.max_state_words
                 ),
@@ -5623,6 +5733,119 @@ mod tests {
         verify_semcode(&bytes).expect(
             "tens of thousands of unreachable two-byte RETs must not require per-instruction \
              reads/writes metadata to be materialized for every one of them",
+        );
+    }
+
+    /// #1756 Codex review round 17 (owner decision): Codex's own exact
+    /// P2 shape - an entry `RET` (the only reachable instruction)
+    /// followed by a large amount of structurally valid but UNREACHABLE
+    /// `RET` padding (the same construction `c1756_rejects_large_
+    /// unreachable_ret_padding_without_dense_metadata` already uses for
+    /// a different reason - this pass never even attempts to judge
+    /// unreachable code). Proves `reachable_count` stays 1 and the raw-
+    /// state requirement stays fixed at 17 words (4 raw + 13 leader-
+    /// state, both independently measured) no matter how much
+    /// unreachable padding follows - preserving the verifier's pre-
+    /// existing, deliberate "unreachable code is not judged by this
+    /// pass" admission policy that round 16's `instr_len`-based proxy
+    /// would otherwise have broken by charging the WHOLE structural
+    /// instruction section, unreachable padding included. Also serves as
+    /// the review's requested direct accounting comparison: padding = 0
+    /// and padding = 1,000,000 must report the IDENTICAL exact word
+    /// count, proving `reachable_instruction_bytes` genuinely does not
+    /// grow with unreachable padding size.
+    #[test]
+    fn c1756_unreachable_padding_does_not_inflate_raw_state() {
+        fn padded(padding: usize) -> Vec<u8> {
+            let mut instrs = vec![IrInstr::Ret { src: None }];
+            for _ in 0..padding {
+                instrs.push(IrInstr::Ret { src: None });
+            }
+            emit_test_function(instrs)
+        }
+
+        for padding in [0usize, 1_000_000] {
+            let bytes = padded(padding);
+
+            // usage == limit (17 words) must be accepted regardless of
+            // padding size.
+            verify_semcode_token_with_quotas_and_limits(
+                &bytes,
+                RuntimeQuotas::verified_local(),
+                VerificationLimits {
+                    max_state_words: 17,
+                    max_work_units: usize::MAX,
+                },
+            )
+            .unwrap_or_else(|report| {
+                panic!(
+                    "padding={padding}: unreachable padding must not inflate the raw-state \
+                     requirement past the single reachable RET's own cost: {report:?}"
+                )
+            });
+
+            // usage == limit + 1 must still reject deterministically,
+            // reporting the SAME exact word count regardless of padding.
+            let report = verify_semcode_token_with_quotas_and_limits(
+                &bytes,
+                RuntimeQuotas::verified_local(),
+                VerificationLimits {
+                    max_state_words: 16,
+                    max_work_units: usize::MAX,
+                },
+            )
+            .expect_err("usage == limit + 1 must still reject deterministically");
+            assert_eq!(
+                report.diagnostics[0].code,
+                VerificationCode::AnalysisStateLimitExceeded
+            );
+            assert!(
+                report.diagnostics[0]
+                    .message
+                    .contains("17 logical verifier-analysis word"),
+                "padding={padding}: exact required word count must stay 17 regardless of \
+                 unreachable padding size, got: {}",
+                report.diagnostics[0].message
+            );
+            assert!(
+                report.diagnostics[0].message.contains("1 reachable node"),
+                "padding={padding}: reachable_count must stay 1 regardless of unreachable \
+                 padding size"
+            );
+        }
+    }
+
+    /// #1756 Codex review round 17's own requested "control test": the
+    /// SAME long instruction stream, made genuinely REACHABLE instead of
+    /// unreachable (no branch-free-but-unreachable padding - see
+    /// `c1756_long_linear_low_domain_rejects_on_raw_state_not_leader_
+    /// state`, unchanged by this round since it has no unreachable code
+    /// at all, so `reachable_instruction_bytes == instr_len` for it
+    /// exactly) still drives the raw-state requirement up and can still
+    /// be rejected - proving round 17 narrowed accounting to genuinely
+    /// REACHABLE bytes, not accidentally made instruction bytes free in
+    /// general. That existing test's exact numbers (312,508 raw-only;
+    /// 312,528 combined) are re-verified unchanged by this round's own
+    /// full c1756 suite run, confirming this directly.
+    #[test]
+    fn c1756_reachable_instruction_bytes_counts_only_reachable_spans() {
+        // Five structural instructions at offsets 0, 4, 8, 20, 24; the
+        // instruction section ends at offset 28 (the fifth instruction
+        // is 4 bytes). Reachable: 0 (len 4), 4 (len 4), 24 (len 4, to
+        // the section end) - 8 and 20 are unreachable and must not
+        // count.
+        let instr_starts = vec![0usize, 4, 8, 20, 24];
+        let instr_len = 28usize;
+        let mut reachable = HashSet::new();
+        reachable.insert(0usize);
+        reachable.insert(4usize);
+        reachable.insert(24usize);
+
+        assert_eq!(
+            reachable_instruction_bytes(&instr_starts, &reachable, instr_len),
+            Some(12),
+            "must sum only the three reachable spans (4+4+4=12), ignoring the two \
+             unreachable instructions at offsets 8 and 20 entirely"
         );
     }
 
