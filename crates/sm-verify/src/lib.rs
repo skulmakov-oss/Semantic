@@ -2196,12 +2196,19 @@ fn check_raw_node_state_budget(
 ///   `compute_missing_sets` runs and read throughout it via
 ///   `compressed_successors_of`.
 /// - `leader_positions` (`Vec<usize>`, `leader_count` entries):
-///   `LEADER_INDEX_LOGICAL_BYTES` per entry. Necessarily built BEFORE
-///   this very check can run at all (the check needs `leader_count` as
-///   an input) - the one structure this check cannot gate ahead of
-///   itself by construction, but it costs only O(leader_count), not
-///   O(leader_count * domain_size), so it is charged honestly rather
-///   than pretended away.
+///   `LEADER_INDEX_LOGICAL_BYTES` per entry. Round 20 (Codex P2)
+///   corrected an earlier belief (rounds 15-19: "necessarily built
+///   BEFORE this very check can run at all... the one structure this
+///   check cannot gate ahead of itself by construction") - that was
+///   never actually true. `leader_count` is derived by counting `is_
+///   leader`'s true bits (`is_leader.iter().filter(..).count()`, zero
+///   additional allocation - `is_leader` itself is already `raw_words`-
+///   authorized, see `check_raw_node_state_budget`'s own doc comment),
+///   so this check CAN and DOES gate ahead of `leader_positions`'s own
+///   materialization: the check runs first, using only the count, and
+///   `leader_positions` is collected (via the identical `.filter(..).
+///   collect()` expression as before) only once this check has already
+///   authorized its cost. No exception remains in this envelope.
 /// - `compute_missing_sets`'s worklist stack (`Vec<(usize, usize)>`):
 ///   proven (see `c1756_reversed_order_diamond_chain_stack_peak_
 ///   scales_with_leader_count` for the adversarial construction and
@@ -2772,21 +2779,41 @@ fn prove_definite_register_assignment(
     // #1756 Codex review round 11: see this function's own doc comment
     // ("Leader compression") for the finding this closes.
     let is_leader = compute_leaders(reachable_count, successors_of);
-    let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
 
-    // #1756 Codex review round 13 (owner decision), round 16: the
-    // deterministic verifier-resource admission check, BEFORE either
-    // `build_leader_chains` or `compute_missing_sets` allocates its
-    // leader_count-sized dense state - see `check_analysis_state_
-    // budget`'s own doc comment and `VerificationLimits`. A genuinely
-    // branch-dense reachable graph (round 13's finding) is not a bug in
-    // leader compression - it is the correct, minimal leader set an
-    // EXACT MUST-dataflow proof requires - so this is a resource-
-    // envelope decision, not a correctness fix. Round 16: now COMBINES
-    // the raw-node cost already proven safe above with this phase's own
-    // leader/domain-scaled cost, since both remain simultaneously live
-    // for the rest of this analysis.
-    let leader_count = leader_positions.len();
+    // #1756 Codex review round 20 (owner decision): `leader_count` is
+    // derived by counting `is_leader`'s true bits - a plain iterator
+    // `.filter(..).count()`, zero additional allocation - rather than by
+    // first materializing `leader_positions` and taking its `.len()`.
+    // `is_leader` itself (`reachable_count`-sized, `Vec<bool>`) was
+    // already allocated under the EARLIER raw-node check's own
+    // authorization (`LEADER_FLAG_LOGICAL_BYTES * reachable_count`, part
+    // of `raw_words` above); counting its bits reads that already-
+    // authorized memory, allocating nothing new. This is what lets the
+    // combined check below run, and potentially reject, BEFORE
+    // `leader_positions` - a SEPARATE, `leader_count`-sized `Vec<usize>`
+    // allocation this check's own `fixed_bytes` term also charges for -
+    // is ever constructed. Closes the last remaining pre-allocation
+    // timing hole in this envelope: round 15 charged `leader_positions`
+    // honestly because building it BEFORE the check was, at the time,
+    // believed unavoidable ("the one structure this check cannot gate
+    // ahead of itself by construction") - round 20's finding is that
+    // this was never actually true, since `is_leader` already contains
+    // everything needed to compute `leader_count` without collecting
+    // positions at all.
+    let leader_count = is_leader.iter().filter(|&&leader| leader).count();
+
+    // #1756 Codex review round 13 (owner decision), round 16, round 20:
+    // the deterministic verifier-resource admission check, BEFORE
+    // `leader_positions`, `build_leader_chains`, or `compute_missing_
+    // sets` allocates any leader_count-sized state - see `check_
+    // analysis_state_budget`'s own doc comment and `VerificationLimits`.
+    // A genuinely branch-dense reachable graph (round 13's finding) is
+    // not a bug in leader compression - it is the correct, minimal
+    // leader set an EXACT MUST-dataflow proof requires - so this is a
+    // resource-envelope decision, not a correctness fix. Round 16: now
+    // COMBINES the raw-node cost already proven safe above with this
+    // phase's own leader/domain-scaled cost, since both remain
+    // simultaneously live for the rest of this analysis.
     if let Err(state_words) =
         check_analysis_state_budget(raw_words, leader_count, domain_size, limits.max_state_words)
     {
@@ -2801,6 +2828,11 @@ fn prove_definite_register_assignment(
             ),
         ));
     }
+
+    // #1756 Codex review round 20: only NOW, with the combined check
+    // above having authorized `leader_count`'s own storage cost, is
+    // `leader_positions` actually materialized.
+    let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
 
     let leader_index_of = |pos: usize| -> usize {
         leader_positions
@@ -7585,6 +7617,323 @@ mod tests {
         assert!(combined.diagnostics[0]
             .message
             .contains("312528 logical verifier-analysis word"));
+    }
+
+    /// #1756 Codex review round 20 (owner decision): the "linear control
+    /// case" - proves this round's reordering did NOT regress to
+    /// charging `reachable_count` in place of `leader_count` (which
+    /// would silently undo round 11's entire leader-compression
+    /// benefit). Reuses `c1756_long_linear_low_domain_rejects_on_raw_
+    /// state_not_leader_state`'s exact construction and numbers (100,000
+    /// unreachable-free `LOAD_BOOL`s, `reachable_count = 100,002`,
+    /// `leader_count = 1` always for a branch-free stream, `raw_words =
+    /// 312,508`, true `leader_words = 20`, true combined = 312,528).
+    /// `500,000` sits comfortably above the TRUE combined requirement
+    /// but far below what the combined requirement would be if
+    /// `leader_count` were wrongly substituted with `reachable_count`
+    /// (`dense_words = (2*100_002+1)*1 = 200,005`, `fixed_bytes =
+    /// 100_002*88 + (100_002+2)*16 = 10,400,240`, `fixed_words =
+    /// 1,300,030`, wrong combined = `312,508 + 200,005 + 1,300,030 =
+    /// 1,812,543`) - if the reordering had accidentally substituted the
+    /// wrong count, this construction would reject at `500,000`; it must
+    /// still accept.
+    #[test]
+    fn c1756_linear_control_case_still_uses_leader_count_not_reachable_count() {
+        let bytes = emit_test_function(build_long_linear_chain(100_000));
+        verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 500_000,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect(
+            "a branch-free stream's TRUE leader_count (1) must still admit this construction - \
+             a limit this low would reject if leader_count had regressed to reachable_count \
+             (100,002)",
+        );
+    }
+
+    /// #1756 Codex review round 20 (owner decision): Codex's own exact
+    /// regression - a branch-dense signature-bearing function where the
+    /// raw-only precheck passes but the COMBINED check (which needs
+    /// `leader_count`, and therefore needs `leader_positions`
+    /// authorized) rejects. Reuses `build_diamond_chain`'s already-
+    /// established exact numbers (`N = 1,000` genuine diamonds:
+    /// `reachable_count = 2,003`, `leader_count = 2,001`, `raw_words =
+    /// 7,011`, true combined = `37,039`, all independently verified in
+    /// rounds 16-17). `max_state_words = 20_000` sits strictly between
+    /// `raw_words` (7,011 - the precheck alone passes) and the combined
+    /// requirement (37,039 - the combined check must reject), proving
+    /// the combined check's own rejection is what fires, using the
+    /// CORRECTLY count-derived `leader_count = 2,001` (asserted in the
+    /// message) - not a stale or wrong value, and specifically NOT by
+    /// way of ever materializing `leader_positions` first (see the
+    /// companion direct/low-level test below for the strongest form of
+    /// this proof: an equivalent construction that never once calls
+    /// `.filter().collect()` for leader positions anywhere in the test's
+    /// own code, mirroring the production call order exactly).
+    #[test]
+    fn c1756_branch_dense_combined_check_rejects_using_count_only_leader_count() {
+        const N: usize = 1_000;
+        let bytes = emit_test_function(build_diamond_chain(N, false));
+        let report = verify_semcode_token_with_quotas_and_limits(
+            &bytes,
+            RuntimeQuotas::verified_local(),
+            VerificationLimits {
+                max_state_words: 20_000,
+                max_work_units: usize::MAX,
+            },
+        )
+        .expect_err(
+            "the combined check must reject even though the raw-only precheck alone (7,011) \
+             would pass at this limit",
+        );
+        assert_eq!(
+            report.diagnostics[0].code,
+            VerificationCode::AnalysisStateLimitExceeded
+        );
+        assert!(
+            report.diagnostics[0].message.contains("2001 leader(s)"),
+            "the exact leader_count must still be correctly derived and reported via the \
+             count-only path, proving it produces the right number: {}",
+            report.diagnostics[0].message
+        );
+        assert!(report.diagnostics[0]
+            .message
+            .contains("37039 logical verifier-analysis word"));
+    }
+
+    /// #1756 Codex review round 20 (owner decision): the STRONGEST form
+    /// of "leader_positions has not yet been allocated" evidence - a
+    /// direct, low-level mirror of the production call order
+    /// (`compute_leaders` -> count `is_leader`'s true bits -> `check_
+    /// analysis_state_budget`) that NEVER calls `.filter().collect()` to
+    /// build a `Vec<usize>` of leader positions anywhere in this test's
+    /// own code, exactly as `prove_definite_register_assignment` no
+    /// longer does before this same check. Deliberately does NOT use
+    /// allocator-size instrumentation for this specific claim: unlike
+    /// round 18's per-INSTRUCTION allocation count (a multi-order-of-
+    /// magnitude gap, cleanly separable from every other legitimate
+    /// allocation this call makes), a single `leader_positions` `Vec`
+    /// among several other legitimately reachable_count/leader_count-
+    /// scaled allocations (`reachable_indices`, `is_leader`, `chain_
+    /// killed`, etc., several of comparable size) is not reliably
+    /// distinguishable by allocation COUNT or even peak SIZE alone - a
+    /// direct call-order proof is the honest, non-brittle choice instead
+    /// (matching round 18's own precedent of preferring a structural
+    /// proof when instrumentation would not cleanly discriminate).
+    #[test]
+    fn c1756_leader_count_derived_without_collecting_positions_before_combined_check() {
+        const DIAMOND_COUNT: usize = 1_000;
+        const DOMAIN_SIZE: usize = 3;
+        let reachable_count = 1 + 3 * DIAMOND_COUNT;
+        let successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(1), None]
+            } else {
+                let rel = pos - 1;
+                let diamond = rel / 3;
+                let slot = rel % 3;
+                match slot {
+                    0 => {
+                        let merge = 1 + 3 * diamond + 2;
+                        let false_arm = 1 + 3 * diamond + 1;
+                        [Some(merge), Some(false_arm)]
+                    }
+                    1 => {
+                        let merge = 1 + 3 * diamond + 2;
+                        [Some(merge), None]
+                    }
+                    2 => {
+                        if diamond + 1 < DIAMOND_COUNT {
+                            [Some(1 + 3 * (diamond + 1)), None]
+                        } else {
+                            [None, None]
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        };
+
+        let is_leader = compute_leaders(reachable_count, successors_of);
+        // Zero-allocation count - no `Vec<usize>` of positions exists at
+        // this point, matching production exactly.
+        let leader_count = is_leader.iter().filter(|&&leader| leader).count();
+        assert_eq!(
+            leader_count,
+            2 * DIAMOND_COUNT + 1,
+            "exact leader count must still be correct via the count-only path"
+        );
+
+        // This test bypasses real SemCode decoding entirely, so
+        // `reachable_instruction_bytes` is a synthetic, small (relative
+        // to the leader-scaled cost below) placeholder - only its
+        // relationship to the chosen limit matters here, not its exact
+        // real-world value.
+        let reachable_instruction_bytes = reachable_count * 4;
+        let raw_words = check_raw_node_state_budget(
+            reachable_count,
+            reachable_instruction_bytes,
+            0,
+            usize::MAX,
+        )
+        .expect("raw precheck must pass at usize::MAX");
+
+        let limit = raw_words + 100; // comfortably above raw alone, comfortably below the combined requirement
+        assert!(
+            check_raw_node_state_budget(reachable_count, reachable_instruction_bytes, 0, limit)
+                .is_ok(),
+            "raw-only precheck must pass at this limit"
+        );
+        let result = check_analysis_state_budget(raw_words, leader_count, DOMAIN_SIZE, limit);
+        assert!(
+            result.is_err(),
+            "the combined check must reject once leader-state is included, even though raw \
+             alone fit - and it does so here using ONLY the count-derived leader_count, with no \
+             leader_positions Vec ever constructed anywhere in this test"
+        );
+    }
+
+    /// #1756 Codex review round 20 (owner decision): "count/collect
+    /// consistency" - across representative CFG shapes, the zero-
+    /// allocation count (`is_leader.iter().filter(..).count()`) and the
+    /// materialized position list (`(0..n).filter(..).collect()`) must
+    /// never disagree. Both views read the SAME already-computed
+    /// `is_leader: Vec<bool>` in this implementation (not two separate
+    /// traversals), so this is provable by construction rather than
+    /// merely tested - but the test still guards against a FUTURE change
+    /// accidentally introducing a second, independently-computed
+    /// counting path that could drift from `compute_leaders`'s own
+    /// classification.
+    #[test]
+    fn c1756_leader_count_and_collected_positions_agree_across_cfg_shapes() {
+        // Linear: no branches at all - exactly one leader (entry).
+        {
+            let reachable_count = 6;
+            let successors_of = |pos: usize| -> [Option<usize>; 2] {
+                if pos + 1 < reachable_count {
+                    [Some(pos + 1), None]
+                } else {
+                    [None, None]
+                }
+            };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(count_only, collected.len(), "linear");
+            assert_eq!(collected, vec![0], "linear: entry only");
+        }
+
+        // Genuine diamond: entry branches to two arms, both merge - every
+        // position is a leader (entry, 2 branch targets, 1 merge).
+        {
+            let reachable_count = 4;
+            let successors_of = |pos: usize| -> [Option<usize>; 2] {
+                match pos {
+                    0 => [Some(1), Some(2)],
+                    1 => [Some(3), None],
+                    2 => [Some(3), None],
+                    3 => [None, None],
+                    _ => unreachable!(),
+                }
+            };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(count_only, collected.len(), "genuine diamond");
+            assert_eq!(
+                collected,
+                vec![0, 1, 2, 3],
+                "genuine diamond: all 4 positions"
+            );
+        }
+
+        // Merge with non-leader interior: two arms each with an extra
+        // non-branching hop before converging - the hops (2 and 4) must
+        // NOT be leaders.
+        {
+            let reachable_count = 6;
+            let successors_of = |pos: usize| -> [Option<usize>; 2] {
+                match pos {
+                    0 => [Some(1), Some(3)],
+                    1 => [Some(2), None],
+                    2 => [Some(5), None],
+                    3 => [Some(4), None],
+                    4 => [Some(5), None],
+                    5 => [None, None],
+                    _ => unreachable!(),
+                }
+            };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(
+                count_only,
+                collected.len(),
+                "merge with non-leader interior"
+            );
+            assert_eq!(
+                collected,
+                vec![0, 1, 3, 5],
+                "merge: entry, both branch targets, and the merge point - the two single-\
+                 predecessor hops (2, 4) stay non-leaders"
+            );
+        }
+
+        // Self-targeting JMP_IF with duplicate (undeduplicated-then-
+        // deduplicated) successors - round 12's own fix.
+        {
+            let reachable_count = 5;
+            let raw_successors_of = |pos: usize| -> [Option<usize>; 2] {
+                if pos == 0 {
+                    [Some(1), None]
+                } else if pos + 1 < reachable_count {
+                    [Some(pos + 1), Some(pos + 1)]
+                } else {
+                    [None, None]
+                }
+            };
+            let successors_of =
+                |pos: usize| -> [Option<usize>; 2] { dedup_successors(raw_successors_of(pos)) };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(count_only, collected.len(), "self-targeting JMP_IF");
+            assert_eq!(
+                collected,
+                vec![0],
+                "self-targeting JMP_IF chain collapses to exactly one leader (entry) once \
+                 deduplicated"
+            );
+        }
+
+        // Loop: entry -> header (2 predecessors: entry, body) -> body
+        // (branches back to header or forward to exit).
+        {
+            let reachable_count = 4;
+            let successors_of = |pos: usize| -> [Option<usize>; 2] {
+                match pos {
+                    0 => [Some(1), None],
+                    1 => [Some(2), None],
+                    2 => [Some(1), Some(3)],
+                    3 => [None, None],
+                    _ => unreachable!(),
+                }
+            };
+            let is_leader = compute_leaders(reachable_count, successors_of);
+            let count_only = is_leader.iter().filter(|&&l| l).count();
+            let collected: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+            assert_eq!(count_only, collected.len(), "loop");
+            assert_eq!(
+                collected,
+                vec![0, 1, 3],
+                "loop: entry, the header (merge point via the back-edge), and the exit branch \
+                 target - the loop body itself (2) stays non-leader"
+            );
+        }
     }
 
     /// #1756 Codex review round 16: exact boundary behavior for `check_
