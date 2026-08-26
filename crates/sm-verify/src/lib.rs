@@ -1403,6 +1403,30 @@ fn compute_missing_sets(
     (missing, event_count, peak_queue_len)
 }
 
+/// #1756 Codex review round 12: `JMP_IF` unconditionally records
+/// `InstructionSuccessors::Two(target, next_offset)` - if its taken
+/// branch happens to target the very next instruction (a legal, if
+/// pointless, no-op conditional branch), `target == next_offset` and
+/// `for_each_reachable_successor` reports the SAME reachable position
+/// twice. Left as-is, every consumer of `[Option<usize>; 2]` successors
+/// below (`compute_leaders`, `chain_step`, `build_leader_chains`,
+/// `find_first_violation`) would see that as two edges rather than one -
+/// `compute_leaders` in particular would double-count the shared
+/// target's in-degree AND treat it as a branch target, forcing it (and,
+/// for a whole chain of such instructions, every one of their targets)
+/// to become its own leader, defeating round 11's compression entirely
+/// for that chain. Collapsing it back to a single logical edge here,
+/// once, is what lets every downstream consumer keep treating the two
+/// slots as "distinct successors, if both present" as a precondition
+/// rather than a fact they each have to re-derive.
+#[cfg(feature = "std")]
+fn dedup_successors(succs: [Option<usize>; 2]) -> [Option<usize>; 2] {
+    match succs {
+        [Some(a), Some(b)] if a == b => [Some(a), None],
+        other => other,
+    }
+}
+
 /// #1756 Codex review round 11: identifies which reachable positions are
 /// "leaders" - the only positions that need their own entry in the
 /// compressed dataflow graph `compute_missing_sets` runs over (see
@@ -1415,6 +1439,14 @@ fn compute_missing_sets(
 /// genuine 1-to-1 edge - so its MISSING value is always identical to its
 /// predecessor's MISSING_OUT and never needs independent storage or
 /// worklist participation; `chain_step` walks straight past it instead.
+///
+/// **Precondition** (#1756 Codex review round 12): `successors_of`'s two
+/// slots, when both `Some`, must already be DISTINCT positions - a
+/// source with only one true logical successor (e.g. a self-targeting
+/// `JMP_IF`, see `dedup_successors`) must present that as `[Some(x),
+/// None]`, never `[Some(x), Some(x)]`. This function trusts that
+/// precondition rather than re-deriving it, so every caller must run
+/// raw successors through `dedup_successors` first.
 ///
 /// This always terminates when traced backward from any non-leader
 /// position: a cycle reachable from entry must contain a node entered
@@ -1735,7 +1767,11 @@ fn prove_definite_register_assignment(
                 }
             },
         );
-        out
+        // #1756 Codex review round 12: a self-targeting JMP_IF reports
+        // its one true successor twice - collapse it to a single edge
+        // here, upholding the precondition `compute_leaders` (and every
+        // other leader-compression consumer) documents and trusts.
+        dedup_successors(out)
     };
 
     // #1756 Codex review round 11: see this function's own doc comment
@@ -5742,6 +5778,115 @@ mod tests {
         verify_semcode(&bytes).expect(
             "every register is genuinely defined by the time it's read, regardless of how long \
              the redundant prefix that precedes its definition is",
+        );
+    }
+
+    /// #1756 Codex review round 12: "Deduplicate identical branch
+    /// successors before choosing leaders" - a `JMP_IF` whose taken
+    /// branch targets its own fallthrough (a legal, if pointless, no-op
+    /// conditional branch) makes `for_each_reachable_successor` report
+    /// that one true successor twice. Before `dedup_successors`,
+    /// `compute_leaders` would see that as out-degree 2 (a branch) and
+    /// double-count the shared target's in-degree, forcing it to become
+    /// a leader - repeated over a long chain of such instructions, this
+    /// defeats round 11's compression entirely, exactly reproducing its
+    /// adversarial shape. This test proves BOTH halves directly: the raw
+    /// (undeduplicated) successors really do blow leader compression
+    /// back open, and running them through `dedup_successors` first (as
+    /// the real caller now does) collapses the chain back to a single
+    /// leader.
+    #[test]
+    fn c1756_self_targeting_branch_chain_collapses_via_dedup_successors() {
+        const CHAIN_LEN: usize = 500_000;
+        let reachable_count = CHAIN_LEN + 2; // entry, then CHAIN_LEN self-targeting branches, then a dead end
+                                             // Position 0 = entry -> 1. Positions 1..reachable_count-1 each
+                                             // mimic a self-targeting JMP_IF: `for_each_reachable_successor`
+                                             // reports its next position as BOTH the taken and fallthrough
+                                             // successor, i.e. the SAME position twice, before dedup.
+        let raw_successors_of = |pos: usize| -> [Option<usize>; 2] {
+            if pos == 0 {
+                [Some(1), None]
+            } else if pos < reachable_count - 1 {
+                [Some(pos + 1), Some(pos + 1)]
+            } else {
+                [None, None]
+            }
+        };
+
+        let undeduped_leaders = compute_leaders(reachable_count, raw_successors_of);
+        let undeduped_leader_positions: Vec<usize> = (0..reachable_count)
+            .filter(|&p| undeduped_leaders[p])
+            .collect();
+        assert!(
+            undeduped_leader_positions.len() > CHAIN_LEN / 2,
+            "reproducing the finding: WITHOUT dedup, a chain of self-targeting branches must \
+             blow leader compression back open (got {} leaders for a {CHAIN_LEN}-instruction \
+             chain, expected close to all of them)",
+            undeduped_leader_positions.len()
+        );
+
+        let successors_of =
+            |pos: usize| -> [Option<usize>; 2] { dedup_successors(raw_successors_of(pos)) };
+        let is_leader = compute_leaders(reachable_count, successors_of);
+        let leader_positions: Vec<usize> = (0..reachable_count).filter(|&p| is_leader[p]).collect();
+        assert_eq!(
+            leader_positions,
+            vec![0],
+            "the fix under test: once raw successors are deduplicated, a chain of self-targeting \
+             branches must collapse to exactly one leader (entry), same as any other \
+             non-branching run"
+        );
+
+        let leader_index_of =
+            |pos: usize| -> usize { leader_positions.binary_search(&pos).unwrap() };
+        let no_writes = |_pos: usize, _visit: &mut dyn FnMut(usize)| {};
+        let (chain_killed, chain_targets) = build_leader_chains(
+            &leader_positions,
+            &is_leader,
+            successors_of,
+            no_writes,
+            leader_index_of,
+        );
+        const DOMAIN_SIZE: usize = 4096;
+        let entry_missing = RegSet::full(DOMAIN_SIZE);
+        let (_missing, event_count, _peak_queue_len) = compute_missing_sets(
+            leader_positions.len(),
+            DOMAIN_SIZE,
+            entry_missing,
+            |leader_idx, bit| chain_killed[leader_idx].contains(bit),
+            |leader_idx| chain_targets[leader_idx],
+        );
+        assert!(
+            event_count <= DOMAIN_SIZE,
+            "event_count ({event_count}) must stay within domain_size ({DOMAIN_SIZE}) alone, \
+             not scale with CHAIN_LEN * DOMAIN_SIZE - Codex's own figure for this shape at \
+             32,768 branches was ~134 million events"
+        );
+    }
+
+    /// #1756 Codex review round 12: the same finding exercised through
+    /// the real `verify_semcode` pipeline - a real `JMP_IF` whose label
+    /// resolves to the very next instruction, repeated many times,
+    /// confirming `for_each_reachable_successor` really does produce the
+    /// duplicate-successor shape `dedup_successors` is fixing, and that
+    /// the real caller's wiring wasn't the untested half of the fix.
+    #[test]
+    fn c1756_self_targeting_conditional_branch_chain_verifies_correctly_through_full_pipeline() {
+        let mut instrs = vec![IrInstr::LoadBool { dst: 0, val: true }];
+        for i in 0..2000 {
+            instrs.push(IrInstr::JmpIf {
+                cond: 0,
+                label: format!("l{i}"),
+            });
+            instrs.push(IrInstr::Label {
+                name: format!("l{i}"),
+            });
+        }
+        instrs.push(IrInstr::Ret { src: Some(0) });
+        let bytes = emit_test_function(instrs);
+        verify_semcode(&bytes).expect(
+            "r0 is defined before any read, regardless of how long the self-targeting \
+             conditional-branch chain is",
         );
     }
 
