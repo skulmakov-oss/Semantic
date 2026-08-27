@@ -302,6 +302,7 @@ struct CodeLexer {
     angle_depth: usize,
     paren_depth: usize,
     bracket_depth: usize,
+    brace_depth: usize,
 }
 
 impl CodeLexer {
@@ -311,6 +312,7 @@ impl CodeLexer {
             angle_depth: 0,
             paren_depth: 0,
             bracket_depth: 0,
+            brace_depth: 0,
         }
     }
 
@@ -318,6 +320,7 @@ impl CodeLexer {
         self.angle_depth = 0;
         self.paren_depth = 0;
         self.bracket_depth = 0;
+        self.brace_depth = 0;
     }
 
     fn scan_line(&mut self, line: &str) -> ScannedLine {
@@ -510,15 +513,56 @@ impl CodeLexer {
                         continue;
                     }
 
-                    // 9. Structural tokens & depth tracking
+                    // 9. Composite operators: <<, <=, >=, ->, =>
+                    if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
+                        cur_code.push_str("<<");
+                        code_tokens.push_str("<<");
+                        i += 2;
+                        continue;
+                    }
+                    if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '=' {
+                        cur_code.push_str("<=");
+                        code_tokens.push_str("<=");
+                        i += 2;
+                        continue;
+                    }
+                    if chars[i] == '>' && i + 1 < chars.len() && chars[i + 1] == '=' {
+                        cur_code.push_str(">=");
+                        code_tokens.push_str(">=");
+                        i += 2;
+                        continue;
+                    }
+                    if chars[i] == '-' && i + 1 < chars.len() && chars[i + 1] == '>' {
+                        cur_code.push_str("->");
+                        code_tokens.push_str("->");
+                        i += 2;
+                        continue;
+                    }
+                    if chars[i] == '=' && i + 1 < chars.len() && chars[i + 1] == '>' {
+                        cur_code.push_str("=>");
+                        code_tokens.push_str("=>");
+                        i += 2;
+                        continue;
+                    }
+
+                    // 10. Structural tokens & depth tracking
                     match chars[i] {
                         '<' => {
-                            self.angle_depth += 1;
+                            if self.brace_depth == 0
+                                && self.paren_depth == 0
+                                && self.bracket_depth == 0
+                            {
+                                self.angle_depth += 1;
+                            }
                             cur_code.push('<');
                             code_tokens.push('<');
                         }
                         '>' => {
-                            if self.angle_depth > 0 {
+                            if self.brace_depth == 0
+                                && self.paren_depth == 0
+                                && self.bracket_depth == 0
+                                && self.angle_depth > 0
+                            {
                                 self.angle_depth -= 1;
                             }
                             cur_code.push('>');
@@ -558,13 +602,15 @@ impl CodeLexer {
                             has_structural_open_brace = true;
                             let is_fn_body = self.paren_depth == 0
                                 && self.angle_depth == 0
-                                && self.bracket_depth == 0;
+                                && self.bracket_depth == 0
+                                && self.brace_depth == 0;
                             if is_fn_body && !has_function_body_open_brace {
                                 has_function_body_open_brace = true;
                                 let seg_idx = segments.len();
                                 let char_idx = cur_code.len();
                                 first_fn_body_open_brace_seg = Some((seg_idx, char_idx));
                             }
+                            self.brace_depth += 1;
                             cur_code.push('{');
                             code_tokens.push('{');
                         }
@@ -572,6 +618,9 @@ impl CodeLexer {
                             depth_delta -= 1;
                             close_brace_count += 1;
                             has_structural_close_brace = true;
+                            if self.brace_depth > 0 {
+                                self.brace_depth -= 1;
+                            }
                             cur_code.push('}');
                             code_tokens.push('}');
                         }
@@ -714,12 +763,45 @@ fn is_public_code(code_tokens: &str) -> bool {
 
 fn is_public_fn(code_tokens: &str) -> bool {
     if let Some((_, rest)) = parse_public_item(code_tokens) {
-        rest.starts_with("fn ")
-            || rest.starts_with("const fn ")
-            || rest.starts_with("async fn ")
-            || rest.starts_with("unsafe fn ")
-            || rest.starts_with("extern ")
-            || rest.starts_with("unsafe extern ")
+        let mut cur = rest.trim_start();
+        loop {
+            if let Some(after) = cur.strip_prefix("const") {
+                if after.starts_with(char::is_whitespace) {
+                    cur = after.trim_start();
+                    continue;
+                }
+            }
+            if let Some(after) = cur.strip_prefix("async") {
+                if after.starts_with(char::is_whitespace) {
+                    cur = after.trim_start();
+                    continue;
+                }
+            }
+            if let Some(after) = cur.strip_prefix("unsafe") {
+                if after.starts_with(char::is_whitespace) {
+                    cur = after.trim_start();
+                    continue;
+                }
+            }
+            if let Some(after) = cur.strip_prefix("extern") {
+                let mut rem = after.trim_start();
+                if rem.starts_with("\"\"") {
+                    rem = rem[2..].trim_start();
+                } else if rem.starts_with('"') {
+                    if let Some(close) = rem[1..].find('"') {
+                        rem = rem[close + 2..].trim_start();
+                    }
+                }
+                cur = rem;
+                continue;
+            }
+            break;
+        }
+        cur.starts_with("fn ")
+            || cur.starts_with("fn<")
+            || cur.starts_with("fn(")
+            || cur.starts_with("fn\n")
+            || cur == "fn"
     } else {
         false
     }
@@ -775,8 +857,40 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
         let mut item_lexer = file_lexer.clone();
         let scanned = item_lexer.scan_line(raw_line);
 
-        if raw_line.starts_with("#[") && file_lexer.state == LexState::Normal {
-            pending_attrs.push(normalize_ws(raw_line));
+        if scanned.code_tokens.trim_start().starts_with("#[")
+            && file_lexer.state == LexState::Normal
+        {
+            let mut attr_text = scanned.render_visible();
+            let mut current_scanned = scanned;
+            let mut is_done = item_lexer.bracket_depth == 0
+                && current_scanned.segments.iter().any(|s| match s {
+                    VisibleSegment::Code(c) => c.contains(']'),
+                    _ => false,
+                });
+            while !is_done && idx + 1 < src_lines.len() {
+                idx += 1;
+                let next_line = if item_lexer.state.is_in_string_literal() {
+                    src_lines[idx]
+                } else {
+                    src_lines[idx].trim()
+                };
+                if next_line.is_empty() && !item_lexer.state.is_in_string_literal() {
+                    continue;
+                }
+                current_scanned = item_lexer.scan_line(next_line);
+                let rendered = current_scanned.render_visible();
+                if !attr_text.ends_with(' ') && !rendered.starts_with(' ') {
+                    attr_text.push(' ');
+                }
+                attr_text.push_str(&rendered);
+                if item_lexer.bracket_depth == 0 && item_lexer.state == LexState::Normal {
+                    is_done = true;
+                }
+            }
+            pending_attrs.push(attr_text);
+            if item_lexer.state == LexState::Normal {
+                item_lexer.reset_top_level_depths();
+            }
             file_lexer = item_lexer;
             idx += 1;
             continue;
@@ -2261,6 +2375,306 @@ fn public_api_guard_mutation_and_false_pass_matrix() {
         normalized_public_surface_str("t.rs", old_r),
         normalized_public_surface_str("t.rs", new_r),
         "R. pub(super) multiline const field change must be detected"
+    );
+
+    // S. supported_headers ordered family mismatch: MUST DETECT
+    let canonical_headers = sm_format::semcode_format::supported_headers();
+    let mut reordered = canonical_headers.to_vec();
+    reordered.swap(0, 1);
+    assert_ne!(
+        canonical_headers,
+        &reordered[..],
+        "S. reordering supported_headers must be detected"
+    );
+    let mut truncated = canonical_headers.to_vec();
+    truncated.pop();
+    assert_ne!(
+        canonical_headers,
+        &truncated[..],
+        "S. removing header from supported_headers must be detected"
+    );
+
+    // T. const-generic comparison operator '>': MUST DETECT signature change
+    let old_t = "pub fn build() -> Foo<{ if 1 > 0 { 32 } else { 64 } }> {\n    private_a()\n}";
+    let new_t = "pub fn build() -> Foo<{ if 1 > 0 { 33 } else { 64 } }> {\n    private_a()\n}";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_t),
+        normalized_public_surface_str("t.rs", new_t),
+        "T. const-generic comparison operator '>' signature change must be detected"
+    );
+    let same_body_t =
+        "pub fn build() -> Foo<{ if 1 > 0 { 32 } else { 64 } }> {\n    private_b()\n}";
+    assert_eq!(
+        normalized_public_surface_str("t.rs", old_t),
+        normalized_public_surface_str("t.rs", same_body_t),
+        "T. private body change must not change surface"
+    );
+
+    // U. const-generic shift operator '<<': MUST preserve correct function boundary
+    let old_u = "pub fn build() -> Foo<{ 1 << 2 }> {\n    private_a()\n}\npub const NEXT: u32 = 1;";
+    let new_u = "pub fn build() -> Foo<{ 1 << 3 }> {\n    private_a()\n}\npub const NEXT: u32 = 1;";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_u),
+        normalized_public_surface_str("t.rs", new_u),
+        "U. const-generic shift operator '<<' signature change must be detected"
+    );
+    let same_body_u =
+        "pub fn build() -> Foo<{ 1 << 2 }> {\n    private_b()\n}\npub const NEXT: u32 = 1;";
+    assert_eq!(
+        normalized_public_surface_str("t.rs", old_u),
+        normalized_public_surface_str("t.rs", same_body_u),
+        "U. private body change must not change surface"
+    );
+
+    // V. combined function qualifiers: MUST classify as function
+    let old_v = "pub const unsafe fn qualified() -> Foo<{ 32 }> {\n    private_a()\n}";
+    let new_v = "pub const unsafe fn qualified() -> Foo<{ 64 }> {\n    private_a()\n}";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_v),
+        normalized_public_surface_str("t.rs", new_v),
+        "V. combined qualifiers signature change must be detected"
+    );
+    let same_body_v = "pub const unsafe fn qualified() -> Foo<{ 32 }> {\n    private_b()\n}";
+    assert_eq!(
+        normalized_public_surface_str("t.rs", old_v),
+        normalized_public_surface_str("t.rs", same_body_v),
+        "V. combined qualifiers private body change must not change surface"
+    );
+
+    // W. multiline cfg_attr predicate change: MUST DETECT
+    let old_w =
+        "#[cfg_attr(\n    feature = \"x\",\n    deprecated(note = \"old\")\n)]\npub fn api() {}";
+    let new_w =
+        "#[cfg_attr(\n    feature = \"y\",\n    deprecated(note = \"old\")\n)]\npub fn api() {}";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_w),
+        normalized_public_surface_str("t.rs", new_w),
+        "W. multiline cfg_attr predicate change must be detected"
+    );
+
+    // X. multiline attribute literal-value change: MUST DETECT
+    let old_x =
+        "#[cfg_attr(\n    feature = \"x\",\n    deprecated(note = \"old\")\n)]\npub fn api() {}";
+    let new_x =
+        "#[cfg_attr(\n    feature = \"x\",\n    deprecated(note = \"new\")\n)]\npub fn api() {}";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_x),
+        normalized_public_surface_str("t.rs", new_x),
+        "X. multiline attribute literal value change must be detected"
+    );
+}
+
+#[test]
+fn supported_headers_match_canonical_contract() {
+    use sm_format::semcode_format::*;
+
+    let canonical_family: &[SemcodeHeaderSpec] = &[
+        HEADER_V0, HEADER_V1, HEADER_V2, HEADER_V3, HEADER_V4, HEADER_V5, HEADER_V6, HEADER_V7,
+        HEADER_V8, HEADER_V9, HEADER_V10, HEADER_V11, HEADER_V12, HEADER_V13, HEADER_V14,
+        HEADER_V15, HEADER_V16, HEADER_V17, HEADER_V18, HEADER_V19,
+    ];
+
+    let actual = supported_headers();
+    assert_eq!(
+        actual, canonical_family,
+        "supported_headers() must return exactly the canonical supported header family in canonical order"
+    );
+
+    for spec in actual {
+        assert_eq!(
+            header_spec_from_magic(&spec.magic),
+            Some(*spec),
+            "header_spec_from_magic must resolve canonical header for magic {:?}",
+            spec.magic
+        );
+    }
+}
+
+#[test]
+fn public_api_guard_handles_generic_angle_tokens_and_operators() {
+    let fn_cmp_32 = r#"
+pub fn build() -> Foo<{ if 1 > 0 { 32 } else { 64 } }> {
+    private_a()
+}
+"#;
+    let fn_cmp_33 = r#"
+pub fn build() -> Foo<{ if 1 > 0 { 33 } else { 64 } }> {
+    private_a()
+}
+"#;
+    let fn_cmp_diff_body = r#"
+pub fn build() -> Foo<{ if 1 > 0 { 32 } else { 64 } }> {
+    private_b()
+}
+"#;
+    let surf_cmp_32 = normalized_public_surface_str("test.rs", fn_cmp_32);
+    let surf_cmp_33 = normalized_public_surface_str("test.rs", fn_cmp_33);
+    let surf_cmp_diff_body = normalized_public_surface_str("test.rs", fn_cmp_diff_body);
+
+    assert_ne!(
+        surf_cmp_32, surf_cmp_33,
+        "changing const-generic expression with '>' operator must alter surface"
+    );
+    assert_eq!(
+        surf_cmp_32, surf_cmp_diff_body,
+        "changing private body in function with const-generic '>' operator must not change surface"
+    );
+    assert!(
+        !surf_cmp_32.contains("private_a"),
+        "private body must not be captured: {surf_cmp_32}"
+    );
+
+    let fn_shift_1 = r#"
+pub fn build() -> Foo<{ 1 << 2 }> {
+    private_a()
+}
+pub const NEXT: u32 = 1;
+"#;
+    let fn_shift_2 = r#"
+pub fn build() -> Foo<{ 1 << 3 }> {
+    private_a()
+}
+pub const NEXT: u32 = 1;
+"#;
+    let fn_shift_diff_body = r#"
+pub fn build() -> Foo<{ 1 << 2 }> {
+    private_b()
+}
+pub const NEXT: u32 = 1;
+"#;
+    let surf_shift_1 = normalized_public_surface_str("test.rs", fn_shift_1);
+    let surf_shift_2 = normalized_public_surface_str("test.rs", fn_shift_2);
+    let surf_shift_diff_body = normalized_public_surface_str("test.rs", fn_shift_diff_body);
+
+    assert_ne!(
+        surf_shift_1, surf_shift_2,
+        "changing const-generic expression with '<<' shift operator must alter surface"
+    );
+    assert_eq!(
+        surf_shift_1, surf_shift_diff_body,
+        "changing private body in function with '<<' shift operator must not change surface"
+    );
+    assert!(
+        surf_shift_1.contains("pub const NEXT: u32 = 1;"),
+        "following declaration must remain separate: {surf_shift_1}"
+    );
+
+    let fn_less = r#"
+pub fn build() -> Foo<{ if 1 < 2 { 32 } else { 64 } }> {
+    private_a()
+}
+"#;
+    let surf_less = normalized_public_surface_str("test.rs", fn_less);
+    assert!(
+        surf_less.contains("pub fn build() -> Foo<{ if 1 < 2 { 32 } else { 64 } }> {"),
+        "signature with '<' inside const block must be captured: {surf_less}"
+    );
+    assert!(
+        !surf_less.contains("private_a"),
+        "private body must not be captured: {surf_less}"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_combined_function_qualifiers() {
+    let fn_qual_32 = r#"
+pub const unsafe fn qualified() -> Foo<{
+    32
+}> {
+    private_a()
+}
+"#;
+    let fn_qual_64 = r#"
+pub const unsafe fn qualified() -> Foo<{
+    64
+}> {
+    private_a()
+}
+"#;
+    let fn_qual_diff_body = r#"
+pub const unsafe fn qualified() -> Foo<{
+    32
+}> {
+    private_b()
+}
+"#;
+    let surf_qual_32 = normalized_public_surface_str("test.rs", fn_qual_32);
+    let surf_qual_64 = normalized_public_surface_str("test.rs", fn_qual_64);
+    let surf_qual_diff_body = normalized_public_surface_str("test.rs", fn_qual_diff_body);
+
+    assert_ne!(
+        surf_qual_32, surf_qual_64,
+        "changing 32 -> 64 in combined qualifiers function must alter surface"
+    );
+    assert_eq!(
+        surf_qual_32, surf_qual_diff_body,
+        "changing only private_a -> private_b in combined qualifiers function must not alter surface"
+    );
+    assert!(
+        !surf_qual_32.contains("private_a"),
+        "private body must not be captured: {surf_qual_32}"
+    );
+
+    let fn_ffi = r#"
+pub unsafe extern "C" fn ffi_entry() {
+    private_impl()
+}
+"#;
+    let surf_ffi = normalized_public_surface_str("test.rs", fn_ffi);
+    assert!(
+        surf_ffi.contains("pub unsafe extern \"C\" fn ffi_entry() {"),
+        "pub unsafe extern \"C\" fn must be classified as function: {surf_ffi}"
+    );
+    assert!(
+        !surf_ffi.contains("private_impl"),
+        "private body must not be captured: {surf_ffi}"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_multiline_outer_attributes() {
+    let src_x_old = r#"
+#[cfg_attr(
+    feature = "x",
+    deprecated(note = "old")
+)]
+pub fn api() {}
+"#;
+    let src_y_old = r#"
+#[cfg_attr(
+    feature = "y",
+    deprecated(note = "old")
+)]
+pub fn api() {}
+"#;
+    let src_x_new = r#"
+#[cfg_attr(
+    feature = "x",
+    deprecated(note = "new")
+)]
+pub fn api() {}
+"#;
+    let surf_x_old = normalized_public_surface_str("test.rs", src_x_old);
+    let surf_y_old = normalized_public_surface_str("test.rs", src_y_old);
+    let surf_x_new = normalized_public_surface_str("test.rs", src_x_new);
+
+    assert_ne!(
+        surf_x_old, surf_y_old,
+        "changing attribute predicate feature x -> y must change surface"
+    );
+    assert_ne!(
+        surf_x_old, surf_x_new,
+        "changing attribute literal note old -> new must change surface"
+    );
+
+    let src_x_reformatted = r#"
+#[cfg_attr(  feature = "x",   /* comment */  deprecated(note = "old")  )]
+pub fn api() {}
+"#;
+    let surf_x_reformatted = normalized_public_surface_str("test.rs", src_x_reformatted);
+    assert_eq!(
+        surf_x_old, surf_x_reformatted,
+        "formatting/comments-only changes to attribute must not change surface: {surf_x_old} vs {surf_x_reformatted}"
     );
 }
 
