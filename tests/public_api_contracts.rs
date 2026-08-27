@@ -126,26 +126,172 @@ enum LexState {
     RawByteString(usize),
 }
 
+impl LexState {
+    fn is_in_string_literal(self) -> bool {
+        matches!(
+            self,
+            LexState::NormalString
+                | LexState::RawString(_)
+                | LexState::ByteNormalString
+                | LexState::RawByteString(_)
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VisibleSegment {
+    Code(String),
+    Literal(String),
+}
+
 #[derive(Debug, Clone)]
 struct ScannedLine {
-    visible_text: String,
+    segments: Vec<VisibleSegment>,
     code_tokens: String,
     depth_delta: i32,
     has_structural_semicolon: bool,
     has_structural_open_brace: bool,
     has_structural_close_brace: bool,
-    first_open_brace_visible_idx: Option<usize>,
     open_brace_count: usize,
     close_brace_count: usize,
+    has_function_body_open_brace: bool,
+    first_fn_body_open_brace_seg: Option<(usize, usize)>,
     ends_in_literal_or_comment: bool,
+    ends_in_string_literal: bool,
 }
 
 impl ScannedLine {
-    fn text_up_to_first_structural_open_brace(&self) -> &str {
-        if let Some(idx) = self.first_open_brace_visible_idx {
-            &self.visible_text[..=idx]
+    fn render_visible(&self) -> String {
+        let mut out = String::new();
+        for seg in &self.segments {
+            match seg {
+                VisibleSegment::Code(s) => {
+                    let norm = normalize_ws(s);
+                    if !norm.is_empty() {
+                        if !out.is_empty() && !out.ends_with(' ') {
+                            let first = norm.chars().next().unwrap();
+                            if first != ';'
+                                && first != ','
+                                && first != ':'
+                                && first != ')'
+                                && first != ']'
+                                && first != '}'
+                                && first != '>'
+                            {
+                                out.push(' ');
+                            }
+                        }
+                        out.push_str(&norm);
+                    }
+                }
+                VisibleSegment::Literal(s) => {
+                    if !out.is_empty() && !out.ends_with(' ') {
+                        let last = out.chars().last().unwrap();
+                        if last != '('
+                            && last != '['
+                            && last != '{'
+                            && last != '<'
+                            && last != '*'
+                            && last != '&'
+                            && last != '!'
+                        {
+                            out.push(' ');
+                        }
+                    }
+                    out.push_str(s);
+                }
+            }
+        }
+        out
+    }
+
+    fn text_up_to_function_body_open_brace(&self) -> String {
+        if let Some((target_seg, char_idx)) = self.first_fn_body_open_brace_seg {
+            let mut out = String::new();
+            for (idx, seg) in self.segments.iter().enumerate() {
+                if idx < target_seg {
+                    match seg {
+                        VisibleSegment::Code(s) => {
+                            let norm = normalize_ws(s);
+                            if !norm.is_empty() {
+                                if !out.is_empty() && !out.ends_with(' ') {
+                                    let first = norm.chars().next().unwrap();
+                                    if first != ';'
+                                        && first != ','
+                                        && first != ':'
+                                        && first != ')'
+                                        && first != ']'
+                                        && first != '}'
+                                        && first != '>'
+                                    {
+                                        out.push(' ');
+                                    }
+                                }
+                                out.push_str(&norm);
+                            }
+                        }
+                        VisibleSegment::Literal(s) => {
+                            if !out.is_empty() && !out.ends_with(' ') {
+                                let last = out.chars().last().unwrap();
+                                if last != '('
+                                    && last != '['
+                                    && last != '{'
+                                    && last != '<'
+                                    && last != '*'
+                                    && last != '&'
+                                    && last != '!'
+                                {
+                                    out.push(' ');
+                                }
+                            }
+                            out.push_str(s);
+                        }
+                    }
+                } else if idx == target_seg {
+                    match seg {
+                        VisibleSegment::Code(s) => {
+                            let prefix = &s[..=char_idx];
+                            let norm = normalize_ws(prefix);
+                            if !norm.is_empty() {
+                                if !out.is_empty() && !out.ends_with(' ') {
+                                    let first = norm.chars().next().unwrap();
+                                    if first != ';'
+                                        && first != ','
+                                        && first != ':'
+                                        && first != ')'
+                                        && first != ']'
+                                        && first != '}'
+                                        && first != '>'
+                                    {
+                                        out.push(' ');
+                                    }
+                                }
+                                out.push_str(&norm);
+                            }
+                        }
+                        VisibleSegment::Literal(s) => {
+                            if !out.is_empty() && !out.ends_with(' ') {
+                                let last = out.chars().last().unwrap();
+                                if last != '('
+                                    && last != '['
+                                    && last != '{'
+                                    && last != '<'
+                                    && last != '*'
+                                    && last != '&'
+                                    && last != '!'
+                                {
+                                    out.push(' ');
+                                }
+                            }
+                            out.push_str(&s[..=char_idx]);
+                        }
+                    }
+                    break;
+                }
+            }
+            out
         } else {
-            &self.visible_text
+            self.render_visible()
         }
     }
 }
@@ -153,25 +299,39 @@ impl ScannedLine {
 #[derive(Debug, Clone)]
 struct CodeLexer {
     state: LexState,
+    angle_depth: usize,
+    paren_depth: usize,
+    bracket_depth: usize,
 }
 
 impl CodeLexer {
     fn new() -> Self {
         Self {
             state: LexState::Normal,
+            angle_depth: 0,
+            paren_depth: 0,
+            bracket_depth: 0,
         }
     }
 
+    fn reset_top_level_depths(&mut self) {
+        self.angle_depth = 0;
+        self.paren_depth = 0;
+        self.bracket_depth = 0;
+    }
+
     fn scan_line(&mut self, line: &str) -> ScannedLine {
-        let mut visible_text = String::with_capacity(line.len());
+        let mut segments = Vec::new();
+        let mut cur_code = String::new();
         let mut code_tokens = String::with_capacity(line.len());
         let mut depth_delta = 0i32;
         let mut has_structural_semicolon = false;
         let mut has_structural_open_brace = false;
         let mut has_structural_close_brace = false;
-        let mut first_open_brace_visible_idx = None;
         let mut open_brace_count = 0usize;
         let mut close_brace_count = 0usize;
+        let mut has_function_body_open_brace = false;
+        let mut first_fn_body_open_brace_seg = None;
 
         let chars: Vec<char> = line.chars().collect();
         let mut i = 0;
@@ -181,12 +341,17 @@ impl CodeLexer {
                 LexState::Normal => {
                     // 1. Line comment //
                     if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                        code_tokens.push(' ');
                         break;
                     }
 
                     // 2. Block comment start /*
                     if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+                        if !cur_code.is_empty() {
+                            segments.push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                        }
                         self.state = LexState::BlockComment(1);
+                        code_tokens.push(' ');
                         i += 2;
                         continue;
                     }
@@ -200,8 +365,11 @@ impl CodeLexer {
                             j += 1;
                         }
                         if j < chars.len() && chars[j] == '"' {
+                            if !cur_code.is_empty() {
+                                segments.push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                            }
                             self.state = LexState::RawByteString(hashes);
-                            visible_text.extend(&chars[i..=j]);
+                            segments.push(VisibleSegment::Literal(chars[i..=j].iter().collect()));
                             code_tokens.push_str("\"\"");
                             i = j + 1;
                             continue;
@@ -217,8 +385,11 @@ impl CodeLexer {
                             j += 1;
                         }
                         if j < chars.len() && chars[j] == '"' {
+                            if !cur_code.is_empty() {
+                                segments.push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                            }
                             self.state = LexState::RawString(hashes);
-                            visible_text.extend(&chars[i..=j]);
+                            segments.push(VisibleSegment::Literal(chars[i..=j].iter().collect()));
                             code_tokens.push_str("\"\"");
                             i = j + 1;
                             continue;
@@ -227,8 +398,11 @@ impl CodeLexer {
 
                     // 5. Byte string b"..."
                     if chars[i] == 'b' && i + 1 < chars.len() && chars[i + 1] == '"' {
+                        if !cur_code.is_empty() {
+                            segments.push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                        }
                         self.state = LexState::ByteNormalString;
-                        visible_text.extend(&chars[i..=i + 1]);
+                        segments.push(VisibleSegment::Literal(chars[i..=i + 1].iter().collect()));
                         code_tokens.push_str("\"\"");
                         i += 2;
                         continue;
@@ -236,8 +410,11 @@ impl CodeLexer {
 
                     // 6. Normal string "..."
                     if chars[i] == '"' {
+                        if !cur_code.is_empty() {
+                            segments.push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                        }
                         self.state = LexState::NormalString;
-                        visible_text.push('"');
+                        segments.push(VisibleSegment::Literal("\"".to_string()));
                         code_tokens.push_str("\"\"");
                         i += 1;
                         continue;
@@ -245,89 +422,166 @@ impl CodeLexer {
 
                     // 7. Byte char b'...'
                     if chars[i] == 'b' && i + 1 < chars.len() && chars[i + 1] == '\'' {
-                        let mut j = i + 2;
-                        let mut found = false;
-                        while j < chars.len() {
-                            if chars[j] == '\\' {
-                                j += 2;
-                            } else if chars[j] == '\'' {
-                                found = true;
-                                break;
-                            } else {
+                        let is_simple_byte_char =
+                            i + 3 < chars.len() && chars[i + 2] != '\\' && chars[i + 3] == '\'';
+                        let is_esc_byte_char = i + 2 < chars.len() && chars[i + 2] == '\\';
+                        if is_simple_byte_char {
+                            if !cur_code.is_empty() {
+                                segments.push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                            }
+                            segments
+                                .push(VisibleSegment::Literal(chars[i..=i + 3].iter().collect()));
+                            code_tokens.push_str("b''");
+                            i += 4;
+                            continue;
+                        } else if is_esc_byte_char {
+                            let mut j = i + 3;
+                            let mut found = false;
+                            while j < chars.len() && j <= i + 6 {
+                                if chars[j] == '\'' && chars[j - 1] != '\\'
+                                    || (j > i + 3
+                                        && chars[j] == '\''
+                                        && chars[j - 2] == '\\'
+                                        && chars[j - 1] == '\\')
+                                {
+                                    found = true;
+                                    break;
+                                }
                                 j += 1;
                             }
-                        }
-                        if found {
-                            visible_text.extend(&chars[i..=j]);
-                            code_tokens.push_str("b''");
-                            i = j + 1;
-                            continue;
+                            if found {
+                                if !cur_code.is_empty() {
+                                    segments
+                                        .push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                                }
+                                segments
+                                    .push(VisibleSegment::Literal(chars[i..=j].iter().collect()));
+                                code_tokens.push_str("b''");
+                                i = j + 1;
+                                continue;
+                            }
                         }
                     }
 
                     // 8. Char literal '...'
                     if chars[i] == '\'' {
-                        let mut j = i + 1;
-                        let mut found = false;
-                        while j < chars.len() {
-                            if chars[j] == '\\' {
-                                j += 2;
-                            } else if chars[j] == '\'' {
-                                found = true;
-                                break;
-                            } else {
+                        let is_simple_char =
+                            i + 2 < chars.len() && chars[i + 1] != '\\' && chars[i + 2] == '\'';
+                        let is_esc_char = i + 1 < chars.len() && chars[i + 1] == '\\';
+                        if is_simple_char {
+                            if !cur_code.is_empty() {
+                                segments.push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                            }
+                            segments
+                                .push(VisibleSegment::Literal(chars[i..=i + 2].iter().collect()));
+                            code_tokens.push_str("''");
+                            i += 3;
+                            continue;
+                        } else if is_esc_char {
+                            let mut j = i + 2;
+                            let mut found = false;
+                            while j < chars.len() && j <= i + 10 {
+                                if (chars[j] == '\'' && chars[j - 1] != '\\')
+                                    || (j > i + 2
+                                        && chars[j] == '\''
+                                        && chars[j - 2] == '\\'
+                                        && chars[j - 1] == '\\')
+                                {
+                                    found = true;
+                                    break;
+                                }
                                 j += 1;
                             }
+                            if found {
+                                if !cur_code.is_empty() {
+                                    segments
+                                        .push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
+                                }
+                                segments
+                                    .push(VisibleSegment::Literal(chars[i..=j].iter().collect()));
+                                code_tokens.push_str("''");
+                                i = j + 1;
+                                continue;
+                            }
                         }
-                        if found && j > i + 1 && (j <= i + 10 || !chars[i + 1..j].contains(&' ')) {
-                            visible_text.extend(&chars[i..=j]);
-                            code_tokens.push_str("''");
-                            i = j + 1;
-                            continue;
-                        } else {
-                            visible_text.push('\'');
-                            code_tokens.push('\'');
-                            i += 1;
-                            continue;
-                        }
+                        cur_code.push('\'');
+                        code_tokens.push('\'');
+                        i += 1;
+                        continue;
                     }
 
-                    // 9. Structural tokens
+                    // 9. Structural tokens & depth tracking
                     match chars[i] {
+                        '<' => {
+                            self.angle_depth += 1;
+                            cur_code.push('<');
+                            code_tokens.push('<');
+                        }
+                        '>' => {
+                            if self.angle_depth > 0 {
+                                self.angle_depth -= 1;
+                            }
+                            cur_code.push('>');
+                            code_tokens.push('>');
+                        }
+                        '(' => {
+                            self.paren_depth += 1;
+                            depth_delta += 1;
+                            cur_code.push('(');
+                            code_tokens.push('(');
+                        }
+                        ')' => {
+                            if self.paren_depth > 0 {
+                                self.paren_depth -= 1;
+                            }
+                            depth_delta -= 1;
+                            cur_code.push(')');
+                            code_tokens.push(')');
+                        }
+                        '[' => {
+                            self.bracket_depth += 1;
+                            depth_delta += 1;
+                            cur_code.push('[');
+                            code_tokens.push('[');
+                        }
+                        ']' => {
+                            if self.bracket_depth > 0 {
+                                self.bracket_depth -= 1;
+                            }
+                            depth_delta -= 1;
+                            cur_code.push(']');
+                            code_tokens.push(']');
+                        }
                         '{' => {
                             depth_delta += 1;
                             open_brace_count += 1;
                             has_structural_open_brace = true;
-                            if first_open_brace_visible_idx.is_none() {
-                                first_open_brace_visible_idx = Some(visible_text.len());
+                            let is_fn_body = self.paren_depth == 0
+                                && self.angle_depth == 0
+                                && self.bracket_depth == 0;
+                            if is_fn_body && !has_function_body_open_brace {
+                                has_function_body_open_brace = true;
+                                let seg_idx = segments.len();
+                                let char_idx = cur_code.len();
+                                first_fn_body_open_brace_seg = Some((seg_idx, char_idx));
                             }
-                            visible_text.push('{');
+                            cur_code.push('{');
                             code_tokens.push('{');
                         }
                         '}' => {
                             depth_delta -= 1;
                             close_brace_count += 1;
                             has_structural_close_brace = true;
-                            visible_text.push('}');
+                            cur_code.push('}');
                             code_tokens.push('}');
-                        }
-                        '(' | '[' => {
-                            depth_delta += 1;
-                            visible_text.push(chars[i]);
-                            code_tokens.push(chars[i]);
-                        }
-                        ')' | ']' => {
-                            depth_delta -= 1;
-                            visible_text.push(chars[i]);
-                            code_tokens.push(chars[i]);
                         }
                         ';' => {
                             has_structural_semicolon = true;
-                            visible_text.push(';');
+                            cur_code.push(';');
                             code_tokens.push(';');
                         }
                         c => {
-                            visible_text.push(c);
+                            cur_code.push(c);
                             code_tokens.push(c);
                         }
                     }
@@ -340,6 +594,7 @@ impl CodeLexer {
                     } else if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '/' {
                         if depth <= 1 {
                             self.state = LexState::Normal;
+                            code_tokens.push(' ');
                         } else {
                             self.state = LexState::BlockComment(depth - 1);
                         }
@@ -349,96 +604,149 @@ impl CodeLexer {
                     }
                 }
                 LexState::NormalString | LexState::ByteNormalString => {
-                    visible_text.push(chars[i]);
-                    if chars[i] == '\\' && i + 1 < chars.len() {
-                        visible_text.push(chars[i + 1]);
-                        i += 2;
-                    } else if chars[i] == '"' {
-                        self.state = LexState::Normal;
-                        i += 1;
+                    let mut lit_str = String::new();
+                    while i < chars.len() {
+                        if chars[i] == '\\' && i + 1 < chars.len() {
+                            lit_str.push(chars[i]);
+                            lit_str.push(chars[i + 1]);
+                            i += 2;
+                        } else if chars[i] == '"' {
+                            lit_str.push('"');
+                            self.state = LexState::Normal;
+                            i += 1;
+                            break;
+                        } else {
+                            lit_str.push(chars[i]);
+                            i += 1;
+                        }
+                    }
+                    if let Some(VisibleSegment::Literal(prev)) = segments.last_mut() {
+                        prev.push_str(&lit_str);
                     } else {
-                        i += 1;
+                        segments.push(VisibleSegment::Literal(lit_str));
                     }
                 }
                 LexState::RawString(hashes) | LexState::RawByteString(hashes) => {
-                    visible_text.push(chars[i]);
-                    if chars[i] == '"' {
-                        let mut j = i + 1;
-                        let mut match_hashes = 0;
-                        while j < chars.len() && match_hashes < hashes && chars[j] == '#' {
-                            match_hashes += 1;
-                            j += 1;
+                    let mut lit_str = String::new();
+                    while i < chars.len() {
+                        if chars[i] == '"' {
+                            let mut j = i + 1;
+                            let mut match_hashes = 0;
+                            while j < chars.len() && match_hashes < hashes && chars[j] == '#' {
+                                match_hashes += 1;
+                                j += 1;
+                            }
+                            if match_hashes == hashes {
+                                lit_str.push('"');
+                                for _ in 0..hashes {
+                                    lit_str.push('#');
+                                }
+                                self.state = LexState::Normal;
+                                i = j;
+                                break;
+                            }
                         }
-                        if match_hashes == hashes {
-                            visible_text.extend(&chars[i + 1..j]);
-                            self.state = LexState::Normal;
-                            i = j;
-                            continue;
-                        }
+                        lit_str.push(chars[i]);
+                        i += 1;
                     }
-                    i += 1;
+                    if let Some(VisibleSegment::Literal(prev)) = segments.last_mut() {
+                        prev.push_str(&lit_str);
+                    } else {
+                        segments.push(VisibleSegment::Literal(lit_str));
+                    }
                 }
             }
         }
 
+        if !cur_code.is_empty() {
+            segments.push(VisibleSegment::Code(cur_code));
+        }
+
         ScannedLine {
-            visible_text,
+            segments,
             code_tokens,
             depth_delta,
             has_structural_semicolon,
             has_structural_open_brace,
             has_structural_close_brace,
-            first_open_brace_visible_idx,
             open_brace_count,
             close_brace_count,
+            has_function_body_open_brace,
+            first_fn_body_open_brace_seg,
             ends_in_literal_or_comment: self.state != LexState::Normal,
+            ends_in_string_literal: self.state.is_in_string_literal(),
         }
     }
 }
 
-fn is_public_code(code_tokens: &str) -> bool {
+fn parse_public_item(code_tokens: &str) -> Option<(&str, &str)> {
     let t = code_tokens.trim_start();
-    t.starts_with("pub ") || t.starts_with("pub(")
+    if !t.starts_with("pub") {
+        return None;
+    }
+    let rest = if t.starts_with("pub(") {
+        let mut depth = 0;
+        let mut close_idx = None;
+        for (i, c) in t.char_indices() {
+            if c == '(' {
+                depth += 1;
+            } else if c == ')' {
+                depth -= 1;
+                if depth == 0 {
+                    close_idx = Some(i);
+                    break;
+                }
+            }
+        }
+        let close_pos = close_idx?;
+        t[close_pos + 1..].trim_start()
+    } else if t.starts_with("pub ") || t == "pub" {
+        t[3..].trim_start()
+    } else {
+        return None;
+    };
+    Some((t, rest))
+}
+
+fn is_public_code(code_tokens: &str) -> bool {
+    parse_public_item(code_tokens).is_some()
 }
 
 fn is_public_fn(code_tokens: &str) -> bool {
-    let t = code_tokens.trim_start();
-    if !is_public_code(t) {
-        return false;
+    if let Some((_, rest)) = parse_public_item(code_tokens) {
+        rest.starts_with("fn ")
+            || rest.starts_with("const fn ")
+            || rest.starts_with("async fn ")
+            || rest.starts_with("unsafe fn ")
+            || rest.starts_with("extern ")
+            || rest.starts_with("unsafe extern ")
+    } else {
+        false
     }
-    t.starts_with("pub fn ")
-        || t.starts_with("pub const fn ")
-        || t.starts_with("pub async fn ")
-        || t.starts_with("pub unsafe fn ")
-        || t.starts_with("pub extern ")
-        || t.starts_with("pub unsafe extern ")
-        || t.starts_with("pub(crate) fn ")
-        || t.starts_with("pub(crate) const fn ")
-        || t.starts_with("pub(crate) async fn ")
-        || t.starts_with("pub(crate) unsafe fn ")
-        || t.contains(" fn ")
 }
 
 fn is_public_enum(code_tokens: &str) -> bool {
-    let t = code_tokens.trim_start();
-    if !is_public_code(t) {
-        return false;
+    if let Some((_, rest)) = parse_public_item(code_tokens) {
+        rest.starts_with("enum ")
+    } else {
+        false
     }
-    t.starts_with("pub enum ") || t.starts_with("pub(crate) enum ") || t.contains(" enum ")
+}
+
+fn is_public_use(code_tokens: &str) -> bool {
+    if let Some((_, rest)) = parse_public_item(code_tokens) {
+        rest.starts_with("use ")
+    } else {
+        false
+    }
 }
 
 fn is_public_const_or_static(code_tokens: &str) -> bool {
-    let t = code_tokens.trim_start();
-    if !is_public_code(t) {
-        return false;
+    if let Some((_, rest)) = parse_public_item(code_tokens) {
+        (rest.starts_with("const ") || rest.starts_with("static ")) && !is_public_fn(code_tokens)
+    } else {
+        false
     }
-    (t.starts_with("pub const ")
-        || t.starts_with("pub static ")
-        || t.starts_with("pub(crate) const ")
-        || t.starts_with("pub(crate) static "))
-        && !t.starts_with("pub const fn ")
-        && !t.starts_with("pub(crate) const fn ")
-        && !t.contains(" const fn ")
 }
 
 fn normalized_public_surface(path: &str) -> String {
@@ -454,8 +762,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
     let mut file_lexer = CodeLexer::new();
 
     while idx < src_lines.len() {
-        let raw_line = src_lines[idx].trim();
-        if raw_line.is_empty() {
+        let raw_line = if file_lexer.state.is_in_string_literal() {
+            src_lines[idx]
+        } else {
+            src_lines[idx].trim()
+        };
+        if raw_line.is_empty() && !file_lexer.state.is_in_string_literal() {
             idx += 1;
             continue;
         }
@@ -475,31 +787,36 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
             if is_public_fn(&scanned.code_tokens) {
                 let mut current_scanned = scanned;
-                let mut signature =
-                    normalize_ws(current_scanned.text_up_to_first_structural_open_brace());
-                while !current_scanned.has_structural_open_brace
+                let mut signature = current_scanned.text_up_to_function_body_open_brace();
+                while !current_scanned.has_function_body_open_brace
                     && !current_scanned.has_structural_semicolon
                     && idx + 1 < src_lines.len()
                 {
                     idx += 1;
-                    let continuation = src_lines[idx].trim();
+                    let continuation = if item_lexer.state.is_in_string_literal() {
+                        src_lines[idx]
+                    } else {
+                        src_lines[idx].trim()
+                    };
                     current_scanned = item_lexer.scan_line(continuation);
-                    if continuation.is_empty() || current_scanned.visible_text.trim().is_empty() {
+                    let rendered = current_scanned.text_up_to_function_body_open_brace();
+                    if continuation.is_empty() || rendered.trim().is_empty() {
                         continue;
                     }
                     signature.push(' ');
-                    signature.push_str(&normalize_ws(
-                        current_scanned.text_up_to_first_structural_open_brace(),
-                    ));
+                    signature.push_str(&rendered);
                 }
-                lines.push(signature);
+                lines.push(normalize_ws(&signature));
+                if item_lexer.state == LexState::Normal {
+                    item_lexer.reset_top_level_depths();
+                }
                 file_lexer = item_lexer;
                 idx += 1;
                 continue;
             }
 
             if is_public_enum(&scanned.code_tokens) {
-                let mut enum_decl = normalize_ws(&scanned.visible_text);
+                let mut enum_decl = scanned.render_visible();
                 let mut enum_brace_depth =
                     scanned.open_brace_count as i32 - scanned.close_brace_count as i32;
                 let mut current_scanned = scanned;
@@ -509,13 +826,18 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     && idx + 1 < src_lines.len()
                 {
                     idx += 1;
-                    let continuation = src_lines[idx].trim();
+                    let continuation = if item_lexer.state.is_in_string_literal() {
+                        src_lines[idx]
+                    } else {
+                        src_lines[idx].trim()
+                    };
                     current_scanned = item_lexer.scan_line(continuation);
-                    if continuation.is_empty() || current_scanned.visible_text.trim().is_empty() {
+                    let rendered = current_scanned.render_visible();
+                    if continuation.is_empty() || rendered.trim().is_empty() {
                         continue;
                     }
                     enum_decl.push(' ');
-                    enum_decl.push_str(&normalize_ws(&current_scanned.visible_text));
+                    enum_decl.push_str(&rendered);
                     enum_brace_depth += current_scanned.open_brace_count as i32
                         - current_scanned.close_brace_count as i32;
                 }
@@ -525,24 +847,32 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     && current_scanned.has_structural_close_brace
                 {
                     // Single-line enum: pub enum State { N, F, T, S }
-                    lines.push(enum_decl);
+                    lines.push(normalize_ws(&enum_decl));
+                    if item_lexer.state == LexState::Normal {
+                        item_lexer.reset_top_level_depths();
+                    }
                     file_lexer = item_lexer;
                     idx += 1;
                     continue;
                 }
 
-                lines.push(enum_decl);
+                lines.push(normalize_ws(&enum_decl));
 
                 while enum_brace_depth > 0 && idx + 1 < src_lines.len() {
                     idx += 1;
-                    let item_line = src_lines[idx].trim();
-                    if item_line.is_empty() {
+                    let item_line = if item_lexer.state.is_in_string_literal() {
+                        src_lines[idx]
+                    } else {
+                        src_lines[idx].trim()
+                    };
+                    if item_line.is_empty() && !item_lexer.state.is_in_string_literal() {
                         continue;
                     }
                     let sc = item_lexer.scan_line(item_line);
                     enum_brace_depth += sc.open_brace_count as i32 - sc.close_brace_count as i32;
 
-                    if sc.visible_text.trim().is_empty() && !sc.ends_in_literal_or_comment {
+                    let rendered = sc.render_visible();
+                    if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
                         continue;
                     }
                     if item_line.starts_with("#[") && !sc.ends_in_literal_or_comment {
@@ -551,28 +881,74 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
 
                     if enum_brace_depth == 0 {
-                        // Closing line of enum body
-                        let clean_trimmed = sc.visible_text.trim_end_matches('}').trim();
+                        let clean_trimmed = rendered.trim_end_matches('}').trim();
                         if !clean_trimmed.is_empty() {
                             lines.push(normalize_ws(clean_trimmed));
                         }
                         break;
                     } else {
-                        lines.push(normalize_ws(&sc.visible_text));
+                        lines.push(normalize_ws(&rendered));
                     }
                 }
 
+                if item_lexer.state == LexState::Normal {
+                    item_lexer.reset_top_level_depths();
+                }
                 file_lexer = item_lexer;
                 idx += 1;
                 continue;
             }
 
             if is_public_const_or_static(&scanned.code_tokens) {
-                let mut item = normalize_ws(&scanned.visible_text);
+                let mut item = scanned.render_visible();
                 let mut depth = scanned.depth_delta;
+                let mut prev_ended_in_string = scanned.ends_in_string_literal;
                 let mut has_semi_at_zero = depth <= 0 && scanned.has_structural_semicolon;
 
                 while !has_semi_at_zero && idx + 1 < src_lines.len() {
+                    idx += 1;
+                    let next_line = if item_lexer.state.is_in_string_literal() {
+                        src_lines[idx]
+                    } else {
+                        src_lines[idx].trim()
+                    };
+                    if next_line.is_empty() && !item_lexer.state.is_in_string_literal() {
+                        continue;
+                    }
+                    let sc = item_lexer.scan_line(next_line);
+                    depth += sc.depth_delta;
+                    if depth <= 0 && sc.has_structural_semicolon {
+                        has_semi_at_zero = true;
+                    }
+                    let rendered = sc.render_visible();
+                    if rendered.trim().is_empty() && !sc.ends_in_string_literal {
+                        prev_ended_in_string = sc.ends_in_string_literal;
+                        continue;
+                    }
+                    if prev_ended_in_string {
+                        item.push('\n');
+                    } else if !item.ends_with(' ') {
+                        item.push(' ');
+                    }
+                    item.push_str(&rendered);
+                    prev_ended_in_string = sc.ends_in_string_literal;
+                }
+
+                lines.push(item);
+                if item_lexer.state == LexState::Normal {
+                    item_lexer.reset_top_level_depths();
+                }
+                file_lexer = item_lexer;
+                idx += 1;
+                continue;
+            }
+
+            if is_public_use(&scanned.code_tokens) {
+                let mut item = scanned.render_visible();
+                let mut depth = scanned.depth_delta;
+                let mut is_done = depth <= 0 && scanned.has_structural_semicolon;
+
+                while !is_done && idx + 1 < src_lines.len() {
                     idx += 1;
                     let next_line = src_lines[idx].trim();
                     if next_line.is_empty() {
@@ -581,23 +957,27 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     let sc = item_lexer.scan_line(next_line);
                     depth += sc.depth_delta;
                     if depth <= 0 && sc.has_structural_semicolon {
-                        has_semi_at_zero = true;
+                        is_done = true;
                     }
-                    if sc.visible_text.trim().is_empty() && !sc.ends_in_literal_or_comment {
+                    let rendered = sc.render_visible();
+                    if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
                         continue;
                     }
                     item.push(' ');
-                    item.push_str(&normalize_ws(&sc.visible_text));
+                    item.push_str(&rendered);
                 }
 
                 lines.push(normalize_ws(&item));
+                if item_lexer.state == LexState::Normal {
+                    item_lexer.reset_top_level_depths();
+                }
                 file_lexer = item_lexer;
                 idx += 1;
                 continue;
             }
 
-            // Other public items (struct, type alias, trait, mod, use)
-            let mut item = normalize_ws(&scanned.visible_text);
+            // Other public items (struct, type alias, trait, mod)
+            let mut item = scanned.render_visible();
             let mut depth = scanned.depth_delta;
             let is_item_done = |sc: &ScannedLine, d: i32| {
                 sc.has_structural_open_brace
@@ -619,20 +999,27 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 if is_item_done(&sc, depth) {
                     is_complete = true;
                 }
-                if sc.visible_text.trim().is_empty() && !sc.ends_in_literal_or_comment {
+                let rendered = sc.render_visible();
+                if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
                     continue;
                 }
                 item.push(' ');
-                item.push_str(&normalize_ws(&sc.visible_text));
+                item.push_str(&rendered);
             }
 
             lines.push(normalize_ws(&item));
+            if item_lexer.state == LexState::Normal {
+                item_lexer.reset_top_level_depths();
+            }
             file_lexer = item_lexer;
             idx += 1;
             continue;
         }
 
         // Advance file_lexer for non-public lines
+        if item_lexer.state == LexState::Normal {
+            item_lexer.reset_top_level_depths();
+        }
         file_lexer = item_lexer;
         pending_attrs.clear();
         idx += 1;
@@ -1538,7 +1925,7 @@ pub const NEXT: u32 = 1;
         "changing multiline string continuation after literal semicolon must change surface"
     );
     assert!(
-        old_surface.contains("pub const TEXT: &str = \"first; SECOND LINE\";"),
+        old_surface.contains("pub const TEXT: &str = \"first;\nSECOND LINE\";"),
         "full multiline string const must be captured: {old_surface}"
     );
     assert!(
@@ -1811,5 +2198,221 @@ fn public_api_guard_mutation_and_false_pass_matrix() {
         normalized_public_surface_str("t.rs", old_k),
         normalized_public_surface_str("t.rs", new_k),
         "K. whitespace formatting change must not change surface"
+    );
+
+    // L. String literal double-space -> single-space: MUST DETECT
+    let old_l = "pub const S: &str = \"a  b\";";
+    let new_l = "pub const S: &str = \"a b\";";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_l),
+        normalized_public_surface_str("t.rs", new_l),
+        "L. string literal double-space vs single-space change must be detected"
+    );
+
+    // M. Multiline newline -> space: MUST DETECT
+    let old_m = "pub const S: &str = \"a\nb\";";
+    let new_m = "pub const S: &str = \"a b\";";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_m),
+        normalized_public_surface_str("t.rs", new_m),
+        "M. multiline literal newline vs space change must be detected"
+    );
+
+    // N. Raw-string indentation: MUST DETECT
+    let old_n = "pub const R: &str = r#\"a\n  b\"#;";
+    let new_n = "pub const R: &str = r#\"a\n b\"#;";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_n),
+        normalized_public_surface_str("t.rs", new_n),
+        "N. raw-string indentation change must be detected"
+    );
+
+    // O. Multiline pub-use member: MUST DETECT
+    let old_o = "pub use demo::{\n    Alpha,\n    Beta,\n};";
+    let new_o = "pub use demo::{\n    Alpha,\n    Gamma,\n};";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_o),
+        normalized_public_surface_str("t.rs", new_o),
+        "O. multiline pub-use member change must be detected"
+    );
+
+    // P. Const-generic signature value: MUST DETECT
+    let old_p = "pub fn build() -> Foo<{ 32 }> {\n    private_a()\n}";
+    let new_p = "pub fn build() -> Foo<{ 64 }> {\n    private_a()\n}";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_p),
+        normalized_public_surface_str("t.rs", new_p),
+        "P. const-generic signature value change must be detected"
+    );
+
+    // Q. Block comment token separator: declaration MUST remain inventoried
+    let old_q = "pub/* comment */const X: u32 = 1;";
+    let new_q = "pub/* comment */const X: u32 = 2;";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_q),
+        normalized_public_surface_str("t.rs", new_q),
+        "Q. block comment token separator declaration must detect value changes"
+    );
+
+    // R. pub(super) multiline const field: MUST DETECT
+    let old_r = "pub(super) const HEADER: Spec = Spec {\n    rev: 1,\n};";
+    let new_r = "pub(super) const HEADER: Spec = Spec {\n    rev: 2,\n};";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_r),
+        normalized_public_surface_str("t.rs", new_r),
+        "R. pub(super) multiline const field change must be detected"
+    );
+}
+
+#[test]
+fn public_api_guard_preserves_literal_whitespace_and_raw_string_indentation() {
+    let s_double_space = "pub const S: &str = \"a  b\";";
+    let s_single_space = "pub const S: &str = \"a b\";";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", s_double_space),
+        normalized_public_surface_str("test.rs", s_single_space),
+        "surfaces must differ for double space vs single space inside literal"
+    );
+
+    let s_multiline = "pub const S: &str = \"a\nb\";";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", s_multiline),
+        normalized_public_surface_str("test.rs", s_single_space),
+        "surfaces must differ for multiline string vs single line space"
+    );
+
+    let r_indent_2 = "pub const R: &str = r#\"a\n  b\"#;";
+    let r_indent_1 = "pub const R: &str = r#\"a\n b\"#;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", r_indent_2),
+        normalized_public_surface_str("test.rs", r_indent_1),
+        "surfaces must differ for raw string indentation change"
+    );
+}
+
+#[test]
+fn public_api_guard_captures_multiline_pub_use_reexports() {
+    let old_use = r#"
+pub use demo::{
+    Alpha,
+    Beta,
+};
+pub const NEXT: u32 = 10;
+"#;
+    let new_use = r#"
+pub use demo::{
+    Alpha,
+    Gamma,
+};
+pub const NEXT: u32 = 10;
+"#;
+    let old_surf = normalized_public_surface_str("test.rs", old_use);
+    let new_surf = normalized_public_surface_str("test.rs", new_use);
+    assert_ne!(
+        old_surf, new_surf,
+        "multiline pub use re-export member change must alter surface"
+    );
+    assert!(
+        old_surf.contains("Alpha") && old_surf.contains("Beta"),
+        "re-exported members Alpha and Beta must be captured: {old_surf}"
+    );
+    assert!(
+        old_surf.contains("pub const NEXT: u32 = 10;"),
+        "following declaration must be inventoried: {old_surf}"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_function_signature_const_generic_braces() {
+    let fn_32 = r#"
+pub fn build() -> Foo<{ 32 }> {
+    private_a()
+}
+"#;
+    let fn_64 = r#"
+pub fn build() -> Foo<{ 64 }> {
+    private_a()
+}
+"#;
+    let fn_32_diff_body = r#"
+pub fn build() -> Foo<{ 32 }> {
+    private_b()
+}
+"#;
+    let surf_32 = normalized_public_surface_str("test.rs", fn_32);
+    let surf_64 = normalized_public_surface_str("test.rs", fn_64);
+    let surf_32_diff_body = normalized_public_surface_str("test.rs", fn_32_diff_body);
+
+    assert_ne!(
+        surf_32, surf_64,
+        "const-generic value change in return type must change surface"
+    );
+    assert_eq!(
+        surf_32, surf_32_diff_body,
+        "changing private body in function with const-generic return type must not change surface"
+    );
+    assert!(
+        !surf_32.contains("private_a"),
+        "private body must not be captured: {surf_32}"
+    );
+}
+
+#[test]
+fn public_api_guard_treats_comments_as_token_separators() {
+    let src1 = "pub/* comment */const X: u32 = 1;";
+    let src2 = "pub const X: u32 = 1;";
+    let surf1 = normalized_public_surface_str("test.rs", src1);
+    let surf2 = normalized_public_surface_str("test.rs", src2);
+    assert_eq!(
+        surf1, surf2,
+        "comment separating pub and const must yield normalized declaration"
+    );
+
+    let src3 = "pub/* comment */const X: u32 = 2;";
+    let surf3 = normalized_public_surface_str("test.rs", src3);
+    assert_ne!(
+        surf1, surf3,
+        "value change with comment token separator must change surface"
+    );
+
+    let src_enum = "pub/*x*/ enum E { A, B }";
+    let surf_enum = normalized_public_surface_str("test.rs", src_enum);
+    assert!(
+        surf_enum.contains("A") && surf_enum.contains("B"),
+        "enum with comment separator must capture variants: {surf_enum}"
+    );
+
+    let src_crate = "pub(crate)/*x*/ const X: u32 = 1;";
+    let surf_crate = normalized_public_surface_str("test.rs", src_crate);
+    assert!(
+        surf_crate.contains("pub(crate) const X: u32 = 1;"),
+        "pub(crate) with comment separator must be captured: {surf_crate}"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_all_pub_restricted_visibilities() {
+    let src_super_1 = r#"
+pub(super) const HEADER: Spec = Spec {
+    rev: 1,
+};
+"#;
+    let src_super_2 = r#"
+pub(super) const HEADER: Spec = Spec {
+    rev: 2,
+};
+"#;
+    let surf_super_1 = normalized_public_surface_str("test.rs", src_super_1);
+    let surf_super_2 = normalized_public_surface_str("test.rs", src_super_2);
+    assert_ne!(
+        surf_super_1, surf_super_2,
+        "pub(super) multiline const change must be captured"
+    );
+
+    let src_in_path = "pub(in crate::module) static GLOBAL_DATA: u32 = 100;";
+    let surf_in_path = normalized_public_surface_str("test.rs", src_in_path);
+    assert!(
+        surf_in_path.contains("pub(in crate::module) static GLOBAL_DATA: u32 = 100;"),
+        "pub(in ...) restricted visibility static must be captured: {surf_in_path}"
     );
 }
