@@ -13,8 +13,18 @@ pub requested_host_channel: Option<String>,
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HelloPendingPolicyReason {
+MissingObservationCapability,
+StdoutNotDefaultSink,
+GenericIoNotAllowed,
+AuditRequiredButUnavailable,
+NondeterministicSinkConfiguration,
+UnsupportedOperationKind,
+UnsupportedPayloadType,
+UnsupportedAuditPolicy,
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelloPendingPolicyResult {
+Admit,
+Deny { reason: HelloPendingPolicyReason },
 #[cfg(feature = "std")]
 pub fn evaluate_hello_pending_policy(input: &HelloPendingPolicyInput) -> HelloPendingPolicyResult {

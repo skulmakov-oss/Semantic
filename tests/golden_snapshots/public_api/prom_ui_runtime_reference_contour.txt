@@ -3,8 +3,8 @@ pub const ROOT_NODE: u64 = 10;
 pub const LABEL_NODE: u64 = 11;
 pub const BUTTON_NODE: u64 = 12;
 pub const LIST_NODE: u64 = 13;
-pub const REFERENCE_SOURCE_TEXT: &str = concat!(
-pub const INVALID_SOURCE_TEXT: &str = concat!(
+pub const REFERENCE_SOURCE_TEXT: &str = concat!( "projection v0 {\n", "revision 1; epoch 1;\n", "surface 1 root 10 key 1;\n", "node 10 role root key 10 { child 11 order 0; child 12 order 1; child 13 order 2; }\n", "node 11 role text key 11 {}\n", "node 12 role danger_action key 12 {}\n", "node 13 role evidence_panel key 13 {}\n", "collection_anchor 13;\n", "}" );
+pub const INVALID_SOURCE_TEXT: &str = concat!( "projection v0 {\n", "revision 1; epoch 1;\n", "surface 1 root 10 key 1;\n", "node 10 role root key 10 { child 999 order 0; }\n", "}" );
 pub struct ReferenceLayout {
 pub fn build(bundle: &GateDActivatedBundle) -> Self {
 pub fn hit_test(&self, x: f64, y: f64) -> Option<u64> {
@@ -15,6 +15,8 @@ pub fn compile_reference_bundle() -> Vec<u8> {
 pub fn compile_invalid_bundle() -> Option<Vec<u8>> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReferenceContourError {
+CompileFailed(ProjectionBundleCompileError),
+ActivationDenied(GateDActivationError),
 pub struct ReferenceState {
 pub fn new(source_text: &str) -> Result<Self, ReferenceContourError> {
 pub fn handle_pointer_moved(&mut self, x: f64, y: f64) {

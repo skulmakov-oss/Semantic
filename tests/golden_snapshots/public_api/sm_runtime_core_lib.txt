@@ -31,10 +31,27 @@ pub fn field(&self, name: SymbolId) -> Self {
 pub fn adt_payload(&self, variant: SymbolId, index: u16) -> Self {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PathComponent {
+TupleIndex(u16),
+Field(SymbolId),
+AdtPayload { variant: SymbolId, index: u16 },
+SequenceIndexStatic(u32),
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionContext {
+PureCompute,
+VerifiedLocal,
+RuleExecution,
+KernelBound,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuotaKind {
+Steps,
+Calls,
+StackDepth,
+Frames,
+Registers,
+ConstPool,
+SymbolTable,
+EffectCalls,
+TraceEntries,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QuotaExceeded {
 pub kind: QuotaKind,
@@ -42,6 +59,19 @@ pub limit: usize,
 pub used: usize,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeTrap {
+AssertionFailed,
+BorrowWriteConflict,
+StackOverflow,
+StackUnderflow,
+TypeMismatch,
+InvalidOpcode,
+InvalidJump,
+DivisionByZero,
+ArithmeticOverflow,
+CapabilityDenied,
+AbiViolation,
+VerifierRejected,
+QuotaExceeded(QuotaExceeded),
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeQuotas {
 pub max_steps: usize,

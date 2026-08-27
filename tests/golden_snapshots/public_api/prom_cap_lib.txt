@@ -2,6 +2,22 @@ source: crates/prom-cap/src/lib.rs
 pub mod hello_observation_capability;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CapabilityKind {
+GateRead,
+GateWrite,
+PulseEmit,
+ControlledObservationSink,
+StateQuery,
+StateUpdate,
+EventPost,
+ClockRead,
+ArgsRead,
+StdinReadText,
+StdoutWrite,
+StderrWrite,
+PathInspect,
+FsRead,
+FsWrite,
+TimeDuration,
 pub const fn id(self) -> &'static str {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapabilityLookupEntry {
@@ -14,16 +30,27 @@ pub fn try_new( entries: &'a [CapabilityLookupEntry], ) -> Result<Self, Capabili
 pub fn lookup( &self, reference: CapabilityRef, ) -> Result<&CapabilityLookupEntry, CapabilityLookupError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityLookupError {
+UnknownReference,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityLookupBuildError {
+DuplicateReference,
+UnsortedEntries,
 pub const fn required_capability_for_call(call: HostCallId) -> CapabilityKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilitySurfaceClass {
+StableV1,
+FoundationApplicationV0,
+PlannedPostStable,
 pub const fn capability_surface_class(kind: CapabilityKind) -> CapabilitySurfaceClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApplicationCapabilityProfile {
+Pure,
+CliReadOnly,
+CliFileTransform,
+UiBounded,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityManifestVersion {
+V1,
 pub const fn as_str(self) -> &'static str {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityManifestMetadata {
@@ -31,6 +58,7 @@ pub schema: String,
 pub version: CapabilityManifestVersion,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityDeniedCode {
+MissingCapability,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityDenied {
 pub capability: CapabilityKind,
@@ -42,6 +70,8 @@ pub fn new( capability: CapabilityKind, call: Option<HostCallId>, code: Capabili
 pub trait CapabilityChecker {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ManifestValidationCode {
+UnsupportedSchema,
+UnsupportedVersion,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ManifestValidationReport {
 pub code: ManifestValidationCode,

@@ -116,49 +116,418 @@ fn normalize_ws(line: &str) -> String {
     line.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LexState {
+    Normal,
+    BlockComment(usize),
+    RawString(usize),
+    NormalString,
+}
+
+struct CodeSanitizer {
+    state: LexState,
+}
+
+impl CodeSanitizer {
+    fn new() -> Self {
+        Self {
+            state: LexState::Normal,
+        }
+    }
+
+    fn clean_line(&mut self, line: &str) -> String {
+        let mut out = String::with_capacity(line.len());
+        let chars: Vec<char> = line.chars().collect();
+        let mut i = 0;
+
+        while i < chars.len() {
+            match self.state {
+                LexState::Normal => {
+                    if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                        break;
+                    } else if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+                        self.state = LexState::BlockComment(1);
+                        i += 2;
+                    } else if chars[i] == '"' {
+                        self.state = LexState::NormalString;
+                        out.push('"');
+                        i += 1;
+                    } else if (chars[i] == 'r' || chars[i] == 'b' || chars[i] == 'c')
+                        && i + 1 < chars.len()
+                        && (chars[i + 1] == '"'
+                            || chars[i + 1] == '#'
+                            || (chars[i] == 'b' && (chars[i + 1] == 'r' || chars[i + 1] == '"')))
+                    {
+                        let mut j = i;
+                        if chars[j] == 'b' || chars[j] == 'c' {
+                            j += 1;
+                        }
+                        if j < chars.len() && chars[j] == 'r' {
+                            let r_start = i;
+                            j += 1;
+                            let mut hashes = 0;
+                            while j < chars.len() && chars[j] == '#' {
+                                hashes += 1;
+                                j += 1;
+                            }
+                            if j < chars.len() && chars[j] == '"' {
+                                self.state = LexState::RawString(hashes);
+                                for k in r_start..=j {
+                                    out.push(chars[k]);
+                                }
+                                i = j + 1;
+                                continue;
+                            }
+                        } else if j < chars.len() && chars[j] == '"' {
+                            self.state = LexState::NormalString;
+                            for k in i..=j {
+                                out.push(chars[k]);
+                            }
+                            i = j + 1;
+                            continue;
+                        }
+                        out.push(chars[i]);
+                        i += 1;
+                    } else if chars[i] == '\'' {
+                        if i + 1 < chars.len()
+                            && chars[i + 1] == '\\'
+                            && i + 3 < chars.len()
+                            && chars[i + 3] == '\''
+                        {
+                            for k in 0..4 {
+                                out.push(chars[i + k]);
+                            }
+                            i += 4;
+                        } else if i + 2 < chars.len() && chars[i + 2] == '\'' {
+                            for k in 0..3 {
+                                out.push(chars[i + k]);
+                            }
+                            i += 3;
+                        } else {
+                            out.push(chars[i]);
+                            i += 1;
+                        }
+                    } else {
+                        out.push(chars[i]);
+                        i += 1;
+                    }
+                }
+                LexState::BlockComment(depth) => {
+                    if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+                        self.state = LexState::BlockComment(depth + 1);
+                        i += 2;
+                    } else if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                        if depth <= 1 {
+                            self.state = LexState::Normal;
+                        } else {
+                            self.state = LexState::BlockComment(depth - 1);
+                        }
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                }
+                LexState::NormalString => {
+                    out.push(chars[i]);
+                    if chars[i] == '\\' && i + 1 < chars.len() {
+                        out.push(chars[i + 1]);
+                        i += 2;
+                    } else if chars[i] == '"' {
+                        self.state = LexState::Normal;
+                        i += 1;
+                    } else {
+                        i += 1;
+                    }
+                }
+                LexState::RawString(hashes) => {
+                    out.push(chars[i]);
+                    if chars[i] == '"' {
+                        let mut j = i + 1;
+                        let mut match_hashes = 0;
+                        while j < chars.len() && match_hashes < hashes && chars[j] == '#' {
+                            match_hashes += 1;
+                            j += 1;
+                        }
+                        if match_hashes == hashes {
+                            for k in (i + 1)..j {
+                                out.push(chars[k]);
+                            }
+                            self.state = LexState::Normal;
+                            i = j;
+                            continue;
+                        }
+                    }
+                    i += 1;
+                }
+            }
+        }
+
+        out
+    }
+
+    fn depth_delta_of_code(code: &str) -> i32 {
+        let mut d = 0i32;
+        let mut in_str = false;
+        let mut in_raw: Option<usize> = None;
+        let chars: Vec<char> = code.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if in_str {
+                if chars[i] == '\\' {
+                    i += 2;
+                } else if chars[i] == '"' {
+                    in_str = false;
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            } else if let Some(hashes) = in_raw {
+                if chars[i] == '"' {
+                    let mut j = i + 1;
+                    let mut match_hashes = 0;
+                    while j < chars.len() && match_hashes < hashes && chars[j] == '#' {
+                        match_hashes += 1;
+                        j += 1;
+                    }
+                    if match_hashes == hashes {
+                        in_raw = None;
+                        i = j;
+                        continue;
+                    }
+                }
+                i += 1;
+            } else if chars[i] == '"' {
+                in_str = true;
+                i += 1;
+            } else if (chars[i] == 'r' || chars[i] == 'b' || chars[i] == 'c') && i + 1 < chars.len()
+            {
+                let mut j = i;
+                if chars[j] == 'b' || chars[j] == 'c' {
+                    j += 1;
+                }
+                if j < chars.len() && chars[j] == 'r' {
+                    j += 1;
+                    let mut hashes = 0;
+                    while j < chars.len() && chars[j] == '#' {
+                        hashes += 1;
+                        j += 1;
+                    }
+                    if j < chars.len() && chars[j] == '"' {
+                        in_raw = Some(hashes);
+                        i = j + 1;
+                        continue;
+                    }
+                }
+                match chars[i] {
+                    '{' | '[' | '(' => d += 1,
+                    '}' | ']' | ')' => d -= 1,
+                    _ => {}
+                }
+                i += 1;
+            } else {
+                match chars[i] {
+                    '{' | '[' | '(' => d += 1,
+                    '}' | ']' | ')' => d -= 1,
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+        d
+    }
+}
+
 fn is_public_item(line: &str) -> bool {
     line.starts_with("pub ") || line.starts_with("pub(")
 }
 
 fn is_public_fn(line: &str) -> bool {
-    is_public_item(line) && (line.starts_with("pub fn") || line.contains(" fn "))
+    let is_pub = is_public_item(line);
+    if !is_pub {
+        return false;
+    }
+    line.starts_with("pub fn ")
+        || line.starts_with("pub const fn ")
+        || line.starts_with("pub async fn ")
+        || line.starts_with("pub unsafe fn ")
+        || line.starts_with("pub extern ")
+        || line.starts_with("pub unsafe extern ")
+        || line.starts_with("pub(crate) fn ")
+        || line.starts_with("pub(crate) const fn ")
+        || line.starts_with("pub(crate) async fn ")
+        || line.starts_with("pub(crate) unsafe fn ")
+        || line.contains(" fn ")
+}
+
+fn is_public_enum(line: &str) -> bool {
+    let is_pub = is_public_item(line);
+    if !is_pub {
+        return false;
+    }
+    line.starts_with("pub enum ") || line.starts_with("pub(crate) enum ") || line.contains(" enum ")
+}
+
+fn is_public_const_or_static(line: &str) -> bool {
+    let is_pub = is_public_item(line);
+    if !is_pub {
+        return false;
+    }
+    (line.starts_with("pub const ")
+        || line.starts_with("pub static ")
+        || line.starts_with("pub(crate) const ")
+        || line.starts_with("pub(crate) static "))
+        && !line.starts_with("pub const fn ")
+        && !line.starts_with("pub(crate) const fn ")
+        && !line.contains(" const fn ")
 }
 
 fn normalized_public_surface(path: &str) -> String {
     let src = fs::read_to_string(path).unwrap_or_else(|err| panic!("read {path}: {err}"));
+    normalized_public_surface_str(path, &src)
+}
+
+fn normalized_public_surface_str(path: &str, src: &str) -> String {
     let src_lines: Vec<&str> = src.lines().collect();
     let mut lines = Vec::new();
     let mut pending_attrs = Vec::new();
     let mut idx = 0usize;
 
     while idx < src_lines.len() {
-        let line = src_lines[idx].trim();
-        if line.starts_with("#[") {
-            pending_attrs.push(normalize_ws(line));
+        let raw_line = src_lines[idx].trim();
+        if raw_line.is_empty() {
             idx += 1;
             continue;
         }
-        if is_public_item(line) {
+        if raw_line.starts_with("#[") {
+            pending_attrs.push(normalize_ws(raw_line));
+            idx += 1;
+            continue;
+        }
+        if is_public_item(raw_line) {
             lines.append(&mut pending_attrs);
-            if is_public_fn(line) {
-                let mut signature = normalize_ws(line);
-                while !signature.ends_with('{') && !signature.ends_with(';') {
+            if is_public_fn(raw_line) {
+                let mut sanitizer = CodeSanitizer::new();
+                let clean_first = sanitizer.clean_line(raw_line);
+                let mut signature = normalize_ws(&clean_first);
+                let mut s = clean_first.clone();
+                while !s.ends_with('{') && !s.ends_with(';') && idx + 1 < src_lines.len() {
                     idx += 1;
-                    if idx >= src_lines.len() {
-                        break;
-                    }
                     let continuation = src_lines[idx].trim();
-                    if continuation.is_empty() {
+                    let clean = sanitizer.clean_line(continuation);
+                    if continuation.is_empty() || clean.trim().is_empty() {
                         continue;
                     }
                     signature.push(' ');
-                    signature.push_str(&normalize_ws(continuation));
+                    signature.push_str(&normalize_ws(&clean));
+                    s = clean;
                 }
                 lines.push(signature);
                 idx += 1;
                 continue;
             }
-            lines.push(normalize_ws(line));
+
+            if is_public_enum(raw_line) {
+                let mut sanitizer = CodeSanitizer::new();
+                let clean_first = sanitizer.clean_line(raw_line);
+                let mut enum_decl = normalize_ws(&clean_first);
+                let mut s = clean_first.clone();
+                while !s.contains('{') && idx + 1 < src_lines.len() {
+                    idx += 1;
+                    let continuation = src_lines[idx].trim();
+                    let clean = sanitizer.clean_line(continuation);
+                    if continuation.is_empty() || clean.trim().is_empty() {
+                        continue;
+                    }
+                    enum_decl.push(' ');
+                    enum_decl.push_str(&normalize_ws(&clean));
+                    s = clean;
+                }
+                lines.push(enum_decl);
+
+                let mut depth = 1i32;
+                while depth > 0 && idx + 1 < src_lines.len() {
+                    idx += 1;
+                    let item_line = src_lines[idx].trim();
+                    if item_line.is_empty() {
+                        continue;
+                    }
+                    let clean = sanitizer.clean_line(item_line);
+                    if clean.trim().is_empty() && sanitizer.state == LexState::Normal {
+                        continue;
+                    }
+                    if item_line.starts_with("#[") && sanitizer.state == LexState::Normal {
+                        lines.push(normalize_ws(item_line));
+                        continue;
+                    }
+                    depth += CodeSanitizer::depth_delta_of_code(&clean);
+                    if depth == 0 {
+                        let clean_trimmed = clean.trim_end_matches('}').trim();
+                        if !clean_trimmed.is_empty() {
+                            lines.push(normalize_ws(clean_trimmed));
+                        }
+                        break;
+                    } else {
+                        lines.push(normalize_ws(&clean));
+                    }
+                }
+                idx += 1;
+                continue;
+            }
+
+            if is_public_const_or_static(raw_line) {
+                let mut sanitizer = CodeSanitizer::new();
+                let clean_first = sanitizer.clean_line(raw_line);
+                let mut item = normalize_ws(&clean_first);
+                let mut depth = CodeSanitizer::depth_delta_of_code(&clean_first);
+                let mut has_semi_at_zero = depth <= 0 && clean_first.contains(';');
+
+                while !has_semi_at_zero && idx + 1 < src_lines.len() {
+                    idx += 1;
+                    let next_line = src_lines[idx].trim();
+                    if next_line.is_empty() {
+                        continue;
+                    }
+                    let clean = sanitizer.clean_line(next_line);
+                    depth += CodeSanitizer::depth_delta_of_code(&clean);
+                    if depth <= 0 && clean.contains(';') {
+                        has_semi_at_zero = true;
+                    }
+                    if clean.trim().is_empty() {
+                        continue;
+                    }
+                    item.push(' ');
+                    item.push_str(&normalize_ws(&clean));
+                }
+                lines.push(normalize_ws(&item));
+                idx += 1;
+                continue;
+            }
+
+            let mut sanitizer = CodeSanitizer::new();
+            let clean_first = sanitizer.clean_line(raw_line);
+            let mut item = normalize_ws(&clean_first);
+            let mut depth = CodeSanitizer::depth_delta_of_code(&clean_first);
+
+            let is_complete = |it: &str, d: i32| {
+                it.ends_with('{')
+                    || (d <= 0 && (it.ends_with(';') || it.ends_with(',') || it.ends_with('}')))
+            };
+
+            while !is_complete(&item, depth) && idx + 1 < src_lines.len() {
+                idx += 1;
+                let continuation = src_lines[idx].trim();
+                if continuation.is_empty() {
+                    continue;
+                }
+                let clean = sanitizer.clean_line(continuation);
+                depth += CodeSanitizer::depth_delta_of_code(&clean);
+                if clean.trim().is_empty() {
+                    continue;
+                }
+                item.push(' ');
+                item.push_str(&normalize_ws(&clean));
+            }
+            lines.push(normalize_ws(&item));
             idx += 1;
             continue;
         }
@@ -695,4 +1064,354 @@ fn prom_refs_wrapper_invocations_match_contract() {
     assert_eq!(actual.len(), 6, "actual invocation count = 6");
     assert_eq!(actual_unique.len(), 6, "actual unique wrapper count = 6");
     assert_eq!(expected.len(), 6, "expected wrapper count = 6");
+}
+
+#[test]
+fn public_api_guard_captures_enum_variants_and_detects_drift() {
+    let base_enum = r#"
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Demo {
+            Alpha,
+            Beta,
+        }
+    "#;
+    let surface_base = normalized_public_surface_str("demo.rs", base_enum);
+    assert!(
+        surface_base.contains("Alpha"),
+        "surface must contain variant Alpha"
+    );
+    assert!(
+        surface_base.contains("Beta"),
+        "surface must contain variant Beta"
+    );
+
+    // 1. Variant rename (Beta -> Gamma)
+    let renamed = r#"
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Demo {
+            Alpha,
+            Gamma,
+        }
+    "#;
+    assert_ne!(
+        surface_base,
+        normalized_public_surface_str("demo.rs", renamed),
+        "variant rename must alter public API surface"
+    );
+
+    // 2. Variant addition
+    let added = r#"
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Demo {
+            Alpha,
+            Beta,
+            Gamma,
+        }
+    "#;
+    assert_ne!(
+        surface_base,
+        normalized_public_surface_str("demo.rs", added),
+        "variant addition must alter public API surface"
+    );
+
+    // 3. Variant removal
+    let removed = r#"
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        pub enum Demo {
+            Alpha,
+        }
+    "#;
+    assert_ne!(
+        surface_base,
+        normalized_public_surface_str("demo.rs", removed),
+        "variant removal must alter public API surface"
+    );
+
+    // 4. Discriminant change
+    let disc_1 = r#"
+        pub enum Disc {
+            A = 0x01,
+            B = 0x02,
+        }
+    "#;
+    let disc_2 = r#"
+        pub enum Disc {
+            A = 0x01,
+            B = 0x03,
+        }
+    "#;
+    let surface_disc_1 = normalized_public_surface_str("disc.rs", disc_1);
+    let surface_disc_2 = normalized_public_surface_str("disc.rs", disc_2);
+    assert!(
+        surface_disc_1.contains("B = 0x02"),
+        "discriminant must be captured"
+    );
+    assert_ne!(
+        surface_disc_1, surface_disc_2,
+        "discriminant change must alter public API surface"
+    );
+
+    // 5. Tuple variant field change
+    let tuple_1 = r#"
+        pub enum Tup {
+            Val(u32),
+        }
+    "#;
+    let tuple_2 = r#"
+        pub enum Tup {
+            Val(u64),
+        }
+    "#;
+    let surface_tup_1 = normalized_public_surface_str("tup.rs", tuple_1);
+    let surface_tup_2 = normalized_public_surface_str("tup.rs", tuple_2);
+    assert!(
+        surface_tup_1.contains("Val(u32)"),
+        "tuple variant field must be captured"
+    );
+    assert_ne!(
+        surface_tup_1, surface_tup_2,
+        "tuple variant field shape change must alter public API surface"
+    );
+
+    // 6. Struct variant field change
+    let struct_1 = r#"
+        pub enum StructVar {
+            Payload {
+                tag: u16,
+                count: u32,
+            },
+        }
+    "#;
+    let struct_2 = r#"
+        pub enum StructVar {
+            Payload {
+                tag: u16,
+                count: u64,
+            },
+        }
+    "#;
+    let surface_struct_1 = normalized_public_surface_str("struct_var.rs", struct_1);
+    let surface_struct_2 = normalized_public_surface_str("struct_var.rs", struct_2);
+    assert!(
+        surface_struct_1.contains("count: u32"),
+        "struct variant field must be captured"
+    );
+    assert_ne!(
+        surface_struct_1, surface_struct_2,
+        "struct variant field shape change must alter public API surface"
+    );
+}
+
+#[test]
+fn public_api_guard_captures_multiline_const_and_detects_value_drift() {
+    let const_1 = r#"
+        pub const HEADER_DEMO: Spec = Spec {
+            epoch: 0,
+            rev: 1,
+            capabilities: CAP_A | CAP_B,
+        };
+    "#;
+    let const_2 = r#"
+        pub const HEADER_DEMO: Spec = Spec {
+            epoch: 0,
+            rev: 2,
+            capabilities: CAP_A | CAP_B,
+        };
+    "#;
+    let surface_const_1 = normalized_public_surface_str("const.rs", const_1);
+    let surface_const_2 = normalized_public_surface_str("const.rs", const_2);
+    assert!(
+        surface_const_1.contains("rev: 1"),
+        "const struct literal field value must be captured"
+    );
+    assert_ne!(
+        surface_const_1, surface_const_2,
+        "const struct literal field value drift must alter public API surface"
+    );
+
+    let arr_1 = r#"
+        pub const BYTES: [u8; 3] = [
+            1,
+            2,
+            3,
+        ];
+    "#;
+    let arr_2 = r#"
+        pub const BYTES: [u8; 3] = [
+            1,
+            9,
+            3,
+        ];
+    "#;
+    let surface_arr_1 = normalized_public_surface_str("arr.rs", arr_1);
+    let surface_arr_2 = normalized_public_surface_str("arr.rs", arr_2);
+    assert!(
+        surface_arr_1.contains("2"),
+        "const array element must be captured"
+    );
+    assert_ne!(
+        surface_arr_1, surface_arr_2,
+        "const array element drift must alter public API surface"
+    );
+}
+
+#[test]
+fn public_api_guard_does_not_overcapture_function_implementation_bodies() {
+    let fn_impl_a = r#"
+        pub fn compute_hash(seed: u64) -> u64 {
+            let mut state = seed.wrapping_add(0x9e3779b97f4a7c15);
+            state ^= state >> 30;
+            state
+        }
+    "#;
+    let fn_impl_b = r#"
+        pub fn compute_hash(seed: u64) -> u64 {
+            // completely different private implementation
+            let state = seed.rotate_left(13);
+            internal_helper(state);
+            state
+        }
+    "#;
+    let surface_a = normalized_public_surface_str("fn_demo.rs", fn_impl_a);
+    let surface_b = normalized_public_surface_str("fn_demo.rs", fn_impl_b);
+
+    assert_eq!(
+        surface_a, surface_b,
+        "changing private function body must not alter public API inventory"
+    );
+    assert!(
+        !surface_a.contains("wrapping_add"),
+        "function body internals must not be in public API inventory"
+    );
+    assert!(
+        !surface_b.contains("rotate_left"),
+        "function body internals must not be in public API inventory"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_complex_lexical_literals_and_comments() {
+    // A. Raw string const with braces and delimiters inside
+    let src_a = r##"
+        pub const X: &str = r#"{ not a Rust block }"#;
+        pub const NEXT_A: u32 = 10;
+    "##;
+    let surface_a = normalized_public_surface_str("case_a.rs", src_a);
+    assert!(
+        surface_a.contains(r##"pub const X: &str = r#"{ not a Rust block }"#;"##),
+        "raw string literal const must be captured: {surface_a}"
+    );
+    assert!(
+        surface_a.contains("pub const NEXT_A: u32 = 10;"),
+        "subsequent public const must be recognized: {surface_a}"
+    );
+
+    // B. Raw string with unmatched-looking delimiter
+    let src_b = r##"
+        pub const X: &str = r#"}"#;
+        pub const NEXT_B: u32 = 20;
+    "##;
+    let surface_b = normalized_public_surface_str("case_b.rs", src_b);
+    assert!(
+        surface_b.contains(r##"pub const X: &str = r#"}"#;"##),
+        "raw string with unmatched brace must be captured: {surface_b}"
+    );
+    assert!(
+        surface_b.contains("pub const NEXT_B: u32 = 20;"),
+        "subsequent public const must be recognized: {surface_b}"
+    );
+
+    // C. Higher-hash raw string
+    let src_c = r###"
+        pub const X: &str = r##"{ \" }"##;
+        pub const NEXT_C: u32 = 30;
+    "###;
+    let surface_c = normalized_public_surface_str("case_c.rs", src_c);
+    assert!(
+        surface_c.contains(r###"pub const X: &str = r##"{ \" }"##;"###),
+        "higher-hash raw string must be captured: {surface_c}"
+    );
+    assert!(
+        surface_c.contains("pub const NEXT_C: u32 = 30;"),
+        "subsequent public const must be recognized: {surface_c}"
+    );
+
+    // D. Raw byte string
+    let src_d = r##"
+        pub const X: &[u8] = br#"{ }"#;
+        pub const NEXT_D: u32 = 40;
+    "##;
+    let surface_d = normalized_public_surface_str("case_d.rs", src_d);
+    assert!(
+        surface_d.contains(r##"pub const X: &[u8] = br#"{ }"#;"##),
+        "raw byte string must be captured: {surface_d}"
+    );
+    assert!(
+        surface_d.contains("pub const NEXT_D: u32 = 40;"),
+        "subsequent public const must be recognized: {surface_d}"
+    );
+
+    // E. Block comment inside a public const
+    let src_e = r#"
+        pub const X: Spec = Spec {
+            /* fake } delimiter */
+            value: 1,
+        };
+        pub const NEXT_E: u32 = 50;
+    "#;
+    let surface_e = normalized_public_surface_str("case_e.rs", src_e);
+    assert!(
+        surface_e.contains("pub const X: Spec = Spec { value: 1, };"),
+        "const with inline block comment must be captured: {surface_e}"
+    );
+    assert!(
+        surface_e.contains("pub const NEXT_E: u32 = 50;"),
+        "subsequent public const must be recognized: {surface_e}"
+    );
+
+    // F. Multi-line block comment
+    let src_f = r#"
+        pub const X: Spec = Spec {
+            /*
+               fake }
+               fake {
+            */
+            value: 1,
+        };
+        pub const NEXT_F: u32 = 60;
+    "#;
+    let surface_f = normalized_public_surface_str("case_f.rs", src_f);
+    assert!(
+        surface_f.contains("pub const X: Spec = Spec { value: 1, };"),
+        "const with multi-line block comment must be captured: {surface_f}"
+    );
+    assert!(
+        surface_f.contains("pub const NEXT_F: u32 = 60;"),
+        "subsequent public const must be recognized: {surface_f}"
+    );
+
+    // G. Public enum with raw strings and block comments
+    let src_g = r#"
+        pub enum LexEnum {
+            Alpha,
+            /*
+               fake }
+            */
+            Beta,
+        }
+        pub const NEXT_G: u32 = 70;
+    "#;
+    let surface_g = normalized_public_surface_str("case_g.rs", src_g);
+    assert!(
+        surface_g.contains("Alpha"),
+        "enum variant Alpha must be captured: {surface_g}"
+    );
+    assert!(
+        surface_g.contains("Beta"),
+        "enum variant Beta must be captured: {surface_g}"
+    );
+    assert!(
+        surface_g.contains("pub const NEXT_G: u32 = 70;"),
+        "subsequent public const after enum must be recognized: {surface_g}"
+    );
 }

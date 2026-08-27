@@ -1,12 +1,54 @@
 source: crates/prom-ui/src/shell_bridge.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeQuad {
+N,
+F,
+T,
+S,
 #[derive(Debug, Clone, PartialEq)]
 pub enum BridgeValue {
+Quad(BridgeQuad),
+Signed(i64),
+Unsigned(u64),
+Text(String),
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeAvailability {
+Available,
+Unavailable,
+Hidden,
+Pending,
+Stale,
 #[derive(Debug, Clone, PartialEq)]
 pub enum BridgePatchOperation {
+SetBindingValue {
+node: u64,
+slot: u32,
+value: BridgeValue,
+},
+SetNodeAvailability {
+node: u64,
+availability: BridgeAvailability,
+},
+CollectionInsert {
+collection: u64,
+key: u64,
+before: Option<u64>,
+value: BridgeValue,
+},
+CollectionUpdate {
+collection: u64,
+key: u64,
+value: BridgeValue,
+},
+CollectionRemove {
+collection: u64,
+key: u64,
+},
+CollectionMove {
+collection: u64,
+key: u64,
+before: Option<u64>,
+},
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgePatchEnvelope {
 pub patch_id: u64,
@@ -18,11 +60,16 @@ pub epoch: u64,
 pub sequence: u64,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeAdmissionError {
+InvalidIdentity,
+InvalidPatch,
 #[derive(Debug, Clone)]
 pub struct AdmittedProjectionPatchBatch {
 pub fn admit_projection_patch_batch( envelope: BridgePatchEnvelope, operations: Vec<BridgePatchOperation>, ) -> Result<AdmittedProjectionPatchBatch, BridgeAdmissionError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeTargetRole {
+Node { node: u64 },
+Binding { node: u64, slot: u32 },
+Collection { collection: u64 },
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeManifestEntry {
 pub patch_ordinal: u64,
@@ -30,6 +77,7 @@ pub operation_ordinal: u64,
 pub role: BridgeTargetRole,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeManifestError {
+ReplayIndexOverflow,
 #[derive(Debug, Clone)]
 pub struct PreparedPatchSubmission {
 pub fn prepare_patch_submission( batch: AdmittedProjectionPatchBatch, ) -> Result<PreparedPatchSubmission, BridgeManifestError> {
@@ -47,6 +95,9 @@ pub struct LocalProjectionStateHandle {
 pub fn initial_local_projection_state() -> LocalProjectionStateHandle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeApplicationError {
+KeyAlreadyPresent { collection: u64, key: u64 },
+KeyMissing { collection: u64, key: u64 },
+BeforeKeyMissing { collection: u64, before: u64 },
 pub fn apply_prepared_patch_submission( previous: &LocalProjectionStateHandle, submission: &PreparedPatchSubmission, ) -> Result<LocalProjectionStateHandle, BridgeApplicationError> {
 pub fn binding_value( state: &LocalProjectionStateHandle, node: u64, slot: u32, ) -> Option<BridgeValue> {
 pub fn node_availability( state: &LocalProjectionStateHandle, node: u64, ) -> Option<BridgeAvailability> {
@@ -58,6 +109,9 @@ pub fn role(&self) -> &str {
 pub fn children(&self) -> &[u64] {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeAccessibilityRole {
+GenericContainer,
+Label,
+Button,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeAccessibilityEntry {
 pub fn node(&self) -> u64 {
@@ -71,7 +125,11 @@ pub fn activation_snapshot(&self) -> &ActivationTargetSnapshot {
 pub fn root_node(&self) -> u64 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GateDActivationError {
+BundleRejected,
 pub fn activate_projection_bundle_v0_gate_d( bytes: &[u8], ) -> Result<GateDActivatedBundle, GateDActivationError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectionBundleCompileError {
+ParseOrCompile,
+CollectionAnchorQualification,
+Canonicalization,
 pub fn compile_projection_source_to_bundle_v0( source_id: u64, source_text: &str, document_id: u64, bundle_revision: u64, bundle_epoch: u64, compiler_identity: &str, ) -> Result<Vec<u8>, ProjectionBundleCompileError> {

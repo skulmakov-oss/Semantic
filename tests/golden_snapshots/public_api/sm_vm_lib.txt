@@ -3,5 +3,9 @@ pub use sm_format::semcode_format::{
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QuadVal {
+N,
+F,
+T,
+S,
 #[cfg(feature = "std")]
 pub use semcode_vm::*;

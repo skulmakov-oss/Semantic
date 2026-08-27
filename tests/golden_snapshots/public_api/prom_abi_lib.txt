@@ -1,12 +1,35 @@
 source: crates/prom-abi/src/lib.rs
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HostCallId {
+GateRead,
+GateWrite,
+PulseEmit,
+StateQuery,
+StateUpdate,
+EventPost,
+ClockRead,
+ArgsRead,
+StdinReadText,
+StdoutWrite,
+StderrWrite,
+PathInspect,
+FsRead,
+FsWrite,
+TimeDuration,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EffectClass {
+HostQuery,
+HostWrite,
+EventEmit,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeterminismClass {
+Deterministic,
+HostBound,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostCallStability {
+StableV1,
+FoundationApplicationV0,
+PlannedPostStable,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HostCallDescriptor {
 pub id: HostCallId,
@@ -17,8 +40,18 @@ pub stability: HostCallStability,
 pub const fn descriptor_for_call(id: HostCallId) -> HostCallDescriptor {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AbiValue {
+Quad(u8),
+Bool(bool),
+I32(i32),
+U32(u32),
+Fx(i32),
+F64(f64),
+Unit,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AbiFailureKind {
+Unavailable,
+InvalidInput,
+HostFault,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbiError {
 pub call: HostCallId,

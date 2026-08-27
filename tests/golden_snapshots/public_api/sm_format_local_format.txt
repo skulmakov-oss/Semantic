@@ -59,40 +59,130 @@ pub magic: [u8; 8],
 pub epoch: u16,
 pub rev: u16,
 pub capabilities: u32,
-pub const HEADER_V0: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V1: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V2: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V3: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V4: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V5: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V6: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V7: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V8: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V9: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V10: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V11: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V12: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V13: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V14: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V15: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V16: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V17: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V18: SemcodeHeaderSpec = SemcodeHeaderSpec {
-pub const HEADER_V19: SemcodeHeaderSpec = SemcodeHeaderSpec {
+pub const HEADER_V0: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC0, epoch: 0, rev: 1, capabilities: CAP_DEBUG_SYMBOLS | CAP_GATE_SURFACE, };
+pub const HEADER_V1: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC1, epoch: 0, rev: 2, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE, };
+pub const HEADER_V2: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC2, epoch: 0, rev: 3, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES, };
+pub const HEADER_V3: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC3, epoch: 0, rev: 4, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH, };
+pub const HEADER_V4: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC4, epoch: 0, rev: 5, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY, };
+pub const HEADER_V5: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC5, epoch: 0, rev: 6, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE, };
+pub const HEADER_V6: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC6, epoch: 0, rev: 7, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST, };
+pub const HEADER_V7: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC7, epoch: 0, rev: 8, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ, };
+pub const HEADER_V8: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC8, epoch: 0, rev: 9, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES, };
+pub const HEADER_V9: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC9, epoch: 0, rev: 10, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES | CAP_SEQUENCE_VALUES, };
+pub const HEADER_V10: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC10, epoch: 0, rev: 11, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES | CAP_SEQUENCE_VALUES | CAP_CLOSURE_VALUES, };
+pub const HEADER_V11: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC11, epoch: 0, rev: 12, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES | CAP_SEQUENCE_VALUES | CAP_CLOSURE_VALUES | CAP_OWNERSHIP_PATHS, };
+pub const HEADER_V12: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC12, epoch: 0, rev: 13, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES | CAP_SEQUENCE_VALUES | CAP_CLOSURE_VALUES | CAP_OWNERSHIP_PATHS | CAP_OWNERSHIP_FIELD_PATHS, };
+pub const HEADER_V13: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC13, epoch: 0, rev: 14, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES | CAP_SEQUENCE_VALUES | CAP_CLOSURE_VALUES | CAP_OWNERSHIP_PATHS | CAP_OWNERSHIP_FIELD_PATHS | CAP_SEQUENCE_ITERATION, };
+pub const HEADER_V14: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC14, epoch: 0, rev: 15, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES | CAP_SEQUENCE_VALUES | CAP_CLOSURE_VALUES | CAP_OWNERSHIP_PATHS | CAP_OWNERSHIP_FIELD_PATHS | CAP_SEQUENCE_ITERATION | CAP_MAP_VALUES, };
+pub const HEADER_V15: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC15, epoch: 0, rev: 16, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES | CAP_SEQUENCE_VALUES | CAP_CLOSURE_VALUES | CAP_OWNERSHIP_PATHS | CAP_OWNERSHIP_FIELD_PATHS | CAP_SEQUENCE_ITERATION | CAP_MAP_VALUES | CAP_PRNG, };
+pub const HEADER_V16: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC16, epoch: 0, rev: 17, capabilities: CAP_DEBUG_SYMBOLS | CAP_F64_MATH | CAP_GATE_SURFACE | CAP_FX_VALUES | CAP_FX_MATH | CAP_STATE_QUERY | CAP_STATE_UPDATE | CAP_EVENT_POST | CAP_CLOCK_READ | CAP_TEXT_VALUES | CAP_SEQUENCE_VALUES | CAP_CLOSURE_VALUES | CAP_OWNERSHIP_PATHS | CAP_OWNERSHIP_FIELD_PATHS | CAP_SEQUENCE_ITERATION | CAP_MAP_VALUES | CAP_PRNG | CAP_STDOUT, };
+pub const HEADER_V17: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC17, epoch: 0, rev: 18, capabilities: HEADER_V16.capabilities | CAP_ARGS_READ | CAP_STDIN_READ_TEXT | CAP_STDOUT_WRITE | CAP_STDERR_WRITE | CAP_PATH_INSPECT | CAP_FS_READ | CAP_FS_WRITE | CAP_TIME_DURATION, };
+pub const HEADER_V18: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC18, epoch: 0, rev: 19, capabilities: HEADER_V17.capabilities, };
+pub const HEADER_V19: SemcodeHeaderSpec = SemcodeHeaderSpec { magic: MAGIC19, epoch: 0, rev: 20, capabilities: HEADER_V18.capabilities, };
 pub const SEMCODE_SIGNATURE_MIN_REVISION: u16 = HEADER_V19.rev;
 pub fn supported_headers() -> &'static [SemcodeHeaderSpec] {
 pub fn header_spec_from_magic(magic: &[u8; 8]) -> Option<SemcodeHeaderSpec> {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Opcode {
+LoadQ = 0x01,
+LoadBool = 0x02,
+LoadI32 = 0x03,
+AddI32 = 0x07,
+SubI32 = 0x08,
+MulI32 = 0x09,
+DivI32 = 0x0a,
+ModI32 = 0x0b,
+ConcatText = 0x0c,
+LoadU32 = 0x06,
+LoadVar = 0x04,
+StoreVar = 0x05,
+QAnd = 0x10,
+QOr = 0x11,
+QNot = 0x12,
+QImpl = 0x13,
+BoolAnd = 0x14,
+BoolOr = 0x15,
+BoolNot = 0x16,
+QTruthAnd = 0x17,
+QTruthOr = 0x18,
+QTruthNot = 0x19,
+QTruthImpl = 0x1a,
+CmpEq = 0x20,
+CmpNe = 0x21,
+CmpI32Lt = 0x22,
+CmpI32Le = 0x23,
+Jmp = 0x30,
+JmpIf = 0x31,
+Call = 0x40,
+Ret = 0x41,
+Assert = 0x42,
+MakeTuple = 0x43,
+TupleGet = 0x44,
+MakeRecord = 0x45,
+RecordGet = 0x46,
+MakeAdt = 0x47,
+AdtTag = 0x48,
+AdtGet = 0x49,
+LoadF64 = 0x50,
+AddF64 = 0x51,
+SubF64 = 0x52,
+MulF64 = 0x53,
+DivF64 = 0x54,
+LoadFx = 0x55,
+AddFx = 0x56,
+SubFx = 0x57,
+MulFx = 0x58,
+DivFx = 0x59,
+LoadText = 0x5a,
+MakeSequence = 0x5b,
+SequenceGet = 0x5c,
+MakeClosure = 0x5d,
+ClosureCall = 0x5e,
+SequenceLen = 0x5f,
+SequenceIsEmpty = 0x67,
+SequenceContains = 0x68,
+SequencePush = 0x69,
+SequencePrepend = 0x6a,
+SequencePop = 0x6b,
+MapEmpty = 0x70,
+MapContains = 0x71,
+MapGet = 0x72,
+MapSet = 0x73,
+RngSeed = 0x74,
+RngNextI32 = 0x75,
+GateRead = 0x60,
+GateWrite = 0x61,
+PulseEmit = 0x62,
+StateQuery = 0x63,
+StateUpdate = 0x64,
+EventPost = 0x65,
+ClockRead = 0x66,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemcodeFormatError {
+UnexpectedEof,
+InvalidUtf8,
+UnknownOpcode(u8),
 pub fn byte(self) -> u8 {
 pub fn from_byte(v: u8) -> Result<Self, SemcodeFormatError> {
 pub fn minimum_semcode_revision(self) -> u16 {
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CallableValueFamily {
+Quad = 1,
+Bool = 2,
+Text = 3,
+Sequence = 4,
+Map = 5,
+Closure = 6,
+I32 = 7,
+U32 = 8,
+Fx = 9,
+F64 = 10,
+Tuple = 11,
+Record = 12,
+Adt = 13,
+Unit = 14,
 pub fn byte(self) -> u8 {
 pub fn from_byte(v: u8) -> Result<Self, SemcodeFormatError> {
 #[derive(Debug, Clone, PartialEq, Eq)]

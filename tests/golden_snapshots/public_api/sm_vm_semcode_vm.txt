@@ -1,12 +1,31 @@
 source: crates/sm-vm/src/semcode_vm.rs
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MapKey {
+I32(i32),
+U32(u32),
+Bool(bool),
+Text(String),
+Quad(u8),
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClosureValue {
 pub function_name: String,
 pub captures: Vec<Value>,
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+Quad(QuadVal),
+Bool(bool),
+Text(String),
+Sequence(Vec<Value>),
+Map(Vec<(MapKey, Value)>),
+Closure(ClosureValue),
+I32(i32),
+F64(f64),
+U32(u32),
+Fx(i32),
+Tuple(Vec<Value>),
+Record(RecordCarrier<Value>),
+Adt(AdtCarrier<Value>),
+Unit,
 #[derive(Debug, Clone)]
 pub struct Frame {
 pub pc: usize,
@@ -47,6 +66,21 @@ pub fn top_n(&self, n: usize) -> Vec<(Opcode, u64)> {
 pub fn summary_top_n(&self, n: usize) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuntimeError {
+BadHeader,
+UnsupportedBytecodeVersion { found: String, supported: String },
+BadFormat(String),
+UnknownFunction(String),
+InvalidJumpAddress { func: String, addr: usize },
+TypeMismatchRuntime(String),
+StackUnderflow,
+StackOverflow,
+QuotaExceeded(QuotaExceeded),
+VerifierRejected(RejectReport),
+UnknownVariable(String),
+InvalidStringId(u16),
+HostAbi(AbiError),
+CapabilityDenied(CapabilityDenied),
+Trap(RuntimeTrap),
 pub fn run_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
 pub fn run_verified_semcode(bytes: &[u8]) -> Result<(), RuntimeError> {
 pub fn run_semcode_collecting_hello_observations( bytes: &[u8], ) -> Result<Vec<HelloObservationEvent>, RuntimeError> {
