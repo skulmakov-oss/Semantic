@@ -172,17 +172,13 @@ impl CodeSanitizer {
                             }
                             if j < chars.len() && chars[j] == '"' {
                                 self.state = LexState::RawString(hashes);
-                                for k in r_start..=j {
-                                    out.push(chars[k]);
-                                }
+                                out.extend(&chars[r_start..=j]);
                                 i = j + 1;
                                 continue;
                             }
                         } else if j < chars.len() && chars[j] == '"' {
                             self.state = LexState::NormalString;
-                            for k in i..=j {
-                                out.push(chars[k]);
-                            }
+                            out.extend(&chars[i..=j]);
                             i = j + 1;
                             continue;
                         }
@@ -194,14 +190,10 @@ impl CodeSanitizer {
                             && i + 3 < chars.len()
                             && chars[i + 3] == '\''
                         {
-                            for k in 0..4 {
-                                out.push(chars[i + k]);
-                            }
+                            out.extend(&chars[i..=i + 3]);
                             i += 4;
                         } else if i + 2 < chars.len() && chars[i + 2] == '\'' {
-                            for k in 0..3 {
-                                out.push(chars[i + k]);
-                            }
+                            out.extend(&chars[i..=i + 2]);
                             i += 3;
                         } else {
                             out.push(chars[i]);
@@ -249,9 +241,7 @@ impl CodeSanitizer {
                             j += 1;
                         }
                         if match_hashes == hashes {
-                            for k in (i + 1)..j {
-                                out.push(chars[k]);
-                            }
+                            out.extend(&chars[(i + 1)..j]);
                             self.state = LexState::Normal;
                             i = j;
                             continue;
