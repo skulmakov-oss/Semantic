@@ -148,14 +148,11 @@ enum VisibleSegment {
 struct ScannedLine {
     segments: Vec<VisibleSegment>,
     code_tokens: String,
-    depth_delta: i32,
-    has_structural_semicolon: bool,
-    has_structural_open_brace: bool,
-    has_structural_close_brace: bool,
-    open_brace_count: usize,
-    close_brace_count: usize,
-    has_function_body_open_brace: bool,
-    first_fn_body_open_brace_seg: Option<(usize, usize)>,
+    has_top_level_semicolon: bool,
+    has_top_level_comma: bool,
+    has_top_level_open_brace: bool,
+    has_top_level_close_brace: bool,
+    first_top_level_open_brace_seg: Option<(usize, usize)>,
     ends_in_string_literal: bool,
 }
 
@@ -165,7 +162,7 @@ impl ScannedLine {
     }
 
     fn text_up_to_function_body_open_brace(&self) -> String {
-        self.render_visible_up_to(self.first_fn_body_open_brace_seg)
+        self.render_visible_up_to(self.first_top_level_open_brace_seg)
     }
 
     fn render_visible_without_enum_close_brace(&self) -> String {
@@ -281,14 +278,11 @@ impl CodeLexer {
         let mut segments = Vec::new();
         let mut cur_code = String::new();
         let mut code_tokens = String::with_capacity(line.len());
-        let mut depth_delta = 0i32;
-        let mut has_structural_semicolon = false;
-        let mut has_structural_open_brace = false;
-        let mut has_structural_close_brace = false;
-        let mut open_brace_count = 0usize;
-        let mut close_brace_count = 0usize;
-        let mut has_function_body_open_brace = false;
-        let mut first_fn_body_open_brace_seg = None;
+        let mut has_top_level_semicolon = false;
+        let mut has_top_level_comma = false;
+        let mut has_top_level_open_brace = false;
+        let mut has_top_level_close_brace = false;
+        let mut first_top_level_open_brace_seg = None;
 
         let chars: Vec<char> = line.chars().collect();
         let mut i = 0;
@@ -524,7 +518,6 @@ impl CodeLexer {
                         }
                         '(' => {
                             self.paren_depth += 1;
-                            depth_delta += 1;
                             cur_code.push('(');
                             code_tokens.push('(');
                         }
@@ -532,13 +525,11 @@ impl CodeLexer {
                             if self.paren_depth > 0 {
                                 self.paren_depth -= 1;
                             }
-                            depth_delta -= 1;
                             cur_code.push(')');
                             code_tokens.push(')');
                         }
                         '[' => {
                             self.bracket_depth += 1;
-                            depth_delta += 1;
                             cur_code.push('[');
                             code_tokens.push('[');
                         }
@@ -546,32 +537,32 @@ impl CodeLexer {
                             if self.bracket_depth > 0 {
                                 self.bracket_depth -= 1;
                             }
-                            depth_delta -= 1;
                             cur_code.push(']');
                             code_tokens.push(']');
                         }
                         '{' => {
-                            depth_delta += 1;
-                            open_brace_count += 1;
-                            has_structural_open_brace = true;
-                            let is_fn_body = self.paren_depth == 0
+                            let is_top_level = self.paren_depth == 0
                                 && self.angle_depth == 0
                                 && self.bracket_depth == 0
                                 && self.brace_depth == 0;
-                            if is_fn_body && !has_function_body_open_brace {
-                                has_function_body_open_brace = true;
+                            if is_top_level && !has_top_level_open_brace {
+                                has_top_level_open_brace = true;
                                 let seg_idx = segments.len();
                                 let char_idx = cur_code.len();
-                                first_fn_body_open_brace_seg = Some((seg_idx, char_idx));
+                                first_top_level_open_brace_seg = Some((seg_idx, char_idx));
                             }
                             self.brace_depth += 1;
                             cur_code.push('{');
                             code_tokens.push('{');
                         }
                         '}' => {
-                            depth_delta -= 1;
-                            close_brace_count += 1;
-                            has_structural_close_brace = true;
+                            if self.paren_depth == 0
+                                && self.angle_depth == 0
+                                && self.bracket_depth == 0
+                                && self.brace_depth == 1
+                            {
+                                has_top_level_close_brace = true;
+                            }
                             if self.brace_depth > 0 {
                                 self.brace_depth -= 1;
                             }
@@ -579,9 +570,26 @@ impl CodeLexer {
                             code_tokens.push('}');
                         }
                         ';' => {
-                            has_structural_semicolon = true;
+                            if self.paren_depth == 0
+                                && self.angle_depth == 0
+                                && self.bracket_depth == 0
+                                && self.brace_depth == 0
+                            {
+                                has_top_level_semicolon = true;
+                            }
                             cur_code.push(';');
                             code_tokens.push(';');
+                        }
+                        ',' => {
+                            if self.paren_depth == 0
+                                && self.angle_depth == 0
+                                && self.bracket_depth == 0
+                                && self.brace_depth == 0
+                            {
+                                has_top_level_comma = true;
+                            }
+                            cur_code.push(',');
+                            code_tokens.push(',');
                         }
                         c => {
                             cur_code.push(c);
@@ -668,14 +676,11 @@ impl CodeLexer {
         ScannedLine {
             segments,
             code_tokens,
-            depth_delta,
-            has_structural_semicolon,
-            has_structural_open_brace,
-            has_structural_close_brace,
-            open_brace_count,
-            close_brace_count,
-            has_function_body_open_brace,
-            first_fn_body_open_brace_seg,
+            has_top_level_semicolon,
+            has_top_level_comma,
+            has_top_level_open_brace,
+            has_top_level_close_brace,
+            first_top_level_open_brace_seg,
             ends_in_string_literal: self.state.is_in_string_literal(),
         }
     }
@@ -847,8 +852,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             if is_public_fn(&scanned.code_tokens) {
                 let mut current_scanned = scanned;
                 let mut signature = current_scanned.text_up_to_function_body_open_brace();
-                while !current_scanned.has_function_body_open_brace
-                    && !current_scanned.has_structural_semicolon
+                while !current_scanned.has_top_level_open_brace
+                    && !current_scanned.has_top_level_semicolon
                     && idx + 1 < src_lines.len()
                 {
                     idx += 1;
@@ -877,20 +882,16 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
             if is_public_enum(&scanned.code_tokens) {
                 let mut enum_decl = scanned.render_visible();
-                let mut enum_brace_depth =
-                    scanned.open_brace_count as i32 - scanned.close_brace_count as i32;
-                let mut current_scanned = scanned;
+                let mut body_open = scanned.has_top_level_open_brace;
+                let mut body_closed = body_open && scanned.has_top_level_close_brace;
 
-                while enum_brace_depth == 0
-                    && !current_scanned.has_structural_open_brace
-                    && idx + 1 < src_lines.len()
-                {
+                while !body_open && idx + 1 < src_lines.len() {
                     idx += 1;
                     let continuation = src_lines[idx];
                     if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
-                    current_scanned = item_lexer.scan_line(continuation);
+                    let current_scanned = item_lexer.scan_line(continuation);
                     let rendered = current_scanned.render_visible();
                     if rendered.trim().is_empty() {
                         continue;
@@ -899,14 +900,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         enum_decl.push(' ');
                     }
                     enum_decl.push_str(&rendered);
-                    enum_brace_depth += current_scanned.open_brace_count as i32
-                        - current_scanned.close_brace_count as i32;
+                    body_open = current_scanned.has_top_level_open_brace;
+                    body_closed = body_open && current_scanned.has_top_level_close_brace;
                 }
 
-                if enum_brace_depth <= 0
-                    && current_scanned.has_structural_open_brace
-                    && current_scanned.has_structural_close_brace
-                {
+                if body_closed {
                     // Single-line enum: pub enum State { N, F, T, S }
                     lines.push(enum_decl);
                     if item_lexer.state == LexState::Normal {
@@ -919,14 +917,13 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                 lines.push(enum_decl);
 
-                while enum_brace_depth > 0 && idx + 1 < src_lines.len() {
+                while body_open && idx + 1 < src_lines.len() {
                     idx += 1;
                     let item_line = src_lines[idx];
                     if item_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
                     let sc = item_lexer.scan_line(item_line);
-                    enum_brace_depth += sc.open_brace_count as i32 - sc.close_brace_count as i32;
 
                     let rendered = sc.render_visible();
                     if rendered.trim().is_empty() && !sc.ends_in_string_literal {
@@ -937,7 +934,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         continue;
                     }
 
-                    if enum_brace_depth == 0 {
+                    if sc.has_top_level_close_brace {
                         let without_close_brace = sc.render_visible_without_enum_close_brace();
                         if !without_close_brace.trim().is_empty() {
                             lines.push(without_close_brace);
@@ -958,21 +955,17 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
             if is_public_const_or_static(&scanned.code_tokens) {
                 let mut item = scanned.render_visible();
-                let mut depth = scanned.depth_delta;
                 let mut prev_ended_in_string = scanned.ends_in_string_literal;
-                let mut has_semi_at_zero = depth <= 0 && scanned.has_structural_semicolon;
+                let mut has_terminator = scanned.has_top_level_semicolon;
 
-                while !has_semi_at_zero && idx + 1 < src_lines.len() {
+                while !has_terminator && idx + 1 < src_lines.len() {
                     idx += 1;
                     let next_line = src_lines[idx];
                     if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
                     let sc = item_lexer.scan_line(next_line);
-                    depth += sc.depth_delta;
-                    if depth <= 0 && sc.has_structural_semicolon {
-                        has_semi_at_zero = true;
-                    }
+                    has_terminator = sc.has_top_level_semicolon;
                     let rendered = sc.render_visible();
                     if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                         prev_ended_in_string = sc.ends_in_string_literal;
@@ -998,8 +991,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
             if is_public_use(&scanned.code_tokens) {
                 let mut item = scanned.render_visible();
-                let mut depth = scanned.depth_delta;
-                let mut is_done = depth <= 0 && scanned.has_structural_semicolon;
+                let mut is_done = scanned.has_top_level_semicolon;
 
                 while !is_done && idx + 1 < src_lines.len() {
                     idx += 1;
@@ -1008,10 +1000,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         continue;
                     }
                     let sc = item_lexer.scan_line(next_line);
-                    depth += sc.depth_delta;
-                    if depth <= 0 && sc.has_structural_semicolon {
-                        is_done = true;
-                    }
+                    is_done = sc.has_top_level_semicolon;
                     let rendered = sc.render_visible();
                     if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                         continue;
@@ -1033,15 +1022,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
             // Other public items (struct, type alias, trait, mod)
             let mut item = scanned.render_visible();
-            let mut depth = scanned.depth_delta;
-            let is_item_done = |sc: &ScannedLine, d: i32| {
-                sc.has_structural_open_brace
-                    || (d <= 0
-                        && (sc.has_structural_semicolon
-                            || sc.code_tokens.trim().ends_with(',')
-                            || sc.code_tokens.trim().ends_with(';')))
+            let is_item_done = |sc: &ScannedLine| {
+                sc.has_top_level_open_brace || sc.has_top_level_semicolon || sc.has_top_level_comma
             };
-            let mut is_complete = is_item_done(&scanned, depth);
+            let mut is_complete = is_item_done(&scanned);
 
             while !is_complete && idx + 1 < src_lines.len() {
                 idx += 1;
@@ -1050,8 +1034,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     continue;
                 }
                 let sc = item_lexer.scan_line(continuation);
-                depth += sc.depth_delta;
-                if is_item_done(&sc, depth) {
+                if is_item_done(&sc) {
                     is_complete = true;
                 }
                 let rendered = sc.render_visible();
@@ -1799,6 +1782,93 @@ fn public_api_guard_captures_multiline_const_and_detects_value_drift() {
     assert_ne!(
         surface_arr_1, surface_arr_2,
         "const array element drift must alter public API surface"
+    );
+}
+
+#[test]
+fn public_api_guard_does_not_treat_array_length_semicolon_as_function_terminator() {
+    let returns_u32 = r#"
+pub fn f(
+    x: [u8; 3]
+) -> u32
+{
+    private_impl_a()
+}
+"#;
+    let returns_u64 = returns_u32.replace("-> u32", "-> u64");
+    let different_private_body = returns_u32.replace("private_impl_a", "private_impl_b");
+
+    let surface_u32 = normalized_public_surface_str("test.rs", returns_u32);
+    let surface_u64 = normalized_public_surface_str("test.rs", &returns_u64);
+    let surface_different_body = normalized_public_surface_str("test.rs", &different_private_body);
+
+    assert_ne!(
+        surface_u32, surface_u64,
+        "return-type drift after an array-length semicolon must alter the public surface"
+    );
+    assert_eq!(
+        surface_u32, surface_different_body,
+        "private body drift must remain excluded from the public surface"
+    );
+}
+
+#[test]
+fn public_api_guard_does_not_treat_array_length_semicolon_as_const_terminator() {
+    let value_3 = r#"
+pub const X: [u8; 3] =
+[
+    1,
+    2,
+    3,
+];
+"#;
+    let value_4 = value_3.replace("    3,", "    4,");
+
+    assert_ne!(
+        normalized_public_surface_str("test.rs", value_3),
+        normalized_public_surface_str("test.rs", &value_4),
+        "initializer drift after an array-type semicolon must alter the public surface"
+    );
+}
+
+#[test]
+fn public_api_guard_ignores_const_generic_braces_before_enum_body() {
+    let variant_b = r#"
+pub enum E<const N: usize = { 1 }>
+{
+    A,
+    B,
+}
+"#;
+    let renamed_variant = variant_b.replace("    A,", "    RenamedA,");
+    let reformatted_const = variant_b.replace("{ 1 }", "{   1   }");
+
+    assert_ne!(
+        normalized_public_surface_str("test.rs", variant_b),
+        normalized_public_surface_str("test.rs", &renamed_variant),
+        "an enum body after a const-generic block must remain contract-bearing"
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", variant_b),
+        normalized_public_surface_str("test.rs", &reformatted_const),
+        "formatting-only whitespace inside const-generic code must remain normalized"
+    );
+}
+
+#[test]
+fn public_api_guard_ignores_nested_const_blocks_in_generic_public_items() {
+    let u32_alias = r#"
+pub type X = SomeType<
+    { 1 },
+    u32,
+>;
+"#;
+    let u64_alias = u32_alias.replace("    u32,", "    u64,");
+
+    assert_ne!(
+        normalized_public_surface_str("test.rs", u32_alias),
+        normalized_public_surface_str("test.rs", &u64_alias),
+        "a nested const block must not hide a later type-alias component"
     );
 }
 
