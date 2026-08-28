@@ -839,6 +839,49 @@ fn is_public_const_or_static(code_tokens: &str) -> bool {
     }
 }
 
+fn is_public_qualifiers_only(code_tokens: &str) -> bool {
+    let Some((_, rest)) = parse_public_item(code_tokens) else {
+        return false;
+    };
+    let mut cur = rest.trim_start();
+    loop {
+        if let Some(after) = cur.strip_prefix("const") {
+            if after.is_empty() || after.starts_with(char::is_whitespace) {
+                cur = after.trim_start();
+                continue;
+            }
+        }
+        if let Some(after) = cur.strip_prefix("async") {
+            if after.is_empty() || after.starts_with(char::is_whitespace) {
+                cur = after.trim_start();
+                continue;
+            }
+        }
+        if let Some(after) = cur.strip_prefix("unsafe") {
+            if after.is_empty() || after.starts_with(char::is_whitespace) {
+                cur = after.trim_start();
+                continue;
+            }
+        }
+        if let Some(after) = cur.strip_prefix("extern") {
+            let mut rem = after.trim_start();
+            if rem.starts_with("\"\"") {
+                rem = rem[2..].trim_start();
+            } else if rem.starts_with('"') {
+                if let Some(close) = rem[1..].find('"') {
+                    rem = rem[close + 2..].trim_start();
+                } else {
+                    rem = "";
+                }
+            }
+            cur = rem;
+            continue;
+        }
+        break;
+    }
+    cur.trim().is_empty()
+}
+
 fn normalized_public_surface(path: &str) -> String {
     let src = fs::read_to_string(path).unwrap_or_else(|err| panic!("read {path}: {err}"));
     normalized_public_surface_str(path, &src)
@@ -909,9 +952,52 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
         if is_public_code(&scanned.code_tokens) {
             lines.append(&mut pending_attrs);
 
-            if is_public_fn(&scanned.code_tokens) {
-                let mut current_scanned = scanned;
-                let mut signature = current_scanned.text_up_to_function_body_open_brace();
+            let mut current_scanned = scanned;
+            let mut prefix_text = current_scanned.render_visible();
+            let mut combined_code_tokens = current_scanned.code_tokens.clone();
+
+            while is_public_qualifiers_only(&combined_code_tokens) && idx + 1 < src_lines.len() {
+                idx += 1;
+                let next_line = src_lines[idx];
+                if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
+                    continue;
+                }
+                let continues_literal = item_lexer.state.is_in_string_literal();
+                let sc = item_lexer.scan_line(next_line);
+                let rendered = sc.render_visible();
+                if continues_literal {
+                    prefix_text.push('\n');
+                    prefix_text.push_str(&rendered);
+                } else {
+                    if rendered.trim().is_empty() && !sc.ends_in_string_literal {
+                        continue;
+                    }
+                    if !prefix_text.ends_with(' ') && !rendered.starts_with(' ') {
+                        prefix_text.push(' ');
+                    }
+                    prefix_text.push_str(&rendered);
+                }
+                if !combined_code_tokens.ends_with(' ') && !sc.code_tokens.starts_with(' ') {
+                    combined_code_tokens.push(' ');
+                }
+                combined_code_tokens.push_str(&sc.code_tokens);
+                current_scanned = sc;
+            }
+
+            if is_public_fn(&combined_code_tokens) {
+                let mut signature = if current_scanned.has_top_level_open_brace {
+                    let up_to_brace = current_scanned.text_up_to_function_body_open_brace();
+                    let rendered_last = current_scanned.render_visible();
+                    if prefix_text.ends_with(&rendered_last) {
+                        let prefix_head = &prefix_text[..prefix_text.len() - rendered_last.len()];
+                        format!("{prefix_head}{up_to_brace}")
+                    } else {
+                        up_to_brace
+                    }
+                } else {
+                    prefix_text
+                };
+
                 while !current_scanned.has_top_level_open_brace
                     && !current_scanned.has_top_level_semicolon
                     && idx + 1 < src_lines.len()
@@ -946,10 +1032,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 continue;
             }
 
-            if is_public_enum(&scanned.code_tokens) {
-                let mut enum_decl = scanned.render_visible();
-                let mut body_open = scanned.has_top_level_open_brace;
-                let mut body_closed = body_open && scanned.has_top_level_close_brace;
+            if is_public_enum(&combined_code_tokens) {
+                let mut enum_decl = prefix_text;
+                let mut body_open = current_scanned.has_top_level_open_brace;
+                let mut body_closed = body_open && current_scanned.has_top_level_close_brace;
 
                 while !body_open && idx + 1 < src_lines.len() {
                     idx += 1;
@@ -958,13 +1044,13 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         continue;
                     }
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let current_scanned = item_lexer.scan_line(continuation);
-                    let rendered = current_scanned.render_visible();
+                    let sc = item_lexer.scan_line(continuation);
+                    let rendered = sc.render_visible();
                     if continues_literal {
                         enum_decl.push('\n');
                         enum_decl.push_str(&rendered);
-                        body_open = current_scanned.has_top_level_open_brace;
-                        body_closed = body_open && current_scanned.has_top_level_close_brace;
+                        body_open = sc.has_top_level_open_brace;
+                        body_closed = body_open && sc.has_top_level_close_brace;
                         continue;
                     }
                     if rendered.trim().is_empty() {
@@ -974,8 +1060,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         enum_decl.push(' ');
                     }
                     enum_decl.push_str(&rendered);
-                    body_open = current_scanned.has_top_level_open_brace;
-                    body_closed = body_open && current_scanned.has_top_level_close_brace;
+                    body_open = sc.has_top_level_open_brace;
+                    body_closed = body_open && sc.has_top_level_close_brace;
                 }
 
                 if body_closed {
@@ -1029,10 +1115,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 continue;
             }
 
-            if is_public_const_or_static(&scanned.code_tokens) {
-                let mut item = scanned.render_visible();
-                let mut prev_ended_in_string = scanned.ends_in_string_literal;
-                let mut has_terminator = scanned.has_top_level_semicolon;
+            if is_public_const_or_static(&combined_code_tokens) {
+                let mut item = prefix_text;
+                let mut prev_ended_in_string = current_scanned.ends_in_string_literal;
+                let mut has_terminator = current_scanned.has_top_level_semicolon;
 
                 while !has_terminator && idx + 1 < src_lines.len() {
                     idx += 1;
@@ -1065,9 +1151,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 continue;
             }
 
-            if is_public_use(&scanned.code_tokens) {
-                let mut item = scanned.render_visible();
-                let mut is_done = scanned.has_top_level_semicolon;
+            if is_public_use(&combined_code_tokens) {
+                let mut item = prefix_text;
+                let mut is_done = current_scanned.has_top_level_semicolon;
 
                 while !is_done && idx + 1 < src_lines.len() {
                     idx += 1;
@@ -1103,13 +1189,25 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             }
 
             // Other public items (struct, type alias, trait, mod)
-            let mut item = scanned.render_visible();
-            let is_struct = is_public_struct(&scanned.code_tokens);
+            let is_struct = is_public_struct(&combined_code_tokens);
             let is_item_done = |sc: &ScannedLine| {
                 sc.has_top_level_open_brace || sc.has_top_level_semicolon || sc.has_top_level_comma
             };
-            let mut is_complete =
-                is_item_done(&scanned) || has_public_tuple_struct_body_open(&scanned.code_tokens);
+            let mut is_complete = is_item_done(&current_scanned)
+                || has_public_tuple_struct_body_open(&combined_code_tokens);
+
+            let mut item = if current_scanned.has_top_level_open_brace {
+                let up_to_brace = current_scanned.text_up_to_function_body_open_brace();
+                let rendered_last = current_scanned.render_visible();
+                if prefix_text.ends_with(&rendered_last) {
+                    let prefix_head = &prefix_text[..prefix_text.len() - rendered_last.len()];
+                    format!("{prefix_head}{up_to_brace}")
+                } else {
+                    up_to_brace
+                }
+            } else {
+                prefix_text
+            };
 
             while !is_complete && idx + 1 < src_lines.len() {
                 idx += 1;
@@ -1125,7 +1223,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 if is_item_done(&sc) || opens_tuple_body {
                     is_complete = true;
                 }
-                let rendered = sc.render_visible();
+                let rendered = if sc.has_top_level_open_brace {
+                    sc.text_up_to_function_body_open_brace()
+                } else {
+                    sc.render_visible()
+                };
                 if continues_literal {
                     item.push('\n');
                     item.push_str(&rendered);
@@ -3283,5 +3385,47 @@ fn public_api_guard_preserves_multiline_literal_newlines_in_signatures() {
     assert!(
         !surf_nl.contains("private_impl"),
         "private body must not be captured: {surf_nl}"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_multiline_qualifiers_on_functions() {
+    let src_multiline_qual = r#"
+pub unsafe extern
+"C" fn f() {
+    private_a()
+}
+"#;
+    let src_diff_body = r#"
+pub unsafe extern
+"C" fn f() {
+    private_b()
+}
+"#;
+    let src_diff_qual = r#"
+pub unsafe extern
+"system" fn f() {
+    private_a()
+}
+"#;
+    let surf_base = normalized_public_surface_str("test.rs", src_multiline_qual);
+    let surf_diff_body = normalized_public_surface_str("test.rs", src_diff_body);
+    let surf_diff_qual = normalized_public_surface_str("test.rs", src_diff_qual);
+
+    assert_eq!(
+        surf_base, surf_diff_body,
+        "private body changes in functions with multiline qualifiers must not alter surface: {surf_base} vs {surf_diff_body}"
+    );
+    assert_ne!(
+        surf_base, surf_diff_qual,
+        "qualifier changes across lines must alter public surface"
+    );
+    assert!(
+        !surf_base.contains("private_a"),
+        "private body must not be captured in multiline qualifier function: {surf_base}"
+    );
+    assert!(
+        surf_base.contains("pub unsafe extern \"C\" fn f() {"),
+        "signature must be captured properly: {surf_base}"
     );
 }
