@@ -156,7 +156,6 @@ struct ScannedLine {
     close_brace_count: usize,
     has_function_body_open_brace: bool,
     first_fn_body_open_brace_seg: Option<(usize, usize)>,
-    ends_in_literal_or_comment: bool,
     ends_in_string_literal: bool,
 }
 
@@ -677,7 +676,6 @@ impl CodeLexer {
             close_brace_count,
             has_function_body_open_brace,
             first_fn_body_open_brace_seg,
-            ends_in_literal_or_comment: self.state != LexState::Normal,
             ends_in_string_literal: self.state.is_in_string_literal(),
         }
     }
@@ -931,12 +929,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     enum_brace_depth += sc.open_brace_count as i32 - sc.close_brace_count as i32;
 
                     let rendered = sc.render_visible();
-                    if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
+                    if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                         continue;
                     }
-                    if sc.code_tokens.trim_start().starts_with("#[")
-                        && !sc.ends_in_literal_or_comment
-                    {
+                    if sc.code_tokens.trim_start().starts_with("#[") && !sc.ends_in_string_literal {
                         lines.push(rendered);
                         continue;
                     }
@@ -1017,7 +1013,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         is_done = true;
                     }
                     let rendered = sc.render_visible();
-                    if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
+                    if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                         continue;
                     }
                     if !item.ends_with(' ') && !rendered.starts_with(' ') {
@@ -1059,7 +1055,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     is_complete = true;
                 }
                 let rendered = sc.render_visible();
-                if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
+                if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                     continue;
                 }
                 if !item.ends_with(' ') && !rendered.starts_with(' ') {
@@ -2893,5 +2889,33 @@ fn public_api_guard_normalizes_formatting_whitespace_outside_literals() {
         normalized_public_surface_str("test.rs", src_comments),
         normalized_public_surface_str("test.rs", src_normal),
         "comments-only differences outside literals must remain normalized"
+    );
+}
+
+#[test]
+fn public_api_guard_ignores_multiline_block_comments_inside_enums() {
+    let src_short_comment = r#"
+pub enum Mode {
+    /* brief comment */
+    Active,
+    Inactive,
+}
+"#;
+    let src_multiline_comment = r#"
+pub enum Mode {
+    /*
+     * Detailed multiline
+     * block comment with
+     * several lines
+     */
+    Active,
+    Inactive,
+}
+"#;
+    let surf_short = normalized_public_surface_str("test.rs", src_short_comment);
+    let surf_multiline = normalized_public_surface_str("test.rs", src_multiline_comment);
+    assert_eq!(
+        surf_short, surf_multiline,
+        "multiline block comments inside enums must not produce spurious empty lines or alter snapshot: {surf_short} vs {surf_multiline}"
     );
 }
