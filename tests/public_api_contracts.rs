@@ -150,6 +150,7 @@ struct ScannedLine {
     code_tokens: String,
     has_top_level_semicolon: bool,
     has_top_level_comma: bool,
+    has_top_level_open_paren: bool,
     has_top_level_open_brace: bool,
     has_top_level_close_brace: bool,
     first_top_level_open_brace_seg: Option<(usize, usize)>,
@@ -280,6 +281,7 @@ impl CodeLexer {
         let mut code_tokens = String::with_capacity(line.len());
         let mut has_top_level_semicolon = false;
         let mut has_top_level_comma = false;
+        let mut has_top_level_open_paren = false;
         let mut has_top_level_open_brace = false;
         let mut has_top_level_close_brace = false;
         let mut first_top_level_open_brace_seg = None;
@@ -517,6 +519,13 @@ impl CodeLexer {
                             code_tokens.push('>');
                         }
                         '(' => {
+                            if self.paren_depth == 0
+                                && self.angle_depth == 0
+                                && self.bracket_depth == 0
+                                && self.brace_depth == 0
+                            {
+                                has_top_level_open_paren = true;
+                            }
                             self.paren_depth += 1;
                             cur_code.push('(');
                             code_tokens.push('(');
@@ -678,6 +687,7 @@ impl CodeLexer {
             code_tokens,
             has_top_level_semicolon,
             has_top_level_comma,
+            has_top_level_open_paren,
             has_top_level_open_brace,
             has_top_level_close_brace,
             first_top_level_open_brace_seg,
@@ -773,6 +783,25 @@ fn is_public_enum(code_tokens: &str) -> bool {
     }
 }
 
+fn is_public_struct(code_tokens: &str) -> bool {
+    parse_public_item(code_tokens).is_some_and(|(_, rest)| rest.starts_with("struct "))
+}
+
+fn has_public_tuple_struct_body_open(code_tokens: &str) -> bool {
+    let Some((_, rest)) = parse_public_item(code_tokens) else {
+        return false;
+    };
+    if !rest.starts_with("struct ") {
+        return false;
+    }
+    let before_where = rest
+        .split_once(" where ")
+        .map_or(rest, |(before, _)| before);
+    CodeLexer::new()
+        .scan_line(before_where)
+        .has_top_level_open_paren
+}
+
 fn is_public_use(code_tokens: &str) -> bool {
     if let Some((_, rest)) = parse_public_item(code_tokens) {
         rest.starts_with("use ")
@@ -827,9 +856,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                     continue;
                 }
+                let continues_literal = item_lexer.state.is_in_string_literal();
                 current_scanned = item_lexer.scan_line(next_line);
                 let rendered = current_scanned.render_visible();
-                if !attr_text.ends_with(' ') && !rendered.starts_with(' ') {
+                if continues_literal {
+                    attr_text.push('\n');
+                } else if !attr_text.ends_with(' ') && !rendered.starts_with(' ') {
                     attr_text.push(' ');
                 }
                 attr_text.push_str(&rendered);
@@ -1022,10 +1054,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
             // Other public items (struct, type alias, trait, mod)
             let mut item = scanned.render_visible();
+            let is_struct = is_public_struct(&scanned.code_tokens);
             let is_item_done = |sc: &ScannedLine| {
                 sc.has_top_level_open_brace || sc.has_top_level_semicolon || sc.has_top_level_comma
             };
-            let mut is_complete = is_item_done(&scanned);
+            let mut is_complete =
+                is_item_done(&scanned) || has_public_tuple_struct_body_open(&scanned.code_tokens);
 
             while !is_complete && idx + 1 < src_lines.len() {
                 idx += 1;
@@ -1034,7 +1068,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     continue;
                 }
                 let sc = item_lexer.scan_line(continuation);
-                if is_item_done(&sc) {
+                let opens_tuple_body = is_struct
+                    && sc.has_top_level_open_paren
+                    && sc.code_tokens.trim_start().starts_with('(');
+                if is_item_done(&sc) || opens_tuple_body {
                     is_complete = true;
                 }
                 let rendered = sc.render_visible();
@@ -2715,6 +2752,47 @@ pub fn api() {}
     assert_eq!(
         surf_x_old, surf_x_reformatted,
         "formatting/comments-only changes to attribute must not change surface: {surf_x_old} vs {surf_x_reformatted}"
+    );
+}
+
+#[test]
+fn public_api_guard_preserves_newlines_inside_multiline_attribute_literals() {
+    let multiline = "#[deprecated(note = \"a\nb\")]\npub fn api() {}";
+    let single_line = "#[deprecated(note = \"a b\")]\npub fn api() {}";
+
+    assert_ne!(
+        normalized_public_surface_str("test.rs", multiline),
+        normalized_public_surface_str("test.rs", single_line),
+        "a literal newline in public attribute metadata must not normalize to a space"
+    );
+}
+
+#[test]
+fn public_api_guard_ignores_private_multiline_tuple_struct_fields() {
+    let private_u32 = "pub struct S(\n    u32,\n);\npub const NEXT: u32 = 1;";
+    let private_u64 = "pub struct S(\n    u64,\n);\npub const NEXT: u32 = 1;";
+
+    let u32_surface = normalized_public_surface_str("test.rs", private_u32);
+    let u64_surface = normalized_public_surface_str("test.rs", private_u64);
+    assert_eq!(
+        u32_surface, u64_surface,
+        "changing a private tuple field type must not alter the public surface"
+    );
+    assert!(
+        u32_surface.contains("pub const NEXT: u32 = 1;"),
+        "the declaration after a tuple struct must remain inventoried: {u32_surface}"
+    );
+}
+
+#[test]
+fn public_api_guard_captures_public_multiline_tuple_struct_fields() {
+    let public_u32 = "pub struct S(\n    pub u32,\n);";
+    let public_u64 = "pub struct S(\n    pub u64,\n);";
+
+    assert_ne!(
+        normalized_public_surface_str("test.rs", public_u32),
+        normalized_public_surface_str("test.rs", public_u64),
+        "changing a public tuple field type must alter the public surface"
     );
 }
 
