@@ -162,92 +162,31 @@ struct ScannedLine {
 
 impl ScannedLine {
     fn render_visible(&self) -> String {
-        let mut out = String::new();
-        for seg in &self.segments {
-            match seg {
-                VisibleSegment::Code(s) => {
-                    let norm = normalize_ws(s);
-                    if !norm.is_empty() {
-                        if !out.is_empty() && !out.ends_with(' ') {
-                            let first = norm.chars().next().unwrap();
-                            if first != ';'
-                                && first != ','
-                                && first != ':'
-                                && first != ')'
-                                && first != ']'
-                                && first != '}'
-                                && first != '>'
-                            {
-                                out.push(' ');
-                            }
-                        }
-                        out.push_str(&norm);
-                    }
-                }
-                VisibleSegment::Literal(s) => {
-                    if !out.is_empty() && !out.ends_with(' ') {
-                        let last = out.chars().last().unwrap();
-                        if last != '('
-                            && last != '['
-                            && last != '{'
-                            && last != '<'
-                            && last != '*'
-                            && last != '&'
-                            && last != '!'
-                        {
-                            out.push(' ');
-                        }
-                    }
-                    out.push_str(s);
-                }
-            }
-        }
-        out
+        self.render_visible_up_to(None)
     }
 
     fn text_up_to_function_body_open_brace(&self) -> String {
-        if let Some((target_seg, char_idx)) = self.first_fn_body_open_brace_seg {
-            let mut out = String::new();
-            for (idx, seg) in self.segments.iter().enumerate() {
-                if idx < target_seg {
-                    match seg {
-                        VisibleSegment::Code(s) => {
-                            let norm = normalize_ws(s);
-                            if !norm.is_empty() {
-                                if !out.is_empty() && !out.ends_with(' ') {
-                                    let first = norm.chars().next().unwrap();
-                                    if first != ';'
-                                        && first != ','
-                                        && first != ':'
-                                        && first != ')'
-                                        && first != ']'
-                                        && first != '}'
-                                        && first != '>'
-                                    {
-                                        out.push(' ');
-                                    }
-                                }
-                                out.push_str(&norm);
-                            }
-                        }
-                        VisibleSegment::Literal(s) => {
-                            if !out.is_empty() && !out.ends_with(' ') {
-                                let last = out.chars().last().unwrap();
-                                if last != '('
-                                    && last != '['
-                                    && last != '{'
-                                    && last != '<'
-                                    && last != '*'
-                                    && last != '&'
-                                    && last != '!'
-                                {
-                                    out.push(' ');
-                                }
-                            }
-                            out.push_str(s);
-                        }
-                    }
-                } else if idx == target_seg {
+        self.render_visible_up_to(self.first_fn_body_open_brace_seg)
+    }
+
+    fn render_visible_without_enum_close_brace(&self) -> String {
+        let mut cloned = self.clone();
+        if let Some(VisibleSegment::Code(last_code)) = cloned.segments.last_mut() {
+            if let Some(pos) = last_code.rfind('}') {
+                last_code.truncate(pos);
+            }
+        }
+        cloned.render_visible()
+    }
+
+    fn render_visible_up_to(&self, limit: Option<(usize, usize)>) -> String {
+        let mut out = String::new();
+        for (idx, seg) in self.segments.iter().enumerate() {
+            if let Some((target_seg, char_idx)) = limit {
+                if idx > target_seg {
+                    break;
+                }
+                if idx == target_seg {
                     match seg {
                         VisibleSegment::Code(s) => {
                             let prefix = &s[..=char_idx];
@@ -255,14 +194,7 @@ impl ScannedLine {
                             if !norm.is_empty() {
                                 if !out.is_empty() && !out.ends_with(' ') {
                                     let first = norm.chars().next().unwrap();
-                                    if first != ';'
-                                        && first != ','
-                                        && first != ':'
-                                        && first != ')'
-                                        && first != ']'
-                                        && first != '}'
-                                        && first != '>'
-                                    {
+                                    if !is_attached_punctuation_prefix(first) {
                                         out.push(' ');
                                     }
                                 }
@@ -272,14 +204,7 @@ impl ScannedLine {
                         VisibleSegment::Literal(s) => {
                             if !out.is_empty() && !out.ends_with(' ') {
                                 let last = out.chars().last().unwrap();
-                                if last != '('
-                                    && last != '['
-                                    && last != '{'
-                                    && last != '<'
-                                    && last != '*'
-                                    && last != '&'
-                                    && last != '!'
-                                {
+                                if !is_attached_opening_delimiter(last) {
                                     out.push(' ');
                                 }
                             }
@@ -289,11 +214,41 @@ impl ScannedLine {
                     break;
                 }
             }
-            out
-        } else {
-            self.render_visible()
+
+            match seg {
+                VisibleSegment::Code(s) => {
+                    let norm = normalize_ws(s);
+                    if !norm.is_empty() {
+                        if !out.is_empty() && !out.ends_with(' ') {
+                            let first = norm.chars().next().unwrap();
+                            if !is_attached_punctuation_prefix(first) {
+                                out.push(' ');
+                            }
+                        }
+                        out.push_str(&norm);
+                    }
+                }
+                VisibleSegment::Literal(s) => {
+                    if !out.is_empty() && !out.ends_with(' ') {
+                        let last = out.chars().last().unwrap();
+                        if !is_attached_opening_delimiter(last) {
+                            out.push(' ');
+                        }
+                    }
+                    out.push_str(s);
+                }
+            }
         }
+        out
     }
+}
+
+fn is_attached_punctuation_prefix(c: char) -> bool {
+    matches!(c, ';' | ',' | ':' | ')' | ']' | '}' | '>')
+}
+
+fn is_attached_opening_delimiter(c: char) -> bool {
+    matches!(c, '(' | '[' | '{' | '<' | '*' | '&' | '!')
 }
 
 #[derive(Debug, Clone)]
@@ -844,12 +799,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
     let mut file_lexer = CodeLexer::new();
 
     while idx < src_lines.len() {
-        let raw_line = if file_lexer.state.is_in_string_literal() {
-            src_lines[idx]
-        } else {
-            src_lines[idx].trim()
-        };
-        if raw_line.is_empty() && !file_lexer.state.is_in_string_literal() {
+        let raw_line = src_lines[idx];
+        if raw_line.trim().is_empty() && file_lexer.state == LexState::Normal {
             idx += 1;
             continue;
         }
@@ -869,12 +820,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 });
             while !is_done && idx + 1 < src_lines.len() {
                 idx += 1;
-                let next_line = if item_lexer.state.is_in_string_literal() {
-                    src_lines[idx]
-                } else {
-                    src_lines[idx].trim()
-                };
-                if next_line.is_empty() && !item_lexer.state.is_in_string_literal() {
+                let next_line = src_lines[idx];
+                if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                     continue;
                 }
                 current_scanned = item_lexer.scan_line(next_line);
@@ -907,20 +854,21 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     && idx + 1 < src_lines.len()
                 {
                     idx += 1;
-                    let continuation = if item_lexer.state.is_in_string_literal() {
-                        src_lines[idx]
-                    } else {
-                        src_lines[idx].trim()
-                    };
-                    current_scanned = item_lexer.scan_line(continuation);
-                    let rendered = current_scanned.text_up_to_function_body_open_brace();
-                    if continuation.is_empty() || rendered.trim().is_empty() {
+                    let continuation = src_lines[idx];
+                    if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
-                    signature.push(' ');
+                    current_scanned = item_lexer.scan_line(continuation);
+                    let rendered = current_scanned.text_up_to_function_body_open_brace();
+                    if rendered.trim().is_empty() {
+                        continue;
+                    }
+                    if !signature.ends_with(' ') && !rendered.starts_with(' ') {
+                        signature.push(' ');
+                    }
                     signature.push_str(&rendered);
                 }
-                lines.push(normalize_ws(&signature));
+                lines.push(signature);
                 if item_lexer.state == LexState::Normal {
                     item_lexer.reset_top_level_depths();
                 }
@@ -940,17 +888,18 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     && idx + 1 < src_lines.len()
                 {
                     idx += 1;
-                    let continuation = if item_lexer.state.is_in_string_literal() {
-                        src_lines[idx]
-                    } else {
-                        src_lines[idx].trim()
-                    };
-                    current_scanned = item_lexer.scan_line(continuation);
-                    let rendered = current_scanned.render_visible();
-                    if continuation.is_empty() || rendered.trim().is_empty() {
+                    let continuation = src_lines[idx];
+                    if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
-                    enum_decl.push(' ');
+                    current_scanned = item_lexer.scan_line(continuation);
+                    let rendered = current_scanned.render_visible();
+                    if rendered.trim().is_empty() {
+                        continue;
+                    }
+                    if !enum_decl.ends_with(' ') && !rendered.starts_with(' ') {
+                        enum_decl.push(' ');
+                    }
                     enum_decl.push_str(&rendered);
                     enum_brace_depth += current_scanned.open_brace_count as i32
                         - current_scanned.close_brace_count as i32;
@@ -961,7 +910,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     && current_scanned.has_structural_close_brace
                 {
                     // Single-line enum: pub enum State { N, F, T, S }
-                    lines.push(normalize_ws(&enum_decl));
+                    lines.push(enum_decl);
                     if item_lexer.state == LexState::Normal {
                         item_lexer.reset_top_level_depths();
                     }
@@ -970,16 +919,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     continue;
                 }
 
-                lines.push(normalize_ws(&enum_decl));
+                lines.push(enum_decl);
 
                 while enum_brace_depth > 0 && idx + 1 < src_lines.len() {
                     idx += 1;
-                    let item_line = if item_lexer.state.is_in_string_literal() {
-                        src_lines[idx]
-                    } else {
-                        src_lines[idx].trim()
-                    };
-                    if item_line.is_empty() && !item_lexer.state.is_in_string_literal() {
+                    let item_line = src_lines[idx];
+                    if item_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
                     let sc = item_lexer.scan_line(item_line);
@@ -989,19 +934,21 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
                         continue;
                     }
-                    if item_line.starts_with("#[") && !sc.ends_in_literal_or_comment {
-                        lines.push(normalize_ws(item_line));
+                    if sc.code_tokens.trim_start().starts_with("#[")
+                        && !sc.ends_in_literal_or_comment
+                    {
+                        lines.push(rendered);
                         continue;
                     }
 
                     if enum_brace_depth == 0 {
-                        let clean_trimmed = rendered.trim_end_matches('}').trim();
-                        if !clean_trimmed.is_empty() {
-                            lines.push(normalize_ws(clean_trimmed));
+                        let without_close_brace = sc.render_visible_without_enum_close_brace();
+                        if !without_close_brace.trim().is_empty() {
+                            lines.push(without_close_brace);
                         }
                         break;
                     } else {
-                        lines.push(normalize_ws(&rendered));
+                        lines.push(rendered);
                     }
                 }
 
@@ -1021,12 +968,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                 while !has_semi_at_zero && idx + 1 < src_lines.len() {
                     idx += 1;
-                    let next_line = if item_lexer.state.is_in_string_literal() {
-                        src_lines[idx]
-                    } else {
-                        src_lines[idx].trim()
-                    };
-                    if next_line.is_empty() && !item_lexer.state.is_in_string_literal() {
+                    let next_line = src_lines[idx];
+                    if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
                     let sc = item_lexer.scan_line(next_line);
@@ -1064,8 +1007,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                 while !is_done && idx + 1 < src_lines.len() {
                     idx += 1;
-                    let next_line = src_lines[idx].trim();
-                    if next_line.is_empty() {
+                    let next_line = src_lines[idx];
+                    if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
                     let sc = item_lexer.scan_line(next_line);
@@ -1077,11 +1020,13 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
                         continue;
                     }
-                    item.push(' ');
+                    if !item.ends_with(' ') && !rendered.starts_with(' ') {
+                        item.push(' ');
+                    }
                     item.push_str(&rendered);
                 }
 
-                lines.push(normalize_ws(&item));
+                lines.push(item);
                 if item_lexer.state == LexState::Normal {
                     item_lexer.reset_top_level_depths();
                 }
@@ -1104,8 +1049,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
             while !is_complete && idx + 1 < src_lines.len() {
                 idx += 1;
-                let continuation = src_lines[idx].trim();
-                if continuation.is_empty() {
+                let continuation = src_lines[idx];
+                if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
                     continue;
                 }
                 let sc = item_lexer.scan_line(continuation);
@@ -1117,11 +1062,13 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 if rendered.trim().is_empty() && !sc.ends_in_literal_or_comment {
                     continue;
                 }
-                item.push(' ');
+                if !item.ends_with(' ') && !rendered.starts_with(' ') {
+                    item.push(' ');
+                }
                 item.push_str(&rendered);
             }
 
-            lines.push(normalize_ws(&item));
+            lines.push(item);
             if item_lexer.state == LexState::Normal {
                 item_lexer.reset_top_level_depths();
             }
@@ -2462,6 +2409,33 @@ fn public_api_guard_mutation_and_false_pass_matrix() {
         normalized_public_surface_str("t.rs", new_x),
         "X. multiline attribute literal value change must be detected"
     );
+
+    // Y. Normal multiline string trailing whitespace inside literal: MUST DETECT
+    let old_y = format!("pub const S: &str = \"a{}{}\nb\";", ' ', ' ');
+    let new_y = format!("pub const S: &str = \"a{}\nb\";", ' ');
+    assert_ne!(
+        normalized_public_surface_str("t.rs", &old_y),
+        normalized_public_surface_str("t.rs", &new_y),
+        "Y. normal multiline string trailing whitespace change must be detected"
+    );
+
+    // Z. Raw multiline string trailing whitespace inside literal: MUST DETECT
+    let old_z = format!("pub const R: &str = r#\"a{}{}\nb\"#;", ' ', ' ');
+    let new_z = format!("pub const R: &str = r#\"a{}\nb\"#;", ' ');
+    assert_ne!(
+        normalized_public_surface_str("t.rs", &old_z),
+        normalized_public_surface_str("t.rs", &new_z),
+        "Z. raw multiline string trailing whitespace change must be detected"
+    );
+
+    // AA. Literal whitespace inside struct const-generic default: MUST DETECT
+    let old_aa = "pub struct S<const MSG: &'static str = \"a  b\">;";
+    let new_aa = "pub struct S<const MSG: &'static str = \"a b\">;";
+    assert_ne!(
+        normalized_public_surface_str("t.rs", old_aa),
+        normalized_public_surface_str("t.rs", new_aa),
+        "AA. literal whitespace inside struct generic default must be detected"
+    );
 }
 
 #[test]
@@ -2828,5 +2802,96 @@ pub(super) const HEADER: Spec = Spec {
     assert!(
         surf_in_path.contains("pub(in crate::module) static GLOBAL_DATA: u32 = 100;"),
         "pub(in ...) restricted visibility static must be captured: {surf_in_path}"
+    );
+}
+
+#[test]
+fn public_api_guard_preserves_multiline_string_trailing_literal_whitespace() {
+    // A. Normal multiline string trailing whitespace: 2 spaces vs 1 space before newline
+    let s_two_spaces = format!("pub const S: &str = \"a{}{}\nb\";", ' ', ' ');
+    let s_one_space = format!("pub const S: &str = \"a{}\nb\";", ' ');
+    let surf_s_two = normalized_public_surface_str("test.rs", &s_two_spaces);
+    let surf_s_one = normalized_public_surface_str("test.rs", &s_one_space);
+    assert_ne!(
+        surf_s_two, surf_s_one,
+        "normal multiline string trailing whitespace inside literal must change surface"
+    );
+
+    // B. Raw multiline string trailing whitespace: 2 spaces vs 1 space before newline
+    let r_two_spaces = format!("pub const R: &str = r#\"a{}{}\nb\"#;", ' ', ' ');
+    let r_one_space = format!("pub const R: &str = r#\"a{}\nb\"#;", ' ');
+    let surf_r_two = normalized_public_surface_str("test.rs", &r_two_spaces);
+    let surf_r_one = normalized_public_surface_str("test.rs", &r_one_space);
+    assert_ne!(
+        surf_r_two, surf_r_one,
+        "raw multiline string trailing whitespace inside literal must change surface"
+    );
+}
+
+#[test]
+fn public_api_guard_preserves_literal_whitespace_in_signatures_and_generic_items() {
+    // C. Literal whitespace in public function signature
+    let fn_lit_two_spaces = "pub fn build() -> Foo<\"a  b\"> {\n    private_a()\n}";
+    let fn_lit_one_space = "pub fn build() -> Foo<\"a b\"> {\n    private_a()\n}";
+    let fn_lit_diff_body = "pub fn build() -> Foo<\"a  b\"> {\n    private_b()\n}";
+    let surf_fn_two = normalized_public_surface_str("test.rs", fn_lit_two_spaces);
+    let surf_fn_one = normalized_public_surface_str("test.rs", fn_lit_one_space);
+    let surf_fn_diff_body = normalized_public_surface_str("test.rs", fn_lit_diff_body);
+
+    assert_ne!(
+        surf_fn_two, surf_fn_one,
+        "literal whitespace change in function signature must change surface"
+    );
+    assert_eq!(
+        surf_fn_two, surf_fn_diff_body,
+        "private body change must not change surface"
+    );
+    assert!(
+        !surf_fn_two.contains("private_a"),
+        "private body must not be captured in surface: {surf_fn_two}"
+    );
+
+    // D. Literal whitespace in struct, enum variant, and type alias
+    let struct_two_spaces = "pub struct S<const MSG: &'static str = \"a  b\">;";
+    let struct_one_space = "pub struct S<const MSG: &'static str = \"a b\">;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", struct_two_spaces),
+        normalized_public_surface_str("test.rs", struct_one_space),
+        "literal whitespace in struct const generic default must change surface"
+    );
+
+    let type_two_spaces = "pub type Msg = StaticMsg<\"a  b\">;";
+    let type_one_space = "pub type Msg = StaticMsg<\"a b\">;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", type_two_spaces),
+        normalized_public_surface_str("test.rs", type_one_space),
+        "literal whitespace in type alias must change surface"
+    );
+
+    let enum_two_spaces = "pub enum E {\n    Variant = \"a  b\",\n}";
+    let enum_one_space = "pub enum E {\n    Variant = \"a b\",\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", enum_two_spaces),
+        normalized_public_surface_str("test.rs", enum_one_space),
+        "literal whitespace in enum variant must change surface"
+    );
+}
+
+#[test]
+fn public_api_guard_normalizes_formatting_whitespace_outside_literals() {
+    // E. Formatting outside literals remains normalized
+    let src_spaces = "    pub   const   X:   u32   =   1;\n";
+    let src_normal = "pub const X: u32 = 1;\n";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", src_spaces),
+        normalized_public_surface_str("test.rs", src_normal),
+        "whitespace formatting outside literals must remain normalized"
+    );
+
+    let src_comments = "pub /* c1 */ const /* c2 */ X: u32 = 1;\n";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", src_comments),
+        normalized_public_surface_str("test.rs", src_normal),
+        "comments-only differences outside literals must remain normalized"
     );
 }
