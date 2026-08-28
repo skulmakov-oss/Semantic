@@ -823,6 +823,38 @@ fn normalized_public_surface(path: &str) -> String {
     normalized_public_surface_str(path, &src)
 }
 
+fn capture_attribute(
+    src_lines: &[&str],
+    idx: &mut usize,
+    lexer: &mut CodeLexer,
+    mut scanned: ScannedLine,
+) -> String {
+    let mut attr_text = scanned.render_visible();
+    let mut is_done = lexer.bracket_depth == 0
+        && scanned.segments.iter().any(|s| match s {
+            VisibleSegment::Code(c) => c.contains(']'),
+            _ => false,
+        });
+    while !is_done && *idx + 1 < src_lines.len() {
+        *idx += 1;
+        let next_line = src_lines[*idx];
+        if next_line.trim().is_empty() && lexer.state == LexState::Normal {
+            continue;
+        }
+        let continues_literal = lexer.state.is_in_string_literal();
+        scanned = lexer.scan_line(next_line);
+        let rendered = scanned.render_visible();
+        if continues_literal {
+            attr_text.push('\n');
+        } else if !attr_text.ends_with(' ') && !rendered.starts_with(' ') {
+            attr_text.push(' ');
+        }
+        attr_text.push_str(&rendered);
+        is_done = lexer.bracket_depth == 0 && lexer.state == LexState::Normal;
+    }
+    attr_text
+}
+
 fn normalized_public_surface_str(path: &str, src: &str) -> String {
     let src_lines: Vec<&str> = src.lines().collect();
     let mut lines = Vec::new();
@@ -843,32 +875,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
         if scanned.code_tokens.trim_start().starts_with("#[")
             && file_lexer.state == LexState::Normal
         {
-            let mut attr_text = scanned.render_visible();
-            let mut current_scanned = scanned;
-            let mut is_done = item_lexer.bracket_depth == 0
-                && current_scanned.segments.iter().any(|s| match s {
-                    VisibleSegment::Code(c) => c.contains(']'),
-                    _ => false,
-                });
-            while !is_done && idx + 1 < src_lines.len() {
-                idx += 1;
-                let next_line = src_lines[idx];
-                if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
-                    continue;
-                }
-                let continues_literal = item_lexer.state.is_in_string_literal();
-                current_scanned = item_lexer.scan_line(next_line);
-                let rendered = current_scanned.render_visible();
-                if continues_literal {
-                    attr_text.push('\n');
-                } else if !attr_text.ends_with(' ') && !rendered.starts_with(' ') {
-                    attr_text.push(' ');
-                }
-                attr_text.push_str(&rendered);
-                if item_lexer.bracket_depth == 0 && item_lexer.state == LexState::Normal {
-                    is_done = true;
-                }
-            }
+            let attr_text = capture_attribute(&src_lines, &mut idx, &mut item_lexer, scanned);
             pending_attrs.push(attr_text);
             if item_lexer.state == LexState::Normal {
                 item_lexer.reset_top_level_depths();
@@ -961,8 +968,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                         continue;
                     }
-                    if sc.code_tokens.trim_start().starts_with("#[") && !sc.ends_in_string_literal {
-                        lines.push(rendered);
+                    if sc.code_tokens.trim_start().starts_with("#[") {
+                        let attr_text =
+                            capture_attribute(&src_lines, &mut idx, &mut item_lexer, sc);
+                        lines.push(attr_text);
                         continue;
                     }
 
@@ -2764,6 +2773,45 @@ fn public_api_guard_preserves_newlines_inside_multiline_attribute_literals() {
         normalized_public_surface_str("test.rs", multiline),
         normalized_public_surface_str("test.rs", single_line),
         "a literal newline in public attribute metadata must not normalize to a space"
+    );
+}
+
+#[test]
+fn public_api_guard_normalizes_multiline_enum_variant_attributes() {
+    let single_line = r#"
+pub enum E {
+    #[cfg_attr( feature = "x", deprecated(note = "old") )]
+    A,
+}
+"#;
+    let multiline = r#"
+pub enum E {
+    #[cfg_attr(
+        feature = "x",
+        deprecated(note = "old")
+    )]
+    A,
+}
+"#;
+    let changed = r#"
+pub enum E {
+    #[cfg_attr(
+        feature = "x",
+        deprecated(note = "new")
+    )]
+    A,
+}
+"#;
+
+    assert_eq!(
+        normalized_public_surface_str("test.rs", single_line),
+        normalized_public_surface_str("test.rs", multiline),
+        "formatting-only changes to an enum variant attribute must not alter the public surface"
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", multiline),
+        normalized_public_surface_str("test.rs", changed),
+        "contract changes inside a multiline enum variant attribute must alter the public surface"
     );
 }
 
