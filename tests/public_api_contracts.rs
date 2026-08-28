@@ -191,7 +191,12 @@ impl ScannedLine {
                             if !norm.is_empty() {
                                 if !out.is_empty() && !out.ends_with(' ') {
                                     let first = norm.chars().next().unwrap();
-                                    if !is_attached_punctuation_prefix(first) {
+                                    let last = out.chars().last().unwrap();
+                                    let skip_space = is_attached_punctuation_prefix(first)
+                                        || is_attached_opening_delimiter(last)
+                                        || (last == '#' && first == '[')
+                                        || (out.ends_with("pub") && first == '(');
+                                    if !skip_space {
                                         out.push(' ');
                                     }
                                 }
@@ -218,7 +223,12 @@ impl ScannedLine {
                     if !norm.is_empty() {
                         if !out.is_empty() && !out.ends_with(' ') {
                             let first = norm.chars().next().unwrap();
-                            if !is_attached_punctuation_prefix(first) {
+                            let last = out.chars().last().unwrap();
+                            let skip_space = is_attached_punctuation_prefix(first)
+                                || is_attached_opening_delimiter(last)
+                                || (last == '#' && first == '[')
+                                || (out.ends_with("pub") && first == '(');
+                            if !skip_space {
                                 out.push(' ');
                             }
                         }
@@ -276,13 +286,13 @@ fn is_macro_bang(code_tokens: &str) -> bool {
     let ident_len = s
         .chars()
         .rev()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
         .count();
     if ident_len == 0 {
         return false;
     }
     let ident = &s[s.len() - ident_len..];
-    if ident.starts_with(|c: char| c.is_ascii_digit()) {
+    if ident.starts_with(|c: char| c.is_numeric()) {
         return false;
     }
     true
@@ -791,10 +801,11 @@ fn parse_public_item(code_tokens: &str) -> Option<(&str, &str)> {
     if !t.starts_with("pub") {
         return None;
     }
-    let rest = if t.starts_with("pub(") {
+    let after_pub = t[3..].trim_start();
+    if after_pub.starts_with('(') {
         let mut depth = 0;
         let mut close_idx = None;
-        for (i, c) in t.char_indices() {
+        for (i, c) in after_pub.char_indices() {
             if c == '(' {
                 depth += 1;
             } else if c == ')' {
@@ -806,13 +817,39 @@ fn parse_public_item(code_tokens: &str) -> Option<(&str, &str)> {
             }
         }
         let close_pos = close_idx?;
-        t[close_pos + 1..].trim_start()
+        let rest = after_pub[close_pos + 1..].trim_start();
+        Some((t, rest))
     } else if t.starts_with("pub ") || t == "pub" {
-        t[3..].trim_start()
+        Some((t, after_pub))
     } else {
-        return None;
-    };
-    Some((t, rest))
+        None
+    }
+}
+
+fn is_keyword_prefix<'a>(s: &'a str, kw: &str) -> Option<&'a str> {
+    if let Some(rest) = s.strip_prefix(kw) {
+        if rest.is_empty()
+            || rest.starts_with(char::is_whitespace)
+            || rest.starts_with('<')
+            || rest.starts_with('(')
+            || rest.starts_with('{')
+            || rest.starts_with(':')
+            || rest.starts_with(';')
+        {
+            return Some(rest.trim_start());
+        }
+    }
+    None
+}
+
+fn is_outer_attribute_start(code_tokens: &str) -> bool {
+    let t = code_tokens.trim_start();
+    if let Some(rest) = t.strip_prefix('#') {
+        let trimmed = rest.trim_start();
+        trimmed.starts_with('[') || trimmed.is_empty()
+    } else {
+        false
+    }
 }
 
 fn is_public_code(code_tokens: &str) -> bool {
@@ -823,26 +860,20 @@ fn is_public_fn(code_tokens: &str) -> bool {
     if let Some((_, rest)) = parse_public_item(code_tokens) {
         let mut cur = rest.trim_start();
         loop {
-            if let Some(after) = cur.strip_prefix("const") {
-                if after.starts_with(char::is_whitespace) {
-                    cur = after.trim_start();
-                    continue;
-                }
+            if let Some(after) = is_keyword_prefix(cur, "const") {
+                cur = after;
+                continue;
             }
-            if let Some(after) = cur.strip_prefix("async") {
-                if after.starts_with(char::is_whitespace) {
-                    cur = after.trim_start();
-                    continue;
-                }
+            if let Some(after) = is_keyword_prefix(cur, "async") {
+                cur = after;
+                continue;
             }
-            if let Some(after) = cur.strip_prefix("unsafe") {
-                if after.starts_with(char::is_whitespace) {
-                    cur = after.trim_start();
-                    continue;
-                }
+            if let Some(after) = is_keyword_prefix(cur, "unsafe") {
+                cur = after;
+                continue;
             }
-            if let Some(after) = cur.strip_prefix("extern") {
-                let mut rem = after.trim_start();
+            if let Some(after) = is_keyword_prefix(cur, "extern") {
+                let mut rem = after;
                 if rem.starts_with("\"\"") {
                     rem = rem[2..].trim_start();
                 } else if rem.starts_with('"') {
@@ -855,11 +886,7 @@ fn is_public_fn(code_tokens: &str) -> bool {
             }
             break;
         }
-        cur.starts_with("fn ")
-            || cur.starts_with("fn<")
-            || cur.starts_with("fn(")
-            || cur.starts_with("fn\n")
-            || cur == "fn"
+        is_keyword_prefix(cur, "fn").is_some()
     } else {
         false
     }
@@ -867,21 +894,22 @@ fn is_public_fn(code_tokens: &str) -> bool {
 
 fn is_public_enum(code_tokens: &str) -> bool {
     if let Some((_, rest)) = parse_public_item(code_tokens) {
-        rest.starts_with("enum ")
+        is_keyword_prefix(rest, "enum").is_some()
     } else {
         false
     }
 }
 
 fn is_public_struct(code_tokens: &str) -> bool {
-    parse_public_item(code_tokens).is_some_and(|(_, rest)| rest.starts_with("struct "))
+    parse_public_item(code_tokens)
+        .is_some_and(|(_, rest)| is_keyword_prefix(rest, "struct").is_some())
 }
 
 fn has_public_tuple_struct_body_open(code_tokens: &str) -> bool {
     let Some((_, rest)) = parse_public_item(code_tokens) else {
         return false;
     };
-    if !rest.starts_with("struct ") {
+    if is_keyword_prefix(rest, "struct").is_none() {
         return false;
     }
     let before_where = rest
@@ -894,7 +922,7 @@ fn has_public_tuple_struct_body_open(code_tokens: &str) -> bool {
 
 fn is_public_use(code_tokens: &str) -> bool {
     if let Some((_, rest)) = parse_public_item(code_tokens) {
-        rest.starts_with("use ")
+        is_keyword_prefix(rest, "use").is_some()
     } else {
         false
     }
@@ -902,7 +930,8 @@ fn is_public_use(code_tokens: &str) -> bool {
 
 fn is_public_const_or_static(code_tokens: &str) -> bool {
     if let Some((_, rest)) = parse_public_item(code_tokens) {
-        (rest.starts_with("const ") || rest.starts_with("static ")) && !is_public_fn(code_tokens)
+        (is_keyword_prefix(rest, "const").is_some() || is_keyword_prefix(rest, "static").is_some())
+            && !is_public_fn(code_tokens)
     } else {
         false
     }
@@ -914,26 +943,20 @@ fn is_public_qualifiers_only(code_tokens: &str) -> bool {
     };
     let mut cur = rest.trim_start();
     loop {
-        if let Some(after) = cur.strip_prefix("const") {
-            if after.is_empty() || after.starts_with(char::is_whitespace) {
-                cur = after.trim_start();
-                continue;
-            }
+        if let Some(after) = is_keyword_prefix(cur, "const") {
+            cur = after;
+            continue;
         }
-        if let Some(after) = cur.strip_prefix("async") {
-            if after.is_empty() || after.starts_with(char::is_whitespace) {
-                cur = after.trim_start();
-                continue;
-            }
+        if let Some(after) = is_keyword_prefix(cur, "async") {
+            cur = after;
+            continue;
         }
-        if let Some(after) = cur.strip_prefix("unsafe") {
-            if after.is_empty() || after.starts_with(char::is_whitespace) {
-                cur = after.trim_start();
-                continue;
-            }
+        if let Some(after) = is_keyword_prefix(cur, "unsafe") {
+            cur = after;
+            continue;
         }
-        if let Some(after) = cur.strip_prefix("extern") {
-            let mut rem = after.trim_start();
+        if let Some(after) = is_keyword_prefix(cur, "extern") {
+            let mut rem = after;
             if rem.starts_with("\"\"") {
                 rem = rem[2..].trim_start();
             } else if rem.starts_with('"') {
@@ -1005,9 +1028,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
         let mut item_lexer = file_lexer.clone();
         let scanned = item_lexer.scan_line(raw_line);
 
-        if scanned.code_tokens.trim_start().starts_with("#[")
-            && file_lexer.state == LexState::Normal
-        {
+        if is_outer_attribute_start(&scanned.code_tokens) && file_lexer.state == LexState::Normal {
             let attr_text = capture_attribute(&src_lines, &mut idx, &mut item_lexer, scanned);
             pending_attrs.push(attr_text);
             if item_lexer.state == LexState::Normal {
@@ -1158,7 +1179,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                         continue;
                     }
-                    if sc.code_tokens.trim_start().starts_with("#[") {
+                    if is_outer_attribute_start(&sc.code_tokens) {
                         let attr_text =
                             capture_attribute(&src_lines, &mut idx, &mut item_lexer, sc);
                         lines.push(attr_text);
@@ -3613,4 +3634,139 @@ fn public_api_guard_distinguishes_braced_macros_from_function_and_item_bodies() 
     let surf_s = normalized_public_surface_str("test.rs", struct_where_macro);
     assert!(surf_s.contains("pub struct Foo<T> where T: type_macro! { u32 } {"));
     assert!(!surf_s.contains("private_field"));
+}
+
+#[test]
+fn public_api_guard_handles_unicode_macro_identifiers() {
+    let fn_unicode_u32 = "pub fn f() -> Москва! { u32 } {\n    private_a()\n}";
+    let fn_unicode_u64 = "pub fn f() -> Москва! { u64 } {\n    private_a()\n}";
+    let fn_unicode_diff_body = "pub fn f() -> Москва! { u32 } {\n    private_b()\n}";
+
+    let surf_u32 = normalized_public_surface_str("test.rs", fn_unicode_u32);
+    let surf_u64 = normalized_public_surface_str("test.rs", fn_unicode_u64);
+    let surf_diff_body = normalized_public_surface_str("test.rs", fn_unicode_diff_body);
+
+    assert_ne!(
+        surf_u32, surf_u64,
+        "Unicode macro payload change must alter public surface: {surf_u32} vs {surf_u64}"
+    );
+    assert_eq!(
+        surf_u32, surf_diff_body,
+        "private body change after Unicode macro must not alter public surface"
+    );
+    assert!(
+        !surf_u32.contains("private_a"),
+        "private body must not leak into public surface: {surf_u32}"
+    );
+    assert!(
+        surf_u32.contains("pub fn f() -> Москва! { u32 } {"),
+        "Unicode macro and function header must be captured intact: {surf_u32}"
+    );
+
+    // Path-qualified Unicode macro
+    let fn_path_u32 = "pub fn f() -> модуль::Макрос! { u32 } {\n    private_a()\n}";
+    let fn_path_u64 = "pub fn f() -> модуль::Макрос! { u64 } {\n    private_a()\n}";
+    let surf_path_u32 = normalized_public_surface_str("test.rs", fn_path_u32);
+    let surf_path_u64 = normalized_public_surface_str("test.rs", fn_path_u64);
+    assert_ne!(
+        surf_path_u32, surf_path_u64,
+        "path-qualified Unicode macro payload change must alter public surface"
+    );
+    assert!(
+        !surf_path_u32.contains("private_a"),
+        "private body must not leak: {surf_path_u32}"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_trivia_separated_outer_attributes() {
+    let canonical = "#[deprecated(note = \"old\")]\npub fn api() {}";
+    let trivia_attr = "# /* comment */ [deprecated(note = \"old\")]\npub fn api() {}";
+    let trivia_attr_new = "# /* comment */ [deprecated(note = \"new\")]\npub fn api() {}";
+
+    let surf_canon = normalized_public_surface_str("test.rs", canonical);
+    let surf_trivia = normalized_public_surface_str("test.rs", trivia_attr);
+    let surf_trivia_new = normalized_public_surface_str("test.rs", trivia_attr_new);
+
+    assert_eq!(
+        surf_canon, surf_trivia,
+        "trivia-separated attribute must normalize to same public contract as canonical attribute"
+    );
+    assert_ne!(
+        surf_trivia, surf_trivia_new,
+        "mutating note in trivia-separated attribute must alter public surface"
+    );
+
+    // Multiline cfg_attr with trivia
+    let cfg_old = "# /*x*/ [cfg_attr(\n    feature = \"x\",\n    deprecated(note = \"old\")\n)]\npub fn api() {}";
+    let cfg_new_feat = "# /*x*/ [cfg_attr(\n    feature = \"y\",\n    deprecated(note = \"old\")\n)]\npub fn api() {}";
+    let cfg_new_note = "# /*x*/ [cfg_attr(\n    feature = \"x\",\n    deprecated(note = \"new\")\n)]\npub fn api() {}";
+
+    let surf_cfg_old = normalized_public_surface_str("test.rs", cfg_old);
+    let surf_cfg_new_feat = normalized_public_surface_str("test.rs", cfg_new_feat);
+    let surf_cfg_new_note = normalized_public_surface_str("test.rs", cfg_new_note);
+
+    assert_ne!(
+        surf_cfg_old, surf_cfg_new_feat,
+        "changing feature in cfg_attr must alter surface"
+    );
+    assert_ne!(
+        surf_cfg_old, surf_cfg_new_note,
+        "changing note in cfg_attr must alter surface"
+    );
+
+    // Enum variant attribute with trivia
+    let enum_old = "pub enum E {\n    # /*x*/ [deprecated(note = \"old\")]\n    A,\n}";
+    let enum_new = "pub enum E {\n    # /*x*/ [deprecated(note = \"new\")]\n    A,\n}";
+    let enum_canon = "pub enum E {\n    #[deprecated(note = \"old\")]\n    A,\n}";
+
+    let surf_e_old = normalized_public_surface_str("test.rs", enum_old);
+    let surf_e_new = normalized_public_surface_str("test.rs", enum_new);
+    let surf_e_canon = normalized_public_surface_str("test.rs", enum_canon);
+
+    assert_eq!(
+        surf_e_old, surf_e_canon,
+        "enum variant trivia-separated attribute must match canonical"
+    );
+    assert_ne!(
+        surf_e_old, surf_e_new,
+        "mutating enum variant attribute note must alter surface"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_trivia_separated_restricted_visibility() {
+    let const_trivia_rev1 = "pub /*x*/ (crate) const HEADER: Spec = Spec {\n    rev: 1,\n};";
+    let const_trivia_rev2 = "pub /*x*/ (crate) const HEADER: Spec = Spec {\n    rev: 2,\n};";
+    let const_canon_rev1 = "pub(crate) const HEADER: Spec = Spec {\n    rev: 1,\n};";
+
+    let surf_rev1 = normalized_public_surface_str("test.rs", const_trivia_rev1);
+    let surf_rev2 = normalized_public_surface_str("test.rs", const_trivia_rev2);
+    let surf_canon1 = normalized_public_surface_str("test.rs", const_canon_rev1);
+
+    assert_eq!(
+        surf_rev1, surf_canon1,
+        "trivia-separated pub(crate) must normalize equal to canonical"
+    );
+    assert_ne!(
+        surf_rev1, surf_rev2,
+        "mutating multiline struct initializer in pub(crate) const must alter surface"
+    );
+    assert!(
+        surf_rev1.contains("rev: 1"),
+        "complete struct initializer must be captured in const: {surf_rev1}"
+    );
+
+    // pub(super) and pub(in path)
+    let static_super_old = "pub /*x*/ ( super ) static GLOBAL: u32 = 100;";
+    let static_super_new = "pub /*x*/ ( super ) static GLOBAL: u32 = 101;";
+    let surf_super_old = normalized_public_surface_str("test.rs", static_super_old);
+    let surf_super_new = normalized_public_surface_str("test.rs", static_super_new);
+    assert_ne!(surf_super_old, surf_super_new);
+
+    let static_in_path_old = "pub /*x*/ ( in crate::module ) static GLOBAL: u32 = 100;";
+    let static_in_path_new = "pub /*x*/ ( in crate::module ) static GLOBAL: u32 = 101;";
+    let surf_in_old = normalized_public_surface_str("test.rs", static_in_path_old);
+    let surf_in_new = normalized_public_surface_str("test.rs", static_in_path_new);
+    assert_ne!(surf_in_old, surf_in_new);
 }
