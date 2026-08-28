@@ -268,6 +268,26 @@ fn is_likely_comparison_less_than(code_tokens: &str) -> bool {
     false
 }
 
+fn is_macro_bang(code_tokens: &str) -> bool {
+    let s = code_tokens.trim_end();
+    if s.is_empty() {
+        return false;
+    }
+    let ident_len = s
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .count();
+    if ident_len == 0 {
+        return false;
+    }
+    let ident = &s[s.len() - ident_len..];
+    if ident.starts_with(|c: char| c.is_ascii_digit()) {
+        return false;
+    }
+    true
+}
+
 #[derive(Debug, Clone)]
 struct CodeLexer {
     state: LexState,
@@ -275,6 +295,8 @@ struct CodeLexer {
     paren_depth: usize,
     bracket_depth: usize,
     brace_depth: usize,
+    pending_macro_bang: bool,
+    macro_brace_stack: Vec<usize>,
 }
 
 impl CodeLexer {
@@ -285,6 +307,8 @@ impl CodeLexer {
             paren_depth: 0,
             bracket_depth: 0,
             brace_depth: 0,
+            pending_macro_bang: false,
+            macro_brace_stack: Vec::new(),
         }
     }
 
@@ -293,6 +317,8 @@ impl CodeLexer {
         self.paren_depth = 0;
         self.bracket_depth = 0;
         self.brace_depth = 0;
+        self.pending_macro_bang = false;
+        self.macro_brace_stack.clear();
     }
 
     fn scan_line(&mut self, line: &str) -> ScannedLine {
@@ -484,40 +510,58 @@ impl CodeLexer {
                     }
 
                     // 9. Composite operators: <<, <=, >=, ->, =>
+                    if chars[i] == '!' && i + 1 < chars.len() && chars[i + 1] == '=' {
+                        cur_code.push_str("!=");
+                        code_tokens.push_str("!=");
+                        self.pending_macro_bang = false;
+                        i += 2;
+                        continue;
+                    }
                     if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
                         cur_code.push_str("<<");
                         code_tokens.push_str("<<");
+                        self.pending_macro_bang = false;
                         i += 2;
                         continue;
                     }
                     if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '=' {
                         cur_code.push_str("<=");
                         code_tokens.push_str("<=");
+                        self.pending_macro_bang = false;
                         i += 2;
                         continue;
                     }
                     if chars[i] == '>' && i + 1 < chars.len() && chars[i + 1] == '=' {
                         cur_code.push_str(">=");
                         code_tokens.push_str(">=");
+                        self.pending_macro_bang = false;
                         i += 2;
                         continue;
                     }
                     if chars[i] == '-' && i + 1 < chars.len() && chars[i + 1] == '>' {
                         cur_code.push_str("->");
                         code_tokens.push_str("->");
+                        self.pending_macro_bang = false;
                         i += 2;
                         continue;
                     }
                     if chars[i] == '=' && i + 1 < chars.len() && chars[i + 1] == '>' {
                         cur_code.push_str("=>");
                         code_tokens.push_str("=>");
+                        self.pending_macro_bang = false;
                         i += 2;
                         continue;
                     }
 
                     // 10. Structural tokens & depth tracking
                     match chars[i] {
+                        '!' => {
+                            self.pending_macro_bang = is_macro_bang(&code_tokens);
+                            cur_code.push('!');
+                            code_tokens.push('!');
+                        }
                         '<' => {
+                            self.pending_macro_bang = false;
                             if self.brace_depth == 0
                                 && self.paren_depth == 0
                                 && self.bracket_depth == 0
@@ -529,6 +573,7 @@ impl CodeLexer {
                             code_tokens.push('<');
                         }
                         '>' => {
+                            self.pending_macro_bang = false;
                             if self.brace_depth == 0
                                 && self.paren_depth == 0
                                 && self.bracket_depth == 0
@@ -540,6 +585,7 @@ impl CodeLexer {
                             code_tokens.push('>');
                         }
                         '(' => {
+                            self.pending_macro_bang = false;
                             if self.paren_depth == 0
                                 && self.angle_depth == 0
                                 && self.bracket_depth == 0
@@ -552,6 +598,7 @@ impl CodeLexer {
                             code_tokens.push('(');
                         }
                         ')' => {
+                            self.pending_macro_bang = false;
                             if self.paren_depth > 0 {
                                 self.paren_depth -= 1;
                             }
@@ -559,11 +606,13 @@ impl CodeLexer {
                             code_tokens.push(')');
                         }
                         '[' => {
+                            self.pending_macro_bang = false;
                             self.bracket_depth += 1;
                             cur_code.push('[');
                             code_tokens.push('[');
                         }
                         ']' => {
+                            self.pending_macro_bang = false;
                             if self.bracket_depth > 0 {
                                 self.bracket_depth -= 1;
                             }
@@ -571,22 +620,35 @@ impl CodeLexer {
                             code_tokens.push(']');
                         }
                         '{' => {
-                            let is_top_level = self.paren_depth == 0
-                                && self.angle_depth == 0
-                                && self.bracket_depth == 0
-                                && self.brace_depth == 0;
-                            if is_top_level && !has_top_level_open_brace {
-                                has_top_level_open_brace = true;
-                                let seg_idx = segments.len();
-                                let char_idx = cur_code.len();
-                                first_top_level_open_brace_seg = Some((seg_idx, char_idx));
+                            let is_macro_brace = self.pending_macro_bang;
+                            self.pending_macro_bang = false;
+                            if is_macro_brace {
+                                self.macro_brace_stack.push(self.brace_depth);
+                            } else {
+                                let is_top_level = self.paren_depth == 0
+                                    && self.angle_depth == 0
+                                    && self.bracket_depth == 0
+                                    && self.brace_depth == 0;
+                                if is_top_level && !has_top_level_open_brace {
+                                    has_top_level_open_brace = true;
+                                    let seg_idx = segments.len();
+                                    let char_idx = cur_code.len();
+                                    first_top_level_open_brace_seg = Some((seg_idx, char_idx));
+                                }
                             }
                             self.brace_depth += 1;
                             cur_code.push('{');
                             code_tokens.push('{');
                         }
                         '}' => {
-                            if self.paren_depth == 0
+                            self.pending_macro_bang = false;
+                            let is_macro_close = self
+                                .macro_brace_stack
+                                .last()
+                                .is_some_and(|&d| d == self.brace_depth.saturating_sub(1));
+                            if is_macro_close {
+                                self.macro_brace_stack.pop();
+                            } else if self.paren_depth == 0
                                 && self.angle_depth == 0
                                 && self.bracket_depth == 0
                                 && self.brace_depth == 1
@@ -600,6 +662,7 @@ impl CodeLexer {
                             code_tokens.push('}');
                         }
                         ';' => {
+                            self.pending_macro_bang = false;
                             if self.paren_depth == 0
                                 && self.bracket_depth == 0
                                 && self.brace_depth == 0
@@ -611,6 +674,7 @@ impl CodeLexer {
                             code_tokens.push(';');
                         }
                         ',' => {
+                            self.pending_macro_bang = false;
                             if self.paren_depth == 0
                                 && self.angle_depth == 0
                                 && self.bracket_depth == 0
@@ -621,7 +685,12 @@ impl CodeLexer {
                             cur_code.push(',');
                             code_tokens.push(',');
                         }
+                        ' ' | '\t' | '\r' | '\n' => {
+                            cur_code.push(chars[i]);
+                            code_tokens.push(chars[i]);
+                        }
                         c => {
+                            self.pending_macro_bang = false;
                             cur_code.push(c);
                             code_tokens.push(c);
                         }
@@ -3428,4 +3497,120 @@ pub unsafe extern
         surf_base.contains("pub unsafe extern \"C\" fn f() {"),
         "signature must be captured properly: {surf_base}"
     );
+}
+
+#[test]
+fn public_api_guard_distinguishes_braced_macros_from_function_and_item_bodies() {
+    // 1. Braced macro in return type: payload change must alter surface; private body change must not
+    let fn_braced_u32 = "pub fn f() -> type_macro! { u32 } {\n    private_a()\n}";
+    let fn_braced_u64 = "pub fn f() -> type_macro! { u64 } {\n    private_a()\n}";
+    let fn_braced_diff_body = "pub fn f() -> type_macro! { u32 } {\n    private_b()\n}";
+
+    let surf_u32 = normalized_public_surface_str("test.rs", fn_braced_u32);
+    let surf_u64 = normalized_public_surface_str("test.rs", fn_braced_u64);
+    let surf_diff_body = normalized_public_surface_str("test.rs", fn_braced_diff_body);
+
+    assert_ne!(
+        surf_u32, surf_u64,
+        "payload difference in braced macro must produce different public surface"
+    );
+    assert_eq!(
+        surf_u32, surf_diff_body,
+        "private body change after braced return type macro must not alter public surface"
+    );
+    assert!(
+        !surf_u32.contains("private_a") && !surf_u32.contains("private_b"),
+        "private body must not leak into surface: {surf_u32}"
+    );
+    assert!(
+        surf_u32.contains("pub fn f() -> type_macro! { u32 } {"),
+        "complete macro invocation and function header must be captured: {surf_u32}"
+    );
+
+    // 2. Path-qualified braced macro
+    let fn_path_u32 = "pub fn f() -> foo::bar! { u32 } {\n    private_a()\n}";
+    let fn_path_u64 = "pub fn f() -> foo::bar! { u64 } {\n    private_a()\n}";
+    let surf_path_u32 = normalized_public_surface_str("test.rs", fn_path_u32);
+    let surf_path_u64 = normalized_public_surface_str("test.rs", fn_path_u64);
+    assert_ne!(
+        surf_path_u32, surf_path_u64,
+        "path-qualified braced macro payload difference must alter public surface"
+    );
+    assert!(
+        !surf_path_u32.contains("private_a"),
+        "private body must not leak: {surf_path_u32}"
+    );
+
+    // 3. Parenthesized macro form
+    let fn_paren_u32 = "pub fn f() -> type_macro!(u32) {\n    private_a()\n}";
+    let fn_paren_u64 = "pub fn f() -> type_macro!(u64) {\n    private_a()\n}";
+    let fn_paren_diff_body = "pub fn f() -> type_macro!(u32) {\n    private_b()\n}";
+    let surf_paren_u32 = normalized_public_surface_str("test.rs", fn_paren_u32);
+    let surf_paren_u64 = normalized_public_surface_str("test.rs", fn_paren_u64);
+    let surf_paren_diff_body = normalized_public_surface_str("test.rs", fn_paren_diff_body);
+    assert_ne!(surf_paren_u32, surf_paren_u64);
+    assert_eq!(surf_paren_u32, surf_paren_diff_body);
+    assert!(!surf_paren_u32.contains("private_a"));
+
+    // 4. Bracket-delimited macro form
+    let fn_bracket_u32 = "pub fn f() -> type_macro![u32] {\n    private_a()\n}";
+    let fn_bracket_u64 = "pub fn f() -> type_macro![u64] {\n    private_a()\n}";
+    let surf_bracket_u32 = normalized_public_surface_str("test.rs", fn_bracket_u32);
+    let surf_bracket_u64 = normalized_public_surface_str("test.rs", fn_bracket_u64);
+    assert_ne!(surf_bracket_u32, surf_bracket_u64);
+    assert!(!surf_bracket_u32.contains("private_a"));
+
+    // 5. Existing plain function body detection
+    let fn_plain = "pub fn f() -> u32 {\n    private_a()\n}";
+    let surf_plain = normalized_public_surface_str("test.rs", fn_plain);
+    assert!(surf_plain.contains("pub fn f() -> u32 {"));
+    assert!(!surf_plain.contains("private_a"));
+
+    // 6. Multiline qualifier + braced macro
+    let fn_multi_qual_u32 =
+        "pub unsafe extern\n\"C\" fn f() -> type_macro! { u32 } {\n    private_a()\n}";
+    let fn_multi_qual_u64 =
+        "pub unsafe extern\n\"C\" fn f() -> type_macro! { u64 } {\n    private_a()\n}";
+    let fn_multi_qual_diff_qual =
+        "pub unsafe extern\n\"system\" fn f() -> type_macro! { u32 } {\n    private_a()\n}";
+    let fn_multi_qual_diff_body =
+        "pub unsafe extern\n\"C\" fn f() -> type_macro! { u32 } {\n    private_b()\n}";
+
+    let surf_mq_u32 = normalized_public_surface_str("test.rs", fn_multi_qual_u32);
+    let surf_mq_u64 = normalized_public_surface_str("test.rs", fn_multi_qual_u64);
+    let surf_mq_diff_qual = normalized_public_surface_str("test.rs", fn_multi_qual_diff_qual);
+    let surf_mq_diff_body = normalized_public_surface_str("test.rs", fn_multi_qual_diff_body);
+
+    assert_ne!(
+        surf_mq_u32, surf_mq_u64,
+        "payload change must alter surface"
+    );
+    assert_ne!(
+        surf_mq_u32, surf_mq_diff_qual,
+        "qualifier change must alter surface"
+    );
+    assert_eq!(
+        surf_mq_u32, surf_mq_diff_body,
+        "private body change must not alter surface"
+    );
+    assert!(!surf_mq_u32.contains("private_a"));
+
+    // 7. Sibling paths: const, type alias, struct where clause
+    let const_macro_u32 = "pub const X: type_macro! { u32 } = 10;";
+    let const_macro_u64 = "pub const X: type_macro! { u64 } = 10;";
+    let surf_c_u32 = normalized_public_surface_str("test.rs", const_macro_u32);
+    let surf_c_u64 = normalized_public_surface_str("test.rs", const_macro_u64);
+    assert_ne!(surf_c_u32, surf_c_u64);
+
+    let type_macro_u32 = "pub type T = type_macro! { u32 };";
+    let type_macro_u64 = "pub type T = type_macro! { u64 };";
+    let surf_t_u32 = normalized_public_surface_str("test.rs", type_macro_u32);
+    let surf_t_u64 = normalized_public_surface_str("test.rs", type_macro_u64);
+    assert_ne!(surf_t_u32, surf_t_u64);
+
+    let struct_where_macro =
+        "pub struct Foo<T> where T: type_macro! { u32 } {\n    private_field: u32,\n}";
+    let surf_s = normalized_public_surface_str("test.rs", struct_where_macro);
+    assert!(surf_s.contains("pub struct Foo<T> where T: type_macro! { u32 } {"));
+    assert!(!surf_s.contains("private_field"));
 }
