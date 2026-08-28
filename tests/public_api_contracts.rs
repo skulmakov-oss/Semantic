@@ -248,6 +248,26 @@ fn is_attached_opening_delimiter(c: char) -> bool {
     matches!(c, '(' | '[' | '{' | '<' | '*' | '&' | '!')
 }
 
+fn is_likely_comparison_less_than(code_tokens: &str) -> bool {
+    let t = code_tokens.trim_end();
+    if t.ends_with(|c: char| {
+        c.is_ascii_digit() || c == '\'' || c == '"' || c == ')' || c == ']' || c == '}'
+    }) {
+        return true;
+    }
+    if t.ends_with("true") || t.ends_with("false") {
+        return true;
+    }
+    if is_public_const_or_static(code_tokens) {
+        if let Some((_, after_eq)) = t.rsplit_once('=') {
+            if !after_eq.trim_end().ends_with("::") && !after_eq.contains('<') {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[derive(Debug, Clone)]
 struct CodeLexer {
     state: LexState,
@@ -501,6 +521,7 @@ impl CodeLexer {
                             if self.brace_depth == 0
                                 && self.paren_depth == 0
                                 && self.bracket_depth == 0
+                                && !is_likely_comparison_less_than(&code_tokens)
                             {
                                 self.angle_depth += 1;
                             }
@@ -580,11 +601,11 @@ impl CodeLexer {
                         }
                         ';' => {
                             if self.paren_depth == 0
-                                && self.angle_depth == 0
                                 && self.bracket_depth == 0
                                 && self.brace_depth == 0
                             {
                                 has_top_level_semicolon = true;
+                                self.angle_depth = 0;
                             }
                             cur_code.push(';');
                             code_tokens.push(';');
@@ -900,8 +921,14 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
+                    let continues_literal = item_lexer.state.is_in_string_literal();
                     current_scanned = item_lexer.scan_line(continuation);
                     let rendered = current_scanned.text_up_to_function_body_open_brace();
+                    if continues_literal {
+                        signature.push('\n');
+                        signature.push_str(&rendered);
+                        continue;
+                    }
                     if rendered.trim().is_empty() {
                         continue;
                     }
@@ -930,8 +957,16 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
+                    let continues_literal = item_lexer.state.is_in_string_literal();
                     let current_scanned = item_lexer.scan_line(continuation);
                     let rendered = current_scanned.render_visible();
+                    if continues_literal {
+                        enum_decl.push('\n');
+                        enum_decl.push_str(&rendered);
+                        body_open = current_scanned.has_top_level_open_brace;
+                        body_closed = body_open && current_scanned.has_top_level_close_brace;
+                        continue;
+                    }
                     if rendered.trim().is_empty() {
                         continue;
                     }
@@ -1040,9 +1075,15 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
+                    let continues_literal = item_lexer.state.is_in_string_literal();
                     let sc = item_lexer.scan_line(next_line);
                     is_done = sc.has_top_level_semicolon;
                     let rendered = sc.render_visible();
+                    if continues_literal {
+                        item.push('\n');
+                        item.push_str(&rendered);
+                        continue;
+                    }
                     if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                         continue;
                     }
@@ -1076,6 +1117,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
                     continue;
                 }
+                let continues_literal = item_lexer.state.is_in_string_literal();
                 let sc = item_lexer.scan_line(continuation);
                 let opens_tuple_body = is_struct
                     && sc.has_top_level_open_paren
@@ -1084,6 +1126,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     is_complete = true;
                 }
                 let rendered = sc.render_visible();
+                if continues_literal {
+                    item.push('\n');
+                    item.push_str(&rendered);
+                    continue;
+                }
                 if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                     continue;
                 }
@@ -2662,6 +2709,36 @@ pub fn build() -> Foo<{ if 1 < 2 { 32 } else { 64 } }> {
 }
 
 #[test]
+fn public_api_guard_treats_const_initializer_comparisons_as_top_level() {
+    let private_a =
+        "pub const LESS: bool = 1 < 2;\nfn hidden() -> u32 { 1 }\npub const NEXT: u32 = 7;";
+    let private_b =
+        "pub const LESS: bool = 1 < 2;\nfn hidden() -> u64 { 2 }\npub const NEXT: u32 = 7;";
+    let changed =
+        "pub const LESS: bool = 1 > 2;\nfn hidden() -> u32 { 1 }\npub const NEXT: u32 = 7;";
+
+    let surface_a = normalized_public_surface_str("test.rs", private_a);
+    let surface_b = normalized_public_surface_str("test.rs", private_b);
+    assert_eq!(
+        surface_a, surface_b,
+        "private declarations after a const comparison must not alter the public surface"
+    );
+    assert_ne!(
+        surface_a,
+        normalized_public_surface_str("test.rs", changed),
+        "changing the public const comparison must alter the public surface"
+    );
+    assert!(
+        surface_a.contains("pub const NEXT: u32 = 7;"),
+        "the public declaration after a const comparison must remain inventoried: {surface_a}"
+    );
+    assert!(
+        !surface_a.contains("hidden"),
+        "private declarations must not be captured: {surface_a}"
+    );
+}
+
+#[test]
 fn public_api_guard_handles_combined_function_qualifiers() {
     let fn_qual_32 = r#"
 pub const unsafe fn qualified() -> Foo<{
@@ -3070,6 +3147,29 @@ fn public_api_guard_preserves_literal_whitespace_in_signatures_and_generic_items
 }
 
 #[test]
+fn public_api_guard_preserves_literal_newlines_in_function_signatures() {
+    let multiline = "pub fn f() -> type_macro!(\"a\nb\") {\n    private_a()\n}";
+    let single_line = "pub fn f() -> type_macro!(\"a b\") {\n    private_a()\n}";
+    let different_body = "pub fn f() -> type_macro!(\"a\nb\") {\n    private_b()\n}";
+
+    let multiline_surface = normalized_public_surface_str("test.rs", multiline);
+    assert_ne!(
+        multiline_surface,
+        normalized_public_surface_str("test.rs", single_line),
+        "a literal newline in a public function signature must not normalize to a space"
+    );
+    assert_eq!(
+        multiline_surface,
+        normalized_public_surface_str("test.rs", different_body),
+        "private function-body changes must not alter the public surface"
+    );
+    assert!(
+        !multiline_surface.contains("private_a"),
+        "private function bodies must not be captured: {multiline_surface}"
+    );
+}
+
+#[test]
 fn public_api_guard_normalizes_formatting_whitespace_outside_literals() {
     // E. Formatting outside literals remains normalized
     let src_spaces = "    pub   const   X:   u32   =   1;\n";
@@ -3113,5 +3213,75 @@ pub enum Mode {
     assert_eq!(
         surf_short, surf_multiline,
         "multiline block comments inside enums must not produce spurious empty lines or alter snapshot: {surf_short} vs {surf_multiline}"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_top_level_less_than_comparison() {
+    let src_less_old = r#"
+pub const LESS: bool = 1 < 2;
+pub fn next_api() {
+    private_a()
+}
+"#;
+    let src_less_new = r#"
+pub const LESS: bool = 1 < 3;
+pub fn next_api() {
+    private_a()
+}
+"#;
+    let src_less_diff_body = r#"
+pub const LESS: bool = 1 < 2;
+pub fn next_api() {
+    private_b()
+}
+"#;
+    let surf_old = normalized_public_surface_str("test.rs", src_less_old);
+    let surf_new = normalized_public_surface_str("test.rs", src_less_new);
+    let surf_diff_body = normalized_public_surface_str("test.rs", src_less_diff_body);
+
+    assert_ne!(
+        surf_old, surf_new,
+        "changing value in top-level '<' comparison const must alter surface"
+    );
+    assert_eq!(
+        surf_old, surf_diff_body,
+        "changing private body in next_api after top-level '<' const must not alter surface"
+    );
+    assert!(
+        !surf_old.contains("private_a"),
+        "private body of next_api must not be captured: {surf_old}"
+    );
+    assert!(
+        surf_old.contains("pub const LESS: bool = 1 < 2;"),
+        "const declaration must be captured intact: {surf_old}"
+    );
+    assert!(
+        surf_old.contains("pub fn next_api() {"),
+        "next function must be inventoried separately: {surf_old}"
+    );
+}
+
+#[test]
+fn public_api_guard_preserves_multiline_literal_newlines_in_signatures() {
+    let fn_nl = "pub fn f() -> type_macro!(\"a\nb\") {\n    private_impl()\n}";
+    let fn_sp = "pub fn f() -> type_macro!(\"a b\") {\n    private_impl()\n}";
+    let fn_nl_diff_body = "pub fn f() -> type_macro!(\"a\nb\") {\n    different_private_impl()\n}";
+
+    let surf_nl = normalized_public_surface_str("test.rs", fn_nl);
+    let surf_sp = normalized_public_surface_str("test.rs", fn_sp);
+    let surf_nl_diff_body = normalized_public_surface_str("test.rs", fn_nl_diff_body);
+
+    assert_ne!(
+        surf_nl, surf_sp,
+        "multiline literal with newline in signature macro must produce different surface from space"
+    );
+    assert_eq!(
+        surf_nl, surf_nl_diff_body,
+        "private body change must not change surface"
+    );
+    assert!(
+        !surf_nl.contains("private_impl"),
+        "private body must not be captured: {surf_nl}"
     );
 }
