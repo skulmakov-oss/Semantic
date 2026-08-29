@@ -1420,6 +1420,10 @@ fn append_code_chunk(
     }
 }
 
+fn emit_captured_fragment(text: &str) -> Option<String> {
+    (!text.trim().is_empty()).then(|| text.to_owned())
+}
+
 fn normalize_variant(text: &str) -> String {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -1612,6 +1616,64 @@ fn capture_attribute(
     }
 }
 
+fn scan_logical_item_line(
+    lexer: &mut CodeLexer,
+    line: &str,
+    same_line_remainder: &mut Option<String>,
+) -> ScannedLine {
+    scan_logical_item_line_with_terminator(lexer, line, same_line_remainder, None)
+}
+
+fn scan_logical_item_line_with_terminator(
+    lexer: &mut CodeLexer,
+    line: &str,
+    same_line_remainder: &mut Option<String>,
+    closes_with_brace: Option<bool>,
+) -> ScannedLine {
+    let lexer_before_line = lexer.clone();
+    let scanned = lexer.scan_line(line);
+    let public_braced_item = is_public_fn(&scanned.code_tokens)
+        || is_public_enum(&scanned.code_tokens)
+        || is_public_struct(&scanned.code_tokens)
+        || is_public_union(&scanned.code_tokens)
+        || is_public_trait(&scanned.code_tokens)
+        || is_public_mod(&scanned.code_tokens);
+    let public_semicolon_item = is_public_const_or_static(&scanned.code_tokens)
+        || is_public_use(&scanned.code_tokens)
+        || is_public_type_alias(&scanned.code_tokens)
+        || is_public_extern_crate(&scanned.code_tokens);
+    let has_balanced_top_level_braces = scanned.has_top_level_open_brace
+        && scanned
+            .events
+            .iter()
+            .any(|event| event.kind == StructuralEventKind::TopLevelCloseBrace);
+    let closes_with_brace = closes_with_brace.unwrap_or({
+        lexer_before_line.brace_depth > 0
+            || (public_braced_item && scanned.has_top_level_open_brace)
+            || (has_balanced_top_level_braces && !public_semicolon_item)
+    });
+    let boundary = scanned.events.iter().find_map(|event| {
+        ((closes_with_brace && event.kind == StructuralEventKind::TopLevelCloseBrace)
+            || (!closes_with_brace && event.kind == StructuralEventKind::TopLevelSemicolon))
+            .then_some((event.seg_idx, event.char_idx))
+    });
+    let Some(boundary) = boundary else {
+        return scanned;
+    };
+    let remainder = next_pos(&scanned.segments, boundary).map_or_else(String::new, |start| {
+        scanned.render_visible_range(Some(start), None)
+    });
+    if remainder.trim().is_empty() {
+        return scanned;
+    }
+
+    let consumed = scanned.render_visible_range(None, Some(boundary));
+    *lexer = lexer_before_line;
+    let scanned = lexer.scan_line(&consumed);
+    *same_line_remainder = Some(remainder);
+    scanned
+}
+
 fn normalized_public_surface_str(path: &str, src: &str) -> String {
     let src_lines: Vec<&str> = src.lines().collect();
     let mut lines = Vec::new();
@@ -1629,7 +1691,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
         }
 
         let mut item_lexer = file_lexer.clone();
-        let scanned = item_lexer.scan_line(raw_line);
+        let scanned = scan_logical_item_line(&mut item_lexer, raw_line, &mut same_line_remainder);
 
         if is_outer_attribute_start(&scanned.code_tokens) && file_lexer.state == LexState::Normal {
             item_lexer = file_lexer.clone();
@@ -1662,7 +1724,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     continue;
                 }
                 let continues_literal = item_lexer.state.is_in_string_literal();
-                let sc = item_lexer.scan_line(next_line);
+                let sc =
+                    scan_logical_item_line(&mut item_lexer, next_line, &mut same_line_remainder);
                 let rendered = sc.render_visible();
                 if continues_literal {
                     prefix_text.push('\n');
@@ -1700,7 +1763,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     continue;
                 }
                 let continues_literal = item_lexer.state.is_in_string_literal();
-                let sc = item_lexer.scan_line(next_line);
+                let sc =
+                    scan_logical_item_line(&mut item_lexer, next_line, &mut same_line_remainder);
                 let rendered = sc.render_visible();
                 if continues_literal {
                     prefix_text.push('\n');
@@ -1746,7 +1810,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    current_scanned = item_lexer.scan_line(continuation);
+                    current_scanned = scan_logical_item_line(
+                        &mut item_lexer,
+                        continuation,
+                        &mut same_line_remainder,
+                    );
                     let rendered = current_scanned.text_up_to_function_body_open_brace();
                     if was_escaped {
                         signature.push_str(&rendered);
@@ -1766,11 +1834,33 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     signature.push_str(&rendered);
                 }
                 lines.push(signature);
+                let mut body_closed = current_scanned
+                    .events
+                    .iter()
+                    .any(|event| event.kind == StructuralEventKind::TopLevelCloseBrace);
+                while current_scanned.has_top_level_open_brace
+                    && !body_closed
+                    && idx + 1 < src_lines.len()
+                {
+                    idx += 1;
+                    current_scanned = scan_logical_item_line_with_terminator(
+                        &mut item_lexer,
+                        src_lines[idx],
+                        &mut same_line_remainder,
+                        Some(true),
+                    );
+                    body_closed = current_scanned
+                        .events
+                        .iter()
+                        .any(|event| event.kind == StructuralEventKind::TopLevelCloseBrace);
+                }
                 if item_lexer.state == LexState::Normal {
                     item_lexer.reset_top_level_depths();
                 }
                 file_lexer = item_lexer;
-                idx += 1;
+                if same_line_remainder.is_none() {
+                    idx += 1;
+                }
                 continue;
             }
 
@@ -1786,7 +1876,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let sc = item_lexer.scan_line(continuation);
+                    let sc = scan_logical_item_line(
+                        &mut item_lexer,
+                        continuation,
+                        &mut same_line_remainder,
+                    );
                     let rendered = sc.render_visible();
                     if was_escaped {
                         enum_decl.push_str(&rendered);
@@ -1954,7 +2048,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let sc = item_lexer.scan_line(variant_line);
+                    let sc = scan_logical_item_line(
+                        &mut item_lexer,
+                        variant_line,
+                        &mut same_line_remainder,
+                    );
 
                     let mut cur_pos = Some((0, 0));
                     for event in &sc.events {
@@ -2036,7 +2134,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     item_lexer.reset_top_level_depths();
                 }
                 file_lexer = item_lexer;
-                idx += 1;
+                if same_line_remainder.is_none() {
+                    idx += 1;
+                }
                 continue;
             }
 
@@ -2052,7 +2152,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         continue;
                     }
                     let was_escaped = item_lexer.state.is_escaped_continuation();
-                    let sc = item_lexer.scan_line(next_line);
+                    let sc = scan_logical_item_line_with_terminator(
+                        &mut item_lexer,
+                        next_line,
+                        &mut same_line_remainder,
+                        Some(false),
+                    );
                     has_terminator = sc.has_top_level_semicolon;
                     let rendered = sc.render_visible();
                     if rendered.trim().is_empty() && !sc.ends_in_string_literal {
@@ -2078,7 +2183,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     item_lexer.reset_top_level_depths();
                 }
                 file_lexer = item_lexer;
-                idx += 1;
+                if same_line_remainder.is_none() {
+                    idx += 1;
+                }
                 continue;
             }
 
@@ -2094,7 +2201,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let sc = item_lexer.scan_line(next_line);
+                    let sc = scan_logical_item_line_with_terminator(
+                        &mut item_lexer,
+                        next_line,
+                        &mut same_line_remainder,
+                        Some(false),
+                    );
                     is_done = sc.has_top_level_semicolon;
                     let rendered = sc.render_visible();
                     if was_escaped {
@@ -2120,7 +2232,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     item_lexer.reset_top_level_depths();
                 }
                 file_lexer = item_lexer;
-                idx += 1;
+                if same_line_remainder.is_none() {
+                    idx += 1;
+                }
                 continue;
             }
 
@@ -2137,7 +2251,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let sc = item_lexer.scan_line(continuation);
+                    let sc = scan_logical_item_line(
+                        &mut item_lexer,
+                        continuation,
+                        &mut same_line_remainder,
+                    );
                     let rendered = sc.render_visible();
                     if was_escaped {
                         prefix_text.push_str(&rendered);
@@ -2170,7 +2288,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         item_lexer.reset_top_level_depths();
                     }
                     file_lexer = item_lexer;
-                    idx += 1;
+                    if same_line_remainder.is_none() {
+                        idx += 1;
+                    }
                     continue;
                 }
 
@@ -2213,7 +2333,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         );
                         tuple_body.push('\n');
                         idx += 1;
-                        current_scanned = item_lexer.scan_line(src_lines[idx]);
+                        current_scanned = scan_logical_item_line(
+                            &mut item_lexer,
+                            src_lines[idx],
+                            &mut same_line_remainder,
+                        );
                         body_start = Some((0, 0));
                         opening_line = false;
                     };
@@ -2237,7 +2361,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             "unterminated public tuple struct in {path}"
                         );
                         idx += 1;
-                        current_scanned = item_lexer.scan_line(src_lines[idx]);
+                        current_scanned = scan_logical_item_line(
+                            &mut item_lexer,
+                            src_lines[idx],
+                            &mut same_line_remainder,
+                        );
                         let rendered = current_scanned
                             .render_visible_range(None, semicolon_pos(&current_scanned));
                         if !suffix.is_empty() && !rendered.is_empty() {
@@ -2260,16 +2388,16 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         last.truncate(last.trim_end().trim_end_matches(',').len());
                     }
                     let public_fields = public_fields.join(" ");
-                    let suffix = normalize_ws(&suffix);
+                    let suffix = emit_captured_fragment(&suffix).unwrap_or_default();
                     let separator = if suffix.starts_with(';') { "" } else { " " };
-                    lines.push(normalize_ws(&format!(
-                        "{header}{public_fields}){separator}{suffix}"
-                    )));
+                    lines.push(format!("{header}{public_fields}){separator}{suffix}"));
                     if item_lexer.state == LexState::Normal {
                         item_lexer.reset_top_level_depths();
                     }
                     file_lexer = item_lexer;
-                    idx += 1;
+                    if same_line_remainder.is_none() {
+                        idx += 1;
+                    }
                     continue;
                 }
 
@@ -2297,7 +2425,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let sc = item_lexer.scan_line(continuation);
+                    let sc = scan_logical_item_line(
+                        &mut item_lexer,
+                        continuation,
+                        &mut same_line_remainder,
+                    );
                     let rendered = sc.render_visible();
                     body_open = sc.has_top_level_open_brace;
                     if was_escaped {
@@ -2359,7 +2491,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                     false,
                                     false,
                                 );
-                                let trimmed_text = normalize_ws(&cur_field_text);
+                                let trimmed_text =
+                                    emit_captured_fragment(&cur_field_text).unwrap_or_default();
                                 if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
                                     lines.append(&mut pending_field_attrs);
                                     lines.push(trimmed_text);
@@ -2392,7 +2525,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             );
 
                             if event.kind == StructuralEventKind::BaselineComma {
-                                let trimmed_text = normalize_ws(&cur_field_text);
+                                let trimmed_text =
+                                    emit_captured_fragment(&cur_field_text).unwrap_or_default();
                                 if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
                                     lines.append(&mut pending_field_attrs);
                                     lines.push(trimmed_text);
@@ -2455,7 +2589,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let sc = item_lexer.scan_line(field_line);
+                    let sc = scan_logical_item_line(
+                        &mut item_lexer,
+                        field_line,
+                        &mut same_line_remainder,
+                    );
 
                     let mut cur_pos = Some((0, 0));
                     for event in &sc.events {
@@ -2478,7 +2616,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 was_escaped,
                                 continues_literal,
                             );
-                            let trimmed_text = normalize_ws(&cur_field_text);
+                            let trimmed_text =
+                                emit_captured_fragment(&cur_field_text).unwrap_or_default();
                             if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
                                 lines.append(&mut pending_field_attrs);
                                 lines.push(trimmed_text);
@@ -2507,7 +2646,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
 
                         if event.kind == StructuralEventKind::BaselineComma {
-                            let trimmed_text = normalize_ws(&cur_field_text);
+                            let trimmed_text =
+                                emit_captured_fragment(&cur_field_text).unwrap_or_default();
                             if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
                                 lines.append(&mut pending_field_attrs);
                                 lines.push(trimmed_text);
@@ -2538,7 +2678,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     item_lexer.reset_top_level_depths();
                 }
                 file_lexer = item_lexer;
-                idx += 1;
+                if same_line_remainder.is_none() {
+                    idx += 1;
+                }
                 continue;
             }
 
@@ -2566,7 +2708,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let sc = item_lexer.scan_line(continuation);
+                    let sc = scan_logical_item_line(
+                        &mut item_lexer,
+                        continuation,
+                        &mut same_line_remainder,
+                    );
                     let rendered = sc.render_visible();
                     body_open = sc.has_top_level_open_brace;
                     if was_escaped {
@@ -2643,7 +2789,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                     cur_member_text.push_str(&chunk_text);
                                     cur_member_code.push_str(&chunk_code);
                                 }
-                                let trimmed_text = normalize_ws(&cur_member_text);
+                                let trimmed_text =
+                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
                                 if !trimmed_text.is_empty() {
                                     lines.append(&mut pending_trait_attrs);
                                     lines.push(trimmed_text);
@@ -2683,7 +2830,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             );
 
                             if event.kind == StructuralEventKind::BaselineSemicolon {
-                                let trimmed_text = normalize_ws(&cur_member_text);
+                                let trimmed_text =
+                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
                                 if !trimmed_text.is_empty() {
                                     lines.append(&mut pending_trait_attrs);
                                     lines.push(trimmed_text);
@@ -2696,7 +2844,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 let is_method = classify_trait_member(&cur_member_code)
                                     == TraitMemberKind::Method;
                                 if is_method {
-                                    let trimmed_text = normalize_ws(&cur_member_text);
+                                    let trimmed_text = emit_captured_fragment(&cur_member_text)
+                                        .unwrap_or_default();
                                     if !trimmed_text.is_empty() {
                                         lines.append(&mut pending_trait_attrs);
                                         lines.push(trimmed_text);
@@ -2741,7 +2890,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
 
                     if in_default_method_body {
-                        let sc = item_lexer.scan_line(line_text);
+                        let sc = scan_logical_item_line(
+                            &mut item_lexer,
+                            line_text,
+                            &mut same_line_remainder,
+                        );
                         let mut cur_pos = None;
                         for event in &sc.events {
                             if event.kind == StructuralEventKind::MethodBodyClose {
@@ -2793,7 +2946,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                     cur_member_text.push_str(&chunk_text);
                                     cur_member_code.push_str(&chunk_code);
                                 }
-                                let trimmed_text = normalize_ws(&cur_member_text);
+                                let trimmed_text =
+                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
                                 if !trimmed_text.is_empty() {
                                     lines.append(&mut pending_trait_attrs);
                                     lines.push(trimmed_text);
@@ -2827,7 +2981,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
 
                             if event.kind == StructuralEventKind::BaselineSemicolon {
-                                let trimmed_text = normalize_ws(&cur_member_text);
+                                let trimmed_text =
+                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
                                 if !trimmed_text.is_empty() {
                                     lines.append(&mut pending_trait_attrs);
                                     lines.push(trimmed_text);
@@ -2840,7 +2995,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 let is_method = classify_trait_member(&cur_member_code)
                                     == TraitMemberKind::Method;
                                 if is_method {
-                                    let trimmed_text = normalize_ws(&cur_member_text);
+                                    let trimmed_text = emit_captured_fragment(&cur_member_text)
+                                        .unwrap_or_default();
                                     if !trimmed_text.is_empty() {
                                         lines.append(&mut pending_trait_attrs);
                                         lines.push(trimmed_text);
@@ -2887,7 +3043,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                     let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
-                    let sc = item_lexer.scan_line(line_text);
+                    let sc = scan_logical_item_line(
+                        &mut item_lexer,
+                        line_text,
+                        &mut same_line_remainder,
+                    );
 
                     let mut cur_pos = Some((0, 0));
                     for event in &sc.events {
@@ -2920,7 +3080,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 cur_member_text.push_str(&chunk_text);
                                 cur_member_code.push_str(&chunk_code);
                             }
-                            let trimmed_text = normalize_ws(&cur_member_text);
+                            let trimmed_text =
+                                emit_captured_fragment(&cur_member_text).unwrap_or_default();
                             if !trimmed_text.is_empty() {
                                 lines.append(&mut pending_trait_attrs);
                                 lines.push(trimmed_text);
@@ -2959,7 +3120,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
 
                         if event.kind == StructuralEventKind::BaselineSemicolon {
-                            let trimmed_text = normalize_ws(&cur_member_text);
+                            let trimmed_text =
+                                emit_captured_fragment(&cur_member_text).unwrap_or_default();
                             if !trimmed_text.is_empty() {
                                 lines.append(&mut pending_trait_attrs);
                                 lines.push(trimmed_text);
@@ -2972,7 +3134,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             let is_method =
                                 classify_trait_member(&cur_member_code) == TraitMemberKind::Method;
                             if is_method {
-                                let trimmed_text = normalize_ws(&cur_member_text);
+                                let trimmed_text =
+                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
                                 if !trimmed_text.is_empty() {
                                     lines.append(&mut pending_trait_attrs);
                                     lines.push(trimmed_text);
@@ -3014,7 +3177,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     item_lexer.reset_top_level_depths();
                 }
                 file_lexer = item_lexer;
-                idx += 1;
+                if same_line_remainder.is_none() {
+                    idx += 1;
+                }
                 continue;
             }
 
@@ -3026,7 +3191,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 {
                     idx += 1;
                     let continuation = src_lines[idx];
-                    let sc = item_lexer.scan_line(continuation);
+                    let sc = scan_logical_item_line(
+                        &mut item_lexer,
+                        continuation,
+                        &mut same_line_remainder,
+                    );
                     let rendered = sc.render_visible();
                     if !rendered.trim().is_empty() {
                         if !module_decl.ends_with(' ') && !rendered.starts_with(' ') {
@@ -3080,7 +3249,11 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         }
                         module_body.push('\n');
                         idx += 1;
-                        current_scanned = item_lexer.scan_line(src_lines[idx]);
+                        current_scanned = scan_logical_item_line(
+                            &mut item_lexer,
+                            src_lines[idx],
+                            &mut same_line_remainder,
+                        );
                         body_start = Some((0, 0));
                         opening_line = false;
                     }
@@ -3099,7 +3272,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     item_lexer.reset_top_level_depths();
                 }
                 file_lexer = item_lexer;
-                idx += 1;
+                if same_line_remainder.is_none() {
+                    idx += 1;
+                }
                 continue;
             }
 
@@ -3121,7 +3296,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 }
                 let was_escaped = item_lexer.state.is_escaped_continuation();
                 let continues_literal = item_lexer.state.is_in_string_literal();
-                let sc = item_lexer.scan_line(continuation);
+                let sc = scan_logical_item_line_with_terminator(
+                    &mut item_lexer,
+                    continuation,
+                    &mut same_line_remainder,
+                    Some(false),
+                );
                 if is_item_done(&sc) {
                     is_complete = true;
                 }
@@ -3149,7 +3329,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 item_lexer.reset_top_level_depths();
             }
             file_lexer = item_lexer;
-            idx += 1;
+            if same_line_remainder.is_none() {
+                idx += 1;
+            }
             continue;
         }
 
@@ -3159,7 +3341,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
         }
         file_lexer = item_lexer;
         pending_attrs.clear();
-        idx += 1;
+        if same_line_remainder.is_none() {
+            idx += 1;
+        }
     }
 
     format!(
@@ -6523,6 +6707,209 @@ fn public_api_guard_recurses_into_inline_public_modules() {
     let external = normalized_public_surface_str("test.rs", "pub mod external;");
     assert!(external.contains("pub mod external;"));
     assert!(!external.contains("private_a"));
+}
+
+#[test]
+fn public_api_guard_preserves_literal_whitespace_in_public_fields() {
+    let surface = |src| normalized_public_surface_str("test.rs", src);
+    for (two_spaces, one_space, label) in [
+        (
+            "pub struct S { pub x: Ty!(\"a  b\"), }",
+            "pub struct S { pub x: Ty!(\"a b\"), }",
+            "named field",
+        ),
+        (
+            "pub struct S { pub x: Ty!(r#\"a  b\"#), }",
+            "pub struct S { pub x: Ty!(r#\"a b\"#), }",
+            "raw string field",
+        ),
+        (
+            "pub struct S { pub x: Ty!(b\"a  b\"), }",
+            "pub struct S { pub x: Ty!(b\"a b\"), }",
+            "byte string field",
+        ),
+        (
+            "pub struct S(pub Ty!(\"a  b\"));",
+            "pub struct S(pub Ty!(\"a b\"));",
+            "tuple field",
+        ),
+        (
+            "pub enum E { V(Ty!(\"a  b\")) }",
+            "pub enum E { V(Ty!(\"a b\")) }",
+            "enum payload",
+        ),
+        (
+            "pub union U { pub x: Ty!(\"a  b\"), }",
+            "pub union U { pub x: Ty!(\"a b\"), }",
+            "union field",
+        ),
+        (
+            "pub struct S { pub x: Ty!(\"a\nb\"), }",
+            "pub struct S { pub x: Ty!(\"a b\"), }",
+            "literal newline",
+        ),
+    ] {
+        let two_spaces = surface(two_spaces);
+        let one_space = surface(one_space);
+        assert_ne!(
+            two_spaces, one_space,
+            "{label} literal collapsed; two={two_spaces:?}, one={one_space:?}"
+        );
+    }
+
+    assert_eq!(
+        surface("pub struct S { hidden: Ty!(\"a  b\"), pub visible: u32, }"),
+        surface("pub struct S { hidden: Ty!(\"a b\"), pub visible: u32, }")
+    );
+    assert_eq!(
+        surface("pub struct S { pub x: Result<Ty!(\"a  b\"), u32>, }"),
+        surface("pub struct S {\n pub   x: Result<Ty!(\"a  b\"),    u32>,\n}")
+    );
+    assert_ne!(
+        surface("pub fn f<T>() where T: Bound<Ty!(\"a  b\")> {}"),
+        surface("pub fn f<T>() where T: Bound<Ty!(\"a b\")> {}")
+    );
+}
+
+#[test]
+fn public_api_guard_preserves_literal_whitespace_in_trait_members() {
+    let surface = |src| normalized_public_surface_str("test.rs", src);
+    for (two_spaces, one_space, label) in [
+        (
+            "pub trait T { const S: &'static str = \"a  b\"; }",
+            "pub trait T { const S: &'static str = \"a b\"; }",
+            "associated const",
+        ),
+        (
+            "pub trait T { const S: &'static str = r#\"a  b\"#; }",
+            "pub trait T { const S: &'static str = r#\"a b\"#; }",
+            "raw associated const",
+        ),
+        (
+            "pub trait T { const S: &'static str = \"a\nb\"; }",
+            "pub trait T { const S: &'static str = \"a b\"; }",
+            "associated const newline",
+        ),
+        (
+            "pub trait T { fn f() -> Ty!(\"a  b\"); }",
+            "pub trait T { fn f() -> Ty!(\"a b\"); }",
+            "method return type",
+        ),
+        (
+            "pub trait T { type Item: Bound<Ty!(\"a  b\")>; }",
+            "pub trait T { type Item: Bound<Ty!(\"a b\")>; }",
+            "associated type bound",
+        ),
+    ] {
+        let two_spaces = surface(two_spaces);
+        let one_space = surface(one_space);
+        assert_ne!(
+            two_spaces, one_space,
+            "{label} literal collapsed; two={two_spaces:?}, one={one_space:?}"
+        );
+    }
+
+    let body_a = "pub trait T { fn f() -> Ty!(\"a  b\") { private_a() } }";
+    let body_b = "pub trait T { fn f() -> Ty!(\"a  b\") { private_b() } }";
+    assert_eq!(surface(body_a), surface(body_b));
+    assert_ne!(
+        surface(body_a),
+        surface("pub trait T { fn f() -> Ty!(\"a b\") { private_a() } }")
+    );
+}
+
+#[test]
+fn public_api_guard_resumes_after_inline_module_on_same_line() {
+    let surface = |src| normalized_public_surface_str("test.rs", src);
+    for (u32_source, u64_source, label) in [
+        (
+            "pub mod m {} pub fn f() -> u32 { 0 }",
+            "pub mod m {} pub fn f() -> u64 { 0 }",
+            "empty module",
+        ),
+        (
+            "pub mod m { pub const X: u32 = 1; } pub fn f() -> u32 { 0 }",
+            "pub mod m { pub const X: u32 = 1; } pub fn f() -> u64 { 0 }",
+            "module member",
+        ),
+        (
+            "pub mod m {} #[deprecated] pub fn f() -> u32 { 0 }",
+            "pub mod m {} #[deprecated] pub fn f() -> u64 { 0 }",
+            "following attribute",
+        ),
+        (
+            "pub mod a {} pub mod b { pub fn f() -> u32 { 0 } }",
+            "pub mod a {} pub mod b { pub fn f() -> u64 { 0 } }",
+            "second module",
+        ),
+        (
+            "pub mod a {\n pub mod b {}\n} pub fn outer() -> u32 { 0 }",
+            "pub mod a {\n pub mod b {}\n} pub fn outer() -> u64 { 0 }",
+            "nested module",
+        ),
+    ] {
+        let u32_surface = surface(u32_source);
+        let u64_surface = surface(u64_source);
+        assert_ne!(
+            u32_surface, u64_surface,
+            "{label} remainder was lost; u32={u32_surface:?}, u64={u64_surface:?}"
+        );
+    }
+
+    assert_ne!(
+        surface("pub mod m { pub const X: u32 = 1; } pub fn f() -> u32 { 0 }"),
+        surface("pub mod m { pub const X: u32 = 2; } pub fn f() -> u32 { 0 }")
+    );
+    assert_eq!(
+        surface("pub mod m { pub const X: u32 = 1; } pub fn f() -> u32 { private_a() }"),
+        surface("pub mod m { pub const X: u32 = 1; } pub fn f() -> u32 { private_b() }")
+    );
+    assert_eq!(
+        surface("pub mod m {} fn hidden() -> u32 { 0 }"),
+        surface("pub mod m {} fn hidden() -> u64 { 0 }")
+    );
+    let multiple = surface("pub mod m {} pub const A: u32 = 1; pub fn f() -> u32 { 0 }");
+    assert!(multiple.contains("pub const A: u32 = 1;"));
+    assert!(multiple.contains("pub fn f() -> u32 {"));
+}
+
+#[test]
+fn public_api_guard_resumes_after_same_line_balanced_public_items() {
+    let surface = |src| normalized_public_surface_str("test.rs", src);
+    for (one_source, two_source, label) in [
+        (
+            "pub struct S {\n} pub const X: u32 = 1;",
+            "pub struct S {\n} pub const X: u32 = 2;",
+            "struct",
+        ),
+        (
+            "pub union U {\n x: u32\n} pub const X: u32 = 1;",
+            "pub union U {\n x: u32\n} pub const X: u32 = 2;",
+            "union",
+        ),
+        (
+            "pub trait T {\n} pub const X: u32 = 1;",
+            "pub trait T {\n} pub const X: u32 = 2;",
+            "trait",
+        ),
+        (
+            "pub enum E {\n} pub const X: u32 = 1;",
+            "pub enum E {\n} pub const X: u32 = 2;",
+            "enum",
+        ),
+        (
+            "pub fn first() {\n} pub const X: u32 = 1;",
+            "pub fn first() {\n} pub const X: u32 = 2;",
+            "function",
+        ),
+    ] {
+        let u32_surface = surface(one_source);
+        let u64_surface = surface(two_source);
+        assert_ne!(
+            u32_surface, u64_surface,
+            "{label} remainder was lost; u32={u32_surface:?}, u64={u64_surface:?}"
+        );
+    }
 }
 
 #[test]
