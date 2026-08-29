@@ -180,10 +180,12 @@ struct ScannedLine {
     code_tokens: String,
     events: Vec<StructuralEvent>,
     has_top_level_semicolon: bool,
-    has_top_level_comma: bool,
     has_top_level_open_paren: bool,
+    top_level_open_paren_segs: Vec<(usize, usize)>,
+    top_level_close_paren_segs: Vec<(usize, usize)>,
     has_top_level_open_brace: bool,
     first_top_level_open_brace_seg: Option<(usize, usize)>,
+    first_outer_attribute_close_seg: Option<(usize, usize)>,
     ends_in_string_literal: bool,
 }
 
@@ -479,10 +481,12 @@ impl CodeLexer {
         let mut code_tokens = String::with_capacity(line.len());
         let mut events = Vec::new();
         let mut has_top_level_semicolon = false;
-        let mut has_top_level_comma = false;
         let mut has_top_level_open_paren = false;
+        let mut top_level_open_paren_segs = Vec::new();
+        let mut top_level_close_paren_segs = Vec::new();
         let mut has_top_level_open_brace = false;
         let mut first_top_level_open_brace_seg = None;
+        let mut first_outer_attribute_close_seg = None;
 
         let chars: Vec<char> = line.chars().collect();
         let mut i = 0;
@@ -746,6 +750,7 @@ impl CodeLexer {
                                 && self.brace_depth == 0
                             {
                                 has_top_level_open_paren = true;
+                                top_level_open_paren_segs.push((segments.len(), cur_code.len()));
                             }
                             self.paren_depth += 1;
                             cur_code.push('(');
@@ -753,6 +758,13 @@ impl CodeLexer {
                         }
                         ')' => {
                             self.pending_macro_bang = false;
+                            if self.paren_depth == 1
+                                && self.angle_depth == 0
+                                && self.bracket_depth == 0
+                                && self.brace_depth == 0
+                            {
+                                top_level_close_paren_segs.push((segments.len(), cur_code.len()));
+                            }
                             if self.paren_depth > 0 {
                                 self.paren_depth -= 1;
                             }
@@ -767,6 +779,11 @@ impl CodeLexer {
                         }
                         ']' => {
                             self.pending_macro_bang = false;
+                            if self.bracket_depth == 1 && first_outer_attribute_close_seg.is_none()
+                            {
+                                first_outer_attribute_close_seg =
+                                    Some((segments.len(), cur_code.len()));
+                            }
                             if self.bracket_depth > 0 {
                                 self.bracket_depth -= 1;
                             }
@@ -888,7 +905,6 @@ impl CodeLexer {
                                 && self.bracket_depth == 0
                                 && self.brace_depth == 0
                             {
-                                has_top_level_comma = true;
                                 events.push(StructuralEvent {
                                     seg_idx: segments.len(),
                                     char_idx: cur_code.len(),
@@ -1025,10 +1041,12 @@ impl CodeLexer {
             code_tokens,
             events,
             has_top_level_semicolon,
-            has_top_level_comma,
             has_top_level_open_paren,
+            top_level_open_paren_segs,
+            top_level_close_paren_segs,
             has_top_level_open_brace,
             first_top_level_open_brace_seg,
+            first_outer_attribute_close_seg,
             ends_in_string_literal: self.state.is_in_string_literal(),
         }
     }
@@ -1147,14 +1165,15 @@ fn has_public_tuple_struct_body_open(code_tokens: &str) -> bool {
     let Some((_, rest)) = parse_public_item(code_tokens) else {
         return false;
     };
-    if is_keyword_prefix(rest, "struct").is_none() {
+    let Some(after_struct) = is_keyword_prefix(rest, "struct") else {
         return false;
-    }
-    let before_where = rest
-        .split_once(" where ")
-        .map_or(rest, |(before, _)| before);
+    };
     CodeLexer::new()
-        .scan_line(before_where)
+        .scan_line(
+            after_struct
+                .split_once(" where ")
+                .map_or(after_struct, |(head, _)| head),
+        )
         .has_top_level_open_paren
 }
 
@@ -1188,6 +1207,22 @@ fn is_public_const_or_static(code_tokens: &str) -> bool {
     } else {
         false
     }
+}
+
+fn is_public_type_alias(code_tokens: &str) -> bool {
+    parse_public_item(code_tokens)
+        .is_some_and(|(_, rest)| is_keyword_prefix(rest, "type").is_some())
+}
+
+fn is_public_mod(code_tokens: &str) -> bool {
+    parse_public_item(code_tokens).is_some_and(|(_, rest)| is_keyword_prefix(rest, "mod").is_some())
+}
+
+fn is_public_extern_crate(code_tokens: &str) -> bool {
+    parse_public_item(code_tokens).is_some_and(|(_, rest)| {
+        is_keyword_prefix(rest, "extern")
+            .is_some_and(|after_extern| is_keyword_prefix(after_extern, "crate").is_some())
+    })
 }
 
 fn is_public_qualifiers_only(code_tokens: &str) -> bool {
@@ -1494,43 +1529,69 @@ fn normalized_public_surface(path: &str) -> String {
     normalized_public_surface_str(path, &src)
 }
 
+struct CapturedAttribute {
+    text: String,
+    remainder: String,
+}
+
 fn capture_attribute(
     src_lines: &[&str],
     idx: &mut usize,
     lexer: &mut CodeLexer,
-    mut scanned: ScannedLine,
-) -> String {
-    let mut attr_text = scanned.render_visible();
-    let mut is_done = lexer.bracket_depth == 0 && lexer.state == LexState::Normal;
-    while !is_done && *idx + 1 < src_lines.len() {
-        *idx += 1;
-        let next_line = src_lines[*idx];
-        if next_line.trim().is_empty() && lexer.state == LexState::Normal {
-            continue;
-        }
+    first_line: &str,
+) -> CapturedAttribute {
+    let mut attr_text = String::new();
+    let mut line = first_line;
+    loop {
+        let lexer_before_line = lexer.clone();
         let continues_literal = lexer.state.is_in_string_literal();
-        scanned = lexer.scan_line(next_line);
-        let rendered = scanned.render_visible();
+        let scanned = lexer.scan_line(line);
+        let attr_end = scanned.first_outer_attribute_close_seg;
+        let rendered = attr_end.map_or_else(
+            || scanned.render_visible(),
+            |end| scanned.render_visible_range(None, Some(end)),
+        );
         if continues_literal {
             attr_text.push('\n');
-        } else if !attr_text.ends_with(' ') && !rendered.starts_with(' ') {
+        } else if !attr_text.is_empty() && !attr_text.ends_with(' ') && !rendered.starts_with(' ') {
             attr_text.push(' ');
         }
         attr_text.push_str(&rendered);
-        is_done = lexer.bracket_depth == 0 && lexer.state == LexState::Normal;
+
+        if let Some(end) = attr_end {
+            let remainder = next_pos(&scanned.segments, end).map_or_else(String::new, |start| {
+                scanned.render_visible_range(Some(start), None)
+            });
+            *lexer = lexer_before_line;
+            lexer.scan_line(&rendered);
+            return CapturedAttribute {
+                text: attr_text,
+                remainder,
+            };
+        }
+
+        if *idx + 1 >= src_lines.len() {
+            return CapturedAttribute {
+                text: attr_text,
+                remainder: String::new(),
+            };
+        }
+        *idx += 1;
+        line = src_lines[*idx];
     }
-    attr_text
 }
 
 fn normalized_public_surface_str(path: &str, src: &str) -> String {
     let src_lines: Vec<&str> = src.lines().collect();
     let mut lines = Vec::new();
     let mut pending_attrs = Vec::new();
+    let mut same_line_remainder = None;
     let mut idx = 0usize;
     let mut file_lexer = CodeLexer::new();
 
     while idx < src_lines.len() {
-        let raw_line = src_lines[idx];
+        let owned_line = same_line_remainder.take();
+        let raw_line = owned_line.as_deref().unwrap_or(src_lines[idx]);
         if raw_line.trim().is_empty() && file_lexer.state == LexState::Normal {
             idx += 1;
             continue;
@@ -1540,13 +1601,18 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
         let scanned = item_lexer.scan_line(raw_line);
 
         if is_outer_attribute_start(&scanned.code_tokens) && file_lexer.state == LexState::Normal {
-            let attr_text = capture_attribute(&src_lines, &mut idx, &mut item_lexer, scanned);
-            pending_attrs.push(attr_text);
+            item_lexer = file_lexer.clone();
+            let captured = capture_attribute(&src_lines, &mut idx, &mut item_lexer, raw_line);
+            pending_attrs.push(captured.text);
             if item_lexer.state == LexState::Normal {
                 item_lexer.reset_top_level_depths();
             }
             file_lexer = item_lexer;
-            idx += 1;
+            if captured.remainder.trim().is_empty() {
+                idx += 1;
+            } else {
+                same_line_remainder = Some(captured.remainder);
+            }
             continue;
         }
 
@@ -1825,9 +1891,15 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                 }
 
-                while !enum_body_closed && idx + 1 < src_lines.len() {
-                    idx += 1;
-                    let variant_line = src_lines[idx];
+                let mut variant_remainder = None;
+                while !enum_body_closed
+                    && (variant_remainder.is_some() || idx + 1 < src_lines.len())
+                {
+                    let owned_line = variant_remainder.take();
+                    if owned_line.is_none() {
+                        idx += 1;
+                    }
+                    let variant_line = owned_line.as_deref().unwrap_or(src_lines[idx]);
                     if variant_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
@@ -1835,10 +1907,16 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         let mut check_lexer = item_lexer.clone();
                         let check_sc = check_lexer.scan_line(variant_line);
                         if is_outer_attribute_start(&check_sc.code_tokens) {
-                            let first_sc = item_lexer.scan_line(variant_line);
-                            let attr_text =
-                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, first_sc);
-                            pending_variant_attrs.push(attr_text);
+                            let captured = capture_attribute(
+                                &src_lines,
+                                &mut idx,
+                                &mut item_lexer,
+                                variant_line,
+                            );
+                            pending_variant_attrs.push(captured.text);
+                            if !captured.remainder.trim().is_empty() {
+                                variant_remainder = Some(captured.remainder);
+                            }
                             continue;
                         }
                     }
@@ -2054,51 +2132,68 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     current_scanned = sc;
                 }
 
-                let is_unit_or_tuple = current_scanned.has_top_level_semicolon
-                    || current_scanned.has_top_level_open_paren
-                    || has_public_tuple_struct_body_open(&combined_code_tokens);
-
-                if is_unit_or_tuple && !current_scanned.has_top_level_open_brace {
-                    let mut item = prefix_text;
-                    let mut is_done = current_scanned.has_top_level_semicolon
-                        || current_scanned.has_top_level_open_paren
-                        || has_public_tuple_struct_body_open(&combined_code_tokens);
-                    while !is_done && idx + 1 < src_lines.len() {
-                        idx += 1;
-                        let continuation = src_lines[idx];
-                        if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
-                            continue;
-                        }
-                        let was_escaped = item_lexer.state.is_escaped_continuation();
-                        let continues_literal = item_lexer.state.is_in_string_literal();
-                        let sc = item_lexer.scan_line(continuation);
-                        let opens_tuple = sc.has_top_level_open_paren
-                            && sc.code_tokens.trim_start().starts_with('(');
-                        if sc.has_top_level_semicolon || opens_tuple {
-                            is_done = true;
-                        }
-                        let rendered = sc.render_visible();
-                        if was_escaped {
-                            item.push_str(&rendered);
-                            continue;
-                        }
-                        if continues_literal {
-                            item.push('\n');
-                            item.push_str(&rendered);
-                            continue;
-                        }
-                        if rendered.trim().is_empty() && !sc.ends_in_string_literal {
-                            continue;
-                        }
-                        let needs_space = !item.ends_with(' ')
-                            && !rendered.starts_with(' ')
-                            && !rendered.starts_with('(');
-                        if needs_space {
-                            item.push(' ');
-                        }
-                        item.push_str(&rendered);
+                let is_tuple = has_public_tuple_struct_body_open(&combined_code_tokens);
+                if current_scanned.has_top_level_semicolon && !is_tuple {
+                    lines.push(prefix_text);
+                    if item_lexer.state == LexState::Normal {
+                        item_lexer.reset_top_level_depths();
                     }
-                    lines.push(item);
+                    file_lexer = item_lexer;
+                    idx += 1;
+                    continue;
+                }
+
+                if let Some(open_pos) = is_tuple
+                    .then(|| current_scanned.top_level_open_paren_segs.last().copied())
+                    .flatten()
+                {
+                    let rendered_last = current_scanned.render_visible();
+                    let header_line = current_scanned.render_visible_range(None, Some(open_pos));
+                    let header = if prefix_text.ends_with(&rendered_last) {
+                        let prefix_head = &prefix_text[..prefix_text.len() - rendered_last.len()];
+                        format!("{prefix_head}{header_line}")
+                    } else {
+                        header_line
+                    };
+                    let mut tuple_body = String::new();
+                    let mut body_start = next_pos(&current_scanned.segments, open_pos);
+                    let mut opening_line = true;
+                    loop {
+                        let close_pos = current_scanned
+                            .top_level_close_paren_segs
+                            .iter()
+                            .copied()
+                            .find(|&close| body_start.is_none_or(|start| close >= start));
+                        let body_end =
+                            close_pos.and_then(|close| prev_pos(&current_scanned.segments, close));
+                        if !(opening_line && body_start.is_none())
+                            && !(close_pos.is_some() && body_end.is_none())
+                        {
+                            tuple_body.push_str(
+                                &current_scanned.render_visible_range(body_start, body_end),
+                            );
+                        }
+                        if close_pos.is_some() || idx + 1 >= src_lines.len() {
+                            break;
+                        }
+                        tuple_body.push('\n');
+                        idx += 1;
+                        current_scanned = item_lexer.scan_line(src_lines[idx]);
+                        body_start = Some((0, 0));
+                        opening_line = false;
+                    }
+
+                    let tuple_fields = normalized_public_surface_str(
+                        path,
+                        &format!("pub struct __Tuple {{\n{tuple_body}\n}}"),
+                    );
+                    let public_fields = tuple_fields
+                        .lines()
+                        .skip(2)
+                        .filter(|line| !line.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    lines.push(normalize_ws(&format!("{header}{public_fields});")));
                     if item_lexer.state == LexState::Normal {
                         item_lexer.reset_top_level_depths();
                     }
@@ -2257,9 +2352,15 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                 }
 
-                while !struct_body_closed && idx + 1 < src_lines.len() {
-                    idx += 1;
-                    let field_line = src_lines[idx];
+                let mut field_remainder = None;
+                while !struct_body_closed
+                    && (field_remainder.is_some() || idx + 1 < src_lines.len())
+                {
+                    let owned_line = field_remainder.take();
+                    if owned_line.is_none() {
+                        idx += 1;
+                    }
+                    let field_line = owned_line.as_deref().unwrap_or(src_lines[idx]);
                     if field_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
@@ -2267,10 +2368,16 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         let mut check_lexer = item_lexer.clone();
                         let check_sc = check_lexer.scan_line(field_line);
                         if is_outer_attribute_start(&check_sc.code_tokens) {
-                            let first_sc = item_lexer.scan_line(field_line);
-                            let attr_text =
-                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, first_sc);
-                            pending_field_attrs.push(attr_text);
+                            let captured = capture_attribute(
+                                &src_lines,
+                                &mut idx,
+                                &mut item_lexer,
+                                field_line,
+                            );
+                            pending_field_attrs.push(captured.text);
+                            if !captured.remainder.trim().is_empty() {
+                                field_remainder = Some(captured.remainder);
+                            }
                             continue;
                         }
                     }
@@ -2550,9 +2657,14 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     }
                 }
 
-                while !trait_body_closed && idx + 1 < src_lines.len() {
-                    idx += 1;
-                    let line_text = src_lines[idx];
+                let mut trait_remainder = None;
+                while !trait_body_closed && (trait_remainder.is_some() || idx + 1 < src_lines.len())
+                {
+                    let owned_line = trait_remainder.take();
+                    if owned_line.is_none() {
+                        idx += 1;
+                    }
+                    let line_text = owned_line.as_deref().unwrap_or(src_lines[idx]);
                     if line_text.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
@@ -2692,9 +2804,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         let mut check_lexer = item_lexer.clone();
                         let check_sc = check_lexer.scan_line(line_text);
                         if is_outer_attribute_start(&check_sc.code_tokens) {
-                            let attr_text =
-                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, check_sc);
-                            pending_trait_attrs.push(attr_text);
+                            let captured =
+                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, line_text);
+                            pending_trait_attrs.push(captured.text);
+                            if !captured.remainder.trim().is_empty() {
+                                trait_remainder = Some(captured.remainder);
+                            }
                             continue;
                         }
                     }
@@ -2832,24 +2947,100 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 continue;
             }
 
-            // Other public items (type alias, mod, etc.)
-            let is_item_done = |sc: &ScannedLine| {
-                sc.has_top_level_open_brace || sc.has_top_level_semicolon || sc.has_top_level_comma
-            };
+            if is_public_mod(&combined_code_tokens) {
+                let mut module_decl = prefix_text;
+                while !current_scanned.has_top_level_open_brace
+                    && !current_scanned.has_top_level_semicolon
+                    && idx + 1 < src_lines.len()
+                {
+                    idx += 1;
+                    let continuation = src_lines[idx];
+                    let sc = item_lexer.scan_line(continuation);
+                    let rendered = sc.render_visible();
+                    if !rendered.trim().is_empty() {
+                        if !module_decl.ends_with(' ') && !rendered.starts_with(' ') {
+                            module_decl.push(' ');
+                        }
+                        module_decl.push_str(&rendered);
+                    }
+                    current_scanned = sc;
+                }
+
+                if current_scanned.has_top_level_semicolon {
+                    lines.push(module_decl);
+                } else if let Some(open_pos) = current_scanned.first_top_level_open_brace_seg {
+                    let rendered_last = current_scanned.render_visible();
+                    let header = if module_decl.ends_with(&rendered_last) {
+                        let prefix_head = &module_decl[..module_decl.len() - rendered_last.len()];
+                        format!(
+                            "{prefix_head}{}",
+                            current_scanned.text_up_to_function_body_open_brace()
+                        )
+                    } else {
+                        current_scanned.text_up_to_function_body_open_brace()
+                    };
+                    lines.push(header);
+
+                    let mut module_body = String::new();
+                    let mut body_start = next_pos(&current_scanned.segments, open_pos);
+                    let mut opening_line = true;
+                    loop {
+                        let close_pos = current_scanned
+                            .events
+                            .iter()
+                            .find(|event| {
+                                event.kind == StructuralEventKind::TopLevelCloseBrace
+                                    && body_start.is_none_or(|start| {
+                                        (event.seg_idx, event.char_idx) >= start
+                                    })
+                            })
+                            .map(|event| (event.seg_idx, event.char_idx));
+                        let body_end =
+                            close_pos.and_then(|close| prev_pos(&current_scanned.segments, close));
+                        if !(opening_line && body_start.is_none())
+                            && !(close_pos.is_some() && body_end.is_none())
+                        {
+                            module_body.push_str(
+                                &current_scanned.render_visible_range(body_start, body_end),
+                            );
+                        }
+                        if close_pos.is_some() || idx + 1 >= src_lines.len() {
+                            break;
+                        }
+                        module_body.push('\n');
+                        idx += 1;
+                        current_scanned = item_lexer.scan_line(src_lines[idx]);
+                        body_start = Some((0, 0));
+                        opening_line = false;
+                    }
+
+                    let nested_surface = normalized_public_surface_str(path, &module_body);
+                    lines.extend(
+                        nested_surface
+                            .lines()
+                            .skip(1)
+                            .filter(|line| !line.is_empty())
+                            .map(str::to_owned),
+                    );
+                }
+
+                if item_lexer.state == LexState::Normal {
+                    item_lexer.reset_top_level_depths();
+                }
+                file_lexer = item_lexer;
+                idx += 1;
+                continue;
+            }
+
+            assert!(
+                is_public_type_alias(&combined_code_tokens)
+                    || is_public_extern_crate(&combined_code_tokens),
+                "unsupported public item kind must fail closed: {combined_code_tokens}"
+            );
+            let is_item_done = |sc: &ScannedLine| sc.has_top_level_semicolon;
             let mut is_complete = is_item_done(&current_scanned);
 
-            let mut item = if current_scanned.has_top_level_open_brace {
-                let up_to_brace = current_scanned.text_up_to_function_body_open_brace();
-                let rendered_last = current_scanned.render_visible();
-                if prefix_text.ends_with(&rendered_last) {
-                    let prefix_head = &prefix_text[..prefix_text.len() - rendered_last.len()];
-                    format!("{prefix_head}{up_to_brace}")
-                } else {
-                    up_to_brace
-                }
-            } else {
-                prefix_text
-            };
+            let mut item = prefix_text;
 
             while !is_complete && idx + 1 < src_lines.len() {
                 idx += 1;
@@ -2863,11 +3054,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 if is_item_done(&sc) {
                     is_complete = true;
                 }
-                let rendered = if sc.has_top_level_open_brace {
-                    sc.text_up_to_function_body_open_brace()
-                } else {
-                    sc.render_visible()
-                };
+                let rendered = sc.render_visible();
                 if was_escaped {
                     item.push_str(&rendered);
                     continue;
@@ -5927,7 +6114,11 @@ fn public_api_guard_handles_generic_types_inside_const_expression_blocks_probe()
 fn public_api_guard_handles_multiline_restricted_visibility_and_mutations() {
     let multi_vis_1 = "pub(in\n    crate) const X: u32 = 1;";
     let multi_vis_2 = "pub(in\n    crate) const X: u32 = 2;";
+    let multi_vis_u64 = "pub(in\n    crate) const X: u64 = 1;";
     let single_vis = "pub(in crate) const X: u32 = 1;";
+
+    assert!(multi_vis_1.contains("pub(in\n    crate)"));
+    assert!(multi_vis_1.as_bytes().contains(&b'\n'));
 
     assert_ne!(
         normalized_public_surface_str("test.rs", multi_vis_1),
@@ -5938,6 +6129,11 @@ fn public_api_guard_handles_multiline_restricted_visibility_and_mutations() {
         normalized_public_surface_str("test.rs", multi_vis_1),
         normalized_public_surface_str("test.rs", single_vis),
         "multiline pub(in crate) must normalize equivalently to single-line"
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", multi_vis_1),
+        normalized_public_surface_str("test.rs", multi_vis_u64),
+        "type change with multiline pub(in crate) must alter public surface"
     );
 
     let struct_const_1 = "pub(in\n    crate) const HEADER: Spec = Spec {\n    rev: 1,\n};";
@@ -5981,6 +6177,8 @@ fn public_api_guard_handles_multiline_tuple_struct_headers_and_mutations() {
     // A. Private tuple field stays private
     let priv_u32 = "pub struct S\n(\n    u32,\n);";
     let priv_u64 = "pub struct S\n(\n    u64,\n);";
+    assert!(priv_u32.contains("S\n("));
+    assert!(priv_u32.as_bytes().contains(&b'\n'));
     assert_eq!(
         normalized_public_surface_str("test.rs", priv_u32),
         normalized_public_surface_str("test.rs", priv_u64),
@@ -6099,4 +6297,159 @@ fn public_api_guard_accumulates_and_normalizes_multiline_enum_variants() {
         normalized_public_surface_str("test.rs", attr_reformatted),
         "trivia and reflow on attributed variant must normalize equivalently"
     );
+}
+
+#[test]
+fn public_api_guard_resumes_after_same_line_outer_attributes() {
+    let u32_signature = "#[deprecated] pub fn f() -> u32 { private_a() }";
+    let u64_signature = "#[deprecated] pub fn f() -> u64 { private_a() }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", u32_signature),
+        normalized_public_surface_str("test.rs", u64_signature),
+        "same-line item after an outer attribute must remain contract-bearing"
+    );
+
+    let different_body = "#[deprecated] pub fn f() -> u32 { private_b() }";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", u32_signature),
+        normalized_public_surface_str("test.rs", different_body),
+        "an attributed function's private body must remain excluded"
+    );
+
+    let multiple_u32 = "#[deprecated] #[inline] pub fn f() -> u32 { 0 }";
+    let multiple_u64 = "#[deprecated] #[inline] pub fn f() -> u64 { 0 }";
+    let multiple_surface = normalized_public_surface_str("test.rs", multiple_u32);
+    assert!(multiple_surface.contains("#[deprecated]"));
+    assert!(multiple_surface.contains("#[inline]"));
+    assert_ne!(
+        multiple_surface,
+        normalized_public_surface_str("test.rs", multiple_u64)
+    );
+
+    let multiline_u32 =
+        "#[cfg_attr(\n    feature = \"x\",\n    deprecated\n)] pub fn f() -> u32 { 0 }";
+    let multiline_u64 =
+        "#[cfg_attr(\n    feature = \"x\",\n    deprecated\n)] pub fn f() -> u64 { 0 }";
+    assert!(multiline_u32.contains(")] pub fn"));
+    assert_ne!(
+        normalized_public_surface_str("test.rs", multiline_u32),
+        normalized_public_surface_str("test.rs", multiline_u64)
+    );
+
+    let variant_u32 = "pub enum E {\n    #[deprecated] A(u32),\n}";
+    let variant_u64 = "pub enum E {\n    #[deprecated] A(u64),\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", variant_u32),
+        normalized_public_surface_str("test.rs", variant_u64)
+    );
+
+    let public_field_u32 = "pub struct S {\n    #[deprecated] pub value: u32,\n}";
+    let public_field_u64 = "pub struct S {\n    #[deprecated] pub value: u64,\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", public_field_u32),
+        normalized_public_surface_str("test.rs", public_field_u64)
+    );
+    let private_field_u32 = "pub struct S {\n    #[deprecated] value: u32,\n}";
+    let private_field_u64 = "pub struct S {\n    #[deprecated] value: u64,\n}";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", private_field_u32),
+        normalized_public_surface_str("test.rs", private_field_u64)
+    );
+
+    let trait_u32 = "pub trait T {\n    #[deprecated] fn f() -> u32;\n}";
+    let trait_u64 = "pub trait T {\n    #[deprecated] fn f() -> u64;\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", trait_u32),
+        normalized_public_surface_str("test.rs", trait_u64)
+    );
+}
+
+#[test]
+fn public_api_guard_continues_type_aliases_past_where_clause_commas() {
+    let vec_target = "pub type Foo<T>\nwhere\n    T: Copy,\n= Vec<T>;";
+    let option_target = "pub type Foo<T>\nwhere\n    T: Copy,\n= Option<T>;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", vec_target),
+        normalized_public_surface_str("test.rs", option_target),
+        "a where-clause comma must not hide the type-alias target"
+    );
+    let single_line = "pub type Foo<T> where T: Copy, = Vec<T>;";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", vec_target),
+        normalized_public_surface_str("test.rs", single_line),
+        "equivalent type-alias formatting must normalize consistently"
+    );
+
+    let changed_bound = "pub type Foo<T>\nwhere\n    T: Clone,\n= Vec<T>;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", vec_target),
+        normalized_public_surface_str("test.rs", changed_bound)
+    );
+    let multiple_bounds =
+        "pub type Foo<T, U>\nwhere\n    T: Copy + Clone,\n    U: Send,\n= Result<T, U>;";
+    let changed_multiple_bounds =
+        "pub type Foo<T, U>\nwhere\n    T: Copy + Clone,\n    U: Sync,\n= Result<T, U>;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", multiple_bounds),
+        normalized_public_surface_str("test.rs", changed_multiple_bounds)
+    );
+
+    let nested_target = "pub type Foo<T>\nwhere\n    T: Copy,\n= Result<Vec<T>, Option<T>>;";
+    let changed_nested_target = "pub type Foo<T>\nwhere\n    T: Copy,\n= Result<Vec<T>, Box<T>>;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", nested_target),
+        normalized_public_surface_str("test.rs", changed_nested_target)
+    );
+
+    let followed = "pub type Foo<T>\nwhere\n    T: Copy,\n= Vec<T>;\n\npub const NEXT: u32 = 1;";
+    let followed_surface = normalized_public_surface_str("test.rs", followed);
+    assert!(followed_surface.contains("= Vec<T>;"));
+    assert!(followed_surface.contains("pub const NEXT: u32 = 1;"));
+}
+
+#[test]
+fn public_api_guard_recurses_into_inline_public_modules() {
+    let u32_signature = "pub mod m { pub fn f() -> u32 { private_a() } }";
+    let u64_signature = "pub mod m { pub fn f() -> u64 { private_a() } }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", u32_signature),
+        normalized_public_surface_str("test.rs", u64_signature),
+        "nested public contracts in inline modules must remain contract-bearing"
+    );
+
+    let different_body = "pub mod m { pub fn f() -> u32 { private_b() } }";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", u32_signature),
+        normalized_public_surface_str("test.rs", different_body)
+    );
+
+    let hidden_u32 = "pub mod m { fn hidden() -> u32 { 1 } pub fn visible() -> bool { true } }";
+    let hidden_u64 = "pub mod m { fn hidden() -> u64 { 2 } pub fn visible() -> bool { true } }";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", hidden_u32),
+        normalized_public_surface_str("test.rs", hidden_u64)
+    );
+
+    let public_field_u32 = "pub mod m { pub struct S { pub x: u32, private: u32, } }";
+    let public_field_u64 = "pub mod m { pub struct S { pub x: u64, private: u32, } }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", public_field_u32),
+        normalized_public_surface_str("test.rs", public_field_u64)
+    );
+    let private_field_u64 = "pub mod m { pub struct S { pub x: u32, private: u64, } }";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", public_field_u32),
+        normalized_public_surface_str("test.rs", private_field_u64)
+    );
+
+    let nested_u32 = "pub mod outer { pub mod inner { pub fn f() -> u32 { private_a() } } }";
+    let nested_u64 = "pub mod outer { pub mod inner { pub fn f() -> u64 { private_a() } } }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", nested_u32),
+        normalized_public_surface_str("test.rs", nested_u64)
+    );
+
+    let external = normalized_public_surface_str("test.rs", "pub mod external;");
+    assert!(external.contains("pub mod external;"));
+    assert!(!external.contains("private_a"));
 }
