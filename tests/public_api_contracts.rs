@@ -448,7 +448,7 @@ struct CodeLexer {
     brace_depth: usize,
     pending_macro_bang: bool,
     macro_brace_stack: Vec<usize>,
-    const_brace_stack: Vec<usize>,
+    const_brace_stack: Vec<(usize, usize)>, // (brace depth, angle depth at entry)
 }
 
 impl CodeLexer {
@@ -673,7 +673,35 @@ impl CodeLexer {
                         i += 2;
                         continue;
                     }
+                    if chars[i] == '<'
+                        && i + 2 < chars.len()
+                        && chars[i + 1] == '<'
+                        && chars[i + 2] == '='
+                    {
+                        cur_code.push_str("<<=");
+                        code_tokens.push_str("<<=");
+                        self.pending_macro_bang = false;
+                        i += 3;
+                        continue;
+                    }
+                    if chars[i] == '>'
+                        && i + 2 < chars.len()
+                        && chars[i + 1] == '>'
+                        && chars[i + 2] == '='
+                    {
+                        cur_code.push_str(">>=");
+                        code_tokens.push_str(">>=");
+                        self.pending_macro_bang = false;
+                        i += 3;
+                        continue;
+                    }
                     if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
+                        let is_shift = (!self.const_brace_stack.is_empty()
+                            && !code_tokens.trim_end().ends_with("::"))
+                            || is_likely_comparison_less_than(&code_tokens);
+                        if !is_shift {
+                            self.angle_depth += 2;
+                        }
                         cur_code.push_str("<<");
                         code_tokens.push_str("<<");
                         self.pending_macro_bang = false;
@@ -733,9 +761,13 @@ impl CodeLexer {
                         }
                         '>' => {
                             self.pending_macro_bang = false;
+                            let angle_floor = self
+                                .const_brace_stack
+                                .last()
+                                .map_or(0, |&(_, angle_depth)| angle_depth);
                             if self.paren_depth == 0
                                 && self.bracket_depth == 0
-                                && self.angle_depth > 0
+                                && self.angle_depth > angle_floor
                             {
                                 self.angle_depth -= 1;
                             }
@@ -797,7 +829,8 @@ impl CodeLexer {
                                 self.macro_brace_stack.push(self.brace_depth);
                             } else {
                                 if self.angle_depth > 0 || !self.const_brace_stack.is_empty() {
-                                    self.const_brace_stack.push(self.brace_depth);
+                                    self.const_brace_stack
+                                        .push((self.brace_depth, self.angle_depth));
                                 }
                                 let is_top_level = self.paren_depth == 0
                                     && self.angle_depth == 0
@@ -842,7 +875,9 @@ impl CodeLexer {
                                 if self
                                     .const_brace_stack
                                     .last()
-                                    .is_some_and(|&d| d == self.brace_depth.saturating_sub(1))
+                                    .is_some_and(|&(brace_depth, _)| {
+                                        brace_depth == self.brace_depth.saturating_sub(1)
+                                    })
                                 {
                                     self.const_brace_stack.pop();
                                 }
@@ -1169,11 +1204,7 @@ fn has_public_tuple_struct_body_open(code_tokens: &str) -> bool {
         return false;
     };
     CodeLexer::new()
-        .scan_line(
-            after_struct
-                .split_once(" where ")
-                .map_or(after_struct, |(head, _)| head),
-        )
+        .scan_line(after_struct)
         .has_top_level_open_paren
 }
 
@@ -2158,42 +2189,82 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     let mut tuple_body = String::new();
                     let mut body_start = next_pos(&current_scanned.segments, open_pos);
                     let mut opening_line = true;
-                    loop {
-                        let close_pos = current_scanned
+                    let close_pos = loop {
+                        if let Some(close_pos) = current_scanned
                             .top_level_close_paren_segs
                             .iter()
                             .copied()
-                            .find(|&close| body_start.is_none_or(|start| close >= start));
-                        let body_end =
-                            close_pos.and_then(|close| prev_pos(&current_scanned.segments, close));
-                        if !(opening_line && body_start.is_none())
-                            && !(close_pos.is_some() && body_end.is_none())
+                            .find(|&close| body_start.is_none_or(|start| close >= start))
                         {
-                            tuple_body.push_str(
-                                &current_scanned.render_visible_range(body_start, body_end),
-                            );
+                            if let Some(body_end) = prev_pos(&current_scanned.segments, close_pos) {
+                                tuple_body.push_str(
+                                    &current_scanned
+                                        .render_visible_range(body_start, Some(body_end)),
+                                );
+                            }
+                            break close_pos;
+                        } else if !(opening_line && body_start.is_none()) {
+                            tuple_body
+                                .push_str(&current_scanned.render_visible_range(body_start, None));
                         }
-                        if close_pos.is_some() || idx + 1 >= src_lines.len() {
-                            break;
-                        }
+                        assert!(
+                            idx + 1 < src_lines.len(),
+                            "unterminated public tuple struct in {path}"
+                        );
                         tuple_body.push('\n');
                         idx += 1;
                         current_scanned = item_lexer.scan_line(src_lines[idx]);
                         body_start = Some((0, 0));
                         opening_line = false;
+                    };
+
+                    let semicolon_pos = |sc: &ScannedLine| {
+                        sc.events.iter().find_map(|event| {
+                            (event.kind == StructuralEventKind::TopLevelSemicolon)
+                                .then_some((event.seg_idx, event.char_idx))
+                        })
+                    };
+                    let mut suffix = next_pos(&current_scanned.segments, close_pos).map_or_else(
+                        String::new,
+                        |start| {
+                            current_scanned
+                                .render_visible_range(Some(start), semicolon_pos(&current_scanned))
+                        },
+                    );
+                    while semicolon_pos(&current_scanned).is_none() {
+                        assert!(
+                            idx + 1 < src_lines.len(),
+                            "unterminated public tuple struct in {path}"
+                        );
+                        idx += 1;
+                        current_scanned = item_lexer.scan_line(src_lines[idx]);
+                        let rendered = current_scanned
+                            .render_visible_range(None, semicolon_pos(&current_scanned));
+                        if !suffix.is_empty() && !rendered.is_empty() {
+                            suffix.push(' ');
+                        }
+                        suffix.push_str(&rendered);
                     }
 
                     let tuple_fields = normalized_public_surface_str(
                         path,
                         &format!("pub struct __Tuple {{\n{tuple_body}\n}}"),
                     );
-                    let public_fields = tuple_fields
+                    let mut public_fields = tuple_fields
                         .lines()
                         .skip(2)
                         .filter(|line| !line.is_empty())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    lines.push(normalize_ws(&format!("{header}{public_fields});")));
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>();
+                    if let Some(last) = public_fields.last_mut() {
+                        last.truncate(last.trim_end().trim_end_matches(',').len());
+                    }
+                    let public_fields = public_fields.join(" ");
+                    let suffix = normalize_ws(&suffix);
+                    let separator = if suffix.starts_with(';') { "" } else { " " };
+                    lines.push(normalize_ws(&format!(
+                        "{header}{public_fields}){separator}{suffix}"
+                    )));
                     if item_lexer.state == LexState::Normal {
                         item_lexer.reset_top_level_depths();
                     }
@@ -6452,4 +6523,179 @@ fn public_api_guard_recurses_into_inline_public_modules() {
     let external = normalized_public_surface_str("test.rs", "pub mod external;");
     assert!(external.contains("pub mod external;"));
     assert!(!external.contains("private_a"));
+}
+
+#[test]
+fn public_api_guard_preserves_outer_generic_depth_across_right_shift() {
+    let second_2 = "pub fn f() -> Foo<{ 8 >> 1 }, { 2 }> { private_a() }";
+    let second_3 = "pub fn f() -> Foo<{ 8 >> 1 }, { 3 }> { private_a() }";
+    let surface_2 = normalized_public_surface_str("test.rs", second_2);
+    let surface_3 = normalized_public_surface_str("test.rs", second_3);
+
+    assert_ne!(
+        surface_2, surface_3,
+        "a following const-generic argument must remain contract-bearing; surface: {surface_2:?}"
+    );
+
+    let different_body = "pub fn f() -> Foo<{ 8 >> 1 }, { 2 }> { private_b() }";
+    assert_eq!(
+        surface_2,
+        normalized_public_surface_str("test.rs", different_body)
+    );
+    let shifted_16 = "pub fn f() -> Foo<{ 16 >> 1 }, { 2 }> { private_a() }";
+    assert_ne!(
+        surface_2,
+        normalized_public_surface_str("test.rs", shifted_16)
+    );
+
+    let nested_u32 = "pub fn f() -> Outer<Inner<u32>> { private_a() }";
+    let nested_u64 = "pub fn f() -> Outer<Inner<u64>> { private_a() }";
+    let nested_body = "pub fn f() -> Outer<Inner<u32>> { private_b() }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", nested_u32),
+        normalized_public_surface_str("test.rs", nested_u64)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", nested_u32),
+        normalized_public_surface_str("test.rs", nested_body)
+    );
+
+    let inner_u8 = "pub fn f() -> Foo<{ core::mem::size_of::<Option<Result<u8, u16>>>() }, { 2 }> { private_a() }";
+    let inner_u32 = "pub fn f() -> Foo<{ core::mem::size_of::<Option<Result<u32, u16>>>() }, { 2 }> { private_a() }";
+    let inner_body = "pub fn f() -> Foo<{ core::mem::size_of::<Option<Result<u8, u16>>>() }, { 2 }> { private_b() }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", inner_u8),
+        normalized_public_surface_str("test.rs", inner_u32)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", inner_u8),
+        normalized_public_surface_str("test.rs", inner_body)
+    );
+
+    let left_8 = "pub fn f() -> Foo<{ 8 << 1 }, { 2 }> { private_a() }";
+    let left_16 = "pub fn f() -> Foo<{ 16 << 1 }, { 2 }> { private_a() }";
+    let left_second = "pub fn f() -> Foo<{ 8 << 1 }, { 3 }> { private_a() }";
+    let left_body = "pub fn f() -> Foo<{ 8 << 1 }, { 2 }> { private_b() }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", left_8),
+        normalized_public_surface_str("test.rs", left_16)
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", left_8),
+        normalized_public_surface_str("test.rs", left_second)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", left_8),
+        normalized_public_surface_str("test.rs", left_body)
+    );
+
+    let shift_assign_1 = "pub fn f() -> Foo<{ let mut x = 8; x >>= 1; x }, { 2 }> { private_a() }";
+    let shift_assign_2 = "pub fn f() -> Foo<{ let mut x = 8; x >>= 2; x }, { 2 }> { private_a() }";
+    let left_assign_1 = "pub fn f() -> Foo<{ let mut x = 8; x <<= 1; x }, { 2 }> { private_a() }";
+    let left_assign_2 = "pub fn f() -> Foo<{ let mut x = 8; x <<= 2; x }, { 2 }> { private_a() }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", shift_assign_1),
+        normalized_public_surface_str("test.rs", shift_assign_2)
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", left_assign_1),
+        normalized_public_surface_str("test.rs", left_assign_2)
+    );
+
+    let qualified_2 = "pub fn f<T>() -> Foo<<T as Trait>::Assoc, { 2 }> { private_a() }";
+    let qualified_3 = "pub fn f<T>() -> Foo<<T as Trait>::Assoc, { 3 }> { private_a() }";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", qualified_2),
+        normalized_public_surface_str("test.rs", qualified_3),
+        "adjacent generic openings must not be classified as a left shift"
+    );
+}
+
+#[test]
+fn public_api_guard_retains_tuple_struct_where_clause() {
+    let copy = "pub struct S<T>(pub T) where T: Copy;";
+    let clone = "pub struct S<T>(pub T) where T: Clone;";
+    let copy_surface = normalized_public_surface_str("test.rs", copy);
+    let clone_surface = normalized_public_surface_str("test.rs", clone);
+
+    assert_ne!(
+        copy_surface, clone_surface,
+        "tuple-struct where clauses must remain contract-bearing; surface: {copy_surface:?}"
+    );
+
+    let multiline_copy = "pub struct S<T>(\n    pub T,\n)\nwhere\n    T: Copy;";
+    let multiline_clone = "pub struct S<T>(\n    pub T,\n)\nwhere\n    T: Clone;";
+    assert!(multiline_copy.as_bytes().contains(&b'\n'));
+    assert_ne!(
+        normalized_public_surface_str("test.rs", multiline_copy),
+        normalized_public_surface_str("test.rs", multiline_clone)
+    );
+    assert_eq!(
+        copy_surface,
+        normalized_public_surface_str("test.rs", multiline_copy)
+    );
+
+    let public_option = "pub struct S<T>(pub Option<T>) where T: Copy;";
+    assert_ne!(
+        copy_surface,
+        normalized_public_surface_str("test.rs", public_option)
+    );
+
+    let private_t = "pub struct S<T>(T) where T: Copy;";
+    let private_option = "pub struct S<T>(Option<T>) where T: Copy;";
+    let private_clone = "pub struct S<T>(T) where T: Clone;";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", private_t),
+        normalized_public_surface_str("test.rs", private_option)
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", private_t),
+        normalized_public_surface_str("test.rs", private_clone)
+    );
+
+    let predicates = "pub struct Pair<T, U>(pub T, pub U)\nwhere\n    T: Copy,\n    U: Clone;";
+    let changed_t = "pub struct Pair<T, U>(pub T, pub U)\nwhere\n    T: Send,\n    U: Clone;";
+    let changed_u = "pub struct Pair<T, U>(pub T, pub U)\nwhere\n    T: Copy,\n    U: Sync;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", predicates),
+        normalized_public_surface_str("test.rs", changed_t)
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", predicates),
+        normalized_public_surface_str("test.rs", changed_u)
+    );
+
+    let associated_u32 = "pub struct Iter<T>(pub T) where T: Iterator<Item = u32>;";
+    let associated_u64 = "pub struct Iter<T>(pub T) where T: Iterator<Item = u64>;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", associated_u32),
+        normalized_public_surface_str("test.rs", associated_u64)
+    );
+
+    let followed = "pub struct S<T>(pub T)\nwhere\n    T: Copy;\n\npub const NEXT: u32 = 1;";
+    let followed_surface = normalized_public_surface_str("test.rs", followed);
+    assert!(followed_surface.contains("where T: Copy;"));
+    assert!(followed_surface.contains("pub const NEXT: u32 = 1;"));
+
+    let plain_public_u32 = "pub struct Plain(pub u32);";
+    let plain_public_u64 = "pub struct Plain(pub u64);";
+    let plain_private_u32 = "pub struct Private(u32);";
+    let plain_private_u64 = "pub struct Private(u64);";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", plain_public_u32),
+        normalized_public_surface_str("test.rs", plain_public_u64)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", plain_private_u32),
+        normalized_public_surface_str("test.rs", plain_private_u64)
+    );
+
+    for visibility in ["pub(crate)", "pub(super)", "pub(in crate)"] {
+        let restricted_copy = format!("pub struct Restricted<T>({visibility} T) where T: Copy;");
+        let restricted_clone = format!("pub struct Restricted<T>({visibility} T) where T: Clone;");
+        assert_ne!(
+            normalized_public_surface_str("test.rs", &restricted_copy),
+            normalized_public_surface_str("test.rs", &restricted_clone)
+        );
+    }
 }
