@@ -394,7 +394,7 @@ fn is_likely_comparison_less_than(code_tokens: &str) -> bool {
     if t.is_empty() {
         return false;
     }
-    if t.ends_with(|c: char| c == '\'' || c == '"' || c == ')' || c == ']' || c == '}') {
+    if t.ends_with(['\'', '"', ')', ']', '}']) {
         return true;
     }
     if t.ends_with("true") || t.ends_with("false") {
@@ -457,6 +457,7 @@ struct CodeLexer {
     brace_depth: usize,
     pending_macro_bang: bool,
     macro_brace_stack: Vec<usize>,
+    const_brace_stack: Vec<usize>,
 }
 
 impl CodeLexer {
@@ -469,6 +470,7 @@ impl CodeLexer {
             brace_depth: 0,
             pending_macro_bang: false,
             macro_brace_stack: Vec::new(),
+            const_brace_stack: Vec::new(),
         }
     }
 
@@ -479,6 +481,7 @@ impl CodeLexer {
         self.brace_depth = 0;
         self.pending_macro_bang = false;
         self.macro_brace_stack.clear();
+        self.const_brace_stack.clear();
     }
 
     fn scan_line(&mut self, line: &str) -> ScannedLine {
@@ -723,10 +726,14 @@ impl CodeLexer {
                         }
                         '<' => {
                             self.pending_macro_bang = false;
-                            if self.paren_depth == 0
-                                && self.bracket_depth == 0
-                                && !is_likely_comparison_less_than(&code_tokens)
-                            {
+                            let in_const_expr = !self.const_brace_stack.is_empty();
+                            let is_comparison = if in_const_expr {
+                                let t = code_tokens.trim_end();
+                                !t.ends_with("::")
+                            } else {
+                                is_likely_comparison_less_than(&code_tokens)
+                            };
+                            if self.paren_depth == 0 && self.bracket_depth == 0 && !is_comparison {
                                 self.angle_depth += 1;
                             }
                             cur_code.push('<');
@@ -784,6 +791,9 @@ impl CodeLexer {
                             if is_macro_brace {
                                 self.macro_brace_stack.push(self.brace_depth);
                             } else {
+                                if self.angle_depth > 0 || !self.const_brace_stack.is_empty() {
+                                    self.const_brace_stack.push(self.brace_depth);
+                                }
                                 let is_top_level = self.paren_depth == 0
                                     && self.angle_depth == 0
                                     && self.bracket_depth == 0
@@ -823,23 +833,32 @@ impl CodeLexer {
                                 .is_some_and(|&d| d == self.brace_depth.saturating_sub(1));
                             if is_macro_close {
                                 self.macro_brace_stack.pop();
-                            } else if self.paren_depth == 0
-                                && self.angle_depth == 0
-                                && self.bracket_depth == 0
-                            {
-                                if self.brace_depth == 1 {
-                                    has_top_level_close_brace = true;
-                                    events.push(StructuralEvent {
-                                        seg_idx: segments.len(),
-                                        char_idx: cur_code.len(),
-                                        kind: StructuralEventKind::TopLevelCloseBrace,
-                                    });
-                                } else if self.brace_depth == 2 {
-                                    events.push(StructuralEvent {
-                                        seg_idx: segments.len(),
-                                        char_idx: cur_code.len(),
-                                        kind: StructuralEventKind::MethodBodyClose,
-                                    });
+                            } else {
+                                if self
+                                    .const_brace_stack
+                                    .last()
+                                    .is_some_and(|&d| d == self.brace_depth.saturating_sub(1))
+                                {
+                                    self.const_brace_stack.pop();
+                                }
+                                if self.paren_depth == 0
+                                    && self.angle_depth == 0
+                                    && self.bracket_depth == 0
+                                {
+                                    if self.brace_depth == 1 {
+                                        has_top_level_close_brace = true;
+                                        events.push(StructuralEvent {
+                                            seg_idx: segments.len(),
+                                            char_idx: cur_code.len(),
+                                            kind: StructuralEventKind::TopLevelCloseBrace,
+                                        });
+                                    } else if self.brace_depth == 2 {
+                                        events.push(StructuralEvent {
+                                            seg_idx: segments.len(),
+                                            char_idx: cur_code.len(),
+                                            kind: StructuralEventKind::MethodBodyClose,
+                                        });
+                                    }
                                 }
                             }
                             if self.brace_depth > 0 {
@@ -1220,6 +1239,73 @@ fn is_public_qualifiers_only(code_tokens: &str) -> bool {
         break;
     }
     cur.trim().is_empty()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TraitMemberKind {
+    Method,
+    AssociatedConst,
+    AssociatedType,
+    MacroInvocation,
+    Other,
+}
+
+fn classify_trait_member(code_tokens: &str) -> TraitMemberKind {
+    let mut cur = code_tokens.trim_start();
+    if let Some((_, rest)) = parse_public_item(cur) {
+        cur = rest.trim_start();
+    }
+
+    let mut is_const = false;
+    let mut is_async = false;
+    let mut is_unsafe = false;
+    let mut is_extern = false;
+
+    loop {
+        if let Some(after) = is_keyword_prefix(cur, "const") {
+            is_const = true;
+            cur = after;
+            continue;
+        }
+        if let Some(after) = is_keyword_prefix(cur, "async") {
+            is_async = true;
+            cur = after;
+            continue;
+        }
+        if let Some(after) = is_keyword_prefix(cur, "unsafe") {
+            is_unsafe = true;
+            cur = after;
+            continue;
+        }
+        if let Some(after) = is_keyword_prefix(cur, "extern") {
+            is_extern = true;
+            let mut rem = after;
+            if rem.starts_with("\"\"") {
+                rem = rem[2..].trim_start();
+            } else if rem.starts_with('"') {
+                if let Some(close) = rem[1..].find('"') {
+                    rem = rem[close + 2..].trim_start();
+                } else {
+                    rem = "";
+                }
+            }
+            cur = rem;
+            continue;
+        }
+        break;
+    }
+
+    if is_keyword_prefix(cur, "fn").is_some() {
+        TraitMemberKind::Method
+    } else if is_const && !is_async && !is_unsafe && !is_extern {
+        TraitMemberKind::AssociatedConst
+    } else if is_keyword_prefix(cur, "type").is_some() {
+        TraitMemberKind::AssociatedType
+    } else if cur.contains('!') {
+        TraitMemberKind::MacroInvocation
+    } else {
+        TraitMemberKind::Other
+    }
 }
 
 fn normalized_public_surface(path: &str) -> String {
@@ -1941,6 +2027,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                 let mut pending_trait_attrs = Vec::new();
                 let mut cur_member_text = String::new();
+                let mut cur_member_code = String::new();
                 let mut in_default_method_body = false;
                 let mut trait_body_closed = false;
 
@@ -1970,13 +2057,16 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             }
 
                             if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                                let chunk_text = if let Some(limit) = prev_pos(
+                                let (chunk_text, chunk_code) = if let Some(limit) = prev_pos(
                                     &current_scanned.segments,
                                     (event.seg_idx, event.char_idx),
                                 ) {
-                                    current_scanned.render_visible_range(cur_pos, Some(limit))
+                                    (
+                                        current_scanned.render_visible_range(cur_pos, Some(limit)),
+                                        current_scanned.code_tokens_range(cur_pos, Some(limit)),
+                                    )
                                 } else {
-                                    String::new()
+                                    (String::new(), String::new())
                                 };
                                 if !chunk_text.trim().is_empty() {
                                     if !cur_member_text.is_empty()
@@ -1984,8 +2074,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                         && !chunk_text.starts_with(' ')
                                     {
                                         cur_member_text.push(' ');
+                                        cur_member_code.push(' ');
                                     }
                                     cur_member_text.push_str(&chunk_text);
+                                    cur_member_code.push_str(&chunk_code);
                                 }
                                 let trimmed_text = normalize_ws(&cur_member_text);
                                 if !trimmed_text.is_empty() {
@@ -1995,6 +2087,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                     pending_trait_attrs.clear();
                                 }
                                 cur_member_text.clear();
+                                cur_member_code.clear();
                                 trait_body_closed = true;
                                 cur_pos = next_pos(
                                     &current_scanned.segments,
@@ -2007,15 +2100,23 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 cur_pos,
                                 Some((event.seg_idx, event.char_idx)),
                             );
+                            let chunk_code = current_scanned
+                                .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
                             if !chunk_text.trim().is_empty() {
                                 if !cur_member_text.is_empty()
                                     && !cur_member_text.ends_with(' ')
                                     && !chunk_text.starts_with(' ')
                                 {
                                     cur_member_text.push(' ');
+                                    cur_member_code.push(' ');
                                 }
                                 cur_member_text.push_str(&chunk_text);
+                                cur_member_code.push_str(&chunk_code);
                             }
+                            cur_pos = next_pos(
+                                &current_scanned.segments,
+                                (event.seg_idx, event.char_idx),
+                            );
 
                             if event.kind == StructuralEventKind::BaselineSemicolon {
                                 let trimmed_text = normalize_ws(&cur_member_text);
@@ -2026,37 +2127,38 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                     pending_trait_attrs.clear();
                                 }
                                 cur_member_text.clear();
-                                cur_pos = next_pos(
-                                    &current_scanned.segments,
-                                    (event.seg_idx, event.char_idx),
-                                );
+                                cur_member_code.clear();
                             } else if event.kind == StructuralEventKind::BaselineOpenBrace {
-                                let trimmed_text = normalize_ws(&cur_member_text);
-                                if !trimmed_text.is_empty() {
-                                    lines.append(&mut pending_trait_attrs);
-                                    lines.push(trimmed_text);
-                                } else {
-                                    pending_trait_attrs.clear();
+                                let is_method = classify_trait_member(&cur_member_code)
+                                    == TraitMemberKind::Method;
+                                if is_method {
+                                    let trimmed_text = normalize_ws(&cur_member_text);
+                                    if !trimmed_text.is_empty() {
+                                        lines.append(&mut pending_trait_attrs);
+                                        lines.push(trimmed_text);
+                                    } else {
+                                        pending_trait_attrs.clear();
+                                    }
+                                    cur_member_text.clear();
+                                    cur_member_code.clear();
+                                    in_default_method_body = true;
                                 }
-                                cur_member_text.clear();
-                                in_default_method_body = true;
-                                cur_pos = next_pos(
-                                    &current_scanned.segments,
-                                    (event.seg_idx, event.char_idx),
-                                );
                             }
                         }
                         if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
                             let remainder_text =
                                 current_scanned.render_visible_range(cur_pos, None);
+                            let remainder_code = current_scanned.code_tokens_range(cur_pos, None);
                             if !remainder_text.trim().is_empty() {
                                 if !cur_member_text.is_empty()
                                     && !cur_member_text.ends_with(' ')
                                     && !remainder_text.starts_with(' ')
                                 {
                                     cur_member_text.push(' ');
+                                    cur_member_code.push(' ');
                                 }
                                 cur_member_text.push_str(&remainder_text);
+                                cur_member_code.push_str(&remainder_code);
                             }
                         }
                     }
@@ -2101,12 +2203,15 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             }
 
                             if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                                let chunk_text = if let Some(limit) =
+                                let (chunk_text, chunk_code) = if let Some(limit) =
                                     prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
                                 {
-                                    sc.render_visible_range(cur_pos, Some(limit))
+                                    (
+                                        sc.render_visible_range(cur_pos, Some(limit)),
+                                        sc.code_tokens_range(cur_pos, Some(limit)),
+                                    )
                                 } else {
-                                    String::new()
+                                    (String::new(), String::new())
                                 };
                                 if !chunk_text.trim().is_empty() {
                                     if !cur_member_text.is_empty()
@@ -2114,8 +2219,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                         && !chunk_text.starts_with(' ')
                                     {
                                         cur_member_text.push(' ');
+                                        cur_member_code.push(' ');
                                     }
                                     cur_member_text.push_str(&chunk_text);
+                                    cur_member_code.push_str(&chunk_code);
                                 }
                                 let trimmed_text = normalize_ws(&cur_member_text);
                                 if !trimmed_text.is_empty() {
@@ -2125,6 +2232,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                     pending_trait_attrs.clear();
                                 }
                                 cur_member_text.clear();
+                                cur_member_code.clear();
                                 trait_body_closed = true;
                                 cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
                                 break;
@@ -2134,15 +2242,20 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 cur_pos,
                                 Some((event.seg_idx, event.char_idx)),
                             );
+                            let chunk_code = sc
+                                .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
                             if !chunk_text.trim().is_empty() {
                                 if !cur_member_text.is_empty()
                                     && !cur_member_text.ends_with(' ')
                                     && !chunk_text.starts_with(' ')
                                 {
                                     cur_member_text.push(' ');
+                                    cur_member_code.push(' ');
                                 }
                                 cur_member_text.push_str(&chunk_text);
+                                cur_member_code.push_str(&chunk_code);
                             }
+                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
 
                             if event.kind == StructuralEventKind::BaselineSemicolon {
                                 let trimmed_text = normalize_ws(&cur_member_text);
@@ -2153,30 +2266,37 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                     pending_trait_attrs.clear();
                                 }
                                 cur_member_text.clear();
-                                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                                cur_member_code.clear();
                             } else if event.kind == StructuralEventKind::BaselineOpenBrace {
-                                let trimmed_text = normalize_ws(&cur_member_text);
-                                if !trimmed_text.is_empty() {
-                                    lines.append(&mut pending_trait_attrs);
-                                    lines.push(trimmed_text);
-                                } else {
-                                    pending_trait_attrs.clear();
+                                let is_method = classify_trait_member(&cur_member_code)
+                                    == TraitMemberKind::Method;
+                                if is_method {
+                                    let trimmed_text = normalize_ws(&cur_member_text);
+                                    if !trimmed_text.is_empty() {
+                                        lines.append(&mut pending_trait_attrs);
+                                        lines.push(trimmed_text);
+                                    } else {
+                                        pending_trait_attrs.clear();
+                                    }
+                                    cur_member_text.clear();
+                                    cur_member_code.clear();
+                                    in_default_method_body = true;
                                 }
-                                cur_member_text.clear();
-                                in_default_method_body = true;
-                                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
                             }
                         }
                         if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
                             let remainder_text = sc.render_visible_range(cur_pos, None);
+                            let remainder_code = sc.code_tokens_range(cur_pos, None);
                             if !remainder_text.trim().is_empty() {
                                 if !cur_member_text.is_empty()
                                     && !cur_member_text.ends_with(' ')
                                     && !remainder_text.starts_with(' ')
                                 {
                                     cur_member_text.push(' ');
+                                    cur_member_code.push(' ');
                                 }
                                 cur_member_text.push_str(&remainder_text);
+                                cur_member_code.push_str(&remainder_code);
                             }
                         }
                         continue;
@@ -2200,26 +2320,33 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     let mut cur_pos = Some((0, 0));
                     for event in &sc.events {
                         if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                            let chunk_text = if let Some(limit) =
+                            let (chunk_text, chunk_code) = if let Some(limit) =
                                 prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
                             {
-                                sc.render_visible_range(cur_pos, Some(limit))
+                                (
+                                    sc.render_visible_range(cur_pos, Some(limit)),
+                                    sc.code_tokens_range(cur_pos, Some(limit)),
+                                )
                             } else {
-                                String::new()
+                                (String::new(), String::new())
                             };
                             if was_escaped {
                                 cur_member_text.push_str(&chunk_text);
+                                cur_member_code.push_str(&chunk_code);
                             } else if continues_literal {
                                 cur_member_text.push('\n');
                                 cur_member_text.push_str(&chunk_text);
+                                cur_member_code.push_str(&chunk_code);
                             } else if !chunk_text.trim().is_empty() {
                                 if !cur_member_text.is_empty()
                                     && !cur_member_text.ends_with(' ')
                                     && !chunk_text.starts_with(' ')
                                 {
                                     cur_member_text.push(' ');
+                                    cur_member_code.push(' ');
                                 }
                                 cur_member_text.push_str(&chunk_text);
+                                cur_member_code.push_str(&chunk_code);
                             }
                             let trimmed_text = normalize_ws(&cur_member_text);
                             if !trimmed_text.is_empty() {
@@ -2229,6 +2356,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 pending_trait_attrs.clear();
                             }
                             cur_member_text.clear();
+                            cur_member_code.clear();
                             trait_body_closed = true;
                             cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
                             break;
@@ -2236,20 +2364,27 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                         let chunk_text =
                             sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                        let chunk_code =
+                            sc.code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
                         if was_escaped {
                             cur_member_text.push_str(&chunk_text);
+                            cur_member_code.push_str(&chunk_code);
                         } else if continues_literal {
                             cur_member_text.push('\n');
                             cur_member_text.push_str(&chunk_text);
+                            cur_member_code.push_str(&chunk_code);
                         } else if !chunk_text.trim().is_empty() {
                             if !cur_member_text.is_empty()
                                 && !cur_member_text.ends_with(' ')
                                 && !chunk_text.starts_with(' ')
                             {
                                 cur_member_text.push(' ');
+                                cur_member_code.push(' ');
                             }
                             cur_member_text.push_str(&chunk_text);
+                            cur_member_code.push_str(&chunk_code);
                         }
+                        cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
 
                         if event.kind == StructuralEventKind::BaselineSemicolon {
                             let trimmed_text = normalize_ws(&cur_member_text);
@@ -2260,36 +2395,45 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 pending_trait_attrs.clear();
                             }
                             cur_member_text.clear();
-                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                            cur_member_code.clear();
                         } else if event.kind == StructuralEventKind::BaselineOpenBrace {
-                            let trimmed_text = normalize_ws(&cur_member_text);
-                            if !trimmed_text.is_empty() {
-                                lines.append(&mut pending_trait_attrs);
-                                lines.push(trimmed_text);
-                            } else {
-                                pending_trait_attrs.clear();
+                            let is_method =
+                                classify_trait_member(&cur_member_code) == TraitMemberKind::Method;
+                            if is_method {
+                                let trimmed_text = normalize_ws(&cur_member_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_trait_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_trait_attrs.clear();
+                                }
+                                cur_member_text.clear();
+                                cur_member_code.clear();
+                                in_default_method_body = true;
                             }
-                            cur_member_text.clear();
-                            in_default_method_body = true;
-                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
                         }
                     }
 
                     if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
                         let remainder_text = sc.render_visible_range(cur_pos, None);
+                        let remainder_code = sc.code_tokens_range(cur_pos, None);
                         if was_escaped {
                             cur_member_text.push_str(&remainder_text);
+                            cur_member_code.push_str(&remainder_code);
                         } else if continues_literal {
                             cur_member_text.push('\n');
                             cur_member_text.push_str(&remainder_text);
+                            cur_member_code.push_str(&remainder_code);
                         } else if !remainder_text.trim().is_empty() {
                             if !cur_member_text.is_empty()
                                 && !cur_member_text.ends_with(' ')
                                 && !remainder_text.starts_with(' ')
                             {
                                 cur_member_text.push(' ');
+                                cur_member_code.push(' ');
                             }
                             cur_member_text.push_str(&remainder_text);
+                            cur_member_code.push_str(&remainder_code);
                         }
                     }
                 }
@@ -4980,6 +5124,8 @@ fn public_api_guard_handles_wrapped_struct_fields_p2_1() {
     // Regression A: Wrapped type
     let struct_wrapped_32 = "pub struct S {\n    pub value:\n        Vec<u32>,\n}";
     let struct_wrapped_64 = "pub struct S {\n    pub value:\n        Vec<u64>,\n}";
+    assert!(struct_wrapped_32.contains("pub value:\n"));
+    assert!(struct_wrapped_32.as_bytes().contains(&b'\n'));
     let surf_w32 = normalized_public_surface_str("test.rs", struct_wrapped_32);
     let surf_w64 = normalized_public_surface_str("test.rs", struct_wrapped_64);
     assert_ne!(
@@ -5000,6 +5146,8 @@ fn public_api_guard_handles_wrapped_struct_fields_p2_1() {
         "pub struct S {\n    private:\n        Vec<u32>,\n    pub visible: bool,\n}";
     let struct_priv_w64 =
         "pub struct S {\n    private:\n        Vec<u64>,\n    pub visible: bool,\n}";
+    assert!(struct_priv_w32.contains("private:\n"));
+    assert!(struct_priv_w32.as_bytes().contains(&b'\n'));
     assert_eq!(
         normalized_public_surface_str("test.rs", struct_priv_w32),
         normalized_public_surface_str("test.rs", struct_priv_w64),
@@ -5029,6 +5177,8 @@ fn public_api_guard_handles_wrapped_struct_fields_p2_1() {
         "pub struct S {\n    pub value:\n        Result<Vec<u32>, Option<[u8; 3]>>,\n}";
     let struct_nested_64 =
         "pub struct S {\n    pub value:\n        Result<Vec<u64>, Option<[u8; 3]>>,\n}";
+    assert!(struct_nested_32.contains("pub value:\n"));
+    assert!(struct_nested_32.as_bytes().contains(&b'\n'));
     assert_ne!(
         normalized_public_surface_str("test.rs", struct_nested_32),
         normalized_public_surface_str("test.rs", struct_nested_64),
@@ -5038,6 +5188,8 @@ fn public_api_guard_handles_wrapped_struct_fields_p2_1() {
     // Regression F: Restricted visibility
     let struct_restr_32 = "pub struct S {\n    pub(crate) value:\n        Vec<u32>,\n}";
     let struct_restr_64 = "pub struct S {\n    pub(crate) value:\n        Vec<u64>,\n}";
+    assert!(struct_restr_32.contains("pub(crate) value:\n"));
+    assert!(struct_restr_32.as_bytes().contains(&b'\n'));
     assert_ne!(
         normalized_public_surface_str("test.rs", struct_restr_32),
         normalized_public_surface_str("test.rs", struct_restr_64),
@@ -5050,6 +5202,8 @@ fn public_api_guard_handles_inline_default_trait_bodies_p2_2() {
     // Regression A: Inline default method body isolation
     let trait_inline_a = "pub trait T {\n    fn f() -> u32 { private_a() }\n}";
     let trait_inline_b = "pub trait T {\n    fn f() -> u32 { private_b() }\n}";
+    assert!(trait_inline_a.contains("{\n    fn f() -> u32 { private_a() }\n}"));
+    assert!(trait_inline_a.as_bytes().contains(&b'\n'));
     assert_eq!(
         normalized_public_surface_str("test.rs", trait_inline_a),
         normalized_public_surface_str("test.rs", trait_inline_b),
@@ -5077,6 +5231,8 @@ fn public_api_guard_handles_inline_default_trait_bodies_p2_2() {
     let trait_multi_def_32 = "pub trait T {\n    fn f(\n        &self,\n        x: Vec<u32>,\n    ) -> u32\n    {\n        private_a()\n    }\n}";
     let trait_multi_def_64 = "pub trait T {\n    fn f(\n        &self,\n        x: Vec<u64>,\n    ) -> u32\n    {\n        private_a()\n    }\n}";
     let trait_multi_def_diff_body = "pub trait T {\n    fn f(\n        &self,\n        x: Vec<u32>,\n    ) -> u32\n    {\n        private_b()\n    }\n}";
+    assert!(trait_multi_def_32.contains("fn f(\n"));
+    assert!(trait_multi_def_32.as_bytes().contains(&b'\n'));
     assert_ne!(
         normalized_public_surface_str("test.rs", trait_multi_def_32),
         normalized_public_surface_str("test.rs", trait_multi_def_64),
@@ -5091,6 +5247,8 @@ fn public_api_guard_handles_inline_default_trait_bodies_p2_2() {
     // Regression E: Default body containing nested braces
     let trait_nested_body_a = "pub trait T {\n    fn f() -> u32 {\n        if private_cond() {\n            private_a()\n        } else {\n            private_b()\n        }\n    }\n}";
     let trait_nested_body_b = "pub trait T {\n    fn f() -> u32 {\n        if private_cond() {\n            private_c()\n        } else {\n            private_d()\n        }\n    }\n}";
+    assert!(trait_nested_body_a.contains("if private_cond() {\n"));
+    assert!(trait_nested_body_a.as_bytes().contains(&b'\n'));
     assert_eq!(
         normalized_public_surface_str("test.rs", trait_nested_body_a),
         normalized_public_surface_str("test.rs", trait_nested_body_b),
@@ -5102,6 +5260,8 @@ fn public_api_guard_handles_inline_default_trait_bodies_p2_2() {
     let trait_macro_64 = "pub trait T {\n    fn f() -> type_macro! { u64 } { private_a() }\n}";
     let trait_macro_diff_body =
         "pub trait T {\n    fn f() -> type_macro! { u32 } { private_b() }\n}";
+    assert!(trait_macro_32.contains("type_macro! { u32 } { private_a() }\n"));
+    assert!(trait_macro_32.as_bytes().contains(&b'\n'));
     assert_ne!(
         normalized_public_surface_str("test.rs", trait_macro_32),
         normalized_public_surface_str("test.rs", trait_macro_64),
@@ -5120,6 +5280,8 @@ fn public_api_guard_handles_digit_suffixed_generic_identifiers_p2_3() {
     let fn_vec2_1 = "pub fn f() -> Vec2<{1}> {\n    private_a()\n}";
     let fn_vec2_2 = "pub fn f() -> Vec2<{2}> {\n    private_a()\n}";
     let fn_vec2_diff_body = "pub fn f() -> Vec2<{1}> {\n    private_b()\n}";
+    assert!(fn_vec2_1.contains("Vec2<{1}> {\n"));
+    assert!(fn_vec2_1.as_bytes().contains(&b'\n'));
     assert_ne!(
         normalized_public_surface_str("test.rs", fn_vec2_1),
         normalized_public_surface_str("test.rs", fn_vec2_2),
@@ -5179,5 +5341,148 @@ fn public_api_guard_handles_digit_suffixed_generic_identifiers_p2_3() {
     assert_eq!(
         normalized_public_surface_str("test.rs", fn_const_expr_cmp_1),
         normalized_public_surface_str("test.rs", fn_const_expr_cmp_diff_body)
+    );
+}
+
+#[test]
+fn public_api_guard_handles_trait_associated_const_braces_blocker_1() {
+    // Regression A: Braced associated const default mutation { 1 } vs { 2 }
+    let trait_const_1 = "pub trait T {\n    const N: usize = { 1 };\n}";
+    let trait_const_2 = "pub trait T {\n    const N: usize = { 2 };\n}";
+    assert!(trait_const_1.contains("const N: usize = { 1 };"));
+    assert!(trait_const_1.as_bytes().contains(&b'\n'));
+    let surf_c1 = normalized_public_surface_str("test.rs", trait_const_1);
+    let surf_c2 = normalized_public_surface_str("test.rs", trait_const_2);
+    assert_ne!(
+        surf_c1, surf_c2,
+        "braced associated const default mutation {{ 1 }} -> {{ 2 }} must alter public surface"
+    );
+
+    // Regression B: Formatting-only change
+    let trait_const_reflow = "pub trait T {\n    const N: usize = {\n        1\n    };\n}";
+    assert!(trait_const_reflow.contains("{\n        1\n    };"));
+    assert!(trait_const_reflow.as_bytes().contains(&b'\n'));
+    let surf_reflow = normalized_public_surface_str("test.rs", trait_const_reflow);
+    assert_eq!(
+        surf_c1, surf_reflow,
+        "formatting-only reflow in associated const must match surface"
+    );
+
+    // Regression C: Nested braced expression
+    let trait_nested_const_1 =
+        "pub trait T {\n    const N: usize = {\n        if true { 1 } else { 2 }\n    };\n}";
+    let trait_nested_const_3 =
+        "pub trait T {\n    const N: usize = {\n        if true { 3 } else { 2 }\n    };\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", trait_nested_const_1),
+        normalized_public_surface_str("test.rs", trait_nested_const_3),
+        "nested braced expression in associated const must alter surface on value mutation"
+    );
+
+    // Regression D: Default method remains isolated
+    let trait_method_a = "pub trait T {\n    fn f() -> u32 { private_a() }\n}";
+    let trait_method_b = "pub trait T {\n    fn f() -> u32 { private_b() }\n}";
+    let trait_method_64 = "pub trait T {\n    fn f() -> u64 { private_a() }\n}";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", trait_method_a),
+        normalized_public_surface_str("test.rs", trait_method_b),
+        "default method private implementation must remain isolated"
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", trait_method_a),
+        normalized_public_surface_str("test.rs", trait_method_64),
+        "default method signature change must alter surface"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_const_generic_identifier_comparisons_blocker_2() {
+    // Regression A: Identifier comparison inside const generic
+    let fn_flag_cmp_1 = "pub fn f() -> Flag<{ A < B }> {\n    private_a()\n}";
+    let fn_flag_cmp_2 = "pub fn f() -> Flag<{ A < C }> {\n    private_a()\n}";
+    let fn_flag_cmp_diff_body = "pub fn f() -> Flag<{ A < B }> {\n    private_b()\n}";
+    assert!(fn_flag_cmp_1.contains("Flag<{ A < B }>"));
+    assert!(fn_flag_cmp_1.as_bytes().contains(&b'\n'));
+
+    let surf_flag_1 = normalized_public_surface_str("test.rs", fn_flag_cmp_1);
+    let surf_flag_2 = normalized_public_surface_str("test.rs", fn_flag_cmp_2);
+    let surf_flag_diff_body = normalized_public_surface_str("test.rs", fn_flag_cmp_diff_body);
+
+    assert_ne!(
+        surf_flag_1, surf_flag_2,
+        "operand mutation in Flag<{{ A < B }}> must alter surface"
+    );
+    assert_eq!(
+        surf_flag_1, surf_flag_diff_body,
+        "private body change with Flag<{{ A < B }}> must NOT alter surface"
+    );
+    assert!(
+        !surf_flag_1.contains("private_a"),
+        "private body must not leak into surface: {surf_flag_1}"
+    );
+
+    // Regression B: Numeric comparison inside const generic
+    let fn_flag_num_1 = "pub fn f() -> Flag<{ 1 < 2 }> {\n    private_a()\n}";
+    let fn_flag_num_2 = "pub fn f() -> Flag<{ 1 < 3 }> {\n    private_a()\n}";
+    let fn_flag_num_diff_body = "pub fn f() -> Flag<{ 1 < 2 }> {\n    private_b()\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", fn_flag_num_1),
+        normalized_public_surface_str("test.rs", fn_flag_num_2)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", fn_flag_num_1),
+        normalized_public_surface_str("test.rs", fn_flag_num_diff_body)
+    );
+
+    // Regression C: Nested generic inside const expression (turbofish)
+    let fn_turbofish_1 =
+        "pub fn f() -> Flag<{ core::mem::size_of::<u32>() < 8 }> {\n    private_a()\n}";
+    let fn_turbofish_2 =
+        "pub fn f() -> Flag<{ core::mem::size_of::<u64>() < 8 }> {\n    private_a()\n}";
+    let fn_turbofish_diff_body =
+        "pub fn f() -> Flag<{ core::mem::size_of::<u32>() < 8 }> {\n    private_b()\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", fn_turbofish_1),
+        normalized_public_surface_str("test.rs", fn_turbofish_2)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", fn_turbofish_1),
+        normalized_public_surface_str("test.rs", fn_turbofish_diff_body)
+    );
+    assert!(!normalized_public_surface_str("test.rs", fn_turbofish_1).contains("private_a"));
+
+    // Regression D: Existing digit-suffixed generic
+    let fn_vec2_1 = "pub fn f() -> Vec2<{1}> {\n    private_a()\n}";
+    let fn_vec2_2 = "pub fn f() -> Vec2<{2}> {\n    private_a()\n}";
+    let fn_vec2_diff_body = "pub fn f() -> Vec2<{1}> {\n    private_b()\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", fn_vec2_1),
+        normalized_public_surface_str("test.rs", fn_vec2_2)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", fn_vec2_1),
+        normalized_public_surface_str("test.rs", fn_vec2_diff_body)
+    );
+
+    // Regression E: Existing top-level const comparison
+    let const_less_1 = "pub const LESS: bool = A < B;\npub fn next() {}";
+    let const_less_2 = "pub const LESS: bool = A < C;\npub fn next() {}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", const_less_1),
+        normalized_public_surface_str("test.rs", const_less_2)
+    );
+
+    // Regression F: Existing complex const generic
+    let fn_complex_1 = "pub fn f() -> Foo<{ if 1 < 2 { 32 } else { 64 } }> {\n    private_a()\n}";
+    let fn_complex_2 = "pub fn f() -> Foo<{ if 1 < 2 { 32 } else { 128 } }> {\n    private_a()\n}";
+    let fn_complex_diff_body =
+        "pub fn f() -> Foo<{ if 1 < 2 { 32 } else { 64 } }> {\n    private_b()\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", fn_complex_1),
+        normalized_public_surface_str("test.rs", fn_complex_2)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", fn_complex_1),
+        normalized_public_surface_str("test.rs", fn_complex_diff_body)
     );
 }
