@@ -183,7 +183,6 @@ struct ScannedLine {
     has_top_level_comma: bool,
     has_top_level_open_paren: bool,
     has_top_level_open_brace: bool,
-    has_top_level_close_brace: bool,
     first_top_level_open_brace_seg: Option<(usize, usize)>,
     ends_in_string_literal: bool,
 }
@@ -195,16 +194,6 @@ impl ScannedLine {
 
     fn text_up_to_function_body_open_brace(&self) -> String {
         self.render_visible_range(None, self.first_top_level_open_brace_seg)
-    }
-
-    fn render_visible_without_enum_close_brace(&self) -> String {
-        let mut cloned = self.clone();
-        if let Some(VisibleSegment::Code(last_code)) = cloned.segments.last_mut() {
-            if let Some(pos) = last_code.rfind('}') {
-                last_code.truncate(pos);
-            }
-        }
-        cloned.render_visible()
     }
 
     fn render_visible_range(
@@ -493,7 +482,6 @@ impl CodeLexer {
         let mut has_top_level_comma = false;
         let mut has_top_level_open_paren = false;
         let mut has_top_level_open_brace = false;
-        let mut has_top_level_close_brace = false;
         let mut first_top_level_open_brace_seg = None;
 
         let chars: Vec<char> = line.chars().collect();
@@ -846,7 +834,6 @@ impl CodeLexer {
                                     && self.bracket_depth == 0
                                 {
                                     if self.brace_depth == 1 {
-                                        has_top_level_close_brace = true;
                                         events.push(StructuralEvent {
                                             seg_idx: segments.len(),
                                             char_idx: cur_code.len(),
@@ -1041,7 +1028,6 @@ impl CodeLexer {
             has_top_level_comma,
             has_top_level_open_paren,
             has_top_level_open_brace,
-            has_top_level_close_brace,
             first_top_level_open_brace_seg,
             ends_in_string_literal: self.state.is_in_string_literal(),
         }
@@ -1308,6 +1294,201 @@ fn classify_trait_member(code_tokens: &str) -> TraitMemberKind {
     }
 }
 
+fn is_incomplete_public_prefix(code_tokens: &str) -> bool {
+    let t = code_tokens.trim_start();
+    if let Some(after_pub) = is_keyword_prefix(t, "pub") {
+        if after_pub.starts_with('(') {
+            let mut depth = 0;
+            for c in after_pub.chars() {
+                if c == '(' {
+                    depth += 1;
+                } else if c == ')' {
+                    depth -= 1;
+                    if depth == 0 {
+                        return false;
+                    }
+                }
+            }
+            depth > 0
+        } else {
+            after_pub.is_empty()
+        }
+    } else {
+        false
+    }
+}
+
+fn append_code_chunk(
+    dest_text: &mut String,
+    dest_code: &mut String,
+    chunk_text: &str,
+    chunk_code: &str,
+    was_escaped: bool,
+    continues_literal: bool,
+) {
+    if was_escaped {
+        dest_text.push_str(chunk_text);
+        dest_code.push_str(chunk_code);
+    } else if continues_literal {
+        dest_text.push('\n');
+        dest_text.push_str(chunk_text);
+        dest_code.push_str(chunk_code);
+    } else if !chunk_text.trim().is_empty() {
+        let needs_space = !dest_text.is_empty()
+            && !dest_text.ends_with(' ')
+            && !chunk_text.starts_with(' ')
+            && !dest_text
+                .chars()
+                .last()
+                .is_some_and(is_attached_opening_delimiter)
+            && !chunk_text
+                .chars()
+                .next()
+                .is_some_and(is_attached_punctuation_prefix);
+        if needs_space {
+            dest_text.push(' ');
+            dest_code.push(' ');
+        }
+        dest_text.push_str(chunk_text);
+        dest_code.push_str(chunk_code);
+    }
+}
+
+fn normalize_variant(text: &str) -> String {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let mut s = trimmed.to_string();
+    if !s.ends_with(',') {
+        s.push(',');
+    }
+    let mut out = String::with_capacity(s.len());
+    let mut in_str = false;
+    let mut in_char = false;
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        if in_str {
+            out.push(c);
+            if c == '\\' && i + 1 < chars.len() {
+                out.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == '"' {
+                in_str = false;
+            }
+            i += 1;
+            continue;
+        }
+        if in_char {
+            out.push(c);
+            if c == '\\' && i + 1 < chars.len() {
+                out.push(chars[i + 1]);
+                i += 2;
+                continue;
+            }
+            if c == '\'' {
+                in_char = false;
+            }
+            i += 1;
+            continue;
+        }
+        if c == '"' {
+            in_str = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == '\'' {
+            in_char = true;
+            out.push(c);
+            i += 1;
+            continue;
+        }
+
+        if c == ',' {
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && (chars[j] == ')' || chars[j] == '}') {
+                if chars[j] == '}' && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+                out.push(chars[j]);
+                i = j + 1;
+                continue;
+            }
+        }
+        if c == '(' {
+            out.push('(');
+            i += 1;
+            while i < chars.len() && chars[i].is_whitespace() {
+                i += 1;
+            }
+            continue;
+        }
+        if c == ')' {
+            if out.ends_with(' ') && !out.ends_with("()") {
+                out.pop();
+            }
+            out.push(')');
+            i += 1;
+            continue;
+        }
+        if c == '{' {
+            if !out.is_empty() && !out.ends_with(' ') {
+                out.push(' ');
+            }
+            out.push('{');
+            let mut j = i + 1;
+            while j < chars.len() && chars[j].is_whitespace() {
+                j += 1;
+            }
+            if j < chars.len() && chars[j] != '}' {
+                out.push(' ');
+            }
+            i = j;
+            continue;
+        }
+        if c == '}' {
+            if !out.ends_with(' ') && !out.ends_with('{') {
+                out.push(' ');
+            }
+            out.push('}');
+            i += 1;
+            continue;
+        }
+        if c.is_whitespace() {
+            if !out.is_empty()
+                && !out.ends_with(' ')
+                && !out
+                    .chars()
+                    .last()
+                    .is_some_and(is_attached_opening_delimiter)
+            {
+                let mut j = i + 1;
+                while j < chars.len() && chars[j].is_whitespace() {
+                    j += 1;
+                }
+                if j < chars.len() && !is_attached_punctuation_prefix(chars[j]) {
+                    out.push(' ');
+                }
+                i = j;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+    out
+}
+
 fn normalized_public_surface(path: &str) -> String {
     let src = fs::read_to_string(path).unwrap_or_else(|err| panic!("read {path}: {err}"));
     normalized_public_surface_str(path, &src)
@@ -1320,11 +1501,7 @@ fn capture_attribute(
     mut scanned: ScannedLine,
 ) -> String {
     let mut attr_text = scanned.render_visible();
-    let mut is_done = lexer.bracket_depth == 0
-        && scanned.segments.iter().any(|s| match s {
-            VisibleSegment::Code(c) => c.contains(']'),
-            _ => false,
-        });
+    let mut is_done = lexer.bracket_depth == 0 && lexer.state == LexState::Normal;
     while !is_done && *idx + 1 < src_lines.len() {
         *idx += 1;
         let next_line = src_lines[*idx];
@@ -1373,12 +1550,51 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             continue;
         }
 
-        if is_public_code(&scanned.code_tokens) {
+        if is_public_code(&scanned.code_tokens) || is_incomplete_public_prefix(&scanned.code_tokens)
+        {
             lines.append(&mut pending_attrs);
 
             let mut current_scanned = scanned;
             let mut prefix_text = current_scanned.render_visible();
             let mut combined_code_tokens = current_scanned.code_tokens.clone();
+
+            while is_incomplete_public_prefix(&combined_code_tokens) && idx + 1 < src_lines.len() {
+                idx += 1;
+                let next_line = src_lines[idx];
+                if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
+                    continue;
+                }
+                let continues_literal = item_lexer.state.is_in_string_literal();
+                let sc = item_lexer.scan_line(next_line);
+                let rendered = sc.render_visible();
+                if continues_literal {
+                    prefix_text.push('\n');
+                    prefix_text.push_str(&rendered);
+                } else {
+                    let trimmed_rendered = rendered.trim();
+                    if trimmed_rendered.is_empty() && !sc.ends_in_string_literal {
+                        continue;
+                    }
+                    if !prefix_text.ends_with(' ')
+                        && !prefix_text.ends_with('(')
+                        && !trimmed_rendered.starts_with(')')
+                    {
+                        prefix_text.push(' ');
+                    }
+                    prefix_text.push_str(trimmed_rendered);
+                }
+                let trimmed_code = sc.code_tokens.trim();
+                if !trimmed_code.is_empty() {
+                    if !combined_code_tokens.ends_with(' ')
+                        && !combined_code_tokens.ends_with('(')
+                        && !trimmed_code.starts_with(')')
+                    {
+                        combined_code_tokens.push(' ');
+                    }
+                    combined_code_tokens.push_str(trimmed_code);
+                }
+                current_scanned = sc;
+            }
 
             while is_public_qualifiers_only(&combined_code_tokens) && idx + 1 < src_lines.len() {
                 idx += 1;
@@ -1464,7 +1680,6 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             if is_public_enum(&combined_code_tokens) {
                 let mut enum_decl = prefix_text;
                 let mut body_open = current_scanned.has_top_level_open_brace;
-                let mut body_closed = body_open && current_scanned.has_top_level_close_brace;
 
                 while !body_open && idx + 1 < src_lines.len() {
                     idx += 1;
@@ -1478,68 +1693,233 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     let rendered = sc.render_visible();
                     if was_escaped {
                         enum_decl.push_str(&rendered);
-                        body_open = sc.has_top_level_open_brace;
-                        body_closed = body_open && sc.has_top_level_close_brace;
-                        continue;
-                    }
-                    if continues_literal {
+                    } else if continues_literal {
                         enum_decl.push('\n');
                         enum_decl.push_str(&rendered);
-                        body_open = sc.has_top_level_open_brace;
-                        body_closed = body_open && sc.has_top_level_close_brace;
-                        continue;
-                    }
-                    if rendered.trim().is_empty() {
-                        continue;
-                    }
-                    if !enum_decl.ends_with(' ') && !rendered.starts_with(' ') {
-                        enum_decl.push(' ');
-                    }
-                    enum_decl.push_str(&rendered);
-                    body_open = sc.has_top_level_open_brace;
-                    body_closed = body_open && sc.has_top_level_close_brace;
-                }
-
-                if body_closed {
-                    // Single-line enum: pub enum State { N, F, T, S }
-                    lines.push(enum_decl);
-                    if item_lexer.state == LexState::Normal {
-                        item_lexer.reset_top_level_depths();
-                    }
-                    file_lexer = item_lexer;
-                    idx += 1;
-                    continue;
-                }
-
-                lines.push(enum_decl);
-
-                while body_open && idx + 1 < src_lines.len() {
-                    idx += 1;
-                    let item_line = src_lines[idx];
-                    if item_line.trim().is_empty() && item_lexer.state == LexState::Normal {
-                        continue;
-                    }
-                    let sc = item_lexer.scan_line(item_line);
-
-                    let rendered = sc.render_visible();
-                    if rendered.trim().is_empty() && !sc.ends_in_string_literal {
-                        continue;
-                    }
-                    if is_outer_attribute_start(&sc.code_tokens) {
-                        let attr_text =
-                            capture_attribute(&src_lines, &mut idx, &mut item_lexer, sc);
-                        lines.push(attr_text);
-                        continue;
-                    }
-
-                    if sc.has_top_level_close_brace {
-                        let without_close_brace = sc.render_visible_without_enum_close_brace();
-                        if !without_close_brace.trim().is_empty() {
-                            lines.push(without_close_brace);
-                        }
-                        break;
                     } else {
-                        lines.push(rendered);
+                        if !rendered.trim().is_empty() {
+                            if !enum_decl.ends_with(' ') && !rendered.starts_with(' ') {
+                                enum_decl.push(' ');
+                            }
+                            enum_decl.push_str(&rendered);
+                        }
+                    }
+                    body_open = sc.has_top_level_open_brace;
+                    current_scanned = sc;
+                }
+
+                let header = if current_scanned.has_top_level_open_brace {
+                    let up_to_brace = current_scanned.text_up_to_function_body_open_brace();
+                    let rendered_last = current_scanned.render_visible();
+                    if enum_decl.ends_with(&rendered_last) {
+                        let prefix_head = &enum_decl[..enum_decl.len() - rendered_last.len()];
+                        format!("{prefix_head}{up_to_brace}")
+                    } else {
+                        up_to_brace
+                    }
+                } else {
+                    enum_decl
+                };
+                lines.push(header);
+
+                let mut pending_variant_attrs = Vec::new();
+                let mut cur_variant_text = String::new();
+                let mut cur_variant_code = String::new();
+                let mut enum_body_closed = false;
+
+                // Process remainder of opening line (if any)
+                if let Some(open_brace_pos) = current_scanned.first_top_level_open_brace_seg {
+                    if let Some(start_pos) = next_pos(&current_scanned.segments, open_brace_pos) {
+                        let mut cur_pos = Some(start_pos);
+                        for event in &current_scanned.events {
+                            if event.kind == StructuralEventKind::TopLevelOpenBrace {
+                                continue;
+                            }
+                            if event.seg_idx < start_pos.0
+                                || (event.seg_idx == start_pos.0 && event.char_idx < start_pos.1)
+                            {
+                                continue;
+                            }
+
+                            if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                                let (chunk_text, chunk_code) = if let Some(limit) = prev_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                ) {
+                                    (
+                                        current_scanned.render_visible_range(cur_pos, Some(limit)),
+                                        current_scanned.code_tokens_range(cur_pos, Some(limit)),
+                                    )
+                                } else {
+                                    (String::new(), String::new())
+                                };
+                                append_code_chunk(
+                                    &mut cur_variant_text,
+                                    &mut cur_variant_code,
+                                    &chunk_text,
+                                    &chunk_code,
+                                    false,
+                                    false,
+                                );
+                                let trimmed_text = normalize_variant(&cur_variant_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_variant_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_variant_attrs.clear();
+                                }
+                                cur_variant_text.clear();
+                                cur_variant_code.clear();
+                                enum_body_closed = true;
+                                cur_pos = next_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                );
+                                break;
+                            }
+
+                            let chunk_text = current_scanned.render_visible_range(
+                                cur_pos,
+                                Some((event.seg_idx, event.char_idx)),
+                            );
+                            let chunk_code = current_scanned
+                                .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                            append_code_chunk(
+                                &mut cur_variant_text,
+                                &mut cur_variant_code,
+                                &chunk_text,
+                                &chunk_code,
+                                false,
+                                false,
+                            );
+                            cur_pos = next_pos(
+                                &current_scanned.segments,
+                                (event.seg_idx, event.char_idx),
+                            );
+
+                            if event.kind == StructuralEventKind::BaselineComma {
+                                let trimmed_text = normalize_variant(&cur_variant_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_variant_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_variant_attrs.clear();
+                                }
+                                cur_variant_text.clear();
+                                cur_variant_code.clear();
+                            }
+                        }
+                        if !enum_body_closed && cur_pos.is_some() {
+                            let remainder_text =
+                                current_scanned.render_visible_range(cur_pos, None);
+                            let remainder_code = current_scanned.code_tokens_range(cur_pos, None);
+                            append_code_chunk(
+                                &mut cur_variant_text,
+                                &mut cur_variant_code,
+                                &remainder_text,
+                                &remainder_code,
+                                false,
+                                false,
+                            );
+                        }
+                    }
+                }
+
+                while !enum_body_closed && idx + 1 < src_lines.len() {
+                    idx += 1;
+                    let variant_line = src_lines[idx];
+                    if variant_line.trim().is_empty() && item_lexer.state == LexState::Normal {
+                        continue;
+                    }
+                    if cur_variant_text.trim().is_empty() && item_lexer.state == LexState::Normal {
+                        let mut check_lexer = item_lexer.clone();
+                        let check_sc = check_lexer.scan_line(variant_line);
+                        if is_outer_attribute_start(&check_sc.code_tokens) {
+                            let first_sc = item_lexer.scan_line(variant_line);
+                            let attr_text =
+                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, first_sc);
+                            pending_variant_attrs.push(attr_text);
+                            continue;
+                        }
+                    }
+
+                    let was_escaped = item_lexer.state.is_escaped_continuation();
+                    let continues_literal = item_lexer.state.is_in_string_literal();
+                    let sc = item_lexer.scan_line(variant_line);
+
+                    let mut cur_pos = Some((0, 0));
+                    for event in &sc.events {
+                        if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                            let (chunk_text, chunk_code) = if let Some(limit) =
+                                prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
+                            {
+                                (
+                                    sc.render_visible_range(cur_pos, Some(limit)),
+                                    sc.code_tokens_range(cur_pos, Some(limit)),
+                                )
+                            } else {
+                                (String::new(), String::new())
+                            };
+                            append_code_chunk(
+                                &mut cur_variant_text,
+                                &mut cur_variant_code,
+                                &chunk_text,
+                                &chunk_code,
+                                was_escaped,
+                                continues_literal,
+                            );
+                            let trimmed_text = normalize_variant(&cur_variant_text);
+                            if !trimmed_text.is_empty() {
+                                lines.append(&mut pending_variant_attrs);
+                                lines.push(trimmed_text);
+                            } else {
+                                pending_variant_attrs.clear();
+                            }
+                            cur_variant_text.clear();
+                            cur_variant_code.clear();
+                            enum_body_closed = true;
+                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                            break;
+                        }
+
+                        let chunk_text =
+                            sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                        let chunk_code =
+                            sc.code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                        append_code_chunk(
+                            &mut cur_variant_text,
+                            &mut cur_variant_code,
+                            &chunk_text,
+                            &chunk_code,
+                            was_escaped,
+                            continues_literal,
+                        );
+                        cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+
+                        if event.kind == StructuralEventKind::BaselineComma {
+                            let trimmed_text = normalize_variant(&cur_variant_text);
+                            if !trimmed_text.is_empty() {
+                                lines.append(&mut pending_variant_attrs);
+                                lines.push(trimmed_text);
+                            } else {
+                                pending_variant_attrs.clear();
+                            }
+                            cur_variant_text.clear();
+                            cur_variant_code.clear();
+                        }
+                    }
+
+                    if !enum_body_closed && cur_pos.is_some() {
+                        let remainder_text = sc.render_visible_range(cur_pos, None);
+                        let remainder_code = sc.code_tokens_range(cur_pos, None);
+                        append_code_chunk(
+                            &mut cur_variant_text,
+                            &mut cur_variant_code,
+                            &remainder_text,
+                            &remainder_code,
+                            was_escaped,
+                            continues_literal,
+                        );
                     }
                 }
 
@@ -1636,12 +2016,52 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             }
 
             if is_public_struct(&combined_code_tokens) || is_public_union(&combined_code_tokens) {
+                while !current_scanned.has_top_level_semicolon
+                    && !current_scanned.has_top_level_open_paren
+                    && !current_scanned.has_top_level_open_brace
+                    && idx + 1 < src_lines.len()
+                {
+                    idx += 1;
+                    let continuation = src_lines[idx];
+                    if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
+                        continue;
+                    }
+                    let was_escaped = item_lexer.state.is_escaped_continuation();
+                    let continues_literal = item_lexer.state.is_in_string_literal();
+                    let sc = item_lexer.scan_line(continuation);
+                    let rendered = sc.render_visible();
+                    if was_escaped {
+                        prefix_text.push_str(&rendered);
+                    } else if continues_literal {
+                        prefix_text.push('\n');
+                        prefix_text.push_str(&rendered);
+                    } else {
+                        if rendered.trim().is_empty() && !sc.ends_in_string_literal {
+                            continue;
+                        }
+                        let needs_space = !prefix_text.ends_with(' ')
+                            && !rendered.starts_with(' ')
+                            && !rendered.starts_with('(');
+                        if needs_space {
+                            prefix_text.push(' ');
+                        }
+                        prefix_text.push_str(&rendered);
+                    }
+                    if !combined_code_tokens.ends_with(' ') && !sc.code_tokens.starts_with(' ') {
+                        combined_code_tokens.push(' ');
+                    }
+                    combined_code_tokens.push_str(&sc.code_tokens);
+                    current_scanned = sc;
+                }
+
                 let is_unit_or_tuple = current_scanned.has_top_level_semicolon
+                    || current_scanned.has_top_level_open_paren
                     || has_public_tuple_struct_body_open(&combined_code_tokens);
 
                 if is_unit_or_tuple && !current_scanned.has_top_level_open_brace {
                     let mut item = prefix_text;
                     let mut is_done = current_scanned.has_top_level_semicolon
+                        || current_scanned.has_top_level_open_paren
                         || has_public_tuple_struct_body_open(&combined_code_tokens);
                     while !is_done && idx + 1 < src_lines.len() {
                         idx += 1;
@@ -1670,7 +2090,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         if rendered.trim().is_empty() && !sc.ends_in_string_literal {
                             continue;
                         }
-                        if !item.ends_with(' ') && !rendered.starts_with(' ') {
+                        let needs_space = !item.ends_with(' ')
+                            && !rendered.starts_with(' ')
+                            && !rendered.starts_with('(');
+                        if needs_space {
                             item.push(' ');
                         }
                         item.push_str(&rendered);
@@ -1762,17 +2185,14 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 } else {
                                     (String::new(), String::new())
                                 };
-                                if !chunk_text.trim().is_empty() {
-                                    if !cur_field_text.is_empty()
-                                        && !cur_field_text.ends_with(' ')
-                                        && !chunk_text.starts_with(' ')
-                                    {
-                                        cur_field_text.push(' ');
-                                        cur_field_code.push(' ');
-                                    }
-                                    cur_field_text.push_str(&chunk_text);
-                                    cur_field_code.push_str(&chunk_code);
-                                }
+                                append_code_chunk(
+                                    &mut cur_field_text,
+                                    &mut cur_field_code,
+                                    &chunk_text,
+                                    &chunk_code,
+                                    false,
+                                    false,
+                                );
                                 let trimmed_text = normalize_ws(&cur_field_text);
                                 if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
                                     lines.append(&mut pending_field_attrs);
@@ -1796,17 +2216,14 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             );
                             let chunk_code = current_scanned
                                 .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                            if !chunk_text.trim().is_empty() {
-                                if !cur_field_text.is_empty()
-                                    && !cur_field_text.ends_with(' ')
-                                    && !chunk_text.starts_with(' ')
-                                {
-                                    cur_field_text.push(' ');
-                                    cur_field_code.push(' ');
-                                }
-                                cur_field_text.push_str(&chunk_text);
-                                cur_field_code.push_str(&chunk_code);
-                            }
+                            append_code_chunk(
+                                &mut cur_field_text,
+                                &mut cur_field_code,
+                                &chunk_text,
+                                &chunk_code,
+                                false,
+                                false,
+                            );
 
                             if event.kind == StructuralEventKind::BaselineComma {
                                 let trimmed_text = normalize_ws(&cur_field_text);
@@ -1828,17 +2245,14 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             let remainder_text =
                                 current_scanned.render_visible_range(cur_pos, None);
                             let remainder_code = current_scanned.code_tokens_range(cur_pos, None);
-                            if !remainder_text.trim().is_empty() {
-                                if !cur_field_text.is_empty()
-                                    && !cur_field_text.ends_with(' ')
-                                    && !remainder_text.starts_with(' ')
-                                {
-                                    cur_field_text.push(' ');
-                                    cur_field_code.push(' ');
-                                }
-                                cur_field_text.push_str(&remainder_text);
-                                cur_field_code.push_str(&remainder_code);
-                            }
+                            append_code_chunk(
+                                &mut cur_field_text,
+                                &mut cur_field_code,
+                                &remainder_text,
+                                &remainder_code,
+                                false,
+                                false,
+                            );
                         }
                     }
                 }
@@ -1853,8 +2267,9 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         let mut check_lexer = item_lexer.clone();
                         let check_sc = check_lexer.scan_line(field_line);
                         if is_outer_attribute_start(&check_sc.code_tokens) {
+                            let first_sc = item_lexer.scan_line(field_line);
                             let attr_text =
-                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, check_sc);
+                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, first_sc);
                             pending_field_attrs.push(attr_text);
                             continue;
                         }
@@ -1877,24 +2292,14 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             } else {
                                 (String::new(), String::new())
                             };
-                            if was_escaped {
-                                cur_field_text.push_str(&chunk_text);
-                                cur_field_code.push_str(&chunk_code);
-                            } else if continues_literal {
-                                cur_field_text.push('\n');
-                                cur_field_text.push_str(&chunk_text);
-                                cur_field_code.push_str(&chunk_code);
-                            } else if !chunk_text.trim().is_empty() {
-                                if !cur_field_text.is_empty()
-                                    && !cur_field_text.ends_with(' ')
-                                    && !chunk_text.starts_with(' ')
-                                {
-                                    cur_field_text.push(' ');
-                                    cur_field_code.push(' ');
-                                }
-                                cur_field_text.push_str(&chunk_text);
-                                cur_field_code.push_str(&chunk_code);
-                            }
+                            append_code_chunk(
+                                &mut cur_field_text,
+                                &mut cur_field_code,
+                                &chunk_text,
+                                &chunk_code,
+                                was_escaped,
+                                continues_literal,
+                            );
                             let trimmed_text = normalize_ws(&cur_field_text);
                             if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
                                 lines.append(&mut pending_field_attrs);
@@ -1913,24 +2318,15 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
                         let chunk_code =
                             sc.code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                        if was_escaped {
-                            cur_field_text.push_str(&chunk_text);
-                            cur_field_code.push_str(&chunk_code);
-                        } else if continues_literal {
-                            cur_field_text.push('\n');
-                            cur_field_text.push_str(&chunk_text);
-                            cur_field_code.push_str(&chunk_code);
-                        } else if !chunk_text.trim().is_empty() {
-                            if !cur_field_text.is_empty()
-                                && !cur_field_text.ends_with(' ')
-                                && !chunk_text.starts_with(' ')
-                            {
-                                cur_field_text.push(' ');
-                                cur_field_code.push(' ');
-                            }
-                            cur_field_text.push_str(&chunk_text);
-                            cur_field_code.push_str(&chunk_code);
-                        }
+                        append_code_chunk(
+                            &mut cur_field_text,
+                            &mut cur_field_code,
+                            &chunk_text,
+                            &chunk_code,
+                            was_escaped,
+                            continues_literal,
+                        );
+                        cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
 
                         if event.kind == StructuralEventKind::BaselineComma {
                             let trimmed_text = normalize_ws(&cur_field_text);
@@ -1949,24 +2345,14 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     if !struct_body_closed && cur_pos.is_some() {
                         let remainder_text = sc.render_visible_range(cur_pos, None);
                         let remainder_code = sc.code_tokens_range(cur_pos, None);
-                        if was_escaped {
-                            cur_field_text.push_str(&remainder_text);
-                            cur_field_code.push_str(&remainder_code);
-                        } else if continues_literal {
-                            cur_field_text.push('\n');
-                            cur_field_text.push_str(&remainder_text);
-                            cur_field_code.push_str(&remainder_code);
-                        } else if !remainder_text.trim().is_empty() {
-                            if !cur_field_text.is_empty()
-                                && !cur_field_text.ends_with(' ')
-                                && !remainder_text.starts_with(' ')
-                            {
-                                cur_field_text.push(' ');
-                                cur_field_code.push(' ');
-                            }
-                            cur_field_text.push_str(&remainder_text);
-                            cur_field_code.push_str(&remainder_code);
-                        }
+                        append_code_chunk(
+                            &mut cur_field_text,
+                            &mut cur_field_code,
+                            &remainder_text,
+                            &remainder_code,
+                            was_escaped,
+                            continues_literal,
+                        );
                     }
                 }
 
@@ -5484,5 +5870,233 @@ fn public_api_guard_handles_const_generic_identifier_comparisons_blocker_2() {
     assert_eq!(
         normalized_public_surface_str("test.rs", fn_complex_1),
         normalized_public_surface_str("test.rs", fn_complex_diff_body)
+    );
+}
+
+#[test]
+fn public_api_guard_handles_generic_types_inside_const_expression_blocks_probe() {
+    // Probe 1: Normal generic type Option<u8> inside const generic block
+    let fn_opt_u8 =
+        "pub fn f() -> Flag<{\n    let _: Option<u8> = None;\n    true\n}> {\n    private_a()\n}";
+    let fn_opt_u16 =
+        "pub fn f() -> Flag<{\n    let _: Option<u16> = None;\n    true\n}> {\n    private_a()\n}";
+    let fn_opt_diff_body =
+        "pub fn f() -> Flag<{\n    let _: Option<u8> = None;\n    true\n}> {\n    private_b()\n}";
+
+    assert!(fn_opt_u8.contains("Option<u8>"));
+    assert!(fn_opt_u8.as_bytes().contains(&b'\n'));
+
+    let surf_u8 = normalized_public_surface_str("test.rs", fn_opt_u8);
+    let surf_u16 = normalized_public_surface_str("test.rs", fn_opt_u16);
+    let surf_diff_body = normalized_public_surface_str("test.rs", fn_opt_diff_body);
+
+    assert_ne!(
+        surf_u8, surf_u16,
+        "type mutation in const generic block must alter public surface"
+    );
+    assert_eq!(
+        surf_u8, surf_diff_body,
+        "private body change must NOT alter public surface"
+    );
+    assert!(
+        !surf_u8.contains("private_a"),
+        "private body must not leak into public surface"
+    );
+
+    // Probe 2: Nested generic type Result<Option<u8>, Error>
+    let fn_nested_u8 = "pub fn f() -> Flag<{\n    let _: Result<Option<u8>, Error> = Ok(None);\n    true\n}> {\n    private_a()\n}";
+    let fn_nested_u16 = "pub fn f() -> Flag<{\n    let _: Result<Option<u16>, Error> = Ok(None);\n    true\n}> {\n    private_a()\n}";
+    let fn_nested_diff_body = "pub fn f() -> Flag<{\n    let _: Result<Option<u8>, Error> = Ok(None);\n    true\n}> {\n    private_b()\n}";
+
+    let surf_nest_u8 = normalized_public_surface_str("test.rs", fn_nested_u8);
+    let surf_nest_u16 = normalized_public_surface_str("test.rs", fn_nested_u16);
+    let surf_nest_diff = normalized_public_surface_str("test.rs", fn_nested_diff_body);
+
+    assert_ne!(
+        surf_nest_u8, surf_nest_u16,
+        "nested generic type mutation in const block must alter public surface"
+    );
+    assert_eq!(
+        surf_nest_u8, surf_nest_diff,
+        "private body change with nested generic in const block must NOT alter public surface"
+    );
+    assert!(!surf_nest_u8.contains("private_a"));
+}
+
+#[test]
+fn public_api_guard_handles_multiline_restricted_visibility_and_mutations() {
+    let multi_vis_1 = "pub(in\n    crate) const X: u32 = 1;";
+    let multi_vis_2 = "pub(in\n    crate) const X: u32 = 2;";
+    let single_vis = "pub(in crate) const X: u32 = 1;";
+
+    assert_ne!(
+        normalized_public_surface_str("test.rs", multi_vis_1),
+        normalized_public_surface_str("test.rs", multi_vis_2),
+        "const value change with multiline pub(in crate) must alter public surface"
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", multi_vis_1),
+        normalized_public_surface_str("test.rs", single_vis),
+        "multiline pub(in crate) must normalize equivalently to single-line"
+    );
+
+    let struct_const_1 = "pub(in\n    crate) const HEADER: Spec = Spec {\n    rev: 1,\n};";
+    let struct_const_2 = "pub(in\n    crate) const HEADER: Spec = Spec {\n    rev: 2,\n};";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", struct_const_1),
+        normalized_public_surface_str("test.rs", struct_const_2),
+        "braced const field mutation with multiline pub(in crate) must alter public surface"
+    );
+
+    let pub_crate_split = "pub(\n    crate\n) const X: u32 = 1;";
+    let pub_crate_single = "pub(crate) const X: u32 = 1;";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", pub_crate_split),
+        normalized_public_surface_str("test.rs", pub_crate_single)
+    );
+
+    let pub_super = "pub(super) const X: u32 = 1;";
+    let pub_self = "pub(self) const X: u32 = 1;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", pub_super),
+        normalized_public_surface_str("test.rs", pub_self)
+    );
+
+    let pub_path_1 = "pub(in crate::module) const X: u32 = 1;";
+    let pub_path_2 = "pub(in crate::other) const X: u32 = 1;";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", pub_path_1),
+        normalized_public_surface_str("test.rs", pub_path_2)
+    );
+
+    let pub_comment = "pub /*x*/ (\n    in crate\n) const X: u32 = 1;";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", pub_comment),
+        normalized_public_surface_str("test.rs", single_vis)
+    );
+}
+
+#[test]
+fn public_api_guard_handles_multiline_tuple_struct_headers_and_mutations() {
+    // A. Private tuple field stays private
+    let priv_u32 = "pub struct S\n(\n    u32,\n);";
+    let priv_u64 = "pub struct S\n(\n    u64,\n);";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", priv_u32),
+        normalized_public_surface_str("test.rs", priv_u64),
+        "private tuple field type mutation must NOT alter public surface"
+    );
+
+    // B. Public tuple field remains contract-bearing
+    let pub_u32 = "pub struct S\n(\n    pub u32,\n);";
+    let pub_u64 = "pub struct S\n(\n    pub u64,\n);";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", pub_u32),
+        normalized_public_surface_str("test.rs", pub_u64),
+        "public tuple field type mutation MUST alter public surface"
+    );
+
+    // C. Restricted public tuple field
+    let pub_crate = "pub struct S\n(\n    pub(crate) u32,\n);";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", pub_crate),
+        normalized_public_surface_str("test.rs", priv_u32),
+        "restricted public tuple field must differ from private field"
+    );
+
+    // D. Following declaration remains separate
+    let seq_u32 = "pub struct S\n(\n    u32,\n);\npub const NEXT: u32 = 7;";
+    let seq_u64 = "pub struct S\n(\n    u64,\n);\npub const NEXT: u32 = 7;";
+    let surf_seq_32 = normalized_public_surface_str("test.rs", seq_u32);
+    let surf_seq_64 = normalized_public_surface_str("test.rs", seq_u64);
+    assert_eq!(surf_seq_32, surf_seq_64);
+    assert!(
+        surf_seq_32.contains("pub const NEXT: u32 = 7;"),
+        "following const must be inventoried separately: {surf_seq_32}"
+    );
+
+    // E. Canonical/reflow equivalence
+    let same_line_open = "pub struct S(\n    u32,\n);";
+    let split_line_open = "pub struct S\n(\n    u32,\n);";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", same_line_open),
+        normalized_public_surface_str("test.rs", split_line_open),
+        "reflowed tuple struct opening delimiter must normalize equivalently"
+    );
+}
+
+#[test]
+fn public_api_guard_accumulates_and_normalizes_multiline_enum_variants() {
+    // A. Multiline tuple variant formatting equivalence
+    let tup_single = "pub enum E {\n    A(u32),\n}";
+    let tup_multi = "pub enum E {\n    A(\n        u32,\n    ),\n}";
+    let tup_diff = "pub enum E {\n    A(\n        u64,\n    ),\n}";
+
+    assert_eq!(
+        normalized_public_surface_str("test.rs", tup_single),
+        normalized_public_surface_str("test.rs", tup_multi),
+        "multiline tuple variant must normalize equivalently to single-line"
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", tup_multi),
+        normalized_public_surface_str("test.rs", tup_diff),
+        "tuple variant payload type change must alter public surface"
+    );
+
+    // B. Multiline struct variant formatting equivalence
+    let str_single = "pub enum E {\n    A { x: u32, y: bool },\n}";
+    let str_multi = "pub enum E {\n    A {\n        x: u32,\n        y: bool,\n    },\n}";
+    let str_diff = "pub enum E {\n    A {\n        x: u64,\n        y: bool,\n    },\n}";
+
+    assert_eq!(
+        normalized_public_surface_str("test.rs", str_single),
+        normalized_public_surface_str("test.rs", str_multi),
+        "multiline struct variant must normalize equivalently to single-line"
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", str_multi),
+        normalized_public_surface_str("test.rs", str_diff),
+        "struct variant field type change must alter public surface"
+    );
+
+    // C. Discriminant equivalence
+    let disc_single = "pub enum E {\n    A = 1,\n}";
+    let disc_multi = "pub enum E {\n    A =\n        1,\n}";
+    let disc_diff = "pub enum E {\n    A =\n        2,\n}";
+
+    assert_eq!(
+        normalized_public_surface_str("test.rs", disc_single),
+        normalized_public_surface_str("test.rs", disc_multi),
+        "multiline discriminant must normalize equivalently to single-line"
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", disc_multi),
+        normalized_public_surface_str("test.rs", disc_diff),
+        "discriminant value change must alter public surface"
+    );
+
+    // D. Outer attribute with trivia
+    let attr_old =
+        "pub enum E {\n    # /*x*/ [deprecated(note = \"old\")]\n    A(\n        u32,\n    ),\n}";
+    let attr_new =
+        "pub enum E {\n    # /*x*/ [deprecated(note = \"new\")]\n    A(\n        u32,\n    ),\n}";
+    let attr_type_diff =
+        "pub enum E {\n    # /*x*/ [deprecated(note = \"old\")]\n    A(\n        u64,\n    ),\n}";
+    let attr_reformatted = "pub enum E {\n    #[deprecated(note = \"old\")]\n    A(u32),\n}";
+
+    assert_ne!(
+        normalized_public_surface_str("test.rs", attr_old),
+        normalized_public_surface_str("test.rs", attr_new),
+        "attribute literal note change on variant must alter public surface"
+    );
+    assert_ne!(
+        normalized_public_surface_str("test.rs", attr_old),
+        normalized_public_surface_str("test.rs", attr_type_diff),
+        "payload type change on attributed variant must alter public surface"
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", attr_old),
+        normalized_public_surface_str("test.rs", attr_reformatted),
+        "trivia and reflow on attributed variant must normalize equivalently"
     );
 }

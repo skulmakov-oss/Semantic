@@ -5,24 +5,10 @@ pub records: Vec<HelloObservationByteRecord>,
 pub format_status: &'static str,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelloObservationByteRecord {
-DeclareLocalQuad {
-symbol: String,
-value: String,
-},
-RequireQuadEq {
-symbol: String,
-expected: String,
-},
-ObserveTextLiteral {
-symbolic_op: &'static str,
-text_const_index: u32,
-observation_class: &'static str,
-sequence_index: u32,
-policy_ref: u32,
-},
-CompleteQuad {
-value: String,
-},
+DeclareLocalQuad { symbol: String, value: String },
+RequireQuadEq { symbol: String, expected: String },
+ObserveTextLiteral { symbolic_op: &'static str, text_const_index: u32, observation_class: &'static str, sequence_index: u32, policy_ref: u32 },
+CompleteQuad { value: String },
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelloObservationByteEmissionError {
 UnsupportedShape,

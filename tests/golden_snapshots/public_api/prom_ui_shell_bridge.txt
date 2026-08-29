@@ -20,35 +20,12 @@ Pending,
 Stale,
 #[derive(Debug, Clone, PartialEq)]
 pub enum BridgePatchOperation {
-SetBindingValue {
-node: u64,
-slot: u32,
-value: BridgeValue,
-},
-SetNodeAvailability {
-node: u64,
-availability: BridgeAvailability,
-},
-CollectionInsert {
-collection: u64,
-key: u64,
-before: Option<u64>,
-value: BridgeValue,
-},
-CollectionUpdate {
-collection: u64,
-key: u64,
-value: BridgeValue,
-},
-CollectionRemove {
-collection: u64,
-key: u64,
-},
-CollectionMove {
-collection: u64,
-key: u64,
-before: Option<u64>,
-},
+SetBindingValue { node: u64, slot: u32, value: BridgeValue },
+SetNodeAvailability { node: u64, availability: BridgeAvailability },
+CollectionInsert { collection: u64, key: u64, before: Option<u64>, value: BridgeValue },
+CollectionUpdate { collection: u64, key: u64, value: BridgeValue },
+CollectionRemove { collection: u64, key: u64 },
+CollectionMove { collection: u64, key: u64, before: Option<u64> },
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgePatchEnvelope {
 pub patch_id: u64,
