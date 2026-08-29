@@ -437,6 +437,23 @@ fn is_likely_comparison_less_than(code_tokens: &str) -> bool {
     false
 }
 
+/// True when `s`'s trailing (trimmed) tokens end with the Rust keyword
+/// `kw` at a genuine word boundary - never matched as a suffix of a longer
+/// identifier (`"sometype"` does not end with keyword `"type"`). Used to
+/// track, across physical lines, whether the declaration currently being
+/// scanned started with a keyword whose `=` right-hand side is a TYPE
+/// rather than a value expression (`type X = ...`), so that case can be
+/// excluded from `CodeLexer::expr_initializer_active`.
+fn ends_with_keyword(s: &str, kw: &str) -> bool {
+    let t = s.trim_end();
+    match t.strip_suffix(kw) {
+        Some(before) => {
+            before.is_empty() || before.ends_with(|c: char| !c.is_alphanumeric() && c != '_')
+        }
+        None => false,
+    }
+}
+
 fn is_macro_bang(code_tokens: &str) -> bool {
     let s = code_tokens.trim_end();
     if s.is_empty() {
@@ -470,6 +487,45 @@ struct CodeLexer {
     pending_macro_bang: bool,
     macro_brace_stack: Vec<usize>,
     const_brace_stack: Vec<(usize, usize)>, // (brace depth, angle depth at entry)
+    /// Set the moment a plain `=` is seen at a declaration boundary
+    /// (top-level: `paren_depth == bracket_depth == angle_depth == 0 &&
+    /// brace_depth == 0`, or baseline-member: same but `brace_depth == 1`,
+    /// which is where a top-level `const`/`static` initializer, an enum
+    /// discriminant, or a trait/impl associated-const initializer/default
+    /// all start). While set, `<`/`>`/`<<`/`>>` default to OPERATORS
+    /// rather than generic delimiters, exactly like the existing
+    /// `const_brace_stack` mechanism already does for const-generic
+    /// `{ EXPR }` positions, closing the gap for the two declaration
+    /// shapes that are const/expression contexts without ever being
+    /// inside a const-generic angle frame at all. A trailing `::` still
+    /// opens a turbofish/qualified-path generic exactly as before
+    /// (`Foo::<Bar>`, `<T as Trait>::Assoc`), since that check is
+    /// unchanged; this flag only widens which initializer shapes get the
+    /// same treatment `const_brace_stack` already provides, not how a
+    /// `<` is judged once inside one. Cleared at the same structural-
+    /// event sites that already end a top-level or baseline declaration
+    /// (`TopLevelSemicolon`, `BaselineSemicolon`, `TopLevelComma`,
+    /// `BaselineComma`, `TopLevelCloseBrace`), never tied to
+    /// `MethodBodyClose`, since a discriminant's own `{ ... }` block-
+    /// expression closing brace can coincidentally match that same
+    /// brace-depth pattern without ending the declaration itself (the
+    /// terminating comma/semicolon that follows still does).
+    expr_initializer_active: bool,
+    /// Set once the keyword `type` is recognized (via `ends_with_keyword`,
+    /// at a whitespace boundary) at the same declaration-boundary depth
+    /// `expr_initializer_active` cares about, and cleared at the same
+    /// sites. A plain `=` at that depth is only treated as the start of a
+    /// value-expression initializer when this is FALSE - `type X = ...`
+    /// and `type Item = DefaultType;` (an associated type default) have a
+    /// TYPE on their right-hand side, not an expression, so their `<`/`>`
+    /// must keep the ordinary generic-delimiter treatment (`Vec<Foo>` must
+    /// still open a generic frame). This is a Rust reserved-keyword check,
+    /// not an identifier/name heuristic - it is the same kind of
+    /// structural keyword-prefix test `is_public_type_alias` already uses
+    /// for top-level dispatch, just tracked persistently so it still
+    /// applies when the keyword and the `=` land on different physical
+    /// lines.
+    pending_type_alias: bool,
 }
 
 impl CodeLexer {
@@ -483,6 +539,8 @@ impl CodeLexer {
             pending_macro_bang: false,
             macro_brace_stack: Vec::new(),
             const_brace_stack: Vec::new(),
+            expr_initializer_active: false,
+            pending_type_alias: false,
         }
     }
 
@@ -494,6 +552,8 @@ impl CodeLexer {
         self.pending_macro_bang = false;
         self.macro_brace_stack.clear();
         self.const_brace_stack.clear();
+        self.expr_initializer_active = false;
+        self.pending_type_alias = false;
     }
 
     fn scan_line(&mut self, line: &str) -> ScannedLine {
@@ -717,7 +777,8 @@ impl CodeLexer {
                         continue;
                     }
                     if chars[i] == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
-                        let is_shift = (!self.const_brace_stack.is_empty()
+                        let is_shift = ((!self.const_brace_stack.is_empty()
+                            || self.expr_initializer_active)
                             && !code_tokens.trim_end().ends_with("::"))
                             || is_likely_comparison_less_than(&code_tokens);
                         if !is_shift {
@@ -767,7 +828,8 @@ impl CodeLexer {
                         }
                         '<' => {
                             self.pending_macro_bang = false;
-                            let in_const_expr = !self.const_brace_stack.is_empty();
+                            let in_const_expr =
+                                !self.const_brace_stack.is_empty() || self.expr_initializer_active;
                             let is_comparison = if in_const_expr {
                                 let t = code_tokens.trim_end();
                                 !t.ends_with("::")
@@ -912,6 +974,8 @@ impl CodeLexer {
                                             char_idx: cur_code.len(),
                                             kind: StructuralEventKind::TopLevelCloseBrace,
                                         });
+                                        self.expr_initializer_active = false;
+                                        self.pending_type_alias = false;
                                     } else if self.brace_depth == 2 {
                                         events.push(StructuralEvent {
                                             seg_idx: segments.len(),
@@ -935,6 +999,8 @@ impl CodeLexer {
                             {
                                 has_top_level_semicolon = true;
                                 self.angle_depth = 0;
+                                self.expr_initializer_active = false;
+                                self.pending_type_alias = false;
                                 events.push(StructuralEvent {
                                     seg_idx: segments.len(),
                                     char_idx: cur_code.len(),
@@ -945,6 +1011,8 @@ impl CodeLexer {
                                 && self.brace_depth == 1
                                 && self.macro_brace_stack.is_empty()
                             {
+                                self.expr_initializer_active = false;
+                                self.pending_type_alias = false;
                                 events.push(StructuralEvent {
                                     seg_idx: segments.len(),
                                     char_idx: cur_code.len(),
@@ -961,6 +1029,8 @@ impl CodeLexer {
                                 && self.bracket_depth == 0
                                 && self.brace_depth == 0
                             {
+                                self.expr_initializer_active = false;
+                                self.pending_type_alias = false;
                                 events.push(StructuralEvent {
                                     seg_idx: segments.len(),
                                     char_idx: cur_code.len(),
@@ -972,6 +1042,8 @@ impl CodeLexer {
                                 && self.brace_depth == 1
                                 && self.macro_brace_stack.is_empty()
                             {
+                                self.expr_initializer_active = false;
+                                self.pending_type_alias = false;
                                 events.push(StructuralEvent {
                                     seg_idx: segments.len(),
                                     char_idx: cur_code.len(),
@@ -981,7 +1053,28 @@ impl CodeLexer {
                             cur_code.push(',');
                             code_tokens.push(',');
                         }
+                        '=' => {
+                            self.pending_macro_bang = false;
+                            if self.paren_depth == 0
+                                && self.bracket_depth == 0
+                                && self.angle_depth == 0
+                                && (self.brace_depth == 0 || self.brace_depth == 1)
+                                && !self.pending_type_alias
+                            {
+                                self.expr_initializer_active = true;
+                            }
+                            cur_code.push('=');
+                            code_tokens.push('=');
+                        }
                         ' ' | '\t' | '\r' | '\n' => {
+                            if self.paren_depth == 0
+                                && self.bracket_depth == 0
+                                && self.angle_depth == 0
+                                && (self.brace_depth == 0 || self.brace_depth == 1)
+                                && ends_with_keyword(&code_tokens, "type")
+                            {
+                                self.pending_type_alias = true;
+                            }
                             cur_code.push(chars[i]);
                             code_tokens.push(chars[i]);
                         }
@@ -1014,11 +1107,29 @@ impl CodeLexer {
                     while i < chars.len() && (chars[i] == ' ' || chars[i] == '\t') {
                         i += 1;
                     }
-                    self.state = if is_byte {
-                        LexState::ByteNormalString
-                    } else {
-                        LexState::NormalString
-                    };
+                    // Rust's escaped-newline continuation does not end at
+                    // the next non-whitespace CHARACTER on the SAME
+                    // physical line - it ends at the next non-whitespace
+                    // SOURCE character, however many physical lines that
+                    // takes (an entirely whitespace-only line in between
+                    // contributes nothing to the literal, not even a
+                    // newline). Only transition back to the literal state
+                    // once a real character was actually found on this
+                    // line; otherwise remain in the Continuation state so
+                    // the NEXT physical line's own leading whitespace is
+                    // also skipped as part of the SAME continuation, and
+                    // so the caller's `was_escaped` check (which governs
+                    // whether a synthetic newline is inserted between
+                    // physical lines) stays true across every physical
+                    // line the continuation actually spans, not just the
+                    // first one.
+                    if i < chars.len() {
+                        self.state = if is_byte {
+                            LexState::ByteNormalString
+                        } else {
+                            LexState::NormalString
+                        };
+                    }
                 }
                 LexState::NormalString | LexState::ByteNormalString => {
                     let is_byte = matches!(self.state, LexState::ByteNormalString);
@@ -1244,6 +1355,87 @@ fn is_public_trait(code_tokens: &str) -> bool {
     })
 }
 
+/// True when `code_tokens` starts an `impl` item (optionally `unsafe
+/// impl`) - trait impl or inherent impl alike; `impl` blocks are never
+/// visibility-qualified, so unlike every other `is_public_X` check this
+/// does not go through `parse_public_item` at all.
+fn is_impl_start(code_tokens: &str) -> bool {
+    let mut cur = code_tokens.trim_start();
+    if let Some(after) = is_keyword_prefix(cur, "unsafe") {
+        cur = after;
+    }
+    is_keyword_prefix(cur, "impl").is_some()
+}
+
+/// True when `code_tokens` starts an `extern` BLOCK (optionally `unsafe
+/// extern`, optionally with an ABI string) - `extern "C" { ... }`, never
+/// a single foreign-function declaration (`extern "C" fn f();`, handled
+/// by `is_public_fn`) or `extern crate ...;` (handled by
+/// `is_public_extern_crate`), both of which lack the block's own `{`
+/// immediately after the optional ABI string.
+fn is_extern_block_start(code_tokens: &str) -> bool {
+    let mut cur = code_tokens.trim_start();
+    if let Some(after) = is_keyword_prefix(cur, "unsafe") {
+        cur = after;
+    }
+    let Some(mut rest) = is_keyword_prefix(cur, "extern") else {
+        return false;
+    };
+    rest = rest.trim_start();
+    if rest.starts_with('"') {
+        match rest[1..].find('"') {
+            Some(close) => rest = rest[close + 2..].trim_start(),
+            None => return false,
+        }
+    }
+    rest.starts_with('{')
+}
+
+/// True when `s` contains `kw` as a genuine whole-word occurrence -
+/// never as part of a longer identifier (`"before"` does not contain
+/// keyword `"for"`, `"x_for_y"` does not either).
+fn contains_keyword(s: &str, kw: &str) -> bool {
+    find_keyword(s, kw).is_some()
+}
+
+/// Byte offset of the first genuine whole-word occurrence of `kw` in
+/// `s`, or `None` if it never appears as a keyword (only, perhaps, as
+/// part of a longer identifier).
+fn find_keyword(s: &str, kw: &str) -> Option<usize> {
+    for (pos, _) in s.match_indices(kw) {
+        let before_ok = s[..pos]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        let after_ok = s[pos + kw.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
+        if before_ok && after_ok {
+            return Some(pos);
+        }
+    }
+    None
+}
+
+/// True when a FULLY-READ `impl` header (from `impl` up to, but not
+/// including, its own body-opening `{`) declares an INHERENT impl
+/// (`impl<T> S<T> { ... }`) rather than a trait impl (`impl<T> Trait<T>
+/// for S<T> { ... }`). Looks for a genuine, whole-word `for` keyword
+/// BEFORE any top-level `where` clause - a higher-ranked trait bound
+/// inside a where-clause (`where T: for<'a> Fn(&'a T)`) contains the
+/// word `for` too, but only ever appears AFTER `where`, so splitting
+/// there before searching keeps that case from being misread as the
+/// impl's own trait-for-type marker. This is a Rust reserved-keyword
+/// check on the item's own header, not an identifier/name heuristic.
+fn is_inherent_impl_header(header: &str) -> bool {
+    let before_where = match find_keyword(header, "where") {
+        Some(pos) => &header[..pos],
+        None => header,
+    };
+    !contains_keyword(before_where, "for")
+}
+
 fn is_public_use(code_tokens: &str) -> bool {
     if let Some((_, rest)) = parse_public_item(code_tokens) {
         is_keyword_prefix(rest, "use").is_some()
@@ -1378,6 +1570,495 @@ fn classify_trait_member(code_tokens: &str) -> TraitMemberKind {
         TraitMemberKind::MacroInvocation
     } else {
         TraitMemberKind::Other
+    }
+}
+
+/// Scans one braced item body (trait or inherent impl) for baseline
+/// members - the SAME authoritative scanner both use, not a separate
+/// parser per item kind. Reads the header up to the body's own `{`
+/// (spanning further physical lines if needed), pushes it, then walks
+/// the body member-by-member using the same `BaselineSemicolon`/
+/// `BaselineComma`/`BaselineOpenBrace`/`TopLevelCloseBrace` structural
+/// events every other collector in this file uses: a member ending in
+/// `;` (an associated const/type) or opening a method body (skipped via
+/// `MethodBodyClose`, never recursed into, exactly like a trait default
+/// method) is captured with `emit_captured_fragment` - the same literal-
+/// aware, no-blind-`normalize_ws` emitter every other capture path in
+/// this file already uses.
+///
+/// `should_emit(member_code_tokens)` decides whether a fully-captured
+/// member is actually pushed to the golden surface: trait members are
+/// unconditionally public (`|_| true`), so this is the ONLY difference
+/// from the trait path - inherent impl members pass a per-member `pub`-
+/// visibility check instead. The classification that decides whether a
+/// member is a METHOD (and must therefore have its body skipped,
+/// regardless of whether it will ultimately be emitted) is untouched by
+/// this predicate - a private inherent method's body is still never
+/// recursed into, it is simply not pushed to `lines`.
+#[allow(clippy::too_many_arguments)]
+fn scan_baseline_member_body(
+    lines: &mut Vec<String>,
+    src_lines: &[&str],
+    idx: &mut usize,
+    item_lexer: &mut CodeLexer,
+    same_line_remainder: &mut Option<String>,
+    current_scanned: &ScannedLine,
+    header_prefix: String,
+    push_header: bool,
+    should_emit: impl Fn(&str) -> bool,
+) {
+    let mut header = if current_scanned.has_top_level_open_brace {
+        let up_to_brace = current_scanned.text_up_to_function_body_open_brace();
+        let rendered_last = current_scanned.render_visible();
+        if header_prefix.ends_with(&rendered_last) {
+            let prefix_head = &header_prefix[..header_prefix.len() - rendered_last.len()];
+            format!("{prefix_head}{up_to_brace}")
+        } else {
+            up_to_brace
+        }
+    } else {
+        header_prefix
+    };
+
+    let mut body_open = current_scanned.has_top_level_open_brace;
+
+    while !body_open && *idx + 1 < src_lines.len() {
+        *idx += 1;
+        let continuation = src_lines[*idx];
+        if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
+            continue;
+        }
+        let was_escaped = item_lexer.state.is_escaped_continuation();
+        let continues_literal = item_lexer.state.is_in_string_literal();
+        let sc = scan_logical_item_line(item_lexer, continuation, same_line_remainder);
+        let rendered = sc.render_visible();
+        body_open = sc.has_top_level_open_brace;
+        if was_escaped {
+            header.push_str(&rendered);
+            continue;
+        }
+        if continues_literal {
+            header.push('\n');
+            header.push_str(&rendered);
+            continue;
+        }
+        if rendered.trim().is_empty() {
+            continue;
+        }
+        if !header.ends_with(' ') && !rendered.starts_with(' ') {
+            header.push(' ');
+        }
+        header.push_str(&rendered);
+    }
+
+    if push_header {
+        lines.push(header);
+    }
+
+    let mut pending_member_attrs = Vec::new();
+    let mut cur_member_text = String::new();
+    let mut cur_member_code = String::new();
+    let mut in_default_method_body = false;
+    let mut body_closed = false;
+
+    let emit = |lines: &mut Vec<String>,
+                pending_attrs: &mut Vec<String>,
+                cur_member_text: &mut String,
+                cur_member_code: &mut String| {
+        let trimmed_text = emit_captured_fragment(cur_member_text).unwrap_or_default();
+        if !trimmed_text.is_empty() && should_emit(cur_member_code) {
+            lines.append(pending_attrs);
+            lines.push(trimmed_text);
+        } else {
+            pending_attrs.clear();
+        }
+        cur_member_text.clear();
+        cur_member_code.clear();
+    };
+
+    // Process remainder of opening line (if any)
+    if let Some(open_brace_pos) = current_scanned.first_top_level_open_brace_seg {
+        if let Some(start_pos) = next_pos(&current_scanned.segments, open_brace_pos) {
+            let mut cur_pos = Some(start_pos);
+            for event in &current_scanned.events {
+                if event.kind == StructuralEventKind::TopLevelOpenBrace {
+                    continue;
+                }
+                if event.seg_idx < start_pos.0
+                    || (event.seg_idx == start_pos.0 && event.char_idx < start_pos.1)
+                {
+                    continue;
+                }
+
+                if in_default_method_body {
+                    if event.kind == StructuralEventKind::MethodBodyClose {
+                        in_default_method_body = false;
+                        cur_pos =
+                            next_pos(&current_scanned.segments, (event.seg_idx, event.char_idx));
+                    }
+                    continue;
+                }
+
+                if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                    let (chunk_text, chunk_code) = if let Some(limit) =
+                        prev_pos(&current_scanned.segments, (event.seg_idx, event.char_idx))
+                    {
+                        (
+                            current_scanned.render_visible_range(cur_pos, Some(limit)),
+                            current_scanned.code_tokens_range(cur_pos, Some(limit)),
+                        )
+                    } else {
+                        (String::new(), String::new())
+                    };
+                    if !chunk_text.trim().is_empty() {
+                        if !cur_member_text.is_empty()
+                            && !cur_member_text.ends_with(' ')
+                            && !chunk_text.starts_with(' ')
+                        {
+                            cur_member_text.push(' ');
+                            cur_member_code.push(' ');
+                        }
+                        cur_member_text.push_str(&chunk_text);
+                        cur_member_code.push_str(&chunk_code);
+                    }
+                    emit(
+                        lines,
+                        &mut pending_member_attrs,
+                        &mut cur_member_text,
+                        &mut cur_member_code,
+                    );
+                    body_closed = true;
+                    cur_pos = next_pos(&current_scanned.segments, (event.seg_idx, event.char_idx));
+                    break;
+                }
+
+                let chunk_text = current_scanned
+                    .render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                let chunk_code = current_scanned
+                    .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                if !chunk_text.trim().is_empty() {
+                    if !cur_member_text.is_empty()
+                        && !cur_member_text.ends_with(' ')
+                        && !chunk_text.starts_with(' ')
+                    {
+                        cur_member_text.push(' ');
+                        cur_member_code.push(' ');
+                    }
+                    cur_member_text.push_str(&chunk_text);
+                    cur_member_code.push_str(&chunk_code);
+                }
+                cur_pos = next_pos(&current_scanned.segments, (event.seg_idx, event.char_idx));
+
+                if event.kind == StructuralEventKind::BaselineSemicolon {
+                    emit(
+                        lines,
+                        &mut pending_member_attrs,
+                        &mut cur_member_text,
+                        &mut cur_member_code,
+                    );
+                } else if event.kind == StructuralEventKind::BaselineOpenBrace {
+                    let is_method =
+                        classify_trait_member(&cur_member_code) == TraitMemberKind::Method;
+                    if is_method {
+                        emit(
+                            lines,
+                            &mut pending_member_attrs,
+                            &mut cur_member_text,
+                            &mut cur_member_code,
+                        );
+                        in_default_method_body = true;
+                    }
+                }
+            }
+            if !body_closed && !in_default_method_body && cur_pos.is_some() {
+                let remainder_text = current_scanned.render_visible_range(cur_pos, None);
+                let remainder_code = current_scanned.code_tokens_range(cur_pos, None);
+                if !remainder_text.trim().is_empty() {
+                    if !cur_member_text.is_empty()
+                        && !cur_member_text.ends_with(' ')
+                        && !remainder_text.starts_with(' ')
+                    {
+                        cur_member_text.push(' ');
+                        cur_member_code.push(' ');
+                    }
+                    cur_member_text.push_str(&remainder_text);
+                    cur_member_code.push_str(&remainder_code);
+                }
+            }
+        }
+    }
+
+    let mut body_remainder = None;
+    while !body_closed && (body_remainder.is_some() || *idx + 1 < src_lines.len()) {
+        let owned_line = body_remainder.take();
+        if owned_line.is_none() {
+            *idx += 1;
+        }
+        let line_text = owned_line.as_deref().unwrap_or(src_lines[*idx]);
+        if line_text.trim().is_empty() && item_lexer.state == LexState::Normal {
+            continue;
+        }
+
+        if in_default_method_body {
+            let sc = scan_logical_item_line(item_lexer, line_text, same_line_remainder);
+            let mut cur_pos = None;
+            for event in &sc.events {
+                if event.kind == StructuralEventKind::MethodBodyClose {
+                    in_default_method_body = false;
+                    cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                    break;
+                }
+            }
+            if in_default_method_body {
+                if item_lexer.brace_depth == 1 && item_lexer.macro_brace_stack.is_empty() {
+                    in_default_method_body = false;
+                } else if item_lexer.brace_depth == 0 {
+                    break;
+                }
+                continue;
+            }
+            if cur_pos.is_none() {
+                continue;
+            }
+            for event in &sc.events {
+                let Some(pos) = cur_pos else { break };
+                if event.seg_idx < pos.0 || (event.seg_idx == pos.0 && event.char_idx < pos.1) {
+                    continue;
+                }
+
+                if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                    let (chunk_text, chunk_code) = if let Some(limit) =
+                        prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
+                    {
+                        (
+                            sc.render_visible_range(cur_pos, Some(limit)),
+                            sc.code_tokens_range(cur_pos, Some(limit)),
+                        )
+                    } else {
+                        (String::new(), String::new())
+                    };
+                    if !chunk_text.trim().is_empty() {
+                        if !cur_member_text.is_empty()
+                            && !cur_member_text.ends_with(' ')
+                            && !chunk_text.starts_with(' ')
+                        {
+                            cur_member_text.push(' ');
+                            cur_member_code.push(' ');
+                        }
+                        cur_member_text.push_str(&chunk_text);
+                        cur_member_code.push_str(&chunk_code);
+                    }
+                    emit(
+                        lines,
+                        &mut pending_member_attrs,
+                        &mut cur_member_text,
+                        &mut cur_member_code,
+                    );
+                    body_closed = true;
+                    cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                    break;
+                }
+
+                let chunk_text =
+                    sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                let chunk_code =
+                    sc.code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                if !chunk_text.trim().is_empty() {
+                    if !cur_member_text.is_empty()
+                        && !cur_member_text.ends_with(' ')
+                        && !chunk_text.starts_with(' ')
+                    {
+                        cur_member_text.push(' ');
+                        cur_member_code.push(' ');
+                    }
+                    cur_member_text.push_str(&chunk_text);
+                    cur_member_code.push_str(&chunk_code);
+                }
+                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+
+                if event.kind == StructuralEventKind::BaselineSemicolon {
+                    emit(
+                        lines,
+                        &mut pending_member_attrs,
+                        &mut cur_member_text,
+                        &mut cur_member_code,
+                    );
+                } else if event.kind == StructuralEventKind::BaselineOpenBrace {
+                    let is_method =
+                        classify_trait_member(&cur_member_code) == TraitMemberKind::Method;
+                    if is_method {
+                        emit(
+                            lines,
+                            &mut pending_member_attrs,
+                            &mut cur_member_text,
+                            &mut cur_member_code,
+                        );
+                        in_default_method_body = true;
+                    }
+                }
+            }
+            if !body_closed && !in_default_method_body && cur_pos.is_some() {
+                let remainder_text = sc.render_visible_range(cur_pos, None);
+                let remainder_code = sc.code_tokens_range(cur_pos, None);
+                if !remainder_text.trim().is_empty() {
+                    if !cur_member_text.is_empty()
+                        && !cur_member_text.ends_with(' ')
+                        && !remainder_text.starts_with(' ')
+                    {
+                        cur_member_text.push(' ');
+                        cur_member_code.push(' ');
+                    }
+                    cur_member_text.push_str(&remainder_text);
+                    cur_member_code.push_str(&remainder_code);
+                }
+            }
+            continue;
+        }
+
+        if cur_member_text.trim().is_empty() && item_lexer.state == LexState::Normal {
+            let mut check_lexer = item_lexer.clone();
+            let check_sc = check_lexer.scan_line(line_text);
+            if is_outer_attribute_start(&check_sc.code_tokens) {
+                let captured = capture_attribute(src_lines, idx, item_lexer, line_text);
+                pending_member_attrs.push(captured.text);
+                if !captured.remainder.trim().is_empty() {
+                    body_remainder = Some(captured.remainder);
+                }
+                continue;
+            }
+        }
+
+        let was_escaped = item_lexer.state.is_escaped_continuation();
+        let continues_literal = item_lexer.state.is_in_string_literal();
+        let sc = scan_logical_item_line(item_lexer, line_text, same_line_remainder);
+
+        let mut cur_pos = Some((0, 0));
+        for event in &sc.events {
+            // A method whose entire body opens AND closes on this same
+            // physical line (e.g. `pub fn f() -> u32 { private_a() }`,
+            // itself immediately followed by more members on this same
+            // line or the next) must have that body-close event handled
+            // HERE too, not only when a skip was already in progress at
+            // the start of a physical line - otherwise `in_default_
+            // method_body` would stay incorrectly true past this line,
+            // discarding every member that follows.
+            if in_default_method_body {
+                if event.kind == StructuralEventKind::MethodBodyClose {
+                    in_default_method_body = false;
+                    cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                }
+                continue;
+            }
+
+            if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                let (chunk_text, chunk_code) =
+                    if let Some(limit) = prev_pos(&sc.segments, (event.seg_idx, event.char_idx)) {
+                        (
+                            sc.render_visible_range(cur_pos, Some(limit)),
+                            sc.code_tokens_range(cur_pos, Some(limit)),
+                        )
+                    } else {
+                        (String::new(), String::new())
+                    };
+                if was_escaped {
+                    cur_member_text.push_str(&chunk_text);
+                    cur_member_code.push_str(&chunk_code);
+                } else if continues_literal {
+                    cur_member_text.push('\n');
+                    cur_member_text.push_str(&chunk_text);
+                    cur_member_code.push_str(&chunk_code);
+                } else if !chunk_text.trim().is_empty() {
+                    if !cur_member_text.is_empty()
+                        && !cur_member_text.ends_with(' ')
+                        && !chunk_text.starts_with(' ')
+                    {
+                        cur_member_text.push(' ');
+                        cur_member_code.push(' ');
+                    }
+                    cur_member_text.push_str(&chunk_text);
+                    cur_member_code.push_str(&chunk_code);
+                }
+                emit(
+                    lines,
+                    &mut pending_member_attrs,
+                    &mut cur_member_text,
+                    &mut cur_member_code,
+                );
+                body_closed = true;
+                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                break;
+            }
+
+            let chunk_text =
+                sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+            let chunk_code = sc.code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+            if was_escaped {
+                cur_member_text.push_str(&chunk_text);
+                cur_member_code.push_str(&chunk_code);
+            } else if continues_literal {
+                cur_member_text.push('\n');
+                cur_member_text.push_str(&chunk_text);
+                cur_member_code.push_str(&chunk_code);
+            } else if !chunk_text.trim().is_empty() {
+                if !cur_member_text.is_empty()
+                    && !cur_member_text.ends_with(' ')
+                    && !chunk_text.starts_with(' ')
+                {
+                    cur_member_text.push(' ');
+                    cur_member_code.push(' ');
+                }
+                cur_member_text.push_str(&chunk_text);
+                cur_member_code.push_str(&chunk_code);
+            }
+            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+
+            if event.kind == StructuralEventKind::BaselineSemicolon {
+                emit(
+                    lines,
+                    &mut pending_member_attrs,
+                    &mut cur_member_text,
+                    &mut cur_member_code,
+                );
+            } else if event.kind == StructuralEventKind::BaselineOpenBrace {
+                let is_method = classify_trait_member(&cur_member_code) == TraitMemberKind::Method;
+                if is_method {
+                    emit(
+                        lines,
+                        &mut pending_member_attrs,
+                        &mut cur_member_text,
+                        &mut cur_member_code,
+                    );
+                    in_default_method_body = true;
+                }
+            }
+        }
+
+        if !body_closed && !in_default_method_body && cur_pos.is_some() {
+            let remainder_text = sc.render_visible_range(cur_pos, None);
+            let remainder_code = sc.code_tokens_range(cur_pos, None);
+            if was_escaped {
+                cur_member_text.push_str(&remainder_text);
+                cur_member_code.push_str(&remainder_code);
+            } else if continues_literal {
+                cur_member_text.push('\n');
+                cur_member_text.push_str(&remainder_text);
+                cur_member_code.push_str(&remainder_code);
+            } else if !remainder_text.trim().is_empty() {
+                if !cur_member_text.is_empty()
+                    && !cur_member_text.ends_with(' ')
+                    && !remainder_text.starts_with(' ')
+                {
+                    cur_member_text.push(' ');
+                    cur_member_code.push(' ');
+                }
+                cur_member_text.push_str(&remainder_text);
+                cur_member_code.push_str(&remainder_code);
+            }
+        }
+    }
+
+    if item_lexer.state == LexState::Normal {
+        item_lexer.reset_top_level_depths();
     }
 }
 
@@ -1791,9 +2472,25 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             continue;
         }
 
-        if is_public_code(&scanned.code_tokens) || is_incomplete_public_prefix(&scanned.code_tokens)
+        if is_public_code(&scanned.code_tokens)
+            || is_incomplete_public_prefix(&scanned.code_tokens)
+            || is_impl_start(&scanned.code_tokens)
+            || is_extern_block_start(&scanned.code_tokens)
         {
-            lines.append(&mut pending_attrs);
+            if is_impl_start(&scanned.code_tokens) || is_extern_block_start(&scanned.code_tokens) {
+                // An impl block (trait impl or inherent impl) or an
+                // extern block is never itself part of the public
+                // declaration inventory - its own header is never pushed
+                // either (see the branches below). A leading attribute
+                // conceptually applies to the WHOLE block, not to
+                // whichever public member happens to be captured next,
+                // so it is dropped here rather than mis-attached -
+                // matching this scanner's pre-existing behavior of not
+                // seeing trait impls (and their attributes) at all.
+                pending_attrs.clear();
+            } else {
+                lines.append(&mut pending_attrs);
+            }
 
             let mut current_scanned = scanned;
             let mut prefix_text = current_scanned.render_visible();
@@ -2470,12 +3167,15 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 .render_visible_range(Some(start), semicolon_pos(&current_scanned))
                         },
                     );
+                    let mut suffix_code = String::new();
                     while semicolon_pos(&current_scanned).is_none() {
                         assert!(
                             idx + 1 < src_lines.len(),
                             "unterminated public tuple struct in {path}"
                         );
                         idx += 1;
+                        let was_escaped = item_lexer.state.is_escaped_continuation();
+                        let continues_literal = item_lexer.state.is_in_string_literal();
                         current_scanned = scan_logical_item_line(
                             &mut item_lexer,
                             src_lines[idx],
@@ -2483,10 +3183,25 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         );
                         let rendered = current_scanned
                             .render_visible_range(None, semicolon_pos(&current_scanned));
-                        if !suffix.is_empty() && !rendered.is_empty() {
-                            suffix.push(' ');
-                        }
-                        suffix.push_str(&rendered);
+                        let rendered_code = current_scanned
+                            .code_tokens_range(None, semicolon_pos(&current_scanned));
+                        // Same continuation-aware join every other multi-
+                        // line accumulator in this file uses - a naive
+                        // "always insert one space between chunks" join
+                        // (the previous behavior here) cannot distinguish
+                        // a literal genuinely continuing across physical
+                        // lines from ordinary code wrapping, so it
+                        // silently collapsed a real embedded newline
+                        // inside a where-clause macro literal into a
+                        // single space.
+                        append_code_chunk(
+                            &mut suffix,
+                            &mut suffix_code,
+                            &rendered,
+                            &rendered_code,
+                            was_escaped,
+                            continues_literal,
+                        );
                     }
 
                     let tuple_fields = normalized_public_surface_str(
@@ -2800,498 +3515,143 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             }
 
             if is_public_trait(&combined_code_tokens) {
-                let mut trait_header = if current_scanned.has_top_level_open_brace {
-                    let up_to_brace = current_scanned.text_up_to_function_body_open_brace();
-                    let rendered_last = current_scanned.render_visible();
-                    if prefix_text.ends_with(&rendered_last) {
-                        let prefix_head = &prefix_text[..prefix_text.len() - rendered_last.len()];
-                        format!("{prefix_head}{up_to_brace}")
-                    } else {
-                        up_to_brace
-                    }
-                } else {
-                    prefix_text
-                };
-
-                let mut body_open = current_scanned.has_top_level_open_brace;
-
-                while !body_open && idx + 1 < src_lines.len() {
+                scan_baseline_member_body(
+                    &mut lines,
+                    &src_lines,
+                    &mut idx,
+                    &mut item_lexer,
+                    &mut same_line_remainder,
+                    &current_scanned,
+                    prefix_text,
+                    true,
+                    |_member_code: &str| true,
+                );
+                file_lexer = item_lexer.clone();
+                if same_line_remainder.is_none() {
                     idx += 1;
-                    let continuation = src_lines[idx];
-                    if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
+                }
+                continue;
+            }
+
+            if is_impl_start(&combined_code_tokens) {
+                while !current_scanned.has_top_level_open_brace && idx + 1 < src_lines.len() {
+                    idx += 1;
+                    let next_line = src_lines[idx];
+                    if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
-                    let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
                     let sc = scan_logical_item_line(
                         &mut item_lexer,
-                        continuation,
+                        next_line,
                         &mut same_line_remainder,
                     );
                     let rendered = sc.render_visible();
-                    body_open = sc.has_top_level_open_brace;
-                    if was_escaped {
-                        trait_header.push_str(&rendered);
-                        continue;
-                    }
                     if continues_literal {
-                        trait_header.push('\n');
-                        trait_header.push_str(&rendered);
-                        continue;
+                        prefix_text.push('\n');
+                        prefix_text.push_str(&rendered);
+                    } else {
+                        let trimmed_rendered = rendered.trim();
+                        if !trimmed_rendered.is_empty() || sc.ends_in_string_literal {
+                            if !prefix_text.ends_with(' ')
+                                && !prefix_text.ends_with('(')
+                                && !trimmed_rendered.starts_with(')')
+                            {
+                                prefix_text.push(' ');
+                            }
+                            prefix_text.push_str(trimmed_rendered);
+                        }
                     }
-                    if rendered.trim().is_empty() {
-                        continue;
+                    let trimmed_code = sc.code_tokens.trim();
+                    if !trimmed_code.is_empty() {
+                        if !combined_code_tokens.ends_with(' ')
+                            && !combined_code_tokens.ends_with('(')
+                            && !trimmed_code.starts_with(')')
+                        {
+                            combined_code_tokens.push(' ');
+                        }
+                        combined_code_tokens.push_str(trimmed_code);
                     }
-                    if !trait_header.ends_with(' ') && !rendered.starts_with(' ') {
-                        trait_header.push(' ');
-                    }
-                    trait_header.push_str(&rendered);
+                    current_scanned = sc;
                 }
 
-                lines.push(trait_header);
-
-                let mut pending_trait_attrs = Vec::new();
-                let mut cur_member_text = String::new();
-                let mut cur_member_code = String::new();
-                let mut in_default_method_body = false;
-                let mut trait_body_closed = false;
-
-                // Process remainder of opening line (if any)
-                if let Some(open_brace_pos) = current_scanned.first_top_level_open_brace_seg {
-                    if let Some(start_pos) = next_pos(&current_scanned.segments, open_brace_pos) {
-                        let mut cur_pos = Some(start_pos);
-                        for event in &current_scanned.events {
-                            if event.kind == StructuralEventKind::TopLevelOpenBrace {
-                                continue;
-                            }
-                            if event.seg_idx < start_pos.0
-                                || (event.seg_idx == start_pos.0 && event.char_idx < start_pos.1)
-                            {
-                                continue;
-                            }
-
-                            if in_default_method_body {
-                                if event.kind == StructuralEventKind::MethodBodyClose {
-                                    in_default_method_body = false;
-                                    cur_pos = next_pos(
-                                        &current_scanned.segments,
-                                        (event.seg_idx, event.char_idx),
-                                    );
-                                }
-                                continue;
-                            }
-
-                            if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                                let (chunk_text, chunk_code) = if let Some(limit) = prev_pos(
-                                    &current_scanned.segments,
-                                    (event.seg_idx, event.char_idx),
-                                ) {
-                                    (
-                                        current_scanned.render_visible_range(cur_pos, Some(limit)),
-                                        current_scanned.code_tokens_range(cur_pos, Some(limit)),
-                                    )
-                                } else {
-                                    (String::new(), String::new())
-                                };
-                                if !chunk_text.trim().is_empty() {
-                                    if !cur_member_text.is_empty()
-                                        && !cur_member_text.ends_with(' ')
-                                        && !chunk_text.starts_with(' ')
-                                    {
-                                        cur_member_text.push(' ');
-                                        cur_member_code.push(' ');
-                                    }
-                                    cur_member_text.push_str(&chunk_text);
-                                    cur_member_code.push_str(&chunk_code);
-                                }
-                                let trimmed_text =
-                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
-                                if !trimmed_text.is_empty() {
-                                    lines.append(&mut pending_trait_attrs);
-                                    lines.push(trimmed_text);
-                                } else {
-                                    pending_trait_attrs.clear();
-                                }
-                                cur_member_text.clear();
-                                cur_member_code.clear();
-                                trait_body_closed = true;
-                                cur_pos = next_pos(
-                                    &current_scanned.segments,
-                                    (event.seg_idx, event.char_idx),
-                                );
-                                break;
-                            }
-
-                            let chunk_text = current_scanned.render_visible_range(
-                                cur_pos,
-                                Some((event.seg_idx, event.char_idx)),
-                            );
-                            let chunk_code = current_scanned
-                                .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                            if !chunk_text.trim().is_empty() {
-                                if !cur_member_text.is_empty()
-                                    && !cur_member_text.ends_with(' ')
-                                    && !chunk_text.starts_with(' ')
-                                {
-                                    cur_member_text.push(' ');
-                                    cur_member_code.push(' ');
-                                }
-                                cur_member_text.push_str(&chunk_text);
-                                cur_member_code.push_str(&chunk_code);
-                            }
-                            cur_pos = next_pos(
-                                &current_scanned.segments,
-                                (event.seg_idx, event.char_idx),
-                            );
-
-                            if event.kind == StructuralEventKind::BaselineSemicolon {
-                                let trimmed_text =
-                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
-                                if !trimmed_text.is_empty() {
-                                    lines.append(&mut pending_trait_attrs);
-                                    lines.push(trimmed_text);
-                                } else {
-                                    pending_trait_attrs.clear();
-                                }
-                                cur_member_text.clear();
-                                cur_member_code.clear();
-                            } else if event.kind == StructuralEventKind::BaselineOpenBrace {
-                                let is_method = classify_trait_member(&cur_member_code)
-                                    == TraitMemberKind::Method;
-                                if is_method {
-                                    let trimmed_text = emit_captured_fragment(&cur_member_text)
-                                        .unwrap_or_default();
-                                    if !trimmed_text.is_empty() {
-                                        lines.append(&mut pending_trait_attrs);
-                                        lines.push(trimmed_text);
-                                    } else {
-                                        pending_trait_attrs.clear();
-                                    }
-                                    cur_member_text.clear();
-                                    cur_member_code.clear();
-                                    in_default_method_body = true;
-                                }
-                            }
-                        }
-                        if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
-                            let remainder_text =
-                                current_scanned.render_visible_range(cur_pos, None);
-                            let remainder_code = current_scanned.code_tokens_range(cur_pos, None);
-                            if !remainder_text.trim().is_empty() {
-                                if !cur_member_text.is_empty()
-                                    && !cur_member_text.ends_with(' ')
-                                    && !remainder_text.starts_with(' ')
-                                {
-                                    cur_member_text.push(' ');
-                                    cur_member_code.push(' ');
-                                }
-                                cur_member_text.push_str(&remainder_text);
-                                cur_member_code.push_str(&remainder_code);
-                            }
-                        }
-                    }
+                // Trait impls (`impl Trait for Type { ... }`) never carry
+                // explicit visibility on their own items (Rust forbids
+                // `pub` there - visibility is inherited from the trait),
+                // so they can never contribute an inherent public scope;
+                // consume the body structurally (so its lines are not
+                // independently re-evaluated) without emitting anything
+                // from it, matching the pre-existing behavior where trait
+                // impls were invisible to this scanner entirely.
+                let is_inherent = is_inherent_impl_header(&combined_code_tokens);
+                scan_baseline_member_body(
+                    &mut lines,
+                    &src_lines,
+                    &mut idx,
+                    &mut item_lexer,
+                    &mut same_line_remainder,
+                    &current_scanned,
+                    prefix_text,
+                    false,
+                    |member_code: &str| is_inherent && is_public_code(member_code),
+                );
+                file_lexer = item_lexer.clone();
+                if same_line_remainder.is_none() {
+                    idx += 1;
                 }
+                continue;
+            }
 
-                let mut trait_remainder = None;
-                while !trait_body_closed && (trait_remainder.is_some() || idx + 1 < src_lines.len())
-                {
-                    let owned_line = trait_remainder.take();
-                    if owned_line.is_none() {
-                        idx += 1;
-                    }
-                    let line_text = owned_line.as_deref().unwrap_or(src_lines[idx]);
-                    if line_text.trim().is_empty() && item_lexer.state == LexState::Normal {
+            if is_extern_block_start(&combined_code_tokens) {
+                while !current_scanned.has_top_level_open_brace && idx + 1 < src_lines.len() {
+                    idx += 1;
+                    let next_line = src_lines[idx];
+                    if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
-
-                    if in_default_method_body {
-                        let sc = scan_logical_item_line(
-                            &mut item_lexer,
-                            line_text,
-                            &mut same_line_remainder,
-                        );
-                        let mut cur_pos = None;
-                        for event in &sc.events {
-                            if event.kind == StructuralEventKind::MethodBodyClose {
-                                in_default_method_body = false;
-                                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
-                                break;
-                            }
-                        }
-                        if in_default_method_body {
-                            if item_lexer.brace_depth == 1
-                                && item_lexer.macro_brace_stack.is_empty()
-                            {
-                                in_default_method_body = false;
-                            } else if item_lexer.brace_depth == 0 {
-                                break;
-                            }
-                            continue;
-                        }
-                        if cur_pos.is_none() {
-                            continue;
-                        }
-                        for event in &sc.events {
-                            let Some(pos) = cur_pos else { break };
-                            if event.seg_idx < pos.0
-                                || (event.seg_idx == pos.0 && event.char_idx < pos.1)
-                            {
-                                continue;
-                            }
-
-                            if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                                let (chunk_text, chunk_code) = if let Some(limit) =
-                                    prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
-                                {
-                                    (
-                                        sc.render_visible_range(cur_pos, Some(limit)),
-                                        sc.code_tokens_range(cur_pos, Some(limit)),
-                                    )
-                                } else {
-                                    (String::new(), String::new())
-                                };
-                                if !chunk_text.trim().is_empty() {
-                                    if !cur_member_text.is_empty()
-                                        && !cur_member_text.ends_with(' ')
-                                        && !chunk_text.starts_with(' ')
-                                    {
-                                        cur_member_text.push(' ');
-                                        cur_member_code.push(' ');
-                                    }
-                                    cur_member_text.push_str(&chunk_text);
-                                    cur_member_code.push_str(&chunk_code);
-                                }
-                                let trimmed_text =
-                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
-                                if !trimmed_text.is_empty() {
-                                    lines.append(&mut pending_trait_attrs);
-                                    lines.push(trimmed_text);
-                                } else {
-                                    pending_trait_attrs.clear();
-                                }
-                                cur_member_text.clear();
-                                cur_member_code.clear();
-                                trait_body_closed = true;
-                                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
-                                break;
-                            }
-
-                            let chunk_text = sc.render_visible_range(
-                                cur_pos,
-                                Some((event.seg_idx, event.char_idx)),
-                            );
-                            let chunk_code = sc
-                                .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                            if !chunk_text.trim().is_empty() {
-                                if !cur_member_text.is_empty()
-                                    && !cur_member_text.ends_with(' ')
-                                    && !chunk_text.starts_with(' ')
-                                {
-                                    cur_member_text.push(' ');
-                                    cur_member_code.push(' ');
-                                }
-                                cur_member_text.push_str(&chunk_text);
-                                cur_member_code.push_str(&chunk_code);
-                            }
-                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
-
-                            if event.kind == StructuralEventKind::BaselineSemicolon {
-                                let trimmed_text =
-                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
-                                if !trimmed_text.is_empty() {
-                                    lines.append(&mut pending_trait_attrs);
-                                    lines.push(trimmed_text);
-                                } else {
-                                    pending_trait_attrs.clear();
-                                }
-                                cur_member_text.clear();
-                                cur_member_code.clear();
-                            } else if event.kind == StructuralEventKind::BaselineOpenBrace {
-                                let is_method = classify_trait_member(&cur_member_code)
-                                    == TraitMemberKind::Method;
-                                if is_method {
-                                    let trimmed_text = emit_captured_fragment(&cur_member_text)
-                                        .unwrap_or_default();
-                                    if !trimmed_text.is_empty() {
-                                        lines.append(&mut pending_trait_attrs);
-                                        lines.push(trimmed_text);
-                                    } else {
-                                        pending_trait_attrs.clear();
-                                    }
-                                    cur_member_text.clear();
-                                    cur_member_code.clear();
-                                    in_default_method_body = true;
-                                }
-                            }
-                        }
-                        if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
-                            let remainder_text = sc.render_visible_range(cur_pos, None);
-                            let remainder_code = sc.code_tokens_range(cur_pos, None);
-                            if !remainder_text.trim().is_empty() {
-                                if !cur_member_text.is_empty()
-                                    && !cur_member_text.ends_with(' ')
-                                    && !remainder_text.starts_with(' ')
-                                {
-                                    cur_member_text.push(' ');
-                                    cur_member_code.push(' ');
-                                }
-                                cur_member_text.push_str(&remainder_text);
-                                cur_member_code.push_str(&remainder_code);
-                            }
-                        }
-                        continue;
-                    }
-
-                    if cur_member_text.trim().is_empty() && item_lexer.state == LexState::Normal {
-                        let mut check_lexer = item_lexer.clone();
-                        let check_sc = check_lexer.scan_line(line_text);
-                        if is_outer_attribute_start(&check_sc.code_tokens) {
-                            let captured =
-                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, line_text);
-                            pending_trait_attrs.push(captured.text);
-                            if !captured.remainder.trim().is_empty() {
-                                trait_remainder = Some(captured.remainder);
-                            }
-                            continue;
-                        }
-                    }
-
-                    let was_escaped = item_lexer.state.is_escaped_continuation();
                     let continues_literal = item_lexer.state.is_in_string_literal();
                     let sc = scan_logical_item_line(
                         &mut item_lexer,
-                        line_text,
+                        next_line,
                         &mut same_line_remainder,
                     );
-
-                    let mut cur_pos = Some((0, 0));
-                    for event in &sc.events {
-                        if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                            let (chunk_text, chunk_code) = if let Some(limit) =
-                                prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
+                    let rendered = sc.render_visible();
+                    if continues_literal {
+                        prefix_text.push('\n');
+                        prefix_text.push_str(&rendered);
+                    } else {
+                        let trimmed_rendered = rendered.trim();
+                        if !trimmed_rendered.is_empty() || sc.ends_in_string_literal {
+                            if !prefix_text.ends_with(' ')
+                                && !prefix_text.ends_with('(')
+                                && !trimmed_rendered.starts_with(')')
                             {
-                                (
-                                    sc.render_visible_range(cur_pos, Some(limit)),
-                                    sc.code_tokens_range(cur_pos, Some(limit)),
-                                )
-                            } else {
-                                (String::new(), String::new())
-                            };
-                            if was_escaped {
-                                cur_member_text.push_str(&chunk_text);
-                                cur_member_code.push_str(&chunk_code);
-                            } else if continues_literal {
-                                cur_member_text.push('\n');
-                                cur_member_text.push_str(&chunk_text);
-                                cur_member_code.push_str(&chunk_code);
-                            } else if !chunk_text.trim().is_empty() {
-                                if !cur_member_text.is_empty()
-                                    && !cur_member_text.ends_with(' ')
-                                    && !chunk_text.starts_with(' ')
-                                {
-                                    cur_member_text.push(' ');
-                                    cur_member_code.push(' ');
-                                }
-                                cur_member_text.push_str(&chunk_text);
-                                cur_member_code.push_str(&chunk_code);
+                                prefix_text.push(' ');
                             }
-                            let trimmed_text =
-                                emit_captured_fragment(&cur_member_text).unwrap_or_default();
-                            if !trimmed_text.is_empty() {
-                                lines.append(&mut pending_trait_attrs);
-                                lines.push(trimmed_text);
-                            } else {
-                                pending_trait_attrs.clear();
-                            }
-                            cur_member_text.clear();
-                            cur_member_code.clear();
-                            trait_body_closed = true;
-                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
-                            break;
-                        }
-
-                        let chunk_text =
-                            sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                        let chunk_code =
-                            sc.code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                        if was_escaped {
-                            cur_member_text.push_str(&chunk_text);
-                            cur_member_code.push_str(&chunk_code);
-                        } else if continues_literal {
-                            cur_member_text.push('\n');
-                            cur_member_text.push_str(&chunk_text);
-                            cur_member_code.push_str(&chunk_code);
-                        } else if !chunk_text.trim().is_empty() {
-                            if !cur_member_text.is_empty()
-                                && !cur_member_text.ends_with(' ')
-                                && !chunk_text.starts_with(' ')
-                            {
-                                cur_member_text.push(' ');
-                                cur_member_code.push(' ');
-                            }
-                            cur_member_text.push_str(&chunk_text);
-                            cur_member_code.push_str(&chunk_code);
-                        }
-                        cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
-
-                        if event.kind == StructuralEventKind::BaselineSemicolon {
-                            let trimmed_text =
-                                emit_captured_fragment(&cur_member_text).unwrap_or_default();
-                            if !trimmed_text.is_empty() {
-                                lines.append(&mut pending_trait_attrs);
-                                lines.push(trimmed_text);
-                            } else {
-                                pending_trait_attrs.clear();
-                            }
-                            cur_member_text.clear();
-                            cur_member_code.clear();
-                        } else if event.kind == StructuralEventKind::BaselineOpenBrace {
-                            let is_method =
-                                classify_trait_member(&cur_member_code) == TraitMemberKind::Method;
-                            if is_method {
-                                let trimmed_text =
-                                    emit_captured_fragment(&cur_member_text).unwrap_or_default();
-                                if !trimmed_text.is_empty() {
-                                    lines.append(&mut pending_trait_attrs);
-                                    lines.push(trimmed_text);
-                                } else {
-                                    pending_trait_attrs.clear();
-                                }
-                                cur_member_text.clear();
-                                cur_member_code.clear();
-                                in_default_method_body = true;
-                            }
+                            prefix_text.push_str(trimmed_rendered);
                         }
                     }
-
-                    if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
-                        let remainder_text = sc.render_visible_range(cur_pos, None);
-                        let remainder_code = sc.code_tokens_range(cur_pos, None);
-                        if was_escaped {
-                            cur_member_text.push_str(&remainder_text);
-                            cur_member_code.push_str(&remainder_code);
-                        } else if continues_literal {
-                            cur_member_text.push('\n');
-                            cur_member_text.push_str(&remainder_text);
-                            cur_member_code.push_str(&remainder_code);
-                        } else if !remainder_text.trim().is_empty() {
-                            if !cur_member_text.is_empty()
-                                && !cur_member_text.ends_with(' ')
-                                && !remainder_text.starts_with(' ')
-                            {
-                                cur_member_text.push(' ');
-                                cur_member_code.push(' ');
-                            }
-                            cur_member_text.push_str(&remainder_text);
-                            cur_member_code.push_str(&remainder_code);
-                        }
-                    }
+                    current_scanned = sc;
                 }
 
-                if item_lexer.state == LexState::Normal {
-                    item_lexer.reset_top_level_depths();
-                }
-                file_lexer = item_lexer;
+                // Foreign items inside an extern block have no method-
+                // body-skip concern (declarations only, no bodies), and
+                // no trait-impl-style ambiguity - every member is either
+                // explicitly visible or not, exactly like an inherent
+                // impl's own members. The block header itself is not
+                // part of the public declaration inventory, same as impl.
+                scan_baseline_member_body(
+                    &mut lines,
+                    &src_lines,
+                    &mut idx,
+                    &mut item_lexer,
+                    &mut same_line_remainder,
+                    &current_scanned,
+                    prefix_text,
+                    false,
+                    |member_code: &str| is_public_code(member_code),
+                );
+                file_lexer = item_lexer.clone();
                 if same_line_remainder.is_none() {
                     idx += 1;
                 }
@@ -7301,4 +7661,584 @@ fn public_api_guard_preserves_raw_strings_in_enum_variants() {
             "{label} literal whitespace collapsed; two={two:?}, one={one:?}"
         );
     }
+}
+
+#[test]
+fn public_api_guard_string_continuation_survives_whitespace_only_lines() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 2A: false-negative collision. Built via explicit `\n`/`\\` construction
+    // (not Rust source-literal continuation), so the scanner receives the
+    // intended bytes verbatim: a real backslash immediately before a real
+    // LF, then a whitespace-only physical line, then another LF before the
+    // resuming content.
+    let escaped_then_blank = "pub const S: &str = \"foo\\\n    \nbar\";";
+    assert!(
+        escaped_then_blank.contains("foo\\\n"),
+        "fixture must contain a real backslash immediately before a real LF"
+    );
+    assert!(
+        escaped_then_blank.contains("\\\n    \n"),
+        "fixture must contain a whitespace-only physical line between the two LFs"
+    );
+    let real_newline = "pub const S: &str = \"foo\nbar\";";
+    assert_ne!(
+        surface(escaped_then_blank),
+        surface(real_newline),
+        "an escaped continuation across a whitespace-only line collided with a genuine embedded newline"
+    );
+
+    // 2B: semantic equivalence matrix - all represent the payload "foobar".
+    let plain = "pub const S: &str = \"foobar\";";
+    let one_line_tight = "pub const S: &str = \"foo\\\nbar\";";
+    let one_line_indented = "pub const S: &str = \"foo\\\n    bar\";";
+    let two_lines_blank_then_indented = "pub const S: &str = \"foo\\\n    \n        bar\";";
+    for (variant, label) in [
+        (
+            one_line_tight,
+            "one continuation line, no leading whitespace",
+        ),
+        (
+            one_line_indented,
+            "one continuation line, with leading whitespace",
+        ),
+        (
+            two_lines_blank_then_indented,
+            "whitespace-only line then an indented resuming line",
+        ),
+    ] {
+        assert_eq!(
+            surface(plain),
+            surface(variant),
+            "{label} did not canonicalize to the same payload as a plain literal"
+        );
+    }
+
+    // A genuine embedded newline must remain distinct from every
+    // escaped-continuation form above.
+    assert_ne!(surface(plain), surface(real_newline));
+    assert_ne!(surface(one_line_tight), surface(real_newline));
+
+    // 2C: byte strings - repeat the critical collision and equivalence
+    // cases under Rust's byte-string continuation semantics (identical to
+    // normal strings).
+    let byte_escaped_then_blank = "pub const S: &[u8] = b\"foo\\\n    \nbar\";";
+    let byte_real_newline = "pub const S: &[u8] = b\"foo\nbar\";";
+    let byte_plain = "pub const S: &[u8] = b\"foobar\";";
+    assert_ne!(
+        surface(byte_escaped_then_blank),
+        surface(byte_real_newline),
+        "byte-string continuation across a whitespace-only line collided with a genuine embedded newline"
+    );
+    assert_eq!(
+        surface(byte_plain),
+        surface(byte_escaped_then_blank),
+        "byte-string continuation across a whitespace-only line did not canonicalize to the plain payload"
+    );
+
+    // 2D: C strings. CodeLexer has no dedicated C-string grammar - `c"..."`
+    // is recognized as ordinary code (`c`) immediately followed by a plain
+    // string literal (`"..."`), which is exactly the right boundary for
+    // capture purposes (the `c` prefix affects the literal's TYPE, not its
+    // payload), so the same NormalString/NormalStringContinuation fix
+    // covers it with no separate grammar.
+    let c_string_escaped_then_blank = "pub const S: &core::ffi::CStr = c\"foo\\\n    \nbar\";";
+    let c_string_real_newline = "pub const S: &core::ffi::CStr = c\"foo\nbar\";";
+    let c_string_plain = "pub const S: &core::ffi::CStr = c\"foobar\";";
+    assert_ne!(
+        surface(c_string_escaped_then_blank),
+        surface(c_string_real_newline),
+        "C-string continuation across a whitespace-only line collided with a genuine embedded newline"
+    );
+    assert_eq!(
+        surface(c_string_plain),
+        surface(c_string_escaped_then_blank),
+        "C-string continuation across a whitespace-only line did not canonicalize to the plain payload"
+    );
+
+    // Raw (C) strings have no escape-continuation semantics at all - every
+    // byte between the delimiters is literal, already guaranteed by the
+    // raw-string literal-preservation fix. One regression per shape
+    // confirms the `c`/`cr`/`cr#` prefix does not disturb that boundary.
+    assert_ne!(
+        surface("pub const S: &str = r#\"a  b\"#;"),
+        surface("pub const S: &str = r#\"a b\"#;"),
+        "raw string literal whitespace must remain unaffected by continuation handling"
+    );
+    assert_ne!(
+        surface("pub const S: &core::ffi::CStr = cr#\"a  b\"#;"),
+        surface("pub const S: &core::ffi::CStr = cr#\"a b\"#;"),
+        "raw C-string literal whitespace must remain unaffected by continuation handling"
+    );
+}
+
+#[test]
+fn public_api_guard_enum_discriminant_comparison_does_not_poison_generic_depth() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    let base = "const A0: i32 = 1;\nconst B0: i32 = 2;\n\npub enum E {\n    \
+                A = { if A0 < B0 { 1 } else { 2 } },\n    B = 3,\n}\n";
+    let mutated_following_variant = "const A0: i32 = 1;\nconst B0: i32 = 2;\n\npub enum E {\n    \
+                A = { if A0 < B0 { 1 } else { 2 } },\n    B = 4,\n}\n";
+    let mutated_block_value = "const A0: i32 = 1;\nconst B0: i32 = 2;\n\npub enum E {\n    \
+                A = { if A0 < B0 { 9 } else { 2 } },\n    B = 3,\n}\n";
+
+    assert_ne!(
+        surface(base),
+        surface(mutated_following_variant),
+        "mutating the FOLLOWING variant B's discriminant must change the surface - if it does \
+         not, the `<` in A's discriminant left angle_depth stale past A's own declaration"
+    );
+    assert_ne!(
+        surface(base),
+        surface(mutated_block_value),
+        "mutating the block-expression value inside A's own discriminant must change the surface"
+    );
+}
+
+#[test]
+fn public_api_guard_trait_associated_const_comparison_does_not_poison_following_members() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    let base = "const A0: i32 = 1;\nconst B0: i32 = 2;\nconst C0: i32 = 3;\n\n\
+                pub trait T {\n    const LESS: bool = A0 < B0;\n    fn f() -> u32;\n}\n\n\
+                pub const NEXT: u32 = 7;\n";
+    let mutated_comparison_rhs = "const A0: i32 = 1;\nconst B0: i32 = 2;\nconst C0: i32 = 3;\n\n\
+                pub trait T {\n    const LESS: bool = A0 < C0;\n    fn f() -> u32;\n}\n\n\
+                pub const NEXT: u32 = 7;\n";
+    let mutated_method_sig = "const A0: i32 = 1;\nconst B0: i32 = 2;\nconst C0: i32 = 3;\n\n\
+                pub trait T {\n    const LESS: bool = A0 < B0;\n    fn f() -> u64;\n}\n\n\
+                pub const NEXT: u32 = 7;\n";
+    let mutated_next = "const A0: i32 = 1;\nconst B0: i32 = 2;\nconst C0: i32 = 3;\n\n\
+                pub trait T {\n    const LESS: bool = A0 < B0;\n    fn f() -> u32;\n}\n\n\
+                pub const NEXT: u32 = 8;\n";
+
+    assert_ne!(
+        surface(base),
+        surface(mutated_comparison_rhs),
+        "A0 < B0 -> A0 < C0 must change the surface (the comparison's own operand is part of \
+         the public contract)"
+    );
+    assert_ne!(
+        surface(base),
+        surface(mutated_method_sig),
+        "the FOLLOWING required method's signature (u32 -> u64) must still be inventoried and \
+         change the surface - proving `<` in the preceding associated const did not leave a \
+         stale angle_depth that swallows or misparses this method"
+    );
+    assert_ne!(
+        surface(base),
+        surface(mutated_next),
+        "the top-level declaration AFTER the trait body must remain separately inventoried and \
+         change the surface"
+    );
+    let base_surface = surface(base);
+    assert!(
+        base_surface.contains("fn f() -> u32;"),
+        "required method must remain inventoried: {base_surface:?}"
+    );
+    assert!(
+        base_surface.contains("pub const NEXT: u32 = 7;"),
+        "NEXT must remain a separate top-level public declaration: {base_surface:?}"
+    );
+
+    // Default method: signature mutation differs, private body mutation does not.
+    let default_body_a = "const A0: i32 = 1;\nconst B0: i32 = 2;\n\n\
+                pub trait T {\n    const LESS: bool = A0 < B0;\n\n    \
+                fn f() -> u32 {\n        private_a()\n    }\n}\n";
+    let default_body_b = "const A0: i32 = 1;\nconst B0: i32 = 2;\n\n\
+                pub trait T {\n    const LESS: bool = A0 < B0;\n\n    \
+                fn f() -> u32 {\n        private_b()\n    }\n}\n";
+    let default_sig_u64 = "const A0: i32 = 1;\nconst B0: i32 = 2;\n\n\
+                pub trait T {\n    const LESS: bool = A0 < B0;\n\n    \
+                fn f() -> u64 {\n        private_a()\n    }\n}\n";
+    assert_eq!(
+        surface(default_body_a),
+        surface(default_body_b),
+        "default method body-only mutation (private_a -> private_b) must not change the surface"
+    );
+    assert_ne!(
+        surface(default_body_a),
+        surface(default_sig_u64),
+        "default method signature mutation (u32 -> u64) must change the surface"
+    );
+}
+
+#[test]
+fn public_api_guard_const_expression_operator_matrix_preserves_generics() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // Every relational/shift operator, in an enum discriminant context,
+    // must not corrupt generic depth for the following variant.
+    for (op, a_val, b_val) in [
+        ("<", "3", "4"),
+        (">", "4", "3"),
+        ("<=", "3", "4"),
+        (">=", "4", "3"),
+        ("<<", "1", "2"),
+        (">>", "8", "4"),
+    ] {
+        let build = |b: &str| {
+            format!(
+                "const A0: i32 = {a_val};\nconst B0: i32 = {b_val};\n\npub enum E {{\n    \
+                 A = {{ if A0 {op} B0 {{ 1 }} else {{ 2 }} }},\n    B = {b},\n}}\n"
+            )
+        };
+        assert_ne!(
+            surface(&build("3")),
+            surface(&build("4")),
+            "operator `{op}` in a discriminant expression must not poison depth past A's own \
+             declaration - the following variant B must still be independently inventoried"
+        );
+    }
+    // Compound-assignment shift operators, in an enum discriminant context
+    // (the trait-associated-const-block-then-method shape below hits a
+    // separate, pre-existing scanner limitation unrelated to this fix -
+    // see the confirmed-pre-existing note in the commit message; this
+    // matrix intentionally sticks to the already-proven-robust enum
+    // construction for these two operators).
+    for (op, a_val, b_val) in [("<<=", "1", "2"), (">>=", "8", "4")] {
+        let build = |b: &str| {
+            format!(
+                "const A0: i32 = {a_val};\nconst B0: i32 = {b_val};\n\npub enum E {{\n    \
+                 A = {{ let mut x = A0; x {op} B0; x as isize }},\n    B = {b},\n}}\n"
+            )
+        };
+        assert_ne!(
+            surface(&build("3")),
+            surface(&build("4")),
+            "compound-assignment operator `{op}` in a discriminant expression must not poison \
+             depth past A's own declaration - the following variant B must still be \
+             independently inventoried"
+        );
+    }
+
+    // Existing generic shapes must remain unaffected by this round's change.
+    let generic_cases = [
+        "pub fn f() -> Foo<Bar<Baz>> { g() }",
+        "pub struct S<const N: Vec2<{ 1 }>>;",
+        "pub fn f<T: Trait>() -> <T as Trait>::Assoc { g() }",
+        "pub const N: usize = core::mem::size_of::<Option<Result<u8, u16>>>();",
+    ];
+    for src in generic_cases {
+        // Must not panic and must produce a stable, non-empty surface -
+        // the acceptance bar here is that generic syntax keeps parsing as
+        // generics (asserted precisely by the existing dedicated
+        // regressions for each shape); this is a smoke check that this
+        // round's change does not disturb them when run adjacently.
+        let rendered = surface(src);
+        assert!(!rendered.trim().is_empty(), "must still parse: {src}");
+    }
+
+    // Turbofish specifically inside an enum discriminant and inside a
+    // trait associated-const initializer must still open/close a real
+    // generic frame (not be treated as a comparison).
+    let turbofish_enum_a = "pub enum E {\n    \
+                A = core::mem::size_of::<Option<u32>>() as isize,\n    B = 1,\n}\n";
+    let turbofish_enum_b = "pub enum E {\n    \
+                A = core::mem::size_of::<Option<u64>>() as isize,\n    B = 1,\n}\n";
+    assert_ne!(
+        surface(turbofish_enum_a),
+        surface(turbofish_enum_b),
+        "turbofish generic argument inside an enum discriminant must remain significant"
+    );
+    let turbofish_enum_b_mut = "pub enum E {\n    \
+                A = core::mem::size_of::<Option<u32>>() as isize,\n    B = 2,\n}\n";
+    assert_ne!(
+        surface(turbofish_enum_a),
+        surface(turbofish_enum_b_mut),
+        "the following variant B must remain independently inventoried after a turbofish-\
+         bearing discriminant"
+    );
+
+    let turbofish_trait_a = "pub trait T {\n    \
+                const N: usize = core::mem::size_of::<Option<u32>>();\n    fn f() -> u32;\n}\n";
+    let turbofish_trait_b = "pub trait T {\n    \
+                const N: usize = core::mem::size_of::<Option<u64>>();\n    fn f() -> u32;\n}\n";
+    assert_ne!(
+        surface(turbofish_trait_a),
+        surface(turbofish_trait_b),
+        "turbofish generic argument inside a trait associated-const initializer must remain \
+         significant"
+    );
+}
+
+#[test]
+fn public_api_guard_captures_single_line_inherent_impl_public_method() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3A: exact public method regression.
+    let base = "pub struct S;\nimpl S { pub fn f(&self) -> u32 { private_a() } }\n";
+    let sig_u64 = "pub struct S;\nimpl S { pub fn f(&self) -> u64 { private_a() } }\n";
+    let body_b = "pub struct S;\nimpl S { pub fn f(&self) -> u32 { private_b() } }\n";
+    assert_ne!(
+        surface(base),
+        surface(sig_u64),
+        "a single-line inherent impl's public method signature must be inventoried and change \
+         the surface on mutation"
+    );
+    assert_eq!(
+        surface(base),
+        surface(body_b),
+        "a private method-body-only mutation must not change the surface"
+    );
+    let base_surface = surface(base);
+    assert!(
+        base_surface.contains("pub fn f(&self) -> u32"),
+        "public method must be captured: {base_surface:?}"
+    );
+    assert!(
+        !base_surface.contains("impl S"),
+        "the impl header itself must not appear as its own contract line: {base_surface:?}"
+    );
+}
+
+#[test]
+fn public_api_guard_inherent_impl_formatting_equivalence() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3B: single-line and multiline impl formatting must be equivalent.
+    let single_line = "pub struct S;\nimpl S { pub fn f(&self) -> u32 { private_a() } }\n";
+    let multiline =
+        "pub struct S;\nimpl S {\n    pub fn f(&self) -> u32 {\n        private_a()\n    }\n}\n";
+    assert_eq!(
+        surface(single_line),
+        surface(multiline),
+        "single-line and multiline inherent impl formatting must produce the same public \
+         contract surface"
+    );
+}
+
+#[test]
+fn public_api_guard_inherent_impl_associated_const() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3C: associated const.
+    let base = "pub struct S;\nimpl S { pub const N: u32 = 1; }\n";
+    let value_2 = "pub struct S;\nimpl S { pub const N: u32 = 2; }\n";
+    let type_u64 = "pub struct S;\nimpl S { pub const N: u64 = 1; }\n";
+    assert_ne!(
+        surface(base),
+        surface(value_2),
+        "associated const value mutation must change the surface"
+    );
+    assert_ne!(
+        surface(base),
+        surface(type_u64),
+        "associated const type mutation must change the surface"
+    );
+}
+
+#[test]
+fn public_api_guard_inherent_impl_multiple_same_line_members() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3D: multiple associated items on one line - both public contracts
+    // inventoried, mutating either changes the surface, private method
+    // body mutation does not.
+    let base = "pub struct S;\n\
+                impl S { pub const N: u32 = 1; pub fn f(&self) -> u32 { private_a() } }\n";
+    let base_surface = surface(base);
+    assert!(
+        base_surface.contains("pub const N: u32 = 1;"),
+        "associated const must be inventoried: {base_surface:?}"
+    );
+    assert!(
+        base_surface.contains("pub fn f(&self) -> u32"),
+        "method must be inventoried: {base_surface:?}"
+    );
+
+    let mutated_const = "pub struct S;\n\
+                impl S { pub const N: u32 = 2; pub fn f(&self) -> u32 { private_a() } }\n";
+    assert_ne!(
+        base_surface,
+        surface(mutated_const),
+        "mutating the const among multiple same-line members must change the surface"
+    );
+
+    let mutated_fn_sig = "pub struct S;\n\
+                impl S { pub const N: u32 = 1; pub fn f(&self) -> u64 { private_a() } }\n";
+    assert_ne!(
+        base_surface,
+        surface(mutated_fn_sig),
+        "mutating the method signature among multiple same-line members must change the surface"
+    );
+
+    let mutated_fn_body = "pub struct S;\n\
+                impl S { pub const N: u32 = 1; pub fn f(&self) -> u32 { private_b() } }\n";
+    assert_eq!(
+        base_surface,
+        surface(mutated_fn_body),
+        "mutating only the private method body among multiple same-line members must not \
+         change the surface"
+    );
+}
+
+#[test]
+fn public_api_guard_inherent_impl_private_members_stay_hidden() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3E: private inherent members.
+    let base = "pub struct S;\nimpl S {\n    \
+                fn hidden(&self) -> u32 { private_a() }\n    \
+                pub fn visible(&self) -> bool { true }\n}\n";
+    let hidden_sig_u64 = "pub struct S;\nimpl S {\n    \
+                fn hidden(&self) -> u64 { private_a() }\n    \
+                pub fn visible(&self) -> bool { true }\n}\n";
+    let hidden_body_b = "pub struct S;\nimpl S {\n    \
+                fn hidden(&self) -> u32 { private_b() }\n    \
+                pub fn visible(&self) -> bool { true }\n}\n";
+    assert_eq!(
+        surface(base),
+        surface(hidden_sig_u64),
+        "a private inherent method's own signature mutation must not change the surface"
+    );
+    assert_eq!(
+        surface(base),
+        surface(hidden_body_b),
+        "a private inherent method's own body mutation must not change the surface"
+    );
+    let base_surface = surface(base);
+    assert!(
+        !base_surface.contains("hidden"),
+        "private inherent member must never leak into the surface: {base_surface:?}"
+    );
+    assert!(
+        base_surface.contains("pub fn visible(&self) -> bool"),
+        "public inherent member must still be captured: {base_surface:?}"
+    );
+}
+
+#[test]
+fn public_api_guard_generic_inherent_impl() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3F: generic inherent impl.
+    let base = "pub struct S<T>(pub T);\nimpl<T> S<T> {\n    \
+                pub fn get(&self) -> &T {\n        private_a()\n    }\n}\n";
+    let sig_mut = "pub struct S<T>(pub T);\nimpl<T> S<T> {\n    \
+                pub fn get(&self) -> &mut T {\n        private_a()\n    }\n}\n";
+    let body_b = "pub struct S<T>(pub T);\nimpl<T> S<T> {\n    \
+                pub fn get(&self) -> &T {\n        private_b()\n    }\n}\n";
+    assert_ne!(
+        surface(base),
+        surface(sig_mut),
+        "generic inherent impl method signature mutation must change the surface"
+    );
+    assert_eq!(
+        surface(base),
+        surface(body_b),
+        "generic inherent impl method private body mutation must not change the surface"
+    );
+}
+
+#[test]
+fn public_api_guard_trait_impl_never_invents_public_methods() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3G: trait impl discipline - Rust forbids explicit `pub` inside a
+    // trait impl, so none of its methods can ever legally be "public" on
+    // their own; the new inherent-impl logic must not treat a trait impl
+    // as an inherent public scope and must not invent a contract line
+    // for anything inside it.
+    let base = "pub struct S;\npub trait Greet {\n    fn hello(&self) -> u32;\n}\n\
+                impl Greet for S {\n    fn hello(&self) -> u32 { 0 }\n}\n";
+    let mutated_body = "pub struct S;\npub trait Greet {\n    fn hello(&self) -> u32;\n}\n\
+                impl Greet for S {\n    fn hello(&self) -> u32 { 1 }\n}\n";
+    let mutated_sig = "pub struct S;\npub trait Greet {\n    fn hello(&self) -> u32;\n}\n\
+                impl Greet for S {\n    fn hello(&self) -> u64 { 0 }\n}\n";
+    assert_eq!(
+        surface(base),
+        surface(mutated_body),
+        "a trait impl method body mutation must not change the surface - nothing inside a \
+         trait impl is part of the inherent public contract"
+    );
+    assert_eq!(
+        surface(base),
+        surface(mutated_sig),
+        "a trait impl method signature mutation must not change the surface either - trait \
+         impl methods can never carry explicit visibility"
+    );
+    let base_surface = surface(base);
+    assert!(
+        !base_surface.contains("impl Greet"),
+        "the trait impl header itself must never appear: {base_surface:?}"
+    );
+    // "hello" appears exactly once - from the trait's own required
+    // method declaration - never a second, invented time from inside
+    // the trait impl body.
+    assert_eq!(
+        base_surface.matches("hello").count(),
+        1,
+        "\"hello\" must appear exactly once (the trait's own required method), never again from \
+         an invented trait-impl line: {base_surface:?}"
+    );
+    // The trait's OWN required method remains correctly inventoried -
+    // this finding is about trait IMPLS, not trait DECLARATIONS.
+    assert!(
+        base_surface.contains("fn hello(&self) -> u32;"),
+        "the trait declaration's own required method must remain inventoried: {base_surface:?}"
+    );
+}
+
+#[test]
+fn public_api_guard_extern_block_public_foreign_items() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3H: extern block sibling audit. `unsafe extern "C" { ... }` is the
+    // Rust 2024 syntax for extern blocks; foreign items inside may carry
+    // explicit visibility, and the same single-line-vs-multiline
+    // formatting-dependence risk applies as for inherent impls.
+    let single_line = "unsafe extern \"C\" { pub fn foreign_api(x: u32) -> u32; }\n";
+    let single_line_mut = "unsafe extern \"C\" { pub fn foreign_api(x: u32) -> u64; }\n";
+    assert_ne!(
+        surface(single_line),
+        surface(single_line_mut),
+        "a public foreign item inside a single-line extern block must be inventoried and \
+         change the surface on mutation"
+    );
+    let multiline = "unsafe extern \"C\" {\n    pub fn foreign_api(x: u32) -> u32;\n}\n";
+    assert_eq!(
+        surface(single_line),
+        surface(multiline),
+        "single-line and multiline extern block formatting must produce the same surface"
+    );
+    let private_item = "unsafe extern \"C\" { fn hidden_api(x: u32) -> u32; }\n";
+    let private_item_mut = "unsafe extern \"C\" { fn hidden_api(x: u32) -> u64; }\n";
+    assert_eq!(
+        surface(private_item),
+        surface(private_item_mut),
+        "a private (non-pub) foreign item must not surface or change the output"
+    );
+    let base_surface = surface(single_line);
+    assert!(
+        base_surface.contains("pub fn foreign_api(x: u32) -> u32;"),
+        "public foreign item must be captured: {base_surface:?}"
+    );
+}
+
+#[test]
+fn public_api_guard_tuple_struct_where_suffix_literal_probe() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // Section 4: mandatory sibling probe - tuple-struct where-suffix
+    // literals. Reports its own PASS/FAIL rather than assuming either.
+    let real_newline = "pub struct S<T>(pub T)\nwhere\n    T: Bound<Ty!(\"a\nb\")>;\n";
+    let one_space = "pub struct S<T>(pub T)\nwhere\n    T: Bound<Ty!(\"a b\")>;\n";
+    assert_ne!(
+        surface(real_newline),
+        surface(one_space),
+        "tuple-struct where-suffix literal newline vs space collapsed - this sibling probe \
+         FAILED and must be promoted to a fixed P2 in this same batch"
+    );
+
+    let escaped_continuation =
+        "pub struct S<T>(pub T)\nwhere\n    T: Bound<Ty!(\"a\\\n    b\")>;\n";
+    let plain = "pub struct S<T>(pub T)\nwhere\n    T: Bound<Ty!(\"ab\")>;\n";
+    assert_eq!(
+        surface(escaped_continuation),
+        surface(plain),
+        "tuple-struct where-suffix escaped continuation must canonicalize like every other \
+         escaped-continuation literal in this file"
+    );
 }
