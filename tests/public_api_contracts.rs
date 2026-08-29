@@ -526,6 +526,39 @@ struct CodeLexer {
     /// applies when the keyword and the `=` land on different physical
     /// lines.
     pending_type_alias: bool,
+    /// Set the moment a genuine, whole-word `where` keyword is recognized
+    /// at true baseline depth (`paren_depth == bracket_depth ==
+    /// angle_depth == brace_depth == 0` - an `impl`/`fn`/... header is
+    /// always scanned before its own body brace opens, so this is the
+    /// same depth `pending_type_alias` tracks at its top-level case).
+    /// Once set, it marks every keyword read afterward as being inside
+    /// this header's where-clause, not its own leading bound list -
+    /// see `header_saw_trait_for` below, the sole consumer.
+    header_saw_where: bool,
+    /// Set the moment a genuine, whole-word `for` keyword is recognized
+    /// at true baseline depth (same depth as `header_saw_where`) BEFORE
+    /// `header_saw_where` has been set. This is the structural signature
+    /// of an impl header's own trait-for-type separator (`impl<T> Trait
+    /// for S<T>`) - a higher-ranked trait bound's `for<'a>` can never
+    /// match it: written inside the header's own leading generic-bound
+    /// list (`impl<T: for<'a> Fn(&'a T)> S<T>`), that `for` sits inside
+    /// the OUTER `impl<...>` angle frame, so `angle_depth > 0` at the
+    /// point it is read; written inside a trailing where-clause (`impl<T>
+    /// S<T> where T: for<'a> Fn(&'a T)`), `header_saw_where` is already
+    /// true by the time that `for` is read, since `where` always precedes
+    /// every bound in its own clause. Checked once, after a fully-read
+    /// impl header, by `is_inherent_impl_header` in place of the unsafe
+    /// `contains_keyword`/`find_keyword` textual "for" search it used to
+    /// do - this field IS the impl's own trait-for-type separator, read
+    /// live off real-time depth-tracked lexer state rather than searched
+    /// for after the fact in already-rendered text, so a legally
+    /// reformatted or line-wrapped header (`for` and its type on
+    /// different physical lines, `for<'a>` split across lines) cannot
+    /// change the answer the way a position-based text search could.
+    /// Reset at the same top-level boundaries as `pending_type_alias`,
+    /// since an impl header (like a type alias) is scanned entirely
+    /// before any of those boundaries and never spans across one.
+    header_saw_trait_for: bool,
 }
 
 impl CodeLexer {
@@ -541,6 +574,8 @@ impl CodeLexer {
             const_brace_stack: Vec::new(),
             expr_initializer_active: false,
             pending_type_alias: false,
+            header_saw_where: false,
+            header_saw_trait_for: false,
         }
     }
 
@@ -553,6 +588,8 @@ impl CodeLexer {
         self.macro_brace_stack.clear();
         self.const_brace_stack.clear();
         self.expr_initializer_active = false;
+        self.header_saw_where = false;
+        self.header_saw_trait_for = false;
         self.pending_type_alias = false;
     }
 
@@ -828,6 +865,24 @@ impl CodeLexer {
                         }
                         '<' => {
                             self.pending_macro_bang = false;
+                            // `for<'a>` (a higher-ranked trait bound) never
+                            // has whitespace forcing the ` ` | `\t` | ... arm
+                            // above to run between `for` and `<` - it must
+                            // be recognized here too, checked against the
+                            // CURRENT (pre-increment) angle_depth: written
+                            // in an impl header's own leading generic-bound
+                            // list, this `for` sits inside the header's
+                            // OUTER `impl<...>` frame, so angle_depth > 0
+                            // here and the check below never fires for it.
+                            if self.paren_depth == 0
+                                && self.bracket_depth == 0
+                                && self.angle_depth == 0
+                                && self.brace_depth == 0
+                                && !self.header_saw_where
+                                && ends_with_keyword(&code_tokens, "for")
+                            {
+                                self.header_saw_trait_for = true;
+                            }
                             let in_const_expr =
                                 !self.const_brace_stack.is_empty() || self.expr_initializer_active;
                             let is_comparison = if in_const_expr {
@@ -1075,6 +1130,19 @@ impl CodeLexer {
                             {
                                 self.pending_type_alias = true;
                             }
+                            if self.paren_depth == 0
+                                && self.bracket_depth == 0
+                                && self.angle_depth == 0
+                                && self.brace_depth == 0
+                            {
+                                if ends_with_keyword(&code_tokens, "where") {
+                                    self.header_saw_where = true;
+                                } else if !self.header_saw_where
+                                    && ends_with_keyword(&code_tokens, "for")
+                                {
+                                    self.header_saw_trait_for = true;
+                                }
+                            }
                             cur_code.push(chars[i]);
                             code_tokens.push(chars[i]);
                         }
@@ -1196,6 +1264,26 @@ impl CodeLexer {
                         segments.push(VisibleSegment::Literal(lit_str));
                     }
                 }
+            }
+        }
+
+        // `where`/`for` reaching the very end of a physical line with
+        // nothing after them (a common rustfmt-style line wrap: `where`
+        // alone on its own line, or the type after `for` continuing on
+        // the next) never hits the whitespace-triggered check above -
+        // there is no trailing character left on this line to trigger
+        // it. Check once more here, against the fully-built `code_tokens`
+        // for this call, so the keyword is still recognized when it is
+        // the last thing scanned.
+        if self.paren_depth == 0
+            && self.bracket_depth == 0
+            && self.angle_depth == 0
+            && self.brace_depth == 0
+        {
+            if ends_with_keyword(&code_tokens, "where") {
+                self.header_saw_where = true;
+            } else if !self.header_saw_where && ends_with_keyword(&code_tokens, "for") {
+                self.header_saw_trait_for = true;
             }
         }
 
@@ -1391,49 +1479,53 @@ fn is_extern_block_start(code_tokens: &str) -> bool {
     rest.starts_with('{')
 }
 
-/// True when `s` contains `kw` as a genuine whole-word occurrence -
-/// never as part of a longer identifier (`"before"` does not contain
-/// keyword `"for"`, `"x_for_y"` does not either).
-fn contains_keyword(s: &str, kw: &str) -> bool {
-    find_keyword(s, kw).is_some()
-}
-
-/// Byte offset of the first genuine whole-word occurrence of `kw` in
-/// `s`, or `None` if it never appears as a keyword (only, perhaps, as
-/// part of a longer identifier).
-fn find_keyword(s: &str, kw: &str) -> Option<usize> {
-    for (pos, _) in s.match_indices(kw) {
-        let before_ok = s[..pos]
-            .chars()
-            .next_back()
-            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
-        let after_ok = s[pos + kw.len()..]
-            .chars()
-            .next()
-            .is_none_or(|c| !c.is_alphanumeric() && c != '_');
-        if before_ok && after_ok {
-            return Some(pos);
-        }
+/// True when `code_tokens` is `extern`/`unsafe extern`, optionally
+/// followed by a complete ABI string, with NOTHING ELSE after it yet -
+/// not enough has been read to tell whether this is going to be an
+/// extern BLOCK (`extern "C" { ... }`), a single foreign-function
+/// declaration (`extern "C" fn f();`), or `extern crate foo;`. Mirrors
+/// `is_incomplete_public_prefix`'s role for a partial `pub(...)`
+/// visibility: it never classifies the construct itself, it only says
+/// "read another physical line before deciding" - the outer dispatch
+/// gate's own continuation loop keeps pulling lines while this is true,
+/// so `is_extern_block_start`'s `{`-immediately-follows check (and
+/// `is_public_fn`/`is_public_extern_crate` for the other two shapes)
+/// always sees the deciding token even when a legally line-wrapped
+/// header (the ABI string, or the whole header, on its own physical
+/// line) puts it on a later line than the header started on.
+fn is_incomplete_extern_prefix(code_tokens: &str) -> bool {
+    let mut cur = code_tokens.trim_start();
+    if let Some(after) = is_keyword_prefix(cur, "unsafe") {
+        cur = after;
     }
-    None
+    let Some(mut rest) = is_keyword_prefix(cur, "extern") else {
+        return false;
+    };
+    rest = rest.trim_start();
+    if rest.is_empty() {
+        return true;
+    }
+    if rest.starts_with('"') {
+        match rest[1..].find('"') {
+            Some(close) => rest = rest[close + 2..].trim_start(),
+            None => return true,
+        }
+    } else {
+        return false;
+    }
+    rest.is_empty()
 }
 
 /// True when a FULLY-READ `impl` header (from `impl` up to, but not
 /// including, its own body-opening `{`) declares an INHERENT impl
 /// (`impl<T> S<T> { ... }`) rather than a trait impl (`impl<T> Trait<T>
-/// for S<T> { ... }`). Looks for a genuine, whole-word `for` keyword
-/// BEFORE any top-level `where` clause - a higher-ranked trait bound
-/// inside a where-clause (`where T: for<'a> Fn(&'a T)`) contains the
-/// word `for` too, but only ever appears AFTER `where`, so splitting
-/// there before searching keeps that case from being misread as the
-/// impl's own trait-for-type marker. This is a Rust reserved-keyword
-/// check on the item's own header, not an identifier/name heuristic.
-fn is_inherent_impl_header(header: &str) -> bool {
-    let before_where = match find_keyword(header, "where") {
-        Some(pos) => &header[..pos],
-        None => header,
-    };
-    !contains_keyword(before_where, "for")
+/// for S<T> { ... }`). `header_saw_trait_for` is read live off the
+/// `CodeLexer`'s own real-time depth-tracked state (see its doc comment)
+/// while the header is scanned, not searched for afterward in already-
+/// rendered text - a higher-ranked trait bound's `for<'a>`, wherever it
+/// is legally written in the header, can never set it.
+fn is_inherent_impl_header(header_saw_trait_for: bool) -> bool {
+    !header_saw_trait_for
 }
 
 fn is_public_use(code_tokens: &str) -> bool {
@@ -1676,119 +1768,44 @@ fn scan_baseline_member_body(
         cur_member_code.clear();
     };
 
-    // Process remainder of opening line (if any)
-    if let Some(open_brace_pos) = current_scanned.first_top_level_open_brace_seg {
-        if let Some(start_pos) = next_pos(&current_scanned.segments, open_brace_pos) {
-            let mut cur_pos = Some(start_pos);
-            for event in &current_scanned.events {
-                if event.kind == StructuralEventKind::TopLevelOpenBrace {
-                    continue;
-                }
-                if event.seg_idx < start_pos.0
-                    || (event.seg_idx == start_pos.0 && event.char_idx < start_pos.1)
-                {
-                    continue;
-                }
-
-                if in_default_method_body {
-                    if event.kind == StructuralEventKind::MethodBodyClose {
-                        in_default_method_body = false;
-                        cur_pos =
-                            next_pos(&current_scanned.segments, (event.seg_idx, event.char_idx));
-                    }
-                    continue;
-                }
-
-                if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                    let (chunk_text, chunk_code) = if let Some(limit) =
-                        prev_pos(&current_scanned.segments, (event.seg_idx, event.char_idx))
-                    {
-                        (
-                            current_scanned.render_visible_range(cur_pos, Some(limit)),
-                            current_scanned.code_tokens_range(cur_pos, Some(limit)),
-                        )
-                    } else {
-                        (String::new(), String::new())
-                    };
-                    if !chunk_text.trim().is_empty() {
-                        if !cur_member_text.is_empty()
-                            && !cur_member_text.ends_with(' ')
-                            && !chunk_text.starts_with(' ')
-                        {
-                            cur_member_text.push(' ');
-                            cur_member_code.push(' ');
-                        }
-                        cur_member_text.push_str(&chunk_text);
-                        cur_member_code.push_str(&chunk_code);
-                    }
-                    emit(
-                        lines,
-                        &mut pending_member_attrs,
-                        &mut cur_member_text,
-                        &mut cur_member_code,
-                    );
-                    body_closed = true;
-                    cur_pos = next_pos(&current_scanned.segments, (event.seg_idx, event.char_idx));
-                    break;
-                }
-
-                let chunk_text = current_scanned
-                    .render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                let chunk_code = current_scanned
-                    .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                if !chunk_text.trim().is_empty() {
-                    if !cur_member_text.is_empty()
-                        && !cur_member_text.ends_with(' ')
-                        && !chunk_text.starts_with(' ')
-                    {
-                        cur_member_text.push(' ');
-                        cur_member_code.push(' ');
-                    }
-                    cur_member_text.push_str(&chunk_text);
-                    cur_member_code.push_str(&chunk_code);
-                }
-                cur_pos = next_pos(&current_scanned.segments, (event.seg_idx, event.char_idx));
-
-                if event.kind == StructuralEventKind::BaselineSemicolon {
-                    emit(
-                        lines,
-                        &mut pending_member_attrs,
-                        &mut cur_member_text,
-                        &mut cur_member_code,
-                    );
-                } else if event.kind == StructuralEventKind::BaselineOpenBrace {
-                    let is_method =
-                        classify_trait_member(&cur_member_code) == TraitMemberKind::Method;
-                    if is_method {
-                        emit(
-                            lines,
-                            &mut pending_member_attrs,
-                            &mut cur_member_text,
-                            &mut cur_member_code,
-                        );
-                        in_default_method_body = true;
-                    }
-                }
-            }
-            if !body_closed && !in_default_method_body && cur_pos.is_some() {
-                let remainder_text = current_scanned.render_visible_range(cur_pos, None);
-                let remainder_code = current_scanned.code_tokens_range(cur_pos, None);
-                if !remainder_text.trim().is_empty() {
-                    if !cur_member_text.is_empty()
-                        && !cur_member_text.ends_with(' ')
-                        && !remainder_text.starts_with(' ')
-                    {
-                        cur_member_text.push(' ');
-                        cur_member_code.push(' ');
-                    }
-                    cur_member_text.push_str(&remainder_text);
-                    cur_member_code.push_str(&remainder_code);
-                }
-            }
+    // A member boundary (right after a previous member's own terminator,
+    // or the very start of a fresh line) may be immediately followed by
+    // another member's attribute on that SAME physical line/remainder -
+    // e.g. `pub const N: u32 = 1; #[deprecated] pub fn f() {}`. The only
+    // place that knows how to peel an attribute off cleanly is the outer
+    // while loop's own `capture_attribute` path, so a boundary found
+    // structurally mid-`sc` (not just at the top of the while loop) must
+    // hand the rest of this scanned line back to that SAME path rather
+    // than accumulating the attribute's own text as if it were part of
+    // the next member's code - this is the same peek `is_outer_attribute_
+    // start` already used at the top of the while loop, just evaluated at
+    // `cur_pos` instead of position (0, 0).
+    let member_boundary_attribute = |sc: &ScannedLine, cur_pos: Option<(usize, usize)>| {
+        let peek_code = sc.code_tokens_range(cur_pos, None);
+        if !is_outer_attribute_start(&peek_code) {
+            return None;
         }
-    }
+        let remainder_text = sc.render_visible_range(cur_pos, None);
+        if remainder_text.trim().is_empty() {
+            None
+        } else {
+            Some(remainder_text)
+        }
+    };
 
-    let mut body_remainder = None;
+    // The opening physical line's own remainder (everything after the
+    // body's `{`) is not processed with a second, attribute-unaware event
+    // loop here - it is handed to the SAME main member-processing loop
+    // below as its first `body_remainder`, so a leading attribute right
+    // after the brace (`impl S { #[deprecated] pub fn f() {...} }`) goes
+    // through the exact same `capture_attribute`/`pending_member_attrs`
+    // path a later physical line already uses.
+    let opening_line_remainder = current_scanned
+        .first_top_level_open_brace_seg
+        .and_then(|open_brace_pos| next_pos(&current_scanned.segments, open_brace_pos))
+        .map(|start_pos| current_scanned.render_visible_range(Some(start_pos), None))
+        .filter(|text| !text.trim().is_empty());
+    let mut body_remainder = opening_line_remainder;
     while !body_closed && (body_remainder.is_some() || *idx + 1 < src_lines.len()) {
         let owned_line = body_remainder.take();
         if owned_line.is_none() {
@@ -1824,6 +1841,14 @@ fn scan_baseline_member_body(
                 let Some(pos) = cur_pos else { break };
                 if event.seg_idx < pos.0 || (event.seg_idx == pos.0 && event.char_idx < pos.1) {
                     continue;
+                }
+
+                if cur_member_text.trim().is_empty() {
+                    if let Some(remainder) = member_boundary_attribute(&sc, cur_pos) {
+                        body_remainder = Some(remainder);
+                        cur_pos = None;
+                        break;
+                    }
                 }
 
                 if event.kind == StructuralEventKind::TopLevelCloseBrace {
@@ -1915,6 +1940,34 @@ fn scan_baseline_member_body(
             continue;
         }
 
+        // Whatever scan most recently advanced `item_lexer` - the initial
+        // header scan, an earlier iteration's own `scan_logical_item_line`
+        // call, or `capture_attribute`'s internal re-scan - walks it
+        // through the WHOLE string it was given, not just up to wherever
+        // this function's own event loop logically stopped. When a member
+        // (or a whole run of members plus the construct's own close
+        // brace) fully closes within that SAME string, the lexer round-
+        // trips all the way back out to brace_depth 0 even though this
+        // function is still logically inside the body. Re-scanning the
+        // next remainder through that lexer would then misread a
+        // member's own braces as top-level ones. brace_depth == 0 here is
+        // exactly that round-trip signal - structurally we are always at
+        // least one level inside the body while this loop still holds it
+        // open (reachable only from a fresh, non-skipping iteration, so
+        // the `in_default_method_body` skip loop's own brace_depth == 0
+        // fallback above is untouched), so it can only read 0 if the same
+        // source string already closed back out - restore the baseline a
+        // body genuinely starts at. A still-open continuation (a member's
+        // own body spans further physical lines) leaves brace_depth >= 1,
+        // correctly reflecting real, still-unclosed nesting, and is left
+        // untouched.
+        if item_lexer.brace_depth == 0 {
+            item_lexer.brace_depth = 1;
+            item_lexer.angle_depth = 0;
+            item_lexer.paren_depth = 0;
+            item_lexer.bracket_depth = 0;
+        }
+
         if cur_member_text.trim().is_empty() && item_lexer.state == LexState::Normal {
             let mut check_lexer = item_lexer.clone();
             let check_sc = check_lexer.scan_line(line_text);
@@ -1948,6 +2001,14 @@ fn scan_baseline_member_body(
                     cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
                 }
                 continue;
+            }
+
+            if cur_member_text.trim().is_empty() {
+                if let Some(remainder) = member_boundary_attribute(&sc, cur_pos) {
+                    body_remainder = Some(remainder);
+                    cur_pos = None;
+                    break;
+                }
             }
 
             if event.kind == StructuralEventKind::TopLevelCloseBrace {
@@ -2476,8 +2537,12 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             || is_incomplete_public_prefix(&scanned.code_tokens)
             || is_impl_start(&scanned.code_tokens)
             || is_extern_block_start(&scanned.code_tokens)
+            || is_incomplete_extern_prefix(&scanned.code_tokens)
         {
-            if is_impl_start(&scanned.code_tokens) || is_extern_block_start(&scanned.code_tokens) {
+            if is_impl_start(&scanned.code_tokens)
+                || is_extern_block_start(&scanned.code_tokens)
+                || is_incomplete_extern_prefix(&scanned.code_tokens)
+            {
                 // An impl block (trait impl or inherent impl) or an
                 // extern block is never itself part of the public
                 // declaration inventory - its own header is never pushed
@@ -2496,7 +2561,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
             let mut prefix_text = current_scanned.render_visible();
             let mut combined_code_tokens = current_scanned.code_tokens.clone();
 
-            while is_incomplete_public_prefix(&combined_code_tokens) && idx + 1 < src_lines.len() {
+            while (is_incomplete_public_prefix(&combined_code_tokens)
+                || is_incomplete_extern_prefix(&combined_code_tokens))
+                && idx + 1 < src_lines.len()
+            {
                 idx += 1;
                 let next_line = src_lines[idx];
                 if next_line.trim().is_empty() && item_lexer.state == LexState::Normal {
@@ -3583,7 +3651,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 // independently re-evaluated) without emitting anything
                 // from it, matching the pre-existing behavior where trait
                 // impls were invisible to this scanner entirely.
-                let is_inherent = is_inherent_impl_header(&combined_code_tokens);
+                let is_inherent = is_inherent_impl_header(item_lexer.header_saw_trait_for);
                 scan_baseline_member_body(
                     &mut lines,
                     &src_lines,
@@ -8240,5 +8308,412 @@ fn public_api_guard_tuple_struct_where_suffix_literal_probe() {
         surface(plain),
         "tuple-struct where-suffix escaped continuation must canonicalize like every other \
          escaped-continuation literal in this file"
+    );
+}
+
+// ====================================================================
+// Round 4: opening-line impl-member attributes (P2-1)
+// ====================================================================
+
+#[test]
+fn public_api_guard_recognizes_attributes_before_opening_line_impl_members() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 1A: exact pre-fix regression.
+    let base = "pub struct S;\nimpl S { #[deprecated] pub fn f(&self) -> u32 { 0 } }\n";
+    let sig_u64 = "pub struct S;\nimpl S { #[deprecated] pub fn f(&self) -> u64 { 0 } }\n";
+    assert_ne!(
+        surface(base),
+        surface(sig_u64),
+        "an attributed public method on the impl's own opening line must be inventoried and \
+         change the surface on signature mutation"
+    );
+    let body_only = "pub struct S;\nimpl S { #[deprecated] pub fn f(&self) -> u32 { 1 } }\n";
+    assert_eq!(
+        surface(base),
+        surface(body_only),
+        "body-only mutation of an attributed opening-line public method must not change the \
+         surface"
+    );
+
+    // 1B: attribute with a literal - no blind literal normalization.
+    let lit_two = "pub struct S;\n\
+                impl S { #[deprecated(note = \"a  b\")] pub fn f(&self) -> u32 { 0 } }\n";
+    let lit_one = "pub struct S;\n\
+                impl S { #[deprecated(note = \"a b\")] pub fn f(&self) -> u32 { 0 } }\n";
+    assert_ne!(
+        surface(lit_two),
+        surface(lit_one),
+        "an attribute literal on an opening-line impl member must preserve its own whitespace, \
+         not be blindly normalized"
+    );
+
+    // Multiline attribute before an opening-line-adjacent member; formatting-
+    // equivalent one-line/multiline forms must match, and the public member
+    // must still be captured.
+    let multiline_attr = "pub struct S;\nimpl S {\n    #[deprecated(\n        note = \"x\"\n    )]\n    pub fn f(&self) -> u32 { 0 }\n}\n";
+    let multiline_attr_surface = surface(multiline_attr);
+    assert!(
+        multiline_attr_surface.contains("pub fn f(&self) -> u32"),
+        "public member after a multiline attribute must be captured: {multiline_attr_surface:?}"
+    );
+
+    // Multiple attributes must both remain associated with the public member.
+    let multi_attr =
+        "pub struct S;\nimpl S {\n    #[cfg(feature = \"x\")]\n    #[deprecated]\n    \
+                pub fn f(&self) -> u32 { 0 }\n}\n";
+    let multi_attr_surface = surface(multi_attr);
+    assert!(
+        multi_attr_surface.contains("cfg"),
+        "first of two attributes must be retained: {multi_attr_surface:?}"
+    );
+    assert!(
+        multi_attr_surface.contains("deprecated"),
+        "second of two attributes must be retained: {multi_attr_surface:?}"
+    );
+    assert!(
+        multi_attr_surface.contains("pub fn f(&self) -> u32"),
+        "public member after two attributes must be captured: {multi_attr_surface:?}"
+    );
+
+    // Attribute + PRIVATE member: neither the member nor its attribute may
+    // leak as an orphan public-contract line.
+    let private_attr =
+        "pub struct S;\nimpl S {\n    #[deprecated]\n    fn hidden(&self) -> u32 { 0 }\n}\n";
+    let private_attr_surface = surface(private_attr);
+    assert!(
+        !private_attr_surface.contains("hidden"),
+        "a private member must not leak: {private_attr_surface:?}"
+    );
+    assert!(
+        !private_attr_surface.contains("deprecated"),
+        "a private member's own attribute must not leak as an orphan line: \
+         {private_attr_surface:?}"
+    );
+
+    // Attribute after a PREVIOUS same-line member.
+    let after_prev = "pub struct S;\nimpl S {\n    pub const N: u32 = 1;\n    \
+                #[deprecated] pub fn f(&self) -> u32 { 0 }\n}\n";
+    let after_prev_surface = surface(after_prev);
+    assert!(
+        after_prev_surface.contains("pub const N: u32 = 1;"),
+        "the earlier member must remain inventoried: {after_prev_surface:?}"
+    );
+    assert!(
+        after_prev_surface.contains("pub fn f(&self) -> u32"),
+        "the attributed later member must also be inventoried: {after_prev_surface:?}"
+    );
+
+    // Entire impl, including the attribute, on ONE physical line.
+    let all_one_line =
+        "pub struct S;\nimpl S { pub const N: u32 = 1; #[deprecated] pub fn f(&self) -> u32 { 0 } }\n";
+    let all_one_line_surface = surface(all_one_line);
+    assert!(
+        all_one_line_surface.contains("pub const N: u32 = 1;"),
+        "first member on a fully single-line impl must be inventoried: {all_one_line_surface:?}"
+    );
+    assert!(
+        all_one_line_surface.contains("pub fn f(&self) -> u32"),
+        "attributed second member on a fully single-line impl must be inventoried: \
+         {all_one_line_surface:?}"
+    );
+}
+
+// ====================================================================
+// Round 4: HRTB vs impl-level `for` (P2-2)
+// ====================================================================
+
+#[test]
+fn public_api_guard_distinguishes_hrtb_from_impl_level_for() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 2A: exact pre-fix regression.
+    let base = "pub struct S<T>(pub T);\n\
+                impl<T: for<'a> Fn(&'a str)> S<T> {\n    pub fn f(&self) -> u32 { 0 }\n}\n";
+    let mutated = "pub struct S<T>(pub T);\n\
+                impl<T: for<'a> Fn(&'a str)> S<T> {\n    pub fn f(&self) -> u64 { 0 }\n}\n";
+    assert_ne!(
+        surface(base),
+        surface(mutated),
+        "an inherent impl whose generic bound contains an HRTB `for<'a>` must still be \
+         classified as inherent, and its public method must be inventoried"
+    );
+
+    // 2B: required inherent-impl matrix - all must classify INHERENT.
+    for (src, label) in [
+        (
+            "pub struct S;\nimpl S {\n    pub fn f(&self) -> u32 { 0 }\n}\n",
+            "plain inherent impl",
+        ),
+        (
+            "pub struct S<T>(pub T);\nimpl<T> S<T> {\n    pub fn f(&self) -> u32 { 0 }\n}\n",
+            "generic inherent impl",
+        ),
+        (
+            "pub struct S<const N: usize>;\nimpl<const N: usize> S<N> {\n    \
+             pub fn f(&self) -> u32 { 0 }\n}\n",
+            "const-generic inherent impl",
+        ),
+        (
+            "pub struct S<T>(pub T);\nimpl<T: for<'a> Fn(&'a str)> S<T> {\n    \
+             pub fn f(&self) -> u32 { 0 }\n}\n",
+            "HRTB generic-bound inherent impl",
+        ),
+        (
+            "pub struct S<T>(pub T);\nimpl<T> S<T>\nwhere\n    T: for<'a> Fn(&'a str),\n{\n    \
+             pub fn f(&self) -> u32 { 0 }\n}\n",
+            "HRTB where-clause inherent impl",
+        ),
+    ] {
+        let out = surface(src);
+        assert!(
+            out.contains("pub fn f(&self) -> u32"),
+            "{label} must classify as INHERENT and inventory its public method: {out:?}"
+        );
+    }
+
+    // 2C: required trait-impl NEGATIVE matrix - none of these may leak a
+    // method as an invented inherent public item, and their `for`-bearing
+    // header must never itself appear.
+    for (src, label) in [
+        (
+            "pub struct S;\npub trait Trait { fn f(&self) -> u32; }\n\
+             impl Trait for S {\n    fn f(&self) -> u32 { 0 }\n}\n",
+            "plain trait impl",
+        ),
+        (
+            "pub struct S<T>(pub T);\npub trait Trait { fn f(&self) -> u32; }\n\
+             impl<T> Trait for S<T> {\n    fn f(&self) -> u32 { 0 }\n}\n",
+            "generic trait impl",
+        ),
+        (
+            "pub struct S<T>(pub T);\npub trait Trait<U> { fn f(&self) -> u32; }\n\
+             impl<T> Trait<T> for S<T> {\n    fn f(&self) -> u32 { 0 }\n}\n",
+            "generic trait-with-param impl",
+        ),
+        (
+            "pub struct S;\npub unsafe trait Trait { fn f(&self) -> u32; }\n\
+             unsafe impl Trait for S {\n    fn f(&self) -> u32 { 0 }\n}\n",
+            "unsafe trait impl",
+        ),
+        (
+            "pub struct S<T>(pub T);\npub trait Trait { fn f(&self) -> u32; }\n\
+             impl<T> Trait for S<T>\nwhere\n    T: for<'a> Fn(&'a str),\n{\n    \
+             fn f(&self) -> u32 { 0 }\n}\n",
+            "trait impl with where-clause HRTB",
+        ),
+    ] {
+        let out = surface(src);
+        assert!(
+            !out.contains("impl") || !out.contains("for"),
+            "{label}: the trait impl header itself must never appear verbatim: {out:?}"
+        );
+        assert_eq!(
+            out.matches("fn f").count(),
+            1,
+            "{label}: \"fn f\" must appear exactly once (the trait's own required method), \
+             never a second, invented time from inside the trait impl: {out:?}"
+        );
+    }
+}
+
+// ====================================================================
+// Round 4: incomplete extern-block headers (P2-3)
+// ====================================================================
+
+#[test]
+fn public_api_guard_recognizes_extern_block_before_continuation_brace() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // 3A: exact pre-fix regression - brace on the line AFTER the ABI string.
+    let base = "unsafe extern \"C\"\n{\n    pub fn f() -> u32;\n}\n";
+    let mutated = "unsafe extern \"C\"\n{\n    pub fn f() -> u64;\n}\n";
+    assert_ne!(
+        surface(base),
+        surface(mutated),
+        "an extern block whose opening brace is on the line after the ABI string must still \
+         inventory its public foreign item and change the surface on mutation"
+    );
+
+    // 3B: layout matrix - all formatting-equivalent.
+    let same_line = "unsafe extern \"C\" { pub fn f() -> u32; }\n";
+    let brace_after_header_tight = "unsafe extern \"C\"\n{ pub fn f() -> u32; }\n";
+    let fully_multiline = "unsafe extern \"C\"\n{\n    pub fn f() -> u32;\n}\n";
+    assert_eq!(
+        surface(same_line),
+        surface(brace_after_header_tight),
+        "same-line vs brace-on-next-line extern headers must be formatting-equivalent"
+    );
+    assert_eq!(
+        surface(same_line),
+        surface(fully_multiline),
+        "same-line vs fully-multiline extern headers must be formatting-equivalent"
+    );
+
+    // 3C: multiple foreign items - mutating either changes the surface.
+    let multi = "unsafe extern \"C\" {\n    pub fn f() -> u32;\n    pub static X: u32;\n}\n";
+    let multi_mut_fn = "unsafe extern \"C\" {\n    pub fn f() -> u64;\n    pub static X: u32;\n}\n";
+    let multi_mut_static =
+        "unsafe extern \"C\" {\n    pub fn f() -> u32;\n    pub static X: u64;\n}\n";
+    assert_ne!(surface(multi), surface(multi_mut_fn));
+    assert_ne!(surface(multi), surface(multi_mut_static));
+    let multi_surface = surface(multi);
+    assert!(multi_surface.contains("pub fn f() -> u32;"));
+    assert!(multi_surface.contains("pub static X: u32;"));
+
+    // 3E: ABI variants - not hard-coded to "C" only.
+    for abi in ["\"C\"", "\"system\"", "\"C-unwind\""] {
+        let src = format!("unsafe extern {abi} {{ pub fn f() -> u32; }}\n");
+        let mutated = format!("unsafe extern {abi} {{ pub fn f() -> u64; }}\n");
+        assert_ne!(
+            surface(&src),
+            surface(&mutated),
+            "extern block with ABI {abi} must inventory its public foreign item"
+        );
+    }
+
+    // 3F: a single foreign FUNCTION DECLARATION (not a block) must remain
+    // unaffected, and an ordinary `pub extern "C" fn` definition (with a
+    // real body) must not enter block-style member recursion.
+    let plain_extern_fn = "pub extern \"C\" fn f() -> u32 { 0 }\n";
+    let plain_extern_fn_mut = "pub extern \"C\" fn f() -> u64 { 0 }\n";
+    assert_ne!(
+        surface(plain_extern_fn),
+        surface(plain_extern_fn_mut),
+        "a plain `pub extern \"C\" fn` definition must still be captured on its own terms"
+    );
+    let plain_extern_fn_surface = surface(plain_extern_fn);
+    assert!(
+        plain_extern_fn_surface.contains("pub extern \"C\" fn f() -> u32"),
+        "plain extern fn definition must be captured normally: {plain_extern_fn_surface:?}"
+    );
+
+    // extern crate must remain unaffected.
+    let extern_crate_a = "extern crate foo;\npub struct S;\n";
+    let extern_crate_b = "extern crate bar;\npub struct S;\n";
+    assert_eq!(
+        surface(extern_crate_a),
+        surface(extern_crate_b),
+        "extern crate declarations are not part of the public contract inventory and must not \
+         be affected by extern-block recognition"
+    );
+}
+
+// ====================================================================
+// Round-3 final audit: reflow across the impl-for / extern-block / same-
+// line-member-boundary changes above must not change classification -
+// each of these mirrors an already-required shape but adds a legal line
+// wrap (or a construct combination) the primary tests above did not
+// separately cover, per the final "logical-header reflow" and "same-
+// line member-state" audits.
+// ====================================================================
+
+#[test]
+fn public_api_guard_final_audit_reflow_and_same_line_symmetry() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // R1: trait impl with `for` itself wrapped onto its own line must
+    // still classify as a TRAIT impl (never invent an inherent method),
+    // matching 2C's negative matrix but with `for` line-wrapped instead
+    // of on the same line as the trait name.
+    let wrapped_for = "pub struct S;\npub trait Trait { fn f(&self) -> u32; }\n\
+                        impl Trait\n    for\n    S\n{\n    fn f(&self) -> u32 { 0 }\n}\n";
+    let wrapped_for_surface = surface(wrapped_for);
+    assert!(
+        !wrapped_for_surface.contains("impl"),
+        "impl header must never itself be inventoried: {wrapped_for_surface:?}"
+    );
+    assert_eq!(
+        wrapped_for_surface.matches("fn f").count(),
+        1,
+        "a trait impl with `for` wrapped onto its own line must not invent a second, inherent \
+         `fn f`: {wrapped_for_surface:?}"
+    );
+
+    // R2: unsafe impl, `for` and the Self type both wrapped, HRTB in the
+    // where-clause too - combines every reflow point in one header.
+    let wrapped_unsafe = "pub struct S;\npub unsafe trait Trait { fn f(&self) -> u32; }\n\
+                           unsafe impl Trait\n    for S\nwhere\n    S: Sized,\n{\n    \
+                           fn f(&self) -> u32 { 0 }\n}\n";
+    let wrapped_unsafe_surface = surface(wrapped_unsafe);
+    assert_eq!(
+        wrapped_unsafe_surface.matches("fn f").count(),
+        1,
+        "unsafe trait impl with `for` and Self both wrapped must not invent a second, inherent \
+         `fn f`: {wrapped_unsafe_surface:?}"
+    );
+
+    // R3: an outer attribute directly before an extern block header must
+    // be dropped, not mis-attached to the block's first foreign item -
+    // the same rule already required for impl blocks (is_impl_start
+    // branch) must hold symmetrically for is_incomplete_extern_prefix.
+    let extern_attr =
+        "#[cfg(feature = \"ffi\")]\nunsafe extern \"C\" {\n    pub fn f() -> u32;\n}\n";
+    let extern_attr_surface = surface(extern_attr);
+    assert!(
+        !extern_attr_surface.contains("cfg"),
+        "an attribute before an extern block header must not be mis-attached to its first \
+         foreign item: {extern_attr_surface:?}"
+    );
+    assert!(
+        extern_attr_surface.contains("pub fn f() -> u32;"),
+        "the foreign item itself must still be inventoried: {extern_attr_surface:?}"
+    );
+
+    // R4: extern block, entirely on one physical line, with an
+    // attributed SECOND foreign item following an unattributed first one
+    // - the same same-line-member-boundary path already required for
+    // impl bodies (public_api_guard_recognizes_attributes_before_opening
+    // _line_impl_members) must hold symmetrically for extern blocks,
+    // since both route through the same `scan_baseline_member_body`.
+    let extern_one_line =
+        "unsafe extern \"C\" { pub static X: u32; #[link_name = \"g\"] pub fn f() -> u32; }\n";
+    let extern_one_line_surface = surface(extern_one_line);
+    assert!(
+        extern_one_line_surface.contains("pub static X: u32;"),
+        "first (unattributed) foreign item on a fully single-line extern block must be \
+         inventoried: {extern_one_line_surface:?}"
+    );
+    assert!(
+        extern_one_line_surface.contains("pub fn f() -> u32;"),
+        "second (attributed) foreign item on a fully single-line extern block must be \
+         inventoried, not swallowed as part of the first: {extern_one_line_surface:?}"
+    );
+    assert!(
+        extern_one_line_surface.contains("link_name"),
+        "the second item's own attribute must be captured: {extern_one_line_surface:?}"
+    );
+
+    // R5: `pub(crate)`/`pub(in path)` restricted-visibility members
+    // inside an inherent impl, formatting-independent (all on one line
+    // vs multiline), must remain equivalent - the brace_depth-round-trip
+    // fix must not be specific to `pub fn`/`pub const`.
+    let restricted_one_line = "pub struct S;\nimpl S { pub(crate) fn f() -> u32 { 0 } }\n";
+    let restricted_multiline =
+        "pub struct S;\nimpl S {\n    pub(crate) fn f() -> u32 {\n        0\n    }\n}\n";
+    assert_eq!(
+        surface(restricted_one_line),
+        surface(restricted_multiline),
+        "a fully single-line inherent impl with a pub(crate) member must be formatting-\
+         equivalent to its multiline form"
+    );
+
+    // R6: a non-pub (private) foreign item inside a fully single-line
+    // extern block must stay hidden, symmetric with R5's inherent-impl
+    // check - `should_emit` for extern blocks is plain `is_public_code`
+    // (no `is_inherent` gate), so this exercises a different `should_
+    // emit` closure than every other single-line test above.
+    let extern_private_one_line =
+        "unsafe extern \"C\" { fn hidden() -> u32; pub fn f() -> u32; }\n";
+    let extern_private_one_line_surface = surface(extern_private_one_line);
+    assert!(
+        !extern_private_one_line_surface.contains("hidden"),
+        "a private foreign item on a fully single-line extern block must not leak: \
+         {extern_private_one_line_surface:?}"
+    );
+    assert!(
+        extern_private_one_line_surface.contains("pub fn f() -> u32;"),
+        "the public foreign item following it must still be inventoried: \
+         {extern_private_one_line_surface:?}"
     );
 }
