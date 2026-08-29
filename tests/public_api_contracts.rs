@@ -203,12 +203,30 @@ impl ScannedLine {
         start: Option<(usize, usize)>,
         end: Option<(usize, usize)>,
     ) -> String {
+        self.render_visible_range_tagged(start, end).0
+    }
+
+    /// Same rendering as `render_visible_range`, but also returns the byte
+    /// ranges within the returned string that came from
+    /// `VisibleSegment::Literal` content, verbatim from the authoritative
+    /// lexer - not re-derived by scanning the returned string for quote
+    /// characters. Downstream consumers that need to know which bytes are
+    /// literal (e.g. `normalize_variant`) must use these ranges instead of
+    /// re-lexing the rendered text, so a literal's own content (including
+    /// any embedded `"`, arbitrary `#` counts in raw strings, or internal
+    /// whitespace) can never be misclassified as code.
+    fn render_visible_range_tagged(
+        &self,
+        start: Option<(usize, usize)>,
+        end: Option<(usize, usize)>,
+    ) -> (String, Vec<(usize, usize)>) {
         if let (Some(s), Some(e)) = (start, end) {
             if s > e {
-                return String::new();
+                return (String::new(), Vec::new());
             }
         }
         let mut out = String::new();
+        let mut literal_ranges: Vec<(usize, usize)> = Vec::new();
         for (seg_idx, seg) in self.segments.iter().enumerate() {
             if let Some((s_seg, _)) = start {
                 if seg_idx < s_seg {
@@ -271,12 +289,15 @@ impl ScannedLine {
                                 out.push(' ');
                             }
                         }
+                        let lit_start = out.len();
                         out.push_str(chunk);
+                        let lit_end = out.len();
+                        literal_ranges.push((lit_start, lit_end));
                     }
                 }
             }
         }
-        out
+        (out, literal_ranges)
     }
 
     fn code_tokens_range(
@@ -1420,60 +1441,120 @@ fn append_code_chunk(
     }
 }
 
+/// Same accumulation as `append_code_chunk`, additionally threading through
+/// the literal byte-ranges `chunk_text` carries (see
+/// `render_visible_range_tagged`'s doc comment) so a later
+/// `normalize_variant` call can tell which bytes of the accumulated
+/// `dest_text` are literal without re-scanning it for quote characters.
+/// `append_code_chunk` itself is untouched - this only wraps it and remaps
+/// `chunk_literal_ranges` by the offset at which `chunk_text` actually
+/// landed in `dest_text` (which can vary depending on `was_escaped`/
+/// `continues_literal`/leading-glue-space decisions `append_code_chunk`
+/// makes internally, so the offset is read back from `dest_text.len()`
+/// after the call rather than predicted ahead of it).
+#[allow(clippy::too_many_arguments)]
+fn append_variant_chunk(
+    dest_text: &mut String,
+    dest_code: &mut String,
+    dest_literal_ranges: &mut Vec<(usize, usize)>,
+    chunk_text: &str,
+    chunk_literal_ranges: &[(usize, usize)],
+    chunk_code: &str,
+    was_escaped: bool,
+    continues_literal: bool,
+) {
+    append_code_chunk(
+        dest_text,
+        dest_code,
+        chunk_text,
+        chunk_code,
+        was_escaped,
+        continues_literal,
+    );
+    if chunk_literal_ranges.is_empty() {
+        return;
+    }
+    let chunk_start_in_dest = dest_text.len() - chunk_text.len();
+    // `append_code_chunk`'s `continues_literal` branch (taken whenever this
+    // chunk continues a literal from the previous physical line, and that
+    // previous line did not itself end in an escaped `\` continuation)
+    // inserts one synthetic '\n' immediately before chunk_text, to
+    // represent the real physical line break that occurred INSIDE the
+    // literal (see requirement F: an actual runtime newline in a raw
+    // literal spanning two physical lines). That byte is itself literal
+    // content, not collapsible code whitespace - if left untagged,
+    // normalize_variant's whitespace-collapse logic would silently turn a
+    // genuine embedded newline into an ordinary space. Since the chunk
+    // always begins already inside the continuing literal whenever this
+    // branch fires, the chunk's own first literal range always starts at
+    // its own byte 0; widen that one range left by one byte to also cover
+    // the synthetic newline.
+    let extend_left = !was_escaped
+        && continues_literal
+        && chunk_start_in_dest > 0
+        && chunk_literal_ranges.first().is_some_and(|&(s, _)| s == 0);
+    for (idx, &(s, e)) in chunk_literal_ranges.iter().enumerate() {
+        let start = if idx == 0 && extend_left {
+            chunk_start_in_dest - 1
+        } else {
+            chunk_start_in_dest + s
+        };
+        dest_literal_ranges.push((start, chunk_start_in_dest + e));
+    }
+}
+
 fn emit_captured_fragment(text: &str) -> Option<String> {
     (!text.trim().is_empty()).then(|| text.to_owned())
 }
 
-fn normalize_variant(text: &str) -> String {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
+/// Normalizes one captured enum-variant declaration for the golden surface.
+///
+/// `literal_ranges` are the byte ranges within `text` that came verbatim
+/// from `VisibleSegment::Literal` content (see
+/// `render_visible_range_tagged`'s own doc comment) - authoritative, not
+/// re-derived here. A tagged `(char, is_literal)` stream is built from
+/// `text` plus these ranges; the structural normalization below (comma/
+/// paren/brace collapsing, whitespace collapsing) only ever inspects and
+/// mutates `is_literal == false` entries. `is_literal == true` entries are
+/// copied through completely unconditionally - never quote-scanned, never
+/// whitespace-collapsed - so a literal's own content (an embedded `"`, an
+/// arbitrary raw-string hash count, or genuine internal whitespace) can
+/// never be misinterpreted as structural code, regardless of what
+/// characters it contains. This replaces the previous per-call `in_str`/
+/// `in_char` quote parser, which re-scanned already-classified text with
+/// weaker rules than the authoritative lexer (it treated any `"` as a
+/// normal-string boundary, so an embedded quote inside a raw string like
+/// `r#"a"  b"#` was misread as closing the literal early, letting the
+/// whitespace after it be collapsed as if it were code).
+fn normalize_variant(text: &str, literal_ranges: &[(usize, usize)]) -> String {
+    let is_literal_byte = |byte_idx: usize| {
+        literal_ranges
+            .iter()
+            .any(|&(s, e)| byte_idx >= s && byte_idx < e)
+    };
+    let mut tagged: Vec<(char, bool)> = text
+        .char_indices()
+        .map(|(byte_idx, c)| (c, is_literal_byte(byte_idx)))
+        .collect();
+
+    while matches!(tagged.first(), Some((c, false)) if c.is_whitespace()) {
+        tagged.remove(0);
+    }
+    while matches!(tagged.last(), Some((c, false)) if c.is_whitespace()) {
+        tagged.pop();
+    }
+    if tagged.is_empty() {
         return String::new();
     }
-    let mut s = trimmed.to_string();
-    if !s.ends_with(',') {
-        s.push(',');
+    if !matches!(tagged.last(), Some((',', false))) {
+        tagged.push((',', false));
     }
-    let mut out = String::with_capacity(s.len());
-    let mut in_str = false;
-    let mut in_char = false;
-    let chars: Vec<char> = s.chars().collect();
+
+    let mut out = String::with_capacity(tagged.len());
     let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        if in_str {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '"' {
-                in_str = false;
-            }
-            i += 1;
-            continue;
-        }
-        if in_char {
-            out.push(c);
-            if c == '\\' && i + 1 < chars.len() {
-                out.push(chars[i + 1]);
-                i += 2;
-                continue;
-            }
-            if c == '\'' {
-                in_char = false;
-            }
-            i += 1;
-            continue;
-        }
-        if c == '"' {
-            in_str = true;
-            out.push(c);
-            i += 1;
-            continue;
-        }
-        if c == '\'' {
-            in_char = true;
+    while i < tagged.len() {
+        let (c, is_lit) = tagged[i];
+        if is_lit {
             out.push(c);
             i += 1;
             continue;
@@ -1481,14 +1562,14 @@ fn normalize_variant(text: &str) -> String {
 
         if c == ',' {
             let mut j = i + 1;
-            while j < chars.len() && chars[j].is_whitespace() {
+            while j < tagged.len() && !tagged[j].1 && tagged[j].0.is_whitespace() {
                 j += 1;
             }
-            if j < chars.len() && (chars[j] == ')' || chars[j] == '}') {
-                if chars[j] == '}' && !out.ends_with(' ') {
+            if j < tagged.len() && !tagged[j].1 && (tagged[j].0 == ')' || tagged[j].0 == '}') {
+                if tagged[j].0 == '}' && !out.ends_with(' ') {
                     out.push(' ');
                 }
-                out.push(chars[j]);
+                out.push(tagged[j].0);
                 i = j + 1;
                 continue;
             }
@@ -1496,7 +1577,7 @@ fn normalize_variant(text: &str) -> String {
         if c == '(' {
             out.push('(');
             i += 1;
-            while i < chars.len() && chars[i].is_whitespace() {
+            while i < tagged.len() && !tagged[i].1 && tagged[i].0.is_whitespace() {
                 i += 1;
             }
             continue;
@@ -1515,10 +1596,10 @@ fn normalize_variant(text: &str) -> String {
             }
             out.push('{');
             let mut j = i + 1;
-            while j < chars.len() && chars[j].is_whitespace() {
+            while j < tagged.len() && !tagged[j].1 && tagged[j].0.is_whitespace() {
                 j += 1;
             }
-            if j < chars.len() && chars[j] != '}' {
+            if j < tagged.len() && !(tagged[j].0 == '}' && !tagged[j].1) {
                 out.push(' ');
             }
             i = j;
@@ -1541,10 +1622,11 @@ fn normalize_variant(text: &str) -> String {
                     .is_some_and(is_attached_opening_delimiter)
             {
                 let mut j = i + 1;
-                while j < chars.len() && chars[j].is_whitespace() {
+                while j < tagged.len() && !tagged[j].1 && tagged[j].0.is_whitespace() {
                     j += 1;
                 }
-                if j < chars.len() && !is_attached_punctuation_prefix(chars[j]) {
+                if j < tagged.len() && (tagged[j].1 || !is_attached_punctuation_prefix(tagged[j].0))
+                {
                     out.push(' ');
                 }
                 i = j;
@@ -1916,6 +1998,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 let mut pending_variant_attrs = Vec::new();
                 let mut cur_variant_text = String::new();
                 let mut cur_variant_code = String::new();
+                let mut cur_variant_literal_ranges: Vec<(usize, usize)> = Vec::new();
                 let mut enum_body_closed = false;
 
                 // Process remainder of opening line (if any)
@@ -1933,26 +2016,35 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             }
 
                             if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                                let (chunk_text, chunk_code) = if let Some(limit) = prev_pos(
-                                    &current_scanned.segments,
-                                    (event.seg_idx, event.char_idx),
-                                ) {
-                                    (
-                                        current_scanned.render_visible_range(cur_pos, Some(limit)),
-                                        current_scanned.code_tokens_range(cur_pos, Some(limit)),
-                                    )
-                                } else {
-                                    (String::new(), String::new())
-                                };
-                                append_code_chunk(
+                                let (chunk_text, chunk_literal_ranges, chunk_code) =
+                                    if let Some(limit) = prev_pos(
+                                        &current_scanned.segments,
+                                        (event.seg_idx, event.char_idx),
+                                    ) {
+                                        let (text, ranges) = current_scanned
+                                            .render_visible_range_tagged(cur_pos, Some(limit));
+                                        (
+                                            text,
+                                            ranges,
+                                            current_scanned.code_tokens_range(cur_pos, Some(limit)),
+                                        )
+                                    } else {
+                                        (String::new(), Vec::new(), String::new())
+                                    };
+                                append_variant_chunk(
                                     &mut cur_variant_text,
                                     &mut cur_variant_code,
+                                    &mut cur_variant_literal_ranges,
                                     &chunk_text,
+                                    &chunk_literal_ranges,
                                     &chunk_code,
                                     false,
                                     false,
                                 );
-                                let trimmed_text = normalize_variant(&cur_variant_text);
+                                let trimmed_text = normalize_variant(
+                                    &cur_variant_text,
+                                    &cur_variant_literal_ranges,
+                                );
                                 if !trimmed_text.is_empty() {
                                     lines.append(&mut pending_variant_attrs);
                                     lines.push(trimmed_text);
@@ -1961,6 +2053,7 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 }
                                 cur_variant_text.clear();
                                 cur_variant_code.clear();
+                                cur_variant_literal_ranges.clear();
                                 enum_body_closed = true;
                                 cur_pos = next_pos(
                                     &current_scanned.segments,
@@ -1969,16 +2062,19 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 break;
                             }
 
-                            let chunk_text = current_scanned.render_visible_range(
-                                cur_pos,
-                                Some((event.seg_idx, event.char_idx)),
-                            );
+                            let (chunk_text, chunk_literal_ranges) = current_scanned
+                                .render_visible_range_tagged(
+                                    cur_pos,
+                                    Some((event.seg_idx, event.char_idx)),
+                                );
                             let chunk_code = current_scanned
                                 .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                            append_code_chunk(
+                            append_variant_chunk(
                                 &mut cur_variant_text,
                                 &mut cur_variant_code,
+                                &mut cur_variant_literal_ranges,
                                 &chunk_text,
+                                &chunk_literal_ranges,
                                 &chunk_code,
                                 false,
                                 false,
@@ -1989,7 +2085,10 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             );
 
                             if event.kind == StructuralEventKind::BaselineComma {
-                                let trimmed_text = normalize_variant(&cur_variant_text);
+                                let trimmed_text = normalize_variant(
+                                    &cur_variant_text,
+                                    &cur_variant_literal_ranges,
+                                );
                                 if !trimmed_text.is_empty() {
                                     lines.append(&mut pending_variant_attrs);
                                     lines.push(trimmed_text);
@@ -1998,16 +2097,19 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                                 }
                                 cur_variant_text.clear();
                                 cur_variant_code.clear();
+                                cur_variant_literal_ranges.clear();
                             }
                         }
                         if !enum_body_closed && cur_pos.is_some() {
-                            let remainder_text =
-                                current_scanned.render_visible_range(cur_pos, None);
+                            let (remainder_text, remainder_literal_ranges) =
+                                current_scanned.render_visible_range_tagged(cur_pos, None);
                             let remainder_code = current_scanned.code_tokens_range(cur_pos, None);
-                            append_code_chunk(
+                            append_variant_chunk(
                                 &mut cur_variant_text,
                                 &mut cur_variant_code,
+                                &mut cur_variant_literal_ranges,
                                 &remainder_text,
+                                &remainder_literal_ranges,
                                 &remainder_code,
                                 false,
                                 false,
@@ -2057,25 +2159,28 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     let mut cur_pos = Some((0, 0));
                     for event in &sc.events {
                         if event.kind == StructuralEventKind::TopLevelCloseBrace {
-                            let (chunk_text, chunk_code) = if let Some(limit) =
-                                prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
-                            {
-                                (
-                                    sc.render_visible_range(cur_pos, Some(limit)),
-                                    sc.code_tokens_range(cur_pos, Some(limit)),
-                                )
-                            } else {
-                                (String::new(), String::new())
-                            };
-                            append_code_chunk(
+                            let (chunk_text, chunk_literal_ranges, chunk_code) =
+                                if let Some(limit) =
+                                    prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
+                                {
+                                    let (text, ranges) =
+                                        sc.render_visible_range_tagged(cur_pos, Some(limit));
+                                    (text, ranges, sc.code_tokens_range(cur_pos, Some(limit)))
+                                } else {
+                                    (String::new(), Vec::new(), String::new())
+                                };
+                            append_variant_chunk(
                                 &mut cur_variant_text,
                                 &mut cur_variant_code,
+                                &mut cur_variant_literal_ranges,
                                 &chunk_text,
+                                &chunk_literal_ranges,
                                 &chunk_code,
                                 was_escaped,
                                 continues_literal,
                             );
-                            let trimmed_text = normalize_variant(&cur_variant_text);
+                            let trimmed_text =
+                                normalize_variant(&cur_variant_text, &cur_variant_literal_ranges);
                             if !trimmed_text.is_empty() {
                                 lines.append(&mut pending_variant_attrs);
                                 lines.push(trimmed_text);
@@ -2084,19 +2189,24 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             }
                             cur_variant_text.clear();
                             cur_variant_code.clear();
+                            cur_variant_literal_ranges.clear();
                             enum_body_closed = true;
                             cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
                             break;
                         }
 
-                        let chunk_text =
-                            sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                        let (chunk_text, chunk_literal_ranges) = sc.render_visible_range_tagged(
+                            cur_pos,
+                            Some((event.seg_idx, event.char_idx)),
+                        );
                         let chunk_code =
                             sc.code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
-                        append_code_chunk(
+                        append_variant_chunk(
                             &mut cur_variant_text,
                             &mut cur_variant_code,
+                            &mut cur_variant_literal_ranges,
                             &chunk_text,
+                            &chunk_literal_ranges,
                             &chunk_code,
                             was_escaped,
                             continues_literal,
@@ -2104,7 +2214,8 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                         cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
 
                         if event.kind == StructuralEventKind::BaselineComma {
-                            let trimmed_text = normalize_variant(&cur_variant_text);
+                            let trimmed_text =
+                                normalize_variant(&cur_variant_text, &cur_variant_literal_ranges);
                             if !trimmed_text.is_empty() {
                                 lines.append(&mut pending_variant_attrs);
                                 lines.push(trimmed_text);
@@ -2113,16 +2224,20 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                             }
                             cur_variant_text.clear();
                             cur_variant_code.clear();
+                            cur_variant_literal_ranges.clear();
                         }
                     }
 
                     if !enum_body_closed && cur_pos.is_some() {
-                        let remainder_text = sc.render_visible_range(cur_pos, None);
+                        let (remainder_text, remainder_literal_ranges) =
+                            sc.render_visible_range_tagged(cur_pos, None);
                         let remainder_code = sc.code_tokens_range(cur_pos, None);
-                        append_code_chunk(
+                        append_variant_chunk(
                             &mut cur_variant_text,
                             &mut cur_variant_code,
+                            &mut cur_variant_literal_ranges,
                             &remainder_text,
+                            &remainder_literal_ranges,
                             &remainder_code,
                             was_escaped,
                             continues_literal,
@@ -7083,6 +7198,107 @@ fn public_api_guard_retains_tuple_struct_where_clause() {
         assert_ne!(
             normalized_public_surface_str("test.rs", &restricted_copy),
             normalized_public_surface_str("test.rs", &restricted_clone)
+        );
+    }
+}
+
+#[test]
+fn public_api_guard_preserves_raw_strings_in_enum_variants() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // A-E: whitespace-inside-a-raw-literal mutations that must NOT collapse
+    // to the same surface, across hash counts, embedded quotes, and raw
+    // byte strings.
+    for (two_spaces, one_space, label) in [
+        (
+            "pub enum E { A = m!(r#\"a\"  b\"#), }",
+            "pub enum E { A = m!(r#\"a\" b\"#), }",
+            "A: exact Codex case - one hash, embedded quote right after open",
+        ),
+        (
+            "pub enum E { A = m!(r#\"a\"quoted\"  b\"#), }",
+            "pub enum E { A = m!(r#\"a\"quoted\" b\"#), }",
+            "B: embedded normal quote mid-literal does not terminate it",
+        ),
+        (
+            "pub enum E { A = m!(r##\"a\"#  b\"##), }",
+            "pub enum E { A = m!(r##\"a\"# b\"##), }",
+            "C: two hashes - embedded \"# does not close r##...\"##",
+        ),
+        (
+            "pub enum E { A = m!(r###\"a  b\"###), }",
+            "pub enum E { A = m!(r###\"a b\"###), }",
+            "D: three hashes",
+        ),
+        (
+            "pub enum E { A = m!(br#\"a\"  b\"#), }",
+            "pub enum E { A = m!(br#\"a\" b\"#), }",
+            "E: raw byte string, one hash, embedded quote",
+        ),
+        (
+            "pub enum E { A = m!(br##\"a\"#  b\"##), }",
+            "pub enum E { A = m!(br##\"a\"# b\"##), }",
+            "E: raw byte string, two hashes",
+        ),
+    ] {
+        let two = surface(two_spaces);
+        let one = surface(one_space);
+        assert_ne!(
+            two, one,
+            "{label} literal whitespace collapsed; two={two:?}, one={one:?}"
+        );
+    }
+
+    // F: an actual runtime newline inside the raw literal (a genuine `\n`
+    // byte in the simulated source, spanning two physical lines) must
+    // differ from a single-space collapse of the same content.
+    let newline_variant = "pub enum E {\n    A = m!(r#\"a\nb\"#),\n}";
+    assert!(
+        newline_variant.contains("a\nb"),
+        "test fixture must contain a genuine runtime newline inside the raw literal"
+    );
+    let space_variant = "pub enum E {\n    A = m!(r#\"a b\"#),\n}";
+    assert_ne!(
+        surface(newline_variant),
+        surface(space_variant),
+        "an actual newline inside a raw literal spanning two physical lines was collapsed"
+    );
+
+    // G: code-only formatting around the macro call may normalize; the raw
+    // payload itself must remain byte-for-byte significant.
+    let tight = "pub enum E { A = m!(r#\"a  b\"#), }";
+    let spread = "pub enum E {\n    A  =  m!( r#\"a  b\"#  ),\n}";
+    assert_eq!(
+        surface(tight),
+        surface(spread),
+        "code-only formatting around an unchanged raw literal must still normalize equal"
+    );
+
+    // Sibling enum shapes: normalize_variant() is shared by unit, tuple,
+    // and struct variants, and by attributed variants - the raw-string fix
+    // must not be an explicit-discriminant-only special case.
+    for (two_spaces, one_space, label) in [
+        (
+            "pub enum E { A(Ty!(r#\"a\"  b\"#)), }",
+            "pub enum E { A(Ty!(r#\"a\" b\"#)), }",
+            "tuple variant payload",
+        ),
+        (
+            "pub enum E { A { x: Ty!(r#\"a\"  b\"#) }, }",
+            "pub enum E { A { x: Ty!(r#\"a\" b\"#) }, }",
+            "struct variant field",
+        ),
+        (
+            "pub enum E {\n    #[deprecated]\n    A = m!(r#\"a\"  b\"#),\n}",
+            "pub enum E {\n    #[deprecated]\n    A = m!(r#\"a\" b\"#),\n}",
+            "attributed variant",
+        ),
+    ] {
+        let two = surface(two_spaces);
+        let one = surface(one_space);
+        assert_ne!(
+            two, one,
+            "{label} literal whitespace collapsed; two={two:?}, one={one:?}"
         );
     }
 }
