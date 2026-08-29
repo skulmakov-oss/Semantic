@@ -3,10 +3,20 @@ source: crates/prom-ui-runtime/src/shell_player.rs
 pub struct ShellSessionId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellLifecycle {
+Created,
+Active,
+Suspended,
+Closed,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellLifecycleCommand {
+Activate,
+Suspend,
+Resume,
+Close,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellLifecycleStimulus {
+Command(ShellLifecycleCommand),
+ExplicitNoOp,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShellLifecycleLimits {
 pub max_transition_stimulus_bytes: usize,
@@ -20,6 +30,8 @@ pub(crate) limits: ShellLifecycleLimits,
 pub(crate) catalog: ActiveProjectionTargetCatalog,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectionReplayCursor {
+Uninitialized,
+At(u64),
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShellLocalState {
 pub session_id: ShellSessionId,
@@ -31,6 +43,9 @@ pub stimulus: ShellLifecycleStimulus,
 pub stimulus_bytes: usize,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ShellTransitionDisposition {
+Applied,
+NoChange,
+Rejected,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShellDiagnostic {
 pub stable_code: &'static str,
@@ -59,6 +74,8 @@ pub patch_count: usize,
 pub stimulus_bytes: usize,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectionPatchPreflightDisposition {
+Accepted,
+Rejected,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProjectionPatchPreflightResult {
 pub(crate) disposition: ProjectionPatchPreflightDisposition,
@@ -70,6 +87,9 @@ pub(crate) logical_diagnostic_count: usize,
 pub(crate) emitted_diagnostic_count: usize,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectionReplayCompatibilityDisposition {
+NotApplicable,
+Compatible,
+Mismatch,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProjectionReplayCompatibilityResult {
 pub(crate) disposition: ProjectionReplayCompatibilityDisposition,
@@ -88,6 +108,9 @@ pub max_patches_per_transition: usize,
 pub max_target_references_per_transition: usize,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectionPatchApplicationDisposition {
+Applied,
+NoChange,
+Rejected,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectionPatchApplicationResult {
 pub disposition: ProjectionPatchApplicationDisposition,

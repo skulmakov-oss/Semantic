@@ -8,9 +8,13 @@ pub const fn new(major: u16, minor: u16) -> Self {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub enum AbiProfile {
+Core,
+GateSurface,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub enum CompatibilityMode {
+Strict,
+LegacySupport,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct FeaturePolicy {
@@ -51,6 +55,8 @@ pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, ProfileIoError> {
 #[cfg(feature = "std")]
 #[derive(Debug)]
 pub enum ProfileIoError {
+Io(std::io::Error),
+Json(serde_json::Error),
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrainingSample<'a> {
 pub input: &'a str,

@@ -6,6 +6,30 @@ pub mod hello_real_semcode_admission;
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerificationCode {
+BadHeader,
+UnsupportedVersion,
+TruncatedFunction,
+InvalidFunctionName,
+DuplicateFunction,
+InvalidStringTable,
+InvalidDebugSection,
+InvalidOwnershipSection,
+UnknownOpcode,
+OperandOutOfBounds,
+InvalidJumpTarget,
+InvalidStringReference,
+InvalidRegisterReference,
+UnknownCallTarget,
+ResourceLimitExceeded,
+CapabilityViolation,
+AmbiguousInstructionFraming,
+OpcodeRequiresNewerHeader,
+ReachableFunctionFallthrough,
+InvalidSignatureSection,
+CallArgumentCountMismatch,
+UndefinedRegisterRead,
+AnalysisStateLimitExceeded,
+AnalysisWorkLimitExceeded,
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VerificationDiagnostic {
@@ -41,6 +65,7 @@ pub struct VerifiedSemCode<'a> {
 #[cfg(feature = "std")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntryResolutionError {
+MissingEntry { entry: String },
 #[cfg(feature = "std")]
 #[derive(Debug, Clone)]
 pub struct VerifiedEntrySemCode<'token, 'bytes> {

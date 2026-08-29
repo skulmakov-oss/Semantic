@@ -30,6 +30,8 @@ pub effect_ordinal: usize,
 pub event_id: AuditEventId,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleEffectExecutionCode {
+UnsupportedEffectFamily,
+StateValidationFailed,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuleEffectExecutionError {
 pub code: RuleEffectExecutionCode,

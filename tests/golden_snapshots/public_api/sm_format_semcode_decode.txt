@@ -6,6 +6,15 @@ pub const MAX_DEBUG_SYMBOLS_PER_FUNCTION: usize = 8192;
 pub const MAX_SIGNATURE_PARAMETERS_PER_FUNCTION: usize = 4096;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
+BadHeader,
+UnsupportedVersion { found: String, supported: String },
+TruncatedFunction { offset: usize, msg: &'static str },
+InvalidFunctionName { offset: usize, msg: &'static str },
+InvalidStringTable { offset: usize, msg: &'static str },
+InvalidDebugSection { offset: usize, msg: &'static str },
+InvalidOwnershipSection { offset: usize, msg: &'static str },
+InvalidSignatureSection { offset: usize, msg: &'static str },
+ResourceLimit { offset: usize, msg: String },
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedDebugSymbol {
 pub pc: usize,
@@ -13,6 +22,10 @@ pub line: u32,
 pub col: u16,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodedAccessPathComponent {
+TupleIndex(u16),
+FieldSymbol(u32),
+AdtPayload { variant: u32, index: u16 },
+SequenceIndexStatic(u32),
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedAccessPath {
 pub root_symbol_id: u32,
@@ -31,6 +44,6 @@ pub has_ownership_section: bool,
 pub has_debug_section: bool,
 pub string_table_end_offset: usize,
 pub signature: Option<CallableSignature>,
-pub instr_start_offset: usize, // relative to code_slice
-pub code_slice: &'a [u8], // the full code block for this function
+pub instr_start_offset: usize,
+pub code_slice: &'a [u8],
 pub fn decode_semcode_envelope<'a>( bytes: &'a [u8], ) -> Result<(SemcodeHeaderSpec, Vec<DecodedFunctionEnvelope<'a>>), DecodeError> {

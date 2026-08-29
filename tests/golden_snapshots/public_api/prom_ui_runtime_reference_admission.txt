@@ -7,6 +7,9 @@ pub epoch: u64,
 pub sequence: u64,
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReferenceAdmissionDenial {
+MissingCapability,
+StaleRevisionOrEpoch,
+ReplayedInvocation,
 #[derive(Debug)]
 pub struct ReferenceContourAdmission {
 pub fn new(granted_action_ids: impl IntoIterator<Item = u64>) -> Self {

@@ -4,8 +4,13 @@ pub struct HelloRealSemCodeModule {
 pub ops: Vec<HelloRealSemCodeOp>,
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelloRealSemCodeOp {
+DeclareLocalQuad { name: String, value: String },
+RequireQuadEq { name: String, expected: String },
+ObserveTextLiteral { text: String },
+CompleteQuad { value: String },
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HelloRealSemCodeError {
+UnsupportedShape,
 pub fn emit_hello_real_semcode_skeleton( module: &HelloIrModule, ) -> Result<HelloRealSemCodeModule, HelloRealSemCodeError> {
 pub fn render_hello_real_semcode_skeleton( module: &HelloIrModule, ) -> Result<Vec<HelloRealSemCodeOp>, HelloRealSemCodeError> {
 pub fn render_hello_real_semcode_skeleton_text( module: &HelloIrModule, ) -> Result<Vec<String>, HelloRealSemCodeError> {
