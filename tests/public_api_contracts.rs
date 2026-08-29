@@ -187,6 +187,19 @@ struct ScannedLine {
     first_top_level_open_brace_seg: Option<(usize, usize)>,
     first_outer_attribute_close_seg: Option<(usize, usize)>,
     ends_in_string_literal: bool,
+    /// True when this line's own scan ended with the lexer having just
+    /// crossed an escaped-newline continuation (a trailing `\` inside a
+    /// normal/byte string, e.g. `"abc\` at end of line) - narrower than
+    /// `ends_in_string_literal` (which is also true for a genuine,
+    /// unescaped multi-line string). `render_visible_range` never
+    /// renders that trailing `\` (it is not part of the literal's actual
+    /// value), so any caller extracting a SUB-RANGE of this line's text
+    /// to be replayed through a later, independent `scan_line` call
+    /// (rather than continuing to use this same `ScannedLine`'s own
+    /// events/segments directly) needs this flag to know it must
+    /// manually re-append `\` to that extracted text, or the
+    /// continuation is silently lost on replay.
+    ends_in_escaped_continuation: bool,
 }
 
 impl ScannedLine {
@@ -593,6 +606,31 @@ impl CodeLexer {
         self.pending_type_alias = false;
     }
 
+    /// Finalizes `header_saw_where`/`header_saw_trait_for` against
+    /// whatever `code_tokens` holds so far, at true baseline depth. This
+    /// is the SOLE place either flag is set - called at every genuine
+    /// Rust token boundary reachable while scanning a header (whitespace,
+    /// `<`, a line or block comment starting, and the end of a physical
+    /// line), not just whitespace, so a keyword immediately followed by
+    /// trivia other than a plain space (`where/**/T`, `for//comment\n<`)
+    /// is recognized exactly the same as one followed by a space. Callers
+    /// pass `code_tokens` as it stands immediately BEFORE the boundary
+    /// character/trivia is itself appended, matching how `ends_with_
+    /// keyword` needs to see the keyword as the literal suffix.
+    fn finalize_header_keywords(&mut self, code_tokens: &str) {
+        if self.paren_depth == 0
+            && self.bracket_depth == 0
+            && self.angle_depth == 0
+            && self.brace_depth == 0
+        {
+            if ends_with_keyword(code_tokens, "where") {
+                self.header_saw_where = true;
+            } else if !self.header_saw_where && ends_with_keyword(code_tokens, "for") {
+                self.header_saw_trait_for = true;
+            }
+        }
+    }
+
     fn scan_line(&mut self, line: &str) -> ScannedLine {
         let mut segments = Vec::new();
         let mut cur_code = String::new();
@@ -614,12 +652,24 @@ impl CodeLexer {
                 LexState::Normal => {
                     // 1. Line comment //
                     if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+                        // A comment is lexical trivia, a genuine Rust token
+                        // boundary - `where//comment` (or `for//comment`)
+                        // must finalize the keyword exactly like a plain
+                        // space would, before the comment (and the rest of
+                        // the physical line) is discarded below.
+                        self.finalize_header_keywords(&code_tokens);
                         code_tokens.push(' ');
                         break;
                     }
 
                     // 2. Block comment start /*
                     if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '*' {
+                        // Same token-boundary reasoning as the line-comment
+                        // case above - `where/**/T` must finalize `where`
+                        // here, since the comment (and whatever text starts
+                        // the NEXT token right after it closes) never
+                        // passes through the whitespace arm.
+                        self.finalize_header_keywords(&code_tokens);
                         if !cur_code.is_empty() {
                             segments.push(VisibleSegment::Code(std::mem::take(&mut cur_code)));
                         }
@@ -867,22 +917,15 @@ impl CodeLexer {
                             self.pending_macro_bang = false;
                             // `for<'a>` (a higher-ranked trait bound) never
                             // has whitespace forcing the ` ` | `\t` | ... arm
-                            // above to run between `for` and `<` - it must
-                            // be recognized here too, checked against the
-                            // CURRENT (pre-increment) angle_depth: written
-                            // in an impl header's own leading generic-bound
-                            // list, this `for` sits inside the header's
-                            // OUTER `impl<...>` frame, so angle_depth > 0
-                            // here and the check below never fires for it.
-                            if self.paren_depth == 0
-                                && self.bracket_depth == 0
-                                && self.angle_depth == 0
-                                && self.brace_depth == 0
-                                && !self.header_saw_where
-                                && ends_with_keyword(&code_tokens, "for")
-                            {
-                                self.header_saw_trait_for = true;
-                            }
+                            // below to run between `for` and `<` - finalize
+                            // here too, against the CURRENT (pre-increment)
+                            // angle_depth: written in an impl header's own
+                            // leading generic-bound list, this `for` sits
+                            // inside the header's OUTER `impl<...>` frame, so
+                            // angle_depth > 0 here and finalization is a
+                            // no-op for it (the depth guard inside `finalize_
+                            // header_keywords` never passes).
+                            self.finalize_header_keywords(&code_tokens);
                             let in_const_expr =
                                 !self.const_brace_stack.is_empty() || self.expr_initializer_active;
                             let is_comparison = if in_const_expr {
@@ -1130,19 +1173,7 @@ impl CodeLexer {
                             {
                                 self.pending_type_alias = true;
                             }
-                            if self.paren_depth == 0
-                                && self.bracket_depth == 0
-                                && self.angle_depth == 0
-                                && self.brace_depth == 0
-                            {
-                                if ends_with_keyword(&code_tokens, "where") {
-                                    self.header_saw_where = true;
-                                } else if !self.header_saw_where
-                                    && ends_with_keyword(&code_tokens, "for")
-                                {
-                                    self.header_saw_trait_for = true;
-                                }
-                            }
+                            self.finalize_header_keywords(&code_tokens);
                             cur_code.push(chars[i]);
                             code_tokens.push(chars[i]);
                         }
@@ -1270,22 +1301,12 @@ impl CodeLexer {
         // `where`/`for` reaching the very end of a physical line with
         // nothing after them (a common rustfmt-style line wrap: `where`
         // alone on its own line, or the type after `for` continuing on
-        // the next) never hits the whitespace-triggered check above -
-        // there is no trailing character left on this line to trigger
-        // it. Check once more here, against the fully-built `code_tokens`
+        // the next) never hits a trailing boundary character on THIS
+        // line to trigger finalization via any of the other call sites.
+        // Finalize once more here, against the fully-built `code_tokens`
         // for this call, so the keyword is still recognized when it is
         // the last thing scanned.
-        if self.paren_depth == 0
-            && self.bracket_depth == 0
-            && self.angle_depth == 0
-            && self.brace_depth == 0
-        {
-            if ends_with_keyword(&code_tokens, "where") {
-                self.header_saw_where = true;
-            } else if !self.header_saw_where && ends_with_keyword(&code_tokens, "for") {
-                self.header_saw_trait_for = true;
-            }
-        }
+        self.finalize_header_keywords(&code_tokens);
 
         if !cur_code.is_empty() {
             segments.push(VisibleSegment::Code(cur_code));
@@ -1303,6 +1324,7 @@ impl CodeLexer {
             first_top_level_open_brace_seg,
             first_outer_attribute_close_seg,
             ends_in_string_literal: self.state.is_in_string_literal(),
+            ends_in_escaped_continuation: self.state.is_escaped_continuation(),
         }
     }
 }
@@ -1516,6 +1538,37 @@ fn is_incomplete_extern_prefix(code_tokens: &str) -> bool {
     rest.is_empty()
 }
 
+/// True when `code_tokens` is now a COMPLETE, private (non-`pub`) extern
+/// declaration - `extern crate foo;` or `extern "C" fn f() { ... }` /
+/// `extern "C" fn f();` - once `is_incomplete_extern_prefix`'s own
+/// lookahead has read enough to rule out an extern BLOCK. Recognizing a
+/// candidate is not the same as classifying it as public: this is exactly
+/// that separation - candidate admission only ever means "keep reading,"
+/// and once a NON-public extern form resolves, it must fall back to the
+/// ordinary private-item path (consumed structurally, never inventoried)
+/// rather than reach the public dispatcher's unsupported-item assertion.
+/// A `pub`-prefixed extern crate/fn never reaches this: `is_incomplete_
+/// extern_prefix` only ever admits a bare `extern`/`unsafe extern`
+/// prefix, so a leading `pub` is already routed through the ordinary
+/// public-item path instead.
+fn is_private_extern_item(code_tokens: &str) -> bool {
+    let mut cur = code_tokens.trim_start();
+    if let Some(after) = is_keyword_prefix(cur, "unsafe") {
+        cur = after;
+    }
+    let Some(mut rest) = is_keyword_prefix(cur, "extern") else {
+        return false;
+    };
+    rest = rest.trim_start();
+    if rest.starts_with('"') {
+        match rest[1..].find('"') {
+            Some(close) => rest = rest[close + 2..].trim_start(),
+            None => return false,
+        }
+    }
+    is_keyword_prefix(rest, "crate").is_some() || is_keyword_prefix(rest, "fn").is_some()
+}
+
 /// True when a FULLY-READ `impl` header (from `impl` up to, but not
 /// including, its own body-opening `{`) declares an INHERENT impl
 /// (`impl<T> S<T> { ... }`) rather than a trait impl (`impl<T> Trait<T>
@@ -1687,6 +1740,69 @@ fn classify_trait_member(code_tokens: &str) -> TraitMemberKind {
 /// regardless of whether it will ultimately be emitted) is untouched by
 /// this predicate - a private inherent method's body is still never
 /// recursed into, it is simply not pushed to `lines`.
+/// A member boundary (right after a previous member's own terminator, or
+/// the very start of a fresh line) may be immediately followed by another
+/// member's attribute on that SAME physical line/remainder - e.g. `pub
+/// const N: u32 = 1; #[deprecated] pub fn f() {}`. The only place that
+/// knows how to peel an attribute off cleanly is the outer while loop's
+/// own `capture_attribute` path, so a boundary found structurally mid-`sc`
+/// (not just at the top of the while loop) must hand the rest of this
+/// scanned line back to that SAME path rather than accumulating the
+/// attribute's own text as if it were part of the next member's code -
+/// this is the same peek `is_outer_attribute_start` already used at the
+/// top of the while loop, just evaluated at `cur_pos` instead of position
+/// (0, 0).
+///
+/// `sc` was produced by scanning its ENTIRE source string in one
+/// `scan_line` call, so `item_lexer`'s own persistent state, by the time
+/// this is called, reflects having walked all the way through `sc` - past
+/// `cur_pos`, into whatever the split-off remainder itself contains. If a
+/// split is returned, `item_lexer` is reset to `lexer_before_line` (the
+/// checkpoint captured before `sc` was scanned) and replayed forward only
+/// through the CONSUMED prefix (`sc`'s text from `region_start` - where
+/// THIS member-processing region actually began scanning `sc` from,
+/// which is NOT always `sc`'s own absolute start: when `sc` is the whole
+/// opening physical line reused directly, `region_start` is the position
+/// right after the construct's own `{`, not position (0, 0), since text
+/// before that belongs to the construct's own header, never scanned by
+/// `item_lexer` as body content at all - up to `cur_pos`), so its state
+/// afterward represents exactly "read up to the boundary, nothing more" -
+/// the same save-checkpoint/rescan-only-the-consumed-portion pattern
+/// `capture_attribute` already uses for its own attribute boundary.
+fn member_boundary_attribute(
+    sc: &ScannedLine,
+    region_start: Option<(usize, usize)>,
+    cur_pos: Option<(usize, usize)>,
+    item_lexer: &mut CodeLexer,
+    lexer_before_line: &CodeLexer,
+) -> Option<String> {
+    let peek_code = sc.code_tokens_range(cur_pos, None);
+    if !is_outer_attribute_start(&peek_code) {
+        return None;
+    }
+    let mut remainder_text = sc.render_visible_range(cur_pos, None);
+    if remainder_text.trim().is_empty() {
+        return None;
+    }
+    // `sc.ends_in_escaped_continuation` covers the end of this WHOLE
+    // scanned line, which is exactly the same endpoint this remainder
+    // (from `cur_pos` to the end) also ends at. `render_visible_range`
+    // never renders the trailing `\` a real escaped continuation ends
+    // in, so it is manually restored here - this remainder is handed
+    // back as plain text for a LATER, independent `scan_line` call
+    // (via `capture_attribute`, then the main member loop) to replay,
+    // and without it that later scan would see an ordinary unclosed
+    // string instead, silently losing the continuation onto the next
+    // physical line.
+    if sc.ends_in_escaped_continuation {
+        remainder_text.push('\\');
+    }
+    let consumed_prefix = sc.render_visible_range(region_start, cur_pos);
+    *item_lexer = lexer_before_line.clone();
+    item_lexer.scan_line(&consumed_prefix);
+    Some(remainder_text)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn scan_baseline_member_body(
     lines: &mut Vec<String>,
@@ -1744,7 +1860,7 @@ fn scan_baseline_member_body(
     }
 
     if push_header {
-        lines.push(header);
+        lines.push(header.clone());
     }
 
     let mut pending_member_attrs = Vec::new();
@@ -1768,31 +1884,6 @@ fn scan_baseline_member_body(
         cur_member_code.clear();
     };
 
-    // A member boundary (right after a previous member's own terminator,
-    // or the very start of a fresh line) may be immediately followed by
-    // another member's attribute on that SAME physical line/remainder -
-    // e.g. `pub const N: u32 = 1; #[deprecated] pub fn f() {}`. The only
-    // place that knows how to peel an attribute off cleanly is the outer
-    // while loop's own `capture_attribute` path, so a boundary found
-    // structurally mid-`sc` (not just at the top of the while loop) must
-    // hand the rest of this scanned line back to that SAME path rather
-    // than accumulating the attribute's own text as if it were part of
-    // the next member's code - this is the same peek `is_outer_attribute_
-    // start` already used at the top of the while loop, just evaluated at
-    // `cur_pos` instead of position (0, 0).
-    let member_boundary_attribute = |sc: &ScannedLine, cur_pos: Option<(usize, usize)>| {
-        let peek_code = sc.code_tokens_range(cur_pos, None);
-        if !is_outer_attribute_start(&peek_code) {
-            return None;
-        }
-        let remainder_text = sc.render_visible_range(cur_pos, None);
-        if remainder_text.trim().is_empty() {
-            None
-        } else {
-            Some(remainder_text)
-        }
-    };
-
     // The opening physical line's own remainder (everything after the
     // body's `{`) is not processed with a second, attribute-unaware event
     // loop here - it is handed to the SAME main member-processing loop
@@ -1800,23 +1891,37 @@ fn scan_baseline_member_body(
     // after the brace (`impl S { #[deprecated] pub fn f() {...} }`) goes
     // through the exact same `capture_attribute`/`pending_member_attrs`
     // path a later physical line already uses.
-    let opening_line_remainder = current_scanned
+    let open_brace_next_pos = current_scanned
         .first_top_level_open_brace_seg
-        .and_then(|open_brace_pos| next_pos(&current_scanned.segments, open_brace_pos))
+        .and_then(|open_brace_pos| next_pos(&current_scanned.segments, open_brace_pos));
+    let opening_line_remainder = open_brace_next_pos
         .map(|start_pos| current_scanned.render_visible_range(Some(start_pos), None))
         .filter(|text| !text.trim().is_empty());
+    // Whether the NEXT `scan_logical_item_line` call over the opening
+    // line's own remainder would be a REPLAY of text already scanned
+    // once, for real, by whichever scan produced `current_scanned` -
+    // cleared the moment that remainder is consumed (attribute-captured
+    // or handed to the main event loop below), since every later
+    // `body_remainder` (a later physical line, or text split off by
+    // `member_boundary_attribute`/`capture_attribute`) is either
+    // genuinely fresh source text or already replayed correctly by its
+    // own save-checkpoint/rescan-only-the-consumed-portion logic.
+    let mut pending_opening_line_replay = opening_line_remainder.is_some();
     let mut body_remainder = opening_line_remainder;
     while !body_closed && (body_remainder.is_some() || *idx + 1 < src_lines.len()) {
         let owned_line = body_remainder.take();
         if owned_line.is_none() {
             *idx += 1;
+            pending_opening_line_replay = false;
         }
         let line_text = owned_line.as_deref().unwrap_or(src_lines[*idx]);
         if line_text.trim().is_empty() && item_lexer.state == LexState::Normal {
+            pending_opening_line_replay = false;
             continue;
         }
 
         if in_default_method_body {
+            let lexer_before_line = item_lexer.clone();
             let sc = scan_logical_item_line(item_lexer, line_text, same_line_remainder);
             let mut cur_pos = None;
             for event in &sc.events {
@@ -1844,7 +1949,13 @@ fn scan_baseline_member_body(
                 }
 
                 if cur_member_text.trim().is_empty() {
-                    if let Some(remainder) = member_boundary_attribute(&sc, cur_pos) {
+                    if let Some(remainder) = member_boundary_attribute(
+                        &sc,
+                        Some((0, 0)),
+                        cur_pos,
+                        item_lexer,
+                        &lexer_before_line,
+                    ) {
                         body_remainder = Some(remainder);
                         cur_pos = None;
                         break;
@@ -1923,6 +2034,29 @@ fn scan_baseline_member_body(
                 }
             }
             if !body_closed && !in_default_method_body && cur_pos.is_some() {
+                // The for-loop above only checks for a boundary attribute
+                // AT an event; when the split point (right after this
+                // member's own terminator) is the LAST thing `sc` has any
+                // event for - the rest of `sc` (an attribute, then its
+                // member) never produces a further structural event of
+                // its own within this SAME scanned line - the loop exits
+                // with nothing left to trigger that check, and this
+                // trailing remainder would otherwise blindly append the
+                // attribute's own text as if it were part of the member.
+                // Check once more here, exactly like the loop's own
+                // per-event check.
+                if cur_member_text.trim().is_empty() {
+                    if let Some(remainder) = member_boundary_attribute(
+                        &sc,
+                        Some((0, 0)),
+                        cur_pos,
+                        item_lexer,
+                        &lexer_before_line,
+                    ) {
+                        body_remainder = Some(remainder);
+                        continue;
+                    }
+                }
                 let remainder_text = sc.render_visible_range(cur_pos, None);
                 let remainder_code = sc.code_tokens_range(cur_pos, None);
                 if !remainder_text.trim().is_empty() {
@@ -1940,40 +2074,32 @@ fn scan_baseline_member_body(
             continue;
         }
 
-        // Whatever scan most recently advanced `item_lexer` - the initial
-        // header scan, an earlier iteration's own `scan_logical_item_line`
-        // call, or `capture_attribute`'s internal re-scan - walks it
-        // through the WHOLE string it was given, not just up to wherever
-        // this function's own event loop logically stopped. When a member
-        // (or a whole run of members plus the construct's own close
-        // brace) fully closes within that SAME string, the lexer round-
-        // trips all the way back out to brace_depth 0 even though this
-        // function is still logically inside the body. Re-scanning the
-        // next remainder through that lexer would then misread a
-        // member's own braces as top-level ones. brace_depth == 0 here is
-        // exactly that round-trip signal - structurally we are always at
-        // least one level inside the body while this loop still holds it
-        // open (reachable only from a fresh, non-skipping iteration, so
-        // the `in_default_method_body` skip loop's own brace_depth == 0
-        // fallback above is untouched), so it can only read 0 if the same
-        // source string already closed back out - restore the baseline a
-        // body genuinely starts at. A still-open continuation (a member's
-        // own body spans further physical lines) leaves brace_depth >= 1,
-        // correctly reflecting real, still-unclosed nesting, and is left
-        // untouched.
-        if item_lexer.brace_depth == 0 {
-            item_lexer.brace_depth = 1;
-            item_lexer.angle_depth = 0;
-            item_lexer.paren_depth = 0;
-            item_lexer.bracket_depth = 0;
-        }
-
         if cur_member_text.trim().is_empty() && item_lexer.state == LexState::Normal {
             let mut check_lexer = item_lexer.clone();
             let check_sc = check_lexer.scan_line(line_text);
             if is_outer_attribute_start(&check_sc.code_tokens) {
+                if pending_opening_line_replay {
+                    // `capture_attribute` does its own internal replay
+                    // (reset to a checkpoint, rescan only the attribute
+                    // text) starting from `item_lexer`'s CURRENT state -
+                    // which, for the untouched opening-line remainder,
+                    // is still whatever the scan that produced `current_
+                    // scanned` left it at (potentially past the body's
+                    // own close, per the same P2-1 concern as above).
+                    // Unlike the general member-processing loop, an
+                    // attribute has no literal-continuation content of
+                    // its own to lose, so re-deriving `item_lexer` from a
+                    // fresh scan of `header` (this construct's own
+                    // declaration up to and including its `{`) here is
+                    // safe and gives `capture_attribute` the correct
+                    // depth to start from.
+                    let mut header_lexer = CodeLexer::new();
+                    header_lexer.scan_line(&header);
+                    *item_lexer = header_lexer;
+                }
                 let captured = capture_attribute(src_lines, idx, item_lexer, line_text);
                 pending_member_attrs.push(captured.text);
+                pending_opening_line_replay = false;
                 if !captured.remainder.trim().is_empty() {
                     body_remainder = Some(captured.remainder);
                 }
@@ -1981,12 +2107,92 @@ fn scan_baseline_member_body(
             }
         }
 
-        let was_escaped = item_lexer.state.is_escaped_continuation();
-        let continues_literal = item_lexer.state.is_in_string_literal();
-        let sc = scan_logical_item_line(item_lexer, line_text, same_line_remainder);
+        // `was_escaped`/`continues_literal` mean "the PREVIOUS iteration
+        // left `item_lexer` mid-literal, so this iteration's own content
+        // continues it." For the untouched opening-line remainder, there
+        // is no previous iteration within this member-capture loop to
+        // continue FROM - `item_lexer`'s current state instead reflects
+        // whatever the scan that produced `current_scanned` left it at
+        // (e.g. mid-raw-string, if the member's own literal opens but
+        // does not close on that physical line), which describes this
+        // remainder's own END, not something preceding it. Both must
+        // read false here regardless.
+        let (was_escaped, continues_literal) = if pending_opening_line_replay {
+            (false, false)
+        } else {
+            (
+                item_lexer.state.is_escaped_continuation(),
+                item_lexer.state.is_in_string_literal(),
+            )
+        };
+        // `lexer_before_line` is the checkpoint `member_boundary_
+        // attribute` resets `item_lexer` to before replaying a consumed
+        // prefix - it must represent "nothing of this member-processing
+        // region has been read yet." For every other iteration that is
+        // simply `item_lexer`'s current value (a genuinely fresh line or
+        // split, not yet touched). For the untouched opening-line
+        // remainder specifically, `item_lexer`'s current value is NOT
+        // that checkpoint - like `header_lexer` below, it still reflects
+        // the WHOLE physical line already having been scanned once, for
+        // real, by whichever scan produced `current_scanned` (so it can
+        // be mid-string, over-advanced past this region's own close, or
+        // both) - re-deriving fresh from `header` here, exactly like the
+        // attribute-check branch above already does, is required so a
+        // boundary attribute found within `current_scanned` (reused
+        // directly as `sc` below) replays its own consumed prefix from
+        // the correct depth and literal state instead of whatever the
+        // original whole-line scan happened to end at.
+        let lexer_before_line = if pending_opening_line_replay {
+            let mut header_lexer = CodeLexer::new();
+            header_lexer.scan_line(&header);
+            header_lexer
+        } else {
+            item_lexer.clone()
+        };
+        // The opening physical line was already scanned once, for real,
+        // by whichever scan produced `current_scanned` - re-scanning its
+        // OWN remainder text here would double-count any paren/bracket/
+        // angle depth that member content past the body's own `{` also
+        // opens (the P2-1 finding this whole function was reworked for),
+        // and `render_visible_range` never round-trips an escaped-
+        // newline continuation's own backslash back through a fresh
+        // scan (it is intentionally omitted from rendered text, since it
+        // is not part of the literal's actual value - see `LexState::
+        // NormalString`'s handling of a trailing `\`), so a member whose
+        // literal continuation crosses the body's own `{` would lose
+        // that continuation entirely on replay. `current_scanned`'s own
+        // events/segments already correctly reflect both concerns -
+        // reuse them directly instead of replaying, sourcing `sc` from
+        // `current_scanned` (with `cur_pos` starting right after the
+        // body's own `{`, not at this text's own start) exactly once,
+        // for the untouched opening-line remainder only.
+        let use_opening_line_directly = pending_opening_line_replay;
+        pending_opening_line_replay = false;
+        let sc = if use_opening_line_directly {
+            current_scanned.clone()
+        } else {
+            scan_logical_item_line(item_lexer, line_text, same_line_remainder)
+        };
+        let sc_start = if use_opening_line_directly {
+            open_brace_next_pos
+        } else {
+            Some((0, 0))
+        };
 
-        let mut cur_pos = Some((0, 0));
+        let mut cur_pos = sc_start;
         for event in &sc.events {
+            // When `sc` is `current_scanned` reused directly (the
+            // opening-line-remainder case above), it carries events for
+            // the WHOLE first physical line, including ones before
+            // `cur_pos` (the construct's own opening brace) - skip them;
+            // this is a no-op for every other case, since `cur_pos`
+            // there always starts at this text's own (0, 0).
+            if let Some(pos) = cur_pos {
+                if event.seg_idx < pos.0 || (event.seg_idx == pos.0 && event.char_idx < pos.1) {
+                    continue;
+                }
+            }
+
             // A method whose entire body opens AND closes on this same
             // physical line (e.g. `pub fn f() -> u32 { private_a() }`,
             // itself immediately followed by more members on this same
@@ -2004,7 +2210,13 @@ fn scan_baseline_member_body(
             }
 
             if cur_member_text.trim().is_empty() {
-                if let Some(remainder) = member_boundary_attribute(&sc, cur_pos) {
+                if let Some(remainder) = member_boundary_attribute(
+                    &sc,
+                    sc_start,
+                    cur_pos,
+                    item_lexer,
+                    &lexer_before_line,
+                ) {
                     body_remainder = Some(remainder);
                     cur_pos = None;
                     break;
@@ -2095,6 +2307,24 @@ fn scan_baseline_member_body(
         }
 
         if !body_closed && !in_default_method_body && cur_pos.is_some() {
+            // Same reasoning as the in_default_method_body sub-loop's own
+            // trailing-remainder check above: the for-loop's per-event
+            // attribute check never ran if this split point was the LAST
+            // (or only) thing `sc` has an event for - check once more
+            // here before blindly folding the rest of `sc` into the
+            // current member's own text.
+            if cur_member_text.trim().is_empty() {
+                if let Some(remainder) = member_boundary_attribute(
+                    &sc,
+                    sc_start,
+                    cur_pos,
+                    item_lexer,
+                    &lexer_before_line,
+                ) {
+                    body_remainder = Some(remainder);
+                    continue;
+                }
+            }
             let remainder_text = sc.render_visible_range(cur_pos, None);
             let remainder_code = sc.code_tokens_range(cur_pos, None);
             if was_escaped {
@@ -2418,9 +2648,21 @@ fn capture_attribute(
         attr_text.push_str(&rendered);
 
         if let Some(end) = attr_end {
-            let remainder = next_pos(&scanned.segments, end).map_or_else(String::new, |start| {
-                scanned.render_visible_range(Some(start), None)
-            });
+            let mut remainder = next_pos(&scanned.segments, end)
+                .map_or_else(String::new, |start| {
+                    scanned.render_visible_range(Some(start), None)
+                });
+            // Same reasoning as `member_boundary_attribute`: this
+            // remainder (everything after the attribute's own `]`) is
+            // handed back as plain text for a LATER, independent
+            // `scan_line` call to replay, and `render_visible_range`
+            // never renders a real escaped continuation's trailing `\` -
+            // restore it here so that later scan doesn't misread an
+            // unclosed literal spanning further physical lines as an
+            // ordinary (non-continuing) unclosed string.
+            if !remainder.is_empty() && scanned.ends_in_escaped_continuation {
+                remainder.push('\\');
+            }
             *lexer = lexer_before_line;
             lexer.scan_line(&rendered);
             return CapturedAttribute {
@@ -2484,11 +2726,22 @@ fn scan_logical_item_line_with_terminator(
     let Some(boundary) = boundary else {
         return scanned;
     };
-    let remainder = next_pos(&scanned.segments, boundary).map_or_else(String::new, |start| {
+    let mut remainder = next_pos(&scanned.segments, boundary).map_or_else(String::new, |start| {
         scanned.render_visible_range(Some(start), None)
     });
     if remainder.trim().is_empty() {
         return scanned;
+    }
+    // Same reasoning as `member_boundary_attribute`/`capture_attribute`:
+    // this remainder is handed back (via `same_line_remainder`) as plain
+    // text for a LATER, independent `scan_logical_item_line` call to
+    // replay, and `render_visible_range` never renders a real escaped
+    // continuation's trailing `\` - restore it here so a member whose
+    // own literal continues past this boundary onto the next physical
+    // line is not misread as an ordinary (non-continuing) unclosed
+    // string on that later scan.
+    if scanned.ends_in_escaped_continuation {
+        remainder.push('\\');
     }
 
     let consumed = scanned.render_visible_range(None, Some(boundary));
@@ -3719,6 +3972,97 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     false,
                     |member_code: &str| is_public_code(member_code),
                 );
+                file_lexer = item_lexer.clone();
+                if same_line_remainder.is_none() {
+                    idx += 1;
+                }
+                continue;
+            }
+
+            if is_private_extern_item(&combined_code_tokens) {
+                // A private (non-`pub`) extern crate or extern fn,
+                // resolved once `is_incomplete_extern_prefix`'s own
+                // lookahead read enough to rule out a block. Consumed
+                // structurally like any other non-public item - never
+                // inventoried - mirroring `is_public_fn`'s own signature-
+                // then-body-skip shape for the fn case (~L2664) and the
+                // semicolon-accumulation shape the public extern-crate/
+                // type-alias path below uses for the crate case (~L3858),
+                // minus every `lines.push`: nothing is captured, only
+                // `idx`/`item_lexer` are advanced past it.
+                let mut probe = combined_code_tokens.trim_start();
+                if let Some(after) = is_keyword_prefix(probe, "unsafe") {
+                    probe = after;
+                }
+                if let Some(mut rest) = is_keyword_prefix(probe, "extern") {
+                    rest = rest.trim_start();
+                    if rest.starts_with('"') {
+                        if let Some(close) = rest[1..].find('"') {
+                            rest = rest[close + 2..].trim_start();
+                        }
+                    }
+                    probe = rest;
+                }
+                let is_fn = is_keyword_prefix(probe, "fn").is_some();
+
+                if is_fn {
+                    while !current_scanned.has_top_level_open_brace
+                        && !current_scanned.has_top_level_semicolon
+                        && idx + 1 < src_lines.len()
+                    {
+                        idx += 1;
+                        let continuation = src_lines[idx];
+                        if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
+                            continue;
+                        }
+                        current_scanned = scan_logical_item_line(
+                            &mut item_lexer,
+                            continuation,
+                            &mut same_line_remainder,
+                        );
+                    }
+                    if current_scanned.has_top_level_open_brace {
+                        let mut body_closed = current_scanned
+                            .events
+                            .iter()
+                            .any(|event| event.kind == StructuralEventKind::TopLevelCloseBrace);
+                        while !body_closed && idx + 1 < src_lines.len() {
+                            idx += 1;
+                            current_scanned = scan_logical_item_line_with_terminator(
+                                &mut item_lexer,
+                                src_lines[idx],
+                                &mut same_line_remainder,
+                                Some(true),
+                            );
+                            body_closed = current_scanned
+                                .events
+                                .iter()
+                                .any(|event| event.kind == StructuralEventKind::TopLevelCloseBrace);
+                        }
+                    }
+                } else {
+                    let mut is_complete = current_scanned.has_top_level_semicolon;
+                    while !is_complete && idx + 1 < src_lines.len() {
+                        idx += 1;
+                        let continuation = src_lines[idx];
+                        if continuation.trim().is_empty() && item_lexer.state == LexState::Normal {
+                            continue;
+                        }
+                        let sc = scan_logical_item_line_with_terminator(
+                            &mut item_lexer,
+                            continuation,
+                            &mut same_line_remainder,
+                            Some(false),
+                        );
+                        if sc.has_top_level_semicolon {
+                            is_complete = true;
+                        }
+                    }
+                }
+
+                if item_lexer.state == LexState::Normal {
+                    item_lexer.reset_top_level_depths();
+                }
                 file_lexer = item_lexer.clone();
                 if same_line_remainder.is_none() {
                     idx += 1;
@@ -8715,5 +9059,360 @@ fn public_api_guard_final_audit_reflow_and_same_line_symmetry() {
         extern_private_one_line_surface.contains("pub fn f() -> u32;"),
         "the public foreign item following it must still be inventoried: \
          {extern_private_one_line_surface:?}"
+    );
+}
+
+// ====================================================================
+// Round 4: fresh P2s from the exact-head review of 3ad0177a -
+// opening-line member replay state, private extern lookahead leaking
+// into the public dispatcher, and `where` separated from its bound list
+// by a block comment.
+// ====================================================================
+
+#[test]
+fn public_api_guard_replays_opening_line_members_from_body_open_state() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // P2-1A: exact Codex case - a member signature that starts on the
+    // impl's own opening line and continues onto a later physical line.
+    let base = "pub struct S;\n\nimpl S { pub fn f(\n    &self,\n) -> u32 { 0 } }\n";
+    let mutated = "pub struct S;\n\nimpl S { pub fn f(\n    &self,\n) -> u64 { 0 } }\n";
+    assert_ne!(
+        surface(base),
+        surface(mutated),
+        "a member signature that opens on the impl's own line and continues onto a later \
+         physical line must be inventoried and change the surface on mutation"
+    );
+
+    // P2-1B: formatting equivalence - opening-line-start vs impl-brace-
+    // on-its-own-line, same multiline signature either way.
+    let normal_form =
+        "pub struct S;\n\nimpl S {\n    pub fn f(\n        &self,\n    ) -> u32 { 0 }\n}\n";
+    assert_eq!(
+        surface(base),
+        surface(normal_form),
+        "an opening-line member whose signature continues onto another physical line must be \
+         formatting-equivalent to the same member with the impl's own brace on its own line"
+    );
+
+    // P2-1C: private method body mutation on the opening-line, multiline
+    // form must not change the surface.
+    let body_only = "pub struct S;\n\nimpl S { pub fn f(\n    &self,\n) -> u32 { 1 } }\n";
+    assert_eq!(
+        surface(base),
+        surface(body_only),
+        "a private body-only mutation on an opening-line member with a multiline signature must \
+         not change the surface"
+    );
+
+    // P2-1D: replay matrix - opening-line member fragments ending in a
+    // still-open delimiter/literal/clause, continuing onto the next
+    // physical line. Each checks: contract mutation -> DIFFERENT,
+    // formatting-only reflow -> EQUAL, private body mutation -> EQUAL.
+    struct Case {
+        label: &'static str,
+        base: &'static str,
+        mutated: &'static str,
+        reflow: &'static str,
+        body_mut: &'static str,
+    }
+    let cases = [
+        Case {
+            label: "open paren (generic return type)",
+            base: "pub struct S;\nimpl S { pub fn f() -> Vec<\n    u32,\n> { Vec::new() } }\n",
+            mutated: "pub struct S;\nimpl S { pub fn f() -> Vec<\n    u64,\n> { Vec::new() } }\n",
+            reflow: "pub struct S;\nimpl S {\n    pub fn f() -> Vec<\n        u32,\n    > { \
+                      Vec::new() }\n}\n",
+            body_mut: "pub struct S;\nimpl S { pub fn f() -> Vec<\n    u32,\n> { \
+                        Vec::with_capacity(1) } }\n",
+        },
+        Case {
+            label: "open bracket (array return type)",
+            base: "pub struct S;\nimpl S { pub fn f() -> [\n    u32; 2\n] { [1, 2] } }\n",
+            mutated: "pub struct S;\nimpl S { pub fn f() -> [\n    u64; 2\n] { [1, 2] } }\n",
+            reflow: "pub struct S;\nimpl S {\n    pub fn f() -> [\n        u32; 2\n    ] { [1, \
+                      2] }\n}\n",
+            body_mut: "pub struct S;\nimpl S { pub fn f() -> [\n    u32; 2\n] { [3, 4] } }\n",
+        },
+        Case {
+            label: "escaped-continuation normal string literal",
+            base: "pub struct S;\nimpl S { pub const N: &str = \"abc\\\n    def\"; }\n",
+            mutated: "pub struct S;\nimpl S { pub const N: &str = \"abc\\\n    xyz\"; }\n",
+            reflow: "pub struct S;\nimpl S {\n    pub const N: &str = \"abc\\\n        def\";\n}\n",
+            // A const's own value IS its public signature - there is no
+            // private body to mutate independently, unlike every other
+            // case in this matrix, so `body_mut` is set equal to `base`
+            // (trivially satisfying the same-surface check).
+            body_mut: "pub struct S;\nimpl S { pub const N: &str = \"abc\\\n    def\"; }\n",
+        },
+        Case {
+            label: "raw string literal spanning a real newline",
+            base: "pub struct S;\nimpl S { pub const N: &str = r#\"\nraw\n\"#; }\n",
+            mutated: "pub struct S;\nimpl S { pub const N: &str = r#\"\nRAW\n\"#; }\n",
+            reflow: "pub struct S;\nimpl S {\n    pub const N: &str = r#\"\nraw\n\"#;\n}\n",
+            // Same reasoning as above - a const has no private body.
+            body_mut: "pub struct S;\nimpl S { pub const N: &str = r#\"\nraw\n\"#; }\n",
+        },
+        Case {
+            label: "type-position macro with paren delimiter",
+            base: "pub struct S;\nimpl S { pub fn f() -> type_macro!(\n    u32,\n) { 0 } }\n",
+            mutated: "pub struct S;\nimpl S { pub fn f() -> type_macro!(\n    u64,\n) { 0 } }\n",
+            reflow: "pub struct S;\nimpl S {\n    pub fn f() -> type_macro!(\n        u32,\n    ) \
+                      { 0 }\n}\n",
+            body_mut: "pub struct S;\nimpl S { pub fn f() -> type_macro!(\n    u32,\n) { 1 } }\n",
+        },
+        Case {
+            label: "where clause on an opening-line method signature",
+            base: "pub struct S;\nimpl S { pub fn f<T>() -> u32\nwhere\n    T: Clone,\n{ 0 } }\n",
+            mutated: "pub struct S;\nimpl S { pub fn f<T>() -> u64\nwhere\n    T: Clone,\n{ 0 } \
+                       }\n",
+            reflow: "pub struct S;\nimpl S {\n    pub fn f<T>() -> u32\n    where\n        T: \
+                      Clone,\n    { 0 }\n}\n",
+            body_mut: "pub struct S;\nimpl S { pub fn f<T>() -> u32\nwhere\n    T: Clone,\n{ 1 } \
+                        }\n",
+        },
+    ];
+    for case in cases {
+        let base_surface = surface(case.base);
+        assert_ne!(
+            base_surface,
+            surface(case.mutated),
+            "{}: a public contract mutation must change the surface: {base_surface:?}",
+            case.label
+        );
+        assert_eq!(
+            base_surface,
+            surface(case.reflow),
+            "{}: formatting-only reflow must not change the surface: {base_surface:?}",
+            case.label
+        );
+        assert_eq!(
+            base_surface,
+            surface(case.body_mut),
+            "{}: a private body-only mutation must not change the surface: {base_surface:?}",
+            case.label
+        );
+    }
+
+    // P2-1E: associated const whose type continues onto the next line.
+    let const_base = "pub struct S;\nimpl S { pub const N:\n    u32 = 1;\n}\n";
+    let const_mutated = "pub struct S;\nimpl S { pub const N:\n    u32 = 2;\n}\n";
+    let const_surface = surface(const_base);
+    assert!(
+        const_surface.contains("pub const N: u32 = 1;"),
+        "an associated const whose type continues onto the next physical line must be \
+         inventoried: {const_surface:?}"
+    );
+    assert_ne!(
+        const_surface,
+        surface(const_mutated),
+        "mutating the const's value must change the surface: {const_surface:?}"
+    );
+}
+
+#[test]
+fn public_api_guard_extern_lookahead_falls_back_to_private_path() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // P2-2A: `extern` then `crate foo;` on the next line - a complete,
+    // PRIVATE (not part of the public contract) item once resolved. Must
+    // not panic and must not depend on the crate name.
+    let crate_a = "extern\ncrate foo;\npub struct S;\n";
+    let crate_b = "extern\ncrate bar;\npub struct S;\n";
+    assert_eq!(
+        surface(crate_a),
+        surface(crate_b),
+        "extern crate declarations are not part of the public contract, including when `extern` \
+         and `crate` land on different physical lines"
+    );
+
+    // P2-2B: `extern` then `"C" fn hidden() {}` on the next line - a
+    // complete, PRIVATE (non-pub) foreign-function definition once
+    // resolved. Must not panic and a private-only mutation must not
+    // change the surface.
+    let fn_a = "extern\n\"C\" fn hidden() -> u32 { 0 }\npub struct S;\n";
+    let fn_b = "extern\n\"C\" fn hidden() -> u64 { 1 }\npub struct S;\n";
+    assert_eq!(
+        surface(fn_a),
+        surface(fn_b),
+        "a private extern fn definition split across `extern` and its ABI/signature must not \
+         leak into or otherwise affect the public contract"
+    );
+
+    // P2-2C: the public counterpart must remain unaffected by the new
+    // lookahead gate - split across lines the same way.
+    let pub_a = "pub extern\n\"C\" fn visible() -> u32 { 0 }\n";
+    let pub_b = "pub extern\n\"C\" fn visible() -> u64 { 0 }\n";
+    assert_ne!(
+        surface(pub_a),
+        surface(pub_b),
+        "a public extern fn definition split across `extern` and its ABI/signature must still \
+         be inventoried and change the surface on mutation: {:?}",
+        surface(pub_a)
+    );
+    assert!(
+        surface(pub_a).contains("extern \"C\" fn visible() -> u32"),
+        "the public extern fn must actually be captured, not merely fail to panic: {:?}",
+        surface(pub_a)
+    );
+
+    // P2-2D: private extern fn immediately followed by a genuine public
+    // item - the fallback to the private path must not corrupt scanning
+    // of what comes after it.
+    let followed = "extern\ncrate foo;\npub const AFTER: u32 = 1;\n";
+    let followed_surface = surface(followed);
+    assert!(
+        followed_surface.contains("pub const AFTER: u32 = 1;"),
+        "an item following a lookahead-resolved private extern crate must still be inventoried: \
+         {followed_surface:?}"
+    );
+}
+
+#[test]
+fn public_api_guard_recognizes_where_before_a_block_comment() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // P2-3A: exact Codex case.
+    let base =
+        "pub struct S<T>(pub T);\nimpl<T> S<T> where/**/T: for<'a> Fn(&'a str) {\n    pub fn f(&self) -> u32 { 0 }\n}\n";
+    let mutated =
+        "pub struct S<T>(pub T);\nimpl<T> S<T> where/**/T: for<'a> Fn(&'a str) {\n    pub fn f(&self) -> u64 { 0 }\n}\n";
+    assert_ne!(
+        surface(base),
+        surface(mutated),
+        "an inherent impl whose `where` is immediately followed by a block comment must still \
+         classify as inherent and inventory its public method"
+    );
+
+    // P2-3B: trivia matrix - every shape below must classify identically
+    // (same public inventory) for an inherent impl.
+    let shapes = [
+        ("where T:", "impl<T> S<T> where T: for<'a> Fn(&'a str) {"),
+        ("where\\nT:", "impl<T> S<T> where\nT: for<'a> Fn(&'a str) {"),
+        (
+            "where/**/T:",
+            "impl<T> S<T> where/**/T: for<'a> Fn(&'a str) {",
+        ),
+        (
+            "where /* comment */ T:",
+            "impl<T> S<T> where /* comment */ T: for<'a> Fn(&'a str) {",
+        ),
+        (
+            "where\\n/* comment */\\nT:",
+            "impl<T> S<T> where\n/* comment */\nT: for<'a> Fn(&'a str) {",
+        ),
+    ];
+    let reference = surface(&format!(
+        "pub struct S<T>(pub T);\n{}\n    pub fn f(&self) -> u32 {{ 0 }}\n}}\n",
+        shapes[0].1
+    ));
+    for (label, header) in &shapes {
+        let src =
+            format!("pub struct S<T>(pub T);\n{header}\n    pub fn f(&self) -> u32 {{ 0 }}\n}}\n");
+        assert_eq!(
+            reference,
+            surface(&src),
+            "{label}: every `where`-before-HRTB trivia shape must classify the impl identically"
+        );
+    }
+
+    // P2-3C: trait-impl counterpart must remain classified as a trait
+    // impl (never invent an inherent public method) with the same
+    // where/block-comment trivia.
+    let trait_impl_base = "pub struct S;\npub trait Trait { fn f(&self) -> u32; }\nimpl Trait \
+                            for S where/**/S: Sized {\n    fn f(&self) -> u32 { 0 }\n}\n";
+    let trait_impl_surface = surface(trait_impl_base);
+    assert_eq!(
+        trait_impl_surface.matches("fn f").count(),
+        1,
+        "a trait impl with `where` immediately followed by a block comment must not invent a \
+         second, inherent `fn f`: {trait_impl_surface:?}"
+    );
+    assert!(
+        !trait_impl_surface.contains("impl"),
+        "the impl header itself must never be inventoried: {trait_impl_surface:?}"
+    );
+}
+
+// ====================================================================
+// Round 4 mandatory member-replay audit: a member-boundary split (or an
+// attribute captured off it) whose OWN remainder itself ends in an
+// escaped-newline continuation must not lose that continuation on
+// replay - the same P2-1 backslash-loss finding, reached through a
+// different split point than the opening line. Confirmed pre-existing
+// on unmodified 3ad0177a (both members vanished entirely, not just the
+// second), not a regression from this round's other fixes.
+// ====================================================================
+
+#[test]
+fn public_api_guard_member_boundary_split_preserves_escaped_continuation() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // Exact regression: an attribute-boundary split (found mid-`sc`,
+    // after an earlier same-line member) immediately followed by a
+    // member whose own string literal continues onto the next physical
+    // line.
+    let base = "pub struct S;\nimpl S { pub const N: u32 = 1; #[deprecated] pub const M: &str = \
+                \"abc\\\n    def\"; }\n";
+    let mutated = "pub struct S;\nimpl S { pub const N: u32 = 1; #[deprecated] pub const M: &str \
+                    = \"abc\\\n    xyz\"; }\n";
+    let base_surface = surface(base);
+    assert!(
+        base_surface.contains("pub const N: u32 = 1;"),
+        "the member BEFORE the attribute boundary must still be inventoried: {base_surface:?}"
+    );
+    assert!(
+        base_surface.contains("pub const M: &str = \"abcdef\";"),
+        "the attributed member's own escaped continuation must survive the boundary split, not \
+         be silently dropped along with the whole member: {base_surface:?}"
+    );
+    assert_ne!(
+        base_surface,
+        surface(mutated),
+        "mutating the value past the boundary split must change the surface: {base_surface:?}"
+    );
+
+    // Same shape, but the split point is `capture_attribute`'s OWN
+    // internal remainder (single member, attribute right after the
+    // body's own `{`) rather than `member_boundary_attribute`'s.
+    let opening = "pub struct S;\nimpl S { #[deprecated] pub const M: &str = \"abc\\\n    def\"; \
+                    }\n";
+    let opening_mutated = "pub struct S;\nimpl S { #[deprecated] pub const M: &str = \"abc\\\n    \
+                            xyz\"; }\n";
+    let opening_surface = surface(opening);
+    assert!(
+        opening_surface.contains("pub const M: &str = \"abcdef\";"),
+        "an opening-line attribute's own remainder ending in an escaped continuation must \
+         survive: {opening_surface:?}"
+    );
+    assert_ne!(
+        opening_surface,
+        surface(opening_mutated),
+        "mutating the value must change the surface: {opening_surface:?}"
+    );
+}
+
+#[test]
+fn public_api_guard_same_line_remainder_preserves_escaped_continuation() {
+    let surface = |src: &str| normalized_public_surface_str("test.rs", src);
+
+    // A same-line boundary (`scan_logical_item_line_with_terminator`'s
+    // own `same_line_remainder` split, for a second logical item on the
+    // same physical line as an earlier one) whose own remainder ends in
+    // an escaped-newline continuation must not lose it - the same class
+    // of finding as the member-boundary-attribute case above, reached
+    // through the top-level same-line-item path instead.
+    let base = "pub struct S; pub const M: &str = \"abc\\\n    def\";\n";
+    let mutated = "pub struct S; pub const M: &str = \"abc\\\n    xyz\";\n";
+    let base_surface = surface(base);
+    assert!(
+        base_surface.contains("pub const M: &str = \"abcdef\";"),
+        "the second same-line item's own escaped continuation must survive the boundary split: \
+         {base_surface:?}"
+    );
+    assert_ne!(
+        base_surface,
+        surface(mutated),
+        "mutating the value must change the surface: {base_surface:?}"
     );
 }
