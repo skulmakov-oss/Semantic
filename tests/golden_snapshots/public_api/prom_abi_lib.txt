@@ -59,7 +59,22 @@ pub kind: AbiFailureKind,
 pub message: String,
 pub fn new(call: HostCallId, kind: AbiFailureKind, message: impl Into<String>) -> Self {
 pub trait PrometheusHostAbi {
+fn gate_read(&mut self, device_id: u16, port: u16) -> Result<AbiValue, AbiError>;
+fn gate_write(&mut self, device_id: u16, port: u16, value: AbiValue) -> Result<(), AbiError>;
+fn pulse_emit(&mut self, signal: &str) -> Result<(), AbiError>;
+fn state_query(&mut self, key: &str) -> Result<AbiValue, AbiError>;
+fn state_update(&mut self, key: &str, value: AbiValue) -> Result<(), AbiError>;
+fn event_post(&mut self, signal: &str) -> Result<(), AbiError>;
+fn clock_read(&mut self) -> Result<u32, AbiError>;
 pub trait ApplicationHostAbi {
+fn args_read(&mut self, index: u32) -> Result<String, AbiError>;
+fn stdin_read_text(&mut self) -> Result<String, AbiError>;
+fn stdout_write(&mut self, text: &str) -> Result<(), AbiError>;
+fn stderr_write(&mut self, text: &str) -> Result<(), AbiError>;
+fn path_inspect(&mut self, path: &str) -> Result<bool, AbiError>;
+fn fs_read_text(&mut self, path: &str) -> Result<String, AbiError>;
+fn fs_write_text(&mut self, path: &str, text: &str) -> Result<(), AbiError>;
+fn time_duration_millis(&mut self) -> Result<u32, AbiError>;
 #[derive(Debug, Default)]
 pub struct RecordingHostAbi {
 pub reads: alloc::vec::Vec<(u16, u16)>,
