@@ -155,10 +155,30 @@ enum VisibleSegment {
     Literal(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StructuralEventKind {
+    TopLevelOpenBrace,
+    TopLevelCloseBrace,
+    TopLevelSemicolon,
+    TopLevelComma,
+    BaselineOpenBrace,
+    MethodBodyClose,
+    BaselineSemicolon,
+    BaselineComma,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StructuralEvent {
+    seg_idx: usize,
+    char_idx: usize,
+    kind: StructuralEventKind,
+}
+
 #[derive(Debug, Clone)]
 struct ScannedLine {
     segments: Vec<VisibleSegment>,
     code_tokens: String,
+    events: Vec<StructuralEvent>,
     has_top_level_semicolon: bool,
     has_top_level_comma: bool,
     has_top_level_open_paren: bool,
@@ -170,11 +190,11 @@ struct ScannedLine {
 
 impl ScannedLine {
     fn render_visible(&self) -> String {
-        self.render_visible_up_to(None)
+        self.render_visible_range(None, None)
     }
 
     fn text_up_to_function_body_open_brace(&self) -> String {
-        self.render_visible_up_to(self.first_top_level_open_brace_seg)
+        self.render_visible_range(None, self.first_top_level_open_brace_seg)
     }
 
     fn render_visible_without_enum_close_brace(&self) -> String {
@@ -187,77 +207,177 @@ impl ScannedLine {
         cloned.render_visible()
     }
 
-    fn render_visible_up_to(&self, limit: Option<(usize, usize)>) -> String {
+    fn render_visible_range(
+        &self,
+        start: Option<(usize, usize)>,
+        end: Option<(usize, usize)>,
+    ) -> String {
+        if let (Some(s), Some(e)) = (start, end) {
+            if s > e {
+                return String::new();
+            }
+        }
         let mut out = String::new();
-        for (idx, seg) in self.segments.iter().enumerate() {
-            if let Some((target_seg, char_idx)) = limit {
-                if idx > target_seg {
-                    break;
+        for (seg_idx, seg) in self.segments.iter().enumerate() {
+            if let Some((s_seg, _)) = start {
+                if seg_idx < s_seg {
+                    continue;
                 }
-                if idx == target_seg {
-                    match seg {
-                        VisibleSegment::Code(s) => {
-                            let prefix = &s[..=char_idx];
-                            let norm = normalize_ws(prefix);
-                            if !norm.is_empty() {
-                                if !out.is_empty() && !out.ends_with(' ') {
-                                    let first = norm.chars().next().unwrap();
-                                    let last = out.chars().last().unwrap();
-                                    let skip_space = is_attached_punctuation_prefix(first)
-                                        || is_attached_opening_delimiter(last)
-                                        || (last == '#' && first == '[')
-                                        || (out.ends_with("pub") && first == '(');
-                                    if !skip_space {
-                                        out.push(' ');
-                                    }
-                                }
-                                out.push_str(&norm);
-                            }
-                        }
-                        VisibleSegment::Literal(s) => {
-                            if !out.is_empty() && !out.ends_with(' ') {
-                                let last = out.chars().last().unwrap();
-                                if !is_attached_opening_delimiter(last) {
-                                    out.push(' ');
-                                }
-                            }
-                            out.push_str(&s[..=char_idx]);
-                        }
-                    }
+            }
+            if let Some((e_seg, _)) = end {
+                if seg_idx > e_seg {
                     break;
                 }
             }
 
             match seg {
                 VisibleSegment::Code(s) => {
-                    let norm = normalize_ws(s);
-                    if !norm.is_empty() {
-                        if !out.is_empty() && !out.ends_with(' ') {
-                            let first = norm.chars().next().unwrap();
-                            let last = out.chars().last().unwrap();
-                            let skip_space = is_attached_punctuation_prefix(first)
-                                || is_attached_opening_delimiter(last)
-                                || (last == '#' && first == '[')
-                                || (out.ends_with("pub") && first == '(');
-                            if !skip_space {
-                                out.push(' ');
+                    let s_char = if start.is_some_and(|(s_seg, _)| s_seg == seg_idx) {
+                        start.unwrap().1
+                    } else {
+                        0
+                    };
+                    let e_char = if end.is_some_and(|(e_seg, _)| e_seg == seg_idx) {
+                        end.unwrap().1
+                    } else {
+                        s.len().saturating_sub(1)
+                    };
+                    if s_char <= e_char && s_char < s.len() {
+                        let chunk = &s[s_char..=e_char.min(s.len() - 1)];
+                        let norm = normalize_ws(chunk);
+                        if !norm.is_empty() {
+                            if !out.is_empty() && !out.ends_with(' ') {
+                                let first = norm.chars().next().unwrap();
+                                let last = out.chars().last().unwrap();
+                                let skip_space = is_attached_punctuation_prefix(first)
+                                    || is_attached_opening_delimiter(last)
+                                    || (last == '#' && first == '[')
+                                    || (out.ends_with("pub") && first == '(');
+                                if !skip_space {
+                                    out.push(' ');
+                                }
                             }
+                            out.push_str(&norm);
                         }
-                        out.push_str(&norm);
                     }
                 }
                 VisibleSegment::Literal(s) => {
-                    if !out.is_empty() && !out.ends_with(' ') {
-                        let last = out.chars().last().unwrap();
-                        if !is_attached_opening_delimiter(last) {
-                            out.push(' ');
+                    let s_char = if start.is_some_and(|(s_seg, _)| s_seg == seg_idx) {
+                        start.unwrap().1
+                    } else {
+                        0
+                    };
+                    let e_char = if end.is_some_and(|(e_seg, _)| e_seg == seg_idx) {
+                        end.unwrap().1
+                    } else {
+                        s.len().saturating_sub(1)
+                    };
+                    if s_char <= e_char && s_char < s.len() {
+                        let chunk = &s[s_char..=e_char.min(s.len() - 1)];
+                        if !out.is_empty() && !out.ends_with(' ') {
+                            let last = out.chars().last().unwrap();
+                            if !is_attached_opening_delimiter(last) {
+                                out.push(' ');
+                            }
                         }
+                        out.push_str(chunk);
                     }
-                    out.push_str(s);
                 }
             }
         }
         out
+    }
+
+    fn code_tokens_range(
+        &self,
+        start: Option<(usize, usize)>,
+        end: Option<(usize, usize)>,
+    ) -> String {
+        if let (Some(s), Some(e)) = (start, end) {
+            if s > e {
+                return String::new();
+            }
+        }
+        let mut out = String::new();
+        for (seg_idx, seg) in self.segments.iter().enumerate() {
+            if let Some((s_seg, _)) = start {
+                if seg_idx < s_seg {
+                    continue;
+                }
+            }
+            if let Some((e_seg, _)) = end {
+                if seg_idx > e_seg {
+                    break;
+                }
+            }
+
+            match seg {
+                VisibleSegment::Code(s) => {
+                    let s_char = if start.is_some_and(|(s_seg, _)| s_seg == seg_idx) {
+                        start.unwrap().1
+                    } else {
+                        0
+                    };
+                    let e_char = if end.is_some_and(|(e_seg, _)| e_seg == seg_idx) {
+                        end.unwrap().1
+                    } else {
+                        s.len().saturating_sub(1)
+                    };
+                    if s_char <= e_char && s_char < s.len() {
+                        let chunk = &s[s_char..=e_char.min(s.len() - 1)];
+                        if !out.is_empty() && !out.ends_with(' ') {
+                            out.push(' ');
+                        }
+                        out.push_str(chunk);
+                    }
+                }
+                VisibleSegment::Literal(_) => {
+                    if !out.is_empty() && !out.ends_with(' ') {
+                        out.push(' ');
+                    }
+                    out.push_str("\"\"");
+                }
+            }
+        }
+        out
+    }
+}
+
+fn next_pos(segments: &[VisibleSegment], pos: (usize, usize)) -> Option<(usize, usize)> {
+    let (seg_idx, char_idx) = pos;
+    if seg_idx >= segments.len() {
+        return None;
+    }
+    let seg_len = match &segments[seg_idx] {
+        VisibleSegment::Code(s) => s.len(),
+        VisibleSegment::Literal(s) => s.len(),
+    };
+    if char_idx + 1 < seg_len {
+        Some((seg_idx, char_idx + 1))
+    } else if seg_idx + 1 < segments.len() {
+        Some((seg_idx + 1, 0))
+    } else {
+        None
+    }
+}
+
+fn prev_pos(segments: &[VisibleSegment], pos: (usize, usize)) -> Option<(usize, usize)> {
+    let (seg_idx, char_idx) = pos;
+    if char_idx > 0 {
+        Some((seg_idx, char_idx - 1))
+    } else if seg_idx > 0 {
+        let prev_seg = seg_idx - 1;
+        let prev_len = match &segments[prev_seg] {
+            VisibleSegment::Code(s) => s.len(),
+            VisibleSegment::Literal(s) => s.len(),
+        };
+        if prev_len > 0 {
+            Some((prev_seg, prev_len - 1))
+        } else {
+            None
+        }
+    } else {
+        None
     }
 }
 
@@ -271,9 +391,10 @@ fn is_attached_opening_delimiter(c: char) -> bool {
 
 fn is_likely_comparison_less_than(code_tokens: &str) -> bool {
     let t = code_tokens.trim_end();
-    if t.ends_with(|c: char| {
-        c.is_ascii_digit() || c == '\'' || c == '"' || c == ')' || c == ']' || c == '}'
-    }) {
+    if t.is_empty() {
+        return false;
+    }
+    if t.ends_with(|c: char| c == '\'' || c == '"' || c == ')' || c == ']' || c == '}') {
         return true;
     }
     if t.ends_with("true") || t.ends_with("false") {
@@ -281,9 +402,24 @@ fn is_likely_comparison_less_than(code_tokens: &str) -> bool {
     }
     if is_public_const_or_static(code_tokens) {
         if let Some((_, after_eq)) = t.rsplit_once('=') {
-            if !after_eq.trim_end().ends_with("::") && !after_eq.contains('<') {
+            let trimmed_after = after_eq.trim();
+            if !trimmed_after.ends_with("::") && !trimmed_after.contains('<') {
                 return true;
             }
+        }
+    }
+    let mut last_token_start = None;
+    for (idx, c) in t.char_indices().rev() {
+        if c.is_alphanumeric() || c == '_' {
+            last_token_start = Some(idx);
+        } else {
+            break;
+        }
+    }
+    if let Some(start) = last_token_start {
+        let token = &t[start..];
+        if token.starts_with(|c: char| c.is_ascii_digit()) {
+            return true;
         }
     }
     false
@@ -349,6 +485,7 @@ impl CodeLexer {
         let mut segments = Vec::new();
         let mut cur_code = String::new();
         let mut code_tokens = String::with_capacity(line.len());
+        let mut events = Vec::new();
         let mut has_top_level_semicolon = false;
         let mut has_top_level_comma = false;
         let mut has_top_level_open_paren = false;
@@ -586,8 +723,7 @@ impl CodeLexer {
                         }
                         '<' => {
                             self.pending_macro_bang = false;
-                            if self.brace_depth == 0
-                                && self.paren_depth == 0
+                            if self.paren_depth == 0
                                 && self.bracket_depth == 0
                                 && !is_likely_comparison_less_than(&code_tokens)
                             {
@@ -598,8 +734,7 @@ impl CodeLexer {
                         }
                         '>' => {
                             self.pending_macro_bang = false;
-                            if self.brace_depth == 0
-                                && self.paren_depth == 0
+                            if self.paren_depth == 0
                                 && self.bracket_depth == 0
                                 && self.angle_depth > 0
                             {
@@ -653,11 +788,27 @@ impl CodeLexer {
                                     && self.angle_depth == 0
                                     && self.bracket_depth == 0
                                     && self.brace_depth == 0;
-                                if is_top_level && !has_top_level_open_brace {
-                                    has_top_level_open_brace = true;
-                                    let seg_idx = segments.len();
-                                    let char_idx = cur_code.len();
-                                    first_top_level_open_brace_seg = Some((seg_idx, char_idx));
+                                if is_top_level {
+                                    if !has_top_level_open_brace {
+                                        has_top_level_open_brace = true;
+                                        first_top_level_open_brace_seg =
+                                            Some((segments.len(), cur_code.len()));
+                                    }
+                                    events.push(StructuralEvent {
+                                        seg_idx: segments.len(),
+                                        char_idx: cur_code.len(),
+                                        kind: StructuralEventKind::TopLevelOpenBrace,
+                                    });
+                                } else if self.paren_depth == 0
+                                    && self.angle_depth == 0
+                                    && self.bracket_depth == 0
+                                    && self.brace_depth == 1
+                                {
+                                    events.push(StructuralEvent {
+                                        seg_idx: segments.len(),
+                                        char_idx: cur_code.len(),
+                                        kind: StructuralEventKind::BaselineOpenBrace,
+                                    });
                                 }
                             }
                             self.brace_depth += 1;
@@ -675,9 +826,21 @@ impl CodeLexer {
                             } else if self.paren_depth == 0
                                 && self.angle_depth == 0
                                 && self.bracket_depth == 0
-                                && self.brace_depth == 1
                             {
-                                has_top_level_close_brace = true;
+                                if self.brace_depth == 1 {
+                                    has_top_level_close_brace = true;
+                                    events.push(StructuralEvent {
+                                        seg_idx: segments.len(),
+                                        char_idx: cur_code.len(),
+                                        kind: StructuralEventKind::TopLevelCloseBrace,
+                                    });
+                                } else if self.brace_depth == 2 {
+                                    events.push(StructuralEvent {
+                                        seg_idx: segments.len(),
+                                        char_idx: cur_code.len(),
+                                        kind: StructuralEventKind::MethodBodyClose,
+                                    });
+                                }
                             }
                             if self.brace_depth > 0 {
                                 self.brace_depth -= 1;
@@ -693,6 +856,21 @@ impl CodeLexer {
                             {
                                 has_top_level_semicolon = true;
                                 self.angle_depth = 0;
+                                events.push(StructuralEvent {
+                                    seg_idx: segments.len(),
+                                    char_idx: cur_code.len(),
+                                    kind: StructuralEventKind::TopLevelSemicolon,
+                                });
+                            } else if self.paren_depth == 0
+                                && self.bracket_depth == 0
+                                && self.brace_depth == 1
+                                && self.macro_brace_stack.is_empty()
+                            {
+                                events.push(StructuralEvent {
+                                    seg_idx: segments.len(),
+                                    char_idx: cur_code.len(),
+                                    kind: StructuralEventKind::BaselineSemicolon,
+                                });
                             }
                             cur_code.push(';');
                             code_tokens.push(';');
@@ -705,6 +883,22 @@ impl CodeLexer {
                                 && self.brace_depth == 0
                             {
                                 has_top_level_comma = true;
+                                events.push(StructuralEvent {
+                                    seg_idx: segments.len(),
+                                    char_idx: cur_code.len(),
+                                    kind: StructuralEventKind::TopLevelComma,
+                                });
+                            } else if self.paren_depth == 0
+                                && self.angle_depth == 0
+                                && self.bracket_depth == 0
+                                && self.brace_depth == 1
+                                && self.macro_brace_stack.is_empty()
+                            {
+                                events.push(StructuralEvent {
+                                    seg_idx: segments.len(),
+                                    char_idx: cur_code.len(),
+                                    kind: StructuralEventKind::BaselineComma,
+                                });
                             }
                             cur_code.push(',');
                             code_tokens.push(',');
@@ -823,6 +1017,7 @@ impl CodeLexer {
         ScannedLine {
             segments,
             code_tokens,
+            events,
             has_top_level_semicolon,
             has_top_level_comma,
             has_top_level_open_paren,
@@ -971,146 +1166,6 @@ fn is_public_trait(code_tokens: &str) -> bool {
         }
         is_keyword_prefix(cur, "trait").is_some()
     })
-}
-
-fn parse_struct_field_list(inner: &str) -> Vec<String> {
-    let mut fields = Vec::new();
-    let mut cur = String::new();
-    let mut paren_depth: usize = 0;
-    let mut bracket_depth: usize = 0;
-    let mut brace_depth: usize = 0;
-    let mut angle_depth: usize = 0;
-
-    let mut lexer = CodeLexer::new();
-    let sc = lexer.scan_line(inner);
-
-    for seg in &sc.segments {
-        match seg {
-            VisibleSegment::Literal(lit) => {
-                cur.push_str(lit);
-            }
-            VisibleSegment::Code(code) => {
-                for c in code.chars() {
-                    match c {
-                        '(' => paren_depth += 1,
-                        ')' => paren_depth = paren_depth.saturating_sub(1),
-                        '[' => bracket_depth += 1,
-                        ']' => bracket_depth = bracket_depth.saturating_sub(1),
-                        '{' => brace_depth += 1,
-                        '}' => brace_depth = brace_depth.saturating_sub(1),
-                        '<' => angle_depth += 1,
-                        '>' => angle_depth = angle_depth.saturating_sub(1),
-                        ',' if paren_depth == 0
-                            && bracket_depth == 0
-                            && brace_depth == 0
-                            && angle_depth == 0 =>
-                        {
-                            let trimmed = normalize_ws(&cur);
-                            if !trimmed.is_empty() {
-                                fields.push(trimmed);
-                            }
-                            cur.clear();
-                            continue;
-                        }
-                        _ => {}
-                    }
-                    cur.push(c);
-                }
-            }
-        }
-    }
-    let trimmed = normalize_ws(&cur);
-    if !trimmed.is_empty() {
-        fields.push(trimmed);
-    }
-    fields
-}
-
-fn parse_trait_member_list(inner: &str) -> Vec<String> {
-    let mut members = Vec::new();
-    let mut cur = String::new();
-    let mut paren_depth: usize = 0;
-    let mut bracket_depth: usize = 0;
-    let mut brace_depth: usize = 0;
-    let mut angle_depth: usize = 0;
-    let mut in_default_body = false;
-
-    let mut lexer = CodeLexer::new();
-    let sc = lexer.scan_line(inner);
-
-    for seg in &sc.segments {
-        match seg {
-            VisibleSegment::Literal(lit) => {
-                if !in_default_body {
-                    cur.push_str(lit);
-                }
-            }
-            VisibleSegment::Code(code) => {
-                for c in code.chars() {
-                    match c {
-                        '(' => paren_depth += 1,
-                        ')' => paren_depth = paren_depth.saturating_sub(1),
-                        '[' => bracket_depth += 1,
-                        ']' => bracket_depth = bracket_depth.saturating_sub(1),
-                        '<' => angle_depth += 1,
-                        '>' => angle_depth = angle_depth.saturating_sub(1),
-                        '{' => {
-                            if !in_default_body
-                                && paren_depth == 0
-                                && bracket_depth == 0
-                                && angle_depth == 0
-                            {
-                                in_default_body = true;
-                                brace_depth = 1;
-                                cur.push('{');
-                                let sig = normalize_ws(&cur);
-                                if !sig.is_empty() {
-                                    members.push(sig);
-                                }
-                                cur.clear();
-                                continue;
-                            } else if in_default_body {
-                                brace_depth += 1;
-                                continue;
-                            }
-                        }
-                        '}' => {
-                            if in_default_body {
-                                brace_depth = brace_depth.saturating_sub(1);
-                                if brace_depth == 0 {
-                                    in_default_body = false;
-                                }
-                                continue;
-                            }
-                        }
-                        ';' if !in_default_body
-                            && paren_depth == 0
-                            && bracket_depth == 0
-                            && brace_depth == 0
-                            && angle_depth == 0 =>
-                        {
-                            cur.push(';');
-                            let trimmed = normalize_ws(&cur);
-                            if !trimmed.is_empty() {
-                                members.push(trimmed);
-                            }
-                            cur.clear();
-                            continue;
-                        }
-                        _ => {}
-                    }
-                    if !in_default_body {
-                        cur.push(c);
-                    }
-                }
-            }
-        }
-    }
-    let trimmed = normalize_ws(&cur);
-    if !trimmed.is_empty() {
-        members.push(trimmed);
-    }
-    members
 }
 
 fn is_public_use(code_tokens: &str) -> bool {
@@ -1558,7 +1613,6 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 };
 
                 let mut body_open = current_scanned.has_top_level_open_brace;
-                let mut body_closed = body_open && current_scanned.has_top_level_close_brace;
 
                 while !body_open && idx + 1 < src_lines.len() {
                     idx += 1;
@@ -1571,7 +1625,6 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     let sc = item_lexer.scan_line(continuation);
                     let rendered = sc.render_visible();
                     body_open = sc.has_top_level_open_brace;
-                    body_closed = body_open && sc.has_top_level_close_brace;
                     if was_escaped {
                         struct_header.push_str(&rendered);
                         continue;
@@ -1592,61 +1645,242 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                 lines.push(struct_header);
 
-                if body_closed {
-                    let rendered_all = current_scanned.render_visible();
-                    if let Some(open_idx) = rendered_all.find('{') {
-                        if let Some(close_idx) = rendered_all.rfind('}') {
-                            if close_idx > open_idx {
-                                let inner = &rendered_all[open_idx + 1..close_idx];
-                                for field in parse_struct_field_list(inner) {
-                                    if is_public_code(&field) {
-                                        lines.push(field);
+                let mut pending_field_attrs = Vec::new();
+                let mut cur_field_text = String::new();
+                let mut cur_field_code = String::new();
+                let mut struct_body_closed = false;
+
+                // Process remainder of opening line (if any)
+                if let Some(open_brace_pos) = current_scanned.first_top_level_open_brace_seg {
+                    if let Some(start_pos) = next_pos(&current_scanned.segments, open_brace_pos) {
+                        let mut cur_pos = Some(start_pos);
+                        for event in &current_scanned.events {
+                            if event.kind == StructuralEventKind::TopLevelOpenBrace {
+                                continue;
+                            }
+                            if event.seg_idx < start_pos.0
+                                || (event.seg_idx == start_pos.0 && event.char_idx < start_pos.1)
+                            {
+                                continue;
+                            }
+
+                            if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                                let (chunk_text, chunk_code) = if let Some(limit) = prev_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                ) {
+                                    (
+                                        current_scanned.render_visible_range(cur_pos, Some(limit)),
+                                        current_scanned.code_tokens_range(cur_pos, Some(limit)),
+                                    )
+                                } else {
+                                    (String::new(), String::new())
+                                };
+                                if !chunk_text.trim().is_empty() {
+                                    if !cur_field_text.is_empty()
+                                        && !cur_field_text.ends_with(' ')
+                                        && !chunk_text.starts_with(' ')
+                                    {
+                                        cur_field_text.push(' ');
+                                        cur_field_code.push(' ');
                                     }
+                                    cur_field_text.push_str(&chunk_text);
+                                    cur_field_code.push_str(&chunk_code);
                                 }
+                                let trimmed_text = normalize_ws(&cur_field_text);
+                                if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
+                                    lines.append(&mut pending_field_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_field_attrs.clear();
+                                }
+                                cur_field_text.clear();
+                                cur_field_code.clear();
+                                struct_body_closed = true;
+                                cur_pos = next_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                );
+                                break;
+                            }
+
+                            let chunk_text = current_scanned.render_visible_range(
+                                cur_pos,
+                                Some((event.seg_idx, event.char_idx)),
+                            );
+                            let chunk_code = current_scanned
+                                .code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                            if !chunk_text.trim().is_empty() {
+                                if !cur_field_text.is_empty()
+                                    && !cur_field_text.ends_with(' ')
+                                    && !chunk_text.starts_with(' ')
+                                {
+                                    cur_field_text.push(' ');
+                                    cur_field_code.push(' ');
+                                }
+                                cur_field_text.push_str(&chunk_text);
+                                cur_field_code.push_str(&chunk_code);
+                            }
+
+                            if event.kind == StructuralEventKind::BaselineComma {
+                                let trimmed_text = normalize_ws(&cur_field_text);
+                                if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
+                                    lines.append(&mut pending_field_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_field_attrs.clear();
+                                }
+                                cur_field_text.clear();
+                                cur_field_code.clear();
+                                cur_pos = next_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                );
+                            }
+                        }
+                        if !struct_body_closed && cur_pos.is_some() {
+                            let remainder_text =
+                                current_scanned.render_visible_range(cur_pos, None);
+                            let remainder_code = current_scanned.code_tokens_range(cur_pos, None);
+                            if !remainder_text.trim().is_empty() {
+                                if !cur_field_text.is_empty()
+                                    && !cur_field_text.ends_with(' ')
+                                    && !remainder_text.starts_with(' ')
+                                {
+                                    cur_field_text.push(' ');
+                                    cur_field_code.push(' ');
+                                }
+                                cur_field_text.push_str(&remainder_text);
+                                cur_field_code.push_str(&remainder_code);
                             }
                         }
                     }
-                    if item_lexer.state == LexState::Normal {
-                        item_lexer.reset_top_level_depths();
-                    }
-                    file_lexer = item_lexer;
-                    idx += 1;
-                    continue;
                 }
 
-                let mut pending_field_attrs = Vec::new();
-                while body_open && idx + 1 < src_lines.len() {
+                while !struct_body_closed && idx + 1 < src_lines.len() {
                     idx += 1;
                     let field_line = src_lines[idx];
                     if field_line.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
-                    let sc = item_lexer.scan_line(field_line);
-                    let rendered = sc.render_visible();
-                    if rendered.trim().is_empty() && !sc.ends_in_string_literal {
-                        continue;
-                    }
-                    if is_outer_attribute_start(&sc.code_tokens) {
-                        let attr_text =
-                            capture_attribute(&src_lines, &mut idx, &mut item_lexer, sc);
-                        pending_field_attrs.push(attr_text);
-                        continue;
-                    }
-                    if sc.has_top_level_close_brace {
-                        let without_close = sc.render_visible_without_enum_close_brace();
-                        if !without_close.trim().is_empty() && is_public_code(&without_close) {
-                            lines.append(&mut pending_field_attrs);
-                            lines.push(without_close);
-                        } else {
-                            pending_field_attrs.clear();
+                    if cur_field_text.trim().is_empty() && item_lexer.state == LexState::Normal {
+                        let mut check_lexer = item_lexer.clone();
+                        let check_sc = check_lexer.scan_line(field_line);
+                        if is_outer_attribute_start(&check_sc.code_tokens) {
+                            let attr_text =
+                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, check_sc);
+                            pending_field_attrs.push(attr_text);
+                            continue;
                         }
-                        break;
                     }
-                    if is_public_code(&sc.code_tokens) {
-                        lines.append(&mut pending_field_attrs);
-                        lines.push(rendered);
-                    } else {
-                        pending_field_attrs.clear();
+
+                    let was_escaped = item_lexer.state.is_escaped_continuation();
+                    let continues_literal = item_lexer.state.is_in_string_literal();
+                    let sc = item_lexer.scan_line(field_line);
+
+                    let mut cur_pos = Some((0, 0));
+                    for event in &sc.events {
+                        if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                            let (chunk_text, chunk_code) = if let Some(limit) =
+                                prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
+                            {
+                                (
+                                    sc.render_visible_range(cur_pos, Some(limit)),
+                                    sc.code_tokens_range(cur_pos, Some(limit)),
+                                )
+                            } else {
+                                (String::new(), String::new())
+                            };
+                            if was_escaped {
+                                cur_field_text.push_str(&chunk_text);
+                                cur_field_code.push_str(&chunk_code);
+                            } else if continues_literal {
+                                cur_field_text.push('\n');
+                                cur_field_text.push_str(&chunk_text);
+                                cur_field_code.push_str(&chunk_code);
+                            } else if !chunk_text.trim().is_empty() {
+                                if !cur_field_text.is_empty()
+                                    && !cur_field_text.ends_with(' ')
+                                    && !chunk_text.starts_with(' ')
+                                {
+                                    cur_field_text.push(' ');
+                                    cur_field_code.push(' ');
+                                }
+                                cur_field_text.push_str(&chunk_text);
+                                cur_field_code.push_str(&chunk_code);
+                            }
+                            let trimmed_text = normalize_ws(&cur_field_text);
+                            if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
+                                lines.append(&mut pending_field_attrs);
+                                lines.push(trimmed_text);
+                            } else {
+                                pending_field_attrs.clear();
+                            }
+                            cur_field_text.clear();
+                            cur_field_code.clear();
+                            struct_body_closed = true;
+                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                            break;
+                        }
+
+                        let chunk_text =
+                            sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                        let chunk_code =
+                            sc.code_tokens_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                        if was_escaped {
+                            cur_field_text.push_str(&chunk_text);
+                            cur_field_code.push_str(&chunk_code);
+                        } else if continues_literal {
+                            cur_field_text.push('\n');
+                            cur_field_text.push_str(&chunk_text);
+                            cur_field_code.push_str(&chunk_code);
+                        } else if !chunk_text.trim().is_empty() {
+                            if !cur_field_text.is_empty()
+                                && !cur_field_text.ends_with(' ')
+                                && !chunk_text.starts_with(' ')
+                            {
+                                cur_field_text.push(' ');
+                                cur_field_code.push(' ');
+                            }
+                            cur_field_text.push_str(&chunk_text);
+                            cur_field_code.push_str(&chunk_code);
+                        }
+
+                        if event.kind == StructuralEventKind::BaselineComma {
+                            let trimmed_text = normalize_ws(&cur_field_text);
+                            if !trimmed_text.is_empty() && is_public_code(&cur_field_code) {
+                                lines.append(&mut pending_field_attrs);
+                                lines.push(trimmed_text);
+                            } else {
+                                pending_field_attrs.clear();
+                            }
+                            cur_field_text.clear();
+                            cur_field_code.clear();
+                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                        }
+                    }
+
+                    if !struct_body_closed && cur_pos.is_some() {
+                        let remainder_text = sc.render_visible_range(cur_pos, None);
+                        let remainder_code = sc.code_tokens_range(cur_pos, None);
+                        if was_escaped {
+                            cur_field_text.push_str(&remainder_text);
+                            cur_field_code.push_str(&remainder_code);
+                        } else if continues_literal {
+                            cur_field_text.push('\n');
+                            cur_field_text.push_str(&remainder_text);
+                            cur_field_code.push_str(&remainder_code);
+                        } else if !remainder_text.trim().is_empty() {
+                            if !cur_field_text.is_empty()
+                                && !cur_field_text.ends_with(' ')
+                                && !remainder_text.starts_with(' ')
+                            {
+                                cur_field_text.push(' ');
+                                cur_field_code.push(' ');
+                            }
+                            cur_field_text.push_str(&remainder_text);
+                            cur_field_code.push_str(&remainder_code);
+                        }
                     }
                 }
 
@@ -1673,7 +1907,6 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                 };
 
                 let mut body_open = current_scanned.has_top_level_open_brace;
-                let mut body_closed = body_open && current_scanned.has_top_level_close_brace;
 
                 while !body_open && idx + 1 < src_lines.len() {
                     idx += 1;
@@ -1686,7 +1919,6 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
                     let sc = item_lexer.scan_line(continuation);
                     let rendered = sc.render_visible();
                     body_open = sc.has_top_level_open_brace;
-                    body_closed = body_open && sc.has_top_level_close_brace;
                     if was_escaped {
                         trait_header.push_str(&rendered);
                         continue;
@@ -1707,144 +1939,359 @@ fn normalized_public_surface_str(path: &str, src: &str) -> String {
 
                 lines.push(trait_header);
 
-                if body_closed {
-                    let rendered_all = current_scanned.render_visible();
-                    if let Some(open_idx) = rendered_all.find('{') {
-                        if let Some(close_idx) = rendered_all.rfind('}') {
-                            if close_idx > open_idx {
-                                let inner = &rendered_all[open_idx + 1..close_idx];
-                                for member in parse_trait_member_list(inner) {
-                                    lines.push(member);
+                let mut pending_trait_attrs = Vec::new();
+                let mut cur_member_text = String::new();
+                let mut in_default_method_body = false;
+                let mut trait_body_closed = false;
+
+                // Process remainder of opening line (if any)
+                if let Some(open_brace_pos) = current_scanned.first_top_level_open_brace_seg {
+                    if let Some(start_pos) = next_pos(&current_scanned.segments, open_brace_pos) {
+                        let mut cur_pos = Some(start_pos);
+                        for event in &current_scanned.events {
+                            if event.kind == StructuralEventKind::TopLevelOpenBrace {
+                                continue;
+                            }
+                            if event.seg_idx < start_pos.0
+                                || (event.seg_idx == start_pos.0 && event.char_idx < start_pos.1)
+                            {
+                                continue;
+                            }
+
+                            if in_default_method_body {
+                                if event.kind == StructuralEventKind::MethodBodyClose {
+                                    in_default_method_body = false;
+                                    cur_pos = next_pos(
+                                        &current_scanned.segments,
+                                        (event.seg_idx, event.char_idx),
+                                    );
                                 }
+                                continue;
+                            }
+
+                            if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                                let chunk_text = if let Some(limit) = prev_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                ) {
+                                    current_scanned.render_visible_range(cur_pos, Some(limit))
+                                } else {
+                                    String::new()
+                                };
+                                if !chunk_text.trim().is_empty() {
+                                    if !cur_member_text.is_empty()
+                                        && !cur_member_text.ends_with(' ')
+                                        && !chunk_text.starts_with(' ')
+                                    {
+                                        cur_member_text.push(' ');
+                                    }
+                                    cur_member_text.push_str(&chunk_text);
+                                }
+                                let trimmed_text = normalize_ws(&cur_member_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_trait_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_trait_attrs.clear();
+                                }
+                                cur_member_text.clear();
+                                trait_body_closed = true;
+                                cur_pos = next_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                );
+                                break;
+                            }
+
+                            let chunk_text = current_scanned.render_visible_range(
+                                cur_pos,
+                                Some((event.seg_idx, event.char_idx)),
+                            );
+                            if !chunk_text.trim().is_empty() {
+                                if !cur_member_text.is_empty()
+                                    && !cur_member_text.ends_with(' ')
+                                    && !chunk_text.starts_with(' ')
+                                {
+                                    cur_member_text.push(' ');
+                                }
+                                cur_member_text.push_str(&chunk_text);
+                            }
+
+                            if event.kind == StructuralEventKind::BaselineSemicolon {
+                                let trimmed_text = normalize_ws(&cur_member_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_trait_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_trait_attrs.clear();
+                                }
+                                cur_member_text.clear();
+                                cur_pos = next_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                );
+                            } else if event.kind == StructuralEventKind::BaselineOpenBrace {
+                                let trimmed_text = normalize_ws(&cur_member_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_trait_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_trait_attrs.clear();
+                                }
+                                cur_member_text.clear();
+                                in_default_method_body = true;
+                                cur_pos = next_pos(
+                                    &current_scanned.segments,
+                                    (event.seg_idx, event.char_idx),
+                                );
+                            }
+                        }
+                        if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
+                            let remainder_text =
+                                current_scanned.render_visible_range(cur_pos, None);
+                            if !remainder_text.trim().is_empty() {
+                                if !cur_member_text.is_empty()
+                                    && !cur_member_text.ends_with(' ')
+                                    && !remainder_text.starts_with(' ')
+                                {
+                                    cur_member_text.push(' ');
+                                }
+                                cur_member_text.push_str(&remainder_text);
                             }
                         }
                     }
-                    if item_lexer.state == LexState::Normal {
-                        item_lexer.reset_top_level_depths();
-                    }
-                    file_lexer = item_lexer;
-                    idx += 1;
-                    continue;
                 }
 
-                let mut in_default_method_body = false;
-                let mut method_brace_depth: usize = 0;
-                let mut pending_trait_attrs = Vec::new();
-
-                while body_open && idx + 1 < src_lines.len() {
+                while !trait_body_closed && idx + 1 < src_lines.len() {
                     idx += 1;
                     let line_text = src_lines[idx];
                     if line_text.trim().is_empty() && item_lexer.state == LexState::Normal {
                         continue;
                     }
-                    let sc = item_lexer.scan_line(line_text);
-                    let rendered = sc.render_visible();
 
                     if in_default_method_body {
-                        for seg in &sc.segments {
-                            if let VisibleSegment::Code(code) = seg {
-                                for c in code.chars() {
-                                    if c == '{' {
-                                        method_brace_depth += 1;
-                                    } else if c == '}' {
-                                        method_brace_depth = method_brace_depth.saturating_sub(1);
-                                        if method_brace_depth == 0 {
-                                            in_default_method_body = false;
-                                        }
-                                    }
-                                }
+                        let sc = item_lexer.scan_line(line_text);
+                        let mut cur_pos = None;
+                        for event in &sc.events {
+                            if event.kind == StructuralEventKind::MethodBodyClose {
+                                in_default_method_body = false;
+                                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                                break;
                             }
                         }
-                        continue;
-                    }
-
-                    if rendered.trim().is_empty() && !sc.ends_in_string_literal {
-                        continue;
-                    }
-
-                    if is_outer_attribute_start(&sc.code_tokens) {
-                        let attr_text =
-                            capture_attribute(&src_lines, &mut idx, &mut item_lexer, sc);
-                        pending_trait_attrs.push(attr_text);
-                        continue;
-                    }
-
-                    if sc.has_top_level_close_brace {
-                        break;
-                    }
-
-                    if sc.code_tokens.contains('{') {
-                        let up_to_brace = sc.text_up_to_function_body_open_brace();
-                        lines.append(&mut pending_trait_attrs);
-                        lines.push(up_to_brace);
-                        let mut b_depth = 0usize;
-                        for seg in &sc.segments {
-                            if let VisibleSegment::Code(code) = seg {
-                                for c in code.chars() {
-                                    if c == '{' {
-                                        b_depth += 1;
-                                    } else if c == '}' {
-                                        b_depth = b_depth.saturating_sub(1);
-                                    }
-                                }
+                        if in_default_method_body {
+                            if item_lexer.brace_depth == 1
+                                && item_lexer.macro_brace_stack.is_empty()
+                            {
+                                in_default_method_body = false;
+                            } else if item_lexer.brace_depth == 0 {
+                                break;
                             }
-                        }
-                        if b_depth > 0 {
-                            in_default_method_body = true;
-                            method_brace_depth = b_depth;
-                        }
-                        continue;
-                    }
-
-                    lines.append(&mut pending_trait_attrs);
-                    let mut member_item = rendered;
-                    let mut is_member_done = sc.code_tokens.contains(';');
-                    while !is_member_done && idx + 1 < src_lines.len() {
-                        idx += 1;
-                        let cont = src_lines[idx];
-                        if cont.trim().is_empty() && item_lexer.state == LexState::Normal {
                             continue;
                         }
-                        let was_escaped = item_lexer.state.is_escaped_continuation();
-                        let continues_lit = item_lexer.state.is_in_string_literal();
-                        let cont_sc = item_lexer.scan_line(cont);
-                        let cont_rendered = cont_sc.render_visible();
-                        is_member_done =
-                            cont_sc.code_tokens.contains(';') || cont_sc.code_tokens.contains('{');
-                        if was_escaped {
-                            member_item.push_str(&cont_rendered);
+                        if cur_pos.is_none() {
                             continue;
                         }
-                        if continues_lit {
-                            member_item.push('\n');
-                            member_item.push_str(&cont_rendered);
-                            continue;
-                        }
-                        if !member_item.ends_with(' ') && !cont_rendered.starts_with(' ') {
-                            member_item.push(' ');
-                        }
-                        member_item.push_str(&cont_rendered);
-                        if cont_sc.code_tokens.contains('{') {
-                            let mut b_depth = 0usize;
-                            for seg in &cont_sc.segments {
-                                if let VisibleSegment::Code(code) = seg {
-                                    for c in code.chars() {
-                                        if c == '{' {
-                                            b_depth += 1;
-                                        } else if c == '}' {
-                                            b_depth = b_depth.saturating_sub(1);
-                                        }
-                                    }
-                                }
+                        for event in &sc.events {
+                            let Some(pos) = cur_pos else { break };
+                            if event.seg_idx < pos.0
+                                || (event.seg_idx == pos.0 && event.char_idx < pos.1)
+                            {
+                                continue;
                             }
-                            if b_depth > 0 {
+
+                            if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                                let chunk_text = if let Some(limit) =
+                                    prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
+                                {
+                                    sc.render_visible_range(cur_pos, Some(limit))
+                                } else {
+                                    String::new()
+                                };
+                                if !chunk_text.trim().is_empty() {
+                                    if !cur_member_text.is_empty()
+                                        && !cur_member_text.ends_with(' ')
+                                        && !chunk_text.starts_with(' ')
+                                    {
+                                        cur_member_text.push(' ');
+                                    }
+                                    cur_member_text.push_str(&chunk_text);
+                                }
+                                let trimmed_text = normalize_ws(&cur_member_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_trait_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_trait_attrs.clear();
+                                }
+                                cur_member_text.clear();
+                                trait_body_closed = true;
+                                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                                break;
+                            }
+
+                            let chunk_text = sc.render_visible_range(
+                                cur_pos,
+                                Some((event.seg_idx, event.char_idx)),
+                            );
+                            if !chunk_text.trim().is_empty() {
+                                if !cur_member_text.is_empty()
+                                    && !cur_member_text.ends_with(' ')
+                                    && !chunk_text.starts_with(' ')
+                                {
+                                    cur_member_text.push(' ');
+                                }
+                                cur_member_text.push_str(&chunk_text);
+                            }
+
+                            if event.kind == StructuralEventKind::BaselineSemicolon {
+                                let trimmed_text = normalize_ws(&cur_member_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_trait_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_trait_attrs.clear();
+                                }
+                                cur_member_text.clear();
+                                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                            } else if event.kind == StructuralEventKind::BaselineOpenBrace {
+                                let trimmed_text = normalize_ws(&cur_member_text);
+                                if !trimmed_text.is_empty() {
+                                    lines.append(&mut pending_trait_attrs);
+                                    lines.push(trimmed_text);
+                                } else {
+                                    pending_trait_attrs.clear();
+                                }
+                                cur_member_text.clear();
                                 in_default_method_body = true;
-                                method_brace_depth = b_depth;
+                                cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
                             }
+                        }
+                        if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
+                            let remainder_text = sc.render_visible_range(cur_pos, None);
+                            if !remainder_text.trim().is_empty() {
+                                if !cur_member_text.is_empty()
+                                    && !cur_member_text.ends_with(' ')
+                                    && !remainder_text.starts_with(' ')
+                                {
+                                    cur_member_text.push(' ');
+                                }
+                                cur_member_text.push_str(&remainder_text);
+                            }
+                        }
+                        continue;
+                    }
+
+                    if cur_member_text.trim().is_empty() && item_lexer.state == LexState::Normal {
+                        let mut check_lexer = item_lexer.clone();
+                        let check_sc = check_lexer.scan_line(line_text);
+                        if is_outer_attribute_start(&check_sc.code_tokens) {
+                            let attr_text =
+                                capture_attribute(&src_lines, &mut idx, &mut item_lexer, check_sc);
+                            pending_trait_attrs.push(attr_text);
+                            continue;
+                        }
+                    }
+
+                    let was_escaped = item_lexer.state.is_escaped_continuation();
+                    let continues_literal = item_lexer.state.is_in_string_literal();
+                    let sc = item_lexer.scan_line(line_text);
+
+                    let mut cur_pos = Some((0, 0));
+                    for event in &sc.events {
+                        if event.kind == StructuralEventKind::TopLevelCloseBrace {
+                            let chunk_text = if let Some(limit) =
+                                prev_pos(&sc.segments, (event.seg_idx, event.char_idx))
+                            {
+                                sc.render_visible_range(cur_pos, Some(limit))
+                            } else {
+                                String::new()
+                            };
+                            if was_escaped {
+                                cur_member_text.push_str(&chunk_text);
+                            } else if continues_literal {
+                                cur_member_text.push('\n');
+                                cur_member_text.push_str(&chunk_text);
+                            } else if !chunk_text.trim().is_empty() {
+                                if !cur_member_text.is_empty()
+                                    && !cur_member_text.ends_with(' ')
+                                    && !chunk_text.starts_with(' ')
+                                {
+                                    cur_member_text.push(' ');
+                                }
+                                cur_member_text.push_str(&chunk_text);
+                            }
+                            let trimmed_text = normalize_ws(&cur_member_text);
+                            if !trimmed_text.is_empty() {
+                                lines.append(&mut pending_trait_attrs);
+                                lines.push(trimmed_text);
+                            } else {
+                                pending_trait_attrs.clear();
+                            }
+                            cur_member_text.clear();
+                            trait_body_closed = true;
+                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
                             break;
                         }
+
+                        let chunk_text =
+                            sc.render_visible_range(cur_pos, Some((event.seg_idx, event.char_idx)));
+                        if was_escaped {
+                            cur_member_text.push_str(&chunk_text);
+                        } else if continues_literal {
+                            cur_member_text.push('\n');
+                            cur_member_text.push_str(&chunk_text);
+                        } else if !chunk_text.trim().is_empty() {
+                            if !cur_member_text.is_empty()
+                                && !cur_member_text.ends_with(' ')
+                                && !chunk_text.starts_with(' ')
+                            {
+                                cur_member_text.push(' ');
+                            }
+                            cur_member_text.push_str(&chunk_text);
+                        }
+
+                        if event.kind == StructuralEventKind::BaselineSemicolon {
+                            let trimmed_text = normalize_ws(&cur_member_text);
+                            if !trimmed_text.is_empty() {
+                                lines.append(&mut pending_trait_attrs);
+                                lines.push(trimmed_text);
+                            } else {
+                                pending_trait_attrs.clear();
+                            }
+                            cur_member_text.clear();
+                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                        } else if event.kind == StructuralEventKind::BaselineOpenBrace {
+                            let trimmed_text = normalize_ws(&cur_member_text);
+                            if !trimmed_text.is_empty() {
+                                lines.append(&mut pending_trait_attrs);
+                                lines.push(trimmed_text);
+                            } else {
+                                pending_trait_attrs.clear();
+                            }
+                            cur_member_text.clear();
+                            in_default_method_body = true;
+                            cur_pos = next_pos(&sc.segments, (event.seg_idx, event.char_idx));
+                        }
                     }
-                    lines.push(member_item);
+
+                    if !trait_body_closed && !in_default_method_body && cur_pos.is_some() {
+                        let remainder_text = sc.render_visible_range(cur_pos, None);
+                        if was_escaped {
+                            cur_member_text.push_str(&remainder_text);
+                        } else if continues_literal {
+                            cur_member_text.push('\n');
+                            cur_member_text.push_str(&remainder_text);
+                        } else if !remainder_text.trim().is_empty() {
+                            if !cur_member_text.is_empty()
+                                && !cur_member_text.ends_with(' ')
+                                && !remainder_text.starts_with(' ')
+                            {
+                                cur_member_text.push(' ');
+                            }
+                            cur_member_text.push_str(&remainder_text);
+                        }
+                    }
                 }
 
                 if item_lexer.state == LexState::Normal {
@@ -4525,5 +4972,212 @@ fn public_api_guard_handles_escaped_newline_string_continuations() {
         normalized_public_surface_str("test.rs", src_byte_a),
         normalized_public_surface_str("test.rs", src_byte_b),
         "byte string escaped newline continuation must normalize indentation"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_wrapped_struct_fields_p2_1() {
+    // Regression A: Wrapped type
+    let struct_wrapped_32 = "pub struct S {\n    pub value:\n        Vec<u32>,\n}";
+    let struct_wrapped_64 = "pub struct S {\n    pub value:\n        Vec<u64>,\n}";
+    let surf_w32 = normalized_public_surface_str("test.rs", struct_wrapped_32);
+    let surf_w64 = normalized_public_surface_str("test.rs", struct_wrapped_64);
+    assert_ne!(
+        surf_w32, surf_w64,
+        "wrapped struct field type change must alter surface"
+    );
+
+    // Regression B: Formatting-only reflow
+    let struct_oneline = "pub struct S {\n    pub value: Vec<u32>,\n}";
+    let surf_oneline = normalized_public_surface_str("test.rs", struct_oneline);
+    assert_eq!(
+        surf_w32, surf_oneline,
+        "wrapped struct field must match one-line struct field surface"
+    );
+
+    // Regression C: Private wrapped field
+    let struct_priv_w32 =
+        "pub struct S {\n    private:\n        Vec<u32>,\n    pub visible: bool,\n}";
+    let struct_priv_w64 =
+        "pub struct S {\n    private:\n        Vec<u64>,\n    pub visible: bool,\n}";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", struct_priv_w32),
+        normalized_public_surface_str("test.rs", struct_priv_w64),
+        "private wrapped struct field change must NOT alter surface"
+    );
+
+    // Regression D: Public field after private field containing comparison syntax
+    let struct_cmp_32 =
+        "pub struct S {\n    private: [(); (1 < 2) as usize],\n    pub visible: u32,\n}";
+    let struct_cmp_64 =
+        "pub struct S {\n    private: [(); (1 < 2) as usize],\n    pub visible: u64,\n}";
+    let struct_cmp_diff_priv =
+        "pub struct S {\n    private: [(); (2 < 3) as usize],\n    pub visible: u32,\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", struct_cmp_32),
+        normalized_public_surface_str("test.rs", struct_cmp_64),
+        "public field type after private comparison field must alter surface"
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", struct_cmp_32),
+        normalized_public_surface_str("test.rs", struct_cmp_diff_priv),
+        "private comparison field change must NOT alter surface"
+    );
+
+    // Regression E: Nested generic public field
+    let struct_nested_32 =
+        "pub struct S {\n    pub value:\n        Result<Vec<u32>, Option<[u8; 3]>>,\n}";
+    let struct_nested_64 =
+        "pub struct S {\n    pub value:\n        Result<Vec<u64>, Option<[u8; 3]>>,\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", struct_nested_32),
+        normalized_public_surface_str("test.rs", struct_nested_64),
+        "nested generic wrapped field type change must alter surface"
+    );
+
+    // Regression F: Restricted visibility
+    let struct_restr_32 = "pub struct S {\n    pub(crate) value:\n        Vec<u32>,\n}";
+    let struct_restr_64 = "pub struct S {\n    pub(crate) value:\n        Vec<u64>,\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", struct_restr_32),
+        normalized_public_surface_str("test.rs", struct_restr_64),
+        "restricted public wrapped field type change must alter surface"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_inline_default_trait_bodies_p2_2() {
+    // Regression A: Inline default method body isolation
+    let trait_inline_a = "pub trait T {\n    fn f() -> u32 { private_a() }\n}";
+    let trait_inline_b = "pub trait T {\n    fn f() -> u32 { private_b() }\n}";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", trait_inline_a),
+        normalized_public_surface_str("test.rs", trait_inline_b),
+        "inline default method body change in multiline trait must NOT alter surface"
+    );
+
+    // Regression B: Inline default method signature mutation
+    let trait_inline_sig_64 = "pub trait T {\n    fn f() -> u64 { private_a() }\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", trait_inline_a),
+        normalized_public_surface_str("test.rs", trait_inline_sig_64),
+        "inline default method signature mutation must alter surface"
+    );
+
+    // Regression C: Required method
+    let trait_req_32 = "pub trait T {\n    fn f() -> u32;\n}";
+    let trait_req_64 = "pub trait T {\n    fn f() -> u64;\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", trait_req_32),
+        normalized_public_surface_str("test.rs", trait_req_64),
+        "required method signature mutation must alter surface"
+    );
+
+    // Regression D: Multiline default method
+    let trait_multi_def_32 = "pub trait T {\n    fn f(\n        &self,\n        x: Vec<u32>,\n    ) -> u32\n    {\n        private_a()\n    }\n}";
+    let trait_multi_def_64 = "pub trait T {\n    fn f(\n        &self,\n        x: Vec<u64>,\n    ) -> u32\n    {\n        private_a()\n    }\n}";
+    let trait_multi_def_diff_body = "pub trait T {\n    fn f(\n        &self,\n        x: Vec<u32>,\n    ) -> u32\n    {\n        private_b()\n    }\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", trait_multi_def_32),
+        normalized_public_surface_str("test.rs", trait_multi_def_64),
+        "multiline default method signature mutation must alter surface"
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", trait_multi_def_32),
+        normalized_public_surface_str("test.rs", trait_multi_def_diff_body),
+        "multiline default method body mutation must NOT alter surface"
+    );
+
+    // Regression E: Default body containing nested braces
+    let trait_nested_body_a = "pub trait T {\n    fn f() -> u32 {\n        if private_cond() {\n            private_a()\n        } else {\n            private_b()\n        }\n    }\n}";
+    let trait_nested_body_b = "pub trait T {\n    fn f() -> u32 {\n        if private_cond() {\n            private_c()\n        } else {\n            private_d()\n        }\n    }\n}";
+    assert_eq!(
+        normalized_public_surface_str("test.rs", trait_nested_body_a),
+        normalized_public_surface_str("test.rs", trait_nested_body_b),
+        "nested default method body mutation must NOT alter surface"
+    );
+
+    // Regression F: Type-position braced macro in trait method signature
+    let trait_macro_32 = "pub trait T {\n    fn f() -> type_macro! { u32 } { private_a() }\n}";
+    let trait_macro_64 = "pub trait T {\n    fn f() -> type_macro! { u64 } { private_a() }\n}";
+    let trait_macro_diff_body =
+        "pub trait T {\n    fn f() -> type_macro! { u32 } { private_b() }\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", trait_macro_32),
+        normalized_public_surface_str("test.rs", trait_macro_64),
+        "type-position braced macro payload change in trait method must alter surface"
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", trait_macro_32),
+        normalized_public_surface_str("test.rs", trait_macro_diff_body),
+        "private body change with braced macro in trait method must NOT alter surface"
+    );
+}
+
+#[test]
+fn public_api_guard_handles_digit_suffixed_generic_identifiers_p2_3() {
+    // Regression A: Digit-suffixed type
+    let fn_vec2_1 = "pub fn f() -> Vec2<{1}> {\n    private_a()\n}";
+    let fn_vec2_2 = "pub fn f() -> Vec2<{2}> {\n    private_a()\n}";
+    let fn_vec2_diff_body = "pub fn f() -> Vec2<{1}> {\n    private_b()\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", fn_vec2_1),
+        normalized_public_surface_str("test.rs", fn_vec2_2),
+        "const generic arg change in Vec2<{{1}}> must alter surface"
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", fn_vec2_1),
+        normalized_public_surface_str("test.rs", fn_vec2_diff_body),
+        "private body change with Vec2<{{1}}> must NOT alter surface"
+    );
+
+    // Regression B: Path-qualified digit-suffixed type
+    let fn_math_vec2_1 = "pub fn f() -> math::Vec2<{1}> {\n    private_a()\n}";
+    let fn_math_vec2_2 = "pub fn f() -> math::Vec2<{2}> {\n    private_a()\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", fn_math_vec2_1),
+        normalized_public_surface_str("test.rs", fn_math_vec2_2),
+        "const generic arg change in math::Vec2<{{1}}> must alter surface"
+    );
+
+    // Regression C: Nested generic
+    let fn_opt_vec2_1 = "pub fn f() -> Option<Vec2<{1}>> {\n    private_a()\n}";
+    let fn_opt_vec2_2 = "pub fn f() -> Option<Vec2<{2}>> {\n    private_a()\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", fn_opt_vec2_1),
+        normalized_public_surface_str("test.rs", fn_opt_vec2_2),
+        "nested generic arg change in Option<Vec2<{{1}}>> must alter surface"
+    );
+
+    // Regression D: Existing comparison
+    let const_less_1 = "pub const LESS: bool = 1 < 2;\npub fn next() {}";
+    let const_less_2 = "pub const LESS: bool = 1 < 3;\npub fn next() {}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", const_less_1),
+        normalized_public_surface_str("test.rs", const_less_2)
+    );
+
+    // Regression E: Identifier expression comparison
+    let const_ident_cmp_1 = "pub const LESS: bool = A < B;\npub fn next() {}";
+    let const_ident_cmp_2 = "pub const LESS: bool = A < C;\npub fn next() {}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", const_ident_cmp_1),
+        normalized_public_surface_str("test.rs", const_ident_cmp_2)
+    );
+
+    // Regression F: Const-generic expression containing comparison
+    let fn_const_expr_cmp_1 =
+        "pub fn f() -> Foo<{ if 1 < 2 { 32 } else { 64 } }> {\n    private_a()\n}";
+    let fn_const_expr_cmp_2 =
+        "pub fn f() -> Foo<{ if 1 < 2 { 32 } else { 128 } }> {\n    private_a()\n}";
+    let fn_const_expr_cmp_diff_body =
+        "pub fn f() -> Foo<{ if 1 < 2 { 32 } else { 64 } }> {\n    private_b()\n}";
+    assert_ne!(
+        normalized_public_surface_str("test.rs", fn_const_expr_cmp_1),
+        normalized_public_surface_str("test.rs", fn_const_expr_cmp_2)
+    );
+    assert_eq!(
+        normalized_public_surface_str("test.rs", fn_const_expr_cmp_1),
+        normalized_public_surface_str("test.rs", fn_const_expr_cmp_diff_body)
     );
 }
