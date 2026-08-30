@@ -56,6 +56,7 @@ Ground all changes in the canonical ownership boundaries of the repository:
   - Call `list_projects` only when the exact project key is not already known for the current task/session.
   - Obtain `get_architecture` once per task, and refresh only when structural changes justify it.
   - Avoid ritualistic repeated discovery calls on every turn.
+- **No Autonomous Fallback**: If Codebase Memory MCP is unavailable, agents must not silently or autonomously substitute alternative discovery mechanisms. Stop, report the blocker, and await repository-owner decision.
 - **Targeted Queries**:
   - `search_graph(name_pattern, label, file_pattern)` — locate functions, types, and modules.
   - `trace_call_path(function_name, direction, depth)` — trace caller/callee chains.

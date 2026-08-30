@@ -93,7 +93,9 @@ Canonical production/trusted execution must enter through verifier-admitted SemC
   - `trace_call_path(function_name, direction, depth)` — call chain analysis.
   - `get_code_snippet(qualified_name)` — retrieve symbol source code.
   - `detect_changes(project)` — map diff impact to affected symbols.
-- **Blocker Protocol**: If Codebase Memory MCP is unavailable, do not silently substitute an inferior path when marked mandatory; report the blocker and request an owner decision.
+- **No Autonomous Fallback**: If Codebase Memory MCP is unavailable, agents must not silently or autonomously substitute alternative discovery mechanisms. The agent system is deterministic and fail-closed:
+  $$\text{required capability unavailable} \rightarrow \text{STOP} \rightarrow \text{report exact blocker} \rightarrow \text{owner decides}$$
+  Only the repository owner/user may authorize a task-scoped, visible, and temporary fallback when necessary. Historical sessions without MCP tools do not establish autonomous fallback authority. The absence of an existing compliant solution is not permission to weaken a constraint.
 
 ### B. mcp-local-rag (Documentation, Research & Historical Context)
 **Mandatory for documentation queries, specs, historical decision logs, and research.**

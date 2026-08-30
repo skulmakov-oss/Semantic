@@ -34,6 +34,7 @@ Operational authority in Semantic follows a strict hierarchy:
   1. **STOP immediately**.
   2. **Report**: Name the constraint, the blocker, the observed evidence, and the minimum repository owner decision required.
   3. **NEVER bypass** or improvise a workaround.
+- **No Autonomous Fallback**: The absence of an existing compliant solution is not permission to weaken a constraint or autonomously fall back. If a required capability, tool, evidence source, or architectural dependency is unavailable, an agent must STOP immediately, report the exact blocker and what cannot be proven, and await explicit repository-owner decision. Only the repository owner may authorize a task-scoped, visible, temporary fallback.
 
 ### Governance-Maintenance Transition
 

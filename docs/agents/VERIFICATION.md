@@ -68,16 +68,17 @@ pwsh -File scripts/admission_guard.ps1 -CIParity
    - `cargo test --test prometheus_runtime_compat_matrix --quiet`
 5. **Release Bundle Process**:
    - `pwsh -File scripts/verify_release_bundle.ps1 -ManifestPath <temp_manifest>`
-6. **Full Std Suite**:
-   - `cargo test --all-targets --quiet`
+6. **Std Suite (Local Target Scope)**:
+   - `cargo test --all-targets --quiet` (note: executes targets for current default packages rather than full `--workspace` scope)
 7. **No-Std Compilation**:
    - `cargo check --no-default-features --quiet`
 
 #### Known Coverage Gaps vs GitHub Actions CI
 While `-CIParity` mirrors the primary test jobs, it has the following specific differences from `.github/workflows/ci.yml`:
-1. **Doctests**: `-CIParity` does not run `cargo test --workspace --doc --quiet` (run in CI job `test-std`).
-2. **7hell Fast Gate**: `-CIParity` does not run `.\tools\7hell\run_ci.ps1` (run in CI job `pcc-qualification-7hell`).
-3. **SARIF / Upload Steps**: `-CIParity` does not run GitHub-specific report upload actions or multi-OS matrix runners.
+1. **Workspace-Wide Target Selection**: In GitHub CI's `test-std` job, CI executes `cargo test --workspace --all-targets --quiet`. In local `scripts/admission_guard.ps1 -CIParity`, Step 6 executes `cargo test --all-targets --quiet` (without `--workspace`), which selects targets for default root/member packages rather than explicitly enumerating every workspace package. Full workspace validation locally requires running `cargo test --workspace --all-targets`. Aligning the local helper script is tracked as separate tooling maintenance.
+2. **Doctests**: `-CIParity` does not run `cargo test --workspace --doc --quiet` (run in CI job `test-std`).
+3. **7hell Fast Gate**: `-CIParity` does not run `.\tools\7hell\run_ci.ps1` (run in CI job `pcc-qualification-7hell`).
+4. **SARIF / Upload Steps**: `-CIParity` does not run GitHub-specific report upload actions or multi-OS matrix runners.
 
 ---
 
