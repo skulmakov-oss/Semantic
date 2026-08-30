@@ -870,6 +870,7 @@ fn const_eq(a: ConstVal, b: ConstVal) -> bool {
         (ConstVal::Bool(x), ConstVal::Bool(y)) => x == y,
         (ConstVal::F64(x), ConstVal::F64(y)) => x == y,
         (ConstVal::I32(x), ConstVal::I32(y)) => x == y,
+        (ConstVal::U32(x), ConstVal::U32(y)) => x == y,
         (ConstVal::Fx(x), ConstVal::Fx(y)) => x == y,
         _ => false,
     }
@@ -1033,6 +1034,150 @@ mod tests {
                 changed: false,
                 num_rewrites: 0,
             }
+        );
+    }
+
+    #[test]
+    fn crystalfold_preserves_u32_equality_semantics() {
+        let mut module = IrModule {
+            functions: vec![IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadU32 { dst: 0, val: 7 },
+                    IrInstr::LoadU32 { dst: 1, val: 7 },
+                    IrInstr::CmpEq {
+                        dst: 2,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                    IrInstr::CmpNe {
+                        dst: 3,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                    IrInstr::LoadU32 { dst: 4, val: 8 },
+                    IrInstr::CmpEq {
+                        dst: 5,
+                        lhs: 0,
+                        rhs: 4,
+                    },
+                    IrInstr::CmpNe {
+                        dst: 6,
+                        lhs: 0,
+                        rhs: 4,
+                    },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            }],
+        };
+
+        CrystalFoldPass.run(&mut module);
+
+        assert_eq!(
+            module.functions[0].instrs[2],
+            IrInstr::LoadBool { dst: 2, val: true },
+            "7u32 == 7u32 must fold to true"
+        );
+        assert_eq!(
+            module.functions[0].instrs[3],
+            IrInstr::LoadBool { dst: 3, val: false },
+            "7u32 != 7u32 must fold to false"
+        );
+        assert_eq!(
+            module.functions[0].instrs[5],
+            IrInstr::LoadBool { dst: 5, val: false },
+            "7u32 == 8u32 must fold to false"
+        );
+        assert_eq!(
+            module.functions[0].instrs[6],
+            IrInstr::LoadBool { dst: 6, val: true },
+            "7u32 != 8u32 must fold to true"
+        );
+    }
+
+    /// Regression guard for #1730: inserting the `(U32, U32)` arm into
+    /// `const_eq` must not disturb equality folding for any other admitted
+    /// same-family pair.
+    #[test]
+    fn crystalfold_const_eq_other_families_unaffected() {
+        let mut module = IrModule {
+            functions: vec![IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadBool { dst: 0, val: true },
+                    IrInstr::LoadBool { dst: 1, val: true },
+                    IrInstr::CmpEq {
+                        dst: 2,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                    IrInstr::LoadI32 { dst: 3, val: 5 },
+                    IrInstr::LoadI32 { dst: 4, val: 6 },
+                    IrInstr::CmpEq {
+                        dst: 5,
+                        lhs: 3,
+                        rhs: 4,
+                    },
+                    IrInstr::LoadF64 { dst: 6, val: 1.5 },
+                    IrInstr::LoadF64 { dst: 7, val: 1.5 },
+                    IrInstr::CmpNe {
+                        dst: 8,
+                        lhs: 6,
+                        rhs: 7,
+                    },
+                    IrInstr::LoadFx { dst: 9, val: 3 },
+                    IrInstr::LoadFx { dst: 10, val: 3 },
+                    IrInstr::CmpEq {
+                        dst: 11,
+                        lhs: 9,
+                        rhs: 10,
+                    },
+                    IrInstr::LoadQ {
+                        dst: 12,
+                        val: QuadVal::T,
+                    },
+                    IrInstr::LoadQ {
+                        dst: 13,
+                        val: QuadVal::F,
+                    },
+                    IrInstr::CmpNe {
+                        dst: 14,
+                        lhs: 12,
+                        rhs: 13,
+                    },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            }],
+        };
+
+        CrystalFoldPass.run(&mut module);
+
+        assert_eq!(
+            module.functions[0].instrs[2],
+            IrInstr::LoadBool { dst: 2, val: true },
+            "bool equality must still fold correctly"
+        );
+        assert_eq!(
+            module.functions[0].instrs[5],
+            IrInstr::LoadBool { dst: 5, val: false },
+            "i32 equality must still fold correctly"
+        );
+        assert_eq!(
+            module.functions[0].instrs[8],
+            IrInstr::LoadBool { dst: 8, val: false },
+            "f64 inequality must still fold correctly"
+        );
+        assert_eq!(
+            module.functions[0].instrs[11],
+            IrInstr::LoadBool { dst: 11, val: true },
+            "fx equality must still fold correctly"
+        );
+        assert_eq!(
+            module.functions[0].instrs[14],
+            IrInstr::LoadBool { dst: 14, val: true },
+            "quad inequality must still fold correctly"
         );
     }
 }
