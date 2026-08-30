@@ -39,17 +39,19 @@ Every agent operation is bounded by a strict hierarchy of authority:
 
 Agents must respect explicit crate ownership boundaries:
 
-- **`sm-front`**: Frontend / parser / AST / lexer / source syntax errors.
-- **`sm-sema`**: Semantic analysis / type inference and checking / compile-time diagnostics.
-- **`sm-ir`**: Intermediate Representation (IR) data structures and lowering passes.
-- **`sm-format`**: Canonical SemCode binary format, opcode definitions, and decoding contracts.
-- **`sm-emit`**: Emission facade over the `sm-format` binary contract.
-- **`sm-verify`**: Verifier admission gate (structure, layout, capability tags, and bytecode validation).
-- **`sm-runtime-core`**: Shared runtime vocabulary, execution errors, and quotas.
-- **`sm-vm`**: Deterministic execution engine for verifier-admitted SemCode.
-- **`smc-cli`**: Canonical public CLI interface and command dispatch.
-- **`prom-*`**: Host ABI, capability checks, gate descriptors, runtime sessions, rules, and deterministic audit records.
-- **`prom-ui*`**: Platform-neutral UI orchestration, presentation models, and backend event bridges.
+- **Deterministic Semantic Core Libraries**:
+  - **`sm-front`**: Frontend / parser / AST / lexer / source syntax errors.
+  - **`sm-sema`**: Semantic analysis / type inference and checking / compile-time diagnostics.
+  - **`sm-ir`**: Intermediate Representation (IR) data structures and lowering passes.
+  - **`sm-format`**: Canonical SemCode binary format, opcode definitions, and decoding contracts.
+  - **`sm-emit`**: Emission facade over the `sm-format` binary contract.
+  - **`sm-verify`**: Verifier admission gate (structure, layout, capability tags, and bytecode validation).
+  - **`sm-runtime-core`**: Shared runtime vocabulary, execution errors, and quotas.
+  - **`sm-vm`**: Deterministic execution engine for verifier-admitted SemCode.
+- **Host-Facing Adapters & Platform Boundaries**:
+  - **`smc-cli`**: Canonical public CLI interface and command dispatch. Performs authorized host I/O (file read/write for artifacts, terminal printing) but cannot own language semantics or verifier policy.
+  - **`prom-*`**: Host ABI, capability checks, gate descriptors, runtime sessions, rules, and deterministic audit records.
+  - **`prom-ui*`**: Platform-neutral UI orchestration, presentation models, and backend event bridges.
 
 ---
 
@@ -136,8 +138,8 @@ graph TD
 
 ### Phase 2: Scoping & Planning
 1. Run brainstorming to clarify requirements, non-goals, and boundary constraints.
-2. Verify that planned file touches fall strictly within `allowed_paths` and do not touch `forbidden_paths`.
-3. Create an `implementation_plan.md` artifact detailing proposed changes, components, and verification plans.
+2. Formulate an implementation plan. **By default, planning is a logical / non-repository artifact** (e.g. in-session representation, memory, or external agent scratch storage). A repository-local plan file (such as `implementation_plan.md`) may be created **only** when its specific path is explicitly authorized by the active task envelope (`allowed_paths`).
+3. Verify that all planned file touches fall strictly within `allowed_paths` and do not touch `forbidden_paths`.
 4. Stop and request review where required by planning mode.
 
 ### Phase 3: Bounded Implementation
@@ -145,7 +147,7 @@ graph TD
 2. Adhere strictly to owner crate boundaries (e.g., `sm-format` owns binary format, `sm-verify` owns admission, `sm-vm` owns deterministic execution).
 3. Do not add external dependencies without explicit architectural justification.
 4. Do not touch files in `forbidden_paths`.
-5. Maintain fail-closed handling and explicit error codes throughout.
+5. Maintain fail-closed handling and explicit error codes throughout. Ensure deterministic core libraries do not introduce direct host side effects.
 
 ### Phase 4: Verification & Evidence Collection
 1. Select verification tier based on change risk (R0 through R3) per [`docs/agents/VERIFICATION.md`](VERIFICATION.md).

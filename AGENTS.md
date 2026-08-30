@@ -27,17 +27,19 @@ $$\text{Effective Authority} = \text{Repository Invariants} \cap \text{Task Auth
 
 Ground all changes in the canonical ownership boundaries of the repository:
 
-- **`sm-front`**: Frontend / parser / AST / source surface and syntax errors.
-- **`sm-sema`**: Semantic analysis / type checking / compile-time diagnostics.
-- **`sm-ir`**: Intermediate Representation (IR) and lowering passes.
-- **`sm-format`**: Canonical SemCode binary format and decoding contract.
-- **`sm-emit`**: Emission / producer-facing facade over the SemCode format.
-- **`sm-verify`**: Verifier admission gate (structure, layout, and bytecode rules).
-- **`sm-runtime-core`**: Shared runtime vocabulary, common execution types, and quotas.
-- **`sm-vm`**: Deterministic execution of verifier-admitted SemCode.
-- **`smc-cli`**: Canonical public CLI owner.
-- **`prom-*`**: PROMETHEUS host ABI, capability policy, gate descriptors, runtime sessions, rules, and audit logging.
-- **`prom-ui*`**: Platform-neutral UI orchestration, presentation models, and backend facades.
+- **Deterministic Core Libraries**:
+  - **`sm-front`**: Frontend / parser / AST / source surface and syntax errors.
+  - **`sm-sema`**: Semantic analysis / type checking / compile-time diagnostics.
+  - **`sm-ir`**: Intermediate Representation (IR) and lowering passes.
+  - **`sm-format`**: Canonical SemCode binary format and decoding contract.
+  - **`sm-emit`**: Emission / producer-facing facade over the SemCode format.
+  - **`sm-verify`**: Verifier admission gate (structure, layout, and bytecode rules).
+  - **`sm-runtime-core`**: Shared runtime vocabulary, common execution types, and quotas.
+  - **`sm-vm`**: Deterministic execution of verifier-admitted SemCode.
+- **Host-Facing Adapters & Platform Boundaries**:
+  - **`smc-cli`**: Canonical public CLI owner; performs authorized host I/O without owning language semantics or verifier policy.
+  - **`prom-*`**: PROMETHEUS host ABI, capability policy, gate descriptors, runtime sessions, rules, and audit logging.
+  - **`prom-ui*`**: Platform-neutral UI orchestration, presentation models, and backend facades.
 
 ---
 
@@ -95,7 +97,7 @@ When available, Superpowers owns the primary planning, TDD, debugging, and verif
 - **One Logical Change per PR**: Narrowly scoped to the assigned task.
 - **Verifier-First Admission**: Never bypass `sm-verify`; never execute unchecked SemCode.
 - **Total Determinism**: Preserve Quad Logic (`N`/`F`/`T`/`S`), deterministic VM execution, and deterministic diagnostics.
-- **Capability Boundaries**: Never add direct filesystem, network, or OS effects inside Semantic core.
+- **Capability Boundaries**: Never add direct filesystem, network, or OS effects inside deterministic Semantic core libraries. Host-facing adapters (`smc-cli`) perform authorized host operations but cannot define language semantics or verifier policy.
 - **Tests for Behavior Changes**: Add positive admission and negative rejection tests whenever behavior changes. Never weaken or delete tests for CI.
 - **Landed on Main != Stable**: Code on `main` is not automatically stable or release-promised. Never widen release claims silently.
 - **No Completion Claim Without Fresh Evidence**: Always run exact verification commands and report exit codes and outputs.

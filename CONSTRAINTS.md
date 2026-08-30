@@ -55,7 +55,7 @@ source
 - **VM Consumes Verified SemCode**: `sm-vm` executes verifier-admitted SemCode deterministically and rejects malformed bytecode distinctly from runtime faults.
 
 ### B. Determinism & Total Representation
-- **NO Nondeterminism in Core**: Given identical input, configuration, capability context, and execution budget, compilation and execution must produce byte-for-byte and trace-for-trace deterministic outcomes.
+- **NO Nondeterminism in Core**: Given identical input, configuration, capability context, and execution budget, compilation and execution in deterministic core libraries must produce byte-for-byte and trace-for-trace deterministic outcomes.
 - **Quad Logic Invariant**: Quad Logic (`quad`) is a native 4-valued domain:
   - `N` = Unknown (`00`)
   - `F` = False (`01`)
@@ -66,20 +66,30 @@ source
 - **Distinction of Roles**: `bool` decides control flow; `quad` represents four-state reasoning truth. Conversions between `bool` and `quad` must be explicit, documented, and tested.
 
 ### C. Architectural Boundaries & Ownership
-- **Frontend & Analysis**: `sm-front` owns parsing, AST, and syntax; `sm-sema` owns type checking and compile-time diagnostics.
-- **IR & Format**: `sm-ir` owns Intermediate Representation and lowering; `sm-format` owns canonical SemCode binary format and decoding contracts; `sm-emit` owns producer-facing emission over `sm-format`.
-- **Verification & Execution**: `sm-verify` owns admission checks; `sm-runtime-core` owns shared runtime vocabulary and quotas; `sm-vm` owns deterministic verified execution; `smc-cli` owns canonical CLI entrypoints.
+- **Deterministic Semantic Core Libraries (`sm-front`, `sm-sema`, `sm-ir`, `sm-format`, `sm-emit`, `sm-verify`, `sm-runtime-core`, `sm-vm`)**:
+  - `sm-front`: parsing, AST, lexer, syntax.
+  - `sm-sema`: semantic analysis, type checking, compile-time diagnostics.
+  - `sm-ir`: Intermediate Representation data structures and lowering passes.
+  - `sm-format`: canonical SemCode binary format, opcode definitions, and decoding contracts.
+  - `sm-emit`: emission facade over `sm-format`.
+  - `sm-verify`: admission gate (structure, layout, and bytecode verification).
+  - `sm-runtime-core`: shared runtime vocabulary, errors, and quotas.
+  - `sm-vm`: deterministic verified SemCode execution engine.
+- **Host-Facing Adapters & CLI (`smc-cli`, platform adapters)**:
+  - Owns CLI entrypoints, argument parsing, file reading/writing of source and compiled artifacts, process exit codes, and platform event bridges.
+  - May perform explicitly authorized host I/O, but must **never** become owners of language semantics, verifier admission rules, capability policy, or deterministic core execution.
 - **PROMETHEUS Boundary (`prom-abi`, `prom-cap`, `prom-gates`, `prom-runtime`, `prom-state`, `prom-rules`, `prom-audit`)**: Owns host ABI, capability checks, gate descriptors, runtime sessions, state transitions, deterministic rule agendas, and audit/replay logging.
 - **Semantic UI (`prom-ui*`, `prom-ui-runtime`, `prom-ui-backend-native`)**: Owns UI model vocabulary, platform-neutral UI orchestration, and native backend facades. UI is an admitted presentation surface; UI is never compiler, verifier, VM, capability policy authority, or audit authority.
 - **Developer / Operator Tooling (Workbench / Studio)**: Tooling surfaces over admitted contracts; never architectural owners of compiler, verifier, VM, or language semantics.
 - **External Integrations (ALM / Andromeda)**: Independent projects that must not be mixed into Semantic core without a formal integration contract and capability boundary.
 
 ### D. Capability Gating & Host Effects
-- **NO Direct External Effects in Core**: Semantic core contains zero direct filesystem, network, process, or OS effects, zero hidden telemetry, and zero unaudited side channels.
-- **Required Route**:
+- **NO Direct External Effects in Semantic Core**: The deterministic core libraries contain zero direct filesystem, network, process, or OS effects, zero hidden telemetry, and zero unaudited side channels.
+- **Authorized Host Operations in Adapters**: Host-facing adapters (`smc-cli`) legitimately perform explicit host operations (reading files, writing output artifacts, standard I/O) as CLI tooling, but must not smuggle unaudited effects into core libraries or bypass capability checks when runtime effects are invoked.
+- **Required External Effect Route**:
   $$\text{effect request} \rightarrow \text{capability check} \rightarrow \text{budget check} \rightarrow \text{gate policy} \rightarrow \text{audit decision} \rightarrow \text{execute/reject} \rightarrow \text{trace/record}$$
 - **Explicit Capability Checks**: Missing capability strictly means no effect. Capability denials must be observable, testable, and safely reported.
-- **Mandatory Auditability**: Every external effect must be traceable to a deterministic audit record. `prom-audit` owns audit and replay record contracts.
+- **Mandatory Auditability**: Every external runtime effect must be traceable to a deterministic audit record. `prom-audit` owns audit and replay record contracts.
 
 ### E. Fail-Closed Posture & Anti-Downgrade
 - **NO Fail-Open Admission**: The system must fail closed on invalid inputs, quota exhaustion, capability denial, missing state, or communication faults.
