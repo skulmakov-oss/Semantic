@@ -18,11 +18,13 @@ Operational authority in Semantic follows a strict hierarchy:
    ↓
 3. CONSTRAINTS.md (Repository Invariants)
    ↓
-4. .harness/current.task.yaml (Task Authorization Envelope)
+4. Explicit Repository-Owner Governance Authorization (only for governance-envelope transitions)
    ↓
-5. Relevant Semantic Skill / Issue Specification
+5. .harness/current.task.yaml (Normal Task Authorization Envelope)
    ↓
-6. Agent Implementation Plan
+6. Normative Specs / Issue Authority / Relevant Semantic Skill
+   ↓
+7. Agent Implementation Plan
 ```
 
 - **Strictness Rule**: A lower layer may make rules stricter, but may never loosen or waive an upper-layer rule.
@@ -33,11 +35,28 @@ Operational authority in Semantic follows a strict hierarchy:
   2. **Report**: Name the constraint, the blocker, the observed evidence, and the minimum repository owner decision required.
   3. **NEVER bypass** or improvise a workaround.
 
+### Governance-Maintenance Transition
+
+The active Harness envelope governs normal repository work. An agent may **not** broaden, replace, or reinterpret that envelope merely because the current task would otherwise be blocked.
+
+If the task itself must change `AGENTS.md`, `CONSTRAINTS.md`, `.harness/current.task.yaml`, or the repository agent-governance layer and the active envelope does not authorize those paths:
+
+1. require explicit repository-owner authorization for a named governance task (recorded in the issue/PR or equivalent durable task evidence);
+2. use a dedicated governance branch and a narrowly scoped temporary governance envelope for the authorized paths;
+3. preserve the authorization/envelope transition in auditable branch/PR history;
+4. if the governance task is out-of-band from the active development track, restore the tracked main-development envelope before merge;
+5. never treat the ability to edit the Harness as permission to self-authorize unrelated work.
+
+This is a controlled envelope transition, not a waiver of repository invariants.
+
 ---
 
 ## 2. Hard Invariants
 
-### A. Verifier-First Execution Pipeline
+### A. Verifier-First Trusted Execution Pipeline
+
+Canonical/trusted execution follows:
+
 ```text
 source
   -> frontend (sm-front)
@@ -45,14 +64,18 @@ source
   -> IR and lowering (sm-ir)
   -> emission (sm-emit over sm-format)
   -> SemCode binary format (sm-format)
-  -> verifier admission (sm-verify)
+  -> verifier admission / verified token (sm-verify)
   -> deterministic execution (sm-vm)
   -> PROMETHEUS capability and effect boundary
 ```
-- **NO Verifier Bypass**: Every public execution path must run through `sm-verify`.
-- **NO Unchecked SemCode Execution**: No runtime route may execute unverified SemCode bytecode.
+
+- **NO Verifier Bypass on Canonical/Trusted Routes**: Production runtime paths, user-facing trusted execution commands, and capability-bearing execution must use verifier-admitted SemCode / the canonical verified-token path.
+- **Raw / Diagnostic Perimeter Is Explicitly Non-Canonical**: Intentionally raw APIs such as documented `run_semcode*` / diagnostic analysis surfaces may execute unverified SemCode only when they remain explicitly classified as raw/diagnostic or compatibility/testing surfaces. They must never be used to bypass admission on production/trusted execution routes or presented as verifier-admitted execution.
+- **Compatibility Shims Are Not Canonical Authority**: Supported byte-based compatibility wrappers may remain where repository contracts require them, but they do not redefine the canonical verified execution policy.
 - **Verifier Is an Admission Gate**: `sm-verify` checks structural, layout, quota, and bytecode constraints. It does not execute runtime policy, does not replace the VM, and does not parse source.
-- **VM Consumes Verified SemCode**: `sm-vm` executes verifier-admitted SemCode deterministically and rejects malformed bytecode distinctly from runtime faults.
+- **VM Trusted Execution Consumes Verified SemCode**: Canonical VM execution consumes verifier-admitted SemCode deterministically and distinguishes verifier rejection from runtime faults.
+
+The documented raw/diagnostic perimeter must remain narrow, explicit, tested, and unable to drift into trusted production execution.
 
 ### B. Determinism & Total Representation
 - **NO Nondeterminism in Core**: Given identical input, configuration, capability context, and execution budget, compilation and execution in deterministic core libraries must produce byte-for-byte and trace-for-trace deterministic outcomes.
@@ -74,7 +97,7 @@ source
   - `sm-emit`: emission facade over `sm-format`.
   - `sm-verify`: admission gate (structure, layout, and bytecode verification).
   - `sm-runtime-core`: shared runtime vocabulary, errors, and quotas.
-  - `sm-vm`: deterministic verified SemCode execution engine.
+  - `sm-vm`: deterministic execution engine, with canonical trusted execution verifier-admitted and explicitly documented raw/diagnostic APIs kept outside the trusted route.
 - **Host-Facing Adapters & CLI (`smc-cli`, platform adapters)**:
   - Owns CLI entrypoints, argument parsing, file reading/writing of source and compiled artifacts, process exit codes, and platform event bridges.
   - May perform explicitly authorized host I/O, but must **never** become owners of language semantics, verifier admission rules, capability policy, or deterministic core execution.
@@ -92,7 +115,7 @@ source
 - **Mandatory Auditability**: Every external runtime effect must be traceable to a deterministic audit record. `prom-audit` owns audit and replay record contracts.
 
 ### E. Fail-Closed Posture & Anti-Downgrade
-- **NO Fail-Open Admission**: The system must fail closed on invalid inputs, quota exhaustion, capability denial, missing state, or communication faults.
+- **NO Fail-Open Admission**: The system must fail closed on invalid inputs, quota exhaustion, capability denial, missing state, or communication faults on routes where admission/policy applies.
 - **NO Silent Fallback or Semantic Downgrade**: Unsupported versions, malformed bytecode, or missing features must fail with explicit errors.
 - **NO Hidden Compatibility Shims**: All compatibility paths must be explicitly declared, strictly bounded, and tested.
 
