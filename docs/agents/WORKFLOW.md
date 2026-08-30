@@ -18,13 +18,16 @@ Every agent operation is bounded by a strict hierarchy of authority:
    ↓
 3. CONSTRAINTS.md (Repository Invariants)
    ↓
-4. .harness/current.task.yaml (Task Authorization Envelope)
+4. Explicit Repository-Owner Governance Authorization
+   (only for controlled governance-envelope transitions)
    ↓
-5. Normative Specs / Issue Authority
+5. .harness/current.task.yaml (Normal Task Authorization Envelope)
    ↓
-6. Repository-Native Semantic Skill
+6. Normative Specs / Issue Authority
    ↓
-7. Agent Implementation Plan
+7. Repository-Native Semantic Skill
+   ↓
+8. Agent Implementation Plan
 ```
 
 - **Strictness Rule**: A lower layer in this hierarchy may make restrictions stricter, but may never loosen or waive an upper-layer rule.
@@ -36,6 +39,19 @@ Every agent operation is bounded by a strict hierarchy of authority:
   3. **NEVER bypass** or improvise a workaround.
 
 Repository-native skills are domain guards, not independent architectural authorities. If a skill conflicts with `CONSTRAINTS.md`, the active Harness envelope, normative `docs/spec/*`, or verified current repository evidence, stop and report the drift rather than silently preferring one source.
+
+### Governance-Maintenance Transition
+
+The active Harness envelope governs normal work. If the task itself changes agent governance/Harness files that the normal envelope does not authorize:
+
+1. require explicit repository-owner authorization for a named governance task;
+2. record that authority durably in the issue/PR or equivalent task evidence;
+3. use a dedicated branch and a narrowly scoped temporary governance envelope for the authorized governance paths;
+4. never broaden the envelope merely to make an unrelated edit pass;
+5. preserve the transition in branch/PR history;
+6. restore the normal main-development envelope before merge when the governance task is intentionally out-of-band from that development track.
+
+This transition authorizes changing the envelope; it does not waive `CONSTRAINTS.md` or platform/safety rules.
 
 ---
 
@@ -51,11 +67,15 @@ Agents must respect explicit crate ownership boundaries:
   - **`sm-emit`**: Emission facade over the `sm-format` binary contract.
   - **`sm-verify`**: Verifier admission gate (structure, layout, capability tags, and bytecode validation).
   - **`sm-runtime-core`**: Shared runtime vocabulary, execution errors, and quotas.
-  - **`sm-vm`**: Deterministic execution engine for verifier-admitted SemCode.
+  - **`sm-vm`**: Deterministic execution engine. Canonical trusted execution is verifier-admitted; explicitly documented raw/diagnostic APIs remain outside that trusted route.
 - **Host-Facing Adapters & Platform Boundaries**:
   - **`smc-cli`**: Canonical public CLI interface and command dispatch. Performs authorized host I/O (file read/write for artifacts, terminal printing) but cannot own language semantics or verifier policy.
   - **`prom-*`**: Host ABI, capability checks, gate descriptors, runtime sessions, rules, and deterministic audit records.
   - **`prom-ui*`**: Platform-neutral UI orchestration, presentation models, and backend event bridges.
+
+### Trusted vs Raw VM Execution
+
+Canonical production/trusted execution must enter through verifier-admitted SemCode / verified-token paths. Explicitly documented raw `run_semcode*`-style and diagnostic/compatibility APIs may remain unverified only inside their narrow non-canonical perimeter. Do not migrate those raw APIs into production/trusted call paths and do not describe them as verifier-admitted execution.
 
 ---
 
@@ -146,8 +166,8 @@ graph TD
 ```
 
 ### Phase 1: Ingestion & Bootstrap
-1. Read [`.harness/current.task.yaml`](../../.harness/current.task.yaml) to verify the active task ID, scope boundaries, and authorizations.
-2. Read [`CONSTRAINTS.md`](../../CONSTRAINTS.md) to confirm all non-negotiable invariants.
+1. Read [`.harness/current.task.yaml`](../../.harness/current.task.yaml) to verify the normal active task ID, scope boundaries, and authorizations.
+2. Read [`CONSTRAINTS.md`](../../CONSTRAINTS.md) to confirm all non-negotiable invariants and determine whether a controlled governance-maintenance transition is required.
 3. Discover code architecture via Codebase Memory MCP (`get_architecture`).
 4. Retrieve relevant documentation and specs via `mcp-local-rag`.
 5. Route to the applicable repository-native Semantic skill(s): use `semantic` for general Semantic domain work and additionally require `semantic-source-authoring-guard` for any `.sm` source/fixture/example/diagnostic-probe authoring.
@@ -155,31 +175,35 @@ graph TD
 ### Phase 2: Scoping & Planning
 1. Run brainstorming to clarify requirements, non-goals, and boundary constraints.
 2. Formulate an implementation plan. **By default, planning is a logical / non-repository artifact** (e.g. in-session representation, memory, or external agent scratch storage). A repository-local plan file (such as `implementation_plan.md`) may be created **only** when its specific path is explicitly authorized by the active task envelope (`allowed_paths`).
-3. Verify that all planned file touches fall strictly within `allowed_paths` and do not touch `forbidden_paths`.
+3. Verify that all planned file touches fall strictly within `allowed_paths` and do not touch `forbidden_paths`, or complete the controlled governance-maintenance transition before editing governance files.
 4. Stop and request review where required by planning mode.
 
 ### Phase 3: Bounded Implementation
 1. Execute changes using small, auditable patches.
 2. Adhere strictly to owner crate boundaries (e.g., `sm-format` owns binary format, `sm-verify` owns admission, `sm-vm` owns deterministic execution).
-3. Do not add external dependencies without explicit architectural justification.
-4. Do not touch files in `forbidden_paths`.
-5. Maintain fail-closed handling and explicit error codes throughout. Ensure deterministic core libraries do not introduce direct host side effects.
+3. Preserve canonical trusted execution through verifier-admitted routes. Do not convert raw/diagnostic VM APIs into production/trusted execution shortcuts.
+4. Do not add external dependencies without explicit architectural justification.
+5. Do not touch files in `forbidden_paths`.
+6. Maintain fail-closed handling and explicit error codes throughout. Ensure deterministic core libraries do not introduce direct host side effects.
 
 ### Phase 4: Verification & Evidence Collection
 1. Select verification tier based on change risk (R0 through R3) per [`docs/agents/VERIFICATION.md`](VERIFICATION.md).
-2. Run `pwsh -File scripts/harness-check.ps1` before committing to confirm uncommitted changes match the task envelope.
-3. Run `pwsh -File scripts/workspace_fmt_check.ps1` to verify formatting across workspace packages.
-4. Run `cargo clippy --workspace --all-targets -- -D warnings`.
-5. Run targeted tests and boundary checks (`cargo test --test legacy_guards`, `cargo test --test public_api_contracts`).
-6. Run relevant Admission Guard gates (`pwsh -File scripts/admission_guard.ps1 -PRReady` or `-CIParity`).
-7. Capture exact exit codes and output logs as evidence.
+2. Inspect untracked files with:
+   ```powershell
+   git ls-files --others --exclude-standard
+   ```
+   The current `scripts/harness-check.ps1` does not see untracked files.
+3. Stage intended new files before Harness verification so they are visible to the staged-path check.
+4. Run `pwsh -File scripts/harness-check.ps1` before committing to validate staged/tracked changes against the task envelope.
+5. Run the formatting/lint/test commands required by the selected risk profile.
+6. Capture exact exit codes and output logs as evidence.
 
 ### Phase 5: PR Preparation & Handoff
 1. Verify the committed scope against the base branch:
    ```powershell
    git diff --name-only origin/main...HEAD
    ```
-   Confirm that every changed file is explicitly authorized.
+   Confirm that every changed file is explicitly authorized by the normal envelope or by the recorded controlled governance transition.
 2. Inspect `git diff --check` and `git status` for clean working tree and no unintended changes.
 3. Prepare closeout report containing:
    - Files changed (exact inventory).
@@ -240,5 +264,8 @@ constraints:
 ```
 
 ### Pre-Commit vs Post-Commit Enforcement
-- **Pre-Commit**: `scripts/harness-check.ps1` evaluates `git diff --name-only` (uncommitted / staged working tree) against `allowed_paths` and `forbidden_paths`. It must be run while changes are in the working tree or index.
-- **Post-Commit / PR Scope**: Agents must execute `git diff --name-only origin/main...HEAD` to verify that all committed files in the PR branch remain within the authorized scope.
+
+- **Untracked preflight**: `git ls-files --others --exclude-standard` must be inspected before the Harness check. New intended files must be staged so they are visible to the current script.
+- **Pre-Commit tracked/staged check**: `scripts/harness-check.ps1` evaluates tracked/staged diffs against `allowed_paths` and `forbidden_paths`. Do not claim it covers untracked files.
+- **Post-Commit / PR Scope**: execute `git diff --name-only origin/main...HEAD` and verify every committed file against the active/recorded authorization.
+- **Governance transition**: if changing governance/Harness files outside the normal envelope, require the controlled repository-owner transition above; never self-authorize by silently widening the envelope.
