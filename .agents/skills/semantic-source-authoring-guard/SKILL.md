@@ -1,69 +1,43 @@
 ---
 name: semantic-source-authoring-guard
-description: Use when writing Semantic `.sm` source files, fixtures, examples, or negative diagnostic probes. Enforce fixture-first and spec-first authoring for current Semantic syntax, types, and diagnostics; prevent invented syntax or unconfirmed language behavior.
+description: Domain guard for authoring Semantic `.sm` source, fixtures, examples, and negative diagnostic probes. Enforces fixture-first and spec-first authoring, confirmed syntax/type cribsheets, and fail-closed stop on spec-vs-fixture drift.
 ---
 
 # Semantic Source Authoring Guard
 
-## Purpose
+Status: repository-native domain guard
+Authority: subordinate to [`AGENTS.md`](../../AGENTS.md), [`CONSTRAINTS.md`](../../CONSTRAINTS.md), and [`.harness/current.task.yaml`](../../.harness/current.task.yaml)
 
-Help agents write valid Semantic `.sm` source from the **current admitted surface**.
+---
 
-Hard rules:
-- Do not invent Semantic syntax.
-- Search existing fixtures and tests before writing new `.sm`.
-- Prefer repo evidence over memory, intuition, or roadmap prose.
-- Do not widen compiler, runtime, parser, verifier, or stdlib behavior to make invented source compile.
+## 1. Purpose & Scope
 
-## Relationship to Semantic Admission Guardian
+This domain guard governs the creation and modification of:
+- Semantic `.sm` source files;
+- Positive and negative test fixtures (`tests/fixtures/**/*.sm`);
+- Language examples (`examples/**/*.sm`);
+- Negative diagnostic probes.
 
-`Semantic Admission Guardian` controls:
-- repository safety;
-- mutation discipline;
-- gates;
-- PR workflow;
-- admission checks.
+### Core Authoring Laws
+1. **Never Invent Syntax**: Author exclusively from the admitted syntax, types, and library functions confirmed by normative specs and verified fixtures.
+2. **Fixture-First Selection**: Search existing test suites and fixtures for the closest valid pattern before authoring new `.sm` code.
+3. **No Compiler Widening for Guessed Source**: Never alter compiler, parser, sema, or runtime code simply to make invented or unconfirmed syntax compile.
+4. **Diagnostic Integrity**: Negative fixtures must probe exact, deterministic diagnostic boundaries with stable error codes and message fragments.
 
-`Semantic Source Authoring Guard` controls:
-- `.sm` source authoring;
-- fixture-first syntax selection;
-- examples and probes;
-- negative diagnostic fixture discipline;
-- no invented language.
+---
 
-The two skills are complementary and non-overlapping.
+## 2. Specification & Fixture Authority
 
-## Boundary With Repository Architecture Work
+### Primary Normative Specifications
+- [`docs/spec/syntax.md`](../../docs/spec/syntax.md)
+- [`docs/spec/types.md`](../../docs/spec/types.md)
+- [`docs/spec/source_semantics.md`](../../docs/spec/source_semantics.md)
+- [`docs/spec/diagnostics.md`](../../docs/spec/diagnostics.md)
+- [`docs/spec/modules.md`](../../docs/spec/modules.md)
+- [`docs/spec/logos.md`](../../docs/spec/logos.md)
+- [`docs/LANGUAGE.md`](../../docs/LANGUAGE.md)
 
-This skill is only for Semantic `.sm` source authoring, fixtures, examples, and diagnostic probes.
-
-Use the main `semantic` skill instead for:
-- Rust source changes;
-- repository architecture;
-- UI / renderer work;
-- roadmap / closeout / ledger PRs;
-- Project #2 metadata;
-- capability / runtime / verifier / VM ownership;
-- Workbench / Studio boundaries;
-- agent skill governance.
-
-If a task combines `.sm` fixtures with architecture, renderer, roadmap, verifier, runtime, capability, or Project #2 workflow:
-1. Use the main `semantic` skill for repository and architectural boundaries.
-2. Use this source authoring guard only for the `.sm` fixture/source portion.
-3. Do not let `.sm` fixture convenience widen compiler, parser, verifier, runtime, or UI behavior.
-
-## Required Source Authorities
-
-Read these canonical docs first:
-- `docs/spec/syntax.md`
-- `docs/spec/types.md`
-- `docs/spec/source_semantics.md`
-- `docs/spec/diagnostics.md`
-- `docs/spec/modules.md`
-- `docs/spec/logos.md`
-- `docs/LANGUAGE.md`
-
-Treat these live paths as stronger evidence than intuition and stronger than future-facing prose:
+### Executable Fixture & Test Grounding
 - `tests/frontend_lexer_qualification.rs`
 - `tests/frontend_parser_qualification.rs`
 - `tests/frontend_sema_qualification.rs`
@@ -74,195 +48,98 @@ Treat these live paths as stronger evidence than intuition and stronger than fut
 - `tests/fixtures/**/*.sm`
 - `examples/**/*.sm`
 
-If docs and fixtures disagree, prefer the fixture/test evidence for current authoring and stop if the conflict cannot be resolved safely.
+### Spec vs. Fixture Conflict Rule (Fail-Closed)
+If normative specifications (`docs/spec/*`) and executable fixtures/tests disagree on syntax, type rules, or diagnostics:
+$$\text{Specification} \neq \text{Fixture Evidence} \implies \text{\textbf{STOP \& Report Contract Drift}}$$
+**Neither source may be silently chosen over the other.** Stop, report the discrepancy, and await repository-owner clarification or open a tracked contract-drift defect.
 
-## DNA-Aware Source Authoring
+---
 
-For `.sm` authoring that touches public examples, doctrine, roadmap-facing examples, UI examples, capability examples, verifier examples, runtime examples, or language identity examples, inspect `docs/dna` before authoring.
+## 3. Mandatory Authoring Workflow
 
-DNA-sensitive `.sm` work must report:
-- docs/dna inspected: YES/NO
-- DNA files inspected:
-- DNA alignment:
-- DNA conflicts detected:
-- DNA-driven constraints applied:
+```text
+1. Identify target construct
+        ↓
+2. Search nearest existing .sm fixture/spec
+        ↓
+3. Copy and adapt pattern minimally
+        ↓
+4. Validate with `cargo run --bin smc -- check <file.sm>`
+        ↓
+5. If syntax fails: fix .sm source (do not hack compiler/runtime)
+        ↓
+6. If construct is unconfirmed by spec/fixtures: DO NOT USE IT
+```
 
-If docs/dna conflicts with the proposed `.sm` example or fixture framing, stop and report the contradiction.
+---
 
-If docs/dna is not relevant to a tiny local negative fixture, say so explicitly.
+## 4. Confirmed Syntax Cribsheet
 
-## Mandatory Authoring Workflow
+Use only constructs confirmed by current normative specs and active tests:
 
-1. Identify the target construct.
-2. Search for the closest existing `.sm` fixture or example.
-3. Copy the nearest valid pattern.
-4. Modify minimally.
-5. Run `smc check <file>`.
-6. If `smc check` fails, fix the `.sm` source first.
-7. Do not change compiler, runtime, parser, verifier, or stdlib code to make invented source compile.
-8. If no fixture/spec confirms a construct, do not use it.
+### Top-Level Declarations
+- `fn name(...) -> Type { ... }` — confirmed.
+- `record Name { ... }` — confirmed.
+- `schema Name { ... }` — confirmed.
+- `enum Name { ... }` — confirmed where supported by current AST/sema fixtures.
+- Logos `System`, `Entity`, `Law` — declarative surface; use only after confirming fixture support.
 
-## Syntax Cribsheet
+### Statements & Bindings
+- `let x = ...;`, `let x: Type = ...;` — confirmed.
+- `let (a, b) = ...;` (tuple destructuring) — confirmed.
+- `let Record { f1, f2 } = ...;` (record destructuring) — confirmed.
+- `assert ...;` — confirmed.
+- `if ... { ... } else { ... }` — confirmed.
+- `match ... { ... }` — confirmed.
+- `return ...;` — confirmed.
+- `let mut`, `const`, `let-else`, `for`, `guard` — use only if confirmed by current fixtures for the task.
 
-Use only constructs confirmed by the current spec/tests/fixtures.
+### Expressions & Operators
+- Literals (numeric, text, boolean, quad) — confirmed.
+- Variables and call expressions — confirmed.
+- Tuple literals `(a, b)` — confirmed.
+- Sequence literals `[a, b, c]` — confirmed.
+- Record literals `Record { f: v }` and field access `r.f` — confirmed.
+- Block expressions `{ ... }`, `if` expressions, `match` expressions — confirmed.
+- Arithmetic, logical, and relational operators — confirmed.
 
-### Top-level declarations
-- `fn` - confirmed by spec/test.
-- `record` - confirmed by spec/test.
-- `schema` - confirmed by spec/test.
-- `enum` - use only after confirming current fixture/spec support.
-- Logos `System`, `Entity`, `Law` - use only after confirming current fixture/spec support.
+---
 
-### Function forms
-- `fn name(...) { ... }` - confirmed by spec/test.
-- Explicit return types - confirmed by spec/test.
-- Expression-bodied forms - use only after confirming current fixture/spec support.
-- Default parameters - use only after confirming current fixture/spec support.
-- `requires`, `ensures`, `invariant` - use only after confirming current fixture/spec support.
+## 5. Confirmed Types Cribsheet
 
-### Statements
-- `let` - confirmed by spec/test.
-- `let mut` - use only after confirming current fixture/spec support.
-- `const` - use only after confirming current fixture/spec support.
-- tuple destructuring - confirmed by spec/test.
-- record destructuring - confirmed by spec/test.
-- `let-else` - use only after confirming current fixture/spec support.
-- assignment and compound assignment - confirmed by spec/test.
-- `for` - use only after confirming current fixture/spec support.
-- `guard` - use only after confirming current fixture/spec support.
-- `assert` - confirmed by spec/test.
-- `if` - confirmed by spec/test.
-- `match` - confirmed by spec/test.
-- `return` - confirmed by spec/test.
+| Type | Status | Description / Limitations |
+|---|---|---|
+| `quad` | Confirmed | Four-state logic (`N` Null, `F` Strict False, `T` Strict True, `S` Conflict). Never treat as `bool`. |
+| `bool` | Confirmed | Binary boolean (`true`, `false`). |
+| `text` | Confirmed | UTF-8 validated text value. |
+| `i32`, `u32`, `f64`, `fx` | Confirmed | Numeric primitives. `fx` represents fixed-point arithmetic. |
+| `unit` | Confirmed | `()` unit type. |
+| Tuples `(T1, T2)` | Confirmed | Fixed-length heterogenous product types. |
+| Records `record R { ... }` | Confirmed | Named-field product types. |
+| `Option(T)` | Confirmed | Tagged optional value (`Some(v)`, `None`). |
+| `Result(T, E)` | Confirmed | Tagged outcome (`Ok(v)`, `Err(e)`). |
+| `Sequence(T)` | Confirmed | Homogenous ordered collection. |
+| `Map(K, V)` | Task-gated | Key-value associative mapping; use only when confirmed by fixtures. |
+| `Closure(T -> U)` | Task-gated | Single-argument closure; use only when confirmed by fixtures. |
 
-### Expressions
-- literals - confirmed by spec/test.
-- variables - confirmed by spec/test.
-- calls - confirmed by spec/test.
-- named-argument calls - use only after confirming current fixture/spec support.
-- method/UFCS sugar - use only after confirming current fixture/spec support.
-- pipeline - use only after confirming current fixture/spec support.
-- where suffix - use only after confirming current fixture/spec support.
-- tuple literals - confirmed by spec/test.
-- sequence literals/usages - confirmed by spec/test.
-- record literals - confirmed by spec/test.
-- record field access - confirmed by spec/test.
-- record copy-with - use only after confirming current fixture/spec support.
-- block expressions - confirmed by spec/test.
-- if expressions - confirmed by spec/test.
-- match expressions - confirmed by spec/test.
-- loop/break expressions - use only after confirming current fixture/spec support.
-- unary/binary operators - confirmed by spec/test.
-- range literals - use only after confirming current fixture/spec support.
+---
 
-### Logos
-- treat Logos as a separate declarative surface.
-- do not mix Logos forms into executable source unless the current spec/tests confirm the pattern.
+## 6. Forbidden Patterns & Anti-Patterns
 
-## Type Cribsheet
+Unless explicitly confirmed by normative specs and active tests for the assigned task, the following are strictly forbidden:
+- Invented standard library functions or pseudo-methods on collections.
+- Rust-style traits, generic syntax (`impl`, `<T: Trait>`), or macro invocations (`println!`).
+- Implicit type coercions (e.g. `quad -> bool` or `i32 -> f64`).
+- Class/OOP inheritance patterns, exceptions (`throw`, `try/catch`, `panic`).
+- Direct filesystem, network, or OS calls from `.sm` source.
+- Multi-line strings, string interpolation, or unescaped control characters.
 
-### Confirmed core types
-- `quad` - confirmed by spec/test.
-- `bool` - confirmed by spec/test.
-- `text` - confirmed by spec/test.
-- `i32` - confirmed by spec/test.
-- `u32` - confirmed by spec/test.
-- `f64` - confirmed by spec/test.
-- `fx` - confirmed by spec/test.
-- `unit` - confirmed by spec/test.
-- measured numeric forms such as `i32[unit]`, `u32[unit]`, `f64[unit]`, `fx[unit]` - use only after confirming current fixture/spec support.
-- tuples - confirmed by spec/test.
-- records - confirmed by spec/test.
-- enums / ADTs - confirmed by spec/test.
-- `Option(T)` - confirmed by spec/test.
-- `Result(T, E)` - confirmed by spec/test.
-- `Sequence(T)` - confirmed by spec/test.
-- `Map(K, V)` - use only when confirmed by current fixtures/tests/specs for the task.
-- `Closure(T -> U)` - use only when confirmed by current fixtures/tests/specs for the task.
-- `qvec(N)` - reserved parser-level family; do not author unless the task explicitly confirms it.
+---
 
-For each type, confirm:
-- where it may appear;
-- how it is constructed;
-- how it is matched;
-- which operations are legal;
-- which limitations are explicit.
+## 7. Stop Conditions
 
-## Confirmed Source Patterns
-
-Use only tiny examples that are already confirmed by spec or existing tests/fixtures.
-
-- minimal `fn main` - confirmed.
-- typed `let` - confirmed.
-- `assert` - confirmed.
-- `quad` match - confirmed when backed by spec/test.
-- `Option(T)` construction and match - confirmed.
-- `Result(T, E)` construction and match - confirmed.
-- record literal and field access - confirmed.
-- `Sequence(T)` literal/usage - confirmed.
-- `Map(K, V)` usage - only when confirmed by fixture/test.
-- one negative diagnostic fixture pattern - confirmed when the diagnostic is already stable.
-
-Keep examples tiny. Do not build app-style samples.
-
-## Forbidden Patterns
-
-Ban these unless the current fixtures/specs explicitly confirm them:
-- invented Semantic syntax;
-- invented stdlib calls;
-- invented methods on `Option`, `Result`, `Sequence`, or `Map`;
-- Rust traits/generics syntax;
-- `impl`;
-- macros;
-- `async` / `await`;
-- Python/Rust/TypeScript import styles;
-- implicit type coercions;
-- text interpolation;
-- multi-line strings;
-- file, network, or host I/O;
-- classes / OOP patterns;
-- `panic`, `throw`, `try/catch`;
-- hidden runtime effects;
-- large app-style examples.
-
-## Diagnostic Fixture Rules
-
-When writing negative `.sm` fixtures:
-- one fixture must represent one diagnostic boundary;
-- prefer stable message fragments over full text;
-- do not add broad snapshots unless the existing suite style requires it;
-- do not change production code unless the task explicitly asks for implementation work;
-- if behavior is unclear, stop and report the uncertainty.
-
-## Verification Workflow
-
-Use the narrowest checks that match the task:
-- `smc check <file>`
-- `cargo test --test <targeted_test_name> --quiet`
-- `pwsh scripts\admission_guard.ps1 -PRReady`
-- `pwsh scripts\admission_guard.ps1 -Readiness`
-
-Use `FullPreflight` only when the current repo workflow requires it.
-
-If the task is a small `.sm` probe, do not force broad gates unless the repository workflow demands them.
-
-## Stop Conditions
-
-Stop and report if:
-- no confirming fixture/spec exists;
-- `smc check` fails because the syntax is unsupported;
-- the requested fixture requires language widening;
-- the task would require compiler/runtime/parser/verifier changes but was scoped as test-only;
-- you are about to invent syntax to satisfy the task;
-- the `.sm` source would conflict with docs/dna project identity;
-- the task is actually repository architecture / renderer / roadmap work and should use the main `semantic` skill first.
-
-## Acceptance Criteria
-
-A skill-use is correct when it:
-- stays fixture-first and spec-first;
-- uses current `.sm` evidence instead of intuition;
-- prevents invented syntax;
-- keeps `.sm` examples minimal;
-- separates source authoring from repo admission and PR workflow;
-- avoids language/runtime/CI changes.
+Stop execution and report a blocker immediately if:
+- **No Confirming Evidence**: The requested language construct has no backing fixture or normative spec.
+- **Spec Drift**: A conflict is found between `docs/spec/*` and fixture behaviors.
+- **Language Widening Required**: Validating the fixture would require unauthorized changes to compiler, parser, sema, or runtime crates.
+- **Scope Misalignment**: The task is actually an architectural or compiler change masquerading as a source-only fixture task.
