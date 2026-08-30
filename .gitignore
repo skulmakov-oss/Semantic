@@ -33,3 +33,7 @@ Cargo.lock
 # are ignored here.
 /artifacts/workbench/screenshots/*.png
 /artifacts/workbench/drag-verification/*.png
+
+# Ephemeral task context checkpoints (agent-managed task memory, not repository content)
+/.harness/context/
+/.harness/reports/context/

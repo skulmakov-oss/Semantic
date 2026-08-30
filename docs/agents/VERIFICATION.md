@@ -149,6 +149,21 @@ pwsh -File scripts/workspace_fmt_check.ps1
   pwsh -File tools/7hell/run.ps1
   ```
 
+### Context Economy & Checkpoint Validation
+Validates machine-readable context checkpoints against `.harness/context-checkpoint.schema.json` and checks repository staleness:
+- **Structural Validation & Schema Compliance**:
+  ```powershell
+  pwsh -File scripts/context_checkpoint_check.ps1 -Checkpoint <path>
+  ```
+- **Staleness & Drift Detection** (validates against live HEAD, active Harness task, and authority file hashes):
+  ```powershell
+  pwsh -File scripts/context_checkpoint_check.ps1 -Checkpoint <path> -AgainstCurrentRepo
+  ```
+- **Validator Built-in Self-Test Suite**:
+  ```powershell
+  pwsh -File scripts/context_checkpoint_check.ps1 -SelfTest
+  ```
+
 ---
 
 ## 5. Verification Checklist by Risk Tier

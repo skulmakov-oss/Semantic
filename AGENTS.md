@@ -120,3 +120,4 @@ Do not silently resolve a conflict between a repository-native skill and higher 
 - **Tests for Behavior Changes**: Add positive admission and negative rejection tests whenever behavior changes. Never weaken or delete tests for CI.
 - **Landed on Main != Stable**: Code on `main` is not automatically stable or release-promised. Never widen release claims silently.
 - **No Completion Claim Without Fresh Evidence**: Always run exact verification commands and report exit codes and outputs.
+- **Context Economy & Checkpoint Protocol**: For long-running or multi-phase tasks, follow the context-economy protocol in [`docs/agents/CONTEXT.md`](docs/agents/CONTEXT.md). Checkpoints are task memory, never repository authority; never compress away unresolved findings, blockers, owner decisions, exact critical identifiers, or verification state.

@@ -200,6 +200,7 @@ graph TD
 4. Run `pwsh -File scripts/harness-check.ps1` before committing to validate staged/tracked changes against the task envelope.
 5. Run the formatting/lint/test commands required by the selected risk profile.
 6. Capture exact exit codes and output logs as evidence.
+7. **Context Economy Checkpoint (When Triggered)**: On major phase completion or before context handoff, summarize durable facts, verification results, and owner decisions into a validated checkpoint per [`docs/agents/CONTEXT.md`](CONTEXT.md). Evict raw test/tool output only after structured extraction.
 
 ### Phase 5: PR Preparation & Handoff
 1. Verify the committed scope against the base branch:
@@ -208,12 +209,14 @@ graph TD
    ```
    Confirm that every changed file is explicitly authorized by the normal envelope or by the recorded controlled governance transition.
 2. Inspect `git diff --check` and `git status` for clean working tree and no unintended changes.
-3. Prepare closeout report containing:
+3. Validate checkpoint state (if used) with `pwsh -File scripts/context_checkpoint_check.ps1 -Checkpoint <path> -AgainstCurrentRepo`.
+4. Submit PR with full verification evidence, risk tier, and stable/release boundary declarations.
+5. Prepare closeout report containing:
    - Files changed (exact inventory).
    - Exact verification commands and results.
    - Any remaining risks or unresolved questions.
    - Confirmation that no compiler/runtime/dependency/workflow behavior was inadvertently altered.
-4. Do not auto-merge. Open PR and stop for review.
+6. Do not auto-merge. Open PR and stop for review.
 
 ---
 
