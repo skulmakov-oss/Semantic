@@ -2,39 +2,53 @@
 applyTo: '**'
 ---
 
-## MANDATORY: Always use Codebase Memory MCP to read the codebase
+# Codebase Memory MCP Integration & Navigation Mechanics
 
-**This rule applies to EVERY request that involves this codebase.**
+Status: tool/integration instruction
+Authority: subordinate to [`AGENTS.md`](../../AGENTS.md), [`CONSTRAINTS.md`](../../CONSTRAINTS.md), and [`docs/agents/WORKFLOW.md`](../../docs/agents/WORKFLOW.md)
 
-### Rules
+This instruction governs Codebase Memory MCP mechanics and code discovery for AI assistants operating in the Semantic repository.
 
-1. **Call `list_projects` FIRST** to discover the correct project name before using any tool.
-2. **Call `mcp_codebase-memo_get_architecture` next** — before writing code, editing files, or answering any question about the codebase.
-3. Use the returned context to make targeted, accurate changes.
-4. **Do NOT use** `grep_search`, `file_search`, `semantic_search`, or `read_file` for initial codebase exploration.
-5. Re-query only if additional context is needed during implementation.
+---
 
-Always use the project identifier returned by `list_projects` instead of guessing project names.
+## 1. Discovery & Query Workflow
 
-### Workflow
+Codebase Memory MCP is mandatory for repository and source code understanding. Use graph queries before modifying code.
 
-```
-// Step 0 — discover available projects (ALWAYS do this first)
-mcp_codebase-memo_list_projects()
+### Step 1: Project Identity
+- Check if the project identifier is already known in the active session.
+- If **not known**: Call `list_projects` once to discover the active project key.
+- If **already known**: Do not repeat ceremonial `list_projects` discovery calls.
 
-// Step 1 — use the project identifier returned above
-mcp_codebase-memo_get_architecture({ "project": "<display_name>" })
+### Step 2: Architecture Overview
+- Call `get_architecture(project)` once at task inception to ground codebase structure, crate boundaries, and hotspots.
+- Refresh only when structural or module layout changes justify it.
 
-// Step 2 — find symbols
-mcp_codebase-memo_search_graph({ "project": "<display_name>", "name_pattern": "<symbol>" })
+### Step 3: Targeted Symbol & Call Traversal
+Use targeted tools for symbol inspection and call-chain analysis:
+- `search_graph(name_pattern, label, file_pattern)` — structured search for types, functions, and modules.
+- `trace_call_path(function_name, direction, depth)` — trace callers (`inbound`) or callees (`outbound`).
+- `get_code_snippet(qualified_name)` — retrieve symbol source code directly.
+- `detect_changes(project)` — map diff impact to affected symbols and risk.
 
-// Step 3 — read code
-mcp_codebase-memo_get_code_snippet({ "project": "<display_name>", "qualified_name": "<fn>" })
-```
+---
 
-### Why
+## 2. Strict No Autonomous Fallback
 
-- Pre-built index covers the entire codebase with relevance ranking.
-- Faster and more accurate than manual file search.
-- Prevents reading stale files or following ghost references.
-- Using `list_projects` avoids guessing project identifiers.
+If Codebase Memory MCP is unavailable in the execution environment:
+
+1. **STOP immediately**. Do not silently substitute broad grep, file search, approximate embeddings, or raw text scanning.
+2. **Report the exact capability blocker** and state what cannot be proven or discovered.
+3. **Await explicit repository-owner decision**:
+   - Repository owner may authorize a task-scoped, visible, and temporary fallback.
+   - Historical sessions where an agent proceeded without MCP tools do not create fallback authority.
+
+---
+
+## 3. Canonical Governance Reference
+
+All repository invariants, crate ownership, verifier-first admission, Quad logic, risk tiers, and verification gates are defined in:
+- [`AGENTS.md`](../../AGENTS.md)
+- [`CONSTRAINTS.md`](../../CONSTRAINTS.md)
+- [`docs/agents/WORKFLOW.md`](../../docs/agents/WORKFLOW.md)
+- [`docs/agents/VERIFICATION.md`](../../docs/agents/VERIFICATION.md)
