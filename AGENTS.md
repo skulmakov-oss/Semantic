@@ -17,6 +17,7 @@ Before reading code or proposing changes, every agent must consult these authori
 4. **Task Envelope**: [`.harness/current.task.yaml`](.harness/current.task.yaml) — Active task scope, allowed/forbidden paths, authorizations, and task constraints.
 5. **Contract Truth**: [`docs/spec/*`](docs/spec/) and [`docs/architecture/bootstrap_transition.md`](docs/architecture/bootstrap_transition.md) — Public language, format, verifier, runtime contracts, and implementation-era authority.
 6. **Execution Methodology**: [`docs/agents/WORKFLOW.md`](docs/agents/WORKFLOW.md) and [`docs/agents/VERIFICATION.md`](docs/agents/VERIFICATION.md) — 5-phase lifecycle, toolstack rules, and verification catalog.
+7. **Repository-Native Domain Skills**: [`.agents/skills/*`](.agents/skills/) — Semantic-specific implementation and authoring guards routed by task surface.
 
 A lower layer in this hierarchy may make rules stricter, but may never loosen or waive an upper-layer rule.
 $$\text{Effective Authority} = \text{Repository Invariants} \cap \text{Task Authority}$$
@@ -69,13 +70,24 @@ Ground all changes in the canonical ownership boundaries of the repository:
 When available, Superpowers owns the primary planning, TDD, debugging, and verification workflow. Superpowers operates **inside** Semantic governance and Harness authority, never above them.
 - `using-superpowers`, `brainstorming`, `writing-plans`, `executing-plans`, `test-driven-development`, `systematic-debugging`, `verification-before-completion`.
 
-### D. Selected Agent Skills Routing
+### D. External Agent Skills Routing
+External process skills answer **how to work**; they do not own Semantic architecture or contracts.
+
 - **`CONSTRAINTS.md`**: Always authoritative across every step (does not require ritual skill invocation for simple edits).
 - **`source-driven-development`**: Use whenever verifying current source behavior, API contracts, or external dependencies.
 - **`doubt-driven-development`**: Mandatory for Critical (R3) and selected Boundary (R2) changes; challenge assumptions, probe failure modes, and demand fresh proof.
-- **`semantic`**: Enforces domain-specific rules for Semantic crates, SemCode, verifier admission, VM execution, and PROMETHEUS boundaries.
 
-### E. Conditional Agent Skills
+### E. Repository-Native Semantic Skills
+Repository-native skills answer **what Semantic permits within a specific domain** and are subordinate to `AGENTS.md`, `CONSTRAINTS.md`, the active Harness envelope, and normative specs.
+
+- **`semantic`** — [`.agents/skills/semantic/SKILL.md`](.agents/skills/semantic/SKILL.md): current broad Semantic domain router/guard for compiler, SemCode, verifier, VM, runtime, PROMETHEUS, UI, ownership, status, tests, and Semantic-specific architecture work. Until #1846 decomposes this skill, use it as the general Semantic domain layer where its task description applies.
+- **`semantic-source-authoring-guard`** — [`.agents/skills/semantic-source-authoring-guard/SKILL.md`](.agents/skills/semantic-source-authoring-guard/SKILL.md): **mandatory for any task that creates or modifies Semantic `.sm` source, fixtures, examples, or negative diagnostic probes.** Use it together with `semantic` when the task also changes architecture, compiler/runtime behavior, verifier/VM behavior, or repository contracts.
+
+Do not silently resolve a conflict between a repository-native skill and higher authority. If a skill conflicts with `CONSTRAINTS.md`, the active Harness, normative `docs/spec/*`, or current verified repository evidence, stop and report the drift instead of choosing whichever source is more convenient.
+
+Planned under #1846: reduce the broad `semantic` skill into a slim router plus specialized domain guards (verifier/runtime, contract/release, and UI boundary) while preserving the existing source-authoring guard.
+
+### F. Conditional Agent Skills
 - **`api-and-interface-design`**: Required for public API, ABI, or crate interface changes.
 - **`security-and-hardening`**: Required for capability, sanitization, quota, or boundary modifications.
 - **`code-review-and-quality`**: Required for pre-PR diff hygiene, clippy analysis, and quality validation.
