@@ -150,8 +150,8 @@ pwsh -File scripts/workspace_fmt_check.ps1
   ```
 
 ### Context Economy & Checkpoint Validation
-Validates machine-readable context checkpoints against `.harness/context-checkpoint.schema.json` and checks repository staleness:
-- **Structural Validation & Schema Compliance**:
+Validates machine-readable context checkpoints against `.harness/context-checkpoint.schema.json` and checks repository staleness. See [`docs/agents/CONTEXT.md`](CONTEXT.md#7-checkpoint-schema--validation) section 7 for the full schema-vs-semantic-vs-repository responsibility split.
+- **Structural Validation & Schema Compliance** (enforced via PowerShell's built-in `Test-Json` against the schema, plus a supplemental RFC 3339 check for the one schema keyword `Test-Json` does not evaluate):
   ```powershell
   pwsh -File scripts/context_checkpoint_check.ps1 -Checkpoint <path>
   ```

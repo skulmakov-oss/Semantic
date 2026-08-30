@@ -1,5 +1,17 @@
 # scripts/context_checkpoint_check.ps1
 # Deterministic, dependency-free validator for Semantic context checkpoints
+#
+# Responsibility split (see docs/agents/CONTEXT.md section 7 for the full writeup):
+#   - .harness/context-checkpoint.schema.json is the structural source of truth,
+#     enforced here via PowerShell 7's built-in Test-Json (proven against this
+#     schema's Draft 2020-12 keyword subset with negative tests; no external
+#     dependency). Test-Json does NOT enforce the "format" keyword, so
+#     checkpoint.created_at gets one supplemental deterministic check below.
+#   - This script additionally enforces cross-field / referential / repository
+#     invariants that JSON Schema cannot express on its own: the mandatory
+#     authority anchor set, checkpoint-global ID uniqueness, fallback
+#     owner-decision referential integrity, budget telemetry-mode coherence,
+#     and live-repository/Harness staleness detection (fail-closed).
 
 [CmdletBinding()]
 param (
@@ -15,208 +27,156 @@ param (
 
 $ErrorActionPreference = "Stop"
 
-function Test-ShaFormat {
-    param ([string]$Sha)
-    if ([string]::IsNullOrWhiteSpace($Sha)) { return $false }
-    return ($Sha -match '^[0-9a-fA-F]{7,40}$')
+$MandatoryAuthorityAnchors = @("AGENTS.md", "CONSTRAINTS.md", ".harness/current.task.yaml")
+
+function Test-DateTimeFormat {
+    # Test-Json does not validate the JSON Schema "format" keyword (proven
+    # empirically: a garbage string passes Test-Json against format:date-time).
+    # This is the deterministic, dependency-free supplement for RFC 3339 date-time.
+    param ([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+    if ($Value -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$') { return $false }
+    $parsed = [DateTimeOffset]::MinValue
+    return [DateTimeOffset]::TryParse(
+        $Value,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::RoundtripKind,
+        [ref]$parsed
+    )
 }
 
-function Validate-CheckpointObject {
+function Get-HarnessTaskId {
+    # Pure helper: extract task.id from raw .harness/current.task.yaml content.
+    # Deliberately synthetic-content-testable so self-tests never need to
+    # touch the real Harness file to prove malformed/missing-id handling.
+    param ([string]$Content)
+    if ([string]::IsNullOrWhiteSpace($Content)) { return $null }
+    if ($Content -match '(?m)^\s*id:\s*(\S.*?)\s*$') {
+        return $Matches[1].Trim()
+    }
+    return $null
+}
+
+function Test-SchemaCompliance {
     param (
-        [psobject]$Json,
+        [Parameter(Mandatory = $true)][string]$RawJson,
+        [Parameter(Mandatory = $true)][string]$SchemaText,
         [string]$SourceLabel = "Checkpoint"
     )
+    $errors = [System.Collections.Generic.List[string]]::new()
+    $isValid = $RawJson | Test-Json -Schema $SchemaText -ErrorAction SilentlyContinue -ErrorVariable schemaErrs
+    if (-not $isValid) {
+        if ($schemaErrs -and $schemaErrs.Count -gt 0) {
+            foreach ($e in $schemaErrs) {
+                $errors.Add("[$SourceLabel][Schema] $($e.Exception.Message)")
+            }
+        } else {
+            $errors.Add("[$SourceLabel][Schema] Checkpoint does not conform to context-checkpoint.schema.json")
+        }
+    }
+    return $errors
+}
 
+function Test-SemanticInvariants {
+    param (
+        [psobject]$Json,
+        [string]$RawJson,
+        [string]$SourceLabel = "Checkpoint"
+    )
     $errors = [System.Collections.Generic.List[string]]::new()
 
-    # 1. Schema version
-    if ($null -eq $Json.schema_version -or $Json.schema_version -ne 1) {
-        $errors.Add("[$SourceLabel] Unsupported or missing schema_version: $($Json.schema_version) (expected 1)")
-    }
-
-    # 2. Checkpoint metadata
-    if ($null -eq $Json.checkpoint) {
-        $errors.Add("[$SourceLabel] Missing 'checkpoint' metadata section")
-    } else {
-        if (-not ($Json.checkpoint.id -match '^chk-[a-zA-Z0-9_-]+$')) {
-            $errors.Add("[$SourceLabel] Invalid or missing checkpoint.id: '$($Json.checkpoint.id)' (expected pattern '^chk-[a-zA-Z0-9_-]+$')")
-        }
-        if ([string]::IsNullOrWhiteSpace($Json.checkpoint.created_at)) {
-            $errors.Add("[$SourceLabel] Missing checkpoint.created_at timestamp")
+    # created_at format (schema's "format" keyword is annotation-only under Test-Json).
+    # Checked against the RAW JSON TEXT, not $Json.checkpoint.created_at: ConvertFrom-Json
+    # silently auto-coerces ISO-8601-looking strings into [datetime] objects, which then
+    # lose their original text and re-stringify in the current culture's default format
+    # (e.g. "08/30/2026 09:00:00") -- checking the parsed object would produce false failures
+    # on genuinely valid dates and could mask a non-ISO string .NET's loose parser still accepts.
+    if ($null -ne $Json.checkpoint) {
+        $createdAtMatch = [regex]::Match($RawJson, '"created_at"\s*:\s*"([^"]*)"')
+        $createdAtRaw = if ($createdAtMatch.Success) { $createdAtMatch.Groups[1].Value } else { $null }
+        if (-not (Test-DateTimeFormat $createdAtRaw)) {
+            $errors.Add("[$SourceLabel] checkpoint.created_at is not a valid RFC 3339 date-time: '$createdAtRaw'")
         }
     }
 
-    # 3. Task metadata
-    if ($null -eq $Json.task) {
-        $errors.Add("[$SourceLabel] Missing 'task' section")
-    } else {
-        if ($null -eq $Json.task.issue -or $Json.task.issue -lt 1) {
-            $errors.Add("[$SourceLabel] Invalid or missing task.issue: $($Json.task.issue)")
+    # Mandatory authority anchor set + duplicate-path rejection (cross-item; out of schema's reach)
+    if ($null -ne $Json.authority -and $null -ne $Json.authority.references) {
+        $seenPaths = [System.Collections.Generic.HashSet[string]]::new()
+        $refPaths = @()
+        foreach ($ref in $Json.authority.references) {
+            if ([string]::IsNullOrWhiteSpace($ref.path)) { continue } # schema already rejects this
+            $refPaths += $ref.path
+            if (-not $seenPaths.Add($ref.path)) {
+                $errors.Add("[$SourceLabel] Duplicate authority reference path: '$($ref.path)'")
+            }
         }
-        if ([string]::IsNullOrWhiteSpace($Json.task.branch)) {
-            $errors.Add("[$SourceLabel] Missing task.branch")
-        }
-        $validPhases = @("UNDERSTAND", "AUTHORIZE", "IMPLEMENT", "VERIFY", "REVIEW_CONVERGENCE", "MERGE_HANDOFF", "COMPLETED")
-        if (-not $validPhases.Contains($Json.task.phase)) {
-            $errors.Add("[$SourceLabel] Invalid task.phase: '$($Json.task.phase)' (expected one of $($validPhases -join ', '))")
-        }
-    }
-
-    # 4. Repository metadata
-    if ($null -eq $Json.repository) {
-        $errors.Add("[$SourceLabel] Missing 'repository' section")
-    } else {
-        if (-not (Test-ShaFormat $Json.repository.base_sha)) {
-            $errors.Add("[$SourceLabel] Malformed or missing repository.base_sha: '$($Json.repository.base_sha)'")
-        }
-        if (-not (Test-ShaFormat $Json.repository.head_sha)) {
-            $errors.Add("[$SourceLabel] Malformed or missing repository.head_sha: '$($Json.repository.head_sha)'")
-        }
-    }
-
-    # 5. Authority metadata
-    if ($null -eq $Json.authority) {
-        $errors.Add("[$SourceLabel] Missing 'authority' section")
-    } else {
-        if ([string]::IsNullOrWhiteSpace($Json.authority.harness_task_id)) {
-            $errors.Add("[$SourceLabel] Missing authority.harness_task_id")
-        }
-        if ($null -eq $Json.authority.references -or $Json.authority.references.Count -eq 0) {
-            $errors.Add("[$SourceLabel] authority.references must contain at least one authority file reference")
-        } else {
-            foreach ($ref in $Json.authority.references) {
-                if ([string]::IsNullOrWhiteSpace($ref.path)) {
-                    $errors.Add("[$SourceLabel] authority reference contains empty path")
-                }
-                if (-not (Test-ShaFormat $ref.blob_sha)) {
-                    $errors.Add("[$SourceLabel] authority reference '$($ref.path)' contains malformed blob_sha: '$($ref.blob_sha)'")
-                }
+        foreach ($anchor in $MandatoryAuthorityAnchors) {
+            if ($refPaths -notcontains $anchor) {
+                $errors.Add("[$SourceLabel] Missing mandatory authority anchor '$anchor' (required set: $($MandatoryAuthorityAnchors -join ', '))")
             }
         }
     }
 
-    # 6. ID Uniqueness across typed entities
+    # Checkpoint-global ID uniqueness across every typed category (cross-array; out of schema's reach)
+    $idSections = @("facts", "owner_decisions", "review_findings", "hypotheses", "unresolved_questions", "blockers")
     $seenIds = [System.Collections.Generic.HashSet[string]]::new()
-    $checkId = {
-        param ($item, $section)
-        if ($null -ne $item.id) {
-            if ([string]::IsNullOrWhiteSpace($item.id)) {
-                $errors.Add("[$SourceLabel] $section contains an empty id")
-            } elseif (-not $seenIds.Add($item.id)) {
-                $errors.Add("[$SourceLabel] Duplicate entry id: '$($item.id)' in $section")
+    foreach ($section in $idSections) {
+        $items = $Json.$section
+        if ($null -eq $items) { continue }
+        foreach ($item in $items) {
+            if ($null -eq $item.id -or [string]::IsNullOrWhiteSpace([string]$item.id)) { continue } # schema-level failure
+            if (-not $seenIds.Add($item.id)) {
+                $errors.Add("[$SourceLabel] Duplicate checkpoint-global id '$($item.id)' in '$section' (ids must be unique across $($idSections -join ', '))")
             }
         }
     }
 
-    # 7. Facts
-    if ($null -eq $Json.facts) {
-        $errors.Add("[$SourceLabel] Missing 'facts' array")
-    } else {
-        foreach ($f in $Json.facts) {
-            & $checkId $f "facts"
-            if ($f.category -ne "PROVEN_FACT") {
-                $errors.Add("[$SourceLabel] Invalid category for fact '$($f.id)': '$($f.category)' (expected 'PROVEN_FACT')")
-            }
-            if ([string]::IsNullOrWhiteSpace($f.statement)) {
-                $errors.Add("[$SourceLabel] Fact '$($f.id)' has empty statement")
-            }
-            if ([string]::IsNullOrWhiteSpace($f.provenance)) {
-                $errors.Add("[$SourceLabel] Fact '$($f.id)' has missing provenance")
-            }
-        }
-    }
-
-    # 8. Owner Decisions
-    if ($null -eq $Json.owner_decisions) {
-        $errors.Add("[$SourceLabel] Missing 'owner_decisions' array")
-    } else {
-        foreach ($od in $Json.owner_decisions) {
-            & $checkId $od "owner_decisions"
-            if ($od.category -ne "OWNER_DECISION") {
-                $errors.Add("[$SourceLabel] Invalid category for owner_decision '$($od.id)': '$($od.category)' (expected 'OWNER_DECISION')")
-            }
-            if ([string]::IsNullOrWhiteSpace($od.decision)) {
-                $errors.Add("[$SourceLabel] Owner decision '$($od.id)' has empty decision text")
-            }
-            if ([string]::IsNullOrWhiteSpace($od.source)) {
-                $errors.Add("[$SourceLabel] Owner decision '$($od.id)' has missing source")
-            }
-        }
-    }
-
-    # 9. Review Findings
-    if ($null -eq $Json.review_findings) {
-        $errors.Add("[$SourceLabel] Missing 'review_findings' array")
-    } else {
-        $validReviewStatus = @("ACTIVE", "ADDRESSED", "ACCEPTED", "REJECTED")
-        foreach ($rf in $Json.review_findings) {
-            & $checkId $rf "review_findings"
-            if ($rf.category -ne "REVIEWER_CLAIM") {
-                $errors.Add("[$SourceLabel] Invalid category for review finding '$($rf.id)': '$($rf.category)' (expected 'REVIEWER_CLAIM')")
-            }
-            if ([string]::IsNullOrWhiteSpace($rf.thread_id)) {
-                $errors.Add("[$SourceLabel] Review finding '$($rf.id)' missing thread_id")
-            }
-            if ([string]::IsNullOrWhiteSpace($rf.claim)) {
-                $errors.Add("[$SourceLabel] Review finding '$($rf.id)' missing claim description")
-            }
-            if (-not $validReviewStatus.Contains($rf.status)) {
-                $errors.Add("[$SourceLabel] Review finding '$($rf.id)' has invalid status: '$($rf.status)'")
-            }
-        }
-    }
-
-    # 10. Hypotheses, Unresolved Questions, Blockers
-    if ($null -eq $Json.hypotheses) { $errors.Add("[$SourceLabel] Missing 'hypotheses' array") }
-    if ($null -eq $Json.unresolved_questions) { $errors.Add("[$SourceLabel] Missing 'unresolved_questions' array") }
-    if ($null -eq $Json.blockers) { $errors.Add("[$SourceLabel] Missing 'blockers' array") }
-
-    # 11. Verification state
-    if ($null -eq $Json.verification) {
-        $errors.Add("[$SourceLabel] Missing 'verification' array")
-    } else {
-        $validVerifStatus = @("SUCCESS", "FAILED", "PENDING")
+    # Verification status/exit_code coherence (cross-field within one entry)
+    if ($null -ne $Json.verification) {
         foreach ($v in $Json.verification) {
-            if ([string]::IsNullOrWhiteSpace($v.command)) {
-                $errors.Add("[$SourceLabel] Verification entry missing command")
-            }
-            if (-not (Test-ShaFormat $v.head_sha)) {
-                $errors.Add("[$SourceLabel] Verification entry '$($v.command)' has malformed head_sha: '$($v.head_sha)'")
-            }
-            if ($null -eq $v.exit_code) {
-                $errors.Add("[$SourceLabel] Verification entry '$($v.command)' missing exit_code")
-            }
-            if (-not $validVerifStatus.Contains($v.status)) {
-                $errors.Add("[$SourceLabel] Verification entry '$($v.command)' has invalid status: '$($v.status)'")
-            }
             if ($v.status -eq "SUCCESS" -and $v.exit_code -ne 0) {
                 $errors.Add("[$SourceLabel] Verification entry '$($v.command)' marked SUCCESS with non-zero exit_code: $($v.exit_code)")
             }
         }
     }
 
-    # 12. Fallback authorization integrity
-    if ($null -eq $Json.fallback) {
-        $errors.Add("[$SourceLabel] Missing 'fallback' section")
-    } else {
-        if ($Json.fallback.used -eq $true -and [string]::IsNullOrWhiteSpace($Json.fallback.authorization)) {
-            $errors.Add("[$SourceLabel] fallback.used is true but fallback.authorization is missing or empty")
+    # Fallback authorization referential integrity (must resolve to a real owner_decisions entry)
+    if ($null -ne $Json.fallback) {
+        $used = $Json.fallback.used
+        $decisionId = $Json.fallback.authorization_decision_id
+        if ($used -eq $true) {
+            if ([string]::IsNullOrWhiteSpace([string]$decisionId)) {
+                $errors.Add("[$SourceLabel] fallback.used is true but fallback.authorization_decision_id is missing")
+            } else {
+                $match = $null
+                if ($null -ne $Json.owner_decisions) {
+                    $match = $Json.owner_decisions | Where-Object { $_.id -eq $decisionId } | Select-Object -First 1
+                }
+                if ($null -eq $match) {
+                    $errors.Add("[$SourceLabel] fallback.authorization_decision_id '$decisionId' does not resolve to any owner_decisions entry")
+                } elseif ($match.category -ne "OWNER_DECISION") {
+                    $errors.Add("[$SourceLabel] fallback.authorization_decision_id '$decisionId' does not resolve to an OWNER_DECISION entry")
+                }
+            }
+        } elseif ($used -eq $false -and $null -ne $decisionId) {
+            $errors.Add("[$SourceLabel] fallback.used is false but fallback.authorization_decision_id is not null: '$decisionId'")
         }
     }
 
-    # 13. Budget threshold integrity
-    if ($null -eq $Json.budget) {
-        $errors.Add("[$SourceLabel] Missing 'budget' section")
-    } else {
-        if ($null -ne $Json.budget.soft_threshold -and $null -ne $Json.budget.hard_threshold) {
-            if ($Json.budget.soft_threshold -ge $Json.budget.hard_threshold) {
-                $errors.Add("[$SourceLabel] budget.soft_threshold ($($Json.budget.soft_threshold)) must be strictly less than budget.hard_threshold ($($Json.budget.hard_threshold))")
+    # Budget telemetry-mode coherence (cross-field: false must pair with null/null, true requires both + soft < hard)
+    if ($null -ne $Json.budget) {
+        $telemetryAvailable = $Json.budget.telemetry_available
+        $soft = $Json.budget.soft_threshold
+        $hard = $Json.budget.hard_threshold
+        if ($telemetryAvailable -eq $false) {
+            if ($null -ne $soft -or $null -ne $hard) {
+                $errors.Add("[$SourceLabel] budget.telemetry_available is false (Event-Trigger Mode) but soft_threshold/hard_threshold are not both null: soft=$soft hard=$hard")
             }
-            if ($Json.budget.soft_threshold -le 0.0 -or $Json.budget.soft_threshold -ge 1.0) {
-                $errors.Add("[$SourceLabel] budget.soft_threshold ($($Json.budget.soft_threshold)) must be between 0.0 and 1.0 exclusive")
-            }
-            if ($Json.budget.hard_threshold -le 0.0 -or $Json.budget.hard_threshold -ge 1.0) {
-                $errors.Add("[$SourceLabel] budget.hard_threshold ($($Json.budget.hard_threshold)) must be between 0.0 and 1.0 exclusive")
+        } elseif ($telemetryAvailable -eq $true) {
+            if ($null -eq $soft -or $null -eq $hard) {
+                $errors.Add("[$SourceLabel] budget.telemetry_available is true (Telemetry Mode) but soft_threshold/hard_threshold are not both present: soft=$soft hard=$hard")
+            } elseif ($soft -ge $hard) {
+                $errors.Add("[$SourceLabel] budget.soft_threshold ($soft) must be strictly less than budget.hard_threshold ($hard)")
             }
         }
     }
@@ -224,39 +184,72 @@ function Validate-CheckpointObject {
     return $errors
 }
 
+function Validate-Checkpoint {
+    param (
+        [Parameter(Mandatory = $true)][string]$RawJson,
+        [Parameter(Mandatory = $true)][string]$SchemaText,
+        [string]$SourceLabel = "Checkpoint"
+    )
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($e in @(Test-SchemaCompliance -RawJson $RawJson -SchemaText $SchemaText -SourceLabel $SourceLabel)) { $errors.Add($e) }
+
+    $json = $null
+    try {
+        $json = $RawJson | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        $errors.Add("[$SourceLabel] Invalid JSON: $($_.Exception.Message)")
+        return $errors
+    }
+
+    foreach ($e in @(Test-SemanticInvariants -Json $json -RawJson $RawJson -SourceLabel $SourceLabel)) { $errors.Add($e) }
+    return $errors
+}
+
 function Test-AgainstCurrentRepository {
     param (
         [psobject]$Json,
-        [string]$SourceLabel = "Checkpoint"
+        [string]$SourceLabel = "Checkpoint",
+        [string]$HarnessPath = ".harness/current.task.yaml"
     )
 
     $staleness = [System.Collections.Generic.List[string]]::new()
 
-    # 1. Live HEAD check
+    # 1. Live HEAD check -- exact identity (schema now requires full 40-hex, so prefix matching is neither
+    #    needed nor safe: "A starts with B OR B starts with A" was the finding this replaces).
     $currentHead = (git rev-parse HEAD).Trim()
     $chkHead = $Json.repository.head_sha
-    if ($currentHead -notlike "$chkHead*" -and $chkHead -notlike "$currentHead*") {
+    if ($currentHead -ne $chkHead) {
         $staleness.Add("[$SourceLabel] HEAD mismatch: Checkpoint head_sha '$chkHead' != Live git HEAD '$currentHead'")
     }
 
-    # 2. Active Harness task check
-    if (Test-Path ".harness/current.task.yaml") {
-        $harnessContent = Get-Content ".harness/current.task.yaml" -Raw
-        if ($harnessContent -match 'id:\s*([^\r\n]+)') {
-            $liveTaskId = $Matches[1].Trim()
-            if ($Json.authority.harness_task_id -ne $liveTaskId) {
-                $staleness.Add("[$SourceLabel] Harness Task ID mismatch: Checkpoint '$($Json.authority.harness_task_id)' != Live '$liveTaskId'")
+    # 2. Harness task check -- FAIL CLOSED. Missing, unreadable, malformed (id unparseable), and
+    #    mismatched task id all produce an error; there is no silent skip path.
+    if (-not (Test-Path $HarnessPath)) {
+        $staleness.Add("[$SourceLabel] Harness authority file '$HarnessPath' does not exist -- cannot verify active task authority (fail-closed)")
+    } else {
+        $harnessContent = $null
+        try {
+            $harnessContent = Get-Content $HarnessPath -Raw -ErrorAction Stop
+        } catch {
+            $staleness.Add("[$SourceLabel] Harness authority file '$HarnessPath' could not be read: $($_.Exception.Message) (fail-closed)")
+        }
+        if ($null -ne $harnessContent) {
+            $liveTaskId = Get-HarnessTaskId $harnessContent
+            if ($null -eq $liveTaskId) {
+                $staleness.Add("[$SourceLabel] Harness authority file '$HarnessPath' is malformed -- task id could not be deterministically extracted (fail-closed)")
+            } elseif ($Json.authority.harness_task_id -ne $liveTaskId) {
+                $staleness.Add("[$SourceLabel] Harness Task ID mismatch (STALE): Checkpoint '$($Json.authority.harness_task_id)' != Live '$liveTaskId'")
             }
         }
     }
 
-    # 3. Authority file blob hash checks
-    if ($null -ne $Json.authority.references) {
+    # 3. Authority file blob hash checks -- exact identity, not prefix matching.
+    if ($null -ne $Json.authority -and $null -ne $Json.authority.references) {
         foreach ($ref in $Json.authority.references) {
             $path = $ref.path
             if (Test-Path $path) {
                 $liveBlobSha = (git hash-object $path).Trim()
-                if ($ref.blob_sha -notlike "$liveBlobSha*" -and $liveBlobSha -notlike "$($ref.blob_sha)*") {
+                if ($ref.blob_sha -ne $liveBlobSha) {
                     $staleness.Add("[$SourceLabel] Authority hash mismatch for '$path': Checkpoint blob_sha '$($ref.blob_sha)' != Live '$liveBlobSha'")
                 }
             } else {
@@ -268,9 +261,20 @@ function Test-AgainstCurrentRepository {
     return $staleness
 }
 
+# --- Structural schema (loaded once; required by both -SelfTest and file validation) ---
+$SchemaPath = Join-Path (Split-Path $PSScriptRoot -Parent) ".harness/context-checkpoint.schema.json"
+if (-not (Test-Path $SchemaPath)) {
+    Write-Error "Structural schema not found at '$SchemaPath'"
+    exit 1
+}
+$SchemaText = Get-Content $SchemaPath -Raw
+
 # --- Built-in Self-Test Suite ---
 if ($SelfTest) {
     Write-Host "[SelfTest] Running built-in checkpoint validator qualification suite..." -ForegroundColor Cyan
+
+    $HEX40 = ("a1b2c3d4" * 5)   # 40 hex chars -- syntactically valid full SHA-1 for structural fixtures
+    $HEX40_ALT = ("9f8e7d6c" * 5)
 
     $validBaseJson = @"
 {
@@ -282,127 +286,328 @@ if ($SelfTest) {
   },
   "task": {
     "issue": 1849,
-    "pr": null,
+    "pr": 1851,
     "branch": "feat/test",
     "phase": "IMPLEMENT"
   },
   "repository": {
-    "base_sha": "15bd096df652764231e4203b8e964b49b0b5ad38",
-    "head_sha": "15bd096df652764231e4203b8e964b49b0b5ad38"
+    "base_sha": "$HEX40",
+    "head_sha": "$HEX40"
   },
   "authority": {
     "harness_task_id": "SEMANTIC-STABLE-FOUNDATION-SSF-07",
     "references": [
-      {
-        "path": "AGENTS.md",
-        "blob_sha": "abcdef1234567890abcdef1234567890abcdef12"
-      }
+      { "path": "AGENTS.md", "blob_sha": "$HEX40" },
+      { "path": "CONSTRAINTS.md", "blob_sha": "$HEX40_ALT" },
+      { "path": ".harness/current.task.yaml", "blob_sha": "$HEX40" }
     ]
   },
   "facts": [
-    {
-      "id": "fact-1",
-      "category": "PROVEN_FACT",
-      "statement": "Test fact",
-      "provenance": "AGENTS.md:L10"
-    }
+    { "id": "fact-1", "category": "PROVEN_FACT", "statement": "Test fact", "provenance": "AGENTS.md:L10" }
   ],
   "owner_decisions": [
-    {
-      "id": "dec-1",
-      "category": "OWNER_DECISION",
-      "decision": "Proceed with test",
-      "source": "issue #1849"
-    }
+    { "id": "dec-1", "category": "OWNER_DECISION", "decision": "Proceed with test", "source": "issue #1849" }
   ],
   "review_findings": [],
   "hypotheses": [],
   "unresolved_questions": [],
   "blockers": [],
   "verification": [
-    {
-      "command": "cargo test",
-      "head_sha": "15bd096df652764231e4203b8e964b49b0b5ad38",
-      "exit_code": 0,
-      "result": "pass",
-      "status": "SUCCESS"
-    }
+    { "command": "cargo test", "head_sha": "$HEX40", "exit_code": 0, "result": "pass", "status": "SUCCESS" }
   ],
   "completed": [],
   "next_actions": [],
   "fallback": {
     "used": false,
-    "authorization": null
+    "authorization_decision_id": null
   },
   "budget": {
     "telemetry_available": false,
-    "soft_threshold": 0.65,
-    "hard_threshold": 0.80
+    "soft_threshold": null,
+    "hard_threshold": null
   }
 }
 "@
 
-    # Test 1: Valid checkpoint -> PASS
-    $validObj = $validBaseJson | ConvertFrom-Json
-    $errors = Validate-CheckpointObject $validObj "ValidCase"
-    if ($errors.Count -ne 0) {
-        throw "SelfTest Failed: Valid case reported unexpected errors: $($errors -join '; ')"
+    $passed = 0
+    $failed = 0
+    $failedNames = [System.Collections.Generic.List[string]]::new()
+
+    function Invoke-Case {
+        param (
+            [string]$Name,
+            [scriptblock]$Errors,
+            [bool]$ExpectValid
+        )
+        $script:__caseErrors = @(& $Errors)
+        $count = $script:__caseErrors.Count
+        $ok = if ($ExpectValid) { $count -eq 0 } else { $count -gt 0 }
+        if ($ok) {
+            Write-Host "  [PASS] $Name" -ForegroundColor Green
+            $script:passed++
+        } else {
+            $detail = if ($count -gt 0) { ($script:__caseErrors -join ' | ') } else { "(no errors, but FAIL was expected)" }
+            Write-Host "  [FAIL] $Name -- $detail" -ForegroundColor Red
+            $script:failed++
+            $script:failedNames.Add($Name)
+        }
     }
-    Write-Host "  [PASS] Positive Valid Checkpoint" -ForegroundColor Green
 
-    # Test 2: Missing head_sha -> FAIL
-    $badHead = $validBaseJson | ConvertFrom-Json
-    $badHead.repository.head_sha = ""
-    $errors = Validate-CheckpointObject $badHead "MissingHead"
-    if ($errors.Count -eq 0) { throw "SelfTest Failed: Missing head_sha did not produce validation error" }
-    Write-Host "  [PASS] Negative Missing head_sha detected" -ForegroundColor Green
+    function New-ValidObj { return $validBaseJson | ConvertFrom-Json }
+    function Get-Raw($obj) { return $obj | ConvertTo-Json -Depth 12 }
+    function Validate($obj, [string]$label = "Case") {
+        return Validate-Checkpoint -RawJson (Get-Raw $obj) -SchemaText $SchemaText -SourceLabel $label
+    }
 
-    # Test 3: Malformed SHA -> FAIL
-    $badSha = $validBaseJson | ConvertFrom-Json
-    $badSha.repository.base_sha = "not-a-valid-hex-sha-!!!"
-    $errors = Validate-CheckpointObject $badSha "MalformedSha"
-    if ($errors.Count -eq 0) { throw "SelfTest Failed: Malformed SHA did not produce validation error" }
-    Write-Host "  [PASS] Negative Malformed SHA detected" -ForegroundColor Green
+    # --- Structural (schema-backed) ---
+    Invoke-Case "Positive: valid complete checkpoint" { Validate (New-ValidObj) } $true
 
-    # Test 4: Unknown classification category -> FAIL
-    $badCat = $validBaseJson | ConvertFrom-Json
-    $badCat.facts[0].category = "UNKNOWN_CATEGORY"
-    $errors = Validate-CheckpointObject $badCat "BadCategory"
-    if ($errors.Count -eq 0) { throw "SelfTest Failed: Unknown category did not produce validation error" }
-    Write-Host "  [PASS] Negative Unknown Category detected" -ForegroundColor Green
+    Invoke-Case "Negative: invalid JSON syntax" {
+        Validate-Checkpoint -RawJson "{ not valid json " -SchemaText $SchemaText -SourceLabel "BadJson"
+    } $false
 
-    # Test 5: Fallback used without authorization -> FAIL
-    $badFallback = $validBaseJson | ConvertFrom-Json
-    $badFallback.fallback.used = $true
-    $badFallback.fallback.authorization = $null
-    $errors = Validate-CheckpointObject $badFallback "MissingFallbackAuth"
-    if ($errors.Count -eq 0) { throw "SelfTest Failed: Missing fallback authorization did not produce error" }
-    Write-Host "  [PASS] Negative Fallback without authorization detected" -ForegroundColor Green
+    Invoke-Case "Negative: unknown top-level property" {
+        $o = New-ValidObj
+        $o | Add-Member -MemberType NoteProperty -Name "unexpected_extra" -Value "x"
+        Validate $o "UnknownTopLevel"
+    } $false
 
-    # Test 6: Verification SUCCESS with exit_code 1 -> FAIL
-    $badVerif = $validBaseJson | ConvertFrom-Json
-    $badVerif.verification[0].exit_code = 1
-    $badVerif.verification[0].status = "SUCCESS"
-    $errors = Validate-CheckpointObject $badVerif "InvalidVerifExit"
-    if ($errors.Count -eq 0) { throw "SelfTest Failed: SUCCESS status with non-zero exit code did not produce error" }
-    Write-Host "  [PASS] Negative Inconsistent verification exit_code detected" -ForegroundColor Green
+    Invoke-Case "Negative: unknown nested property (task)" {
+        $o = New-ValidObj
+        $o.task | Add-Member -MemberType NoteProperty -Name "unexpected_nested" -Value "x"
+        Validate $o "UnknownNested"
+    } $false
 
-    # Test 7: Soft threshold >= Hard threshold -> FAIL
-    $badBudget = $validBaseJson | ConvertFrom-Json
-    $badBudget.budget.soft_threshold = 0.85
-    $badBudget.budget.hard_threshold = 0.80
-    $errors = Validate-CheckpointObject $badBudget "InvertedThresholds"
-    if ($errors.Count -eq 0) { throw "SelfTest Failed: Soft >= Hard budget threshold did not produce error" }
-    Write-Host "  [PASS] Negative Inverted budget thresholds detected" -ForegroundColor Green
+    Invoke-Case "Negative: missing required nested field (repository.head_sha)" {
+        $raw = ($validBaseJson | ConvertFrom-Json | ConvertTo-Json -Depth 12) | ConvertFrom-Json
+        $raw.repository.PSObject.Properties.Remove('head_sha')
+        Validate $raw "MissingHeadSha"
+    } $false
 
-    # Test 8: Live repository authority mismatch detection
-    $staleObj = $validBaseJson | ConvertFrom-Json
-    $staleObj.authority.harness_task_id = "STALE-NONEXISTENT-TASK-ID"
-    $staleErrors = Test-AgainstCurrentRepository $staleObj "StaleTaskTest"
-    if ($staleErrors.Count -eq 0) { throw "SelfTest Failed: Mismatched harness task ID did not produce staleness error" }
-    Write-Host "  [PASS] Staleness detection against live repository verified" -ForegroundColor Green
+    Invoke-Case "Negative: invalid created_at (fails supplemental format check, not caught by Test-Json)" {
+        $o = New-ValidObj
+        $o.checkpoint.created_at = "not-a-date"
+        Validate $o "BadCreatedAt"
+    } $false
 
-    Write-Host "`n[SelfTest] All 8 qualification checks passed successfully.`n" -ForegroundColor Green
+    Invoke-Case "Negative: short repository SHA (7-40 char prefix no longer accepted)" {
+        $o = New-ValidObj
+        $o.repository.base_sha = "abc1234"
+        Validate $o "ShortRepoSha"
+    } $false
+
+    Invoke-Case "Negative: short authority blob SHA" {
+        $o = New-ValidObj
+        $o.authority.references[0].blob_sha = "abc1234"
+        Validate $o "ShortBlobSha"
+    } $false
+
+    Invoke-Case "Negative: malformed hypotheses entry (missing evidence_needed)" {
+        $o = New-ValidObj
+        $o.hypotheses = @([pscustomobject]@{ id = "hyp-1"; category = "HYPOTHESIS"; statement = "x" })
+        Validate $o "MalformedHypothesis"
+    } $false
+
+    Invoke-Case "Negative: malformed blocker entry (missing required_decision)" {
+        $o = New-ValidObj
+        $o.blockers = @([pscustomobject]@{ id = "blk-1"; category = "BLOCKER"; description = "x" })
+        Validate $o "MalformedBlocker"
+    } $false
+
+    Invoke-Case "Negative: malformed completed entry (missing evidence)" {
+        $o = New-ValidObj
+        $o.completed = @([pscustomobject]@{ step = "did a thing" })
+        Validate $o "MalformedCompleted"
+    } $false
+
+    Invoke-Case "Negative: malformed next_actions entry (missing action)" {
+        $o = New-ValidObj
+        $o.next_actions = @([pscustomobject]@{ target = "somewhere" })
+        Validate $o "MalformedNextAction"
+    } $false
+
+    Invoke-Case "Negative: verification entry missing result" {
+        $o = New-ValidObj
+        $o.verification = @([pscustomobject]@{ command = "cargo test"; head_sha = $HEX40; exit_code = 0; status = "SUCCESS" })
+        Validate $o "MissingVerificationResult"
+    } $false
+
+    Invoke-Case "Negative: threshold exactly 0 (exclusiveMinimum)" {
+        $o = New-ValidObj
+        $o.budget.telemetry_available = $true
+        $o.budget.soft_threshold = 0.0
+        $o.budget.hard_threshold = 0.8
+        Validate $o "ThresholdZero"
+    } $false
+
+    Invoke-Case "Negative: threshold exactly 1 (exclusiveMaximum)" {
+        $o = New-ValidObj
+        $o.budget.telemetry_available = $true
+        $o.budget.soft_threshold = 0.5
+        $o.budget.hard_threshold = 1.0
+        Validate $o "ThresholdOne"
+    } $false
+
+    # --- Semantic layer: mandatory authority anchors ---
+    Invoke-Case "Negative: missing AGENTS.md authority anchor" {
+        $o = New-ValidObj
+        $o.authority.references = @($o.authority.references | Where-Object { $_.path -ne "AGENTS.md" })
+        Validate $o "MissingAgentsAnchor"
+    } $false
+
+    Invoke-Case "Negative: missing CONSTRAINTS.md authority anchor" {
+        $o = New-ValidObj
+        $o.authority.references = @($o.authority.references | Where-Object { $_.path -ne "CONSTRAINTS.md" })
+        Validate $o "MissingConstraintsAnchor"
+    } $false
+
+    Invoke-Case "Negative: missing Harness authority anchor" {
+        $o = New-ValidObj
+        $o.authority.references = @($o.authority.references | Where-Object { $_.path -ne ".harness/current.task.yaml" })
+        Validate $o "MissingHarnessAnchor"
+    } $false
+
+    Invoke-Case "Negative: duplicate authority path" {
+        $o = New-ValidObj
+        $dup = [pscustomobject]@{ path = "AGENTS.md"; blob_sha = $HEX40_ALT }
+        $o.authority.references = @($o.authority.references) + $dup
+        Validate $o "DuplicateAuthorityPath"
+    } $false
+
+    # --- Semantic layer: global ID uniqueness ---
+    Invoke-Case "Negative: duplicate id across typed categories (facts vs hypotheses)" {
+        $o = New-ValidObj
+        $o.hypotheses = @([pscustomobject]@{ id = "fact-1"; category = "HYPOTHESIS"; statement = "x"; evidence_needed = "y" })
+        Validate $o "DuplicateGlobalId"
+    } $false
+
+    # --- Semantic layer: fallback referential integrity ---
+    Invoke-Case "Negative: fallback used=true with null authorization_decision_id" {
+        $o = New-ValidObj
+        $o.fallback.used = $true
+        $o.fallback.authorization_decision_id = $null
+        Validate $o "FallbackNullAuth"
+    } $false
+
+    Invoke-Case "Negative: fallback used=true with unknown owner decision id" {
+        $o = New-ValidObj
+        $o.fallback.used = $true
+        $o.fallback.authorization_decision_id = "decision-does-not-exist"
+        Validate $o "FallbackUnknownDecision"
+    } $false
+
+    Invoke-Case "Negative: fallback used=true referencing a non-owner entity (a fact id)" {
+        $o = New-ValidObj
+        $o.fallback.used = $true
+        $o.fallback.authorization_decision_id = "fact-1"
+        Validate $o "FallbackNonOwnerEntity"
+    } $false
+
+    Invoke-Case "Negative: fallback used=false with non-null authorization_decision_id" {
+        $o = New-ValidObj
+        $o.fallback.used = $false
+        $o.fallback.authorization_decision_id = "dec-1"
+        Validate $o "FallbackUsedFalseWithAuth"
+    } $false
+
+    Invoke-Case "Positive: valid owner-authorized fallback reference" {
+        $o = New-ValidObj
+        $o.fallback.used = $true
+        $o.fallback.authorization_decision_id = "dec-1"
+        Validate $o "FallbackValidReference"
+    } $true
+
+    # --- Semantic layer: verification coherence ---
+    Invoke-Case "Negative: verification SUCCESS with non-zero exit_code" {
+        $o = New-ValidObj
+        $o.verification[0].exit_code = 1
+        $o.verification[0].status = "SUCCESS"
+        Validate $o "InvalidVerifExit"
+    } $false
+
+    # --- Semantic layer: budget telemetry-mode coherence ---
+    Invoke-Case "Negative: telemetry_available=false with fabricated thresholds" {
+        $o = New-ValidObj
+        $o.budget.telemetry_available = $false
+        $o.budget.soft_threshold = 0.65
+        $o.budget.hard_threshold = 0.80
+        Validate $o "TelemetryFalseFabricatedThresholds"
+    } $false
+
+    Invoke-Case "Negative: telemetry_available=true with a missing threshold" {
+        $o = New-ValidObj
+        $o.budget.telemetry_available = $true
+        $o.budget.soft_threshold = 0.65
+        $o.budget.hard_threshold = $null
+        Validate $o "TelemetryTrueMissingThreshold"
+    } $false
+
+    Invoke-Case "Negative: soft_threshold >= hard_threshold" {
+        $o = New-ValidObj
+        $o.budget.telemetry_available = $true
+        $o.budget.soft_threshold = 0.85
+        $o.budget.hard_threshold = 0.80
+        Validate $o "InvertedThresholds"
+    } $false
+
+    Invoke-Case "Positive: valid telemetry thresholds" {
+        $o = New-ValidObj
+        $o.budget.telemetry_available = $true
+        $o.budget.soft_threshold = 0.65
+        $o.budget.hard_threshold = 0.80
+        Validate $o "ValidTelemetryThresholds"
+    } $true
+
+    # --- Repository / Harness staleness (fail-closed) ---
+    Invoke-Case "Negative: HEAD mismatch against live repository" {
+        $o = New-ValidObj
+        $o.repository.head_sha = $HEX40_ALT
+        Test-AgainstCurrentRepository -Json $o -SourceLabel "HeadMismatch"
+    } $false
+
+    Invoke-Case "Negative: Harness task id mismatch against live repository" {
+        $o = New-ValidObj
+        $o.repository.head_sha = (git rev-parse HEAD).Trim()
+        $o.authority.harness_task_id = "STALE-NONEXISTENT-TASK-ID"
+        Test-AgainstCurrentRepository -Json $o -SourceLabel "StaleTaskId"
+    } $false
+
+    Invoke-Case "Negative: Harness file missing (fail-closed, synthetic path only)" {
+        $o = New-ValidObj
+        Test-AgainstCurrentRepository -Json $o -SourceLabel "HarnessMissing" -HarnessPath ".harness/__selftest_missing__.yaml"
+    } $false
+
+    $tmpHarness = [System.IO.Path]::GetTempFileName()
+    try {
+        Set-Content -Path $tmpHarness -Value "this is not valid harness yaml content at all" -NoNewline
+        Invoke-Case "Negative: Harness file malformed / task id unparseable (fail-closed, temp file only)" {
+            $o = New-ValidObj
+            Test-AgainstCurrentRepository -Json $o -SourceLabel "HarnessMalformed" -HarnessPath $tmpHarness
+        } $false
+    } finally {
+        Remove-Item -Path $tmpHarness -Force -ErrorAction SilentlyContinue
+    }
+
+    # --- Get-HarnessTaskId pure-helper unit tests (synthetic content; real Harness file never touched) ---
+    Invoke-Case "Get-HarnessTaskId: valid synthetic content extracts id" {
+        $id = Get-HarnessTaskId "task:`n  id: SYNTHETIC-TASK-42`n  title: `"x`"`n"
+        if ($id -ne "SYNTHETIC-TASK-42") { @("expected SYNTHETIC-TASK-42, got '$id'") } else { @() }
+    } $true
+
+    Invoke-Case "Get-HarnessTaskId: malformed synthetic content returns null" {
+        $id = Get-HarnessTaskId "this file has no id field at all"
+        if ($null -ne $id) { @("expected null, got '$id'") } else { @() }
+    } $true
+
+    Write-Host ""
+    if ($failed -eq 0) {
+        Write-Host "[SelfTest] All $passed qualification checks passed successfully." -ForegroundColor Green
+    } else {
+        Write-Host "[SelfTest] $passed passed, $failed FAILED: $($failedNames -join '; ')" -ForegroundColor Red
+    }
+    Write-Host ""
+
+    if ($failed -gt 0) { exit 1 }
     if ([string]::IsNullOrWhiteSpace($Checkpoint)) {
         exit 0
     }
@@ -417,19 +622,17 @@ if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
 
     Write-Host "[Validator] Inspecting checkpoint: '$Checkpoint'..." -ForegroundColor Cyan
 
-    try {
-        $rawContent = Get-Content $Checkpoint -Raw
-        $json = $rawContent | ConvertFrom-Json
-    } catch {
-        Write-Error "Invalid JSON in checkpoint file '$Checkpoint': $_"
-        exit 1
-    }
-
-    $errors = Validate-CheckpointObject $json (Split-Path $Checkpoint -Leaf)
+    $rawContent = Get-Content $Checkpoint -Raw
+    $errors = Validate-Checkpoint -RawJson $rawContent -SchemaText $SchemaText -SourceLabel (Split-Path $Checkpoint -Leaf)
 
     if ($AgainstCurrentRepo) {
-        $repoErrors = Test-AgainstCurrentRepository $json (Split-Path $Checkpoint -Leaf)
-        $errors.AddRange($repoErrors)
+        try {
+            $json = $rawContent | ConvertFrom-Json -ErrorAction Stop
+            $repoErrors = Test-AgainstCurrentRepository -Json $json -SourceLabel (Split-Path $Checkpoint -Leaf)
+            foreach ($e in @($repoErrors)) { $errors.Add($e) }
+        } catch {
+            $errors.Add("Cannot run -AgainstCurrentRepo checks: checkpoint JSON is invalid ($($_.Exception.Message))")
+        }
     }
 
     if ($errors.Count -gt 0) {
@@ -440,7 +643,7 @@ if (-not [string]::IsNullOrWhiteSpace($Checkpoint)) {
         exit 1
     }
 
-    Write-Host "`n[OK] Checkpoint '$Checkpoint' is structurally valid." -ForegroundColor Green
+    Write-Host "`n[OK] Checkpoint '$Checkpoint' is structurally valid (schema-compliant) and passes semantic invariants." -ForegroundColor Green
     if ($AgainstCurrentRepo) {
         Write-Host "[OK] Checkpoint aligns with current repository HEAD and authority snapshot." -ForegroundColor Green
     }

@@ -138,6 +138,16 @@ Compressing constraints into approximate or weaker prose alters repository seman
 
 Checkpoints adhere strictly to [`.harness/context-checkpoint.schema.json`](../../.harness/context-checkpoint.schema.json).
 
+### Responsibility Split
+
+Two layers enforce the checkpoint contract, and each owns a distinct, non-overlapping half of it so there is exactly one place that answers each question -- never two silently divergent structural contracts:
+
+| Layer | Owns | Mechanism |
+|---|---|---|
+| `.harness/context-checkpoint.schema.json` | **Structural contract**: required/optional fields, `additionalProperties: false` (top-level and nested), enums, `const`, full 40-hex SHA patterns, array item shape, numeric bounds (exclusive `(0,1)` for budget thresholds). | PowerShell 7's built-in `Test-Json -Schema`, proven against this schema's Draft 2020-12 keyword subset with negative tests (`required`, `additionalProperties`, `pattern`, `const`, `enum`, `minItems`, `exclusiveMinimum`/`exclusiveMaximum` all confirmed enforced; the `format` keyword is confirmed **not** enforced -- see below). No external dependency. |
+| `scripts/context_checkpoint_check.ps1` (semantic layer) | **Cross-field, referential, and repository invariants** that JSON Schema cannot express on a single property: `checkpoint.created_at` RFC 3339 format (supplements the schema's unenforced `format` keyword, checked against the raw JSON text to avoid `ConvertFrom-Json`'s silent ISO-string-to-`[datetime]` coercion), the mandatory authority anchor set (`AGENTS.md`, `CONSTRAINTS.md`, `.harness/current.task.yaml` must all be present, no duplicate paths), checkpoint-global ID uniqueness across every typed category, `fallback.authorization_decision_id` referential integrity against `owner_decisions`, `budget` telemetry-mode coherence (`telemetry_available` false &#8596; both thresholds null, true &#8596; both present and `soft < hard`), and verification `status`/`exit_code` coherence. | Deterministic PowerShell, dependency-free. |
+| `-AgainstCurrentRepo` | **Live staleness**: `repository.head_sha` vs `git rev-parse HEAD`, `authority.harness_task_id` vs the live `.harness/current.task.yaml`, and authority blob hashes vs live `git hash-object`. Fails closed: a missing, unreadable, or unparseable Harness file is a hard failure, never a silent skip. | Deterministic PowerShell, dependency-free. |
+
 ### Deterministic Validation (`scripts/context_checkpoint_check.ps1`)
 The validator script validates checkpoint structure and detects repository staleness:
 
