@@ -1,71 +1,58 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-07
-  title: "language: close or bound numeric/text/collection/closure/generic/trait/pattern abstractions"
-  type: type_and_abstraction_closure_contract_qualification_and_bounded_implementation
-  mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-06
+  id: AGENT-INFRA-CONTEXT-1849
+  title: "agent infrastructure: context budgeting and Semantic checkpoint compression"
+  type: governance_maintenance_transition
+  mode: active_temporary_governance_envelope
+  supersedes: AGENT-INFRA-03
   authorized_by: >-
-    Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
-    umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-06 closed through PR #1597 at merge commit
-    92be6c0412140a3547cdd9627e0f9a8971965855, after an eleven-pass repair cycle
-    documented in issue #1598 (Decision Log DL-009 through DL-023); only
-    SSF-07 is now active.
+    Repository owner explicit authorization in GitHub issue #1849. Temporary
+    governance-maintenance envelope to authorize implementation of the
+    context-economy protocol, checkpoint schema, validator script, and
+    workflow/verification integration; SSF-07 development envelope will be
+    restored prior to merge.
 
 intent:
   summary: >-
-    Read SSF-00...06 outputs and build a gap table only for abstractions
-    already selected by the frozen Stable Foundation target; separate
-    contract gaps from implementation bugs. Freeze numeric overflow/
-    conversion policy, UTF-8 text semantics, collection equality/ordering/
-    mutability, first-wave closure capture semantics, generic/trait
-    monomorphisation and coherence, and pattern alignment across the
-    parser/typechecker/exhaustiveness/lowering/ownership/diagnostics
-    pipeline, each before implementing it. Add positive end-to-end tests and
-    deterministic negative cases for every included abstraction; give every
-    deferred form an explicit non-goal and a deterministic rejection
-    diagnostic instead of leaving it silently unsupported.
+    Implement a deterministic, auditable context-economy protocol for Semantic
+    coding agents. Establish four context classes (PINNED, ACTIVE, COMPRESSED,
+    EVICTABLE), machine-readable JSON schema, dependency-free PowerShell validator
+    with self-test and staleness detection, and workflow/verification documentation
+    without modifying compiler, runtime, language, or Semantic domain skills.
 
 scope:
   allowed_paths:
     - .harness/current.task.yaml
-    - README.md
-    - CHANGELOG.md
-    - docs/LANGUAGE.md
-    - docs/examples_index.md
-    - docs/getting_started.md
-    - docs/spec/**
-    - docs/status/feature_maturity_matrix.md
-    - docs/roadmap/public_maturity_snapshot.md
-    - docs/roadmap/public_status_model.md
-    - docs/roadmap/v1_readiness.md
-    - docs/roadmap/stable_foundation/**
-    - examples/canonical/**
-    - examples/qualification/**
-    - tests/**
-    - crates/sm-format/**
-    - crates/sm-front/**
-    - crates/sm-sema/**
-    - crates/sm-ir/**
-    - crates/sm-emit/**
-    - crates/sm-verify/**
-    - crates/sm-vm/**
-    - crates/smc-cli/**
+    - .harness/context-checkpoint.schema.json
+    - docs/agents/CONTEXT.md
+    - docs/agents/WORKFLOW.md
+    - docs/agents/VERIFICATION.md
+    - AGENTS.md
+    - scripts/context_checkpoint_check.ps1
+    - .gitignore
 
   forbidden_paths:
-    - .github/**
+    - CONSTRAINTS.md
+    - .agents/skills/**
+    - docs/spec/**
+    - .github/workflows/**
+    - .github/PULL_REQUEST_TEMPLATE/**
+    - .github/copilot-instructions.md
+    - .github/instructions/**
+    - Cargo.toml
+    - Cargo.lock
+    - crates/**
     - apps/**
-    - experiments/**
     - src/**
+    - tests/**
     - third_party/**
     - ton618_legacy/**
 
 authorization:
-  rust_implementation: true
-  language_implementation: true
+  rust_implementation: false
+  language_implementation: false
   documentation_addition: true
   documentation_correction: true
-  test_addition: true
+  test_addition: false
   workflow_changes: false
   dependency_changes: false
   github_issue_lifecycle: true
@@ -74,31 +61,13 @@ authorization:
   stable_promotion: false
 
 constraints:
-  one_active_ssf_phase: true
-  active_phase: SSF-07
-  issue: 1578
-  umbrella_issue: 1569
+  issue: 1849
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
-  current_main_is_not_stable: true
-  gap_table_scoped_to_already_selected_abstractions_only: true
-  contract_gaps_separated_from_implementation_bugs: true
-  no_new_abstraction_added_merely_because_convenient: true
-  numeric_overflow_and_conversion_policy_frozen_before_implementation: true
-  text_utf8_semantics_frozen_before_implementation: true
-  collections_equality_ordering_mutability_iteration_frozen_before_implementation: true
-  closures_first_wave_capture_and_invocation_semantics_frozen_before_implementation: true
-  generics_traits_deterministic_monomorphisation_and_coherence_required: true
-  patterns_aligned_across_parser_typechecker_exhaustiveness_lowering_ownership_diagnostics: true
-  positive_and_deterministic_negative_tests_required_per_included_abstraction: true
-  deferred_forms_have_explicit_non_goals_and_deterministic_rejection: true
-  no_global_refactor_unless_invariant_cannot_be_preserved_otherwise: true
-  no_stable_abstraction_depends_on_unstable_internal_crate_apis: true
-  no_async_await: true
-  no_broad_dynamic_dispatch_or_reflection: true
-  no_macro_system: true
-  no_gc_object_runtime: true
-  no_systems_language_claims_beyond_evidence: true
-  no_stable_release_claim: true
-  no_historical_document_rewrite: true
+  no_production_code_change: true
+  no_dependency_change: true
+  no_ci_workflow_change: true
+  no_semantic_skills_change: true
+  no_autonomous_fallback: true
+  restore_ssf07_before_merge: true
