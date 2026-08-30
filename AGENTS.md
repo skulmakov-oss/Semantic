@@ -1,70 +1,87 @@
 # AGENTS.md
 
-Use the `semantic` skill for work on Semantic Language, SemCode, verifier admission, VM execution, Quad Logic, runtime ownership, quotas, PROMETHEUS boundary crates, docs/spec, roadmap status, tests, and PR planning.
+Status: canonical agent bootstrap and routing authority
+Repository: `skulmakov-oss/Semantic`
 
-Repository discipline:
+Welcome to Semantic. This file is the primary entry point and routing table for AI agents and human contributors working on this codebase.
 
-- one logical change per PR;
-- tests where behavior changes;
-- docs/spec sync where public contract changes;
-- no silent release claim widening;
-- landed on main does not automatically mean stable or promised.
+---
 
-Do not bypass verifier-first admission.
-Do not introduce nondeterminism into Semantic core.
-Do not add direct external effects outside PROMETHEUS capability boundaries.
+## 1. Quick Router & Authority Hierarchy
 
-## Codebase Memory MCP
+Before reading code or making modifications, every agent must consult these authorities in priority order:
 
-**MANDATORY: use Codebase Memory MCP graph tools FIRST — before reading files or making code changes.**
+1. **Hard Invariants**: [`CONSTRAINTS.md`](CONSTRAINTS.md) — Non-negotiable architectural, semantic, and verification invariants.
+2. **Task Envelope**: [`.harness/current.task.yaml`](.harness/current.task.yaml) — Active task scope, allowed/forbidden paths, authorizations, and task constraints.
+3. **Execution Workflow**: [`docs/agents/WORKFLOW.md`](docs/agents/WORKFLOW.md) — 5-phase lifecycle, toolstack instructions, and agent methodology.
+4. **Verification Catalog**: [`docs/agents/VERIFICATION.md`](docs/agents/VERIFICATION.md) — Exact verification commands, Admission Guard modes, and CI parity gates.
+5. **Contract Truth**: [`docs/spec/*`](docs/spec/) — Public language, format, verifier, and runtime contracts.
+6. **Implementation Era Authority**: [`docs/architecture/bootstrap_transition.md`](docs/architecture/bootstrap_transition.md) — Canonical era sequencing and owner boundaries.
 
-This rule applies to every request involving this codebase.
+---
 
-Always call `list_projects` first when you do not already know the project name, then use the `display_name` or exact `name` returned by that tool.
+## 2. Mandatory Agent Stack
 
-```json
-// Step 0 — discover project names
-mcp_codebase-memo_list_projects()
+### A. Codebase Memory MCP (Code Discovery & Understanding)
+**MANDATORY: Use Codebase Memory MCP graph tools FIRST — before reading raw files or making code changes.**
 
-// Step 1 — use the project identifier returned above
-mcp_codebase-memo_get_architecture({ "project": "<display_name>" })
-```
+- **Step 0 — Discover project**:
+  ```json
+  list_projects()
+  ```
+- **Step 1 — Understand architecture**:
+  ```json
+  get_architecture({ "project": "<display_name>" })
+  ```
+- **Step 2 — Graph query and symbol search**:
+  - `search_graph(name_pattern, label, file_pattern)` — Locate functions, types, routes, modules.
+  - `trace_call_path(function_name, direction, depth)` — Trace caller and callee chains.
+  - `get_code_snippet(qualified_name)` — Retrieve specific symbol implementation.
+  - `query_graph(query)` — Run Cypher-like relationship queries.
+  - `detect_changes(project)` — Map git diff to affected symbols and risk.
 
-### Workflow
+### B. mcp-local-rag (Documentation, Research & History)
+**MANDATORY: Use mcp-local-rag for documentation lookup, historical context, specifications, roadmap reports, and external reference material.**
 
-1. Call `list_projects` to discover the correct project name.
-2. Call `get_architecture(project)` to understand the codebase structure.
-3. Use `search_graph` to find relevant symbols, `trace_call_path` for call chains.
-4. Use `get_code_snippet` to read specific function implementations.
-5. Only use `read_file` when you need exact raw content to edit a specific line.
+- `query_documents(query)` — Semantic search across indexed repository docs, architecture reports, and specs.
+- `status()` — Inspect index and memory status.
 
-### Available Tools (14 MCP tools)
+### C. obra/superpowers (Primary Execution Methodology)
+Follow Superpowers discipline for structured execution:
+- `using-superpowers` — Skill discovery and invocation rule before any response or action.
+- `brainstorming` — Explore intent, requirements, and design before implementation.
+- `writing-plans` / `executing-plans` — Plan-driven execution with review checkpoints.
+- `test-driven-development` — Write tests before implementation code.
+- `systematic-debugging` — Rigorous root-cause analysis before fixes.
+- `verification-before-completion` — Confirm evidence before asserting success.
 
-**Indexing:**
-- `index_repository(repo_path)` — Index a repository into the knowledge graph
-- `list_projects` — List all indexed projects with node/edge counts
-- `delete_project(project)` — Remove a project and all its graph data
-- `index_status(project)` — Check indexing status
+### D. Core Agent Skills
+- `constraint-driven-development` — Validate every proposed change against `CONSTRAINTS.md` and `.harness/current.task.yaml` prior to touching code or docs.
+- `source-driven-development` — Ground all statements, designs, and refactors directly in existing source code, tests, and specs.
+- `doubt-driven-development` — Systematically doubt assumptions, probe edge cases, test failure modes, and demand fresh proof.
+- `semantic` — Domain-specific rules for Semantic crates, SemCode, verifier, VM, and PROMETHEUS boundaries.
 
-**Querying:**
-- `search_graph(name_pattern, name_scope, label, file_pattern, exclude_file_pattern)` — Structured search by label, name/qualified_name, include/exclude file globs
-- `trace_call_path(function_name, direction, depth)` — BFS call chain traversal
-- `detect_changes(project)` — Map git diff to affected symbols + risk
-- `query_graph(query)` — Execute Cypher-like graph queries (read-only)
-- `get_graph_schema(project)` — Node/edge counts, relationship patterns
-- `get_code_snippet(qualified_name)` — Read source code for a function
-- `get_architecture(project)` — Codebase overview: languages, packages, routes, hotspots
-- `search_code(pattern, project)` — Grep-like text search within indexed files
-- `manage_adr(action)` — CRUD for Architecture Decision Records
-- `ingest_traces(traces)` — Ingest runtime traces to validate HTTP edges
+### E. Conditional Agent Skills
+- `api-and-interface-design` — For designing public APIs, ABI types, and crate interfaces.
+- `security-and-hardening` — For boundary validation, sanitization, quota enforcement, and capability checks.
+- `code-review-and-quality` — For pre-PR review, clippy validation, and diff hygiene.
 
-## RuFlo / Codex MCP operating rules
+---
 
-- RuFlo is an orchestration assistant, not the architectural authority.
-- Inspect repository state before changing files.
-- Prefer small, auditable patches.
-- Do not rewrite Semantic core invariants without explicit instruction.
-- Do not add dependencies without justification.
-- Preserve verifier-first design, determinism, and evidence boundaries.
-- After each change, run the smallest relevant check first.
-- Do not push or commit unless explicitly instructed.
+## 3. Tooling & Orchestration Governance
+
+- **Do Not Use RuFlo**: RuFlo is retired in this repository.
+- **Ponytail Is Deferred/Experimental**: Ponytail must remain disabled by default.
+- **Harness Scope Enforcement**: All changes must stay within `.harness/current.task.yaml` `allowed_paths`. Run `pwsh -File scripts/harness-check.ps1` before and after changes.
+
+---
+
+## 4. Non-Negotiable Discipline
+
+- **One Logical Change per PR**: Keep changes narrowly scoped to the assigned task.
+- **Verifier-First Admission**: Never bypass `sm-verify`; never execute unchecked SemCode on public routes.
+- **Total Determinism**: Preserve Quad Logic (`N`/`F`/`T`/`S`), deterministic VM execution, and deterministic diagnostics.
+- **Capability Boundaries**: Never add direct filesystem, network, or OS effects inside Semantic core.
+- **Tests for Behavior Changes**: Add positive admission and negative rejection tests whenever behavior changes.
+- **Landed on Main != Stable**: Code on `main` is not automatically stable or release-promised. Never widen release claims silently.
+- **No Completion Claim Without Fresh Evidence**: Always run exact verification commands and report exit codes and outputs.
