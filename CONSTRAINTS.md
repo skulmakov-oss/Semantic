@@ -43,8 +43,8 @@ source
   -> frontend (sm-front)
   -> semantic analysis (sm-sema)
   -> IR and lowering (sm-ir)
-  -> emission (sm-emit)
-  -> SemCode binary format
+  -> emission (sm-emit over sm-format)
+  -> SemCode binary format (sm-format)
   -> verifier admission (sm-verify)
   -> deterministic execution (sm-vm)
   -> PROMETHEUS capability and effect boundary
@@ -52,6 +52,7 @@ source
 - **NO Verifier Bypass**: Every public execution path must run through `sm-verify`.
 - **NO Unchecked SemCode Execution**: No runtime route may execute unverified SemCode bytecode.
 - **Verifier Is an Admission Gate**: `sm-verify` checks structural, layout, quota, and bytecode constraints. It does not execute runtime policy, does not replace the VM, and does not parse source.
+- **VM Consumes Verified SemCode**: `sm-vm` executes verifier-admitted SemCode deterministically and rejects malformed bytecode distinctly from runtime faults.
 
 ### B. Determinism & Total Representation
 - **NO Nondeterminism in Core**: Given identical input, configuration, capability context, and execution budget, compilation and execution must produce byte-for-byte and trace-for-trace deterministic outcomes.
@@ -65,7 +66,9 @@ source
 - **Distinction of Roles**: `bool` decides control flow; `quad` represents four-state reasoning truth. Conversions between `bool` and `quad` must be explicit, documented, and tested.
 
 ### C. Architectural Boundaries & Ownership
-- **Semantic Core (`sm-front`, `sm-sema`, `sm-ir`, `sm-emit`, `sm-verify`, `sm-runtime-core`, `sm-vm`, `smc-cli`)**: Owns language syntax, type checking, IR, SemCode format, verifier admission, VM execution, and canonical CLI.
+- **Frontend & Analysis**: `sm-front` owns parsing, AST, and syntax; `sm-sema` owns type checking and compile-time diagnostics.
+- **IR & Format**: `sm-ir` owns Intermediate Representation and lowering; `sm-format` owns canonical SemCode binary format and decoding contracts; `sm-emit` owns producer-facing emission over `sm-format`.
+- **Verification & Execution**: `sm-verify` owns admission checks; `sm-runtime-core` owns shared runtime vocabulary and quotas; `sm-vm` owns deterministic verified execution; `smc-cli` owns canonical CLI entrypoints.
 - **PROMETHEUS Boundary (`prom-abi`, `prom-cap`, `prom-gates`, `prom-runtime`, `prom-state`, `prom-rules`, `prom-audit`)**: Owns host ABI, capability checks, gate descriptors, runtime sessions, state transitions, deterministic rule agendas, and audit/replay logging.
 - **Semantic UI (`prom-ui*`, `prom-ui-runtime`, `prom-ui-backend-native`)**: Owns UI model vocabulary, platform-neutral UI orchestration, and native backend facades. UI is an admitted presentation surface; UI is never compiler, verifier, VM, capability policy authority, or audit authority.
 - **Developer / Operator Tooling (Workbench / Studio)**: Tooling surfaces over admitted contracts; never architectural owners of compiler, verifier, VM, or language semantics.
@@ -111,5 +114,5 @@ Every change in the repository must be classified by its architectural risk leve
 |---|---|---|---|
 | **R0** | Trivial / Informational | Comments, typo fixes, non-normative documentation | Formatting check, git diff check |
 | **R1** | Private / Isolated | Internal crate refactoring, private module bugfixes | PR-ready check (`scripts/admission_guard.ps1 -PRReady`), unit tests |
-| **R2** | Boundary / Contract | Parser, public API signatures, type rules, IR, serialization format, cross-crate contracts | Full CI parity gate (`-CIParity`), public API contract tests (`public_api_contracts`), golden test fixtures |
+| **R2** | Boundary / Contract | Parser, public API signatures, type rules, IR, serialization format, cross-crate contracts | CI parity gate (`-CIParity`), public API contract tests (`public_api_contracts`), golden test fixtures |
 | **R3** | Critical / Systemic | Verifier admission, SemCode binary format, VM execution, capability gates, PROMETHEUS runtime, determinism, cryptographic/security features, release compatibility | Fresh-context adversarial doubt review, full preflight check (`-FullPreflight`), comprehensive regression suite, release bundle verification |

@@ -10,6 +10,7 @@ This document defines the verification commands, testing tiers, Admission Guard 
 ## 1. Verification Doctrine
 
 - **Evidence Before Assertions**: Never assert that a fix, feature, or document is complete without running fresh verification commands and providing exact exit codes and output logs.
+- **Risk-Based Verification**: Verification effort must scale with the change's risk level (R0 through R3). Informational (R0) documentation edits do not require running heavy full-workspace regression runs; fast checks, formatting, and git diff/harness checks suffice.
 - **Never Weaken Tests**: It is strictly forbidden to delete, weaken, disable, or comment out tests or assertions to achieve a passing status.
 - **Fail-Closed Verification**: If a test or check fails unexpectedly, stop and investigate using systematic debugging; never apply workarounds or silent shims.
 - **Windows Command-Line Safety**: On Windows systems, `cargo fmt --all --check` can exceed the `CreateProcess` command-line length limit. Always use `pwsh -File scripts/workspace_fmt_check.ps1` or `admission_guard.ps1` locally.
@@ -18,7 +19,7 @@ This document defines the verification commands, testing tiers, Admission Guard 
 
 ## 2. Local Admission Guard (`scripts/admission_guard.ps1`)
 
-The repository provides [`scripts/admission_guard.ps1`](../../scripts/admission_guard.ps1) as the canonical local pre-admission gate. It provides several operational modes:
+The repository provides [`scripts/admission_guard.ps1`](../../scripts/admission_guard.ps1) as the canonical local pre-admission gate with multiple operational modes:
 
 ### A. Quick Gate (`-Quick`)
 Fast compilation and formatting validation for iterative development.
@@ -32,7 +33,7 @@ pwsh -File scripts/admission_guard.ps1 -Quick
 ---
 
 ### B. PR-Ready Gate (`-PRReady`)
-Standard pre-PR submission validation gate.
+Standard pre-PR submission validation gate for internal and feature changes.
 ```powershell
 pwsh -File scripts/admission_guard.ps1 -PRReady
 ```
@@ -46,7 +47,7 @@ pwsh -File scripts/admission_guard.ps1 -PRReady
 ---
 
 ### C. CI Parity Gate (`-CIParity`)
-Full local mirror of the GitHub Actions CI pipeline (`.github/workflows/ci.yml`).
+Replicates the primary checks of the GitHub Actions CI pipeline (`.github/workflows/ci.yml`).
 ```powershell
 pwsh -File scripts/admission_guard.ps1 -CIParity
 ```
@@ -71,6 +72,12 @@ pwsh -File scripts/admission_guard.ps1 -CIParity
    - `cargo test --all-targets --quiet`
 7. **No-Std Compilation**:
    - `cargo check --no-default-features --quiet`
+
+#### Known Coverage Gaps vs GitHub Actions CI
+While `-CIParity` mirrors the primary test jobs, it has the following specific differences from `.github/workflows/ci.yml`:
+1. **Doctests**: `-CIParity` does not run `cargo test --workspace --doc --quiet` (run in CI job `test-std`).
+2. **7hell Fast Gate**: `-CIParity` does not run `.\tools\7hell\run_ci.ps1` (run in CI job `pcc-qualification-7hell`).
+3. **SARIF / Upload Steps**: `-CIParity` does not run GitHub-specific report upload actions or multi-OS matrix runners.
 
 ---
 
@@ -115,11 +122,15 @@ The repository CI workflow (`.github/workflows/ci.yml`) executes the following a
 
 ## 4. Specialized Verification Scripts
 
-### Harness Scope Check
-Verifies that all modified or staged files adhere to the allowed and forbidden path rules defined in `.harness/current.task.yaml`:
-```powershell
-pwsh -File scripts/harness-check.ps1
-```
+### Harness Scope Checks
+- **Pre-Commit Working Tree Check**: Evaluates uncommitted/staged working-tree changes against `.harness/current.task.yaml`:
+  ```powershell
+  pwsh -File scripts/harness-check.ps1
+  ```
+- **Post-Commit PR Scope Check**: Evaluates all committed files against the base branch:
+  ```powershell
+  git diff --name-only origin/main...HEAD
+  ```
 
 ### Workspace Format Check (Windows Safe)
 Runs per-package `cargo fmt --check` across all workspace members, avoiding Windows command-line truncation:
@@ -139,15 +150,27 @@ pwsh -File scripts/workspace_fmt_check.ps1
 
 ---
 
-## 5. Verification Checklist for Agents
+## 5. Verification Checklist by Risk Tier
 
-Before claiming any task complete, agents must execute and record results for:
+### Tier R0 (Informational / Docs)
+1. [ ] Formatting: `pwsh -File scripts/workspace_fmt_check.ps1`
+2. [ ] Harness (Pre-Commit): `pwsh -File scripts/harness-check.ps1`
+3. [ ] Git Diff Hygiene: `git diff --check origin/main`
+4. [ ] Committed Scope: `git diff --name-only origin/main...HEAD`
 
-1. [ ] **Harness Verification**: `pwsh -File scripts/harness-check.ps1` (zero forbidden paths; zero unallowed paths).
-2. [ ] **Formatting**: `pwsh -File scripts/workspace_fmt_check.ps1` (zero format diffs).
-3. [ ] **Compilation**: `cargo check --workspace --all-targets` (zero compile errors).
-4. [ ] **Clippy**: `cargo clippy --workspace --all-targets -- -D warnings` (zero warnings).
-5. [ ] **Legacy & Boundary Guards**: `cargo test --test legacy_guards --quiet` (zero boundary violations).
-6. [ ] **Public API Guard**: `cargo test --test public_api_contracts --quiet` (zero unauthorized API changes).
-7. [ ] **Targeted Tests**: All tests relevant to the changed component pass cleanly.
-8. [ ] **Git Diff Hygiene**: `git diff --check` (no whitespace anomalies or conflict markers).
+### Tier R1 (Private / Isolated)
+1. [ ] All R0 checks
+2. [ ] PR-Ready Gate: `pwsh -File scripts/admission_guard.ps1 -PRReady`
+3. [ ] Component Unit Tests: `cargo test -p <crate> --quiet`
+
+### Tier R2 (Boundary / Contract)
+1. [ ] All R1 checks
+2. [ ] CI Parity Gate: `pwsh -File scripts/admission_guard.ps1 -CIParity`
+3. [ ] Boundary Guards: `cargo test --test legacy_guards --test public_api_contracts --quiet`
+4. [ ] Golden / Compatibility Fixtures: `cargo test --test golden_semcode --quiet`
+
+### Tier R3 (Critical / Systemic)
+1. [ ] All R2 checks
+2. [ ] Full Preflight: `pwsh -File scripts/admission_guard.ps1 -FullPreflight`
+3. [ ] 7hell Qualification: `pwsh -File tools/7hell/run_ci.ps1`
+4. [ ] Fresh-context adversarial doubt review
