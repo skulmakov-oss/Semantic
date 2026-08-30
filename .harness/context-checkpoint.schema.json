@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SemanticContextCheckpoint",
+  "description": "Schema for machine-readable, auditable Semantic context checkpoints",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "checkpoint",
+    "task",
+    "repository",
+    "authority",
+    "facts",
+    "owner_decisions",
+    "review_findings",
+    "hypotheses",
+    "unresolved_questions",
+    "blockers",
+    "verification",
+    "completed",
+    "next_actions",
+    "fallback",
+    "budget"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Version of the context checkpoint schema"
+    },
+    "checkpoint": {
+      "type": "object",
+      "required": ["id", "created_at", "supersedes"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^chk-[a-zA-Z0-9_-]+$",
+          "description": "Unique stable identifier for this checkpoint"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 creation timestamp"
+        },
+        "supersedes": {
+          "type": ["string", "null"],
+          "description": "ID of previous checkpoint superseded by this snapshot, or null"
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": ["issue", "pr", "branch", "phase"],
+      "additionalProperties": false,
+      "properties": {
+        "issue": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Tracked GitHub issue number"
+        },
+        "pr": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "Tracked pull request number, or null"
+        },
+        "branch": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Active git branch name"
+        },
+        "phase": {
+          "type": "string",
+          "enum": [
+            "UNDERSTAND",
+            "AUTHORIZE",
+            "IMPLEMENT",
+            "VERIFY",
+            "REVIEW_CONVERGENCE",
+            "MERGE_HANDOFF",
+            "COMPLETED"
+          ],
+          "description": "Active 5-phase lifecycle stage"
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "required": ["base_sha", "head_sha"],
+      "additionalProperties": false,
+      "properties": {
+        "base_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40}$",
+          "description": "Full 40-hex base commit object ID from origin/main (this repository uses the SHA-1 object format; short/abbreviated SHAs are rejected)"
+        },
+        "head_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{40}$",
+          "description": "Full 40-hex current repository HEAD commit object ID"
+        }
+      }
+    },
+    "authority": {
+      "type": "object",
+      "required": ["harness_task_id", "references"],
+      "additionalProperties": false,
+      "properties": {
+        "harness_task_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Active task ID per .harness/current.task.yaml"
+        },
+        "references": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["path", "blob_sha"],
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Repository path to authority document"
+              },
+              "blob_sha": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F]{40}$",
+                "description": "Full 40-hex git blob object ID of the authority document"
+              }
+            }
+          },
+          "description": "Snapshot hashes of governing authority files for staleness detection. Structural floor only: the semantic validator (context_checkpoint_check.ps1) additionally requires the mandatory core anchor set (AGENTS.md, CONSTRAINTS.md, .harness/current.task.yaml) and rejects duplicate paths -- invariants that are cross-item / referential and therefore out of JSON Schema's reach by design."
+        }
+      }
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "statement", "provenance"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "const": "PROVEN_FACT" },
+          "statement": { "type": "string", "minLength": 1 },
+          "provenance": { "type": "string", "minLength": 1 }
+        }
+      },
+      "description": "Verified facts with durable provenance"
+    },
+    "owner_decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "decision", "source"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "const": "OWNER_DECISION" },
+          "decision": { "type": "string", "minLength": 1 },
+          "source": { "type": "string", "minLength": 1 }
+        }
+      },
+      "description": "Explicit repository-owner directives and governance decisions"
+    },
+    "review_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "thread_id", "claim", "status", "rationale"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "const": "REVIEWER_CLAIM" },
+          "thread_id": { "type": "string", "minLength": 1 },
+          "claim": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["ACTIVE", "ADDRESSED", "ACCEPTED", "REJECTED"]
+          },
+          "rationale": { "type": ["string", "null"] }
+        }
+      },
+      "description": "Code review findings and their resolution status"
+    },
+    "hypotheses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "statement", "evidence_needed"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "const": "HYPOTHESIS" },
+          "statement": { "type": "string", "minLength": 1 },
+          "evidence_needed": { "type": "string", "minLength": 1 }
+        }
+      },
+      "description": "Active technical hypotheses under investigation"
+    },
+    "unresolved_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "question", "blocker"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "const": "UNRESOLVED_QUESTION" },
+          "question": { "type": "string", "minLength": 1 },
+          "blocker": { "type": "boolean" }
+        }
+      },
+      "description": "Open questions pending evidence or owner clarification"
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "description", "required_decision"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "category": { "type": "string", "const": "BLOCKER" },
+          "description": { "type": "string", "minLength": 1 },
+          "required_decision": { "type": "string", "minLength": 1 }
+        }
+      },
+      "description": "Active blocking conditions preventing progress"
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command", "head_sha", "exit_code", "result", "status"],
+        "additionalProperties": false,
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "head_sha": { "type": "string", "pattern": "^[0-9a-fA-F]{40}$" },
+          "exit_code": { "type": "integer" },
+          "result": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "string",
+            "enum": ["SUCCESS", "FAILED", "PENDING"]
+          }
+        }
+      },
+      "description": "Verification gate execution records and observed outcomes"
+    },
+    "completed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["step", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "step": { "type": "string", "minLength": 1 },
+          "evidence": { "type": "string", "minLength": 1 }
+        }
+      },
+      "description": "Completed task milestones with supporting evidence locators"
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["action", "target"],
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string", "minLength": 1 },
+          "target": { "type": ["string", "null"] }
+        }
+      },
+      "description": "Ordered next actionable steps"
+    },
+    "fallback": {
+      "type": "object",
+      "required": ["used", "authorization_decision_id"],
+      "additionalProperties": false,
+      "properties": {
+        "used": { "type": "boolean" },
+        "authorization_decision_id": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Referentially provable owner authorization: must equal the id of an entry in owner_decisions (category OWNER_DECISION). Required (non-null) when used is true; required null when used is false. Free-form authorization strings are not accepted -- the semantic validator resolves this reference and rejects an unknown or non-owner id."
+        }
+      },
+      "description": "Explicit, referentially provable record of whether owner-authorized fallback was used"
+    },
+    "budget": {
+      "type": "object",
+      "required": ["telemetry_available", "soft_threshold", "hard_threshold"],
+      "additionalProperties": false,
+      "properties": {
+        "telemetry_available": { "type": "boolean" },
+        "soft_threshold": { "type": ["number", "null"], "exclusiveMinimum": 0.0, "exclusiveMaximum": 1.0 },
+        "hard_threshold": { "type": ["number", "null"], "exclusiveMinimum": 0.0, "exclusiveMaximum": 1.0 }
+      },
+      "description": "Context budget mode and relative pressure thresholds. Structural floor only: telemetry_available=false must pair with null soft_threshold/hard_threshold (Event-Trigger Mode), telemetry_available=true requires both non-null with soft_threshold strictly less than hard_threshold (Telemetry Mode) -- cross-field coherence enforced by the semantic validator, not expressible as a plain per-property JSON Schema constraint here."
+    }
+  }
+}
