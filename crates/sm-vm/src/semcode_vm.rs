@@ -4806,6 +4806,66 @@ mod tests {
         );
     }
 
+    #[test]
+    fn vm_evaluates_named_call_expression_arguments_in_source_order() {
+        // FA-04-016 / #1722, real pipeline proof: `add(b = ten / zero,
+        // a = min_val % neg_one)` writes `b`'s expression first in source
+        // even though `a` is the declared first parameter. `b`'s expression
+        // traps with DivisionByZero; `a`'s expression traps with
+        // ArithmeticOverflow instead. Only one of the two instructions ever
+        // executes (the VM halts on the first trap), so which trap kind
+        // surfaces is a direct, deterministic witness of evaluation order:
+        // source order traps DivisionByZero, parameter order would trap
+        // ArithmeticOverflow.
+        let src = r#"
+            fn add(a: i32, b: i32) -> i32 {
+                return a + b;
+            }
+
+            fn main() {
+                let ten: i32 = 10;
+                let zero: i32 = 0;
+                let min_val: i32 = 0 - 2147483647 - 1;
+                let neg_one: i32 = 0 - 1;
+                let x: i32 = add(b = ten / zero, a = min_val % neg_one);
+                assert(x == 0);
+                return;
+            }
+        "#;
+        assert_traps_under_all_opt_levels(
+            src,
+            "named call-expression argument 'b' (division by zero) is written before 'a' (overflow) in source and must trap first",
+            RuntimeTrap::DivisionByZero,
+        );
+    }
+
+    #[test]
+    fn vm_evaluates_named_call_statement_arguments_in_source_order() {
+        // FA-04-016 / #1722, real pipeline proof for the independent
+        // call-statement lowering path: same distinguishing-trap construction
+        // as vm_evaluates_named_call_expression_arguments_in_source_order,
+        // but with a Unit-returning function invoked as a bare statement.
+        let src = r#"
+            fn take(a: i32, b: i32) {
+                return;
+            }
+
+            fn main() {
+                let ten: i32 = 10;
+                let zero: i32 = 0;
+                let min_val: i32 = 0 - 2147483647 - 1;
+                let neg_one: i32 = 0 - 1;
+                take(b = ten / zero, a = min_val % neg_one);
+                return;
+            }
+        "#;
+        assert_traps_under_all_opt_levels(
+            src,
+            "named call-statement argument 'b' (division by zero) is written before 'a' (overflow) in source and must trap first",
+            RuntimeTrap::DivisionByZero,
+        );
+    }
+
     #[cfg(feature = "disasm")]
     #[test]
     fn vm_runs_u32_literal_compare_path() {
