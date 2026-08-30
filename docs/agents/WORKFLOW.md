@@ -126,12 +126,13 @@ External process skills answer **how to work**. They do not own Semantic archite
 ### E. Repository-Native Semantic Skills
 Repository-native skills answer **what Semantic permits in the affected domain**.
 
-- **`semantic`** (`.agents/skills/semantic/SKILL.md`) — current broad Semantic domain router/guard for compiler, SemCode, verifier, VM, runtime, PROMETHEUS, UI, ownership, status, tests, and Semantic-specific architecture work. Until #1846 decomposes it, use this as the general Semantic domain layer whenever its task description applies.
-- **`semantic-source-authoring-guard`** (`.agents/skills/semantic-source-authoring-guard/SKILL.md`) — **mandatory whenever a task creates or modifies Semantic `.sm` source, fixtures, examples, or negative diagnostic probes.** Use it together with `semantic` if the same task also touches compiler/runtime behavior, verifier/VM behavior, architecture, or repository contracts.
+- **`semantic`** (`.agents/skills/semantic/SKILL.md`) — primary Semantic domain router and subsystem architecture dispatcher.
+- **`semantic-source-authoring-guard`** (`.agents/skills/semantic-source-authoring-guard/SKILL.md`) — **mandatory whenever a task creates or modifies Semantic `.sm` source, fixtures, examples, or negative diagnostic probes.**
+- **`semantic-verifier-runtime-guard`** (`.agents/skills/semantic-verifier-runtime-guard/SKILL.md`) — **mandatory for SemCode format, verifier admission, deterministic VM execution, runtime quotas, capabilities, and PROMETHEUS host/effect boundaries.**
+- **`semantic-contract-release-guard`** (`.agents/skills/semantic-contract-release-guard/SKILL.md`) — **mandatory for public API/ABI contracts, binary serialization formats, spec synchronization, and release/status honesty.**
+- **`semantic-ui-boundary-guard`** (`.agents/skills/semantic-ui-boundary-guard/SKILL.md`) — **mandatory for UI orchestration, presentation models, interaction semantics, trace/audit projections, and native backend facades.**
 
 Do not use repository-native skills as a replacement for Harness authorization or normative specs. Do not silently choose fixture/test behavior over a conflicting normative spec; treat `spec ↔ executable evidence` disagreement as contract drift and stop/report when it cannot be safely reconciled.
-
-Planned under #1846: shrink the broad `semantic` skill into a slim router plus specialized guards for verifier/runtime, contract/release, and UI boundaries while preserving the existing source-authoring guard.
 
 ### F. Conditional Agent Skills
 - **`api-and-interface-design`**: Required for public API, ABI, or crate interface changes.

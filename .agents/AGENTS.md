@@ -30,7 +30,7 @@ When maintaining or authoring repository skills:
 - **Explicit Scope & Non-Goals**: Define exact domain applicability, constraints, and non-goals.
 - **Domain Guard Role**: Repository skills answer *what Semantic permits in a domain*; they do not define general repository governance or override normative specifications (`docs/spec/*`).
 - **Invariant Integrity**: Never silently delete, weaken, or reinterpret repository invariants or test requirements in a skill.
-- **No Direct Modifications**: Do not modify skill files under `.agents/skills/**` unless explicitly authorized by issue scope (e.g. AGENT-INFRA-03 / #1846).
+- **No Direct Modifications**: Do not modify skill files under `.agents/skills/**` unless explicitly authorized by issue scope (e.g., dedicated governance/skill tasks with Harness authorization).
 
 ---
 

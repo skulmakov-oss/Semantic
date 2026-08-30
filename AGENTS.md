@@ -84,12 +84,13 @@ External process skills answer **how to work**; they do not own Semantic archite
 ### E. Repository-Native Semantic Skills
 Repository-native skills answer **what Semantic permits within a specific domain** and are subordinate to `AGENTS.md`, `CONSTRAINTS.md`, the active Harness envelope, and normative specs.
 
-- **`semantic`** — [`.agents/skills/semantic/SKILL.md`](.agents/skills/semantic/SKILL.md): current broad Semantic domain router/guard for compiler, SemCode, verifier, VM, runtime, PROMETHEUS, UI, ownership, status, tests, and Semantic-specific architecture work. Until #1846 decomposes this skill, use it as the general Semantic domain layer where its task description applies.
-- **`semantic-source-authoring-guard`** — [`.agents/skills/semantic-source-authoring-guard/SKILL.md`](.agents/skills/semantic-source-authoring-guard/SKILL.md): **mandatory for any task that creates or modifies Semantic `.sm` source, fixtures, examples, or negative diagnostic probes.** Use it together with `semantic` when the task also changes architecture, compiler/runtime behavior, verifier/VM behavior, or repository contracts.
+- **`semantic`** — [`.agents/skills/semantic/SKILL.md`](.agents/skills/semantic/SKILL.md): primary Semantic domain router and subsystem architecture dispatcher.
+- **`semantic-source-authoring-guard`** — [`.agents/skills/semantic-source-authoring-guard/SKILL.md`](.agents/skills/semantic-source-authoring-guard/SKILL.md): **mandatory for any task that creates or modifies Semantic `.sm` source, fixtures, examples, or negative diagnostic probes.**
+- **`semantic-verifier-runtime-guard`** — [`.agents/skills/semantic-verifier-runtime-guard/SKILL.md`](.agents/skills/semantic-verifier-runtime-guard/SKILL.md): **mandatory for SemCode format, verifier admission, deterministic VM execution, runtime quotas, capabilities, and PROMETHEUS host/effect boundaries.**
+- **`semantic-contract-release-guard`** — [`.agents/skills/semantic-contract-release-guard/SKILL.md`](.agents/skills/semantic-contract-release-guard/SKILL.md): **mandatory for public API/ABI contracts, binary serialization formats, spec synchronization, and release/status honesty.**
+- **`semantic-ui-boundary-guard`** — [`.agents/skills/semantic-ui-boundary-guard/SKILL.md`](.agents/skills/semantic-ui-boundary-guard/SKILL.md): **mandatory for UI orchestration, presentation models, interaction semantics, trace/audit projections, and native backend facades.**
 
 Do not silently resolve a conflict between a repository-native skill and higher authority. If a skill conflicts with `CONSTRAINTS.md`, the active Harness, normative `docs/spec/*`, or current verified repository evidence, stop and report the drift instead of choosing whichever source is more convenient.
-
-Planned under #1846: reduce the broad `semantic` skill into a slim router plus specialized domain guards (verifier/runtime, contract/release, and UI boundary) while preserving the existing source-authoring guard.
 
 ### F. Conditional Agent Skills
 - **`api-and-interface-design`**: Required for public API, ABI, or crate interface changes.
