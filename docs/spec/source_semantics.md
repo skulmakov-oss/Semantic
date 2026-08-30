@@ -224,8 +224,15 @@ Current named-argument call semantics:
 - named arguments are currently supported only for ordinary user-defined
   functions
 - positional arguments may appear only before the first named argument
-- after resolution, named arguments reorder to the declared parameter order
-  before ordinary argument type-checking and lowering
+- named arguments only reorder *parameter-slot assignment* to the declared
+  parameter order; they never change *evaluation order* — argument
+  expressions are still evaluated left-to-right in source (written) order per
+  Deterministic Evaluation Order above, then each evaluated value is placed
+  into the parameter slot its name (or position) resolved to, before
+  ordinary argument type-checking
+- a defaulted parameter's initializer is not source-written at the call site
+  and is evaluated after every explicitly written argument, in parameter
+  order
 - each required non-default parameter must receive exactly one argument in the
   current contract
 

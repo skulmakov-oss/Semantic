@@ -977,12 +977,68 @@ pub fn builtin_sig(name: &str) -> Option<FnSig> {
 }
 
 #[cfg(any(feature = "alloc", feature = "std"))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderedCallArgs {
+    /// Final argument expression for each declared parameter slot, in
+    /// parameter order (defaults substituted). Used for per-slot type
+    /// checking and for the final argument-register order handed to the
+    /// callee.
+    pub slots: Vec<ExprId>,
+    /// Parameter slot indices in the order their expressions must be
+    /// *evaluated*: explicitly supplied arguments in source (left-to-right)
+    /// order, followed by defaulted slots in parameter order.
+    ///
+    /// Named-argument slot assignment and source evaluation order are
+    /// separate concerns: named arguments only ever reorder `slots`, never
+    /// `eval_order`'s relative order of explicitly written argument
+    /// expressions.
+    pub eval_order: Vec<usize>,
+}
+
+#[cfg(any(feature = "alloc", feature = "std"))]
+fn validate_fn_sig_call_metadata(
+    call_name: SymbolId,
+    sig: &FnSig,
+    arena: &AstArena,
+) -> Result<(), FrontendError> {
+    if let Some(param_names) = sig.param_names.as_ref() {
+        if param_names.len() != sig.params.len() {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "function '{}' has malformed signature: {} parameter name(s) declared for {} parameter(s)",
+                    resolve_symbol_name(arena, call_name)?,
+                    param_names.len(),
+                    sig.params.len(),
+                ),
+            });
+        }
+    }
+    if let Some(param_defaults) = sig.param_defaults.as_ref() {
+        if param_defaults.len() != sig.params.len() {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "function '{}' has malformed signature: {} parameter default(s) declared for {} parameter(s)",
+                    resolve_symbol_name(arena, call_name)?,
+                    param_defaults.len(),
+                    sig.params.len(),
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(feature = "alloc", feature = "std"))]
 pub fn reorder_call_args(
     call_name: SymbolId,
     args: &[CallArg],
     sig: &FnSig,
     arena: &AstArena,
-) -> Result<Vec<ExprId>, FrontendError> {
+) -> Result<OrderedCallArgs, FrontendError> {
+    validate_fn_sig_call_metadata(call_name, sig, arena)?;
+
     let has_named = args.iter().any(|arg| arg.name.is_some());
     if !has_named {
         if args.len() > sig.params.len() {
@@ -997,10 +1053,12 @@ pub fn reorder_call_args(
             });
         }
         let mut ordered = vec![None; sig.params.len()];
+        let mut eval_order = Vec::with_capacity(args.len());
         for (idx, arg) in args.iter().enumerate() {
             ordered[idx] = Some(arg.value);
+            eval_order.push(idx);
         }
-        return finalize_ordered_call_args(call_name, ordered, sig, arena, args.len());
+        return finalize_ordered_call_args(call_name, ordered, sig, arena, args.len(), eval_order);
     }
 
     let Some(param_names) = sig.param_names.as_ref() else {
@@ -1014,6 +1072,7 @@ pub fn reorder_call_args(
     };
 
     let mut ordered = vec![None; sig.params.len()];
+    let mut eval_order = Vec::with_capacity(args.len());
     let mut positional_index = 0usize;
     let mut named_seen = false;
     for arg in args {
@@ -1040,6 +1099,7 @@ pub fn reorder_call_args(
                 });
             }
             ordered[param_index] = Some(arg.value);
+            eval_order.push(param_index);
         } else {
             if named_seen {
                 return Err(FrontendError {
@@ -1059,11 +1119,12 @@ pub fn reorder_call_args(
                 });
             }
             ordered[positional_index] = Some(arg.value);
+            eval_order.push(positional_index);
             positional_index += 1;
         }
     }
 
-    finalize_ordered_call_args(call_name, ordered, sig, arena, args.len())
+    finalize_ordered_call_args(call_name, ordered, sig, arena, args.len(), eval_order)
 }
 
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -1073,7 +1134,8 @@ fn finalize_ordered_call_args(
     sig: &FnSig,
     arena: &AstArena,
     provided_count: usize,
-) -> Result<Vec<ExprId>, FrontendError> {
+    mut eval_order: Vec<usize>,
+) -> Result<OrderedCallArgs, FrontendError> {
     let param_names = sig.param_names.as_ref();
     let param_defaults = sig.param_defaults.as_ref();
     for idx in 0..ordered.len() {
@@ -1086,6 +1148,7 @@ fn finalize_ordered_call_args(
             .flatten();
         if let Some(default_expr) = default_expr {
             ordered[idx] = Some(default_expr);
+            eval_order.push(idx);
             continue;
         }
         if let Some(param_names) = param_names {
@@ -1108,7 +1171,10 @@ fn finalize_ordered_call_args(
             ),
         });
     }
-    Ok(ordered.into_iter().flatten().collect())
+    Ok(OrderedCallArgs {
+        slots: ordered.into_iter().flatten().collect(),
+        eval_order,
+    })
 }
 
 #[cfg(any(feature = "alloc", feature = "std"))]

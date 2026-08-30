@@ -2876,7 +2876,7 @@ fn infer_expr_type(
                 // First pass: build substitution map from arguments whose
                 // expected param type is a TypeVar.
                 let mut subst: BTreeMap<SymbolId, Type> = BTreeMap::new();
-                for (i, arg) in ordered_args.iter().enumerate() {
+                for (i, arg) in ordered_args.slots.iter().enumerate() {
                     if let Type::TypeVar(tid) = &sig.params[i] {
                         if subst.contains_key(tid) {
                             // Already bound — verify consistency below.
@@ -2936,7 +2936,7 @@ fn infer_expr_type(
                     sig.params.iter().map(|p| subst_apply(p, &subst)).collect();
                 let concrete_ret = subst_apply(&sig.ret, &subst);
                 // Second pass: check every argument against its concrete type.
-                for (i, arg) in ordered_args.iter().enumerate() {
+                for (i, arg) in ordered_args.slots.iter().enumerate() {
                     let expected_ty = concrete_params[i].clone();
                     let at = infer_expr_type_with_expected(
                         *arg,
@@ -2976,7 +2976,7 @@ fn infer_expr_type(
                 }
                 return Ok(concrete_ret);
             }
-            for (i, arg) in ordered_args.iter().enumerate() {
+            for (i, arg) in ordered_args.slots.iter().enumerate() {
                 let expected_ty = sig.params[i].clone();
                 let at = infer_expr_type_with_expected(
                     *arg,
@@ -3271,6 +3271,184 @@ mod tests {
         let program = parse_program(src)?;
         let plans = derive_validation_plan_table(&program)?;
         Ok((program, plans))
+    }
+
+    // FA-02-033 / #1665: a public, externally-constructible `FnSig` whose
+    // `param_names`/`param_defaults` length disagrees with `params` must be
+    // rejected as a deterministic `FrontendError` by every consumer of the
+    // public `FnTable` API, never allowed to reach the indexing logic in
+    // `reorder_call_args`/`finalize_ordered_call_args` and panic.
+    fn well_formed_add_program() -> Program {
+        let src = r#"
+            fn callee(a: i32, b: i32) -> i32 {
+                return a + b;
+            }
+
+            fn caller() -> i32 {
+                return callee(1, 2);
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        parse_program(src).expect("well-formed program should parse")
+    }
+
+    fn callee_and_caller(program: &Program) -> (SymbolId, &Function) {
+        let callee_id = *program
+            .arena
+            .symbol_to_id
+            .get("callee")
+            .expect("callee symbol exists");
+        let caller = program
+            .functions
+            .iter()
+            .find(|f| program.arena.try_symbol_name(f.name) == Some("caller"))
+            .expect("caller function exists");
+        (callee_id, caller)
+    }
+
+    // Dedicated program for the short-`param_names` case: the caller omits
+    // an argument (no default exists for it), which drives execution into
+    // `finalize_ordered_call_args`'s missing-argument branch. That branch
+    // indexes `param_names[idx]` directly (not via `.get`), so a
+    // shorter-than-`params` `param_names` indexes out of bounds and panics
+    // pre-fix, exactly as FA-02-033 describes.
+    fn program_with_missing_argument_call() -> Program {
+        let src = r#"
+            fn callee(a: i32, b: i32) -> i32 {
+                return a + b;
+            }
+
+            fn caller() -> i32 {
+                return callee(1);
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        parse_program(src).expect("well-formed program should parse")
+    }
+
+    // Dedicated program for the long-`param_names` case: the caller names
+    // an argument `c`, an identifier with no corresponding declared
+    // parameter. Once the table is mutated so `param_names` contains an
+    // extra `c` entry beyond `params`' length, `position()` resolves `c` to
+    // an index `>= ordered.len()`, and `ordered[param_index]` indexes out
+    // of bounds and panics pre-fix, exactly as FA-02-033 describes.
+    fn program_with_named_call_referencing_extra_name() -> Program {
+        let src = r#"
+            fn callee(a: i32, b: i32) -> i32 {
+                return a + b;
+            }
+
+            fn caller() -> i32 {
+                return callee(c = 1, a = 2, b = 3);
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        parse_program(src).expect("well-formed program should parse")
+    }
+
+    #[test]
+    fn malformed_fn_sig_param_names_shorter_than_params_fails_closed() {
+        let program = program_with_missing_argument_call();
+        let mut table = build_fn_table(&program).expect("canonical table builds");
+        let (callee_id, caller) = callee_and_caller(&program);
+        let sig = table.get_mut(&callee_id).expect("callee signature exists");
+        let mut names = sig.param_names.clone().expect("callee has param names");
+        names.pop();
+        sig.param_names = Some(names);
+
+        let err = type_check_function_with_table(caller, &program.arena, &table)
+            .expect_err("short param_names must fail closed, not panic");
+        assert!(
+            err.message.contains("malformed signature"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn malformed_fn_sig_param_names_longer_than_params_fails_closed() {
+        let program = program_with_named_call_referencing_extra_name();
+        let mut table = build_fn_table(&program).expect("canonical table builds");
+        let (callee_id, caller) = callee_and_caller(&program);
+        let sig = table.get_mut(&callee_id).expect("callee signature exists");
+        let mut names = sig.param_names.clone().expect("callee has param names");
+        let extra_c = *program
+            .arena
+            .symbol_to_id
+            .get("c")
+            .expect("'c' interned from the named call argument");
+        names.push(extra_c);
+        sig.param_names = Some(names);
+
+        let err = type_check_function_with_table(caller, &program.arena, &table)
+            .expect_err("long param_names must fail closed, not panic");
+        assert!(
+            err.message.contains("malformed signature"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn malformed_fn_sig_param_defaults_shorter_than_params_fails_closed() {
+        let program = well_formed_add_program();
+        let mut table = build_fn_table(&program).expect("canonical table builds");
+        let (callee_id, caller) = callee_and_caller(&program);
+        let sig = table.get_mut(&callee_id).expect("callee signature exists");
+        let mut defaults = sig
+            .param_defaults
+            .clone()
+            .expect("callee has param defaults");
+        defaults.pop();
+        sig.param_defaults = Some(defaults);
+
+        let err = type_check_function_with_table(caller, &program.arena, &table)
+            .expect_err("short param_defaults must fail closed, not panic");
+        assert!(
+            err.message.contains("malformed signature"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn malformed_fn_sig_param_defaults_longer_than_params_fails_closed() {
+        let program = well_formed_add_program();
+        let mut table = build_fn_table(&program).expect("canonical table builds");
+        let (callee_id, caller) = callee_and_caller(&program);
+        let sig = table.get_mut(&callee_id).expect("callee signature exists");
+        let mut defaults = sig
+            .param_defaults
+            .clone()
+            .expect("callee has param defaults");
+        defaults.push(None);
+        sig.param_defaults = Some(defaults);
+
+        let err = type_check_function_with_table(caller, &program.arena, &table)
+            .expect_err("long param_defaults must fail closed, not panic");
+        assert!(
+            err.message.contains("malformed signature"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn canonical_fn_sig_continues_to_typecheck_via_public_table_api() {
+        let program = well_formed_add_program();
+        let table = build_fn_table(&program).expect("canonical table builds");
+        let (_, caller) = callee_and_caller(&program);
+        type_check_function_with_table(caller, &program.arena, &table)
+            .expect("well-formed FnSig via the public FnTable API must still typecheck");
     }
 
     #[test]

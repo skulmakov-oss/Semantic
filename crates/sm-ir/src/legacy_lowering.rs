@@ -4118,11 +4118,17 @@ fn lower_expr_with_expected(
                 });
             };
             let ordered_args = reorder_call_args(*name, args, &sig, arena)?;
-            let mut regs = Vec::new();
-            for (i, arg) in ordered_args.iter().enumerate() {
-                let expected_arg_ty = sig.params[i].clone();
+            // Evaluate argument expressions in source order (eval_order), but
+            // place each resulting register into its declared parameter slot
+            // so the call's register list stays in parameter order. Named
+            // arguments only ever reorder slot assignment, never evaluation
+            // order — see FA-04-016 / #1722.
+            let mut regs: Vec<Option<u16>> = vec![None; ordered_args.slots.len()];
+            for &slot in &ordered_args.eval_order {
+                let arg = ordered_args.slots[slot];
+                let expected_arg_ty = sig.params[slot].clone();
                 let (r, t) = lower_expr_with_expected(
-                    *arg,
+                    arg,
                     arena,
                     next,
                     out,
@@ -4140,15 +4146,16 @@ fn lower_expr_with_expected(
                         pos: 0,
                         message: format!(
                             "arg {} for '{}' has type {:?}, expected {:?}",
-                            i,
+                            slot,
                             resolve_symbol_name(arena, *name)?,
                             t,
                             expected_arg_ty
                         ),
                     });
                 }
-                regs.push(r);
+                regs[slot] = Some(r);
             }
+            let regs: Vec<u16> = regs.into_iter().flatten().collect();
             if sig.ret == Type::Unit {
                 return Err(FrontendError {
                     pos: 0,
@@ -9707,10 +9714,13 @@ fn lower_expr_stmt_with_parts(
             });
         };
         let ordered_args = reorder_call_args(*name, args, &sig, arena)?;
-        let mut regs = Vec::new();
-        for (i, arg) in ordered_args.iter().enumerate() {
+        // See the call-expression path above (FA-04-016 / #1722): evaluate in
+        // source order, assign into declared parameter slots.
+        let mut regs: Vec<Option<u16>> = vec![None; ordered_args.slots.len()];
+        for &slot in &ordered_args.eval_order {
+            let arg = ordered_args.slots[slot];
             let (r, t) = lower_expr_with_expected(
-                *arg,
+                arg,
                 arena,
                 next,
                 out,
@@ -9719,22 +9729,23 @@ fn lower_expr_stmt_with_parts(
                 fn_table,
                 record_table,
                 adt_table,
-                Some(sig.params[i].clone()),
+                Some(sig.params[slot].clone()),
                 ret_ty.clone(),
                 closure_state,
             )?;
-            if t != sig.params[i] {
+            if t != sig.params[slot] {
                 return Err(FrontendError {
                     pos: 0,
                     message: format!(
                         "arg {} for '{}' type mismatch",
-                        i,
+                        slot,
                         resolve_symbol_name(arena, *name)?
                     ),
                 });
             }
-            regs.push(r);
+            regs[slot] = Some(r);
         }
+        let regs: Vec<u16> = regs.into_iter().flatten().collect();
         let dst = if sig.ret == Type::Unit {
             None
         } else {
@@ -10507,6 +10518,81 @@ mod opt_tests {
     }
 
     #[test]
+    fn lower_named_arguments_evaluates_in_source_order_not_parameter_order() {
+        // FA-04-016 / #1722: `scale(factor = 3.0, x = 2.0)` must evaluate
+        // `factor`'s expression (3.0) before `x`'s expression (2.0) because
+        // it is written first in source, even though `x` is the declared
+        // first parameter. Named-argument slot assignment (x <- 2.0,
+        // factor <- 3.0) must not change evaluation order.
+        let src = r#"
+            fn scale(x: f64, factor: f64) -> f64 = x * factor;
+            fn main() {
+                let total: f64 = scale(factor = 3.0, x = 2.0);
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src).expect("named arguments should lower");
+        let main = &ir[1];
+        let load_order: Vec<f64> = main
+            .instrs
+            .iter()
+            .filter_map(|instr| match instr {
+                IrInstr::LoadF64 { val, .. }
+                    if (*val - 2.0).abs() < f64::EPSILON || (*val - 3.0).abs() < f64::EPSILON =>
+                {
+                    Some(*val)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            load_order,
+            vec![3.0, 2.0],
+            "expected source-order evaluation (factor=3.0 loaded before x=2.0), got {:?}",
+            load_order
+        );
+    }
+
+    #[test]
+    fn lower_named_arguments_evaluates_in_source_order_for_call_statement() {
+        // FA-04-016 / #1722: the call-statement lowering path (a bare,
+        // Unit-returning call used as a statement) owns independent
+        // lowering logic from the call-expression path and must preserve
+        // the same source-order evaluation guarantee.
+        let src = r#"
+            fn take(x: f64, factor: f64) {
+                return;
+            }
+            fn main() {
+                take(factor = 3.0, x = 2.0);
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src).expect("named arguments should lower");
+        let main = &ir[1];
+        let load_order: Vec<f64> = main
+            .instrs
+            .iter()
+            .filter_map(|instr| match instr {
+                IrInstr::LoadF64 { val, .. }
+                    if (*val - 2.0).abs() < f64::EPSILON || (*val - 3.0).abs() < f64::EPSILON =>
+                {
+                    Some(*val)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            load_order,
+            vec![3.0, 2.0],
+            "expected source-order evaluation (factor=3.0 loaded before x=2.0), got {:?}",
+            load_order
+        );
+    }
+
+    #[test]
     fn lowering_rejects_builtin_named_arguments() {
         let src = r#"
             fn main() {
@@ -10519,6 +10605,49 @@ mod opt_tests {
         assert!(err
             .message
             .contains("named arguments are not supported for builtin 'sqrt'"));
+    }
+
+    #[test]
+    fn lower_mixed_named_arguments_and_trailing_default_evaluates_in_source_order() {
+        // FA-04-016 / #1722: named-argument reordering must still preserve
+        // source-order evaluation when combined with a trailing default
+        // parameter. `combo(b = 3.0, a = 1.0)` writes `b` before `a`, and
+        // `c`'s default (a compiler-synthesized, non-source expression) is
+        // evaluated last, after every explicitly written argument.
+        let src = r#"
+            fn combo(a: f64, b: f64, c: f64 = 9.0) -> f64 = a + b + c;
+            fn main() {
+                let total: f64 = combo(b = 3.0, a = 1.0);
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src).expect("mixed named/default call should lower");
+        let main = &ir[1];
+        let load_order: Vec<f64> = main
+            .instrs
+            .iter()
+            .filter_map(|instr| match instr {
+                IrInstr::LoadF64 { val, .. }
+                    if [1.0, 3.0, 9.0]
+                        .iter()
+                        .any(|expected| (*val - expected).abs() < f64::EPSILON) =>
+                {
+                    Some(*val)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            load_order,
+            vec![3.0, 1.0, 9.0],
+            "expected source-order evaluation (b=3.0, then a=1.0, then c's default=9.0 last), got {:?}",
+            load_order
+        );
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::Call { name, args, .. } if name == "combo" && args.len() == 3)));
     }
 
     #[test]
