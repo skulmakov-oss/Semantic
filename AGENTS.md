@@ -14,13 +14,16 @@ Before reading code or proposing changes, every agent must consult these authori
 1. **Platform & Safety Constraints** — Non-negotiable environment and safety invariants.
 2. **Bootstrap & Router**: `AGENTS.md` (this file) — Canonical repository entry point and toolstack routing.
 3. **Hard Invariants**: [`CONSTRAINTS.md`](CONSTRAINTS.md) — Non-negotiable architectural, semantic, determinism, and verification laws.
-4. **Task Envelope**: [`.harness/current.task.yaml`](.harness/current.task.yaml) — Active task scope, allowed/forbidden paths, authorizations, and task constraints.
-5. **Contract Truth**: [`docs/spec/*`](docs/spec/) and [`docs/architecture/bootstrap_transition.md`](docs/architecture/bootstrap_transition.md) — Public language, format, verifier, runtime contracts, and implementation-era authority.
-6. **Execution Methodology**: [`docs/agents/WORKFLOW.md`](docs/agents/WORKFLOW.md) and [`docs/agents/VERIFICATION.md`](docs/agents/VERIFICATION.md) — 5-phase lifecycle, toolstack rules, and verification catalog.
-7. **Repository-Native Domain Skills**: [`.agents/skills/*`](.agents/skills/) — Semantic-specific implementation and authoring guards routed by task surface.
+4. **Explicit Repository-Owner Governance Authorization** — Used only to authorize a controlled governance-envelope transition when the task itself changes agent governance/Harness files that the current normal-task envelope does not permit.
+5. **Task Envelope**: [`.harness/current.task.yaml`](.harness/current.task.yaml) — Normal active task scope, allowed/forbidden paths, authorizations, and task constraints.
+6. **Contract Truth**: [`docs/spec/*`](docs/spec/) and [`docs/architecture/bootstrap_transition.md`](docs/architecture/bootstrap_transition.md) — Public language, format, verifier, runtime contracts, and implementation-era authority.
+7. **Execution Methodology**: [`docs/agents/WORKFLOW.md`](docs/agents/WORKFLOW.md) and [`docs/agents/VERIFICATION.md`](docs/agents/VERIFICATION.md) — 5-phase lifecycle, toolstack rules, and verification catalog.
+8. **Repository-Native Domain Skills**: [`.agents/skills/*`](.agents/skills/) — Semantic-specific implementation and authoring guards routed by task surface.
 
 A lower layer in this hierarchy may make rules stricter, but may never loosen or waive an upper-layer rule.
 $$\text{Effective Authority} = \text{Repository Invariants} \cap \text{Task Authority}$$
+
+For governance-maintenance work, an agent may not self-authorize by broadening the Harness. Follow the controlled transition rules in `CONSTRAINTS.md` and `docs/agents/WORKFLOW.md`.
 
 ---
 
@@ -36,7 +39,7 @@ Ground all changes in the canonical ownership boundaries of the repository:
   - **`sm-emit`**: Emission / producer-facing facade over the SemCode format.
   - **`sm-verify`**: Verifier admission gate (structure, layout, and bytecode rules).
   - **`sm-runtime-core`**: Shared runtime vocabulary, common execution types, and quotas.
-  - **`sm-vm`**: Deterministic execution of verifier-admitted SemCode.
+  - **`sm-vm`**: Deterministic execution engine. Canonical trusted execution consumes verifier-admitted SemCode; explicitly documented raw/diagnostic APIs remain outside that trusted route.
 - **Host-Facing Adapters & Platform Boundaries**:
   - **`smc-cli`**: Canonical public CLI owner; performs authorized host I/O without owning language semantics or verifier policy.
   - **`prom-*`**: PROMETHEUS host ABI, capability policy, gate descriptors, runtime sessions, rules, and audit logging.
@@ -99,7 +102,9 @@ Planned under #1846: reduce the broad `semantic` skill into a slim router plus s
 - **Do Not Use RuFlo**: RuFlo is retired in this repository.
 - **Ponytail Is Deferred/Experimental**: Ponytail must remain disabled by default.
 - **Harness Scope Enforcement**:
-  - Run `pwsh -File scripts/harness-check.ps1` before committing to validate working-tree and staged changes against `.harness/current.task.yaml`.
+  - Inspect untracked files first with `git ls-files --others --exclude-standard`; untracked paths are not visible to the current `harness-check.ps1` implementation.
+  - Stage intended new files before running `pwsh -File scripts/harness-check.ps1`, so newly created files participate in the staged-path check.
+  - Run `pwsh -File scripts/harness-check.ps1` before committing to validate staged/tracked changes against `.harness/current.task.yaml`.
   - Validate committed PR changes with `git diff --name-only origin/main...HEAD`.
 
 ---
@@ -107,7 +112,7 @@ Planned under #1846: reduce the broad `semantic` skill into a slim router plus s
 ## 5. Non-Negotiable Discipline
 
 - **One Logical Change per PR**: Narrowly scoped to the assigned task.
-- **Verifier-First Admission**: Never bypass `sm-verify`; never execute unchecked SemCode.
+- **Verifier-First Trusted Execution**: Never bypass `sm-verify` on canonical/trusted production execution routes. Explicitly documented raw/diagnostic `run_semcode*`-style APIs may remain unverified only within their narrow non-canonical diagnostic/compatibility perimeter and must never drift into trusted execution.
 - **Total Determinism**: Preserve Quad Logic (`N`/`F`/`T`/`S`), deterministic VM execution, and deterministic diagnostics.
 - **Capability Boundaries**: Never add direct filesystem, network, or OS effects inside deterministic Semantic core libraries. Host-facing adapters (`smc-cli`) perform authorized host operations but cannot define language semantics or verifier policy.
 - **Tests for Behavior Changes**: Add positive admission and negative rejection tests whenever behavior changes. Never weaken or delete tests for CI.
