@@ -79,25 +79,26 @@ The documented raw/diagnostic perimeter must remain narrow, explicit, tested, an
 
 ### B. Determinism & Total Representation
 - **NO Nondeterminism in Core**: Given identical input, configuration, capability context, and execution budget, compilation and execution in deterministic core libraries must produce byte-for-byte and trace-for-trace deterministic outcomes.
-- **Quad Logic Invariant**: Quad Logic (`quad`) is a native 4-valued domain:
-  - `N` = Unknown (`00`)
-  - `F` = False (`01`)
-  - `T` = True (`10`)
-  - `S` = Conflict (`11`)
+- **Quad Logic Invariant**: Quad Logic (`quad`) is a native 4-valued domain strictly adhering to normative specification [`docs/spec/quad_logic_frame_v1.md`](docs/spec/quad_logic_frame_v1.md):
+  - `N` = Null (`00`)
+  - `F` = Strict False (`01`)
+  - `T` = Strict True (`10`)
+  - `S` = Conflict / Super (`11`)
 - **NO Quad Collapse**: Quad states must never be implicitly collapsed into `bool` (`N` is not `false`; `S` is not `true` or `false`).
-- **NO Conflict Erasure**: Conflict (`S`) and Unknown (`N`) states must remain visible across compiler, VM, diagnostics, and UI projections.
+- **NO Conflict Erasure**: Conflict (`S`) and Null (`N`) states must remain visible across compiler, VM, diagnostics, and UI projections.
 - **Distinction of Roles**: `bool` decides control flow; `quad` represents four-state reasoning truth. Conversions between `bool` and `quad` must be explicit, documented, and tested.
 
 ### C. Architectural Boundaries & Ownership
 - **Deterministic Semantic Core Libraries (`sm-front`, `sm-sema`, `sm-ir`, `sm-format`, `sm-emit`, `sm-verify`, `sm-runtime-core`, `sm-vm`)**:
   - `sm-front`: parsing, AST, lexer, syntax.
   - `sm-sema`: semantic analysis, type checking, compile-time diagnostics.
-  - `sm-ir`: Intermediate Representation data structures and lowering passes.
-  - `sm-format`: canonical SemCode binary format, opcode definitions, and decoding contracts.
+  - `sm-ir`: Intermediate Representation data structures, lowering passes, and optimizer logic (retains baseline format ownership in historical `docs/spec/*` contracts).
+  - `sm-format`: crate containing SemCode binary format definitions, opcode tables, and decoding implementation.
   - `sm-emit`: emission facade over `sm-format`.
   - `sm-verify`: admission gate (structure, layout, and bytecode verification).
   - `sm-runtime-core`: shared runtime vocabulary, errors, and quotas.
   - `sm-vm`: deterministic execution engine, with canonical trusted execution verifier-admitted and explicitly documented raw/diagnostic APIs kept outside the trusted route.
+  - *Ownership Authority Synchronization*: `docs/spec/*` remains normative contract truth. The formal synchronization of spec documents and skills from `sm-ir` format ownership to `sm-format` is tracked as explicit follow-up work for #1846; ordinary SemCode implementation work is not blocked while governance and historical documentation undergo this planned convergence.
 - **Host-Facing Adapters & CLI (`smc-cli`, platform adapters)**:
   - Owns CLI entrypoints, argument parsing, file reading/writing of source and compiled artifacts, process exit codes, and platform event bridges.
   - May perform explicitly authorized host I/O, but must **never** become owners of language semantics, verifier admission rules, capability policy, or deterministic core execution.

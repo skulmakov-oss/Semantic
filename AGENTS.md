@@ -34,8 +34,8 @@ Ground all changes in the canonical ownership boundaries of the repository:
 - **Deterministic Core Libraries**:
   - **`sm-front`**: Frontend / parser / AST / source surface and syntax errors.
   - **`sm-sema`**: Semantic analysis / type checking / compile-time diagnostics.
-  - **`sm-ir`**: Intermediate Representation (IR) and lowering passes.
-  - **`sm-format`**: Canonical SemCode binary format and decoding contract.
+  - **`sm-ir`**: Intermediate Representation (IR) and lowering passes (baseline format owner in historical `docs/spec/*`).
+  - **`sm-format`**: Crate containing SemCode binary format definitions, opcode tables, and decoding implementation (spec synchronization tracked for #1846).
   - **`sm-emit`**: Emission / producer-facing facade over the SemCode format.
   - **`sm-verify`**: Verifier admission gate (structure, layout, and bytecode rules).
   - **`sm-runtime-core`**: Shared runtime vocabulary, common execution types, and quotas.
@@ -113,7 +113,7 @@ Planned under #1846: reduce the broad `semantic` skill into a slim router plus s
 
 - **One Logical Change per PR**: Narrowly scoped to the assigned task.
 - **Verifier-First Trusted Execution**: Never bypass `sm-verify` on canonical/trusted production execution routes. Explicitly documented raw/diagnostic `run_semcode*`-style APIs may remain unverified only within their narrow non-canonical diagnostic/compatibility perimeter and must never drift into trusted execution.
-- **Total Determinism**: Preserve Quad Logic (`N`/`F`/`T`/`S`), deterministic VM execution, and deterministic diagnostics.
+- **Total Determinism**: Preserve Quad Logic (`N`/`F`/`T`/`S` where `N` = Null, `F` = Strict False, `T` = Strict True, `S` = Conflict / Super per [`docs/spec/quad_logic_frame_v1.md`](docs/spec/quad_logic_frame_v1.md)), deterministic VM execution, and deterministic diagnostics.
 - **Capability Boundaries**: Never add direct filesystem, network, or OS effects inside deterministic Semantic core libraries. Host-facing adapters (`smc-cli`) perform authorized host operations but cannot define language semantics or verifier policy.
 - **Tests for Behavior Changes**: Add positive admission and negative rejection tests whenever behavior changes. Never weaken or delete tests for CI.
 - **Landed on Main != Stable**: Code on `main` is not automatically stable or release-promised. Never widen release claims silently.

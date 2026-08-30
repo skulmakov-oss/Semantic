@@ -62,8 +62,8 @@ Agents must respect explicit crate ownership boundaries:
 - **Deterministic Semantic Core Libraries**:
   - **`sm-front`**: Frontend / parser / AST / lexer / source syntax errors.
   - **`sm-sema`**: Semantic analysis / type inference and checking / compile-time diagnostics.
-  - **`sm-ir`**: Intermediate Representation (IR) data structures and lowering passes.
-  - **`sm-format`**: Canonical SemCode binary format, opcode definitions, and decoding contracts.
+  - **`sm-ir`**: Intermediate Representation (IR) data structures, lowering passes, and optimizer logic (baseline format owner in historical `docs/spec/*`).
+  - **`sm-format`**: Crate containing SemCode binary format definitions, opcode tables, and decoding implementation (spec synchronization tracked for #1846).
   - **`sm-emit`**: Emission facade over the `sm-format` binary contract.
   - **`sm-verify`**: Verifier admission gate (structure, layout, capability tags, and bytecode validation).
   - **`sm-runtime-core`**: Shared runtime vocabulary, execution errors, and quotas.
@@ -180,7 +180,7 @@ graph TD
 
 ### Phase 3: Bounded Implementation
 1. Execute changes using small, auditable patches.
-2. Adhere strictly to owner crate boundaries (e.g., `sm-format` owns binary format, `sm-verify` owns admission, `sm-vm` owns deterministic execution).
+2. Adhere strictly to owner crate boundaries and normative specifications (e.g., `docs/spec/quad_logic_frame_v1.md` for Quad logic; `sm-format` for SemCode binary format implementation, with formal spec synchronization bounded for #1846).
 3. Preserve canonical trusted execution through verifier-admitted routes. Do not convert raw/diagnostic VM APIs into production/trusted execution shortcuts.
 4. Do not add external dependencies without explicit architectural justification.
 5. Do not touch files in `forbidden_paths`.
