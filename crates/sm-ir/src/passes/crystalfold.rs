@@ -630,13 +630,18 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                         cst.insert(dst, ConstVal::F64(a + b));
                         out.push(IrInstr::LoadF64 { dst, val: a + b });
                     }
+                    // x + (-0.0) == x for every x (including x == +/-0.0), so
+                    // eliding is sound. x + (+0.0) is NOT sound to elide here:
+                    // if the untracked x happens to be -0.0 at runtime,
+                    // (-0.0) + (+0.0) == +0.0 per IEEE 754, a sign change this
+                    // rewrite would silently miss. See FA-04-004 / #1710.
                     _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::F64(v)) if *v == 0.0) =>
+                        && matches!(cst.get(&rhs), Some(ConstVal::F64(v)) if *v == 0.0 && v.is_sign_negative()) =>
                     {
                         rewrites = rewrites.saturating_add(1);
                     }
                     _ if dst == rhs
-                        && matches!(cst.get(&lhs), Some(ConstVal::F64(v)) if *v == 0.0) =>
+                        && matches!(cst.get(&lhs), Some(ConstVal::F64(v)) if *v == 0.0 && v.is_sign_negative()) =>
                     {
                         rewrites = rewrites.saturating_add(1);
                     }
@@ -653,8 +658,13 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                         cst.insert(dst, ConstVal::F64(a - b));
                         out.push(IrInstr::LoadF64 { dst, val: a - b });
                     }
+                    // x - (+0.0) == x + (-0.0) == x for every x, so eliding is
+                    // sound. x - (-0.0) == x + (+0.0) is NOT sound: if the
+                    // untracked x happens to be -0.0 at runtime, that would
+                    // silently miss the (-0.0) + (+0.0) == +0.0 sign change.
+                    // See FA-04-004 / #1710.
                     _ if dst == lhs
-                        && matches!(cst.get(&rhs), Some(ConstVal::F64(v)) if *v == 0.0) =>
+                        && matches!(cst.get(&rhs), Some(ConstVal::F64(v)) if *v == 0.0 && v.is_sign_positive()) =>
                     {
                         rewrites = rewrites.saturating_add(1);
                     }
@@ -1178,6 +1188,182 @@ mod tests {
             module.functions[0].instrs[14],
             IrInstr::LoadBool { dst: 14, val: true },
             "quad inequality must still fold correctly"
+        );
+    }
+
+    /// FA-04-004 / #1710: `x + (+0.0)` is not a safe no-op elision when `x`'s
+    /// sign is unknown at compile time. `(-0.0) + (+0.0) == +0.0` per IEEE
+    /// 754, a sign change a bare `dst == lhs` elision would silently miss.
+    /// Register 0 is intentionally never loaded, so CrystalFold's constant
+    /// tracker has no entry for it and must treat it as an unknown runtime
+    /// value (exactly the case an in-place `x = x + 0.0` targets).
+    #[test]
+    fn crystalfold_does_not_elide_add_f64_positive_zero_when_lhs_is_untracked() {
+        let mut module = IrModule {
+            functions: vec![IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadF64 { dst: 1, val: 0.0 },
+                    IrInstr::AddF64 {
+                        dst: 0,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            }],
+        };
+
+        CrystalFoldPass.run(&mut module);
+
+        assert!(
+            module.functions[0].instrs.iter().any(|i| matches!(
+                i,
+                IrInstr::AddF64 {
+                    dst: 0,
+                    lhs: 0,
+                    rhs: 1
+                }
+            )),
+            "x + (+0.0) must not be elided when x's sign is unknown, got {:?}",
+            module.functions[0].instrs
+        );
+    }
+
+    /// Mirror of the above for the `dst == rhs` identity branch: `(+0.0) + x`
+    /// carries the same unsound elision risk by commutativity.
+    #[test]
+    fn crystalfold_does_not_elide_add_f64_positive_zero_when_rhs_is_untracked() {
+        let mut module = IrModule {
+            functions: vec![IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadF64 { dst: 0, val: 0.0 },
+                    IrInstr::AddF64 {
+                        dst: 1,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            }],
+        };
+
+        CrystalFoldPass.run(&mut module);
+
+        assert!(
+            module.functions[0].instrs.iter().any(|i| matches!(
+                i,
+                IrInstr::AddF64 {
+                    dst: 1,
+                    lhs: 0,
+                    rhs: 1
+                }
+            )),
+            "(+0.0) + x must not be elided when x's sign is unknown, got {:?}",
+            module.functions[0].instrs
+        );
+    }
+
+    /// `x + (-0.0) == x` for every x, including x == +/-0.0, so this identity
+    /// remains sound and CrystalFold should keep folding it away — proves the
+    /// #1710 fix narrows admission rather than disabling the optimization.
+    #[test]
+    fn crystalfold_still_elides_add_f64_negative_zero_when_lhs_is_untracked() {
+        let mut module = IrModule {
+            functions: vec![IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadF64 { dst: 1, val: -0.0 },
+                    IrInstr::AddF64 {
+                        dst: 0,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            }],
+        };
+
+        CrystalFoldPass.run(&mut module);
+
+        assert!(
+            !module.functions[0]
+                .instrs
+                .iter()
+                .any(|i| matches!(i, IrInstr::AddF64 { .. })),
+            "x + (-0.0) is sound to elide and must still be folded away, got {:?}",
+            module.functions[0].instrs
+        );
+    }
+
+    /// FA-04-004 / #1710: `x - (-0.0)` is not safe to elide for the same
+    /// reason as `x + (+0.0)` (subtraction is addition of the negation).
+    #[test]
+    fn crystalfold_does_not_elide_sub_f64_negative_zero_when_lhs_is_untracked() {
+        let mut module = IrModule {
+            functions: vec![IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadF64 { dst: 1, val: -0.0 },
+                    IrInstr::SubF64 {
+                        dst: 0,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            }],
+        };
+
+        CrystalFoldPass.run(&mut module);
+
+        assert!(
+            module.functions[0].instrs.iter().any(|i| matches!(
+                i,
+                IrInstr::SubF64 {
+                    dst: 0,
+                    lhs: 0,
+                    rhs: 1
+                }
+            )),
+            "x - (-0.0) must not be elided when x's sign is unknown, got {:?}",
+            module.functions[0].instrs
+        );
+    }
+
+    /// `x - (+0.0) == x` for every x, so this identity remains sound.
+    #[test]
+    fn crystalfold_still_elides_sub_f64_positive_zero_when_lhs_is_untracked() {
+        let mut module = IrModule {
+            functions: vec![IrFunction {
+                name: "main".to_string(),
+                instrs: vec![
+                    IrInstr::LoadF64 { dst: 1, val: 0.0 },
+                    IrInstr::SubF64 {
+                        dst: 0,
+                        lhs: 0,
+                        rhs: 1,
+                    },
+                ],
+                ownership_events: Vec::new(),
+                params: Vec::new(),
+            }],
+        };
+
+        CrystalFoldPass.run(&mut module);
+
+        assert!(
+            !module.functions[0]
+                .instrs
+                .iter()
+                .any(|i| matches!(i, IrInstr::SubF64 { .. })),
+            "x - (+0.0) is sound to elide and must still be folded away, got {:?}",
+            module.functions[0].instrs
         );
     }
 }
