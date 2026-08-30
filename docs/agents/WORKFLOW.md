@@ -20,9 +20,11 @@ Every agent operation is bounded by a strict hierarchy of authority:
    ↓
 4. .harness/current.task.yaml (Task Authorization Envelope)
    ↓
-5. Relevant Semantic Skill / Issue Specification
+5. Normative Specs / Issue Authority
    ↓
-6. Agent Implementation Plan
+6. Repository-Native Semantic Skill
+   ↓
+7. Agent Implementation Plan
 ```
 
 - **Strictness Rule**: A lower layer in this hierarchy may make restrictions stricter, but may never loosen or waive an upper-layer rule.
@@ -32,6 +34,8 @@ Every agent operation is bounded by a strict hierarchy of authority:
   1. **STOP immediately**.
   2. **Report**: Name the constraint, the blocker, the observed evidence, and the minimum repository owner decision required.
   3. **NEVER bypass** or improvise a workaround.
+
+Repository-native skills are domain guards, not independent architectural authorities. If a skill conflicts with `CONSTRAINTS.md`, the active Harness envelope, normative `docs/spec/*`, or verified current repository evidence, stop and report the drift rather than silently preferring one source.
 
 ---
 
@@ -90,18 +94,29 @@ When available, Superpowers owns the primary planning, TDD, debugging, and verif
 - **`systematic-debugging`**: Perform disciplined root-cause analysis on failures before proposing fixes.
 - **`verification-before-completion`**: Confirm evidence from fresh command runs before asserting completion.
 
-### D. Selected Agent Skills Routing
+### D. External Agent Skills Routing
+External process skills answer **how to work**. They do not own Semantic architecture, language contracts, verifier policy, or runtime semantics.
+
 - **`CONSTRAINTS.md`**: Always authoritative across every step (does not require ritual skill invocation for simple edits).
 - **`source-driven-development`**: Use whenever verifying current source behavior, API contracts, or external dependencies.
 - **`doubt-driven-development`**: Mandatory for Critical (R3) and selected Boundary (R2) changes; challenge assumptions, probe failure modes, and demand fresh proof.
-- **`semantic`**: Enforces domain-specific rules for Semantic crates, SemCode formats, verifier admission, VM execution, and PROMETHEUS boundaries.
 
-### E. Conditional Agent Skills
+### E. Repository-Native Semantic Skills
+Repository-native skills answer **what Semantic permits in the affected domain**.
+
+- **`semantic`** (`.agents/skills/semantic/SKILL.md`) — current broad Semantic domain router/guard for compiler, SemCode, verifier, VM, runtime, PROMETHEUS, UI, ownership, status, tests, and Semantic-specific architecture work. Until #1846 decomposes it, use this as the general Semantic domain layer whenever its task description applies.
+- **`semantic-source-authoring-guard`** (`.agents/skills/semantic-source-authoring-guard/SKILL.md`) — **mandatory whenever a task creates or modifies Semantic `.sm` source, fixtures, examples, or negative diagnostic probes.** Use it together with `semantic` if the same task also touches compiler/runtime behavior, verifier/VM behavior, architecture, or repository contracts.
+
+Do not use repository-native skills as a replacement for Harness authorization or normative specs. Do not silently choose fixture/test behavior over a conflicting normative spec; treat `spec ↔ executable evidence` disagreement as contract drift and stop/report when it cannot be safely reconciled.
+
+Planned under #1846: shrink the broad `semantic` skill into a slim router plus specialized guards for verifier/runtime, contract/release, and UI boundaries while preserving the existing source-authoring guard.
+
+### F. Conditional Agent Skills
 - **`api-and-interface-design`**: Required for public API, ABI, or crate interface changes.
 - **`security-and-hardening`**: Required for capability, sanitization, quota, or boundary modifications.
 - **`code-review-and-quality`**: Required during pre-PR diff hygiene, clippy analysis, and quality validation.
 
-### F. Tooling Restrictions
+### G. Tooling Restrictions
 - **RuFlo**: Retired and forbidden. Do not invoke or rely on RuFlo tools.
 - **Ponytail**: Deferred/experimental. Must remain disabled by default.
 
@@ -135,6 +150,7 @@ graph TD
 2. Read [`CONSTRAINTS.md`](../../CONSTRAINTS.md) to confirm all non-negotiable invariants.
 3. Discover code architecture via Codebase Memory MCP (`get_architecture`).
 4. Retrieve relevant documentation and specs via `mcp-local-rag`.
+5. Route to the applicable repository-native Semantic skill(s): use `semantic` for general Semantic domain work and additionally require `semantic-source-authoring-guard` for any `.sm` source/fixture/example/diagnostic-probe authoring.
 
 ### Phase 2: Scoping & Planning
 1. Run brainstorming to clarify requirements, non-goals, and boundary constraints.
