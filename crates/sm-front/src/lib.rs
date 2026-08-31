@@ -581,12 +581,13 @@ pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError>
     let adt_table = build_adt_table(program)?;
     // The sole admitted type variable in a trait method signature is the
     // trait-side `Self` placeholder (Type::TypeVar, interned once per
-    // parsed trait). A trait's own declared type_params are deliberately
-    // NOT admitted here: generic traits are not part of the first-wave
-    // canonical contract (#1635), so a signature that references its own
-    // trait type parameter is rejected by the same "type variable is not
-    // in scope" path canonicalize_declared_type_generic already uses for
-    // any other out-of-scope type variable, rather than silently admitted.
+    // parsed trait). A trait's own declared type_params are never admitted
+    // here -- generic traits are rejected outright below, before any
+    // method signature is ever canonicalized (FA-02-003 / #1635), so this
+    // list existing only as a defensive default: it must never be widened
+    // to include a trait's own type_params, since that would make an
+    // in-scope reference to them the one path that could smuggle a generic
+    // trait past the declaration-level rejection below.
     let self_type_var = program.arena.symbol_to_id.get("Self").copied();
     let admitted_type_vars: Vec<SymbolId> = self_type_var.into_iter().collect();
     let mut out = BTreeMap::new();
@@ -596,6 +597,23 @@ pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError>
                 pos: 0,
                 message: format!(
                     "duplicate trait '{}'",
+                    resolve_symbol_name(&program.arena, t.name)?
+                ),
+            });
+        }
+        // FA-02-003 / #1635: TraitDecl.type_params is documented as "Empty
+        // in first-wave canonical form" (types.rs), but nothing previously
+        // enforced that -- a trait declaring type parameters, used or not,
+        // silently reached TraitTable. Reject before any method-signature
+        // work begins, independent of whether an impl exists or whether
+        // the parameters are referenced, mirroring the sibling impl-side
+        // enforcement in validate_trait_coherence (#1668) rather than
+        // erasing the parameters and treating the trait as non-generic.
+        if !t.type_params.is_empty() {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "trait '{}' declares type parameters; generic traits are not supported",
                     resolve_symbol_name(&program.arena, t.name)?
                 ),
             });
@@ -1709,17 +1727,17 @@ fn main() {
 
     #[test]
     fn build_trait_table_does_not_admit_a_trait_own_type_parameter_as_a_signature_type() {
-        // Sibling-exposure note for #1635 (generic trait declarations
-        // admitted beyond the first-wave contract): this repair
-        // deliberately admits only the reserved Self placeholder as a
-        // TypeVar, never a trait's own declared type_params (see the
-        // comment in build_trait_table). A side effect -- not a fix of
-        // #1635 itself, whose parser-admission surface is untouched -- is
-        // that a method signature actually using the trait's own type
-        // parameter is now incidentally rejected at trait-admission time by
-        // the same "type variable is not in scope" path any other
-        // out-of-scope TypeVar hits, where previously build_trait_table
-        // performed no signature validation at all.
+        // Updated for FA-02-003 / #1635: this case -- a trait method
+        // signature actually referencing the trait's own declared type
+        // parameter -- is necessarily a non-empty-type_params trait, so it
+        // is now rejected by the deliberate declaration-level generic-trait
+        // check before method-signature canonicalization ever runs, not by
+        // the incidental "type variable is not in scope" path this test
+        // originally observed under #1858 (when build_trait_table did not
+        // yet reject generic traits at all). The admitted_type_vars
+        // TypeVar-scope path documented in build_trait_table remains a
+        // defensive default for this same reason, not the active owner of
+        // this rejection.
         let src = r#"
             trait Foo<TP> {
                 fn bar(x: TP) -> TP;
@@ -1730,9 +1748,9 @@ fn main() {
         "#;
         let program = parse_program(src).expect("parse");
         let err = build_trait_table(&program)
-            .expect_err("a trait's own type parameter is not an admitted signature TypeVar");
+            .expect_err("a trait declaring a type parameter must reject as a generic trait");
         assert!(
-            err.message.contains("type variable 'TP' is not in scope"),
+            err.message.contains("Foo") && err.message.contains("generic traits are not supported"),
             "unexpected error: {}",
             err.message
         );
@@ -1784,6 +1802,91 @@ fn main() {
             err.message.contains("qvec is a reserved type"),
             "unexpected error: {}",
             err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_rejects_generic_trait_with_unused_type_parameter() {
+        // FA-02-003 / #1635: the central regression. `T` is never
+        // referenced by any method signature, so this proves rejection is
+        // driven by TraitDecl declaration admission itself (non-empty
+        // type_params), not by incidental method-signature TypeVar-scope
+        // validation -- and with zero impls anywhere, proving trait
+        // declaration validity does not depend on an implementation
+        // existing.
+        let src = r#"
+            trait GenericTrait<T> {
+                fn value(self: Self) -> i32;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("a generic trait with an unused type parameter must reject");
+        assert!(
+            err.message.contains("GenericTrait")
+                && err.message.contains("generic traits are not supported"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_rejects_generic_trait_naming_the_offending_trait() {
+        // (E) Stored-state invariant, proven at the whole-program level: a
+        // successful TraitTable can never contain an entry whose
+        // type_params is non-empty, because build_trait_table rejects the
+        // owning trait before any entry is inserted -- even alongside an
+        // otherwise-admitted non-generic trait declared first.
+        let src = r#"
+            trait Contract {
+                fn a(x: Self) -> Self;
+            }
+            trait GenericTrait<T> {
+                fn value(self: Self) -> i32;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("a generic trait anywhere in the program must reject the whole table");
+        assert!(
+            err.message.contains("GenericTrait")
+                && err.message.contains("generic traits are not supported"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_admits_non_generic_first_wave_trait() {
+        // (C) Positive control: an ordinary first-wave trait with an empty
+        // type_params list must continue to admit successfully.
+        let src = r#"
+            trait Contract {
+                fn value(self: Self) -> i32;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let table = build_trait_table(&program).expect("non-generic first-wave trait must admit");
+        let contract_id = *program
+            .arena
+            .symbol_to_id
+            .get("Contract")
+            .expect("Contract interned");
+        let decl = table
+            .get(&contract_id)
+            .expect("Contract must be present in TraitTable");
+        assert!(
+            decl.type_params.is_empty(),
+            "non-generic trait must be stored with empty type_params"
         );
     }
 

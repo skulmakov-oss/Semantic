@@ -290,10 +290,22 @@ to `Type::Adt`, and an unknown or ambiguous nominal signature type rejects
 deterministically, in nested positions (tuples, `Sequence`, `Option`,
 `Result`, closure parameter/return) as well as directly. `Self` remains the
 one reserved trait placeholder admitted through this same canonicalizer; a
-trait's own declared type parameters are not — a first-wave trait method
-signature that references its own generic parameter is rejected here as an
-out-of-scope type variable, since generic traits are not part of this closed
-surface.
+trait's own declared type parameters are never admitted here, but a
+signature referencing one is no longer what rejects a generic trait — see
+below.
+
+First-wave traits are non-generic: `build_trait_table` requires
+`TraitDecl.type_params.is_empty()` before any method-signature work begins,
+independent of whether the parameters are referenced by any method and
+independent of whether an impl exists. Generic trait syntax
+(`trait Foo<T> { ... }`) may still parse — the raw AST is not required to
+reject it — but a non-empty `type_params` list is never erased or treated
+as though the trait were non-generic; it rejects deterministically instead,
+mirroring the sibling `ImplDecl.type_params` enforcement in
+`validate_trait_coherence`. Generic trait syntax is future/out-of-scope
+work, not a defect to paper over: no successful `TraitTable` entry can have
+a non-empty `type_params`, and `Self` remains supported exactly as
+described above regardless.
 
 A canonical identity alone is not sufficient for trait admission: the
 canonical type must also be on the current executable-admitted type surface.
