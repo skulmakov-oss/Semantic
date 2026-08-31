@@ -792,6 +792,9 @@ Current `match` semantics:
 - enum `match` may omit `_` only when unguarded variant coverage is exhaustive
 - `_` currently means wildcard/default only in `match`, not a general rich
   pattern system
+- a `match` may contain at most one `_` default arm, in either the statement
+  or expression form; a second `_` arm is a deterministic frontend error, not
+  a replacement of the first
 - the first matching arm is selected deterministically
 
 Current `match` expression semantics:

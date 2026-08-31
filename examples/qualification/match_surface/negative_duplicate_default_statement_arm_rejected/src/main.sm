@@ -1,0 +1,11 @@
+fn classify(x: i32) {
+    match x {
+        5 => { }
+        _ => { return; }
+        _ => { return; }
+    }
+}
+
+fn main() {
+    return;
+}
