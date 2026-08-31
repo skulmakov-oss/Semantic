@@ -3615,6 +3615,37 @@ mod tests {
     }
 
     #[test]
+    fn type_check_function_and_type_check_program_agree_on_multi_param_generic_rejection() {
+        // FA-02-002 / #1634, extending the #1649 consistency guard above to
+        // the out-of-contract-arity case specifically: since #1649,
+        // type_check_function shares build_fn_table with type_check_program,
+        // so both must reject a two-parameter generic function identically
+        // rather than diverging again.
+        let single_src = r#"
+            fn pair<T, U>(x: T, y: U) -> T {
+                return x;
+            }
+        "#;
+        let program_src = r#"
+            fn pair<T, U>(x: T, y: U) -> T {
+                return x;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let single = parse_program(single_src).expect("parse single-function program");
+        let full = parse_program(program_src).expect("parse full program");
+        let single_result = type_check_function(&single);
+        let full_result = type_check_program(&full);
+        assert!(
+            single_result.is_err() && full_result.is_err(),
+            "both APIs must reject an out-of-contract two-parameter generic function; \
+             single={single_result:?} full={full_result:?}",
+        );
+    }
+
+    #[test]
     fn fx_identity_surface_typechecks() {
         let src = r#"
             fn id(x: fx) -> fx {
@@ -7549,6 +7580,38 @@ mod tests {
         "#;
         let err = typecheck_source(src)
             .expect_err("blanket/generic impl with type_params must be rejected");
+        assert!(
+            err.message.contains("generic") || err.message.contains("type param"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    // FA-02-002 / #1634 classification evidence: a two-parameter impl is
+    // already rejected by #1668's stricter zero-arity impl contract,
+    // independent of #1634's new max-one check elsewhere -- not a #1634
+    // repair target for impls.
+    #[test]
+    fn two_type_param_impl_is_rejected_by_existing_zero_arity_contract() {
+        let src = r#"
+            trait Show {
+                fn show(self: MyType) -> i32;
+            }
+
+            record MyType { x: i32 }
+
+            impl<X, Y> Show for MyType {
+                fn show(self: MyType) -> i32 {
+                    return 0;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("a two-parameter generic impl must still reject via #1668's contract");
         assert!(
             err.message.contains("generic") || err.message.contains("type param"),
             "unexpected error: {}",

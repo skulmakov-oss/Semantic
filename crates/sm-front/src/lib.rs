@@ -496,6 +496,27 @@ pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
                 message: format!("duplicate function '{name}'"),
             });
         }
+        // FA-02-002 / #1634: the first-wave generic contract admits at most
+        // one type parameter per definition site. The parser deliberately
+        // has no arity limit -- `parse_type_params_with_bounds` may
+        // represent `<T, U, ...>` as raw AST (see
+        // generic_function_two_type_params_are_parsed /
+        // function_with_multiple_type_params_mixed_bounds_is_parsed in
+        // parser.rs, which pin that parsing fidelity) -- so admission is
+        // enforced here, at the same table-construction boundary that
+        // already owns the reserved-name and duplicate-name checks above,
+        // rather than truncating to the first parameter or silently
+        // admitting the extras.
+        if f.type_params.len() > 1 {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "function '{name}' declares {} type parameters; first-wave generic \
+                     definitions admit at most one",
+                    f.type_params.len()
+                ),
+            });
+        }
         out.insert(
             f.name,
             FnSig {
@@ -542,6 +563,21 @@ pub fn build_record_table(program: &Program) -> Result<RecordTable, FrontendErro
                 ),
             });
         }
+        // FA-02-002 / #1634: first-wave generic definitions admit at most
+        // one type parameter (see build_fn_table above for the identical
+        // rule and its rationale). The parser has no arity limit, so
+        // admission is enforced here at table-construction time.
+        if record.type_params.len() > 1 {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "record '{}' declares {} type parameters; first-wave generic \
+                     definitions admit at most one",
+                    resolve_symbol_name(&program.arena, record.name)?,
+                    record.type_params.len()
+                ),
+            });
+        }
         out.insert(record.name, record.clone());
     }
     Ok(out)
@@ -557,6 +593,21 @@ pub fn build_adt_table(program: &Program) -> Result<AdtTable, FrontendError> {
                 message: format!(
                     "duplicate enum '{}'",
                     resolve_symbol_name(&program.arena, adt.name)?
+                ),
+            });
+        }
+        // FA-02-002 / #1634: first-wave generic definitions admit at most
+        // one type parameter (see build_fn_table above for the identical
+        // rule and its rationale). The parser has no arity limit, so
+        // admission is enforced here at table-construction time.
+        if adt.type_params.len() > 1 {
+            return Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "enum '{}' declares {} type parameters; first-wave generic \
+                     definitions admit at most one",
+                    resolve_symbol_name(&program.arena, adt.name)?,
+                    adt.type_params.len()
                 ),
             });
         }
@@ -1450,6 +1501,241 @@ fn main() {
             .expect_err("user function named stdout_write must be rejected");
         assert!(
             err.message.contains("stdout_write") && err.message.contains("reserved"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    // FA-02-002 / #1634: first-wave generic-capable definitions admit at
+    // most one type parameter. The parser deliberately keeps no arity limit
+    // (see generic_function_two_type_params_are_parsed and
+    // function_with_multiple_type_params_mixed_bounds_is_parsed in
+    // parser.rs, both of which must remain green -- raw AST fidelity is
+    // unaffected), so the boundary lives at the same table-construction
+    // authority already used for the reserved/duplicate-name checks above.
+
+    #[test]
+    fn build_fn_table_admits_single_type_param_function() {
+        // Positive control: unaffected by this slice's change.
+        let program = parse_program(
+            r#"
+                fn id<T>(x: T) -> T {
+                    return x;
+                }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        build_fn_table(&program).expect("single type parameter must remain admitted");
+    }
+
+    #[test]
+    fn build_fn_table_preserves_bound_on_single_type_param_function() {
+        let program = parse_program(
+            r#"
+                trait Zeroable {
+                    fn zero(v: ZeroInt) -> i32;
+                }
+                record ZeroInt { n: i32 }
+                fn make_zero<T: Zeroable>(v: T) -> T {
+                    return v;
+                }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        let table = build_fn_table(&program).expect("bounded single-param function must admit");
+        let fn_id = *program
+            .arena
+            .symbol_to_id
+            .get("make_zero")
+            .expect("make_zero interned");
+        let sig = table.get(&fn_id).expect("signature present");
+        assert_eq!(sig.type_params.len(), 1);
+        assert_eq!(sig.trait_bounds.len(), 1);
+    }
+
+    #[test]
+    fn build_fn_table_rejects_function_with_two_type_params() {
+        // Central regression, per #1634's own reproducer.
+        let program = parse_program(
+            r#"
+                fn pair<T, U>(x: T, y: U) -> T {
+                    return x;
+                }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        let err = build_fn_table(&program)
+            .expect_err("a function declaring two type parameters must reject");
+        assert!(
+            err.message.contains("pair")
+                && err.message.contains("2 type parameters")
+                && err.message.contains("at most one"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_fn_table_rejects_bound_on_first_of_two_type_params() {
+        // Mirrors function_with_multiple_type_params_mixed_bounds_is_parsed
+        // in parser.rs (`<T: Eq, U>`) -- the parser still represents this
+        // faithfully; canonical admission must still reject it, and must
+        // not partially preserve the bounded parameter while discarding U.
+        let program = parse_program(
+            r#"
+                trait Eq2 {
+                    fn eq2(v: Self) -> i32;
+                }
+                fn apply<T: Eq2, U>(x: T, y: U) -> i32 {
+                    return 0;
+                }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        let err = build_fn_table(&program).expect_err(
+            "a function declaring two type parameters must reject even when only one is bounded",
+        );
+        assert!(
+            err.message.contains("apply") && err.message.contains("at most one"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_fn_table_rejects_bound_on_second_of_two_type_params() {
+        // `<T, U: Bound>` -- the opposite ordering.
+        let program = parse_program(
+            r#"
+                trait Eq2 {
+                    fn eq2(v: Self) -> i32;
+                }
+                fn apply<T, U: Eq2>(x: T, y: U) -> i32 {
+                    return 0;
+                }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        let err = build_fn_table(&program)
+            .expect_err("a function declaring two type parameters must reject regardless of which one is bounded");
+        assert!(
+            err.message.contains("apply") && err.message.contains("at most one"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_fn_table_rejects_duplicate_type_param_name_via_arity() {
+        // (Duplicate-name classification, #1634 section 14): `<T, T>` is
+        // arity 2 regardless of the repeated name, so it is rejected by
+        // this same check. This is incidental arity coverage, not a
+        // dedicated duplicate-name repair -- no separate uniqueness check
+        // is added here.
+        let program = parse_program(
+            r#"
+                fn f<T, T>(x: T) -> T {
+                    return x;
+                }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        let err = build_fn_table(&program).expect_err("<T, T> must reject as a two-parameter list");
+        assert!(
+            err.message.contains("at most one"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_record_table_admits_single_type_param() {
+        let program = parse_program(
+            r#"
+                record Box<T> { value: T }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        build_record_table(&program).expect("single type parameter record must remain admitted");
+    }
+
+    #[test]
+    fn build_record_table_rejects_two_type_params() {
+        let program = parse_program(
+            r#"
+                record Pair<T, U> { a: T, b: U }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        let err = build_record_table(&program)
+            .expect_err("a record declaring two type parameters must reject");
+        assert!(
+            err.message.contains("Pair")
+                && err.message.contains("2 type parameters")
+                && err.message.contains("at most one"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_adt_table_admits_single_type_param() {
+        let program = parse_program(
+            r#"
+                enum Maybe<T> { Some(T), None }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        build_adt_table(&program).expect("single type parameter enum must remain admitted");
+    }
+
+    #[test]
+    fn build_adt_table_rejects_two_type_params() {
+        let program = parse_program(
+            r#"
+                enum Either<T, U> { Left(T), Right(U) }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        let err = build_adt_table(&program)
+            .expect_err("an enum declaring two type parameters must reject");
+        assert!(
+            err.message.contains("Either")
+                && err.message.contains("2 type parameters")
+                && err.message.contains("at most one"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_rejects_trait_with_two_type_params() {
+        // #1634 classification evidence: already rejected by #1635's
+        // stricter zero-arity trait contract, independent of this slice's
+        // new max-one check -- not a #1634 repair target for traits.
+        let program = parse_program(
+            r#"
+                trait Foo<X, Y> {
+                    fn a(v: Self) -> i32;
+                }
+                fn main() { return; }
+            "#,
+        )
+        .expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("a two-parameter generic trait must still reject via #1635's contract");
+        assert!(
+            err.message.contains("Foo") && err.message.contains("generic traits are not supported"),
             "unexpected error: {}",
             err.message
         );

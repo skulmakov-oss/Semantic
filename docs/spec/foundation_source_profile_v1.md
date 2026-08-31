@@ -319,6 +319,23 @@ directly or nested, exactly like an unknown nominal type. `TraitTable`
 success therefore means both canonical identity is proven *and* the current
 executable/admitted type surface is proven — never identity alone.
 
+First-wave generic-capable definitions — functions, records, and ADTs —
+admit at most one type parameter per definition site; zero is non-generic
+and one is the contracted generic surface. The parser has no arity limit of
+its own (`parse_type_params_with_bounds` may represent `<T, U, ...>` and
+mixed bound combinations like `<T: Bound, U>` as raw AST, and does so
+deliberately, exactly as it does for the generic trait/impl syntax `build_trait_table`/`validate_trait_coherence`
+reject above); admission is enforced at each family's own canonical
+table-construction authority instead (`build_fn_table`, `build_record_table`,
+`build_adt_table`), never by truncating to the first parameter or silently
+admitting the extras. Traits and impls already require zero type parameters
+under the stricter contracts described above, so an out-of-contract arity
+there was already rejected before this boundary existed; it is not a new
+restriction for those two families. Admission of the contracted one-parameter
+form for records/ADTs is a declaration-time fact only — it does not imply a
+faithful applied nominal instantiation path for generic source use, which
+remains a separate, open gap.
+
 ## Deterministically unsupported forms
 
 Forms with no admitted current implementation must fail before execution with a
