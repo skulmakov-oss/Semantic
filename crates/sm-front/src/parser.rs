@@ -2418,6 +2418,12 @@ impl<'a> Parser<'a> {
                         message: "default '_' arm in match currently cannot have guard".to_string(),
                     });
                 }
+                if default.is_some() {
+                    return Err(FrontendError {
+                        pos: self.pos(),
+                        message: "match cannot have more than one default '_' arm".to_string(),
+                    });
+                }
                 self.expect(TokenKind::FatArrow, "expected '=>' after '_'")?;
                 let block = self.parse_block()?;
                 default = Some(block);
@@ -2448,6 +2454,12 @@ impl<'a> Parser<'a> {
                     return Err(FrontendError {
                         pos: self.pos(),
                         message: "default '_' arm in match currently cannot have guard".to_string(),
+                    });
+                }
+                if default.is_some() {
+                    return Err(FrontendError {
+                        pos: self.pos(),
+                        message: "match cannot have more than one default '_' arm".to_string(),
                     });
                 }
                 self.expect(TokenKind::FatArrow, "expected '=>' after '_'")?;
@@ -4804,6 +4816,134 @@ fn main() {
         assert!(err
             .message
             .contains("default '_' arm in match currently cannot have guard"));
+    }
+
+    // FA-02-006 / #1638: a match expression must accept at most one default
+    // '_' arm. A second default previously overwrote the first silently
+    // (`default = Some(block)` with no prior-state check) instead of being
+    // rejected. See the sibling FA-02-005 / #1637 statement-match tests
+    // below for the identical rule applied to statement-form match.
+
+    #[test]
+    fn rustlike_parser_accepts_match_expression_with_no_default_arm() {
+        let src = r#"
+fn main() {
+    let value: f64 = match T {
+        T => { 1.0 }
+    };
+    return;
+}
+"#;
+
+        let program = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("match expression with no default arm should parse");
+        let func = &program.functions[0];
+        let Stmt::Let { value, .. } = program.arena.stmt(func.body[0]) else {
+            panic!("expected leading let statement");
+        };
+        let Expr::Match(match_expr) = program.arena.expr(*value) else {
+            panic!("expected match expression");
+        };
+        assert_eq!(match_expr.arms.len(), 1);
+        assert!(match_expr.default.is_none());
+    }
+
+    #[test]
+    fn rustlike_parser_rejects_duplicate_default_match_expression_arm() {
+        let src = r#"
+fn main() {
+    let value: f64 = match T {
+        _ => { 1.0 }
+        _ => { 2.0 }
+    };
+    return;
+}
+"#;
+
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("a second default '_' arm in a match expression must reject");
+        assert!(
+            err.message
+                .contains("match cannot have more than one default '_' arm"),
+            "unexpected error message: {}",
+            err.message
+        );
+    }
+
+    // FA-02-005 / #1637: the statement-form match owns independent parsing
+    // logic (parse_match_stmt_after_kw_match) from the match expression
+    // above and must reject the identical duplicate-default-arm shape with
+    // the same diagnostic.
+
+    #[test]
+    fn rustlike_parser_accepts_match_statement_with_no_default_arm() {
+        let src = r#"
+fn main() {
+    match T {
+        T => { }
+    }
+    return;
+}
+"#;
+
+        let program = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("match statement with no default arm should parse");
+        let func = &program.functions[0];
+        let Stmt::Match { arms, default, .. } = program.arena.stmt(func.body[0]) else {
+            panic!("expected leading match statement");
+        };
+        assert_eq!(arms.len(), 1);
+        assert!(default.is_empty());
+    }
+
+    #[test]
+    fn rustlike_parser_accepts_match_statement_with_one_default_arm() {
+        // The default arm's block must be non-empty here: `Stmt::Match`
+        // stores `default` as a bare `Vec<StmtId>` (not `Option<...>`), so an
+        // empty default block is indistinguishable from "no default arm" by
+        // inspecting the stored AST alone. The parser's own transient
+        // `Option<Vec<StmtId>>` tracking (which this fix's duplicate check
+        // reads) does not share that ambiguity.
+        let src = r#"
+fn main() {
+    match T {
+        F => { }
+        _ => { return; }
+    }
+    return;
+}
+"#;
+
+        let program = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("match statement with exactly one default arm should parse");
+        let func = &program.functions[0];
+        let Stmt::Match { arms, default, .. } = program.arena.stmt(func.body[0]) else {
+            panic!("expected leading match statement");
+        };
+        assert_eq!(arms.len(), 1);
+        assert!(!default.is_empty());
+    }
+
+    #[test]
+    fn rustlike_parser_rejects_duplicate_default_match_statement_arm() {
+        let src = r#"
+fn main() {
+    match T {
+        _ => { }
+        _ => { }
+    }
+    return;
+}
+"#;
+
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("a second default '_' arm in a match statement must reject");
+        assert!(
+            err.message
+                .contains("match cannot have more than one default '_' arm"),
+            "unexpected error message: {}",
+            err.message
+        );
     }
 
     #[test]

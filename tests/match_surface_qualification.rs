@@ -201,6 +201,18 @@ fn match_surface_negative_fixtures_reject_deterministically() {
             "examples/qualification/match_surface/negative_result_or_pattern_with_wildcard_lowering_rejected/src/main.sm",
             "or-pattern match arms ('A | B') are not supported",
         ),
+        // FA-02-005 / FA-02-006 (#1637 / #1638): a second default '_' arm
+        // must reject deterministically at parse time in both the
+        // expression-producing and statement forms of match, rather than
+        // silently overwriting the first parsed default arm.
+        (
+            "examples/qualification/match_surface/negative_duplicate_default_expression_arm_rejected/src/main.sm",
+            "match cannot have more than one default '_' arm",
+        ),
+        (
+            "examples/qualification/match_surface/negative_duplicate_default_statement_arm_rejected/src/main.sm",
+            "match cannot have more than one default '_' arm",
+        ),
     ];
 
     for (rel, needle) in negative_cases {
