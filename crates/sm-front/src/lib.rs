@@ -608,16 +608,28 @@ pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError>
                     .params
                     .iter()
                     .map(|(name, ty)| {
-                        Ok((
-                            *name,
-                            canonicalize_declared_type_generic(
-                                ty,
-                                &record_table,
-                                &adt_table,
-                                &program.arena,
-                                &admitted_type_vars,
-                            )?,
-                        ))
+                        let canonical = canonicalize_declared_type_generic(
+                            ty,
+                            &record_table,
+                            &adt_table,
+                            &program.arena,
+                            &admitted_type_vars,
+                        )?;
+                        // FA-02-015 / #1647: TraitTable admission proves both
+                        // canonical nominal identity AND that the canonical
+                        // type is on the current executable-admitted
+                        // surface -- never store first and validate later.
+                        typecheck::ensure_executable_type_supported(
+                            &canonical,
+                            &program.arena,
+                            &admitted_type_vars,
+                            format!(
+                                "parameter '{}' of trait method '{}'",
+                                resolve_symbol_name(&program.arena, *name)?,
+                                resolve_symbol_name(&program.arena, m.name)?
+                            ),
+                        )?;
+                        Ok((*name, canonical))
                     })
                     .collect::<Result<Vec<_>, FrontendError>>()?;
                 let ret = canonicalize_declared_type_generic(
@@ -626,6 +638,15 @@ pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError>
                     &adt_table,
                     &program.arena,
                     &admitted_type_vars,
+                )?;
+                typecheck::ensure_executable_type_supported(
+                    &ret,
+                    &program.arena,
+                    &admitted_type_vars,
+                    format!(
+                        "return type of trait method '{}'",
+                        resolve_symbol_name(&program.arena, m.name)?
+                    ),
                 )?;
                 Ok(TraitMethodSig {
                     name: m.name,
@@ -1718,16 +1739,14 @@ fn main() {
     }
 
     #[test]
-    fn build_trait_table_admits_qvec_signatures_independent_of_1647() {
-        // Sibling-exposure note for #1647 (QVec falls through executable
-        // type validation as supported): this repair calls only
-        // canonicalize_declared_type_generic, never
-        // ensure_executable_type_supported (the separate, already-tracked
-        // function #1647 is about), so #1669's closure is independent of
-        // #1647's status either way. QVec is not a Record/Adt nominal
-        // reference, so canonicalize's unrelated catch-all arm returns it
-        // unchanged -- proving this repair neither depends on nor
-        // absorbs #1647's defect.
+    fn build_trait_table_rejects_direct_qvec_signature() {
+        // FA-02-015 / #1647, corrected: a post-review contract audit found
+        // that #1669's "unsupported type must reject" requirement depends
+        // on ensure_executable_type_supported actually being exhaustive.
+        // build_trait_table now consumes that authoritative check after
+        // canonicalizing, so a reserved, not-yet-promoted-to-executable
+        // QVec signature must reject at trait admission, exactly like an
+        // unknown nominal type does -- never silently stored.
         let src = r#"
             trait Marker {
                 fn f(x: qvec[8]) -> i32;
@@ -1737,7 +1756,35 @@ fn main() {
             }
         "#;
         let program = parse_program(src).expect("parse");
-        build_trait_table(&program).expect("qvec trait signature must admit, independent of #1647");
+        let err = build_trait_table(&program)
+            .expect_err("a reserved qvec trait signature must reject at admission");
+        assert!(
+            err.message.contains("qvec is a reserved type"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_rejects_nested_qvec_signature() {
+        // Recursive enforcement: an unsupported family nested inside an
+        // otherwise-admitted composite must also reject.
+        let src = r#"
+            trait Marker {
+                fn f(x: Option(qvec[8])) -> i32;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("qvec nested inside Option must reject at admission");
+        assert!(
+            err.message.contains("qvec is a reserved type"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]

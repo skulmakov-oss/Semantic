@@ -295,6 +295,18 @@ signature that references its own generic parameter is rejected here as an
 out-of-scope type variable, since generic traits are not part of this closed
 surface.
 
+A canonical identity alone is not sufficient for trait admission: the
+canonical type must also be on the current executable-admitted type surface.
+`build_trait_table` consumes `ensure_executable_type_supported` — an
+exhaustive match over every `Type` variant, with no catch-all arm, so adding
+a new `Type` variant without updating this function is a compile error
+rather than a silent new admission — after canonicalizing each signature
+type. `QVec` is a reserved, not-yet-promoted-to-executable type family and
+rejects deterministically wherever it appears in a trait method signature,
+directly or nested, exactly like an unknown nominal type. `TraitTable`
+success therefore means both canonical identity is proven *and* the current
+executable/admitted type surface is proven — never identity alone.
+
 ## Deterministically unsupported forms
 
 Forms with no admitted current implementation must fail before execution with a

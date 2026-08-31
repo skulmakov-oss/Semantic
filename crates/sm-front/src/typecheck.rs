@@ -372,6 +372,7 @@ fn type_check_function_with_tables(
         ensure_executable_type_supported(
             ty,
             arena,
+            &func.type_params,
             format!("parameter '{}'", resolve_symbol_name(arena, *name)?),
         )?;
     }
@@ -390,6 +391,7 @@ fn type_check_function_with_tables(
         ensure_executable_type_supported(
             &canonical_ret,
             arena,
+            &func.type_params,
             format!(
                 "return type of '{}'",
                 resolve_symbol_name(arena, func.name)?
@@ -8086,6 +8088,83 @@ mod tests {
         typecheck_source(src).expect("Option(Self) for an enum impl target must typecheck");
     }
 
+    // FA-02-015 / #1647: ensure_executable_type_supported must be exhaustive
+    // (no `_ => Ok(())` catch-all) over every current Type variant, so a
+    // reserved/not-yet-promoted family like QVec rejects deterministically
+    // -- directly, and nested inside every currently admitted composite
+    // position.
+
+    #[test]
+    fn ensure_executable_type_supported_rejects_qvec_directly_and_when_nested() {
+        let qvec = Type::QVec(8);
+        let cases: Vec<(&str, Type)> = vec![
+            ("direct", qvec.clone()),
+            ("Option(qvec)", Type::Option(Box::new(qvec.clone()))),
+            (
+                "Sequence(qvec)",
+                Type::Sequence(SequenceType {
+                    family: SequenceCollectionFamily::OrderedSequence,
+                    item: Box::new(qvec.clone()),
+                }),
+            ),
+            (
+                "Result(qvec, i32)",
+                Type::Result(Box::new(qvec.clone()), Box::new(Type::I32)),
+            ),
+            (
+                "Result(i32, qvec)",
+                Type::Result(Box::new(Type::I32), Box::new(qvec.clone())),
+            ),
+            ("tuple containing qvec", Type::Tuple(vec![Type::I32, qvec])),
+        ];
+        let program = parse_program("fn main() { return; }").expect("parse");
+        for (label, ty) in cases {
+            let err =
+                ensure_executable_type_supported(&ty, &program.arena, &[], "test".to_string())
+                    .expect_err(&format!("{label} must reject as not executable-admitted"));
+            assert!(
+                err.message.contains("qvec is a reserved type"),
+                "{label}: unexpected error: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn ensure_executable_type_supported_admits_ordinary_families() {
+        // Positive control: every already-qualified executable family must
+        // continue to pass through the now-exhaustive match unchanged.
+        let program = parse_program(
+            r#"
+            record R { n: i32 }
+            enum E { A, B }
+            fn main() { return; }
+        "#,
+        )
+        .expect("parse");
+        let r_id = *program.arena.symbol_to_id.get("R").expect("R symbol");
+        let e_id = *program.arena.symbol_to_id.get("E").expect("E symbol");
+        for ty in [
+            Type::Quad,
+            Type::Bool,
+            Type::Text,
+            Type::I32,
+            Type::U32,
+            Type::Fx,
+            Type::F64,
+            Type::Unit,
+            Type::RangeI32,
+            Type::Record(r_id),
+            Type::Adt(e_id),
+            Type::Tuple(vec![Type::I32, Type::Bool]),
+            Type::Option(Box::new(Type::I32)),
+            Type::Result(Box::new(Type::I32), Box::new(Type::Bool)),
+        ] {
+            ensure_executable_type_supported(&ty, &program.arena, &[], "test".to_string())
+                .unwrap_or_else(|err| panic!("{ty:?} must remain executable-admitted: {err:?}"));
+        }
+    }
+
     #[test]
     fn generic_fn_with_bound_and_satisfying_impl_typechecks() {
         let src = r#"
@@ -11389,42 +11468,108 @@ fn ensure_type_resolved(
     }
 }
 
-fn ensure_executable_type_supported(
+/// FA-02-015 / #1647: exhaustive (no catch-all) executable-type admission.
+///
+/// Every `Type` variant is matched explicitly, so adding a new variant to
+/// the `Type` enum without updating this function is a compile error rather
+/// than a silent "falls through to `Ok(())`" admission. `admitted_type_vars`
+/// is the same narrow, caller-scoped admission list
+/// `canonicalize_declared_type_generic` already uses for the same type (a
+/// function's own `type_params`, or — for a trait method signature — just
+/// the reserved `Self` symbol): a `Type::TypeVar` is executable-admitted
+/// only when its name is in that list, never unconditionally. `Type::QVec`
+/// is a reserved, not-yet-promoted-to-executable type family and rejects
+/// deterministically until it is explicitly qualified by its own repair.
+pub(crate) fn ensure_executable_type_supported(
     ty: &Type,
     arena: &AstArena,
+    admitted_type_vars: &[SymbolId],
     context: String,
 ) -> Result<(), FrontendError> {
     match ty {
+        Type::Quad
+        | Type::Bool
+        | Type::Text
+        | Type::I32
+        | Type::U32
+        | Type::Fx
+        | Type::F64
+        | Type::Unit
+        | Type::RangeI32 => Ok(()),
         Type::Tuple(items) => {
             for item in items {
-                ensure_executable_type_supported(item, arena, context.clone())?;
+                ensure_executable_type_supported(item, arena, admitted_type_vars, context.clone())?;
             }
             Ok(())
         }
-        Type::Sequence(sequence) => {
-            ensure_executable_type_supported(sequence.item.as_ref(), arena, context)
-        }
+        Type::Sequence(sequence) => ensure_executable_type_supported(
+            sequence.item.as_ref(),
+            arena,
+            admitted_type_vars,
+            context,
+        ),
         Type::Map(map) => {
-            ensure_executable_type_supported(map.key.as_ref(), arena, context.clone())?;
-            ensure_executable_type_supported(map.val.as_ref(), arena, context)
+            ensure_executable_type_supported(
+                map.key.as_ref(),
+                arena,
+                admitted_type_vars,
+                context.clone(),
+            )?;
+            ensure_executable_type_supported(map.val.as_ref(), arena, admitted_type_vars, context)
         }
-        Type::Measured(base, _) => ensure_executable_type_supported(base, arena, context),
-        Type::Option(item) => ensure_executable_type_supported(item, arena, context),
+        Type::Closure(closure) => {
+            ensure_executable_type_supported(
+                closure.param.as_ref(),
+                arena,
+                admitted_type_vars,
+                context.clone(),
+            )?;
+            ensure_executable_type_supported(
+                closure.ret.as_ref(),
+                arena,
+                admitted_type_vars,
+                context,
+            )
+        }
+        Type::Measured(base, _) => {
+            ensure_executable_type_supported(base, arena, admitted_type_vars, context)
+        }
+        Type::Option(item) => {
+            ensure_executable_type_supported(item, arena, admitted_type_vars, context)
+        }
         Type::Result(ok_ty, err_ty) => {
-            ensure_executable_type_supported(ok_ty, arena, context.clone())?;
-            ensure_executable_type_supported(err_ty, arena, context)
+            ensure_executable_type_supported(ok_ty, arena, admitted_type_vars, context.clone())?;
+            ensure_executable_type_supported(err_ty, arena, admitted_type_vars, context)
         }
         Type::Record(name) => {
             let _ = resolve_symbol_name(arena, *name)?;
-            let _ = context;
             Ok(())
         }
         Type::Adt(name) => {
             let _ = resolve_symbol_name(arena, *name)?;
-            let _ = context;
             Ok(())
         }
-        _ => Ok(()),
+        Type::TypeVar(name) => {
+            if admitted_type_vars.contains(name) {
+                Ok(())
+            } else {
+                Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "type variable '{}' is not admitted as an executable type in {}",
+                        resolve_symbol_name(arena, *name)?,
+                        context
+                    ),
+                })
+            }
+        }
+        Type::QVec(_) => Err(FrontendError {
+            pos: 0,
+            message: format!(
+                "qvec is a reserved type and is not yet admitted as an executable type in {}",
+                context
+            ),
+        }),
     }
 }
 
