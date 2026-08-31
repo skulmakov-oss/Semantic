@@ -311,13 +311,43 @@ impl<'a> Parser<'a> {
         Ok((params, bounds))
     }
 
-    /// Parse an optional `<T, U, ...>` type parameter list (no bounds).
+    /// Parse an optional `<T, U, ...>` type parameter list for a declaration
+    /// form with no `TraitBound`-carrying AST field (record, ADT, trait,
+    /// impl -- see each's `type_params: Vec<SymbolId>` in `types.rs`).
     ///
-    /// Thin wrapper over `parse_type_params_with_bounds` that discards any
-    /// bounds. Used for record and ADT declarations where trait bounds on type
-    /// parameters are not admitted in first wave.
-    fn parse_type_params(&mut self) -> Result<Vec<SymbolId>, FrontendError> {
-        let (params, _bounds) = self.parse_type_params_with_bounds()?;
+    /// `family` names the declaration form for diagnostics (e.g. `"record"`,
+    /// `"enum"`, `"trait"`, `"impl"`).
+    ///
+    /// A bare `<T, U>` list is admitted -- the parameter names themselves are
+    /// faithfully represented in `type_params`, and existing owner-layer
+    /// authorities (#1635 traits, #1650 records/ADTs, #1668 impls) already
+    /// reject a non-empty `type_params` deterministically for these forms.
+    /// A `: Bound` on any parameter is rejected here instead: this codebase's
+    /// invariant is that recognized semantic information is never silently
+    /// discarded in favor of a successfully-parsed but weaker AST, and none
+    /// of these four declaration kinds have anywhere to faithfully store a
+    /// parsed `TraitBound` (FA-02-001 / #1633).
+    fn parse_type_params(&mut self, family: &'static str) -> Result<Vec<SymbolId>, FrontendError> {
+        let (params, bounds) = self.parse_type_params_with_bounds()?;
+        if !bounds.is_empty() {
+            // `parse_type_params_with_bounds` already pushed `params` onto
+            // `type_param_scope` and expects its caller to eventually pop
+            // them via `pop_type_param_scope` after parsing the declaration
+            // body. This early return skips that call, but it is safe: this
+            // `FrontendError` propagates via `?` all the way out of
+            // `parse_program`, which is always called on a freshly
+            // constructed `Parser` that is dropped immediately on any `Err`
+            // (see `parse_rustlike_with_profile`/`parse_logos_with_profile`)
+            // -- there is no error-recovery or speculative-parse path in
+            // this parser that would observe or reuse `type_param_scope`
+            // after this point.
+            return Err(FrontendError {
+                pos: self.pos(),
+                message: format!(
+                    "trait bounds on type parameters are not supported by {family} declarations"
+                ),
+            });
+        }
         Ok(params)
     }
 
@@ -331,7 +361,7 @@ impl<'a> Parser<'a> {
     fn parse_trait_decl(&mut self) -> Result<TraitDecl, FrontendError> {
         self.expect(TokenKind::KwTrait, "expected 'trait'")?;
         let name = self.expect_symbol()?;
-        let type_params = self.parse_type_params()?;
+        let type_params = self.parse_type_params("trait")?;
         self.expect(TokenKind::LBrace, "expected '{' after trait name")?;
         let self_placeholder = Type::TypeVar(self.arena.intern_symbol("Self"));
         let methods = self.with_self_type_scope(self_placeholder, |parser| {
@@ -394,7 +424,7 @@ impl<'a> Parser<'a> {
     /// Parse an `impl TraitName for TypeName { fn method(...) { ... } ... }` block.
     fn parse_impl_decl(&mut self) -> Result<ImplDecl, FrontendError> {
         self.expect(TokenKind::KwImpl, "expected 'impl'")?;
-        let type_params = self.parse_type_params()?;
+        let type_params = self.parse_type_params("impl")?;
         let trait_name = self.expect_symbol()?;
         self.expect(TokenKind::KwFor, "expected 'for' after trait name in impl")?;
         let for_type = self.expect_symbol()?;
@@ -428,7 +458,7 @@ impl<'a> Parser<'a> {
     fn parse_record_decl(&mut self) -> Result<RecordDecl, FrontendError> {
         self.expect(TokenKind::KwRecord, "expected 'record'")?;
         let name = self.expect_symbol()?;
-        let type_params = self.parse_type_params()?;
+        let type_params = self.parse_type_params("record")?;
         self.expect(TokenKind::LBrace, "expected '{' after record name")?;
         let mut fields = Vec::new();
         while !self.check(TokenKind::RBrace) {
@@ -666,7 +696,7 @@ impl<'a> Parser<'a> {
     fn parse_adt_decl(&mut self) -> Result<AdtDecl, FrontendError> {
         self.expect(TokenKind::KwEnum, "expected 'enum'")?;
         let name = self.expect_symbol()?;
-        let type_params = self.parse_type_params()?;
+        let type_params = self.parse_type_params("enum")?;
         self.expect(TokenKind::LBrace, "expected '{' after enum name")?;
         let mut variants = Vec::new();
         while !self.check(TokenKind::RBrace) {
@@ -6882,6 +6912,144 @@ fn apply<T: Eq, U>(x: T, y: U) -> i32 {
         let func = &program.functions[0];
         assert_eq!(func.type_params.len(), 2);
         assert_eq!(func.trait_bounds.len(), 1);
+    }
+
+    // FA-02-001 / #1633: trait bounds on non-function type parameters have no
+    // AST field to faithfully represent them, so `parse_type_params` rejects
+    // them deterministically instead of silently discarding the bound and
+    // returning a weaker-but-successful AST. `E` (function bounds retained)
+    // is covered above by `function_with_trait_bound_is_parsed` and
+    // `function_with_multiple_type_params_mixed_bounds_is_parsed` -- both
+    // already pass unaffected, since `parse_function` calls
+    // `parse_type_params_with_bounds` directly and never goes through the
+    // now-rejecting `parse_type_params` wrapper this issue changes.
+
+    #[test]
+    fn record_with_trait_bound_is_rejected_at_parse_time() {
+        let src = "record R<T: SomeTrait> { x: T }\n";
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("bound-bearing record must reject during parsing");
+        assert!(
+            err.message.contains("record") && err.message.contains("trait bounds"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn adt_with_trait_bound_is_rejected_at_parse_time() {
+        let src = "enum E<T: SomeTrait> { A(T) }\n";
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("bound-bearing enum must reject during parsing");
+        assert!(
+            err.message.contains("enum") && err.message.contains("trait bounds"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn trait_with_trait_bound_is_rejected_at_parse_time() {
+        // Distinct from #1635's later canonical rejection of *any* generic
+        // trait (bound or not) at `build_trait_table` -- this proves the
+        // raw parser itself never silently drops the bound, independent of
+        // that separate, later, zero-arity owner-layer authority.
+        let src = "trait Tr<T: SomeTrait> {\n    fn f(x: T) -> T;\n}\n";
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("bound-bearing trait must reject during parsing");
+        assert!(
+            err.message.contains("trait") && err.message.contains("trait bounds"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn impl_with_trait_bound_is_rejected_at_parse_time() {
+        let src = "trait Tr {\n    fn f(x: i32) -> i32;\n}\nrecord R { x: i32 }\nimpl<T: SomeTrait> Tr for R {\n    fn f(x: i32) -> i32 { return x; }\n}\n";
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("bound-bearing impl must reject during parsing");
+        assert!(
+            err.message.contains("impl") && err.message.contains("trait bounds"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn nonfunction_nobound_raw_syntax_still_parses_for_all_four_families() {
+        // F: this issue rejects a *bound* on a non-function type parameter,
+        // not the bare parameter list itself. Raw `<T>` syntax with no bound
+        // remains future-capable and must keep parsing -- its later
+        // canonical zero-arity rejection belongs to #1650 (record/ADT),
+        // #1635 (trait), #1668 (impl), not to this parser-level change.
+        let src = "record R<T> { x: T }\nenum E<T> { A(T) }\ntrait Tr<T> {\n    fn f(x: T) -> T;\n}\nimpl<T> Tr for R {\n    fn f(x: i32) -> i32 { return x; }\n}\n";
+        let program = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect("no-bound raw syntax must still parse for record/enum/trait/impl");
+        assert_eq!(program.records[0].type_params.len(), 1);
+        assert_eq!(program.adts[0].type_params.len(), 1);
+        assert_eq!(program.traits[0].type_params.len(), 1);
+        assert_eq!(program.impls[0].type_params.len(), 1);
+    }
+
+    #[test]
+    fn rejecting_a_bounded_record_is_fatal_to_the_whole_program_not_partial() {
+        // G (scope-state integrity, external proof): `parse_program` parses
+        // every declaration with `?` -- there is no catch/continue recovery
+        // anywhere in this loop, so the first `Err` aborts the entire parse.
+        // A well-formed function declared *after* the rejected record must
+        // therefore never be reached, and the result must be exactly one
+        // deterministic `Err`, never a partial `Program` or a differently
+        // shaped error caused by inconsistent parser state.
+        let src = "record R<T: SomeTrait> { x: T }\nfn f(x: i32) -> i32 { return x; }\n";
+        let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+            .expect_err("the rejected record must fail the whole program");
+        assert!(
+            err.message.contains("record") && err.message.contains("trait bounds"),
+            "unexpected error (possible scope-state corruption): {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn rejecting_a_bounded_declaration_leaves_one_unpopped_type_param_scope_entry_confined_to_a_dead_parser(
+    ) {
+        // G (scope-state integrity, direct proof): `parse_type_params_with_bounds`
+        // pushes each parameter name onto `type_param_scope` *before* the
+        // caller learns whether bounds are present, so `parse_type_params`
+        // rejecting on a non-empty `bounds` list returns before its own
+        // caller's normal `pop_type_param_scope` call runs -- this directly
+        // inspects that a `Parser` instance's `type_param_scope` after
+        // rejection confirms one entry is genuinely left unpopped. That is
+        // safe, not corrupting, only because of the surrounding architecture
+        // (proven by the previous test and by inspection): `parse_program`
+        // has no recovery path that would resume parsing with this `Parser`
+        // after an `Err`, and every public entrypoint
+        // (`parse_rustlike_with_profile`) constructs a fresh `Parser` per
+        // call and drops it immediately on any `Err` -- so this leaked entry
+        // can never be observed by a later parse. No explicit unwind is
+        // added because the actual control flow never requires one; this
+        // test is the evidence for that claim, not just an assertion of it.
+        let src = "record R<T: SomeTrait> { x: T }\n";
+        let tokens = lex_tokens(src).expect("lex");
+        let profile = ParserProfile::foundation_default();
+        let mut p = Parser {
+            tokens,
+            idx: 0,
+            source: src.to_string(),
+            arena: AstArena::default(),
+            policy: CompilePolicyView::new(&profile),
+            type_param_scope: Vec::new(),
+            self_type_scope: None,
+        };
+        let result = p.parse_program();
+        assert!(result.is_err(), "bound-bearing record must reject");
+        assert_eq!(
+            p.type_param_scope.len(),
+            1,
+            "expected exactly the one parameter pushed by \
+             parse_type_params_with_bounds to remain unpopped"
+        );
     }
 
     // M9.4 Wave 2 — richer pattern surface parser admission
