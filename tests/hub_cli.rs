@@ -256,10 +256,19 @@ fn audit_lookup_omits_sensitive_correlation_and_identity_metadata() {
         audit_text.contains("adapter_provenance: <redacted>"),
         "{audit_text}"
     );
-    assert!(audit_text.contains("input_digest: <redacted>"), "{audit_text}");
-    assert!(audit_text.contains("output_digest: <redacted>"), "{audit_text}");
+    assert!(
+        audit_text.contains("input_digest: <redacted>"),
+        "{audit_text}"
+    );
+    assert!(
+        audit_text.contains("output_digest: <redacted>"),
+        "{audit_text}"
+    );
     assert!(!audit_text.contains("fnv1a64:"), "{audit_text}");
-    assert!(audit_text.contains("tool_id: vector.turbovec"), "{audit_text}");
+    assert!(
+        audit_text.contains("tool_id: vector.turbovec"),
+        "{audit_text}"
+    );
     assert!(audit_text.contains("status: Success"), "{audit_text}");
 
     let persisted_audit = fs::read_to_string(dir.join(".semantic/hub/audit.log")).unwrap();
