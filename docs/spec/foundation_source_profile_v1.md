@@ -266,6 +266,20 @@ outside the hardcoded
 Iterable `next()` for-loop desugaring, so general trait method dispatch and
 UFCS call resolution remain deferred and experimental.
 
+First-wave impl targets are direct declared nominal records or ADTs only.
+`validate_impl_conformance` proves the impl target identity exactly once,
+against the canonical `RecordTable`/`AdtTable` (the same resolver every other
+declared-type position in the frontend uses), before conformance succeeds —
+an impl for an undeclared target rejects deterministically even when the
+trait's own method signatures never reference `Self` and so would not
+otherwise force that resolution. `Self` in both trait and impl method
+signatures denotes exactly that one resolved concrete type and preserves its
+real nominal family: `Self` for a record-target impl resolves to
+`Type::Record`, `Self` for an enum/ADT-target impl resolves to `Type::Adt` —
+never a guessed `Record` regardless of the target's actual family. Broader
+generic/blanket/dynamic impl forms remain outside this closed surface, as
+described above.
+
 ## Deterministically unsupported forms
 
 Forms with no admitted current implementation must fail before execution with a

@@ -201,7 +201,7 @@ pub fn type_check_program(p: &Program) -> Result<(), FrontendError> {
     // M9.2 Wave 3: trait coherence and impl conformance.
     let trait_table = build_trait_table(p)?;
     validate_trait_coherence(&p.impls, &p.arena)?;
-    validate_impl_conformance(&p.impls, &trait_table, &p.arena)?;
+    validate_impl_conformance(&p.impls, &trait_table, &record_table, &adt_table, &p.arena)?;
     validate_top_level_name_collisions(p, &table, &record_table, &adt_table, &schema_table)?;
     validate_record_declarations(p, &record_table, &adt_table)?;
     validate_adt_declarations(p, &record_table, &adt_table)?;
@@ -7718,6 +7718,374 @@ mod tests {
         );
     }
 
+    // FA-02-035 / #1667 + FA-02-019 / #1651: impl target identity is proven
+    // once against the canonical RecordTable/AdtTable, and every meaning of
+    // `Self` derives from that one proven concrete Type. See
+    // `validate_impl_conformance` and `substitute_trait_self_type`.
+
+    /// Table-driven proof that `substitute_trait_self_type` substitutes both
+    /// parsed forms of `Self` (the trait-side `TypeVar` placeholder and the
+    /// impl-side uncanonicalized `Record(for_type)` form) identically,
+    /// recursively, through every currently admitted composite `Type`
+    /// position, for both a record and an ADT concrete target.
+    #[test]
+    fn substitute_trait_self_type_covers_nested_positions_for_both_nominal_families() {
+        let src = r#"
+            record R { n: i32 }
+            enum E { A, B }
+            fn main() {
+                return;
+            }
+        "#;
+        let mut program = parse_program(src).expect("parse");
+        let r_id = *program.arena.symbol_to_id.get("R").expect("R symbol");
+        let e_id = *program.arena.symbol_to_id.get("E").expect("E symbol");
+        let self_id = program.arena.intern_symbol("Self");
+        let arena = &program.arena;
+
+        for (for_type, concrete) in [(r_id, Type::Record(r_id)), (e_id, Type::Adt(e_id))] {
+            // direct Self, both parsed forms
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::TypeVar(self_id),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                concrete,
+                "direct Self (TypeVar form) must resolve to the concrete target type"
+            );
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::Record(for_type),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                concrete,
+                "direct Self (impl-side Record form) must resolve to the concrete target type"
+            );
+
+            // tuple containing Self
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::Tuple(vec![Type::I32, Type::TypeVar(self_id)]),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                Type::Tuple(vec![Type::I32, concrete.clone()])
+            );
+
+            // Sequence(Self)
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::Sequence(SequenceType {
+                        family: SequenceCollectionFamily::OrderedSequence,
+                        item: Box::new(Type::TypeVar(self_id)),
+                    }),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                Type::Sequence(SequenceType {
+                    family: SequenceCollectionFamily::OrderedSequence,
+                    item: Box::new(concrete.clone()),
+                })
+            );
+
+            // Option(Self)
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::Option(Box::new(Type::TypeVar(self_id))),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                Type::Option(Box::new(concrete.clone()))
+            );
+
+            // Result(Self, ...) and Result(..., Self)
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::Result(Box::new(Type::TypeVar(self_id)), Box::new(Type::Bool)),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                Type::Result(Box::new(concrete.clone()), Box::new(Type::Bool))
+            );
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::Result(Box::new(Type::Bool), Box::new(Type::TypeVar(self_id))),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                Type::Result(Box::new(Type::Bool), Box::new(concrete.clone()))
+            );
+
+            // closure parameter and return containing Self
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::Closure(ClosureType {
+                        family: ClosureValueFamily::UnaryDirect,
+                        capture: ClosureCapturePolicy::Immutable,
+                        param: Box::new(Type::TypeVar(self_id)),
+                        ret: Box::new(Type::I32),
+                    }),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                Type::Closure(ClosureType {
+                    family: ClosureValueFamily::UnaryDirect,
+                    capture: ClosureCapturePolicy::Immutable,
+                    param: Box::new(concrete.clone()),
+                    ret: Box::new(Type::I32),
+                })
+            );
+            assert_eq!(
+                substitute_trait_self_type(
+                    &Type::Closure(ClosureType {
+                        family: ClosureValueFamily::UnaryDirect,
+                        capture: ClosureCapturePolicy::Immutable,
+                        param: Box::new(Type::I32),
+                        ret: Box::new(Type::TypeVar(self_id)),
+                    }),
+                    Some(self_id),
+                    for_type,
+                    &concrete
+                ),
+                Type::Closure(ClosureType {
+                    family: ClosureValueFamily::UnaryDirect,
+                    capture: ClosureCapturePolicy::Immutable,
+                    param: Box::new(Type::I32),
+                    ret: Box::new(concrete.clone()),
+                })
+            );
+
+            // an unrelated nominal name (not Self, not for_type) must never
+            // be substituted
+            let other = arena
+                .symbol_to_id
+                .get("R")
+                .copied()
+                .filter(|id| *id != for_type);
+            if let Some(other_id) = other {
+                assert_eq!(
+                    substitute_trait_self_type(
+                        &Type::Record(other_id),
+                        Some(self_id),
+                        for_type,
+                        &concrete
+                    ),
+                    Type::Record(other_id),
+                    "a nominal type reference that is not Self and not the impl target must be left untouched"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn impl_self_for_adt_target_typechecks_body_as_the_correct_adt_not_a_guessed_record() {
+        // FA-02-035 / #1667 core regression: a `Self`-typed impl method body
+        // for an enum/ADT target must be typechecked as the actual ADT, not
+        // as a guessed Record. Pattern-matching on `self` only typechecks if
+        // `self`'s resolved type is genuinely `Type::Adt(Color)`.
+        let src = r#"
+            trait Describe {
+                fn label(self: Self) -> i32;
+            }
+
+            enum Color {
+                Red,
+                Blue,
+            }
+
+            impl Describe for Color {
+                fn label(self: Self) -> i32 {
+                    match self {
+                        Color::Red => { return 1; }
+                        Color::Blue => { return 2; }
+                    }
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        typecheck_source(src).expect(
+            "enum-Self impl method body must typecheck against the correct ADT-shaped Self",
+        );
+    }
+
+    #[test]
+    fn impl_self_conformance_mismatch_reports_the_correct_adt_type_not_record() {
+        // FA-02-035 / #1667: this is the direct, historical-bug-exposing
+        // proof. Pre-fix, `substitute_trait_self_type` always reconstructed
+        // `Type::Record(concrete_self)` for `Self`, regardless of the impl
+        // target's real nominal family. A genuine conformance mismatch on a
+        // Self-typed position for an *enum* impl target must report the
+        // concrete type as `Adt(..)`, never `Record(..)`, in its diagnostic.
+        let src = r#"
+            trait Make {
+                fn make() -> Self;
+            }
+
+            enum Color {
+                Red,
+                Blue,
+            }
+
+            impl Make for Color {
+                fn make() -> i32 {
+                    return 0;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("impl method returning i32 instead of Self must fail conformance");
+        assert!(
+            err.message.contains("Adt("),
+            "expected the conformance diagnostic to report the resolved Adt(..) type for Self, got: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains("Record("),
+            "the conformance diagnostic must never guess Record(..) for an enum impl target, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn impl_target_that_does_not_exist_rejects_even_without_any_self_reference() {
+        // FA-02-019 / #1651 core regression: a trait whose methods never
+        // reference `Self` previously gave `validate_impl_conformance` no
+        // way to independently prove the impl target exists (it had no
+        // RecordTable/AdtTable input at all). An impl for a wholly
+        // undeclared name must reject deterministically regardless.
+        let src = r#"
+            trait Marker {
+                fn ping() -> i32;
+            }
+
+            impl Marker for MissingType {
+                fn ping() -> i32 {
+                    return 1;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("impl for an undeclared target must reject even with no Self reference");
+        assert!(
+            err.message.contains("unknown nominal type 'MissingType'"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn impl_target_ambiguous_between_record_and_enum_rejects_deterministically() {
+        // The impl-target resolver must fail closed on ambiguity rather than
+        // arbitrarily preferring one nominal family, even though this
+        // program is also independently rejected later by
+        // validate_top_level_name_collisions — validate_impl_conformance
+        // runs first and must not silently pick Record.
+        let src = r#"
+            trait Marker {
+                fn ping() -> i32;
+            }
+
+            record Dup { n: i32 }
+            enum Dup { A, B }
+
+            impl Marker for Dup {
+                fn ping() -> i32 {
+                    return 1;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("impl target ambiguous between record and enum must reject");
+        assert!(
+            err.message
+                .contains("ambiguously declared as both record and enum"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn impl_target_that_exists_without_self_reference_still_typechecks() {
+        // Positive control paired with the #1651 regression above: a real,
+        // unambiguous target must still be admitted when the trait's
+        // methods never reference Self.
+        let src = r#"
+            trait Marker {
+                fn ping() -> i32;
+            }
+
+            record RealType { n: i32 }
+
+            impl Marker for RealType {
+                fn ping() -> i32 {
+                    return 1;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("impl for a real declared target must still typecheck with no Self reference");
+    }
+
+    #[test]
+    fn impl_self_nested_in_option_typechecks_end_to_end_for_enum_target() {
+        // At least one source-level conformance test for a nested Self
+        // position (Option(Self)) through the real pipeline, complementing
+        // the table-driven substitute_trait_self_type unit test above.
+        let src = r#"
+            trait MaybeSelf {
+                fn maybe(self: Self, flag: quad) -> Option(Self);
+            }
+
+            enum Color {
+                Red,
+                Blue,
+            }
+
+            impl MaybeSelf for Color {
+                fn maybe(self: Self, flag: quad) -> Option(Self) {
+                    if flag == T {
+                        return Option::Some(self);
+                    }
+                    return Option::None;
+                }
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("Option(Self) for an enum impl target must typecheck");
+    }
+
     #[test]
     fn generic_fn_with_bound_and_satisfying_impl_typechecks() {
         let src = r#"
@@ -10133,6 +10501,8 @@ fn validate_trait_coherence(impls: &[ImplDecl], arena: &AstArena) -> Result<(), 
 fn validate_impl_conformance(
     impls: &[ImplDecl],
     trait_table: &TraitTable,
+    record_table: &RecordTable,
+    adt_table: &AdtTable,
     arena: &AstArena,
 ) -> Result<(), FrontendError> {
     let self_type_var = arena.symbol_to_id.get("Self").copied();
@@ -10163,6 +10533,31 @@ fn validate_impl_conformance(
                 });
             }
         };
+        // FA-02-019 / #1651: prove the impl target itself is an admitted,
+        // unambiguous nominal type before anything else is checked. Reuses
+        // the same canonical resolver every other declared-type position in
+        // the frontend already goes through (Type::Record(name) is this
+        // codebase's uncanonicalized "unresolved nominal name" convention;
+        // canonicalize_declared_type_generic disambiguates it against
+        // RecordTable/AdtTable, or fails closed on unknown/ambiguous names).
+        // Without this, a trait whose methods never reference `Self` had no
+        // other admission check that the target type exists at all.
+        let trait_name_str = resolve_symbol_name(arena, imp.trait_name)?;
+        let for_type_str = resolve_symbol_name(arena, imp.for_type)?;
+        let resolved_self_ty = canonicalize_declared_type_generic(
+            &Type::Record(imp.for_type),
+            record_table,
+            adt_table,
+            arena,
+            &[],
+        )
+        .map_err(|err| FrontendError {
+            pos: 0,
+            message: format!(
+                "impl of trait '{}' for '{}': {}",
+                trait_name_str, for_type_str, err.message
+            ),
+        })?;
         for trait_method in &trait_decl.methods {
             match imp.methods.iter().find(|m| m.name == trait_method.name) {
                 None => {
@@ -10192,9 +10587,28 @@ fn validate_impl_conformance(
                     for ((_, actual_ty), (_, expected_ty)) in
                         m.params.iter().zip(trait_method.params.iter())
                     {
-                        let expected_ty =
-                            substitute_trait_self_type(expected_ty, self_type_var, imp.for_type);
-                        if actual_ty != &expected_ty {
+                        // FA-02-035 / #1667: substitute Self on *both* sides
+                        // through the same resolved concrete Type. The impl
+                        // side's own `Self` occurrences were parsed as the
+                        // uncanonicalized `Type::Record(imp.for_type)`
+                        // placeholder (identical to writing the target's
+                        // name directly instead of `Self`); the trait side's
+                        // were parsed as `Type::TypeVar("Self")`. Both must
+                        // resolve to the one proven concrete type before
+                        // comparison, never to a guessed `Record`.
+                        let actual_ty = substitute_trait_self_type(
+                            actual_ty,
+                            self_type_var,
+                            imp.for_type,
+                            &resolved_self_ty,
+                        );
+                        let expected_ty = substitute_trait_self_type(
+                            expected_ty,
+                            self_type_var,
+                            imp.for_type,
+                            &resolved_self_ty,
+                        );
+                        if actual_ty != expected_ty {
                             return Err(FrontendError {
                                 pos: 0,
                                 message: format!(
@@ -10207,15 +10621,25 @@ fn validate_impl_conformance(
                             });
                         }
                     }
-                    let expected_ret =
-                        substitute_trait_self_type(&trait_method.ret, self_type_var, imp.for_type);
-                    if m.ret != expected_ret {
+                    let actual_ret = substitute_trait_self_type(
+                        &m.ret,
+                        self_type_var,
+                        imp.for_type,
+                        &resolved_self_ty,
+                    );
+                    let expected_ret = substitute_trait_self_type(
+                        &trait_method.ret,
+                        self_type_var,
+                        imp.for_type,
+                        &resolved_self_ty,
+                    );
+                    if actual_ret != expected_ret {
                         return Err(FrontendError {
                             pos: 0,
                             message: format!(
                                 "impl method '{}' has return type {:?}, expected {:?} from trait '{}'",
                                 resolve_symbol_name(arena, trait_method.name)?,
-                                m.ret,
+                                actual_ret,
                                 expected_ret,
                                 resolve_symbol_name(arena, imp.trait_name)?,
                             ),
@@ -10241,17 +10665,38 @@ fn validate_impl_conformance(
     Ok(())
 }
 
+/// Replace every occurrence of `Self` with the one canonically resolved
+/// concrete impl-target `Type` (see FA-02-035 / #1667 and FA-02-019 /
+/// #1651). Two distinct parsed forms both denote `Self` and must both
+/// substitute to the identical concrete type:
+///
+/// - `Type::TypeVar(name)` where `name` is the interned "Self" symbol: how
+///   trait method signatures parse `Self` (a neutral placeholder, since no
+///   concrete impl target is known while parsing a trait body).
+/// - `Type::Record(name)` where `name == for_type`: how impl method
+///   signatures parse `Self` (this codebase's general "unresolved nominal
+///   name" convention — indistinguishable from writing the target type's
+///   name directly instead of `Self`, which is intentional: they denote the
+///   same type).
+///
+/// `concrete_self` must already be the canonically resolved `Type::Record`
+/// or `Type::Adt` for `for_type` (see `validate_impl_conformance`) — this
+/// function never itself guesses a nominal family.
 fn substitute_trait_self_type(
     ty: &Type,
     self_type_var: Option<SymbolId>,
-    concrete_self: SymbolId,
+    for_type: SymbolId,
+    concrete_self: &Type,
 ) -> Type {
     match ty {
-        Type::TypeVar(name) if Some(*name) == self_type_var => Type::Record(concrete_self),
+        Type::TypeVar(name) if Some(*name) == self_type_var => concrete_self.clone(),
+        Type::Record(name) if *name == for_type => concrete_self.clone(),
         Type::Tuple(items) => Type::Tuple(
             items
                 .iter()
-                .map(|item| substitute_trait_self_type(item, self_type_var, concrete_self))
+                .map(|item| {
+                    substitute_trait_self_type(item, self_type_var, for_type, concrete_self)
+                })
                 .collect(),
         ),
         Type::Sequence(sequence) => Type::Sequence(SequenceType {
@@ -10259,6 +10704,7 @@ fn substitute_trait_self_type(
             item: Box::new(substitute_trait_self_type(
                 sequence.item.as_ref(),
                 self_type_var,
+                for_type,
                 concrete_self,
             )),
         }),
@@ -10266,11 +10712,13 @@ fn substitute_trait_self_type(
             key: Box::new(substitute_trait_self_type(
                 map.key.as_ref(),
                 self_type_var,
+                for_type,
                 concrete_self,
             )),
             val: Box::new(substitute_trait_self_type(
                 map.val.as_ref(),
                 self_type_var,
+                for_type,
                 concrete_self,
             )),
         }),
@@ -10280,11 +10728,13 @@ fn substitute_trait_self_type(
             param: Box::new(substitute_trait_self_type(
                 closure.param.as_ref(),
                 self_type_var,
+                for_type,
                 concrete_self,
             )),
             ret: Box::new(substitute_trait_self_type(
                 closure.ret.as_ref(),
                 self_type_var,
+                for_type,
                 concrete_self,
             )),
         }),
@@ -10292,6 +10742,7 @@ fn substitute_trait_self_type(
             Box::new(substitute_trait_self_type(
                 base.as_ref(),
                 self_type_var,
+                for_type,
                 concrete_self,
             )),
             *unit,
@@ -10299,17 +10750,20 @@ fn substitute_trait_self_type(
         Type::Option(item) => Type::Option(Box::new(substitute_trait_self_type(
             item.as_ref(),
             self_type_var,
+            for_type,
             concrete_self,
         ))),
         Type::Result(ok_ty, err_ty) => Type::Result(
             Box::new(substitute_trait_self_type(
                 ok_ty.as_ref(),
                 self_type_var,
+                for_type,
                 concrete_self,
             )),
             Box::new(substitute_trait_self_type(
                 err_ty.as_ref(),
                 self_type_var,
+                for_type,
                 concrete_self,
             )),
         ),
