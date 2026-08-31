@@ -385,7 +385,7 @@ docs/spec/ui_trace_visuals.md
 docs/spec/ui_audit_projection.md
 crates/prom-ui-trace/
 crates/prom-ui-audit-view/
-apps/workbench_ts_tauri_legacy trace projection map
+historical TS/Tauri trace projection map (retired, see docs/history/workbench_ts_tauri_legacy.md)
 renderer trace lane resolver
 ```
 

@@ -215,7 +215,7 @@ Cache policy:
 - [ ] formatter integration is public-surface only or deferred
 - [ ] release console stays visibility-only
 - [ ] settings/workspace do not alter repository truth
-- [ ] no `apps/workbench_ts_tauri_legacy` implementation changes are required for first-pass docs closeout
+- [ ] legacy TS/Tauri Workbench retired from active dependency surface (see `docs/history/workbench_ts_tauri_legacy.md`)
 - [ ] no parser/typechecker/verifier/VM/runtime ownership moves into Workbench
 - [ ] no private crate coupling is introduced
 - [ ] no stable/production/release-ready claim is made
@@ -270,5 +270,5 @@ The remaining readiness surface is acceptable when:
 - formatter integration is public-surface only or deferred
 - release console is visibility-only
 - settings/workspace cannot alter repository truth
-- no `apps/workbench_ts_tauri_legacy` implementation is changed
+- legacy TS/Tauri Workbench retired per `docs/history/workbench_ts_tauri_legacy.md`
 - no release claim is made

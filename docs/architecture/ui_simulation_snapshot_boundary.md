@@ -379,8 +379,8 @@ docs/spec/ui_simulation_snapshot.md
 crates/prom-ui-snapshot/
 crates/prom-ui-simulation/
 crates/prom-ui-replay/
-apps/workbench_ts_tauri_legacy snapshot/replay views
-apps/workbench_ts_tauri_legacy simulation sandbox
+historical TS/Tauri snapshot/replay views (retired, see docs/history/workbench_ts_tauri_legacy.md)
+historical TS/Tauri simulation sandbox (retired, see docs/history/workbench_ts_tauri_legacy.md)
 ```
 
 Any implementation must preserve:

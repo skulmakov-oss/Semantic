@@ -339,7 +339,7 @@ Possible future shapes:
 docs/spec/ui_components.md
 crates/prom-ui-components/
 crates/prom-ui-layout/
-apps/workbench_ts_tauri_legacy component map
+historical TS/Tauri component map (retired, see docs/history/workbench_ts_tauri_legacy.md)
 renderer-local component resolver
 ```
 

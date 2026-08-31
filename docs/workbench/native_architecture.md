@@ -6,8 +6,7 @@ actually ships in `examples/workbench_semantic/`, not an aspiration — every
 claim below has a corresponding passing test in
 `examples/workbench_semantic/src/main.rs`'s `#[cfg(test)] mod tests`, or in
 the module it names. This is the *only* canonical Workbench: the prior
-React/TypeScript/Tauri app is archived at `apps/workbench_ts_tauri_legacy`
-(non-canonical, reference-only — see its README) and the canonical build has
+React/TypeScript/Tauri app was retired from active dependency surface (see `docs/history/workbench_ts_tauri_legacy.md` for historical provenance) and the canonical build has
 zero Node/npm/Vite/React/Tauri/WebView dependency, enforced by a real
 `cargo tree` check
 (`canonical_workbench_has_no_js_or_tauri_dependency_footprint`).

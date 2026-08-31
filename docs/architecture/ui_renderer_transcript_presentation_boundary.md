@@ -449,7 +449,7 @@ docs/spec/ui_renderer_transcript.md
 crates/prom-ui-renderer/
 crates/prom-ui-renderer-transcript/
 crates/prom-ui-presentation/
-apps/workbench_ts_tauri_legacy renderer transcript view
+historical TS/Tauri renderer transcript view (retired, see docs/history/workbench_ts_tauri_legacy.md)
 renderer-local presentation status map
 ```
 

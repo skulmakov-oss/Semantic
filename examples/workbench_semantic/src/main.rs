@@ -7223,8 +7223,8 @@ mod tests {
 
     /// The canonical Workbench must have zero Node/npm/Vite/React/Tauri/
     /// WebView footprint anywhere on its build path -- the TS/Tauri app was
-    /// archived to `apps/workbench_ts_tauri_legacy` specifically so nothing
-    /// under `examples/workbench_semantic` ever needs a JS toolchain. This
+    /// retired from active dependency surface (docs/history/workbench_ts_tauri_legacy.md)
+    /// so nothing under `examples/workbench_semantic` ever needs a JS toolchain. This
     /// is checked two ways: (1) no JS-tooling files exist in this crate's
     /// own directory, and (2) a real `cargo tree` run against this binary's
     /// actual dependency graph contains no Tauri/WebView crate, so the
