@@ -1,6 +1,19 @@
 # Generics Full Scope
 
 Status: completed M9.1 first-wave post-stable subtrack
+
+> **Current status (corrected — see Post-Close-Out Correction sections
+> below):** this "completed" self-report did not hold. Frontend generic
+> *function* declaration admission and call-site type inference/substitution
+> are implemented end-to-end (#1634, #1648, #1649). Generic record/ADT
+> *declarations* are admitted at the frontend only for zero type parameters
+> after correction (#1650) — the original claimed applied-type-argument
+> surface was never implemented. Wave 3 (IR monomorphisation / lowering) was
+> never implemented for generic functions either: the IR/SemCode boundary
+> now deterministically rejects every generic function declaration rather
+> than silently erasing its type parameters (#1717). No runtime generic
+> dispatch or monomorphisation exists anywhere in this repository today.
+
 Related roadmap package:
 `docs/roadmap/language_maturity/m8_everyday_expressiveness_roadmap.md`
 
@@ -172,9 +185,54 @@ record/ADT admission to zero type parameters (`build_record_table`/
 current normative wording. This entry is left in place as the historical
 record of this track's original scope and self-reported completion state,
 not retroactively edited. The Wave 3 (IR monomorphisation / lowering)
-portion of this track's claimed completion is separately tracked as
-FALSE-READY / INERT-CONTRACT by #1717, which remains open; #1650 addresses
+portion of this track's claimed completion was separately tracked as
+FALSE-READY / INERT-CONTRACT and is corrected below by #1717; #1650 addresses
 only the frontend record/ADT declaration-admission and type-identity
-portion of this document's overclaim. Generic *function* definitions and
-call-site instantiation, by contrast, are genuinely closed (#1634, #1648,
-#1649) and this correction does not apply to that portion of the track.
+portion of this document's overclaim. Generic *function* frontend
+declaration admission and call-site type inference/substitution, by
+contrast, are genuinely closed (#1634, #1648, #1649) and this correction
+does not apply to that portion of the track — but "genuinely closed" here
+means the frontend admission/inference surface only, not execution: whether
+a generic function's declaration is admitted into executable IR/SemCode at
+all is a separate contract, addressed below by #1717, and was not closed by
+#1634/#1648/#1649.
+
+## Post-Close-Out Correction (SSF-07 #1717)
+
+This track's "completed" status and its "deterministic monomorphisation
+policy" / IR monomorphisation pass claims (Included In This Track / Intended
+Wave Order / Wave 3, above) did not hold: no IR monomorphisation or
+specialization pass exists in `crates/sm-ir/src/passes/` (only
+`StructuralCleanup` and `CrystalFold`), and `crates/sm-ir/src/legacy_lowering.rs`
+had no check on a function's `type_params` anywhere prior to this
+correction. Whether a generic function's declaration reached IR lowering at
+all depended entirely on incidental structure: a type parameter referenced
+directly or nested in the function's own `params`/`ret` happened to fail,
+because lowering reused the non-generic `canonicalize_declared_type`
+(unaware of `type_params`) and that function rejects any `TypeVar` it
+encounters — but a type parameter declared and never referenced in its own
+signature (e.g. `fn marker<T>(x: i32) -> i32`) had no `TypeVar` for that
+incidental path to catch, and lowered as an ordinary, non-generic
+`IrFunction` with `type_params` silently discarded. That is genuine type
+erasure, not partial monomorphisation support, and it is strictly worse than
+the direct/nested cases' accidental rejection because it is *inconsistent*:
+whether a generic declaration survived to execute depended on where its own
+type parameter happened to be written, not on whether the declaration was
+generic at all — the same phase-inconsistent, false-ready pattern #1650
+found in record/ADT construction, now found at the IR execution boundary
+instead of the frontend construction boundary. Corrected by
+`ensure_function_is_ir_concrete`, a single admission check run at
+`lower_function_to_ir_with_tables` (the shared choke point every public
+`compile_program_to_ir*`/`compile_program_to_semcode*`/`lower_function_to_ir`
+entrypoint funnels through) that deterministically rejects every generic
+function declaration — used or unused type parameter, called or uncalled,
+trait-bounded or not — before any canonicalization or lowering work begins;
+see `docs/spec/foundation_source_profile_v1.md` for the current normative
+wording. This entry is left in place as the historical record of this
+track's original scope and self-reported completion state, not
+retroactively edited. No IR monomorphisation, specialization, or runtime
+generic dispatch has been implemented — that remains a distinct, larger
+undertaking, not attempted here. Generic record/ADT declarations remain
+separately narrowed to zero type parameters by #1650 and are unaffected by
+this correction, which concerns only generic *function* IR/SemCode
+execution admission.

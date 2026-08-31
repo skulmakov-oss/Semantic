@@ -702,6 +702,52 @@ pub fn lower_expr_to_ir(
     Ok(out)
 }
 
+/// FA-04-011 / #1717: sm-front's #1634/#1648/#1649 frontend generic-function
+/// contract (arity <= 1 per definition site, recursive call-site type
+/// inference/substitution, canonical `FnSig` authority) has no counterpart
+/// at the IR/SemCode executable boundary -- `crates/sm-ir/src/passes/`
+/// contains only `StructuralCleanup`/`CrystalFold`, no specialization or
+/// monomorphisation pass. Before this check, whether a generic function's
+/// declaration reached IR lowering at all depended entirely on incidental
+/// structure: `canonicalize_declared_type` (the non-generic canonicalizer
+/// used below, unaware of `func.type_params`) recursively rejects a
+/// `TypeVar` wherever one appears directly or nested in `params`/`ret`, so
+/// `fn id<T>(x: T) -> T` and `fn keep<T>(x: Option(T)) -> Option(T)`
+/// happened to fail -- with a stale, misleading "deferred to M9.1 Wave 2"
+/// diagnostic that falsely implies future support is coming, not that the
+/// current architecture has decided against runtime generic dispatch. A
+/// function whose declared type parameter never appears in its own
+/// signature (e.g. `fn marker<T>(x: i32) -> i32`) had no `TypeVar`
+/// anywhere for that incidental path to catch, and lowered as an ordinary
+/// `IrFunction` with `type_params` silently discarded -- genuine type
+/// erasure, not partial monomorphisation support, and strictly worse than
+/// the direct/nested cases' accidental rejection because it is
+/// *inconsistent*: whether a generic declaration survives to execute
+/// depended on where its own type parameter happened to be written, not on
+/// whether the declaration is generic at all.
+///
+/// This is the single, deliberate generic-execution admission boundary --
+/// every declared type parameter is rejected here, used or not, before any
+/// canonicalization or lowering work begins. `callable_family_for_type`'s
+/// own `TypeVar` arm remains a late, defense-in-depth safety net for a
+/// resolved parameter type that should be structurally impossible by the
+/// time it is reached (see its doc comment); it is not weakened or relied
+/// upon as the primary admission authority.
+fn ensure_function_is_ir_concrete(func: &Function, arena: &AstArena) -> Result<(), FrontendError> {
+    if !func.type_params.is_empty() {
+        return Err(FrontendError {
+            pos: 0,
+            message: format!(
+                "generic function '{}' is admitted by the frontend but is not \
+                 executable in the current IR contract because concrete IR \
+                 monomorphisation is not implemented",
+                resolve_symbol_name(arena, func.name)?
+            ),
+        });
+    }
+    Ok(())
+}
+
 fn lower_function_to_ir_with_tables(
     func: &Function,
     arena: &AstArena,
@@ -710,6 +756,7 @@ fn lower_function_to_ir_with_tables(
     adt_table: &AdtTable,
     impl_list: &[sm_front::ImplDecl],
 ) -> Result<LoweredFunctionBundle, FrontendError> {
+    ensure_function_is_ir_concrete(func, arena)?;
     let parent_fn_name = resolve_symbol_name(arena, func.name)?.to_string();
     let ensures_result_symbol = find_contract_result_symbol(&func.ensures, arena)?;
     let invariants_result_symbol = find_contract_result_symbol(&func.invariants, arena)?;
@@ -10112,6 +10159,274 @@ mod opt_tests {
     use crate::passes::run_default_opt_passes;
     use sm_format::semcode_decode::{decode_semcode_envelope, DecodedAccessPathComponent};
     use sm_front::parse_program;
+
+    // FA-04-011 / #1717: sm-ir's executable boundary has no monomorphisation
+    // pass, so a generic function's declaration (Function.type_params
+    // non-empty) is rejected deterministically at IR lowering -- used or
+    // unused, called or uncalled, direct or nested, single or multiply
+    // instantiated at call sites. Frontend generic-function type semantics
+    // (#1634/#1648/#1649) remain fully admitted; only IR/SemCode execution
+    // is gated. See ensure_function_is_ir_concrete's doc comment for the
+    // full architecture rationale.
+
+    fn expect_ir_generic_rejection(result: Result<Vec<IrFunction>, FrontendError>, fn_name: &str) {
+        let err = result.expect_err(&format!(
+            "a generic function ('{fn_name}') must be rejected at IR compilation"
+        ));
+        assert!(
+            err.message.contains(fn_name)
+                && err
+                    .message
+                    .contains("not executable in the current IR contract")
+                && err
+                    .message
+                    .contains("concrete IR monomorphisation is not implemented"),
+            "unexpected error: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains("deferred to M9.1 Wave 2"),
+            "rejection must come from the deliberate IR generic-execution boundary, not the \
+             old accidental, misleading construction-time TypeVar-canonicalization failure: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn compile_program_to_ir_rejects_unused_generic_type_param() {
+        // Central regression: T never appears in params/return/body types,
+        // so the pre-#1717 accidental TypeVar-canonicalization rejection
+        // never fired and this function silently lowered as an ordinary
+        // IrFunction -- pure type erasure, not partial monomorphisation
+        // support.
+        let src = r#"
+            fn marker<T>(x: i32) -> i32 {
+                return x;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        expect_ir_generic_rejection(compile_program_to_ir(src), "marker");
+    }
+
+    #[test]
+    fn compile_program_to_ir_rejects_direct_generic_type_param() {
+        let src = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+            fn main() {
+                let y: i32 = id(1);
+                let _ = y;
+                return;
+            }
+        "#;
+        expect_ir_generic_rejection(compile_program_to_ir(src), "id");
+    }
+
+    #[test]
+    fn compile_program_to_ir_rejects_nested_generic_type_param() {
+        let src = r#"
+            fn keep<T>(x: Option(T)) -> Option(T) {
+                return x;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        expect_ir_generic_rejection(compile_program_to_ir(src), "keep");
+    }
+
+    #[test]
+    fn compile_program_to_ir_rejects_generic_regardless_of_instantiation_count() {
+        // No per-call-site specialization identity exists: the same
+        // function-level rejection fires whether id() is called zero, one,
+        // or many times with different concrete types -- proving there is
+        // no monomorphisation model that could ever distinguish id<i32>
+        // from id<text>.
+        let called_multiple = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+            fn main() {
+                let a: i32 = id(1);
+                let b: text = id("x");
+                let _ = a;
+                let _ = b;
+                return;
+            }
+        "#;
+        expect_ir_generic_rejection(compile_program_to_ir(called_multiple), "id");
+
+        let never_called = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        expect_ir_generic_rejection(compile_program_to_ir(never_called), "id");
+    }
+
+    #[test]
+    fn compile_program_to_ir_rejects_generic_to_generic_delegation() {
+        // Preserves #1648's legitimate frontend behavior (asserted below)
+        // while proving IR compilation rejects the delegating wrapper
+        // itself, not only the innermost primitive it calls. `outer` is
+        // declared first so its own rejection is what surfaces (the
+        // compile loop fails on the first generic declaration it
+        // encounters; `id` would reject independently too, but ordering
+        // it second here specifically proves `outer`'s own type_params
+        // triggers admission failure rather than something specific to
+        // calling `id`).
+        let src = r#"
+            fn outer<T>(x: T) -> T {
+                return id(x);
+            }
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+            fn main() {
+                let y: i32 = outer(1);
+                let _ = y;
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        sm_front::type_check_program(&program)
+            .expect("frontend generic-to-generic delegation must remain admitted (#1648)");
+        expect_ir_generic_rejection(compile_program_to_ir(src), "outer");
+    }
+
+    #[test]
+    fn compile_program_to_ir_rejects_generic_with_satisfied_trait_bound() {
+        let src = r#"
+            trait Zeroable {
+                fn zero(v: ZeroInt) -> i32;
+            }
+            record ZeroInt { n: i32 }
+            impl Zeroable for ZeroInt {
+                fn zero(v: ZeroInt) -> i32 { return 0; }
+            }
+            fn wrap<T: Zeroable>(x: Option(T)) -> i32 {
+                return 0;
+            }
+            fn main() {
+                let v: Option(ZeroInt) = Option::Some(ZeroInt { n: 0 });
+                let y: i32 = wrap(v);
+                let _ = y;
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        sm_front::type_check_program(&program)
+            .expect("frontend must admit a bound-satisfied generic call (#1649)");
+        expect_ir_generic_rejection(compile_program_to_ir(src), "wrap");
+    }
+
+    #[test]
+    fn lower_function_to_ir_directly_rejects_generic_function() {
+        // Proves the shared owner boundary cannot be bypassed by calling
+        // the other public single-function lowering entrypoint directly.
+        let src = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let fn_table = sm_front::build_fn_table(&program).expect("fn table");
+        let func = &program.functions[0];
+        let err = lower_function_to_ir(func, &program.arena, &fn_table)
+            .expect_err("direct lower_function_to_ir must also reject a generic function");
+        assert!(
+            err.message.contains("id")
+                && err
+                    .message
+                    .contains("not executable in the current IR contract"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn compile_program_to_semcode_rejects_generic_function_before_any_emission() {
+        // compile_program_to_semcode_with_options_debug calls
+        // compile_program_to_immutable_ir, which calls the same central
+        // compile_program_to_ir_with_options_and_profile this PR gates --
+        // proving no partial/malformed SemCode artifact can ever be
+        // produced for a generic function; the rejection propagates before
+        // emit_semcode is ever reached.
+        let src = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+            fn main() {
+                let y: i32 = id(1);
+                let _ = y;
+                return;
+            }
+        "#;
+        let err = compile_program_to_semcode(src)
+            .expect_err("SemCode compilation of a generic function must reject deterministically");
+        assert!(
+            err.message.contains("id")
+                && err
+                    .message
+                    .contains("not executable in the current IR contract"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn compile_program_to_ir_admits_ordinary_non_generic_functions_with_structural_params() {
+        // Positive control: non-generic functions using the same
+        // structural families (Option, Sequence, Tuple, Record, ADT) that
+        // #1648 qualified for generic inference must remain fully
+        // executable -- only functions with a non-empty type_params are
+        // affected by this PR.
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            enum Color { Red, Green, Blue }
+            fn first(xs: Sequence(i32)) -> i32 {
+                return xs[0];
+            }
+            fn unwrap_opt(x: Option(i32)) -> i32 {
+                return 0;
+            }
+            fn make_pair(a: i32, b: text) -> (i32, text) {
+                return (a, b);
+            }
+            fn make_point(x: i32, y: i32) -> Point {
+                return Point { x: x, y: y };
+            }
+            fn pick_color() -> Color {
+                return Color::Red;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        compile_program_to_ir(src)
+            .expect("ordinary non-generic functions over structural families must lower");
+    }
+
+    #[test]
+    fn compile_program_to_ir_admits_ordinary_non_generic_identity_function() {
+        let src = r#"
+            fn inc(x: i32) -> i32 {
+                return x + 1;
+            }
+            fn main() {
+                let y: i32 = inc(1);
+                let _ = y;
+                return;
+            }
+        "#;
+        compile_program_to_ir(src).expect("ordinary non-generic function must lower");
+    }
 
     // #1732 (FA-05-002) review follow-up: proves emit_semcode_function's
     // opcode-revision tracking is genuinely mechanical (reads the real byte
