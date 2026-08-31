@@ -103,7 +103,7 @@ resource_usage field is Some(n) -> cumulative += n (saturating, never
                                     silently wrapping)
 ```
 
-`HubSessionSummary` (from `HubSession::summary()`) reports:
+The internal `HubSessionSummary` (from `HubSession::summary()`) reports:
 
 ```text
 session_id, caller_identity, capability_ceiling, privacy_ceiling, ceiling
@@ -197,7 +197,6 @@ in submission order (the same shape `smc hub invoke` produces -- see
 
 ```json
 {"session_summary": {
-  "session_id": "...", "caller_identity": "cli:local",
   "capability_ceiling": ["PrivateStorageRead", "VectorSearch"],
   "privacy_ceiling": "ProjectLocal",
   "requests_submitted": 6, "requests_admitted": 6,
@@ -206,6 +205,14 @@ in submission order (the same shape `smc hub invoke` produces -- see
   "first_logical_sequence": 0, "last_logical_sequence": 5
 }}
 ```
+
+This external presentation object is not the internal `HubSessionSummary`:
+it deliberately omits raw `session_id` and `caller_identity`. Those values
+remain internal for session validation and persisted audit provenance. Each
+per-request reply retains its public `request_id`, which is sufficient for
+consumer correlation and for later `smc hub audit --request <request-id>`
+lookup. No alternate raw, compatibility, debug, environment-controlled, or
+logging output path is defined.
 
 ### 7.3 Exit code
 

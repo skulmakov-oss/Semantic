@@ -1016,10 +1016,9 @@ fn cmd_hub_session(args: &[String]) -> Result<(), String> {
         };
         match &session_caller {
             Some(caller) if caller != &request.caller_identity => {
-                return Err(format!(
-                "InputRejected: session requests use multiple caller identities ('{}' and '{}')",
-                caller, request.caller_identity
-            ))
+                return Err(
+                    "InputRejected: session requests use multiple caller identities".to_string(),
+                )
             }
             None => session_caller = Some(request.caller_identity.clone()),
             _ => {}
@@ -1161,8 +1160,6 @@ fn cmd_hub_session(args: &[String]) -> Result<(), String> {
     let summary = session.summary();
     let summary_json = serde_json::json!({
         "session_summary": {
-            "session_id": summary.session_id.as_str(),
-            "caller_identity": summary.caller_identity.as_str(),
             "capability_ceiling": summary.capability_ceiling.iter().map(|cap| cap.as_str()).collect::<Vec<_>>(),
             "privacy_ceiling": summary.privacy_ceiling.to_string(),
             "requests_submitted": summary.requests_submitted,
@@ -1331,18 +1328,16 @@ fn cmd_hub_audit(args: &[String]) -> Result<(), String> {
     };
 
     println!("request_id: {}", record.request_id);
-    println!("session_id: {}", record.session_id);
-    println!("caller_identity: {}", record.caller_identity);
     println!("tool_id: {}", record.tool_id);
     println!("tool_version: {}", record.tool_version);
-    println!("adapter_provenance: {}", record.adapter_provenance);
+    println!("adapter_provenance: <redacted>");
     println!("operation_id: {}", record.operation_id);
     println!("execution_mode: {}", record.execution_mode);
     println!("determinism: {}", record.determinism);
     println!("trust_class: {}", record.trust_class);
     println!("privacy_class: {}", record.privacy_class);
-    println!("input_digest: {}", record.input_digest);
-    println!("output_digest: {}", record.output_digest);
+    println!("input_digest: <redacted>");
+    println!("output_digest: <redacted>");
     println!("worker_state_after: {}", record.worker_state_after);
     println!("status: {}", record.status_code);
     println!("fault_code: {}", record.fault_code.unwrap_or("-"));
