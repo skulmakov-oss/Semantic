@@ -1675,10 +1675,11 @@ fn main() {
     // applied nominal type identity (Type::Record/Type::Adt carry no type
     // arguments, and no source application syntax exists), so first-wave
     // Stable Foundation nominal admission requires zero type parameters --
-    // stricter than #1634's "at most one" arity bound, which remains
-    // correct for functions/traits' own generic surface but does not by
-    // itself make a generic record/ADT representable. Raw parser fidelity
-    // is preserved (see generic_record_type_params_are_parsed_and_stored /
+    // stricter than #1634's "at most one" arity bound, which remains the
+    // current first-wave contract for generic functions; traits and impls
+    // already require zero type parameters under their separate
+    // owner-layer contracts (#1635, #1668). Raw parser fidelity is
+    // preserved (see generic_record_type_params_are_parsed_and_stored /
     // generic_enum_type_params_are_parsed_and_stored in parser.rs, both
     // unmodified and still green): only canonical table-construction
     // admission is narrowed, mirroring the #1635 trait precedent.
