@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   # Opt into the upcoming GitHub Actions Node 24 runtime now so CI is
   # validated before the platform-wide default switch.
