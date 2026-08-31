@@ -1905,6 +1905,86 @@ fn subst_apply(ty: &Type, subst: &BTreeMap<SymbolId, Type>) -> Type {
     }
 }
 
+/// FA-02-016 / #1648 corrective: proves every `TypeVar` occurring in `ty`,
+/// directly or nested inside any currently admitted structural family,
+/// belongs to `declared` -- before `collect_generic_constraints` is ever
+/// allowed to treat it as this call's generic authority.
+///
+/// `type_check_function_with_table` accepts a caller-supplied `FnTable` (a
+/// deliberately checkable public trust boundary -- see the `malformed_fn_sig_*`
+/// regressions for #1665/#1722's precedent), so a callee's `FnSig` cannot be
+/// assumed to have been built by the canonical `build_fn_table` authority,
+/// which is the only thing that actually guarantees every `TypeVar` in
+/// `params`/`ret` was canonicalized within `type_params` scope. Without this
+/// check, a malformed `FnSig` whose `params`/`ret` nests a `TypeVar` never
+/// listed in `type_params` would have that undeclared variable silently
+/// "adopted": `collect_generic_constraints` would bind it like any other
+/// declared parameter the moment it appears structurally nested (exactly the
+/// shape the pre-#1648 shallow first pass could never see in the first
+/// place, so this was not a reachable gap before recursion was added). This
+/// is a distinct concern from `collect_generic_constraints`'s own algorithm,
+/// which is unchanged: an *actual* argument type being a bare `TypeVar` --
+/// including an enclosing generic function's own still-opaque parameter, per
+/// the comment above -- remains a legitimate binding *value*; what this
+/// function polices is which symbols the *expected*, declared signature
+/// shape is entitled to reference as a generic parameter at all.
+fn ensure_typevars_declared(
+    ty: &Type,
+    declared: &[SymbolId],
+    arena: &AstArena,
+) -> Result<(), FrontendError> {
+    match ty {
+        Type::TypeVar(id) => {
+            if declared.contains(id) {
+                Ok(())
+            } else {
+                Err(FrontendError {
+                    pos: 0,
+                    message: format!(
+                        "type variable '{}' is not declared as one of this function's type parameters",
+                        resolve_symbol_name(arena, *id)?
+                    ),
+                })
+            }
+        }
+        Type::Tuple(items) => {
+            for item in items {
+                ensure_typevars_declared(item, declared, arena)?;
+            }
+            Ok(())
+        }
+        Type::Sequence(sequence) => {
+            ensure_typevars_declared(sequence.item.as_ref(), declared, arena)
+        }
+        Type::Map(map) => {
+            ensure_typevars_declared(map.key.as_ref(), declared, arena)?;
+            ensure_typevars_declared(map.val.as_ref(), declared, arena)
+        }
+        Type::Closure(closure) => {
+            ensure_typevars_declared(closure.param.as_ref(), declared, arena)?;
+            ensure_typevars_declared(closure.ret.as_ref(), declared, arena)
+        }
+        Type::Measured(base, _) => ensure_typevars_declared(base, declared, arena),
+        Type::Option(item) => ensure_typevars_declared(item, declared, arena),
+        Type::Result(ok_ty, err_ty) => {
+            ensure_typevars_declared(ok_ty, declared, arena)?;
+            ensure_typevars_declared(err_ty, declared, arena)
+        }
+        Type::Quad
+        | Type::QVec(_)
+        | Type::Bool
+        | Type::Text
+        | Type::I32
+        | Type::U32
+        | Type::Fx
+        | Type::F64
+        | Type::RangeI32
+        | Type::Record(_)
+        | Type::Adt(_)
+        | Type::Unit => Ok(()),
+    }
+}
+
 /// Recursively derives `TypeVar` constraints for a generic call argument
 /// (FA-02-016 / #1648): given the declared, canonicalized `expected` shape
 /// (which may contain the callee's own declared type parameter, directly or
@@ -3089,6 +3169,26 @@ fn infer_expr_type(
             // -- and apply it before checking argument/return types.
             if !sig.type_params.is_empty() {
                 let fn_name = resolve_symbol_name(arena, *name)?;
+                // FA-02-016 / #1648 corrective: prove sig.type_params is an
+                // honest ownership boundary before trusting it -- table is a
+                // public, caller-suppliable FnTable, not necessarily built
+                // by build_fn_table. See ensure_typevars_declared.
+                for p in &sig.params {
+                    ensure_typevars_declared(p, &sig.type_params, arena)?;
+                }
+                ensure_typevars_declared(&sig.ret, &sig.type_params, arena)?;
+                for bound in &sig.trait_bounds {
+                    if !sig.type_params.contains(&bound.param) {
+                        return Err(FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "trait bound references type parameter '{}' which is not declared on '{}'",
+                                resolve_symbol_name(arena, bound.param)?,
+                                fn_name,
+                            ),
+                        });
+                    }
+                }
                 // First pass: recursively collect TypeVar constraints from
                 // every argument's declared (expected) shape against its
                 // actual inferred type. Operates on the final bound
@@ -3481,6 +3581,161 @@ mod tests {
     fn typecheck_source(src: &str) -> Result<(), FrontendError> {
         let program = parse_program(src)?;
         type_check_program(&program)
+    }
+
+    // FA-02-016 / #1648 corrective: `type_check_function_with_table` accepts
+    // a caller-supplied `FnTable`, so a callee's `FnSig` cannot be assumed
+    // to have been built by the canonical `build_fn_table` authority.
+    // Recursive constraint collection means an undeclared `TypeVar` nested
+    // inside a malformed `params`/`ret` shape would otherwise be silently
+    // "adopted" as this call's generic authority the moment it is
+    // structurally reachable -- exactly the shape the pre-#1648 shallow
+    // first pass could never see, so this was not a reachable gap before
+    // recursion was added. `ensure_typevars_declared` closes it.
+
+    fn generic_callee_and_caller(src: &str) -> (Program, SymbolId, Function) {
+        let program = parse_program(src).expect("parse");
+        let callee_id = *program
+            .arena
+            .symbol_to_id
+            .get("callee")
+            .expect("callee interned");
+        let caller = program
+            .functions
+            .iter()
+            .find(|f| program.arena.try_symbol_name(f.name) == Some("caller"))
+            .expect("caller exists")
+            .clone();
+        (program, callee_id, caller)
+    }
+
+    #[test]
+    fn malformed_fn_sig_undeclared_typevar_nested_in_param_fails_closed() {
+        let (mut program, callee_id, caller) = generic_callee_and_caller(
+            r#"
+                fn callee<T>(a: T) -> T { return a; }
+                fn caller() -> text {
+                    let pair: (i32, text) = (1, "x");
+                    return callee(pair);
+                }
+                fn main() { return; }
+            "#,
+        );
+        let x_sym = program.arena.intern_symbol("X");
+        let mut table = build_fn_table(&program).expect("canonical table builds");
+        let sig = table.get_mut(&callee_id).expect("callee sig present");
+        let t_sym = sig.type_params[0];
+        // type_params = [T]; params = [(T, X)]; X is never declared.
+        sig.params[0] = Type::Tuple(vec![Type::TypeVar(t_sym), Type::TypeVar(x_sym)]);
+        sig.ret = Type::TypeVar(x_sym);
+        let err = type_check_function_with_table(&caller, &program.arena, &table)
+            .expect_err("an undeclared TypeVar nested in a param must not be silently adopted");
+        assert!(
+            err.message.contains('X') && err.message.contains("not declared"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn malformed_fn_sig_undeclared_typevar_in_return_only_fails_closed() {
+        // The undeclared variable appears only in `ret`, never in any
+        // `params` position, so it never participates in constraint
+        // collection at all -- proving ensure_typevars_declared's ret check
+        // is independently required, not merely incidental coverage of the
+        // param check above.
+        let (mut program, callee_id, caller) = generic_callee_and_caller(
+            r#"
+                fn callee<T>(a: T) -> T { return a; }
+                fn caller() -> i32 {
+                    let y = callee(1);
+                    let _ = y;
+                    return 0;
+                }
+                fn main() { return; }
+            "#,
+        );
+        let x_sym = program.arena.intern_symbol("X");
+        let mut table = build_fn_table(&program).expect("canonical table builds");
+        let sig = table.get_mut(&callee_id).expect("callee sig present");
+        // type_params = [T]; params = [T] (honest, so a call still supplies
+        // a real T-binding argument); ret = Option(X); X is never declared
+        // and never appears in params.
+        sig.ret = Type::Option(Box::new(Type::TypeVar(x_sym)));
+        let err = type_check_function_with_table(&caller, &program.arena, &table)
+            .expect_err("an undeclared TypeVar appearing only in the return type must reject");
+        assert!(
+            err.message.contains('X') && err.message.contains("not declared"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn generic_to_generic_delegation_with_shared_opaque_typevar_still_typechecks() {
+        // Preserves the legitimate pattern the corrective checks above must
+        // not break: an *actual* argument type being a bare TypeVar --
+        // including an enclosing generic function's own still-opaque
+        // parameter -- remains a valid binding value, distinct from an
+        // *expected*, declared signature shape referencing an undeclared
+        // TypeVar (malformed FnSig, rejected above). `outer` and `id` both
+        // spell their type parameter `T`; since symbol names are interned
+        // program-wide, this is the same SymbolId in both declarations.
+        let src = r#"
+            fn id<T>(y: T) -> T {
+                return y;
+            }
+            fn outer<T>(x: T) -> T {
+                return id(x);
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        typecheck_source(src).expect(
+            "a generic function delegating to another generic function via its own opaque \
+             parameter must still typecheck",
+        );
+    }
+
+    #[test]
+    fn malformed_fn_sig_undeclared_typevar_in_trait_bound_fails_closed() {
+        // Same ownership gap, third site: a trait bound naming a TypeVar
+        // that isn't one of type_params.
+        let (mut program, callee_id, caller) = generic_callee_and_caller(
+            r#"
+                trait Marker {
+                    fn mark(v: Self) -> i32;
+                }
+                fn callee<T>(a: T) -> T { return a; }
+                fn caller() -> i32 {
+                    let y = callee(1);
+                    let _ = y;
+                    return 0;
+                }
+                fn main() { return; }
+            "#,
+        );
+        let x_sym = program.arena.intern_symbol("X");
+        let marker_sym = *program
+            .arena
+            .symbol_to_id
+            .get("Marker")
+            .expect("Marker interned");
+        let mut table = build_fn_table(&program).expect("canonical table builds");
+        let sig = table.get_mut(&callee_id).expect("callee sig present");
+        // type_params = [T]; trait_bounds = [X: Marker]; X is never declared.
+        sig.trait_bounds = vec![TraitBound {
+            param: x_sym,
+            bound: marker_sym,
+        }];
+        let err = type_check_function_with_table(&caller, &program.arena, &table)
+            .expect_err("a trait bound naming an undeclared type parameter must reject");
+        assert!(
+            err.message.contains('X') && err.message.contains("not declared"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     // FA-02-016 / #1648: generic call-site inference and substitution now
