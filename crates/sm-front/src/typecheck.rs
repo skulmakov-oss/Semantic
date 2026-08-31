@@ -1854,14 +1854,207 @@ fn check_stmt(
     }
 }
 
-/// Apply a type-variable substitution map to `ty` (M9.1 Wave 3).
-/// Only direct `TypeVar` occurrences are substituted; compound types
-/// that could theoretically contain a TypeVar (e.g. `Sequence<T>`) are
-/// not handled here — those are deferred to the monomorphisation pass.
+/// Apply a type-variable substitution map to `ty` (FA-02-016 / #1648),
+/// recursively, through every currently admitted structural type family. A
+/// `TypeVar` occurrence is substituted wherever it appears -- directly, or
+/// nested inside `Tuple`/`Sequence`/`Map`/`Option`/`Result`/`Closure`/
+/// `Measured` -- not only at the top level. This is frontend call-site type
+/// substitution, distinct from IR monomorphisation (#1717, unaffected):
+/// `Record`/`Adt` are nominal leaves with no applied type arguments (#1650)
+/// and are never recursed into. Exhaustive over every `Type` variant, no
+/// catch-all arm, so a future variant forces an explicit decision here
+/// rather than silently passing through unsubstituted (mirrors the
+/// exhaustiveness discipline `ensure_executable_type_supported` established
+/// for #1647).
 fn subst_apply(ty: &Type, subst: &BTreeMap<SymbolId, Type>) -> Type {
     match ty {
         Type::TypeVar(id) => subst.get(id).cloned().unwrap_or_else(|| ty.clone()),
-        _ => ty.clone(),
+        Type::Tuple(items) => Type::Tuple(items.iter().map(|t| subst_apply(t, subst)).collect()),
+        Type::Sequence(sequence) => Type::Sequence(SequenceType {
+            family: sequence.family,
+            item: Box::new(subst_apply(sequence.item.as_ref(), subst)),
+        }),
+        Type::Map(map) => Type::Map(MapType {
+            key: Box::new(subst_apply(map.key.as_ref(), subst)),
+            val: Box::new(subst_apply(map.val.as_ref(), subst)),
+        }),
+        Type::Closure(closure) => Type::Closure(ClosureType {
+            family: closure.family,
+            capture: closure.capture,
+            param: Box::new(subst_apply(closure.param.as_ref(), subst)),
+            ret: Box::new(subst_apply(closure.ret.as_ref(), subst)),
+        }),
+        Type::Measured(base, unit) => Type::Measured(Box::new(subst_apply(base, subst)), *unit),
+        Type::Option(item) => Type::Option(Box::new(subst_apply(item, subst))),
+        Type::Result(ok_ty, err_ty) => Type::Result(
+            Box::new(subst_apply(ok_ty, subst)),
+            Box::new(subst_apply(err_ty, subst)),
+        ),
+        Type::Quad
+        | Type::QVec(_)
+        | Type::Bool
+        | Type::Text
+        | Type::I32
+        | Type::U32
+        | Type::Fx
+        | Type::F64
+        | Type::RangeI32
+        | Type::Record(_)
+        | Type::Adt(_)
+        | Type::Unit => ty.clone(),
+    }
+}
+
+/// Recursively derives `TypeVar` constraints for a generic call argument
+/// (FA-02-016 / #1648): given the declared, canonicalized `expected` shape
+/// (which may contain the callee's own declared type parameter, directly or
+/// nested inside any currently admitted structural family) and the `actual`
+/// inferred type of the argument expression, walks both in lockstep and
+/// binds or checks each `TypeVar` encountered in `expected`.
+///
+/// Responsibility split: this function only collects/checks constraints
+/// (inference); `subst_apply` performs the corresponding recursive
+/// substitution afterward. Neither is a substitute for the other.
+///
+/// A structural shape mismatch (e.g. expected `Option(T)`, actual
+/// `Sequence(i32)`) yields no constraint here rather than an error -- the
+/// existing canonical second-pass parameter-compatibility check remains the
+/// final authority and rejects the call deterministically once the
+/// (unsubstituted, still-generic) expected shape provably cannot equal the
+/// concrete argument type. This avoids two independent, potentially
+/// disagreeing diagnostics for the same defect.
+///
+/// `actual` binding a declared type parameter to a bare `TypeVar` (its own,
+/// or -- since symbol names are interned program-wide -- another unrelated
+/// declaration's of the same spelling) is not an error case to special-case
+/// here: it is exactly how a generic function's body-check honestly types a
+/// call to another generic function using its own still-opaque parameter
+/// (e.g. `fn outer<T>(x: T) -> T { return id(x); }` calling
+/// `fn id<T>(y: T) -> T`), independent of and unaffected by whatever
+/// concrete type `outer` itself is later called with. `subst_apply` performs
+/// one structural substitution pass with no fixpoint re-application, so this
+/// carries no cyclic/infinite-recursion risk either way.
+fn collect_generic_constraints(
+    expected: &Type,
+    actual: &Type,
+    arena: &AstArena,
+    subst: &mut BTreeMap<SymbolId, Type>,
+) -> Result<(), FrontendError> {
+    match expected {
+        Type::TypeVar(tid) => match subst.get(tid) {
+            None => {
+                subst.insert(*tid, actual.clone());
+                Ok(())
+            }
+            Some(existing) if existing == actual => Ok(()),
+            Some(existing) => Err(FrontendError {
+                pos: 0,
+                message: format!(
+                    "conflicting generic constraints for type parameter '{}': {:?} vs {:?}",
+                    resolve_symbol_name(arena, *tid)?,
+                    existing,
+                    actual
+                ),
+            }),
+        },
+        Type::Tuple(expected_items) => {
+            if let Type::Tuple(actual_items) = actual {
+                if expected_items.len() == actual_items.len() {
+                    for (e, a) in expected_items.iter().zip(actual_items.iter()) {
+                        collect_generic_constraints(e, a, arena, subst)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        Type::Sequence(expected_seq) => {
+            if let Type::Sequence(actual_seq) = actual {
+                collect_generic_constraints(
+                    expected_seq.item.as_ref(),
+                    actual_seq.item.as_ref(),
+                    arena,
+                    subst,
+                )?;
+            }
+            Ok(())
+        }
+        Type::Map(expected_map) => {
+            if let Type::Map(actual_map) = actual {
+                collect_generic_constraints(
+                    expected_map.key.as_ref(),
+                    actual_map.key.as_ref(),
+                    arena,
+                    subst,
+                )?;
+                collect_generic_constraints(
+                    expected_map.val.as_ref(),
+                    actual_map.val.as_ref(),
+                    arena,
+                    subst,
+                )?;
+            }
+            Ok(())
+        }
+        Type::Closure(expected_closure) => {
+            if let Type::Closure(actual_closure) = actual {
+                if expected_closure.family == actual_closure.family
+                    && expected_closure.capture == actual_closure.capture
+                {
+                    collect_generic_constraints(
+                        expected_closure.param.as_ref(),
+                        actual_closure.param.as_ref(),
+                        arena,
+                        subst,
+                    )?;
+                    collect_generic_constraints(
+                        expected_closure.ret.as_ref(),
+                        actual_closure.ret.as_ref(),
+                        arena,
+                        subst,
+                    )?;
+                }
+            }
+            Ok(())
+        }
+        Type::Measured(expected_base, expected_unit) => {
+            if let Type::Measured(actual_base, actual_unit) = actual {
+                if expected_unit == actual_unit {
+                    collect_generic_constraints(expected_base, actual_base, arena, subst)?;
+                }
+            }
+            Ok(())
+        }
+        Type::Option(expected_item) => {
+            if let Type::Option(actual_item) = actual {
+                collect_generic_constraints(expected_item, actual_item, arena, subst)?;
+            }
+            Ok(())
+        }
+        Type::Result(expected_ok, expected_err) => {
+            if let Type::Result(actual_ok, actual_err) = actual {
+                collect_generic_constraints(expected_ok, actual_ok, arena, subst)?;
+                collect_generic_constraints(expected_err, actual_err, arena, subst)?;
+            }
+            Ok(())
+        }
+        // Leaves for generic-constraint purposes: no TypeVar can occur
+        // inside them, so there is nothing to bind. Record/Adt are nominal
+        // leaves specifically because they carry no applied type arguments
+        // (#1650 remains the separate, unimplemented gap for that). Final
+        // shape/value compatibility for every leaf family remains the
+        // existing canonical second-pass checker's responsibility.
+        Type::Quad
+        | Type::QVec(_)
+        | Type::Bool
+        | Type::Text
+        | Type::I32
+        | Type::U32
+        | Type::Fx
+        | Type::F64
+        | Type::RangeI32
+        | Type::Record(_)
+        | Type::Adt(_)
+        | Type::Unit => Ok(()),
     }
 }
 
@@ -2888,36 +3081,40 @@ fn infer_expr_type(
                 });
             };
             let ordered_args = reorder_call_args(*name, args, &sig, arena)?;
-            // M9.1 Wave 3: generic call-site substitution.
+            // FA-02-016 / #1648: generic call-site substitution.
             // When the function is generic (sig.type_params non-empty), infer a
             // substitution map TypeVar(T) → concrete_type from the argument
-            // expressions and apply it before checking argument/return types.
+            // expressions -- recursively through every currently admitted
+            // structural family, not only a directly TypeVar-shaped parameter
+            // -- and apply it before checking argument/return types.
             if !sig.type_params.is_empty() {
                 let fn_name = resolve_symbol_name(arena, *name)?;
-                // First pass: build substitution map from arguments whose
-                // expected param type is a TypeVar.
+                // First pass: recursively collect TypeVar constraints from
+                // every argument's declared (expected) shape against its
+                // actual inferred type. Operates on the final bound
+                // parameter slot (ordered_args.slots), never source
+                // position, so named/default-argument reordering (#1722)
+                // cannot desync inference from the ABI-bound parameter it
+                // actually corresponds to.
                 let mut subst: BTreeMap<SymbolId, Type> = BTreeMap::new();
                 for (i, arg) in ordered_args.slots.iter().enumerate() {
-                    if let Type::TypeVar(tid) = &sig.params[i] {
-                        if subst.contains_key(tid) {
-                            // Already bound — verify consistency below.
-                            continue;
-                        }
-                        let at = infer_expr_type(
-                            *arg,
-                            arena,
-                            env,
-                            table,
-                            record_table,
-                            adt_table,
-                            ret_ty.clone(),
-                            loop_stack,
-                            impl_list,
-                        )?;
-                        subst.insert(*tid, at);
-                    }
+                    let at = infer_expr_type(
+                        *arg,
+                        arena,
+                        env,
+                        table,
+                        record_table,
+                        adt_table,
+                        ret_ty.clone(),
+                        loop_stack,
+                        impl_list,
+                    )?;
+                    collect_generic_constraints(&sig.params[i], &at, arena, &mut subst)?;
                 }
-                // Every declared type parameter must have been bound.
+                // Every declared type parameter must have been bound by at
+                // least one argument -- the formal exit invariant: a
+                // successful generic call never leaves a declared type
+                // parameter with no constraint at all.
                 for tp in &sig.type_params {
                     if !subst.contains_key(tp) {
                         return Err(FrontendError {
@@ -3284,6 +3481,533 @@ mod tests {
     fn typecheck_source(src: &str) -> Result<(), FrontendError> {
         let program = parse_program(src)?;
         type_check_program(&program)
+    }
+
+    // FA-02-016 / #1648: generic call-site inference and substitution now
+    // recurse through every currently admitted structural type family
+    // (Tuple, Sequence, Map, Option, Result, Closure, Measured), not only a
+    // directly TypeVar-shaped parameter. `Record`/`Adt` remain nominal
+    // leaves (#1650 is the separate, unimplemented applied-nominal gap);
+    // IR monomorphisation (#1717) is a different layer and is untouched.
+
+    #[test]
+    fn generic_call_direct_typevar_still_works() {
+        // (Control) The pre-existing, already-working case must remain
+        // unaffected by recursing constraint collection.
+        let src = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+            fn main() {
+                let y: i32 = id(1);
+                let _ = y;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("direct TypeVar inference must still work");
+    }
+
+    #[test]
+    fn generic_call_direct_typevar_conflicting_constraints_reject() {
+        // fn same<T>(a: T, b: T) -> T; same(1, "x") must reject -- the
+        // exact reproducer named in #1648's conflict-semantics section.
+        let src = r#"
+            fn same<T>(a: T, b: T) -> T {
+                return a;
+            }
+            fn main() {
+                let y = same(1, "x");
+                let _ = y;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("conflicting direct TypeVar constraints for the same T must reject");
+        assert!(
+            err.message.contains("conflicting generic constraints") && err.message.contains('T'),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn generic_call_infers_and_substitutes_through_option() {
+        // Also proves nested return substitution: the call's inferred type
+        // must be the concrete `Option(i32)`, never `Option(TypeVar(T))` --
+        // otherwise the `let r: Option(i32) = ...` binding could not
+        // type-check.
+        let src = r#"
+            fn identity_via_option<T>(x: Option(T)) -> Option(T) {
+                return x;
+            }
+            fn main() {
+                let v: Option(i32) = Option::Some(1);
+                let r: Option(i32) = identity_via_option(v);
+                let _ = r;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("Option(T) must infer T and substitute a concrete return type");
+    }
+
+    #[test]
+    fn generic_call_infers_and_substitutes_through_sequence() {
+        // Also proves nested return substitution via the returned element.
+        let src = r#"
+            fn first<T>(xs: Sequence(T)) -> T {
+                return xs[0];
+            }
+            fn main() {
+                let items: Sequence(i32) = [1, 2, 3];
+                let y: i32 = first(items);
+                let _ = y;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("Sequence(T) must infer T and substitute a concrete return type");
+    }
+
+    #[test]
+    fn generic_call_infers_and_substitutes_through_tuple() {
+        let src = r#"
+            fn tuple_first<T>(pair: (T, i32)) -> T {
+                let (first, _) = pair;
+                return first;
+            }
+            fn main() {
+                let p: (i32, i32) = (7, 2);
+                let y: i32 = tuple_first(p);
+                let _ = y;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("(T, concrete) must infer T and substitute a concrete return type");
+    }
+
+    #[test]
+    fn generic_call_tuple_repeated_consistent_constraint_succeeds() {
+        // (T, T) + (i32, i32) -> T = i32; the same T constrained twice
+        // consistently must not be treated as a conflict.
+        let src = r#"
+            fn same_pair<T>(pair: (T, T)) -> T {
+                let (first, _) = pair;
+                return first;
+            }
+            fn main() {
+                let ok: (i32, i32) = (1, 2);
+                let y: i32 = same_pair(ok);
+                let _ = y;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("repeated consistent nested constraints must succeed");
+    }
+
+    #[test]
+    fn generic_call_tuple_repeated_conflicting_constraint_rejects() {
+        // (T, T) + (i32, text) -> conflicting constraints -> deterministic
+        // reject. No "last binding wins", no first-binding silent ignore.
+        let src = r#"
+            fn same_pair<T>(pair: (T, T)) -> T {
+                let (first, _) = pair;
+                return first;
+            }
+            fn main() {
+                let bad: (i32, text) = (1, "x");
+                let y = same_pair(bad);
+                let _ = y;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("conflicting nested tuple constraints for the same T must reject");
+        assert!(
+            err.message.contains("conflicting generic constraints") && err.message.contains('T'),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn generic_call_infers_through_result() {
+        // Result(T, concrete) is the only source-constructible Result shape
+        // under the one-parameter first-wave contract (#1634) -- a shape
+        // requiring two independent function type parameters (Result(T, E))
+        // is not fabricated here.
+        let src = r#"
+            fn result_marker<T>(r: Result(T, text)) -> i32 {
+                return 0;
+            }
+            fn main() {
+                let r: Result(i32, text) = Result::Ok(1);
+                let y: i32 = result_marker(r);
+                let _ = y;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("Result(T, concrete) must infer T");
+    }
+
+    #[test]
+    fn generic_call_cross_parameter_conflicting_constraints_reject() {
+        // fn cross_constrain<T>(a: Option(T), b: Sequence(T)); arguments
+        // constrain T differently across two different structural families
+        // -> deterministic reject.
+        let src = r#"
+            fn cross_constrain<T>(a: Option(T), b: Sequence(T)) -> i32 {
+                return 0;
+            }
+            fn main() {
+                let opt: Option(i32) = Option::Some(1);
+                let seq: Sequence(text) = ["x"];
+                let y = cross_constrain(opt, seq);
+                let _ = y;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("constraints on T from two different structural families must be checked against each other");
+        assert!(
+            err.message.contains("conflicting generic constraints") && err.message.contains('T'),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn generic_call_unused_type_param_cannot_infer() {
+        // fn unused<T>(x: i32) -> i32; T never appears in params/return, so
+        // no argument can ever constrain it -- deterministic reject at the
+        // call site. Pre-existing behavior (the "every declared type
+        // parameter must be bound" check predates this slice); confirmed
+        // unaffected by the recursive-collection change.
+        let src = r#"
+            fn unused<T>(x: i32) -> i32 {
+                return x;
+            }
+            fn main() {
+                let y: i32 = unused(5);
+                let _ = y;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("a type parameter no argument constrains must reject deterministically");
+        assert!(
+            err.message.contains("cannot infer") && err.message.contains('T'),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn generic_call_structural_mismatch_rejects_via_second_pass() {
+        // Expected Option(T), actual Sequence(i32): a structural shape
+        // mismatch yields no constraint from collect_generic_constraints
+        // (T is separately bound by the first, direct-TypeVar argument
+        // here, so this is not merely "cannot infer"); the existing
+        // canonical second-pass parameter-compatibility check is proven to
+        // be the one that actually rejects the call.
+        let src = r#"
+            fn wrap<T>(a: T, b: Option(T)) -> i32 {
+                return 0;
+            }
+            fn main() {
+                let items: Sequence(i32) = [1, 2, 3];
+                let y = wrap(1, items);
+                let _ = y;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "a structurally mismatched argument shape must still reject deterministically",
+        );
+        assert!(
+            err.message.contains("has type") && err.message.contains("expected"),
+            "expected the canonical second-pass type-mismatch diagnostic, got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn generic_call_bound_satisfied_through_nested_option() {
+        // Nested generic parameter shape (Option(T)) + bound on T +
+        // satisfying impl -> passes. type_check_function cannot exercise
+        // this positively (empty validated impl context by design, #1649);
+        // this whole-program test is the required positive-satisfaction
+        // evidence.
+        let src = r#"
+            trait Zeroable {
+                fn zero(v: ZeroInt) -> i32;
+            }
+            record ZeroInt { n: i32 }
+            impl Zeroable for ZeroInt {
+                fn zero(v: ZeroInt) -> i32 { return 0; }
+            }
+            fn wrap<T: Zeroable>(x: Option(T)) -> i32 {
+                return 0;
+            }
+            fn main() {
+                let v: Option(ZeroInt) = Option::Some(ZeroInt { n: 0 });
+                let y: i32 = wrap(v);
+                let _ = y;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("a bound on T satisfied by an impl through a nested Option(T) must pass");
+    }
+
+    #[test]
+    fn generic_call_bound_missing_through_nested_option_fails_closed() {
+        // Same nested shape, no satisfying impl -> fails closed.
+        let src = r#"
+            trait Printable {
+                fn show(v: NoPrint) -> i32;
+            }
+            record NoPrint { x: i32 }
+            record Unprinted { y: i32 }
+            fn wrap2<T: Printable>(x: Option(T)) -> i32 {
+                return 0;
+            }
+            fn main() {
+                let v: Option(Unprinted) = Option::Some(Unprinted { y: 1 });
+                let r = wrap2(v);
+                let _ = r;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "a bound on T with no satisfying impl through a nested Option(T) must fail closed",
+        );
+        assert!(
+            err.message.contains("Printable"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn type_check_function_and_type_check_program_agree_on_sequence_generic_declaration() {
+        // #1649 regression, extended to a compound family: both public
+        // entry points share the identical call-inference code path this
+        // slice changed, so their admission verdict for a Sequence(T)
+        // declaration must still agree.
+        let single_src = r#"
+            fn first<T>(xs: Sequence(T)) -> T {
+                return xs[0];
+            }
+        "#;
+        let program_src = r#"
+            fn first<T>(xs: Sequence(T)) -> T {
+                return xs[0];
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let single = parse_program(single_src).expect("parse single-function program");
+        let full = parse_program(program_src).expect("parse full program");
+        let single_result = type_check_function(&single);
+        let full_result = type_check_program(&full);
+        assert_eq!(
+            single_result.is_ok(),
+            full_result.is_ok(),
+            "type_check_function must agree with type_check_program for a Sequence(T) declaration; \
+             single={single_result:?} full={full_result:?}",
+        );
+    }
+
+    #[test]
+    fn generic_call_inference_uses_bound_parameter_slot_not_source_position() {
+        // FA-02-033 / #1722: source evaluation order != parameter binding
+        // order. `pick`'s declared order is (a: T, b: i32); this call names
+        // both arguments in the reverse source order. If inference ever
+        // read `sig.params[i]` against the source-position argument instead
+        // of `ordered_args.slots[i]` (the canonically bound slot), it would
+        // bind T from `b`'s i32 value instead of `a`'s text value, and
+        // either infer the wrong T or reject with a spurious type mismatch.
+        let src = r#"
+            fn pick<T>(a: T, b: i32) -> T {
+                return a;
+            }
+            fn main() {
+                let y: text = pick(b = 2, a = "hello");
+                let _ = y;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect(
+            "generic inference must use the bound parameter slot, not source argument position",
+        );
+    }
+
+    // Focused structural unit tests for `collect_generic_constraints` and
+    // `subst_apply` directly: Map has no literal construction syntax in
+    // source (only `map_empty()` + `map_set(...)`), and constructing a
+    // function signature exercising both Closure positions and a Measured
+    // base independently has no simple corresponding call-site source form.
+    // Per #1648's own guidance, these are tested as structural Type
+    // recursion directly rather than through invented sugar.
+
+    #[test]
+    fn collect_generic_constraints_and_subst_apply_recurse_through_map_both_positions() {
+        let program =
+            parse_program("fn f<T>(x: T) -> T { return x; } fn main() { return; }").expect("parse");
+        let t = *program.arena.symbol_to_id.get("T").expect("T interned");
+
+        // Map(text, T) + Map(text, i32) -> T = i32 (value position).
+        let expected_val = Type::Map(MapType {
+            key: Box::new(Type::Text),
+            val: Box::new(Type::TypeVar(t)),
+        });
+        let actual_val = Type::Map(MapType {
+            key: Box::new(Type::Text),
+            val: Box::new(Type::I32),
+        });
+        let mut subst = BTreeMap::new();
+        collect_generic_constraints(&expected_val, &actual_val, &program.arena, &mut subst)
+            .expect("Map value position must infer T");
+        assert_eq!(subst.get(&t), Some(&Type::I32));
+        assert_eq!(subst_apply(&expected_val, &subst), actual_val);
+
+        // Map(T, i32) + Map(text, i32) -> T = text (key position,
+        // independent generic parameter usage -- not two type variables).
+        let expected_key = Type::Map(MapType {
+            key: Box::new(Type::TypeVar(t)),
+            val: Box::new(Type::I32),
+        });
+        let actual_key = Type::Map(MapType {
+            key: Box::new(Type::Text),
+            val: Box::new(Type::I32),
+        });
+        let mut subst2 = BTreeMap::new();
+        collect_generic_constraints(&expected_key, &actual_key, &program.arena, &mut subst2)
+            .expect("Map key position must infer T");
+        assert_eq!(subst2.get(&t), Some(&Type::Text));
+        assert_eq!(subst_apply(&expected_key, &subst2), actual_key);
+    }
+
+    #[test]
+    fn collect_generic_constraints_and_subst_apply_recurse_through_closure_both_positions() {
+        let program =
+            parse_program("fn f<T>(x: T) -> T { return x; } fn main() { return; }").expect("parse");
+        let t = *program.arena.symbol_to_id.get("T").expect("T interned");
+
+        // Closure(T -> i32) + Closure(text -> i32) -> T = text (param).
+        let expected_param = Type::Closure(ClosureType {
+            family: ClosureValueFamily::UnaryDirect,
+            capture: ClosureCapturePolicy::Immutable,
+            param: Box::new(Type::TypeVar(t)),
+            ret: Box::new(Type::I32),
+        });
+        let actual_param = Type::Closure(ClosureType {
+            family: ClosureValueFamily::UnaryDirect,
+            capture: ClosureCapturePolicy::Immutable,
+            param: Box::new(Type::Text),
+            ret: Box::new(Type::I32),
+        });
+        let mut subst = BTreeMap::new();
+        collect_generic_constraints(&expected_param, &actual_param, &program.arena, &mut subst)
+            .expect("Closure param position must infer T");
+        assert_eq!(subst.get(&t), Some(&Type::Text));
+        assert_eq!(subst_apply(&expected_param, &subst), actual_param);
+
+        // Closure(i32 -> T) + Closure(i32 -> bool) -> T = bool (ret).
+        let expected_ret = Type::Closure(ClosureType {
+            family: ClosureValueFamily::UnaryDirect,
+            capture: ClosureCapturePolicy::Immutable,
+            param: Box::new(Type::I32),
+            ret: Box::new(Type::TypeVar(t)),
+        });
+        let actual_ret = Type::Closure(ClosureType {
+            family: ClosureValueFamily::UnaryDirect,
+            capture: ClosureCapturePolicy::Immutable,
+            param: Box::new(Type::I32),
+            ret: Box::new(Type::Bool),
+        });
+        let mut subst2 = BTreeMap::new();
+        collect_generic_constraints(&expected_ret, &actual_ret, &program.arena, &mut subst2)
+            .expect("Closure return position must infer T");
+        assert_eq!(subst2.get(&t), Some(&Type::Bool));
+        assert_eq!(subst_apply(&expected_ret, &subst2), actual_ret);
+    }
+
+    #[test]
+    fn collect_generic_constraints_and_subst_apply_recurse_through_measured_preserving_unit() {
+        let mut program =
+            parse_program("fn f<T>(x: T) -> T { return x; } fn main() { return; }").expect("parse");
+        let t = *program.arena.symbol_to_id.get("T").expect("T interned");
+        let ms = program.arena.intern_symbol("ms");
+
+        // Measured(T, ms) + Measured(i32, ms) -> T = i32, unit preserved.
+        let expected = Type::Measured(Box::new(Type::TypeVar(t)), ms);
+        let actual = Type::Measured(Box::new(Type::I32), ms);
+        let mut subst = BTreeMap::new();
+        collect_generic_constraints(&expected, &actual, &program.arena, &mut subst)
+            .expect("Measured base must infer T");
+        assert_eq!(subst.get(&t), Some(&Type::I32));
+        assert_eq!(subst_apply(&expected, &subst), actual);
+
+        // A different unit must not be absorbed by T: no unit erasure, no
+        // coercive magic -- yields no constraint, left to final
+        // compatibility.
+        let kg = program.arena.intern_symbol("kg");
+        let actual_wrong_unit = Type::Measured(Box::new(Type::I32), kg);
+        let mut subst2 = BTreeMap::new();
+        collect_generic_constraints(&expected, &actual_wrong_unit, &program.arena, &mut subst2)
+            .expect("a differing unit yields no constraint rather than an error here");
+        assert!(
+            subst2.is_empty(),
+            "a mismatched unit must never bind T to the other unit's base type"
+        );
+    }
+
+    #[test]
+    fn collect_generic_constraints_treats_record_and_adt_as_nominal_leaves() {
+        // #1650 boundary: Record/Adt carry no applied type arguments and
+        // are never recursed into for generic-constraint purposes.
+        let program = parse_program(
+            "record R { n: i32 } enum E { A } fn f<T>(x: T) -> T { return x; } fn main() { return; }",
+        )
+        .expect("parse");
+        let t = *program.arena.symbol_to_id.get("T").expect("T interned");
+        let r_id = program.records[0].name;
+        let e_id = program.adts[0].name;
+
+        let mut subst = BTreeMap::new();
+        collect_generic_constraints(
+            &Type::Record(r_id),
+            &Type::Record(r_id),
+            &program.arena,
+            &mut subst,
+        )
+        .expect("nominal Record leaf yields no constraint");
+        assert!(subst.is_empty());
+        collect_generic_constraints(
+            &Type::Adt(e_id),
+            &Type::Adt(e_id),
+            &program.arena,
+            &mut subst,
+        )
+        .expect("nominal Adt leaf yields no constraint");
+        assert!(subst.is_empty());
+
+        // T itself can still bind to a nominal type as an opaque leaf value
+        // from a direct TypeVar position -- this is ordinary inference, not
+        // recursion through the nominal type's (nonexistent) arguments.
+        let mut subst2 = BTreeMap::new();
+        collect_generic_constraints(
+            &Type::TypeVar(t),
+            &Type::Record(r_id),
+            &program.arena,
+            &mut subst2,
+        )
+        .expect("T binds to a nominal type as an opaque value");
+        assert_eq!(subst2.get(&t), Some(&Type::Record(r_id)));
     }
 
     fn derive_validation_plans_from_source(
