@@ -158,18 +158,18 @@ fn lift_literal_to_expected_type(
 /// Type-checks a `Program` containing exactly one function, using the same
 /// canonical `build_fn_table` FnSig-construction authority as
 /// `type_check_program` (FA-02-017 / #1649): generic `type_params` and
-/// `trait_bounds` are preserved and admitted under the identical rules the
-/// program-level path uses, never hardcoded to empty. A declaration this
-/// API rejects or admits therefore agrees with what `type_check_program`
-/// would decide for the same function embedded in a full program.
+/// `trait_bounds` are preserved under the same function-signature admission
+/// rules, never hardcoded to empty.
 ///
-/// `impl_list` is always empty here: this single-function API never builds
-/// or validates a `TraitTable`, so it has no coherence/conformance-checked
-/// impls available to satisfy a trait bound. A self-referential call inside
-/// the checked function's own body that requires bound satisfaction fails
-/// closed for that reason -- this API cannot honestly prove it, and does
-/// not pretend to. A bounded generic function's own declaration/signature
-/// is unaffected either way, since bounds are consulted only at call sites.
+/// This does not make the two public APIs semantically identical:
+/// `type_check_function` does not build or validate trait/impl coherence and
+/// intentionally checks the function with an empty validated impl context
+/// (`impl_list` is always `&[]` here). Therefore checks that require impl
+/// evidence -- such as a self-referential call inside the checked function's
+/// own body that needs trait-bound satisfaction -- may fail closed here even
+/// when a fully validated `type_check_program` context could prove them. A
+/// bounded generic function's own declaration/signature is unaffected either
+/// way, since bounds are consulted only at call sites.
 pub fn type_check_function(program: &Program) -> Result<(), FrontendError> {
     validate_executable_imports(program)?;
     if program.functions.len() != 1 {
