@@ -1,7 +1,7 @@
 task:
   id: SECURITY-MAINT-1866-HUB-AUDIT-CONFIDENTIALITY
-  title: "security(hub): prevent cleartext exposure of sensitive audit correlation metadata"
-  type: security_maintenance_hub_audit_confidentiality
+  title: "security(hub): prevent cleartext exposure of sensitive Hub CLI metadata"
+  type: security_maintenance_hub_cli_confidentiality
   mode: active
   authorized_by: >-
     Repository owner direct authorization for Issue #1866 (2026-08-31):
@@ -10,9 +10,10 @@ task:
 
 intent:
   summary: >-
-    Define and enforce a safe default presentation contract for smc hub audit
-    without changing persisted audit/provenance records, deterministic request
-    lookup, Hub admission, capabilities, storage, or other Hub semantics.
+    Define and enforce safe default presentation contracts for smc hub audit
+    and smc hub session without changing persisted audit/provenance records,
+    deterministic request lookup, Hub admission, capabilities, storage, or
+    other Hub semantics.
 
 scope:
   allowed_paths:
@@ -53,4 +54,5 @@ constraints:
   preserve_deterministic_request_lookup: true
   no_raw_output_fallback_or_compatibility_path: true
   no_codeql_suppression_or_dismissal: true
+  no_raw_session_or_caller_cli_presentation: true
   restore_ssf_07_harness_before_pr: true
