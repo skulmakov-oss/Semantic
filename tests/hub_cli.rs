@@ -240,42 +240,48 @@ fn audit_lookup_omits_sensitive_correlation_and_identity_metadata() {
     assert!(invoke.status.success(), "{:?}", invoke);
 
     let audit = smc_in(&dir, &["hub", "audit", "--request", request_id]);
-    assert!(audit.status.success(), "{:?}", audit);
+    assert!(audit.status.success(), "audit lookup must succeed");
     let audit_text = String::from_utf8_lossy(&audit.stdout);
     assert!(
         audit_text.contains(&format!("request_id: {request_id}")),
-        "audit stdout must retain its public lookup handle: {audit_text}"
+        "audit stdout must retain its public lookup handle"
     );
     for sensitive_value in [session_id, caller_identity] {
         assert!(
             !audit_text.contains(sensitive_value),
-            "audit stdout leaked {sensitive_value:?}: {audit_text}"
+            "audit stdout leaked sensitive metadata"
         );
     }
     assert!(
         audit_text.contains("adapter_provenance: <redacted>"),
-        "{audit_text}"
+        "audit stdout must redact adapter provenance"
     );
     assert!(
         audit_text.contains("input_digest: <redacted>"),
-        "{audit_text}"
+        "audit stdout must redact input digest"
     );
     assert!(
         audit_text.contains("output_digest: <redacted>"),
-        "{audit_text}"
+        "audit stdout must redact output digest"
     );
-    assert!(!audit_text.contains("fnv1a64:"), "{audit_text}");
+    assert!(
+        !audit_text.contains("fnv1a64:"),
+        "audit stdout must not expose a correlation fingerprint"
+    );
     assert!(
         audit_text.contains("tool_id: vector.turbovec"),
-        "{audit_text}"
+        "audit stdout must retain safe tool metadata"
     );
-    assert!(audit_text.contains("status: Success"), "{audit_text}");
+    assert!(
+        audit_text.contains("status: Success"),
+        "audit stdout must retain safe status metadata"
+    );
 
     let persisted_audit = fs::read_to_string(dir.join(".semantic/hub/audit.log")).unwrap();
     for persisted_value in [request_id, session_id, caller_identity] {
         assert!(
             persisted_audit.contains(persisted_value),
-            "audit persistence unexpectedly lost {persisted_value:?}"
+            "audit persistence unexpectedly lost required provenance"
         );
     }
 }
@@ -1288,14 +1294,20 @@ fn session_summary_omits_sensitive_session_and_caller_metadata() {
             output_path.to_str().unwrap(),
         ],
     );
-    assert!(output.status.success(), "{:?}", output);
-    assert!(output.stdout.is_empty(), "{:?}", output);
-    assert!(output.stderr.is_empty(), "{:?}", output);
+    assert!(output.status.success(), "session command must succeed");
+    assert!(
+        output.stdout.is_empty(),
+        "session command must not use stdout with --out"
+    );
+    assert!(
+        output.stderr.is_empty(),
+        "session command must not use stderr with --out"
+    );
     let output_text = fs::read_to_string(&output_path).unwrap();
     for sensitive_value in [session_id, caller_identity] {
         assert!(
             !output_text.contains(sensitive_value),
-            "session stdout leaked {sensitive_value:?}: {output_text}"
+            "session output leaked sensitive metadata"
         );
     }
 
@@ -1306,8 +1318,14 @@ fn session_summary_omits_sensitive_session_and_caller_metadata() {
     assert_eq!(lines.len(), 2, "one reply plus one summary");
     assert_eq!(lines[0]["request_id"], request_id);
     let summary = &lines[1]["session_summary"];
-    assert!(summary.get("session_id").is_none(), "{summary}");
-    assert!(summary.get("caller_identity").is_none(), "{summary}");
+    assert!(
+        summary.get("session_id").is_none(),
+        "session summary must omit session ID"
+    );
+    assert!(
+        summary.get("caller_identity").is_none(),
+        "session summary must omit caller identity"
+    );
     assert_eq!(summary["requests_submitted"], 1);
     assert_eq!(summary["requests_admitted"], 1);
 
@@ -1315,7 +1333,7 @@ fn session_summary_omits_sensitive_session_and_caller_metadata() {
     for persisted_value in [request_id, session_id, caller_identity] {
         assert!(
             persisted_audit.contains(persisted_value),
-            "audit persistence unexpectedly lost {persisted_value:?}"
+            "audit persistence unexpectedly lost required provenance"
         );
     }
 }
@@ -1350,16 +1368,19 @@ fn session_mixed_caller_rejection_does_not_echo_caller_identity() {
         &dir,
         &["hub", "session", "--requests", requests.to_str().unwrap()],
     );
-    assert!(!output.status.success(), "{:?}", output);
+    assert!(
+        !output.status.success(),
+        "mixed-caller session must be rejected"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.starts_with("InputRejected: session requests use multiple caller identities"),
-        "{stderr}"
+        "mixed-caller rejection must retain its public error classification"
     );
     for sensitive_value in [first_caller, second_caller] {
         assert!(
             !stderr.contains(sensitive_value),
-            "session stderr leaked {sensitive_value:?}: {stderr}"
+            "session stderr leaked sensitive metadata"
         );
     }
     assert!(output.stdout.is_empty());
