@@ -9,8 +9,10 @@ export of the canonical audit record.
 
 The persisted audit format remains defined by
 [`hub_api_v0.md`](hub_api_v0.md#10-canonical-audit-encoding). In particular,
-the record retains its request, session, and caller fields for provenance and
-lookup. Default stdout deliberately does not disclose those fields.
+the record retains its request, session, and caller fields for provenance.
+`request_id` remains the public deterministic lookup handle and is emitted
+verbatim by default audit output. Raw `session_id` and `caller_identity` are
+not disclosed by the presentation layer.
 
 ## Field classification
 
@@ -49,7 +51,9 @@ without receiving a raw session or caller value.
 ## Boundary
 
 The command is for default human inspection of tool, operation, execution,
-classification, worker, and outcome data. It must not expose audit correlation
-handles, caller identity, unbounded adapter text, or weak content-correlation
-fingerprints. Callers retain the request ID supplied to the command and can
-repeat the same deterministic lookup without the audit response echoing it.
+classification, worker, and outcome data. It must not expose raw session
+correlation handles, caller identity, unbounded adapter text, or weak
+content-correlation fingerprints. The validated `request_id` remains the
+public lookup/correlation handle and may be echoed verbatim. Callers retain
+the request ID supplied to the command; the audit response may echo that same
+validated public handle, and it can be reused for deterministic lookup.
