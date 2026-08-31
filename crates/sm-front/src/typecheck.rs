@@ -155,6 +155,21 @@ fn lift_literal_to_expected_type(
     }
 }
 
+/// Type-checks a `Program` containing exactly one function, using the same
+/// canonical `build_fn_table` FnSig-construction authority as
+/// `type_check_program` (FA-02-017 / #1649): generic `type_params` and
+/// `trait_bounds` are preserved and admitted under the identical rules the
+/// program-level path uses, never hardcoded to empty. A declaration this
+/// API rejects or admits therefore agrees with what `type_check_program`
+/// would decide for the same function embedded in a full program.
+///
+/// `impl_list` is always empty here: this single-function API never builds
+/// or validates a `TraitTable`, so it has no coherence/conformance-checked
+/// impls available to satisfy a trait bound. A self-referential call inside
+/// the checked function's own body that requires bound satisfaction fails
+/// closed for that reason -- this API cannot honestly prove it, and does
+/// not pretend to. A bounded generic function's own declaration/signature
+/// is unaffected either way, since bounds are consulted only at call sites.
 pub fn type_check_function(program: &Program) -> Result<(), FrontendError> {
     validate_executable_imports(program)?;
     if program.functions.len() != 1 {
@@ -163,28 +178,32 @@ pub fn type_check_function(program: &Program) -> Result<(), FrontendError> {
             message: "type_check_function expects exactly one function in program".to_string(),
         });
     }
-    let mut table = BTreeMap::new();
+    // FA-02-017 / #1649: build the FnSig through the same canonical
+    // build_fn_table authority type_check_program uses, instead of
+    // reconstructing a second, hand-rolled FnSig here. The previous manual
+    // construction canonicalized params/ret through the non-generic
+    // canonicalize_declared_type (which unconditionally rejects TypeVar)
+    // and hardcoded type_params/trait_bounds to empty regardless of what
+    // the parsed Function actually declared -- so this API silently
+    // disagreed with the canonical program-level admission contract for
+    // every generic function, rejecting realistic generic declarations
+    // the canonical path admits (or, for the rare case a declaration did
+    // canonicalize, silently discarding metadata a self-referential call
+    // would have needed), rather than honestly preserving or explicitly
+    // rejecting generic metadata. impl_list stays empty deliberately below:
+    // this single-function API never builds or validates a TraitTable, so
+    // it has no coherence/conformance-checked impls to use for bound
+    // satisfaction -- reading program.impls unchecked here would let an
+    // unvalidated impl silently "prove" a bound the canonical path never
+    // confirmed. A generic function's own declaration/body is unaffected
+    // either way (bounds are consulted only at call sites); a
+    // self-referential call requiring bound satisfaction fails closed
+    // through the existing empty-impl_list path instead.
     let record_table = build_record_table(program)?;
     let adt_table = build_adt_table(program)?;
     let schema_table = build_schema_table(program)?;
+    let table = build_fn_table(program)?;
     let func = &program.functions[0];
-    table.insert(
-        func.name,
-        FnSig {
-            type_params: Vec::new(),
-            trait_bounds: Vec::new(),
-            params: func
-                .params
-                .iter()
-                .map(|(_, t)| {
-                    canonicalize_declared_type(t, &record_table, &adt_table, &program.arena)
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-            param_names: Some(func.params.iter().map(|(name, _)| *name).collect()),
-            param_defaults: Some(func.param_defaults.clone()),
-            ret: canonicalize_declared_type(&func.ret, &record_table, &adt_table, &program.arena)?,
-        },
-    );
     validate_top_level_name_collisions(program, &table, &record_table, &adt_table, &schema_table)?;
     validate_record_declarations(program, &record_table, &adt_table)?;
     validate_adt_declarations(program, &record_table, &adt_table)?;
@@ -3451,6 +3470,148 @@ mod tests {
         let (_, caller) = callee_and_caller(&program);
         type_check_function_with_table(caller, &program.arena, &table)
             .expect("well-formed FnSig via the public FnTable API must still typecheck");
+    }
+
+    // FA-02-017 / #1649: type_check_function() previously reconstructed its
+    // own FnSig by hand, canonicalizing params/ret through the non-generic
+    // canonicalize_declared_type (which unconditionally rejects TypeVar)
+    // and hardcoding type_params/trait_bounds to empty regardless of what
+    // the parsed Function actually declared. It now builds its FnTable
+    // through the same canonical build_fn_table() authority
+    // type_check_program() uses, so this single-function API's admission
+    // verdict for generic declarations matches the canonical program path
+    // instead of silently disagreeing with it.
+
+    fn typecheck_single_function_source(src: &str) -> Result<(), FrontendError> {
+        let program = parse_program(src)?;
+        type_check_function(&program)
+    }
+
+    #[test]
+    fn type_check_function_admits_ordinary_non_generic_function() {
+        // (A) Positive control: unrelated to #1649, must remain unchanged.
+        let src = r#"
+            fn add(a: i32, b: i32) -> i32 {
+                return a + b;
+            }
+        "#;
+        typecheck_single_function_source(src)
+            .expect("ordinary non-generic function must typecheck");
+    }
+
+    #[test]
+    fn type_check_function_admits_generic_function_matching_canonical_admission() {
+        // (B) Central regression: a generic function whose parameter uses
+        // its own type parameter directly. Pre-fix, this rejected with
+        // "type variable 'T' is not admitted in the executable type-check
+        // path yet" even though the canonical program path admits it.
+        let src = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+        "#;
+        typecheck_single_function_source(src).expect(
+            "a generic function admitted by the canonical program path must not be \
+             rejected by type_check_function",
+        );
+    }
+
+    #[test]
+    fn type_check_function_preserves_generic_trait_bounds_in_canonical_fn_table() {
+        // (C) Trait bounds must not be erased to an empty Vec. This tests
+        // metadata preservation, not bound satisfaction (satisfaction is a
+        // call-site concern this single-function API never performs --
+        // see generic_fn_with_bound_and_satisfying_impl_typechecks above
+        // for that separate contract).
+        let src = r#"
+            trait Zeroable {
+                fn zero(v: ZeroInt) -> i32;
+            }
+            record ZeroInt { n: i32 }
+            fn make_zero<T: Zeroable>(v: T) -> T {
+                return v;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        type_check_function(&program).expect(
+            "a bounded generic declaration must not be rejected merely for carrying a bound",
+        );
+        let table = build_fn_table(&program).expect("canonical table builds");
+        let fn_id = *program
+            .arena
+            .symbol_to_id
+            .get("make_zero")
+            .expect("make_zero interned");
+        let sig = table.get(&fn_id).expect("make_zero signature present");
+        assert!(
+            !sig.type_params.is_empty(),
+            "type_params must not be erased to empty"
+        );
+        assert_eq!(
+            sig.trait_bounds.len(),
+            1,
+            "trait_bounds must not be erased to empty"
+        );
+    }
+
+    #[test]
+    fn type_check_function_admits_generic_parameter_nested_in_compound_type() {
+        // (D) Catches a fake repair that only handles a direct top-level
+        // TypeVar param but still falls back to non-generic canonicalization
+        // for a type parameter nested inside a compound type.
+        let src = r#"
+            fn first<T>(x: Option(T)) -> i32 {
+                return 0;
+            }
+        "#;
+        typecheck_single_function_source(src)
+            .expect("a type parameter nested inside Option must not be erased or rejected");
+    }
+
+    #[test]
+    fn type_check_function_admits_record_parameter_via_canonical_identity() {
+        // (E) Existing non-generic behavior: nominal Record signatures must
+        // continue to canonicalize and typecheck exactly as before.
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn make(x: i32, y: i32) -> Point {
+                return Point { x: x, y: y };
+            }
+        "#;
+        typecheck_single_function_source(src).expect("record-typed function must typecheck");
+    }
+
+    #[test]
+    fn type_check_function_agrees_with_canonical_program_path_for_generic_admission() {
+        // (F) Public API consistency regression: directly compares the
+        // single-function API's admission verdict against
+        // type_check_program's verdict for the identical generic
+        // declaration. Fails if type_check_function ever again hand-builds
+        // an FnSig with type_params/trait_bounds hardcoded to empty, since
+        // that reintroduces exactly the divergence this test detects.
+        let single_src = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+        "#;
+        let program_src = r#"
+            fn id<T>(x: T) -> T {
+                return x;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let single = parse_program(single_src).expect("parse single-function program");
+        let full = parse_program(program_src).expect("parse full program");
+        let single_result = type_check_function(&single);
+        let full_result = type_check_program(&full);
+        assert_eq!(
+            single_result.is_ok(),
+            full_result.is_ok(),
+            "type_check_function must agree with type_check_program's admission verdict \
+             for the same generic declaration; single={single_result:?} full={full_result:?}",
+        );
     }
 
     #[test]
