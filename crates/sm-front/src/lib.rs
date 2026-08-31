@@ -563,18 +563,32 @@ pub fn build_record_table(program: &Program) -> Result<RecordTable, FrontendErro
                 ),
             });
         }
-        // FA-02-002 / #1634: first-wave generic definitions admit at most
-        // one type parameter (see build_fn_table above for the identical
-        // rule and its rationale). The parser has no arity limit, so
-        // admission is enforced here at table-construction time.
-        if record.type_params.len() > 1 {
+        // FA-02-018 / #1650: the current nominal Type representation
+        // (Type::Record(SymbolId)) has no applied type arguments, and no
+        // source syntax exists to write one (parse_type's `Foo`/`Foo(Args)`
+        // dispatch is hardcoded per builtin family -- Option/Result/
+        // Sequence/Map/Closure -- with no general nominal-application rule
+        // for a user-declared name; a bare declared name always parses as
+        // an unparameterized Type::Record). A record declaring type
+        // parameters therefore has no faithful concrete type identity any
+        // use site could ever construct: canonicalize_declared_type (the
+        // non-generic canonicalizer every record-literal/field-access call
+        // site already uses) unconditionally rejects a declaration
+        // TypeVar, so every construction attempt already fails today --
+        // just not at the declaration boundary, and not with an honest
+        // diagnostic. Reject the declaration itself, superseding #1634's
+        // narrower ">1" arity check with this stricter zero-arity contract
+        // (an admitted first-wave generic record is not merely
+        // arity-bounded, it does not exist yet at all), mirroring the
+        // zero-arity precedent #1635 established for traits.
+        if !record.type_params.is_empty() {
             return Err(FrontendError {
                 pos: 0,
                 message: format!(
-                    "record '{}' declares {} type parameters; first-wave generic \
-                     definitions admit at most one",
-                    resolve_symbol_name(&program.arena, record.name)?,
-                    record.type_params.len()
+                    "generic record '{}' is not part of the current Stable Foundation \
+                     nominal type contract because applied record type arguments are \
+                     not representable",
+                    resolve_symbol_name(&program.arena, record.name)?
                 ),
             });
         }
@@ -596,18 +610,21 @@ pub fn build_adt_table(program: &Program) -> Result<AdtTable, FrontendError> {
                 ),
             });
         }
-        // FA-02-002 / #1634: first-wave generic definitions admit at most
-        // one type parameter (see build_fn_table above for the identical
-        // rule and its rationale). The parser has no arity limit, so
-        // admission is enforced here at table-construction time.
-        if adt.type_params.len() > 1 {
+        // FA-02-018 / #1650: identical rationale to build_record_table
+        // above -- Type::Adt(SymbolId) has no applied type arguments, no
+        // source application syntax exists, and canonicalize_declared_type
+        // already unconditionally rejects a payload TypeVar at every
+        // constructor call site, so a generic ADT's declaration is
+        // admitted while every construction already fails. Supersedes
+        // #1634's ">1" check with this stricter zero-arity contract.
+        if !adt.type_params.is_empty() {
             return Err(FrontendError {
                 pos: 0,
                 message: format!(
-                    "enum '{}' declares {} type parameters; first-wave generic \
-                     definitions admit at most one",
-                    resolve_symbol_name(&program.arena, adt.name)?,
-                    adt.type_params.len()
+                    "generic enum '{}' is not part of the current Stable Foundation \
+                     nominal type contract because applied enum type arguments are \
+                     not representable",
+                    resolve_symbol_name(&program.arena, adt.name)?
                 ),
             });
         }
@@ -1654,8 +1671,24 @@ fn main() {
         );
     }
 
+    // FA-02-018 / #1650: generic Record/ADT declarations have no faithful
+    // applied nominal type identity (Type::Record/Type::Adt carry no type
+    // arguments, and no source application syntax exists), so first-wave
+    // Stable Foundation nominal admission requires zero type parameters --
+    // stricter than #1634's "at most one" arity bound, which remains the
+    // current first-wave contract for generic functions; traits and impls
+    // already require zero type parameters under their separate
+    // owner-layer contracts (#1635, #1668). Raw parser fidelity is
+    // preserved (see generic_record_type_params_are_parsed_and_stored /
+    // generic_enum_type_params_are_parsed_and_stored in parser.rs, both
+    // unmodified and still green): only canonical table-construction
+    // admission is narrowed, mirroring the #1635 trait precedent.
+
     #[test]
-    fn build_record_table_admits_single_type_param() {
+    fn build_record_table_rejects_generic_record_with_single_type_param() {
+        // Central #1650 regression: a single, otherwise first-wave-legal
+        // type parameter is still rejected -- generic record admission is
+        // zero-arity, not merely bounded by #1634's bare arity limit.
         let program = parse_program(
             r#"
                 record Box<T> { value: T }
@@ -1663,7 +1696,19 @@ fn main() {
             "#,
         )
         .expect("parse");
-        build_record_table(&program).expect("single type parameter record must remain admitted");
+        let err = build_record_table(&program)
+            .expect_err("a generic record must not be admitted -- no applied type identity exists");
+        assert!(
+            err.message.contains("Box")
+                && err
+                    .message
+                    .contains("not part of the current Stable Foundation")
+                && err
+                    .message
+                    .contains("applied record type arguments are not representable"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -1679,15 +1724,17 @@ fn main() {
             .expect_err("a record declaring two type parameters must reject");
         assert!(
             err.message.contains("Pair")
-                && err.message.contains("2 type parameters")
-                && err.message.contains("at most one"),
+                && err
+                    .message
+                    .contains("not part of the current Stable Foundation"),
             "unexpected error: {}",
             err.message
         );
     }
 
     #[test]
-    fn build_adt_table_admits_single_type_param() {
+    fn build_adt_table_rejects_generic_adt_with_single_type_param() {
+        // Central #1650 regression, ADT side.
         let program = parse_program(
             r#"
                 enum Maybe<T> { Some(T), None }
@@ -1695,7 +1742,19 @@ fn main() {
             "#,
         )
         .expect("parse");
-        build_adt_table(&program).expect("single type parameter enum must remain admitted");
+        let err = build_adt_table(&program)
+            .expect_err("a generic enum must not be admitted -- no applied type identity exists");
+        assert!(
+            err.message.contains("Maybe")
+                && err
+                    .message
+                    .contains("not part of the current Stable Foundation")
+                && err
+                    .message
+                    .contains("applied enum type arguments are not representable"),
+            "unexpected error: {}",
+            err.message
+        );
     }
 
     #[test]
@@ -1711,8 +1770,9 @@ fn main() {
             .expect_err("an enum declaring two type parameters must reject");
         assert!(
             err.message.contains("Either")
-                && err.message.contains("2 type parameters")
-                && err.message.contains("at most one"),
+                && err
+                    .message
+                    .contains("not part of the current Stable Foundation"),
             "unexpected error: {}",
             err.message
         );
