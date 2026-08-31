@@ -363,7 +363,7 @@ Possible future shapes:
 docs/spec/ui_layout_primitives.md
 crates/prom-ui-layout/
 crates/prom-ui-style/
-apps/workbench_ts_tauri_legacy layout maps
+historical TS/Tauri layout maps (retired, see docs/history/workbench_ts_tauri_legacy.md)
 renderer-local layout resolver
 ```
 

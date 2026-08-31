@@ -12,9 +12,7 @@ Workbench direction (`semantic-workbench-v0.1.0-beta1`, March 2026)
 with the native Semantic + Prom UI + private Iced substrate
 architecture.
 
-The old TS/Tauri implementation remains archived at
-`apps/workbench_ts_tauri_legacy` as a non-authoritative reference and
-is not the production Workbench path.
+The old TS/Tauri implementation was retired from the active dependency graph (see `docs/history/workbench_ts_tauri_legacy.md` for historical provenance) and is not part of the active main dependency surface.
 
 ## What this release introduces
 

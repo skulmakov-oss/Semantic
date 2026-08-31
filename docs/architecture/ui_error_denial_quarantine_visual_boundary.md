@@ -452,7 +452,7 @@ docs/spec/ui_error_denial_quarantine.md
 crates/prom-ui-status/
 crates/prom-ui-errors/
 crates/prom-ui-components/
-apps/workbench_ts_tauri_legacy error/quarantine views
+historical TS/Tauri error/quarantine views (retired, see docs/history/workbench_ts_tauri_legacy.md)
 renderer status projection map
 ```
 
