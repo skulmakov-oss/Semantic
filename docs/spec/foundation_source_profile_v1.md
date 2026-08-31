@@ -353,6 +353,33 @@ narrowed. No applied nominal type representation, source instantiation
 syntax, or field/payload monomorphisation has been implemented — that
 remains a distinct, larger undertaking, not attempted here.
 
+Generic *function* declarations that pass the frontend admission described
+above are not part of the Included executable surface either: no IR
+monomorphisation or specialization pass exists in `crates/sm-ir/src/passes/`
+(only `StructuralCleanup` and `CrystalFold`), so a generic function's
+`type_params` had no counterpart admission check anywhere in
+`crates/sm-ir/src/legacy_lowering.rs` prior to SSF-07 #1717. Before that fix,
+whether a generic function's declaration reached IR lowering at all depended
+on incidental structure rather than a deliberate boundary: a type parameter
+referenced directly or nested in `params`/`ret` happened to fail because
+lowering reused the non-generic `canonicalize_declared_type`, which rejects
+any `TypeVar`, but a type parameter declared and never referenced in its own
+signature (e.g. `fn marker<T>(x: i32) -> i32`) had no `TypeVar` for that
+incidental path to catch and silently lowered as an ordinary, non-generic
+`IrFunction` — `type_params` discarded, not preserved, checked, or
+specialized. `ensure_function_is_ir_concrete`, the single admission check
+`lower_function_to_ir_with_tables` now runs first (the shared choke point
+every public `compile_program_to_ir*`/`compile_program_to_semcode*`/
+`lower_function_to_ir` entrypoint funnels through), rejects every generic
+function declaration deterministically and uniformly — used or unused type
+parameter, called or uncalled, trait-bounded or not — with a diagnostic
+naming the function and stating that concrete IR monomorphisation is not
+implemented. This closes the false-ready surface without implementing
+monomorphisation: generic function *declarations* and call-site *type
+inference* remain frontend-admitted and closed (#1634, #1648, #1649), but
+executing one is deterministically rejected, not silently erased, until a
+real specialization pass exists.
+
 ## Deterministically unsupported forms
 
 Forms with no admitted current implementation must fail before execution with a
