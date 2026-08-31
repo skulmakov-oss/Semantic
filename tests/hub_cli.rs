@@ -210,6 +210,67 @@ fn full_workflow_create_insert_search_filter_remove_search_again_audit() {
     assert_eq!(stdout_json(&describe_after_reset)["payload"]["len"], 0);
 }
 
+#[test]
+fn audit_lookup_omits_sensitive_correlation_and_identity_metadata() {
+    let dir = temp_dir("hub_cli_audit_confidentiality");
+    let request_id = "confidential-request-id";
+    let session_id = "confidential-session-id";
+    let caller_identity = "confidential-caller-identity";
+    let request = serde_json::json!({
+        "request_id": request_id,
+        "session_id": session_id,
+        "caller_identity": caller_identity,
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "confidentiality-docs", "dim": 8, "bit_width": 4}
+    });
+    let input = dir.join("confidentiality_request.json");
+    fs::write(&input, serde_json::to_vec(&request).unwrap()).unwrap();
+
+    let invoke = smc_in(
+        &dir,
+        &[
+            "hub",
+            "invoke",
+            "vector.turbovec",
+            "vector.index.create",
+            "--input",
+            input.to_str().unwrap(),
+        ],
+    );
+    assert!(invoke.status.success(), "{:?}", invoke);
+
+    let audit = smc_in(&dir, &["hub", "audit", "--request", request_id]);
+    assert!(audit.status.success(), "{:?}", audit);
+    let audit_text = String::from_utf8_lossy(&audit.stdout);
+    assert!(
+        audit_text.contains(&format!("request_id: {request_id}")),
+        "audit stdout must retain its public lookup handle: {audit_text}"
+    );
+    for sensitive_value in [session_id, caller_identity] {
+        assert!(
+            !audit_text.contains(sensitive_value),
+            "audit stdout leaked {sensitive_value:?}: {audit_text}"
+        );
+    }
+    assert!(
+        audit_text.contains("adapter_provenance: <redacted>"),
+        "{audit_text}"
+    );
+    assert!(audit_text.contains("input_digest: <redacted>"), "{audit_text}");
+    assert!(audit_text.contains("output_digest: <redacted>"), "{audit_text}");
+    assert!(!audit_text.contains("fnv1a64:"), "{audit_text}");
+    assert!(audit_text.contains("tool_id: vector.turbovec"), "{audit_text}");
+    assert!(audit_text.contains("status: Success"), "{audit_text}");
+
+    let persisted_audit = fs::read_to_string(dir.join(".semantic/hub/audit.log")).unwrap();
+    for persisted_value in [request_id, session_id, caller_identity] {
+        assert!(
+            persisted_audit.contains(persisted_value),
+            "audit persistence unexpectedly lost {persisted_value:?}"
+        );
+    }
+}
+
 // ---- adversarial / rejection paths --------------------------------------
 
 #[test]
@@ -1185,6 +1246,114 @@ fn session_processes_a_full_create_insert_search_remove_search_recover_workflow_
         summary["last_logical_sequence"],
         replies[5]["logical_sequence"]
     );
+}
+
+#[test]
+fn session_summary_omits_sensitive_session_and_caller_metadata() {
+    let dir = temp_dir("hub_cli_session_confidentiality");
+    let request_id = "session-confidential-request";
+    let session_id = "session-confidential-session";
+    let caller_identity = "session-confidential-caller";
+    let requests = dir.join("confidentiality_session.ndjson");
+    let output_path = dir.join("confidentiality_session_output.ndjson");
+    let request = serde_json::json!({
+        "request_id": request_id,
+        "caller_identity": caller_identity,
+        "tool_id": "vector.turbovec",
+        "operation_id": "vector.index.create",
+        "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
+        "payload": {"index": "session-confidentiality-docs", "dim": 8, "bit_width": 4}
+    });
+    fs::write(&requests, serde_json::to_string(&request).unwrap()).unwrap();
+
+    let output = smc_in(
+        &dir,
+        &[
+            "hub",
+            "session",
+            "--requests",
+            requests.to_str().unwrap(),
+            "--session-id",
+            session_id,
+            "--out",
+            output_path.to_str().unwrap(),
+        ],
+    );
+    assert!(output.status.success(), "{:?}", output);
+    assert!(output.stdout.is_empty(), "{:?}", output);
+    assert!(output.stderr.is_empty(), "{:?}", output);
+    let output_text = fs::read_to_string(&output_path).unwrap();
+    for sensitive_value in [session_id, caller_identity] {
+        assert!(
+            !output_text.contains(sensitive_value),
+            "session stdout leaked {sensitive_value:?}: {output_text}"
+        );
+    }
+
+    let lines: Vec<serde_json::Value> = output_text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2, "one reply plus one summary");
+    assert_eq!(lines[0]["request_id"], request_id);
+    let summary = &lines[1]["session_summary"];
+    assert!(summary.get("session_id").is_none(), "{summary}");
+    assert!(summary.get("caller_identity").is_none(), "{summary}");
+    assert_eq!(summary["requests_submitted"], 1);
+    assert_eq!(summary["requests_admitted"], 1);
+
+    let persisted_audit = fs::read_to_string(dir.join(".semantic/hub/audit.log")).unwrap();
+    for persisted_value in [request_id, session_id, caller_identity] {
+        assert!(
+            persisted_audit.contains(persisted_value),
+            "audit persistence unexpectedly lost {persisted_value:?}"
+        );
+    }
+}
+
+#[test]
+fn session_mixed_caller_rejection_does_not_echo_caller_identity() {
+    let dir = temp_dir("hub_cli_session_mixed_caller_confidentiality");
+    let first_caller = "first-confidential-caller";
+    let second_caller = "second-confidential-caller";
+    let requests = dir.join("mixed_callers.ndjson");
+    let request = |request_id: &str, caller_identity: &str| {
+        serde_json::json!({
+            "request_id": request_id,
+            "caller_identity": caller_identity,
+            "tool_id": "vector.turbovec",
+            "operation_id": "vector.index.create",
+            "capabilities": ["VectorIndexCreate", "PrivateStorageRead", "PrivateStorageWrite"],
+            "payload": {"index": "mixed-caller-docs", "dim": 8, "bit_width": 4}
+        })
+    };
+    fs::write(
+        &requests,
+        format!(
+            "{}\n{}",
+            serde_json::to_string(&request("mixed-caller-1", first_caller)).unwrap(),
+            serde_json::to_string(&request("mixed-caller-2", second_caller)).unwrap(),
+        ),
+    )
+    .unwrap();
+
+    let output = smc_in(
+        &dir,
+        &["hub", "session", "--requests", requests.to_str().unwrap()],
+    );
+    assert!(!output.status.success(), "{:?}", output);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.starts_with("InputRejected: session requests use multiple caller identities"),
+        "{stderr}"
+    );
+    for sensitive_value in [first_caller, second_caller] {
+        assert!(
+            !stderr.contains(sensitive_value),
+            "session stderr leaked {sensitive_value:?}: {stderr}"
+        );
+    }
+    assert!(output.stdout.is_empty());
 }
 
 #[test]
