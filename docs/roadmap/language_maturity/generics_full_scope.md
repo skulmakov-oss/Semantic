@@ -154,3 +154,27 @@ Before closing this track:
 - [x] spec/docs are synced
 - [x] public API or golden snapshots are updated if needed
 - [x] compatibility/release-facing wording is honest
+
+## Post-Close-Out Correction (SSF-07 #1650)
+
+This track's "completed" status and its "generic record and ADT
+definitions [...] admitted" claim (Included In This Track /
+Initial First-Wave Reading, above) did not hold: `RecordDecl`/`AdtDecl`
+declaration admission existed, but `Type::Record`/`Type::Adt` never gained
+applied type arguments, no source syntax existed to apply them, and every
+record literal / ADT constructor already unconditionally rejected a
+declaration `TypeVar` — so a generic record/ADT declaration was admitted
+while every construction of it already failed, a phase-inconsistent,
+false-ready surface rather than the deterministic first-wave model this
+document's Acceptance Reading requires. Corrected by narrowing canonical
+record/ADT admission to zero type parameters (`build_record_table`/
+`build_adt_table`); see `docs/spec/foundation_source_profile_v1.md` for the
+current normative wording. This entry is left in place as the historical
+record of this track's original scope and self-reported completion state,
+not retroactively edited. The Wave 3 (IR monomorphisation / lowering)
+portion of this track's claimed completion is separately tracked as
+FALSE-READY / INERT-CONTRACT by #1717, which remains open; #1650 addresses
+only the frontend record/ADT declaration-admission and type-identity
+portion of this document's overclaim. Generic *function* definitions and
+call-site instantiation, by contrast, are genuinely closed (#1634, #1648,
+#1649) and this correction does not apply to that portion of the track.

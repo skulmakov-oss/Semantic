@@ -3583,6 +3583,149 @@ mod tests {
         type_check_program(&program)
     }
 
+    // FA-02-018 / #1650: generic record/ADT declarations are rejected at
+    // the canonical owner boundary (build_record_table/build_adt_table),
+    // never merely tolerated until an unrelated later error happens to
+    // catch them. These are whole-program (type_check_program) regressions
+    // complementing the direct build_record_table/build_adt_table unit
+    // tests in lib.rs.
+
+    #[test]
+    fn type_check_program_rejects_generic_record_declaration() {
+        let src = r#"
+            record Box<T> { value: T }
+            fn main() { return; }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("a generic record declaration must not be admitted into Stable Foundation");
+        assert!(
+            err.message.contains("Box")
+                && err
+                    .message
+                    .contains("not part of the current Stable Foundation"),
+            "unexpected error: {}",
+            err.message
+        );
+        // Owner-boundary proof: this must be #1650's declaration-admission
+        // diagnostic, not the old accidental construction-time failure
+        // (which never runs, because the declaration is rejected first).
+        assert!(
+            !err.message.contains("deferred to M9.1 Wave 2"),
+            "rejection must come from the owner boundary, not the old accidental \
+             construction-time TypeVar-canonicalization failure: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn type_check_program_rejects_generic_adt_declaration() {
+        let src = r#"
+            enum Maybe<T> { Some(T), None }
+            fn main() { return; }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("a generic enum declaration must not be admitted into Stable Foundation");
+        assert!(
+            err.message.contains("Maybe")
+                && err
+                    .message
+                    .contains("not part of the current Stable Foundation"),
+            "unexpected error: {}",
+            err.message
+        );
+        assert!(
+            !err.message.contains("deferred to M9.1 Wave 2"),
+            "rejection must come from the owner boundary, not the old accidental \
+             construction-time TypeVar-canonicalization failure: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn type_check_program_rejects_generic_record_with_nested_typevar_field() {
+        // The rejection must fire on type_params alone, independent of how
+        // (or whether) T is actually used in field types -- proving it is
+        // the owner-layer declaration check, not something that happens to
+        // trip over a nested TypeVar during field canonicalization.
+        let src = r#"
+            record Box<T> { value: Option(T) }
+            fn main() { return; }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "a generic record must reject regardless of nested field TypeVar positions",
+        );
+        assert!(
+            err.message.contains("Box")
+                && err
+                    .message
+                    .contains("not part of the current Stable Foundation"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn type_check_program_rejects_generic_adt_with_nested_typevar_payload() {
+        let src = r#"
+            enum Wrapper<T> { Boxed(Option(T)) }
+            fn main() { return; }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "a generic enum must reject regardless of nested payload TypeVar positions",
+        );
+        assert!(
+            err.message.contains("Wrapper")
+                && err
+                    .message
+                    .contains("not part of the current Stable Foundation"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn type_check_program_admits_non_generic_record_and_adt_unaffected() {
+        // Positive control: ordinary non-generic records/ADTs, including
+        // construction, field access, and ADT constructors, remain fully
+        // admitted and unaffected by the #1650 zero-arity nominal
+        // narrowing.
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            enum Color { Red, Green, Blue }
+            fn main() {
+                let p = Point { x: 1, y: 2 };
+                let x: i32 = p.x;
+                let p2 = p with { x: x };
+                let _ = p2;
+                let c = Color::Red;
+                let _ = c;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect(
+            "ordinary non-generic record/ADT declarations and use sites must be unaffected",
+        );
+    }
+
+    #[test]
+    fn generic_record_syntax_still_parses_but_type_check_program_rejects() {
+        // Parser fidelity (Model B precedent from #1635/#1634): raw AST
+        // representation of `<T>` on a record/ADT is deliberately
+        // preserved (see generic_record_type_params_are_parsed_and_stored
+        // in parser.rs, unmodified); only canonical Stable Foundation
+        // admission is narrowed.
+        let program = parse_program(
+            r#"
+                record Box<T> { value: T }
+                fn main() { return; }
+            "#,
+        )
+        .expect("generic record syntax must still parse -- raw AST fidelity is preserved");
+        assert_eq!(program.records[0].type_params.len(), 1);
+        type_check_program(&program)
+            .expect_err("canonical admission must still reject the parsed generic declaration");
+    }
+
     // FA-02-016 / #1648 corrective: `type_check_function_with_table` accepts
     // a caller-supplied `FnTable`, so a callee's `FnSig` cannot be assumed
     // to have been built by the canonical `build_fn_table` authority.

@@ -319,22 +319,39 @@ directly or nested, exactly like an unknown nominal type. `TraitTable`
 success therefore means both canonical identity is proven *and* the current
 executable/admitted type surface is proven — never identity alone.
 
-First-wave generic-capable definitions — functions, records, and ADTs —
-admit at most one type parameter per definition site; zero is non-generic
-and one is the contracted generic surface. The parser has no arity limit of
-its own (`parse_type_params_with_bounds` may represent `<T, U, ...>` and
-mixed bound combinations like `<T: Bound, U>` as raw AST, and does so
-deliberately, exactly as it does for the generic trait/impl syntax `build_trait_table`/`validate_trait_coherence`
-reject above); admission is enforced at each family's own canonical
-table-construction authority instead (`build_fn_table`, `build_record_table`,
-`build_adt_table`), never by truncating to the first parameter or silently
-admitting the extras. Traits and impls already require zero type parameters
-under the stricter contracts described above, so an out-of-contract arity
-there was already rejected before this boundary existed; it is not a new
-restriction for those two families. Admission of the contracted one-parameter
-form for records/ADTs is a declaration-time fact only — it does not imply a
-faithful applied nominal instantiation path for generic source use, which
-remains a separate, open gap.
+First-wave generic-capable *function* definitions admit at most one type
+parameter per definition site; zero is non-generic and one is the
+contracted generic surface. The parser has no arity limit of its own
+(`parse_type_params_with_bounds` may represent `<T, U, ...>` and mixed
+bound combinations like `<T: Bound, U>` as raw AST, and does so
+deliberately, exactly as it does for the generic trait/impl syntax
+`build_trait_table`/`validate_trait_coherence` reject above); admission is
+enforced at `build_fn_table`, never by truncating to the first parameter or
+silently admitting the extras. Traits and impls already require zero type
+parameters under the stricter contracts described above, so an
+out-of-contract arity there was already rejected before this boundary
+existed; it is not a new restriction for those two families.
+
+Records and ADTs are non-generic in the current Stable Foundation nominal
+type contract: `build_record_table`/`build_adt_table` require
+`type_params.is_empty()`, rejecting any declared type parameter regardless
+of arity. This is stricter than the one-parameter function surface above,
+not an extension of it — `Type::Record(SymbolId)`/`Type::Adt(SymbolId)`
+carry no applied type arguments, no source syntax exists to write one for a
+user-declared nominal name (`parse_type`'s `Foo`/`Foo(Args)` dispatch is
+hardcoded per builtin family — `Option`/`Result`/`Sequence`/`Map`/
+`Closure` — with no general nominal-application rule; a bare declared name
+always parses as an unparameterized `Type::Record`), and every record
+literal / ADT constructor already unconditionally rejects a declaration
+`TypeVar` via the same non-generic canonicalizer ordinary field/payload
+type-checking uses. A generic record/ADT declaration was therefore
+previously admitted while every construction of it already failed — a
+phase-inconsistent, false-ready surface, not a working one. The parser
+still represents `record Box<T> { ... }` / `enum Maybe<T> { ... }` as raw
+AST (mirroring the trait/impl precedent above); only canonical admission is
+narrowed. No applied nominal type representation, source instantiation
+syntax, or field/payload monomorphisation has been implemented — that
+remains a distinct, larger undertaking, not attempted here.
 
 ## Deterministically unsupported forms
 
