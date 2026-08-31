@@ -567,6 +567,28 @@ pub fn build_adt_table(program: &Program) -> Result<AdtTable, FrontendError> {
 
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError> {
+    // FA-02-037 / #1669: TraitTable is the owner-layer canonical trait
+    // contract (the same architectural role FnSig/FnTable plays for
+    // functions), not an unchecked cache of raw parsed declarations. Every
+    // non-Self method-signature type must resolve against the same
+    // canonical nominal authority every other declared-type position in the
+    // frontend uses (see build_fn_table above), before this trait is
+    // admitted -- independent of whether any impl ever exists. Built
+    // locally (mirroring build_fn_table) rather than accepting
+    // caller-supplied tables, so this invariant holds for every public
+    // caller of build_trait_table, not only type_check_program's.
+    let record_table = build_record_table(program)?;
+    let adt_table = build_adt_table(program)?;
+    // The sole admitted type variable in a trait method signature is the
+    // trait-side `Self` placeholder (Type::TypeVar, interned once per
+    // parsed trait). A trait's own declared type_params are deliberately
+    // NOT admitted here: generic traits are not part of the first-wave
+    // canonical contract (#1635), so a signature that references its own
+    // trait type parameter is rejected by the same "type variable is not
+    // in scope" path canonicalize_declared_type_generic already uses for
+    // any other out-of-scope type variable, rather than silently admitted.
+    let self_type_var = program.arena.symbol_to_id.get("Self").copied();
+    let admitted_type_vars: Vec<SymbolId> = self_type_var.into_iter().collect();
     let mut out = BTreeMap::new();
     for t in &program.traits {
         if out.contains_key(&t.name) {
@@ -578,7 +600,48 @@ pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError>
                 ),
             });
         }
-        out.insert(t.name, t.clone());
+        let methods = t
+            .methods
+            .iter()
+            .map(|m| {
+                let params = m
+                    .params
+                    .iter()
+                    .map(|(name, ty)| {
+                        Ok((
+                            *name,
+                            canonicalize_declared_type_generic(
+                                ty,
+                                &record_table,
+                                &adt_table,
+                                &program.arena,
+                                &admitted_type_vars,
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, FrontendError>>()?;
+                let ret = canonicalize_declared_type_generic(
+                    &m.ret,
+                    &record_table,
+                    &adt_table,
+                    &program.arena,
+                    &admitted_type_vars,
+                )?;
+                Ok(TraitMethodSig {
+                    name: m.name,
+                    params,
+                    ret,
+                })
+            })
+            .collect::<Result<Vec<_>, FrontendError>>()?;
+        out.insert(
+            t.name,
+            TraitDecl {
+                name: t.name,
+                type_params: t.type_params.clone(),
+                methods,
+            },
+        );
     }
     Ok(out)
 }
@@ -1351,6 +1414,330 @@ fn main() {
             "unexpected error: {}",
             err.message
         );
+    }
+
+    // FA-02-037 / #1669: TraitTable is the owner-layer canonical trait
+    // contract, not an unchecked cache of raw parsed declarations. Every
+    // non-Self method-signature type must resolve against the same
+    // canonical RecordTable/AdtTable authority build_fn_table already uses,
+    // independent of whether any impl exists. See build_trait_table.
+
+    #[test]
+    fn build_trait_table_rejects_unknown_parameter_type() {
+        // (A) No impl anywhere -- the trait contract must prove itself.
+        let src = r#"
+            trait Broken {
+                fn f(x: MissingType) -> i32;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("unknown parameter type must reject with no impl present");
+        assert!(
+            err.message.contains("unknown nominal type 'MissingType'"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_rejects_unknown_return_type() {
+        // (B)
+        let src = r#"
+            trait Broken {
+                fn f() -> MissingType;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("unknown return type must reject with no impl present");
+        assert!(
+            err.message.contains("unknown nominal type 'MissingType'"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_rejects_nested_unknown_type() {
+        // (C) At least one compound position containing the unknown name.
+        let src = r#"
+            trait Broken {
+                fn f(x: Option(MissingType)) -> i32;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("unknown type nested inside Option must reject with no impl present");
+        assert!(
+            err.message.contains("unknown nominal type 'MissingType'"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_canonicalizes_record_signature_to_record_type() {
+        // (D) The stored contract must be canonical, not the raw parsed
+        // placeholder -- inspected directly, per #1669's requirement.
+        let src = r#"
+            record R { n: i32 }
+            trait Contract {
+                fn a(x: R) -> R;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let r_id = *program.arena.symbol_to_id.get("R").expect("R symbol");
+        let table = build_trait_table(&program).expect("record signature should admit");
+        let t_id = *program
+            .arena
+            .symbol_to_id
+            .get("Contract")
+            .expect("Contract symbol");
+        let decl = &table[&t_id];
+        assert_eq!(decl.methods[0].params[0].1, Type::Record(r_id));
+        assert_eq!(decl.methods[0].ret, Type::Record(r_id));
+    }
+
+    #[test]
+    fn build_trait_table_canonicalizes_adt_signature_to_adt_type() {
+        // (E) Record-vs-Adt identity must be uniform with the merged
+        // #1667/#1651 impl-side repair: an enum target must never be
+        // stored as an unresolved/guessed Record.
+        let src = r#"
+            enum E { A, B }
+            trait Contract {
+                fn a(x: E) -> E;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let e_id = *program.arena.symbol_to_id.get("E").expect("E symbol");
+        let table = build_trait_table(&program).expect("enum signature should admit");
+        let t_id = *program
+            .arena
+            .symbol_to_id
+            .get("Contract")
+            .expect("Contract symbol");
+        let decl = &table[&t_id];
+        assert_eq!(decl.methods[0].params[0].1, Type::Adt(e_id));
+        assert_eq!(decl.methods[0].ret, Type::Adt(e_id));
+    }
+
+    #[test]
+    fn build_trait_table_admits_reserved_self_in_direct_and_nested_source_positions() {
+        // (F) direct Self, tuple, Sequence, Option, Result(Self, ..),
+        // Result(.., Self) -- all writable as explicit source type syntax.
+        // Closure param/return positions are covered separately below via a
+        // direct canonicalize_declared_type_generic call: this first-wave
+        // surface has no source syntax for writing an explicit closure
+        // type annotation.
+        let cases = [
+            "fn a(x: Self) -> Self;",
+            "fn a(x: (Self, i32)) -> i32;",
+            "fn a(x: Sequence(Self)) -> i32;",
+            "fn a(x: Option(Self)) -> i32;",
+            "fn a(x: Result(Self, i32)) -> i32;",
+            "fn a(x: Result(i32, Self)) -> i32;",
+        ];
+        for method_sig in cases {
+            let src = format!(
+                r#"
+                    trait Contract {{
+                        {method_sig}
+                    }}
+                    fn main() {{
+                        return;
+                    }}
+                "#
+            );
+            let program = parse_program(&src).expect("parse");
+            build_trait_table(&program)
+                .unwrap_or_else(|err| panic!("'{method_sig}' must admit Self: {err:?}"));
+        }
+    }
+
+    #[test]
+    fn canonicalize_declared_type_generic_admits_self_in_closure_positions() {
+        // (F) closure parameter/return continuation of the above, using
+        // build_trait_table's exact admission mechanism directly (no
+        // source syntax exists for an explicit closure type annotation).
+        let src = r#"
+            trait Contract {
+                fn a(x: Self) -> Self;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let self_id = *program
+            .arena
+            .symbol_to_id
+            .get("Self")
+            .expect("Self interned");
+        let record_table = build_record_table(&program).expect("record table");
+        let adt_table = build_adt_table(&program).expect("adt table");
+        let admitted = [self_id];
+
+        let closure_param_self = Type::Closure(ClosureType {
+            family: ClosureValueFamily::UnaryDirect,
+            capture: ClosureCapturePolicy::Immutable,
+            param: Box::new(Type::TypeVar(self_id)),
+            ret: Box::new(Type::I32),
+        });
+        let resolved = canonicalize_declared_type_generic(
+            &closure_param_self,
+            &record_table,
+            &adt_table,
+            &program.arena,
+            &admitted,
+        )
+        .expect("closure parameter containing Self must admit");
+        assert_eq!(resolved, closure_param_self);
+
+        let closure_ret_self = Type::Closure(ClosureType {
+            family: ClosureValueFamily::UnaryDirect,
+            capture: ClosureCapturePolicy::Immutable,
+            param: Box::new(Type::I32),
+            ret: Box::new(Type::TypeVar(self_id)),
+        });
+        let resolved = canonicalize_declared_type_generic(
+            &closure_ret_self,
+            &record_table,
+            &adt_table,
+            &program.arena,
+            &admitted,
+        )
+        .expect("closure return containing Self must admit");
+        assert_eq!(resolved, closure_ret_self);
+    }
+
+    #[test]
+    fn build_trait_table_does_not_treat_unrelated_nominal_type_as_self() {
+        // (G) A record parameter that is not Self must canonicalize to its
+        // own identity, never be conflated with the reserved placeholder.
+        let src = r#"
+            record R { n: i32 }
+            trait Contract {
+                fn a(x: R, y: Self) -> Self;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let r_id = *program.arena.symbol_to_id.get("R").expect("R symbol");
+        let self_id = *program
+            .arena
+            .symbol_to_id
+            .get("Self")
+            .expect("Self interned");
+        let table = build_trait_table(&program).expect("mixed signature should admit");
+        let t_id = *program
+            .arena
+            .symbol_to_id
+            .get("Contract")
+            .expect("Contract symbol");
+        let decl = &table[&t_id];
+        assert_eq!(decl.methods[0].params[0].1, Type::Record(r_id));
+        assert_eq!(decl.methods[0].params[1].1, Type::TypeVar(self_id));
+        assert_ne!(r_id, self_id);
+    }
+
+    #[test]
+    fn build_trait_table_rejects_ambiguous_nominal_identity_with_no_impl() {
+        // (H) The resolver must fail closed on ambiguity itself, not rely
+        // on validate_top_level_name_collisions (a later, unrelated pass)
+        // to incidentally catch it -- and this must hold with zero impls,
+        // proving trait admission is the independent authority.
+        let src = r#"
+            record Dup { n: i32 }
+            enum Dup { A, B }
+            trait Contract {
+                fn a(x: Dup) -> i32;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("ambiguous record/enum identity in a trait signature must reject");
+        assert!(
+            err.message
+                .contains("ambiguously declared as both record and enum"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_does_not_admit_a_trait_own_type_parameter_as_a_signature_type() {
+        // Sibling-exposure note for #1635 (generic trait declarations
+        // admitted beyond the first-wave contract): this repair
+        // deliberately admits only the reserved Self placeholder as a
+        // TypeVar, never a trait's own declared type_params (see the
+        // comment in build_trait_table). A side effect -- not a fix of
+        // #1635 itself, whose parser-admission surface is untouched -- is
+        // that a method signature actually using the trait's own type
+        // parameter is now incidentally rejected at trait-admission time by
+        // the same "type variable is not in scope" path any other
+        // out-of-scope TypeVar hits, where previously build_trait_table
+        // performed no signature validation at all.
+        let src = r#"
+            trait Foo<TP> {
+                fn bar(x: TP) -> TP;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        let err = build_trait_table(&program)
+            .expect_err("a trait's own type parameter is not an admitted signature TypeVar");
+        assert!(
+            err.message.contains("type variable 'TP' is not in scope"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn build_trait_table_admits_qvec_signatures_independent_of_1647() {
+        // Sibling-exposure note for #1647 (QVec falls through executable
+        // type validation as supported): this repair calls only
+        // canonicalize_declared_type_generic, never
+        // ensure_executable_type_supported (the separate, already-tracked
+        // function #1647 is about), so #1669's closure is independent of
+        // #1647's status either way. QVec is not a Record/Adt nominal
+        // reference, so canonicalize's unrelated catch-all arm returns it
+        // unchanged -- proving this repair neither depends on nor
+        // absorbs #1647's defect.
+        let src = r#"
+            trait Marker {
+                fn f(x: qvec[8]) -> i32;
+            }
+            fn main() {
+                return;
+            }
+        "#;
+        let program = parse_program(src).expect("parse");
+        build_trait_table(&program).expect("qvec trait signature must admit, independent of #1647");
     }
 
     #[test]
