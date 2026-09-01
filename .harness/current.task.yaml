@@ -1,30 +1,36 @@
 task:
-  id: SEMANTIC-STABLE-FOUNDATION-SSF-07
-  title: "language: close or bound numeric/text/collection/closure/generic/trait/pattern abstractions"
-  type: type_and_abstraction_closure_contract_qualification_and_bounded_implementation
+  id: SEMANTIC-STABLE-FOUNDATION-SSF-08
+  title: "ownership: select and qualify a memory/ownership model position"
+  type: ownership_and_memory_positioning_contract_qualification_and_bounded_implementation
   mode: active
-  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-06
+  supersedes: SEMANTIC-STABLE-FOUNDATION-SSF-07
   authorized_by: >-
     Repository owner direct instruction (chat, 2026-08-08) to execute GitHub
     umbrella #1569 continuously in strict SSF-00 through SSF-12 dependency
-    order. SSF-06 closed through PR #1597 at merge commit
-    92be6c0412140a3547cdd9627e0f9a8971965855, after an eleven-pass repair cycle
-    documented in issue #1598 (Decision Log DL-009 through DL-023); only
-    SSF-07 is now active.
+    order. SSF-07 closed through the governance-only transition PR this file
+    is part of, branched from main at
+    437ea872609bda57bb5bf735dfa3f29376377b8c: four residual findings
+    (#1633, #1639, #1646, #1861) repaired and merged, one lifecycle-only
+    correction (#1717) reconciled without new code, and every other open
+    SSF-07-module finding classified RETURN or DEFER rather than silently
+    absorbed. Full evidence:
+    docs/roadmap/stable_foundation/ssf07_exit_reconciliation_record.md. Only
+    SSF-08 is now active.
 
 intent:
   summary: >-
-    Read SSF-00...06 outputs and build a gap table only for abstractions
-    already selected by the frozen Stable Foundation target; separate
-    contract gaps from implementation bugs. Freeze numeric overflow/
-    conversion policy, UTF-8 text semantics, collection equality/ordering/
-    mutability, first-wave closure capture semantics, generic/trait
-    monomorphisation and coherence, and pattern alignment across the
-    parser/typechecker/exhaustiveness/lowering/ownership/diagnostics
-    pipeline, each before implementing it. Add positive end-to-end tests and
-    deterministic negative cases for every included abstraction; give every
-    deferred form an explicit non-goal and a deterministic rejection
-    diagnostic instead of leaving it silently unsupported.
+    Select an ownership/memory model position (Position A vs Position B, per
+    the Stable Foundation dependency map) before repairing any individual
+    ownership finding — this is SSF-08's required first step, not an
+    implementation-order convenience. Only after that decision is recorded:
+    work the ownership-state cluster in dependency order (ScopeEnv/state
+    model -> control-flow propagation -> lowering event preservation -> OWN0
+    identity -> OWN0 event timing -> VM/frame/host ownership boundary ->
+    runtime quota and failure taxonomy), each grounded in the selected
+    position rather than patched independently. Add positive end-to-end
+    tests and deterministic negative cases for every included ownership
+    form; give every deferred form an explicit non-goal and a deterministic
+    rejection diagnostic instead of leaving it silently unsupported.
 
 scope:
   allowed_paths:
@@ -75,23 +81,18 @@ authorization:
 
 constraints:
   one_active_ssf_phase: true
-  active_phase: SSF-07
-  issue: 1578
+  active_phase: SSF-08
+  issue: 1579
   umbrella_issue: 1569
   base_branch: main
   one_logical_change_per_pr: true
   evidence_before_claims: true
   current_main_is_not_stable: true
-  gap_table_scoped_to_already_selected_abstractions_only: true
   contract_gaps_separated_from_implementation_bugs: true
-  no_new_abstraction_added_merely_because_convenient: true
-  numeric_overflow_and_conversion_policy_frozen_before_implementation: true
-  text_utf8_semantics_frozen_before_implementation: true
-  collections_equality_ordering_mutability_iteration_frozen_before_implementation: true
-  closures_first_wave_capture_and_invocation_semantics_frozen_before_implementation: true
-  generics_traits_deterministic_monomorphisation_and_coherence_required: true
-  patterns_aligned_across_parser_typechecker_exhaustiveness_lowering_ownership_diagnostics: true
-  positive_and_deterministic_negative_tests_required_per_included_abstraction: true
+  ownership_position_decision_required_before_any_finding_repair: true
+  ownership_state_cluster_worked_in_dependency_order_not_independently: true
+  public_claims_and_negative_examples_match_selected_position: true
+  positive_and_deterministic_negative_tests_required_per_included_ownership_form: true
   deferred_forms_have_explicit_non_goals_and_deterministic_rejection: true
   no_global_refactor_unless_invariant_cannot_be_preserved_otherwise: true
   no_stable_abstraction_depends_on_unstable_internal_crate_apis: true
