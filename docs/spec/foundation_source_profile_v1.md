@@ -420,6 +420,42 @@ inference* remain frontend-admitted and closed (#1634, #1648, #1649), but
 executing one is deterministically rejected, not silently erased, until a
 real specialization pass exists.
 
+Storage-type admission — the question of whether a `Type` may be the type of
+a field, an ADT payload item, or an annotated `const`/`let`/tuple-destructure/
+discard binding — is exhaustive over the current `Type` enum:
+`ensure_storage_type_supported` matches every variant explicitly, with no
+`_` arm, so adding a new `Type` variant without updating this function is a
+compile error rather than a silent "falls through to admission." Before
+SSF-07 #1861, this function ended in `_ => Ok(())`, silently admitting
+every variant it did not explicitly reject (`QVec`, `Closure`, `RangeI32`,
+`TypeVar`, and any future addition), and record/ADT field types were never
+routed through it at all — `validate_record_declarations`/
+`validate_adt_declarations` only proved a field's nominal references
+resolve (`ensure_type_resolved`), never that the field's own type was
+storage-admitted. A reserved type (e.g. `qvec`) could therefore hide inside
+an admitted record field, and that record's nominal identity — a bare
+`Type::Record(name)`, unrelated to the record's own field shapes — was then
+trusted everywhere downstream, including by an ordinary function's own
+executable-signature admission (#1647), which resolves a `Type::Record`
+argument's symbol name without ever inspecting its fields. Both gaps are
+now closed: the match is exhaustive (admitted leaves: `quad`, `bool`,
+`text`, `i32`, `u32`, `fx`, `f64`, `()`; admitted composites, recursing
+into every child: tuples, `Sequence`, `Map`, `Closure`, unit-annotated
+values, `Option`, `Result`; admitted nominal identities: declared records
+and ADTs; rejected: `qvec` as reserved and not yet promoted, and `RangeI32`
+and an unresolved `TypeVar` as having no legitimate storage context this
+helper can prove), and `validate_record_declarations`/
+`validate_adt_declarations` now call it for every field/payload type, so
+storage admission is proven once, before a record or ADT's own nominal
+identity is trusted by anything downstream, not merely for local bindings.
+Storage admission and executable-signature admission (#1647) are decided
+independently, as separate contracts that currently agree on every variant
+by evidence rather than by construction — `Closure` in particular is
+admitted for storage specifically because pre-existing, already-qualified
+tests prove first-class closures are legitimately `let`-bound (see
+`first_class_closure_literal_typechecks_with_declared_signature_and_capture`),
+not merely because closures are executable elsewhere.
+
 ## Deterministically unsupported forms
 
 Forms with no admitted current implementation must fail before execution with a
