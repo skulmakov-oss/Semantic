@@ -72,3 +72,66 @@ fn ssf_00_status_authorities_do_not_drift() {
         );
     }
 }
+
+/// Added after SSF-07 #1578 was found closed (2026-08-30) while
+/// `stable_foundation_dependency_map.md` and `.harness/current.task.yaml`
+/// both still said SSF-07 was Active -- the dependency map's `Current state`
+/// column and the harness's `active_phase`/`issue` fields are two
+/// independent authorities for "which SSF phase is active right now" and
+/// nothing previously checked they agreed. This closes that gap: exactly
+/// one dependency-map row may be marked `**Active**`, and its `SSF-NN /
+/// #NNNN` phase id must match the harness's `active_phase`/`issue` fields
+/// exactly.
+#[test]
+fn ssf_active_phase_matches_across_dependency_map_and_harness() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dependencies = read(
+        root,
+        "docs/roadmap/stable_foundation/stable_foundation_dependency_map.md",
+    );
+    let harness = read(root, ".harness/current.task.yaml");
+
+    let active_rows: Vec<&str> = dependencies
+        .lines()
+        .filter(|line| line.contains("| **Active** |"))
+        .collect();
+    assert_eq!(
+        active_rows.len(),
+        1,
+        "expected exactly one dependency-map phase row marked Active, found {}: {active_rows:?}",
+        active_rows.len()
+    );
+    let phase_id = active_rows[0]
+        .trim_start_matches('|')
+        .split('|')
+        .next()
+        .unwrap_or_default()
+        .trim();
+    let (ssf_phase, issue_part) = phase_id
+        .split_once('/')
+        .unwrap_or_else(|| panic!("could not parse phase id from dependency-map row: {phase_id}"));
+    let ssf_phase = ssf_phase.trim();
+    let issue_number = issue_part.trim().trim_start_matches('#').trim();
+
+    let harness_active_phase = harness
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("active_phase:"))
+        .map(str::trim)
+        .unwrap_or_else(|| panic!("`.harness/current.task.yaml` is missing `active_phase:`"));
+    let harness_issue = harness
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("issue:"))
+        .map(str::trim)
+        .unwrap_or_else(|| panic!("`.harness/current.task.yaml` is missing `issue:`"));
+
+    assert_eq!(
+        ssf_phase, harness_active_phase,
+        "dependency map marks {ssf_phase} Active but harness active_phase is \
+         {harness_active_phase} -- these two authorities have drifted"
+    );
+    assert_eq!(
+        issue_number, harness_issue,
+        "dependency map's Active phase is issue #{issue_number} but harness issue is \
+         {harness_issue} -- these two authorities have drifted"
+    );
+}
