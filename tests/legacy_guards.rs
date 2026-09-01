@@ -332,6 +332,7 @@ fn ton618_content_inventory_is_explicit() {
         "./docs/roadmap/pulsar/quadro_microbench_baseline.md",
         "./docs/roadmap/roadmap_pulsar.md",
         "./docs/roadmap/m_tail_closeout.md",
+        "./docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md",
         "./docs/roadmap/tail_t5_legacy_perimeter_check.md",
         "./docs/spec/quad_logic_frame_v1.md",
         "./src/bin/ton618_core.rs",
