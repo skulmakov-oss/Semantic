@@ -2735,11 +2735,16 @@ impl<'a> Parser<'a> {
         } else if self.check(TokenKind::Ident) {
             let t = self.tokens[self.next_non_layout_idx()].text.clone();
             if t == "Self" {
+                let self_pos = self.peek().pos;
                 let _ = self.advance();
                 if let Some(self_ty) = &self.self_type_scope {
                     self_ty.clone()
                 } else {
-                    Type::Record(self.arena.intern_symbol("Self"))
+                    return Err(FrontendError {
+                        pos: self_pos,
+                        message: "'Self' is only admitted in trait or impl method type positions"
+                            .to_string(),
+                    });
                 }
             } else if t == "qvec" {
                 let _ = self.advance();
@@ -6904,6 +6909,66 @@ fn main() {
     }
 
     #[test]
+    fn self_type_rejects_at_parse_time_in_every_ordinary_type_position() {
+        // FA-02-014 / #1646, matrix items 1-4: `Self` is contextual syntax
+        // admitted only inside a trait/impl owner scope (`self_type_scope`).
+        // Every ordinary type position -- direct or nested, anywhere
+        // `parse_type` is reachable outside that scope -- must reject
+        // deterministically at parse time, never silently become
+        // `Type::Record("Self")`. Nesting must not bypass the rule: the
+        // recursive `parse_type` calls inside `Option`/`Sequence`/`Result`/
+        // tuple parsing reach the identical `Self` branch.
+        let cases = [
+            (
+                "A: function parameter",
+                "fn f(x: Self) -> i32 { return 0; }\n",
+            ),
+            (
+                "B: function return",
+                "record R { x: i32 }\nfn f() -> Self { return R { x: 0 }; }\n",
+            ),
+            (
+                "C: let annotation",
+                "fn f() -> i32 {\n    let x: Self = 0;\n    return 0;\n}\n",
+            ),
+            (
+                "D: record field",
+                "record R {\n    x: Self\n}\nfn main() { return; }\n",
+            ),
+            (
+                "E: ADT payload",
+                "enum E {\n    A(Self)\n}\nfn main() { return; }\n",
+            ),
+            (
+                "G: nested Option(Self)",
+                "fn f(x: Option(Self)) -> i32 { return 0; }\n",
+            ),
+            (
+                "G: nested Sequence(Self)",
+                "fn f(x: Sequence(Self)) -> i32 { return 0; }\n",
+            ),
+            (
+                "G: nested Result(Self, i32)",
+                "fn f(x: Result(Self, i32)) -> i32 { return 0; }\n",
+            ),
+            (
+                "G: nested tuple (Self, i32)",
+                "fn f(x: (Self, i32)) -> i32 { return 0; }\n",
+            ),
+        ];
+        for (label, src) in cases {
+            let err = parse_rustlike_with_profile(src, &ParserProfile::foundation_default())
+                .expect_err(&format!("{label}: Self outside owner context must reject"));
+            assert!(
+                err.message
+                    .contains("'Self' is only admitted in trait or impl method type positions"),
+                "{label}: unexpected error: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
     fn trait_method_self_type_parses_as_owner_layer_marker() {
         let src = r#"
 trait Iterable {
@@ -7110,6 +7175,42 @@ fn apply<T: Eq, U>(x: T, y: U) -> i32 {
             "type_param_scope must be restored to exactly its pre-call depth \
              and contents -- only the entries this call pushed should be \
              popped, leaving the pre-existing outer entry untouched"
+        );
+    }
+
+    #[test]
+    fn with_self_type_scope_restores_previous_scope_when_the_closure_errors() {
+        // FA-02-014 / #1646, owner-state restoration audit: `with_self_type_scope`
+        // saves the previous `self_type_scope`, installs the owner type, runs
+        // the closure, and restores the previous value unconditionally --
+        // `let result = f(self);` does not use `?`, so the restoration line
+        // always runs whether the closure returned `Ok` or `Err`. This
+        // directly inspects a `Parser`'s `self_type_scope` after an error
+        // occurs *inside* a trait body (a malformed method signature after
+        // the return arrow) to prove the scope is genuinely restored, not
+        // merely argued to be safe by the surrounding architecture.
+        let src = "trait Contract {\n    fn a(x: Self) -> ;\n}\n";
+        let tokens = lex_tokens(src).expect("lex");
+        let profile = ParserProfile::foundation_default();
+        let mut p = Parser {
+            tokens,
+            idx: 0,
+            source: src.to_string(),
+            arena: AstArena::default(),
+            policy: CompilePolicyView::new(&profile),
+            type_param_scope: Vec::new(),
+            self_type_scope: None,
+        };
+        assert_eq!(p.self_type_scope, None, "scope before the call");
+        let result = p.parse_program();
+        assert!(
+            result.is_err(),
+            "malformed method signature inside the trait body must reject"
+        );
+        assert_eq!(
+            p.self_type_scope, None,
+            "self_type_scope must be restored to its pre-call value even when \
+             the closure that installed it returns Err"
         );
     }
 
