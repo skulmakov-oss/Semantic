@@ -139,20 +139,65 @@ and `typecheck.rs:2446-2447`). `ScopeEnv`'s seven ownership-query APIs
 unknown `SymbolId` — a lookup miss reads as "available"/"allowed" rather than
 erroring (`lib.rs:263-461`), exactly as `#1664` states.
 
-**A second, independent gap not previously filed**: whole-variable move
-tracking (`consumed`/`mark_consumed`) has **zero production call sites** —
-its only caller anywhere in the crate is a unit test
-(`typecheck.rs:10978`). An ordinary `let y = x;` (`Stmt::Let`,
+**Scalar / direct-root copy semantics — empirically resolved, not a blocking
+finding.** Whole-variable move tracking (`consumed`/`mark_consumed`) has
+**zero production call sites** — its only caller anywhere in the crate is a
+unit test (`typecheck.rs:10978`). An ordinary `let y = x;` (`Stmt::Let`,
 `typecheck.rs:804-866`) never marks `x` consumed; only pattern-driven
 destructuring (`bind_tuple_items`/`bind_record_items`) populates
-`path_state`. Practically this means plain scalar/whole-value move discipline
-is enforced only insofar as `path_state`/pattern-plan checks catch it, not
-via the dedicated `consumed` flag the type was built for. Given the "no
-shared aliasing exists" finding above, a missed whole-value move does not
-create a memory-safety hazard (the VM's copy-value semantics make reuse
-merely redundant, not unsafe) — but it is a real, previously-undocumented gap
-in the frontend's own advisory-strength discipline layer, filed here as a
-**Known Blocking Finding** (see below), not repaired.
+`path_state`. An earlier revision of this record filed that as a Known
+Blocking Finding without first determining whether Semantic's actual
+contract for plain root rebinding is copy or move. It is **copy**,
+confirmed by direct evidence, not inferred from the VM alone:
+
+- `crates/sm-front/src/typecheck.rs:10754-10768` — a test named
+  `use_after_move_rejects` (misleadingly, given its actual assertion)
+  compiles `fn take_val() -> i32 { return 5; } fn main() { let x: i32 =
+  take_val(); let _ = x; let _ = x; return; }` and asserts it **typechecks
+  successfully**, with the code's own comment stating the design intent
+  directly: *"i32 is Copy — use-after-move semantics only apply to non-Copy
+  types. This test just validates the checker doesn't false-positive on
+  i32."* No `is_copy`/`Copy`-classification function exists anywhere in
+  `sm-front` (confirmed by search) — this comment is the language's only
+  explicit statement of the principle, not a mechanically enforced
+  Copy/non-Copy split.
+- **Full-pipeline empirical reproduction**, run against this exact commit
+  via `cargo run -p semantic_language --bin smc -- run <file>` (compile →
+  typecheck → IR → SemCode → verify → VM execute, not typecheck alone):
+  `let a: i32 = 7; let b = a; assert(a == 7); assert(b == 7);` and the
+  analogous pattern for `bool`, `quad`, `f64`, and `text` all typecheck and
+  execute to completion (exit code 0, every `assert` passes) — both the
+  original and the rebound name remain independently usable and correct
+  afterward. Representative scalar families confirmed:
+  `i32`, `bool`, `quad`, `f64`, `text`.
+- **The same is true for a non-Copy aggregate via *plain* rebinding**:
+  `record Point { x: i32, y: i32 } fn main() { let p: Point = Point { x: 1,
+  y: 2 }; let q = p; assert(p.x == 1); assert(q.x == 1); return; }` also
+  executes to completion, `p` still usable after `let q = p;`. This shows
+  the boundary is not "Copy types get copy semantics, non-Copy types get
+  move semantics" (no such split is implemented) — it is "a **plain**
+  root-to-root `let` rebinding is copy-by-value for every type today;
+  **pattern-based destructuring capture** (tuple/record/ADT patterns, match
+  arms) is the only mechanism that tracks move/borrow, via `path_state`,
+  regardless of what is being destructured." A durable regression proving
+  this end-to-end is added at
+  `tests/scalar_root_rebind_copy_semantics_e2e.rs` (this PR).
+
+This is consistent with, not a gap in, `runtime_ownership.md`'s own frozen
+scope: the supported slice is defined as **tuple `AccessPath`** and **direct
+record field `AccessPath`** — i.e. paths with at least one component. A
+plain root rebind (`let y = x;` with no destructuring) produces an
+`AccessPath` with zero components, which was never inside the promised
+tracked surface to begin with. `ScopeBinding.consumed`/`mark_consumed` is
+therefore accurately classified as **inert scaffolding for a whole-value
+move-tracking feature the current admitted contract does not promise**, not
+a defect blocking any invariant this decision record freezes. It is left
+in place (not removed) since removing dead code is out of scope for a
+docs/positioning PR; a future cleanup may remove or repurpose it, but that
+is not an SSF-08 ownership-position blocker. Given the "no shared aliasing
+exists" finding above, this also carries no safety implication: the VM's
+copy-value semantics make a hypothetical missed whole-value move merely
+redundant, never unsafe.
 
 **Common-root hypothesis** (per the governing task's Section 5): confirmed,
 with a precise refinement. It is not one function with one bug; the same
@@ -493,10 +538,14 @@ these are different contracts and this record does not conflate them.
 ## Position A
 
 See "What Semantic Claims" / "Does Not Claim" above. Implementation fit:
-strong for scalar values, tuple paths, and direct record-field paths
-(frozen, documented, D7-qualified with both positive and negative
-end-to-end evidence). Partial fit for Sequence static-index and ADT-payload
-paths (implemented and largely tested, but blocked from promotion by
+resolved for plain scalar/direct-root rebinding (confirmed copy-by-value,
+no open defect). Strong for the golden-covered scenarios in tuple paths and
+direct record-field paths (frozen, documented, D7-qualified positive and
+negative end-to-end evidence), with the caveat that `#1709`/`#1725`/`#1726`
+apply to these paths too and general-case correctness beyond the tested
+scenarios remains open (see Included Ownership Surface). Partial fit for
+Sequence static-index and ADT-payload paths (implemented and largely
+tested, but blocked from promotion by
 `#1709`/`#1718`/`#1725`/`#1726`). No fit claimed, and none needed, for
 indirect/dynamic paths, Map paths, or schema paths — these are correctly
 absent end to end (frontend never produces a path for them;
@@ -625,9 +674,9 @@ implementation, not positioning.)
 
 | Family | Classification |
 |---|---|
-| Scalar / direct root | INCLUDED IN SSF-08 (already qualified; whole-value `consumed` tracking gap noted as a Known Blocking Finding, not a contour exclusion — copy-value VM semantics mean this gap is a discipline gap, not a safety gap) |
-| Tuple | INCLUDED IN SSF-08 (frozen, D7-qualified, positive+negative E2E) |
-| Direct record field | INCLUDED IN SSF-08 (frozen, D7-qualified, positive+negative E2E) |
+| Scalar / direct root | INCLUDED IN SSF-08 — frozen as **copy-by-value** for plain (non-destructuring) root rebinding, confirmed by full-pipeline empirical reproduction (see Frontend State Model); no unresolved defect in this invariant. Pattern-based destructuring capture of a scalar (e.g. as an ADT/tuple/record payload item) is covered by the Tuple/Record/ADT rows below, not this row. |
+| Tuple | INCLUDED IN SSF-08 — scope is frozen and settled (unambiguous since before this decision); the golden-covered scenarios (sibling/same-path/parent-child/child-parent write, multi-frame cleanup) are D7-qualified and pass. **Caveat, not a scope question**: #1709 (nested `if`/`loop`-expression lowering can drop these exact events), #1725 (root-identity correctness), and #1726 (event-timing correctness) all apply to tuple paths too, not only Sequence/ADT — general-case correctness beyond the tested scenarios is not yet proven and requires those three repairs. |
+| Direct record field | INCLUDED IN SSF-08 — same scope and same caveat as Tuple: golden-covered scenarios (positive+negative E2E) pass; #1709/#1725/#1726 apply here too and must close before the guarantee generalizes beyond the tested cases. |
 | Sequence static index | INCLUDED ONLY AFTER REQUIRED REPAIR (`#1718` capability alignment, `#1725`, `#1726`; already has stronger E2E proof — including dynamic-vs-static interaction cases — than the frozen spec currently credits it for) |
 | ADT payload (fixed variant, single level) | INCLUDED ONLY AFTER REQUIRED REPAIR (`#1718`, `#1725`, `#1726`, plus closing the verifier's SymbolId bounds-check gap and reaching a genuine compiler-driven negative E2E test once the frontend supports mutable ADT-payload reassignment) |
 
@@ -680,14 +729,13 @@ governing task's hard scope.
    `#1725`: a name-collision/shadowing defect rather than a
    numbering-space mismatch, both under the general heading of "binding
    identity is not preserved uniformly across the frontend-to-VM boundary."
-7. **Whole-value `consumed` tracking is dead code** (new finding from this
-   audit, not previously filed as its own issue) — `mark_consumed` has no
-   production call site; plain `let y = x;` never marks `x` moved at the
-   frontend. Low safety impact (VM value semantics are always copy, never
-   aliased), but a real gap in the frontend's own advisory-strength
-   discipline layer. Recommend filing as a narrow FA-02 follow-up before or
-   alongside the `#1656`-`#1664` repair, since it will be touched by the
-   same `ScopeEnv`/join-model work.
+Item 7 in an earlier revision of this record ("whole-value `consumed`
+tracking is dead code") is **removed**, not renumbered away silently: it was
+investigated to completion (see Frontend State Model above) and resolved as
+**not a blocking finding**. Plain root rebinding is copy-by-value by design
+(evidenced, not inferred), so `consumed`/`mark_consumed` being unused is
+inert scaffolding for an unpromised feature, not a gap in a promised
+invariant.
 
 ## Repair Dependency Order
 
@@ -784,6 +832,43 @@ the Lane 3 repair slice); does not touch production Rust in `sm-front`,
 the 20 issues investigated; does not modify CI/workflow configuration; does
 not authorize merging this PR.
 
+## Correction Log
+
+Recorded per owner review of the initial revision (commit `3ac20fe7`),
+before merge, on this same PR:
+
+1. **Quota/taxonomy current-facing contradiction** — this decision record's
+   own Resource/Failure Boundary evidence (`#1759`-`#1763`, confirmed still
+   present) directly contradicted
+   `docs/roadmap/stable_foundation/semantic_stable_foundation_matrix.md`'s
+   "Quotas/fuel and trap taxonomy" row, which read **Landed and qualified on
+   `main`**. Corrected to **Landed but unqualified**, using the matrix's own
+   existing status vocabulary (no new status invented), with the evidence
+   column naming the specific enforced-vs-inert quota split and the
+   taxonomy-drift gap, and the routing column pointing to `#1759`-`#1763`/
+   SSF-08. This is a genuine current-facing overclaim this PR corrects — the
+   "Public-claim audit" count of 0 corrected in the original PR body was
+   wrong and is corrected in the PR description.
+2. **Scalar/direct-root classification asserted without full empirical
+   proof** — the initial revision classified scalar/direct-root as
+   "INCLUDED IN SSF-08 (already qualified)" while simultaneously filing a
+   "whole-value `consumed` tracking is dead code" Known Blocking Finding
+   against the same invariant, without first determining whether Semantic's
+   actual contract is copy or move. Resolved empirically (see Frontend
+   State Model): plain root rebinding is copy-by-value by design, evidenced
+   by the `use_after_move_rejects` test's own comment and by full-pipeline
+   execution of representative scalar families plus a non-Copy aggregate.
+   The blocking finding is removed (not silently dropped — recorded as
+   resolved); a durable regression is added at
+   `tests/scalar_root_rebind_copy_semantics_e2e.rs`. The same re-check also
+   surfaced that Tuple and Direct record field carried the identical
+   "qualified + blocking defect in the same invariant" shape via
+   `#1709`/`#1725`/`#1726` (which apply to every path kind, not only
+   Sequence/ADT) — both rows now carry an explicit caveat rather than
+   reading as unqualified endorsements.
+
+Position A is unchanged by both corrections.
+
 ## Evidence Index
 
 - `docs/spec/runtime_ownership.md` — current frozen tuple+record v0 contract
@@ -812,7 +897,8 @@ not authorize merging this PR.
   EVIDENCE).
 - `tests/runtime_ownership_e2e.rs`, `tests/tuple_ownership_golden.rs`,
   `tests/record_field_ownership_golden.rs`, `tests/sequence_ownership_golden.rs`,
-  `tests/pcc6_option_result_ownership_golden.rs` — end-to-end positive and
+  `tests/pcc6_option_result_ownership_golden.rs`,
+  `tests/scalar_root_rebind_copy_semantics_e2e.rs` — end-to-end positive and
   deterministic-negative ownership proof (PRIMARY SOURCE EVIDENCE).
 - `docs/roadmap/stable_foundation/semantic_stable_foundation_matrix.md`,
   `stable_foundation_target_contract.md`, `stable_foundation_dependency_map.md`,
