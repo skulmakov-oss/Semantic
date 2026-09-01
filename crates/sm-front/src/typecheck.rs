@@ -9150,6 +9150,15 @@ mod tests {
 
     #[test]
     fn self_type_outside_trait_or_impl_positions_is_not_admitted() {
+        // FA-02-014 / #1646: before this fix, this test passed only by
+        // coincidence -- `parse_type` silently rewrote out-of-context `Self`
+        // to `Type::Record("Self")`, and this specific source happened to
+        // reject downstream only because no record named "Self" exists, with
+        // the accidental message "unknown nominal type 'Self'". The parser
+        // now rejects `Self` deterministically the moment it is recognized
+        // outside a trait/impl owner scope, regardless of whether any
+        // declaration happens to be named "Self" -- see the companion test
+        // below, which proves the difference is not merely cosmetic.
         let src = r#"
             fn id(value: Self) -> Self {
                 return value;
@@ -9162,7 +9171,43 @@ mod tests {
         let err = typecheck_source(src)
             .expect_err("Self outside trait/impl method type positions must stay unsupported");
         assert!(
-            err.message.contains("unknown nominal type 'Self'"),
+            err.message
+                .contains("'Self' is only admitted in trait or impl method type positions"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn self_type_outside_owner_context_rejects_even_when_a_record_named_self_exists() {
+        // FA-02-014 / #1646, matrix item 12: the required invariant is that
+        // an ordinary type reference spelled `Self` must never resolve as a
+        // nominal record merely because a record happens to be named
+        // "Self". Before this fix, `record Self { x: i32 }` followed by an
+        // ordinary `fn f(x: Self) -> i32 { ... }` typechecked successfully
+        // end-to-end (`Ok(())`) -- `Self` silently resolved to that
+        // unrelated record, exactly the misresolution this issue exists to
+        // close. The parser-level rejection is unconditional: it never
+        // consults the record/ADT tables at all, so this now rejects
+        // deterministically regardless of what happens to be declared.
+        let src = r#"
+            record Self { x: i32 }
+
+            fn f(x: Self) -> i32 {
+                return 0;
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "an ordinary Self reference must reject even when a record literally named \
+             Self is declared, never silently resolve to it",
+        );
+        assert!(
+            err.message
+                .contains("'Self' is only admitted in trait or impl method type positions"),
             "unexpected error: {}",
             err.message
         );

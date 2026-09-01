@@ -280,6 +280,24 @@ never a guessed `Record` regardless of the target's actual family. Broader
 generic/blanket/dynamic impl forms remain outside this closed surface, as
 described above.
 
+`Self` is reserved contextual type syntax, not an ordinary nominal type
+name: the parser admits it only while `self_type_scope` is populated, which
+is true exactly while parsing a trait method signature or an impl method's
+type positions (`parse_trait_decl`/`parse_impl_decl`, via
+`with_self_type_scope`), direct or nested through any currently admitted
+structural type family. Before SSF-07 #1646, `Self` written anywhere else
+(an ordinary function parameter/return, a record field, an ADT payload, a
+`let` annotation) silently parsed as `Type::Record("Self")` — a genuine
+nominal type reference to whatever happens to be named `Self`, which
+existed if and only if some other declaration happened to share that name,
+and rejected with an unrelated "unknown nominal type" diagnostic otherwise.
+`parse_type` now rejects `Self` outside `self_type_scope` deterministically,
+at the exact point recognition occurs, before any record/ADT table lookup
+ever runs — this holds unconditionally, even when a record or enum is
+declared with the literal name `Self`, so an ordinary type reference
+spelled `Self` can never be silently resolved as that unrelated
+declaration.
+
 `TraitTable` (`build_trait_table`) is itself the admitted owner-layer trait
 contract, not an unchecked cache of raw parsed declarations: every non-`Self`
 parameter and return type in every trait method signature is canonicalized

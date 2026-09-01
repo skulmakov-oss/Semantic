@@ -476,10 +476,15 @@ Current v0 range-literal limits:
   first-wave iterable loop path on `main`
 - direct record `Iterable` impl dispatch now executes on current `main` when the
   impl exposes `fn next(self: Self, index: i32) -> Option(Item)`
-- `Self` is admitted only in trait method signatures and impl method type
-  positions on current `main`
-- `Self` outside trait/impl method type positions is not part of the stable
-  syntax contract
+- `Self` is reserved contextual type syntax, admitted only while parsing a
+  trait method signature or an impl method's type positions on current
+  `main` -- direct or nested (`Option(Self)`, `Sequence(Self)`,
+  `Result(Self, T)`, tuple positions, etc.), the parser tracks this owner
+  context explicitly rather than inferring it structurally
+- `Self` written anywhere outside that owner context is rejected
+  deterministically at parse time (FA-02-014 / #1646) and is never
+  reinterpreted as an ordinary nominal type name -- this holds even when a
+  record or enum happens to be declared with the literal name `Self`
 - ADT/schema iterable dispatch and indirect iterable projection are not part of
   the current syntax contract
 - descending/custom-step/general iterable range forms are not yet part of the
