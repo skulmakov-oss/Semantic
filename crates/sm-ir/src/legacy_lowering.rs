@@ -6529,7 +6529,7 @@ fn lower_stmt(
                             .to_string(),
                 });
             }
-            let exhaustive_without_default = if default.is_empty() {
+            let exhaustive_without_default = if default.is_none() {
                 match missing_exhaustive_sum_variants(
                     &scr_ty,
                     arms.iter().map(|arm| (&arm.pat, arm.guard)),
@@ -6884,6 +6884,9 @@ fn lower_stmt(
                 });
                 ctx.instrs.push(IrInstr::Assert { cond });
             } else {
+                let default = default
+                    .as_ref()
+                    .expect("non-exhaustive match statement requires explicit default in lowering");
                 let mut def_env = env.clone();
                 def_env.push_scope();
                 for s in default {
@@ -8259,7 +8262,7 @@ fn lower_loop_expr_stmt(
                             .to_string(),
                 });
             }
-            let exhaustive_without_default = if default.is_empty() {
+            let exhaustive_without_default = if default.is_none() {
                 match missing_exhaustive_sum_variants(
                     &scr_ty,
                     arms.iter().map(|arm| (&arm.pat, arm.guard)),
@@ -8579,6 +8582,9 @@ fn lower_loop_expr_stmt(
                 });
                 out.push(IrInstr::Assert { cond });
             } else {
+                let default = default
+                    .as_ref()
+                    .expect("non-exhaustive match statement requires explicit default in lowering");
                 let mut def_env = env.clone();
                 def_env.push_scope();
                 for stmt in default {
@@ -10752,6 +10758,75 @@ mod opt_tests {
             .instrs
             .iter()
             .any(|instr| matches!(instr, IrInstr::Assert { .. })));
+    }
+
+    // FA-02-007 / #1639, items 8-9: statement-form match lowering must
+    // preserve the same presence-vs-absence distinction as the AST -- an
+    // explicitly present but empty default (`Some(vec![])`) lowers as a real,
+    // reachable (if empty) branch, never collapsed into the "provably
+    // unreachable" trap backstop that a genuinely absent default (`None`)
+    // over exhaustive arms gets.
+
+    #[test]
+    fn lower_statement_match_exhaustive_without_default_to_trap_backstop() {
+        // Item 9: a legally exhaustive statement-form match with `None`
+        // (no `_` arm at all) must still lower correctly, with the
+        // impossible-to-reach default branch backed by an `Assert` trap.
+        let src = r#"
+            enum Flag { A, B }
+
+            fn main() {
+                let f: Flag = Flag::A;
+                match f {
+                    Flag::A => { }
+                    Flag::B => { }
+                }
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src)
+            .expect("exhaustive statement match without default should lower");
+        let main = &ir[0];
+        assert!(main
+            .instrs
+            .iter()
+            .any(|instr| matches!(instr, IrInstr::Assert { .. })));
+    }
+
+    #[test]
+    fn lower_statement_match_present_empty_default_does_not_emit_trap() {
+        // Item 8: an explicitly present but empty default (`_ => {}`, i.e.
+        // `Some(vec![])`) over non-exhaustive arms must lower successfully
+        // as a real branch. It must not be treated as absent and must not
+        // be routed through the impossible-match `Assert` trap -- if
+        // lowering ever regressed to inferring presence from body
+        // emptiness, this case (non-exhaustive arms, so the trap path would
+        // otherwise be unreachable) would either wrongly reject with
+        // "match requires default arm '_'" or wrongly emit an assert(false).
+        let src = r#"
+            enum Flag { A, B, C }
+
+            fn main() {
+                let f: Flag = Flag::A;
+                match f {
+                    Flag::A => { }
+                    _ => { }
+                }
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src)
+            .expect("non-exhaustive statement match with a present empty default should lower");
+        let main = &ir[0];
+        assert!(
+            !main
+                .instrs
+                .iter()
+                .any(|instr| matches!(instr, IrInstr::Assert { .. })),
+            "a present, empty default must not be lowered as the impossible-match trap"
+        );
     }
 
     #[test]

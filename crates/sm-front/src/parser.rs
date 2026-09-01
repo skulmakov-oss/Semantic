@@ -2468,7 +2468,7 @@ impl<'a> Parser<'a> {
         Ok(self.arena.alloc_stmt(Stmt::Match {
             scrutinee,
             arms,
-            default: default.unwrap_or_default(),
+            default,
         }))
     }
 
@@ -4922,17 +4922,17 @@ fn main() {
             panic!("expected leading match statement");
         };
         assert_eq!(arms.len(), 1);
-        assert!(default.is_empty());
+        assert_eq!(*default, None, "no `_` arm at all must store None (#1639)");
     }
 
     #[test]
     fn rustlike_parser_accepts_match_statement_with_one_default_arm() {
-        // The default arm's block must be non-empty here: `Stmt::Match`
-        // stores `default` as a bare `Vec<StmtId>` (not `Option<...>`), so an
-        // empty default block is indistinguishable from "no default arm" by
-        // inspecting the stored AST alone. The parser's own transient
-        // `Option<Vec<StmtId>>` tracking (which this fix's duplicate check
-        // reads) does not share that ambiguity.
+        // FA-02-007 / #1639: `Stmt::Match.default` is `Option<Vec<StmtId>>`,
+        // so this non-empty default arm is distinguishable in the stored AST
+        // itself from both "no default arm" (`None`) and an explicit but
+        // empty default arm (`Some(vec![])`) -- inspecting the stored AST
+        // alone is now sufficient, no need to rely on the parser's transient
+        // tracking.
         let src = r#"
 fn main() {
     match T {
@@ -4950,7 +4950,72 @@ fn main() {
             panic!("expected leading match statement");
         };
         assert_eq!(arms.len(), 1);
-        assert!(!default.is_empty());
+        assert!(
+            default.as_ref().is_some_and(|body| !body.is_empty()),
+            "expected Some(nonempty), got {default:?}"
+        );
+    }
+
+    #[test]
+    fn rustlike_parser_distinguishes_absent_from_empty_present_default_arm() {
+        // FA-02-007 / #1639, items 1-2 of the regression matrix: no `_` arm
+        // at all must parse to `None`, while an explicitly present but empty
+        // `_ => {}` must parse to `Some(Vec::new())` -- never the same AST
+        // value, even though both are "empty" in the sense of contributing
+        // zero statements.
+        let no_wildcard_src = r#"
+fn main() {
+    match T {
+        T => { }
+        F => { }
+    }
+    return;
+}
+"#;
+        let empty_wildcard_src = r#"
+fn main() {
+    match T {
+        T => { }
+        _ => { }
+    }
+    return;
+}
+"#;
+
+        let no_wildcard =
+            parse_rustlike_with_profile(no_wildcard_src, &ParserProfile::foundation_default())
+                .expect("match with no wildcard should parse");
+        let Stmt::Match {
+            default: no_wildcard_default,
+            ..
+        } = no_wildcard.arena.stmt(no_wildcard.functions[0].body[0])
+        else {
+            panic!("expected leading match statement");
+        };
+
+        let empty_wildcard =
+            parse_rustlike_with_profile(empty_wildcard_src, &ParserProfile::foundation_default())
+                .expect("match with empty wildcard should parse");
+        let Stmt::Match {
+            default: empty_wildcard_default,
+            ..
+        } = empty_wildcard
+            .arena
+            .stmt(empty_wildcard.functions[0].body[0])
+        else {
+            panic!("expected leading match statement");
+        };
+
+        assert_eq!(*no_wildcard_default, None, "no `_` arm must store None");
+        assert_eq!(
+            *empty_wildcard_default,
+            Some(Vec::new()),
+            "an explicitly empty `_ => {{}}` must store Some(vec![]), not None"
+        );
+        assert_ne!(
+            no_wildcard_default, empty_wildcard_default,
+            "absent and present-but-empty wildcards must never collapse to the same AST value"
+        );
     }
 
     #[test]
@@ -5654,7 +5719,7 @@ fn main() {
         match program.arena.stmt(unwrap.body[1]) {
             Stmt::Match { arms, default, .. } => {
                 assert!(
-                    default.is_empty(),
+                    default.is_none(),
                     "exhaustive Result match should omit default"
                 );
                 let MatchPattern::Adt(pat) = &arms[1].pat else {

@@ -496,7 +496,12 @@ pub enum Stmt {
     Match {
         scrutinee: ExprId,
         arms: Vec<MatchArm>,
-        default: Vec<StmtId>,
+        /// `None` means the source had no `_` default arm at all. `Some(body)`
+        /// means the source had an explicit `_ => { ... }` arm, independently
+        /// of whether `body` is empty -- an empty wildcard body (`_ => {}`)
+        /// is `Some(Vec::new())`, never conflated with `None` (FA-02-007 /
+        /// #1639). Mirrors `MatchExpr::default: Option<BlockExpr>` above.
+        default: Option<Vec<StmtId>>,
     },
     Break(Option<ExprId>),
     Continue,

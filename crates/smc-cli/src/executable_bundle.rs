@@ -745,7 +745,7 @@ fn collect_local_calls_from_stmt(
                     collect_local_calls_from_stmt(arena, *stmt, functions_by_name, out);
                 }
             }
-            for stmt in default {
+            for stmt in default.iter().flatten() {
                 collect_local_calls_from_stmt(arena, *stmt, functions_by_name, out);
             }
         }
