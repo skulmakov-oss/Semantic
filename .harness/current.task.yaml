@@ -89,7 +89,11 @@ constraints:
   evidence_before_claims: true
   current_main_is_not_stable: true
   contract_gaps_separated_from_implementation_bugs: true
+  ownership_position: A
+  ownership_position_decision_record: >-
+    docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md
   ownership_position_decision_required_before_any_finding_repair: true
+  no_rust_equivalent_lifetime_region_claim: true
   ownership_state_cluster_worked_in_dependency_order_not_independently: true
   public_claims_and_negative_examples_match_selected_position: true
   positive_and_deterministic_negative_tests_required_per_included_ownership_form: true

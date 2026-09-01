@@ -154,9 +154,9 @@ that wording drift; it does not delete or rewrite historical evidence.
 | Source -> IR -> SemCode -> verifier -> VM | F/I/V/R/C | **Qualified limited release** | Gate 1 execution-integrity evidence. | Preserve through every phase. |
 | Deterministic VM rerun | V/R | **Landed and qualified on `main`** | VM goldens, compatibility suites, benchmarks, and 7hell. | Final contract in SSF-08/10/12. |
 | Quotas/fuel and trap taxonomy | V/R | **Landed and qualified on `main`** | VM/spec and trap/quota tests. | Freeze public promise in SSF-08. |
-| OWN0 tuple/direct-record paths | V/R | **Landed and qualified on `main`** | Frozen tuple+record spec and ownership goldens. | Public Position A/B decision in SSF-08. |
-| ADT/schema/sequence/map indirect ownership paths | V/R | **Landed but unqualified** | Some value-family tests exist; no complete stable path model. | SSF-08. |
-| Partial move/release and inter-frame ownership | V/R | **Roadmap** | Explicit gap beyond OWN0. | SSF-08 may defer under Position A. |
+| OWN0 tuple/direct-record paths | V/R | **Landed and qualified on `main`** | Frozen tuple+record spec and ownership goldens. | Position A selected in SSF-08 (`docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md`); root-identity and event-timing repairs (#1725/#1726) required before further promotion. |
+| ADT/schema/sequence/map indirect ownership paths | V/R | **Landed but unqualified** | Some value-family tests exist; no complete stable path model. | Sequence static-index and ADT payload classified INCLUDED ONLY AFTER REQUIRED REPAIR under Position A (SSF-08 decision record); Map/schema/indirect projection remain deferred or not representable. |
+| Partial move/release and inter-frame ownership | V/R | **Roadmap** | Explicit gap beyond OWN0. | Deferred under Position A (SSF-08 decision record); no release event kind exists in OWN0 today. |
 | Capability and audit boundary | V/R/C | **Landed and qualified on `main`** | Controlled observation plus SSF-04 application capabilities; request/manifest distinction, structured denial, hashed audit, and replay-order evidence. | Preserve through SSF-12. |
 | Human-readable diagnostics and source spans | F/I/V/C | **Landed and qualified on `main`** | PCC negative suites and CLI diagnostic parity tests. | Machine contract in SSF-09. |
 | Stable machine-readable diagnostics | F/I/V/C | **Roadmap** | No single frozen JSON/protocol taxonomy across phases. | SSF-09/10. |

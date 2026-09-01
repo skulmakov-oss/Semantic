@@ -135,3 +135,43 @@ fn ssf_active_phase_matches_across_dependency_map_and_harness() {
          {harness_issue} -- these two authorities have drifted"
     );
 }
+
+/// Added when SSF-08 selected Position A (bounded deterministic VM language,
+/// no Rust-equivalent lifetime/region claim) in
+/// `docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md`.
+/// Three independent authorities each carry that decision: the decision
+/// record itself, `.harness/current.task.yaml`, and the frozen runtime
+/// ownership spec's non-goal boundary. Nothing previously checked they
+/// agreed. This uses small, stable anchor strings rather than a large prose
+/// snapshot, so it does not accidentally freeze unrelated wording.
+#[test]
+fn ssf08_ownership_position_matches_across_decision_record_harness_and_spec() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let decision = read(
+        root,
+        "docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md",
+    );
+    let harness = read(root, ".harness/current.task.yaml");
+    let runtime_ownership = read(root, "docs/spec/runtime_ownership.md");
+
+    assert!(
+        decision.contains("Decision: **Position A — bounded deterministic VM language**"),
+        "decision record is missing its own Position A anchor"
+    );
+    assert!(
+        harness.contains("ownership_position: A"),
+        ".harness/current.task.yaml is missing `ownership_position: A`"
+    );
+    assert!(
+        harness.contains("no_rust_equivalent_lifetime_region_claim: true"),
+        ".harness/current.task.yaml is missing the no-Rust-equivalent-claim invariant"
+    );
+    assert!(
+        runtime_ownership.contains("Position A — bounded deterministic VM language"),
+        "runtime_ownership.md's Public Position section is missing the Position A anchor"
+    );
+    assert!(
+        runtime_ownership.contains("does not claim a general runtime borrow checker"),
+        "runtime_ownership.md is missing its general-borrow-checker non-claim boundary"
+    );
+}
