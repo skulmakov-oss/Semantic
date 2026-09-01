@@ -3584,6 +3584,416 @@ mod tests {
         type_check_program(&program)
     }
 
+    #[test]
+    fn storage_admission_aggregate_composite_matrix_typechecks_for_record_and_adt() {
+        // Corrective round (review on PR #1877): wiring
+        // ensure_storage_type_supported into record/ADT declaration
+        // validation changed this authority's semantic scope from
+        // "local binding storage" to "local binding storage, record field
+        // storage, and ADT payload storage" -- the original PR treated the
+        // 20-variant classification as automatically valid for all three
+        // positions without proving that. This table proves, per composite,
+        // that a value can be constructed with the composite in a record
+        // field / ADT payload position, read back out, and used -- not
+        // merely that the declaration alone typechecks.
+        //
+        // Tuple/Measured/Option/Result: `docs/spec/types.md` already states
+        // "measured numeric types may appear in ... tuple elements, record
+        // fields, Option(T), and Result(T, E) payload positions" -- direct
+        // normative evidence, corroborated here.
+        // Sequence/Map: no prior normative record-field statement found;
+        // admitted only after this empirical proof (also lowered to IR
+        // successfully, see legacy_lowering.rs's matching regression).
+        // Record/Adt nesting: architecturally proven independently by
+        // `validate_record_acyclic`/`validate_adt_acyclic`, which exist
+        // specifically to walk nested nominal fields -- that machinery has
+        // no purpose if nominal nesting were not an intended, supported
+        // pattern.
+        let cases = [
+            (
+                "record Tuple",
+                "record R { x: (i32, i32) } fn main() { let r: R = R { x: (1, 2) }; let (a, b): (i32, i32) = r.x; let _ = a; let _ = b; return; }",
+            ),
+            (
+                "adt Tuple",
+                "enum E { V((i32, i32)) } fn main() { let e: E = E::V((1, 2)); match e { E::V(t) => { let (a, b): (i32, i32) = t; let _ = a; let _ = b; } } return; }",
+            ),
+            (
+                "record Sequence",
+                "record R { x: Sequence(i32) } fn main() { let r: R = R { x: [1, 2] }; let s: Sequence(i32) = r.x; let _ = s; return; }",
+            ),
+            (
+                "adt Sequence",
+                "enum E { V(Sequence(i32)) } fn main() { let e: E = E::V([1, 2]); match e { E::V(s) => { let _ = s; } } return; }",
+            ),
+            (
+                "record Map",
+                "record R { x: Map(i32, i32) } fn main() { let r: R = R { x: map_empty() }; let m: Map(i32, i32) = r.x; let _ = m; return; }",
+            ),
+            (
+                "adt Map",
+                "enum E { V(Map(i32, i32)) } fn main() { let e: E = E::V(map_empty()); match e { E::V(m) => { let _ = m; } } return; }",
+            ),
+            (
+                "record Measured",
+                "record R { x: f64[m] } fn main() { let r: R = R { x: 1.0 }; let v: f64[m] = r.x; let _ = v; return; }",
+            ),
+            (
+                "adt Measured",
+                "enum E { V(f64[m]) } fn main() { let e: E = E::V(1.0); match e { E::V(v) => { let _ = v; } } return; }",
+            ),
+            (
+                "record Option",
+                "record R { x: Option(i32) } fn main() { let r: R = R { x: Option::Some(1) }; let o: Option(i32) = r.x; let _ = o; return; }",
+            ),
+            (
+                "adt Option",
+                "enum E { V(Option(i32)) } fn main() { let e: E = E::V(Option::Some(1)); match e { E::V(o) => { let _ = o; } } return; }",
+            ),
+            (
+                "record Result",
+                "record R { x: Result(i32, i32) } fn main() { let r: R = R { x: Result::Ok(1) }; let v: Result(i32, i32) = r.x; let _ = v; return; }",
+            ),
+            (
+                "adt Result",
+                "enum E { V(Result(i32, i32)) } fn main() { let e: E = E::V(Result::Ok(1)); match e { E::V(v) => { let _ = v; } } return; }",
+            ),
+            (
+                "record nested Record",
+                "record Inner { n: i32 } record Outer { x: Inner } fn main() { let o: Outer = Outer { x: Inner { n: 1 } }; let _ = o.x; return; }",
+            ),
+            (
+                "adt nested Record",
+                "record Inner { n: i32 } enum E { V(Inner) } fn main() { let e: E = E::V(Inner { n: 1 }); match e { E::V(i) => { let _ = i; } } return; }",
+            ),
+            (
+                "record nested Adt",
+                "enum Inner { A, B } record Outer { x: Inner } fn main() { let o: Outer = Outer { x: Inner::A }; let _ = o.x; return; }",
+            ),
+            (
+                "adt nested Adt",
+                "enum Inner { A, B } enum E { V(Inner) } fn main() { let e: E = E::V(Inner::A); match e { E::V(i) => { let _ = i; } } return; }",
+            ),
+        ];
+        for (label, src) in cases {
+            typecheck_source(src).unwrap_or_else(|e| {
+                panic!("{label}: aggregate composite storage must typecheck: {e:?}")
+            });
+        }
+    }
+
+    #[test]
+    fn storage_admission_record_closure_field_typechecks_end_to_end() {
+        // Corrective round: the original PR admitted Type::Closure for
+        // storage on the strength of *local-binding* evidence only (two
+        // pre-existing tests proving `let`-bound closures work), which does
+        // not by itself prove record-field closure storage -- the
+        // historical `first_class_closures_full_scope.md` scope explicitly
+        // named "local binding, parameter, and return transport" only, not
+        // aggregate storage. This constructs a record with a closure field,
+        // reads the field back out, and invokes the extracted closure --
+        // full frontend proof; VM execution is proven separately in
+        // sm-vm's test suite (see `docs/spec/foundation_source_profile_v1.md`
+        // for the reconciled normative statement and the SSF-07 #1861
+        // addendum in `first_class_closures_full_scope.md`).
+        let src = r#"
+            record Holder {
+                f: Closure(f64 -> f64),
+            }
+
+            fn main() {
+                let h: Holder = Holder { f: (x => x + 1.0) };
+                let g: Closure(f64 -> f64) = h.f;
+                let total: f64 = g(2.0);
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("record field closure storage: construct, extract, and invoke must typecheck");
+    }
+
+    #[test]
+    fn storage_admission_adt_closure_payload_typechecks_end_to_end() {
+        let src = r#"
+            enum Holder {
+                Wrap(Closure(f64 -> f64)),
+            }
+
+            fn main() {
+                let h: Holder = Holder::Wrap((x => x + 1.0));
+                let total: f64 = match h {
+                    Holder::Wrap(g) => { g(2.0) }
+                };
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("ADT payload closure storage: construct and invoke via match must typecheck");
+    }
+
+    // FA-02-038 / #1861: exhaustive storage-type admission regression
+    // matrix. `ensure_storage_type_supported` is the sole shared authority
+    // for every field/binding storage position (Const/Let/LetTuple/
+    // LetElseTuple/Discard local bindings, and -- newly wired by this fix --
+    // record fields and ADT payloads). Its own exhaustiveness (no `_` arm at
+    // all) is a compile-time property, not something a runtime test can
+    // prove as strongly as the compiler itself: `cargo build`/`cargo check`
+    // succeeding after adding this function's body IS that proof -- if a
+    // 21st `Type` variant is ever added without updating this match, the
+    // crate fails to compile rather than silently admitting it.
+
+    #[test]
+    fn storage_admission_accepts_every_qualified_scalar_leaf() {
+        // Type::Unit has no explicit type-annotation source syntax at all
+        // (parse_type has no "Unit"/"()" branch -- it only ever arises
+        // implicitly as an omitted function return type), so it cannot be
+        // exercised via a `let` annotation here; it is covered directly
+        // below alongside the other structural-placeholder direct-call
+        // proofs.
+        let cases = [
+            ("quad", "N"),
+            ("bool", "true"),
+            ("text", "\"s\""),
+            ("i32", "0"),
+            ("u32", "0u32"),
+            ("fx", "0.0fx"),
+            ("f64", "0.0"),
+        ];
+        for (ty, value) in cases {
+            let src = format!("fn main() {{\n    let x: {ty} = {value};\n    return;\n}}\n");
+            typecheck_source(&src)
+                .unwrap_or_else(|e| panic!("scalar leaf '{ty}' must be admitted storage: {e:?}"));
+        }
+    }
+
+    #[test]
+    fn storage_admission_accepts_every_qualified_composite_and_recurses_into_children() {
+        let cases = [
+            (
+                "Sequence(i32)",
+                "fn main() {\n    let x: Sequence(i32) = [1, 2];\n    return;\n}\n",
+            ),
+            (
+                "Option(i32)",
+                "fn main() {\n    let x: Option(i32) = Option::Some(1);\n    return;\n}\n",
+            ),
+            (
+                "Result(i32, i32)",
+                "fn main() {\n    let x: Result(i32, i32) = Result::Ok(1);\n    return;\n}\n",
+            ),
+            (
+                "tuple (i32, i32)",
+                "fn main() {\n    let x: (i32, i32) = (1, 2);\n    return;\n}\n",
+            ),
+            (
+                "Map(i32, i32)",
+                "fn main() {\n    let x: Map(i32, i32) = map_empty();\n    return;\n}\n",
+            ),
+            (
+                "Closure(f64 -> f64)",
+                "fn main() {\n    let x: Closure(f64 -> f64) = (v => v + 1.0);\n    return;\n}\n",
+            ),
+        ];
+        for (label, src) in cases {
+            typecheck_source(src)
+                .unwrap_or_else(|e| panic!("composite '{label}' must be admitted storage: {e:?}"));
+        }
+    }
+
+    #[test]
+    fn storage_admission_rejects_direct_qvec() {
+        let src = "fn main() {\n    let x: qvec[8] = qvec[8];\n    return;\n}\n";
+        let err = typecheck_source(src).expect_err("direct qvec storage must reject");
+        assert!(
+            err.message.contains("qvec is a reserved type"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn storage_admission_rejects_qvec_nested_in_every_composite() {
+        let src = "fn main() { return; }\n";
+        let program = parse_program(src).expect("parse");
+        let record_table = crate::build_record_table(&program).expect("record table");
+        let adt_table = crate::build_adt_table(&program).expect("adt table");
+        let qvec = Type::QVec(8);
+        let cases: Vec<(&str, Type)> = vec![
+            ("Option(qvec)", Type::Option(Box::new(qvec.clone()))),
+            (
+                "Sequence(qvec)",
+                Type::Sequence(crate::types::SequenceType {
+                    family: crate::types::SequenceCollectionFamily::OrderedSequence,
+                    item: Box::new(qvec.clone()),
+                }),
+            ),
+            (
+                "Result(qvec, i32)",
+                Type::Result(Box::new(qvec.clone()), Box::new(Type::I32)),
+            ),
+            (
+                "Result(i32, qvec)",
+                Type::Result(Box::new(Type::I32), Box::new(qvec.clone())),
+            ),
+            (
+                "Tuple(i32, qvec)",
+                Type::Tuple(vec![Type::I32, qvec.clone()]),
+            ),
+            (
+                "Map(i32, qvec)",
+                Type::Map(crate::types::MapType {
+                    key: Box::new(Type::I32),
+                    val: Box::new(qvec.clone()),
+                }),
+            ),
+            (
+                "Closure(qvec -> i32)",
+                Type::Closure(crate::types::ClosureType {
+                    family: crate::types::ClosureValueFamily::UnaryDirect,
+                    capture: crate::types::ClosureCapturePolicy::Immutable,
+                    param: Box::new(qvec.clone()),
+                    ret: Box::new(Type::I32),
+                }),
+            ),
+        ];
+        for (label, ty) in cases {
+            let canonical =
+                canonicalize_declared_type(&ty, &record_table, &adt_table, &program.arena)
+                    .unwrap_or_else(|e| panic!("{label}: canonicalize failed: {e:?}"));
+            let err =
+                ensure_storage_type_supported(&canonical, &program.arena, "probe".to_string())
+                    .expect_err(&format!(
+                        "{label}: nested qvec must reject, recursion must reach it"
+                    ));
+            assert!(
+                err.message.contains("qvec is a reserved type"),
+                "{label}: unexpected error: {}",
+                err.message
+            );
+        }
+    }
+
+    #[test]
+    fn storage_admission_rejects_typevar_and_range_and_admits_unit_directly() {
+        let src = "fn main() { return; }\n";
+        let program = parse_program(src).expect("parse");
+        let typevar_name = program.arena.symbol_to_id.get("main").copied().unwrap();
+
+        let typevar_err = ensure_storage_type_supported(
+            &Type::TypeVar(typevar_name),
+            &program.arena,
+            "probe".to_string(),
+        )
+        .expect_err("TypeVar must reject: storage admission has no admitted-type-var context");
+        assert!(
+            typevar_err
+                .message
+                .contains("is not admitted as a storage type"),
+            "unexpected error: {}",
+            typevar_err.message
+        );
+
+        let range_err =
+            ensure_storage_type_supported(&Type::RangeI32, &program.arena, "probe".to_string())
+                .expect_err("RangeI32 must reject: it is a structural/iteration type, not storage");
+        assert!(
+            range_err.message.contains("range values are not admitted"),
+            "unexpected error: {}",
+            range_err.message
+        );
+
+        // Type::Unit has no type-annotation source syntax (see the comment
+        // on storage_admission_accepts_every_qualified_scalar_leaf), so its
+        // admission is proven directly here instead.
+        ensure_storage_type_supported(&Type::Unit, &program.arena, "probe".to_string())
+            .expect("Unit must be admitted: a trivial, always-representable storage leaf");
+    }
+
+    #[test]
+    fn storage_admission_rejects_unsupported_record_field_type() {
+        // Items 5 + regression matrix core: end-to-end through the actual
+        // record declaration validation path (validate_record_declarations),
+        // not the helper called directly.
+        let src = "record R {\n    x: qvec[8]\n}\nfn main() {\n    return;\n}\n";
+        let err = typecheck_source(src).expect_err("record field with qvec must reject");
+        assert!(
+            err.message.contains("qvec is a reserved type") && err.message.contains("field 'R.x'"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn storage_admission_rejects_unsupported_adt_payload_type() {
+        let src = "enum E {\n    A(qvec[8])\n}\nfn main() {\n    return;\n}\n";
+        let err = typecheck_source(src).expect_err("ADT payload with qvec must reject");
+        assert!(
+            err.message.contains("qvec is a reserved type")
+                && err.message.contains("variant 'E::A'"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn storage_admission_rejects_unsupported_binding_annotation() {
+        // Item 7: at least one let/const path proving the shared authority
+        // is wired identically for local bindings, not just record/ADT
+        // fields.
+        let src = "fn main() {\n    let x: qvec[8] = qvec[8];\n    return;\n}\n";
+        let err = typecheck_source(src).expect_err("let annotation with qvec must reject");
+        assert!(
+            err.message.contains("qvec is a reserved type") && err.message.contains("let 'x'"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn storage_admission_admits_qualified_non_generic_record_and_adt_storage() {
+        // Item 8: positive control -- ordinary, fully-supported field/
+        // payload types must remain green after wiring storage admission
+        // into declaration validation.
+        let src = r#"
+            record Point {
+                x: i32,
+                y: i32,
+                label: text,
+            }
+
+            enum Shape {
+                Circle(f64),
+                Square(f64, f64),
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("record/ADT with fully-supported field/payload types must typecheck");
+    }
+
+    #[test]
+    fn storage_admission_closes_nominal_cross_boundary_escape() {
+        // Item 9, the central FA-02-038 finding: pre-fix, an unsupported
+        // field type hid inside an admitted record declaration and escaped
+        // as a trusted Type::Record nominal shell to an ordinary function
+        // signature, which #1647's executable-signature admission accepted
+        // without ever looking inside the record's own fields (it only
+        // resolves the symbol name). The record declaration itself must now
+        // reject before any nominal shell is ever trusted downstream.
+        let src = "record R {\n    x: qvec[8]\n}\nfn f(r: R) -> i32 {\n    return 0;\n}\nfn main() {\n    return;\n}\n";
+        let err = typecheck_source(src).expect_err(
+            "unsupported field must reject before the record's nominal identity is trusted",
+        );
+        assert!(
+            err.message.contains("qvec is a reserved type"),
+            "unexpected error (possible authority inversion or cross-boundary escape): {}",
+            err.message
+        );
+    }
+
     // FA-02-018 / #1650: generic record/ADT declarations are rejected at
     // the canonical owner boundary (build_record_table/build_adt_table),
     // never merely tolerated until an unrelated later error happens to
@@ -7993,9 +8403,18 @@ mod tests {
 
     #[test]
     fn record_equality_rejects_unsupported_field_subset() {
+        // FA-02-038 / #1861: this test previously used a `qvec` field to
+        // reach a field type equality never supports. That relied on
+        // `qvec`-typed record fields being admitted at declaration time at
+        // all -- itself the exact fail-open storage-admission gap #1861
+        // closes (record fields now reject `qvec` before equality is ever
+        // considered). `Map(i32, i32)` is a storage-admitted field type
+        // (declares successfully) that `supports_stable_equality_type_inner`
+        // still unconditionally reports as not equality-supporting, so it
+        // isolates the equality-specific rejection this test targets.
         let src = r#"
             record SensorFrame {
-                mask: qvec,
+                mask: Map(i32, i32),
             }
 
             fn compare(left: SensorFrame, right: SensorFrame) {
@@ -12515,6 +12934,23 @@ fn validate_record_declarations(
                     resolve_symbol_name(&program.arena, field.name)?
                 ),
             )?;
+            // FA-02-038 / #1861: ensure_type_resolved above proves nominal
+            // references resolve, not that the field's type is one this
+            // Foundation actually admits as storage -- a reserved/
+            // structural/contextual type (e.g. qvec, a closure, an
+            // unresolved generic) could previously hide inside an admitted
+            // record declaration and escape as a trusted Type::Record
+            // nominal shell everywhere downstream, since no earlier phase
+            // ever looked inside the field.
+            ensure_storage_type_supported(
+                &field.ty,
+                &program.arena,
+                format!(
+                    "field '{}.{}'",
+                    resolve_symbol_name(&program.arena, record.name)?,
+                    resolve_symbol_name(&program.arena, field.name)?
+                ),
+            )?;
         }
     }
 
@@ -12565,6 +13001,19 @@ fn validate_adt_declarations(
                     item_ty,
                     record_table,
                     adt_table,
+                    &program.arena,
+                    format!(
+                        "variant '{}::{}' payload item {}",
+                        resolve_symbol_name(&program.arena, adt.name)?,
+                        resolve_symbol_name(&program.arena, variant.name)?,
+                        index
+                    ),
+                )?;
+                // FA-02-038 / #1861: see the matching comment in
+                // validate_record_declarations -- ensure_type_resolved alone
+                // does not prove a payload's type is admitted storage.
+                ensure_storage_type_supported(
+                    item_ty,
                     &program.arena,
                     format!(
                         "variant '{}::{}' payload item {}",
@@ -13103,12 +13552,88 @@ pub(crate) fn ensure_executable_type_supported(
     }
 }
 
+/// FA-02-038 / #1861: exhaustive (no catch-all) storage-type admission.
+///
+/// Every `Type` variant is matched explicitly, so adding a new variant to
+/// the `Type` enum without updating this function is a compile error rather
+/// than a silent "falls through to `Ok(())`" admission -- the same
+/// exhaustiveness discipline `ensure_executable_type_supported` established
+/// for #1647, applied to a genuinely different question. Storage admission
+/// answers "may this type be the type of a field, binding, or annotated
+/// value", not "may this type appear in an executable function
+/// signature" -- the two contracts happen to agree on every variant here,
+/// but are decided independently rather than by reuse, since nothing
+/// guarantees they always will (e.g. a future closure-capture storage
+/// model could diverge from closure's executable-parameter admission).
+///
+/// `Type::Closure` is an admitted storage composite, and this admission is
+/// position-independent (local binding, record field, ADT payload) by
+/// direct proof rather than by assumption. Local `let` storage was already
+/// covered (see `first_class_closure_literal_typechecks_with_declared_signature_and_capture`
+/// / `direct_first_class_closure_invocation_typechecks_in_wave3`), but an
+/// earlier revision of this fix generalized that to record/ADT storage on
+/// the weaker claim that "no evidence distinguishes record-field storage as
+/// stricter". Wiring this function into `validate_record_declarations`/
+/// `validate_adt_declarations` genuinely widened its scope beyond local
+/// bindings, so that generalization needed its own proof, not an absence of
+/// counter-evidence. That proof now exists at every pipeline stage for both
+/// aggregate positions: typecheck (`storage_admission_record_closure_field_typechecks_end_to_end`
+/// / `storage_admission_adt_closure_payload_typechecks_end_to_end`), IR
+/// lowering to the correct `MakeClosure`/`MakeRecord`/`MakeAdt`/`RecordGet`/
+/// `ClosureCall` opcode sequence (`storage_admission_record_closure_field_lowers_to_working_ir`
+/// / `storage_admission_adt_closure_payload_lowers_to_working_ir` in
+/// `sm-ir`), and full frontend-to-VM execution producing the correct result
+/// (`storage_admission_record_closure_field_vm_executes_correctly` /
+/// `storage_admission_adt_closure_payload_vm_executes_correctly` in
+/// `sm-vm`). This is documented as a deliberate SSF-07 #1861 widening of
+/// closure storage scope beyond the M8.4 local-binding-only baseline; see
+/// the addendum in `docs/roadmap/language_maturity/first_class_closures_full_scope.md`.
+/// Recursing into the closure's parameter/return types mirrors
+/// `ensure_executable_type_supported`, but the two remain independently
+/// decided contracts, not a shared implementation.
+///
+/// The other admitted composites are backed the same way, evidence first:
+/// `Sequence`/`Map` have no prior normative statement admitting them in
+/// aggregate position, so `storage_admission_sequence_and_map_aggregate_storage_lowers`
+/// (`sm-ir`) is their sole but sufficient lowering proof for both record
+/// and ADT storage. `Tuple`/`Measured`/`Option`/`Result` are directly named
+/// in aggregate position by `docs/spec/types.md` ("measured numeric types
+/// may appear in ... tuple elements, record fields ... `Option(T)`, and
+/// `Result(T, E)` payload positions"), confirmed end-to-end by
+/// `storage_admission_aggregate_composite_matrix_typechecks_for_record_and_adt`,
+/// which exercises all eight admitted composites in both record-field and
+/// ADT-payload position. `Record`/`Adt` nominal nesting inside other
+/// records/ADTs is proven intended by the pre-existing
+/// `validate_record_acyclic`/`validate_adt_acyclic` cycle-detection
+/// machinery, which would be pointless if nominal aggregate nesting were
+/// not a supported storage pattern.
+///
+/// `Type::RangeI32` and `Type::TypeVar` reject unconditionally: no current
+/// Foundation source-profile evidence, test, or lowering path shows a range
+/// value or an unresolved generic parameter is ever storable, and unlike
+/// `canonicalize_declared_type_generic`/`ensure_executable_type_supported`
+/// this helper has no caller-scoped `admitted_type_vars` list through which
+/// a `TypeVar` could ever be proven legitimate here -- there is also no
+/// parser-level annotation syntax that ever constructs `Type::RangeI32` in
+/// the first place (it only ever arises as an inferred range-*expression*
+/// type), so this arm is believed unreachable via any current call path;
+/// it is included because exhaustiveness requires a decision for every
+/// variant regardless of reachability. `Type::QVec` remains reserved and
+/// not yet promoted, as it is for executable admission.
 fn ensure_storage_type_supported(
     ty: &Type,
     arena: &AstArena,
     context: String,
 ) -> Result<(), FrontendError> {
     match ty {
+        Type::Quad
+        | Type::Bool
+        | Type::Text
+        | Type::I32
+        | Type::U32
+        | Type::Fx
+        | Type::F64
+        | Type::Unit => Ok(()),
         Type::Tuple(items) => {
             for item in items {
                 ensure_storage_type_supported(item, arena, context.clone())?;
@@ -13121,6 +13646,10 @@ fn ensure_storage_type_supported(
         Type::Map(map) => {
             ensure_storage_type_supported(map.key.as_ref(), arena, context.clone())?;
             ensure_storage_type_supported(map.val.as_ref(), arena, context)
+        }
+        Type::Closure(closure) => {
+            ensure_storage_type_supported(closure.param.as_ref(), arena, context.clone())?;
+            ensure_storage_type_supported(closure.ret.as_ref(), arena, context)
         }
         Type::Measured(base, _) => ensure_storage_type_supported(base, arena, context),
         Type::Option(item) => ensure_storage_type_supported(item, arena, context),
@@ -13136,7 +13665,24 @@ fn ensure_storage_type_supported(
             let _ = resolve_symbol_name(arena, *name)?;
             Ok(())
         }
-        _ => Ok(()),
+        Type::TypeVar(name) => Err(FrontendError {
+            pos: 0,
+            message: format!(
+                "type variable '{}' is not admitted as a storage type in {}",
+                resolve_symbol_name(arena, *name)?,
+                context
+            ),
+        }),
+        Type::RangeI32 => Err(FrontendError {
+            pos: 0,
+            message: format!("range values are not admitted as a storage type in {context}"),
+        }),
+        Type::QVec(_) => Err(FrontendError {
+            pos: 0,
+            message: format!(
+                "qvec is a reserved type and is not admitted as a storage type in {context}"
+            ),
+        }),
     }
 }
 
