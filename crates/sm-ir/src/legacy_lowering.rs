@@ -10166,6 +10166,120 @@ mod opt_tests {
     use sm_format::semcode_decode::{decode_semcode_envelope, DecodedAccessPathComponent};
     use sm_front::parse_program;
 
+    #[test]
+    fn storage_admission_sequence_and_map_aggregate_storage_lowers() {
+        // FA-02-038 / #1861 corrective round: Sequence/Map have no prior
+        // normative record-field statement (unlike Tuple/Measured/Option/
+        // Result, documented in docs/spec/types.md); this is their sole
+        // aggregate-storage lowering evidence.
+        let cases = [
+            (
+                "record Sequence",
+                "record R { x: Sequence(i32) } fn main() { let r: R = R { x: [1, 2] }; let s: Sequence(i32) = r.x; let _ = s; return; }",
+            ),
+            (
+                "adt Sequence",
+                "enum E { V(Sequence(i32)) } fn main() { let e: E = E::V([1, 2]); match e { E::V(s) => { let _ = s; } } return; }",
+            ),
+            (
+                "record Map",
+                "record R { x: Map(i32, i32) } fn main() { let r: R = R { x: map_empty() }; let m: Map(i32, i32) = r.x; let _ = m; return; }",
+            ),
+            (
+                "adt Map",
+                "enum E { V(Map(i32, i32)) } fn main() { let e: E = E::V(map_empty()); match e { E::V(m) => { let _ = m; } } return; }",
+            ),
+        ];
+        for (label, src) in cases {
+            compile_program_to_ir(src)
+                .unwrap_or_else(|e| panic!("{label}: aggregate storage must lower: {e:?}"));
+        }
+    }
+
+    #[test]
+    fn storage_admission_record_closure_field_lowers_to_working_ir() {
+        // FA-02-038 / #1861 corrective round: proves the record-closure
+        // path lowers to real, composing opcodes (MakeClosure -> MakeRecord
+        // -> RecordGet -> ClosureCall), not merely that the frontend admits
+        // the declaration. Full VM execution is proven in sm-vm's test
+        // suite (crates/sm-vm/src/lib.rs).
+        let src = r#"
+            record Holder {
+                f: Closure(f64 -> f64),
+            }
+
+            fn main() {
+                let h: Holder = Holder { f: (x => x + 1.0) };
+                let g: Closure(f64 -> f64) = h.f;
+                let total: f64 = g(2.0);
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("record closure field storage must lower");
+        let main = &ir[0];
+        assert!(
+            main.instrs
+                .iter()
+                .any(|instr| matches!(instr, IrInstr::MakeClosure { .. })),
+            "expected a MakeClosure instruction"
+        );
+        assert!(
+            main.instrs
+                .iter()
+                .any(|instr| matches!(instr, IrInstr::MakeRecord { .. })),
+            "expected the closure to be stored via MakeRecord"
+        );
+        assert!(
+            main.instrs
+                .iter()
+                .any(|instr| matches!(instr, IrInstr::RecordGet { .. })),
+            "expected the closure to be read back out via RecordGet"
+        );
+        assert!(
+            main.instrs
+                .iter()
+                .any(|instr| matches!(instr, IrInstr::ClosureCall { .. })),
+            "expected the extracted closure to be invoked via ClosureCall"
+        );
+    }
+
+    #[test]
+    fn storage_admission_adt_closure_payload_lowers_to_working_ir() {
+        let src = r#"
+            enum Holder {
+                Wrap(Closure(f64 -> f64)),
+            }
+
+            fn main() {
+                let h: Holder = Holder::Wrap((x => x + 1.0));
+                let total: f64 = match h {
+                    Holder::Wrap(g) => { g(2.0) }
+                };
+                return;
+            }
+        "#;
+        let ir = compile_program_to_ir(src).expect("ADT closure payload storage must lower");
+        let main = &ir[0];
+        assert!(
+            main.instrs
+                .iter()
+                .any(|instr| matches!(instr, IrInstr::MakeClosure { .. })),
+            "expected a MakeClosure instruction"
+        );
+        assert!(
+            main.instrs
+                .iter()
+                .any(|instr| matches!(instr, IrInstr::MakeAdt { .. })),
+            "expected the closure to be stored via MakeAdt"
+        );
+        assert!(
+            main.instrs
+                .iter()
+                .any(|instr| matches!(instr, IrInstr::ClosureCall { .. })),
+            "expected the extracted closure to be invoked via ClosureCall"
+        );
+    }
+
     // FA-04-011 / #1717: sm-ir's executable boundary has no monomorphisation
     // pass, so a generic function's declaration (Function.type_params
     // non-empty) is rejected deterministically at IR lowering -- used or

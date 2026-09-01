@@ -3584,6 +3584,153 @@ mod tests {
         type_check_program(&program)
     }
 
+    #[test]
+    fn storage_admission_aggregate_composite_matrix_typechecks_for_record_and_adt() {
+        // Corrective round (review on PR #1877): wiring
+        // ensure_storage_type_supported into record/ADT declaration
+        // validation changed this authority's semantic scope from
+        // "local binding storage" to "local binding storage, record field
+        // storage, and ADT payload storage" -- the original PR treated the
+        // 20-variant classification as automatically valid for all three
+        // positions without proving that. This table proves, per composite,
+        // that a value can be constructed with the composite in a record
+        // field / ADT payload position, read back out, and used -- not
+        // merely that the declaration alone typechecks.
+        //
+        // Tuple/Measured/Option/Result: `docs/spec/types.md` already states
+        // "measured numeric types may appear in ... tuple elements, record
+        // fields, Option(T), and Result(T, E) payload positions" -- direct
+        // normative evidence, corroborated here.
+        // Sequence/Map: no prior normative record-field statement found;
+        // admitted only after this empirical proof (also lowered to IR
+        // successfully, see legacy_lowering.rs's matching regression).
+        // Record/Adt nesting: architecturally proven independently by
+        // `validate_record_acyclic`/`validate_adt_acyclic`, which exist
+        // specifically to walk nested nominal fields -- that machinery has
+        // no purpose if nominal nesting were not an intended, supported
+        // pattern.
+        let cases = [
+            (
+                "record Tuple",
+                "record R { x: (i32, i32) } fn main() { let r: R = R { x: (1, 2) }; let (a, b): (i32, i32) = r.x; let _ = a; let _ = b; return; }",
+            ),
+            (
+                "adt Tuple",
+                "enum E { V((i32, i32)) } fn main() { let e: E = E::V((1, 2)); match e { E::V(t) => { let (a, b): (i32, i32) = t; let _ = a; let _ = b; } } return; }",
+            ),
+            (
+                "record Sequence",
+                "record R { x: Sequence(i32) } fn main() { let r: R = R { x: [1, 2] }; let s: Sequence(i32) = r.x; let _ = s; return; }",
+            ),
+            (
+                "adt Sequence",
+                "enum E { V(Sequence(i32)) } fn main() { let e: E = E::V([1, 2]); match e { E::V(s) => { let _ = s; } } return; }",
+            ),
+            (
+                "record Map",
+                "record R { x: Map(i32, i32) } fn main() { let r: R = R { x: map_empty() }; let m: Map(i32, i32) = r.x; let _ = m; return; }",
+            ),
+            (
+                "adt Map",
+                "enum E { V(Map(i32, i32)) } fn main() { let e: E = E::V(map_empty()); match e { E::V(m) => { let _ = m; } } return; }",
+            ),
+            (
+                "record Measured",
+                "record R { x: f64[m] } fn main() { let r: R = R { x: 1.0 }; let v: f64[m] = r.x; let _ = v; return; }",
+            ),
+            (
+                "adt Measured",
+                "enum E { V(f64[m]) } fn main() { let e: E = E::V(1.0); match e { E::V(v) => { let _ = v; } } return; }",
+            ),
+            (
+                "record Option",
+                "record R { x: Option(i32) } fn main() { let r: R = R { x: Option::Some(1) }; let o: Option(i32) = r.x; let _ = o; return; }",
+            ),
+            (
+                "adt Option",
+                "enum E { V(Option(i32)) } fn main() { let e: E = E::V(Option::Some(1)); match e { E::V(o) => { let _ = o; } } return; }",
+            ),
+            (
+                "record Result",
+                "record R { x: Result(i32, i32) } fn main() { let r: R = R { x: Result::Ok(1) }; let v: Result(i32, i32) = r.x; let _ = v; return; }",
+            ),
+            (
+                "adt Result",
+                "enum E { V(Result(i32, i32)) } fn main() { let e: E = E::V(Result::Ok(1)); match e { E::V(v) => { let _ = v; } } return; }",
+            ),
+            (
+                "record nested Record",
+                "record Inner { n: i32 } record Outer { x: Inner } fn main() { let o: Outer = Outer { x: Inner { n: 1 } }; let _ = o.x; return; }",
+            ),
+            (
+                "adt nested Record",
+                "record Inner { n: i32 } enum E { V(Inner) } fn main() { let e: E = E::V(Inner { n: 1 }); match e { E::V(i) => { let _ = i; } } return; }",
+            ),
+            (
+                "record nested Adt",
+                "enum Inner { A, B } record Outer { x: Inner } fn main() { let o: Outer = Outer { x: Inner::A }; let _ = o.x; return; }",
+            ),
+            (
+                "adt nested Adt",
+                "enum Inner { A, B } enum E { V(Inner) } fn main() { let e: E = E::V(Inner::A); match e { E::V(i) => { let _ = i; } } return; }",
+            ),
+        ];
+        for (label, src) in cases {
+            typecheck_source(src).unwrap_or_else(|e| {
+                panic!("{label}: aggregate composite storage must typecheck: {e:?}")
+            });
+        }
+    }
+
+    #[test]
+    fn storage_admission_record_closure_field_typechecks_end_to_end() {
+        // Corrective round: the original PR admitted Type::Closure for
+        // storage on the strength of *local-binding* evidence only (two
+        // pre-existing tests proving `let`-bound closures work), which does
+        // not by itself prove record-field closure storage -- the
+        // historical `first_class_closures_full_scope.md` scope explicitly
+        // named "local binding, parameter, and return transport" only, not
+        // aggregate storage. This constructs a record with a closure field,
+        // reads the field back out, and invokes the extracted closure --
+        // full frontend proof; VM execution is proven separately in
+        // sm-vm's test suite (see `docs/spec/foundation_source_profile_v1.md`
+        // for the reconciled normative statement and the SSF-07 #1861
+        // addendum in `first_class_closures_full_scope.md`).
+        let src = r#"
+            record Holder {
+                f: Closure(f64 -> f64),
+            }
+
+            fn main() {
+                let h: Holder = Holder { f: (x => x + 1.0) };
+                let g: Closure(f64 -> f64) = h.f;
+                let total: f64 = g(2.0);
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("record field closure storage: construct, extract, and invoke must typecheck");
+    }
+
+    #[test]
+    fn storage_admission_adt_closure_payload_typechecks_end_to_end() {
+        let src = r#"
+            enum Holder {
+                Wrap(Closure(f64 -> f64)),
+            }
+
+            fn main() {
+                let h: Holder = Holder::Wrap((x => x + 1.0));
+                let total: f64 = match h {
+                    Holder::Wrap(g) => { g(2.0) }
+                };
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("ADT payload closure storage: construct and invoke via match must typecheck");
+    }
+
     // FA-02-038 / #1861: exhaustive storage-type admission regression
     // matrix. `ensure_storage_type_supported` is the sole shared authority
     // for every field/binding storage position (Const/Let/LetTuple/
@@ -13419,17 +13566,47 @@ pub(crate) fn ensure_executable_type_supported(
 /// guarantees they always will (e.g. a future closure-capture storage
 /// model could diverge from closure's executable-parameter admission).
 ///
-/// `Type::Closure` is an admitted storage composite: `let f: Closure(f64 ->
-/// f64) = (x => x + offset);` is genuinely qualified, tested first-class
-/// closure storage (see `first_class_closure_literal_typechecks_with_declared_signature_and_capture`
-/// / `direct_first_class_closure_invocation_typechecks_in_wave3`), so this
-/// recurses into the closure's parameter/return types exactly as
-/// `ensure_executable_type_supported` does, rather than rejecting it -- an
-/// earlier revision of this fix rejected `Closure` outright on the
-/// assumption that persistent/stored closures are unproven, until these two
-/// pre-existing tests demonstrated the opposite for local `let` storage,
-/// and no evidence was found distinguishing record-field storage as a
-/// stricter sub-contract.
+/// `Type::Closure` is an admitted storage composite, and this admission is
+/// position-independent (local binding, record field, ADT payload) by
+/// direct proof rather than by assumption. Local `let` storage was already
+/// covered (see `first_class_closure_literal_typechecks_with_declared_signature_and_capture`
+/// / `direct_first_class_closure_invocation_typechecks_in_wave3`), but an
+/// earlier revision of this fix generalized that to record/ADT storage on
+/// the weaker claim that "no evidence distinguishes record-field storage as
+/// stricter". Wiring this function into `validate_record_declarations`/
+/// `validate_adt_declarations` genuinely widened its scope beyond local
+/// bindings, so that generalization needed its own proof, not an absence of
+/// counter-evidence. That proof now exists at every pipeline stage for both
+/// aggregate positions: typecheck (`storage_admission_record_closure_field_typechecks_end_to_end`
+/// / `storage_admission_adt_closure_payload_typechecks_end_to_end`), IR
+/// lowering to the correct `MakeClosure`/`MakeRecord`/`MakeAdt`/`RecordGet`/
+/// `ClosureCall` opcode sequence (`storage_admission_record_closure_field_lowers_to_working_ir`
+/// / `storage_admission_adt_closure_payload_lowers_to_working_ir` in
+/// `sm-ir`), and full frontend-to-VM execution producing the correct result
+/// (`storage_admission_record_closure_field_vm_executes_correctly` /
+/// `storage_admission_adt_closure_payload_vm_executes_correctly` in
+/// `sm-vm`). This is documented as a deliberate SSF-07 #1861 widening of
+/// closure storage scope beyond the M8.4 local-binding-only baseline; see
+/// the addendum in `docs/roadmap/language_maturity/first_class_closures_full_scope.md`.
+/// Recursing into the closure's parameter/return types mirrors
+/// `ensure_executable_type_supported`, but the two remain independently
+/// decided contracts, not a shared implementation.
+///
+/// The other admitted composites are backed the same way, evidence first:
+/// `Sequence`/`Map` have no prior normative statement admitting them in
+/// aggregate position, so `storage_admission_sequence_and_map_aggregate_storage_lowers`
+/// (`sm-ir`) is their sole but sufficient lowering proof for both record
+/// and ADT storage. `Tuple`/`Measured`/`Option`/`Result` are directly named
+/// in aggregate position by `docs/spec/types.md` ("measured numeric types
+/// may appear in ... tuple elements, record fields ... `Option(T)`, and
+/// `Result(T, E)` payload positions"), confirmed end-to-end by
+/// `storage_admission_aggregate_composite_matrix_typechecks_for_record_and_adt`,
+/// which exercises all eight admitted composites in both record-field and
+/// ADT-payload position. `Record`/`Adt` nominal nesting inside other
+/// records/ADTs is proven intended by the pre-existing
+/// `validate_record_acyclic`/`validate_adt_acyclic` cycle-detection
+/// machinery, which would be pointless if nominal aggregate nesting were
+/// not a supported storage pattern.
 ///
 /// `Type::RangeI32` and `Type::TypeVar` reject unconditionally: no current
 /// Foundation source-profile evidence, test, or lowering path shows a range

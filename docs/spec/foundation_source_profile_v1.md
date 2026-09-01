@@ -450,11 +450,28 @@ storage admission is proven once, before a record or ADT's own nominal
 identity is trusted by anything downstream, not merely for local bindings.
 Storage admission and executable-signature admission (#1647) are decided
 independently, as separate contracts that currently agree on every variant
-by evidence rather than by construction — `Closure` in particular is
-admitted for storage specifically because pre-existing, already-qualified
-tests prove first-class closures are legitimately `let`-bound (see
-`first_class_closure_literal_typechecks_with_declared_signature_and_capture`),
-not merely because closures are executable elsewhere.
+by evidence rather than by construction. Because wiring this function into
+`validate_record_declarations`/`validate_adt_declarations` genuinely widened
+its scope from local bindings to also cover record fields and ADT payloads,
+each admitted composite's aggregate-position legitimacy was independently
+proven rather than assumed to follow from its local-binding admission.
+`Closure` is the sharpest case: local `let`-bound closure storage was
+already proven (`first_class_closure_literal_typechecks_with_declared_signature_and_capture`),
+but record-field and ADT-payload closure storage additionally now has
+direct end-to-end proof — typecheck, IR lowering to the expected
+`MakeClosure`/`MakeRecord`/`MakeAdt`/`RecordGet`/`ClosureCall` opcode
+sequence, and full VM execution producing the mathematically correct result
+— documented as a deliberate SSF-07 #1861 widening beyond the M8.4
+local-binding-only baseline (see the addendum in
+`docs/roadmap/language_maturity/first_class_closures_full_scope.md`).
+`Sequence`/`Map` have no prior normative statement admitting aggregate
+storage and rely on that same IR-lowering proof as their sole evidence;
+`Tuple`/`Measured`/`Option`/`Result` are directly named in record-field
+position by `docs/spec/types.md`, confirmed end to end for both record and
+ADT position by a dedicated regression matrix; and `Record`/`Adt` nominal
+nesting is proven intended by the pre-existing acyclic cycle-detection
+machinery (`validate_record_acyclic`/`validate_adt_acyclic`), which
+presupposes nominal aggregate nesting is a supported pattern.
 
 ## Deterministically unsupported forms
 

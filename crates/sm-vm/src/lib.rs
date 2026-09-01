@@ -126,6 +126,67 @@ mod tests {
         );
     }
 
+    /// FA-02-038 / #1861 corrective round: category-3 (full pipeline) proof
+    /// that a record-field-stored closure is not merely admitted by the
+    /// frontend but genuinely executes correctly end to end -- typecheck ->
+    /// IR lowering (see `storage_admission_record_closure_field_lowers_to_working_ir`
+    /// in crates/sm-ir) -> SemCode -> verification -> VM execution. The
+    /// original PR justified `Type::Closure`'s storage admission only via
+    /// local-binding closure tests; this closes that evidentiary gap for
+    /// record-field position specifically.
+    #[test]
+    fn storage_admission_record_closure_field_vm_executes_correctly() {
+        let src = r#"
+            record Holder {
+                f: Closure(f64 -> f64),
+            }
+
+            fn compute() -> f64 {
+                let h: Holder = Holder { f: (x => x + 1.0) };
+                let g: Closure(f64 -> f64) = h.f;
+                return g(2.0);
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("compute").expect("entry");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
+        assert_eq!(res, Value::F64(3.0));
+    }
+
+    /// FA-02-038 / #1861 corrective round: same category-3 proof as
+    /// `storage_admission_record_closure_field_vm_executes_correctly`, for
+    /// ADT payload position.
+    #[test]
+    fn storage_admission_adt_closure_payload_vm_executes_correctly() {
+        let src = r#"
+            enum Holder {
+                Wrap(Closure(f64 -> f64)),
+            }
+
+            fn compute() -> f64 {
+                let h: Holder = Holder::Wrap((x => x + 1.0));
+                let result: f64 = match h {
+                    Holder::Wrap(g) => { g(2.0) }
+                };
+                return result;
+            }
+
+            fn main() {
+                return;
+            }
+        "#;
+        let bytes = compile_program_to_semcode(src).expect("compile");
+        let token = verify_semcode_token(&bytes).expect("verify");
+        let entry = token.require_entry("compute").expect("entry");
+        let res = run_verified_function_semcode_with_args(&entry, vec![]).expect("run");
+        assert_eq!(res, Value::F64(3.0));
+    }
+
     /// #1774 (FA-09-006): the original `test_6_reject_wrong_argument_count`
     /// ended with `assert!(res.is_ok() || res.is_err())`, which is true for
     /// every possible `Result` and therefore proves nothing about whether

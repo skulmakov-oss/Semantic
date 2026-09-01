@@ -149,3 +149,46 @@ Even after this first wave lands, the repository still does not claim:
 
 The next language-facing candidate inside the `M8` package is `M9.1
 Generics`.
+
+## Post-Close-Out Addendum (SSF-07 #1861)
+
+This track's "Included In This Track" list (above) named "local binding,
+parameter, and return transport for admitted closures" as the M8.4
+first-wave closure-transport surface. It did not name record fields or ADT
+payloads — neither as included nor as an explicit non-goal — because
+whether an admitted closure could be stored inside a record or ADT was
+never independently investigated at the time. That silence is not itself an
+error in this document; the M8.4 historical text above is left unedited as
+the accurate record of what M8.4 actually scoped and proved.
+
+SSF-07 #1861 ("storage type admission has a fail-open catch-all for
+unsupported type families") separately discovered that `validate_record_declarations`/
+`validate_adt_declarations` never routed field/payload types through the
+frontend's storage-admission authority (`ensure_storage_type_supported`) at
+all — only through `ensure_type_resolved`, which proves a nominal reference
+resolves, not that the referenced type is itself storage-admitted. Closing
+that gap genuinely widened `ensure_storage_type_supported`'s scope from
+local bindings to also cover record fields and ADT payloads, which meant
+`Type::Closure`'s admission for those two positions needed its own proof
+rather than inheriting M8.4's local-binding evidence by assumption. That
+proof was produced directly: record-field and ADT-payload closure storage
+now has dedicated end-to-end coverage across the full pipeline — frontend
+typecheck (`storage_admission_record_closure_field_typechecks_end_to_end`,
+`storage_admission_adt_closure_payload_typechecks_end_to_end` in
+`crates/sm-front/src/typecheck.rs`), IR lowering to the expected
+`MakeClosure`/`MakeRecord`/`MakeAdt`/`RecordGet`/`ClosureCall` opcode
+sequence (`storage_admission_record_closure_field_lowers_to_working_ir`,
+`storage_admission_adt_closure_payload_lowers_to_working_ir` in
+`crates/sm-ir/src/legacy_lowering.rs`), and full VM execution producing the
+mathematically correct result (`storage_admission_record_closure_field_vm_executes_correctly`,
+`storage_admission_adt_closure_payload_vm_executes_correctly` in
+`crates/sm-vm/src/lib.rs`).
+
+Record-field and ADT-payload closure transport is therefore now a
+deliberately proven and admitted SSF-07 widening of closure storage scope
+beyond the M8.4 first-wave baseline, not a silent extension. See
+`docs/spec/foundation_source_profile_v1.md` for the current normative
+storage-admission contract, which documents this alongside the same
+evidence-first treatment applied to every other admitted composite
+(`Tuple`, `Sequence`, `Map`, `Measured`, `Option`, `Result`, `Record`,
+`Adt`).
