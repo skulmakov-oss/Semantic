@@ -323,14 +323,36 @@ First-wave generic-capable *function* definitions admit at most one type
 parameter per definition site; zero is non-generic and one is the
 contracted generic surface. The parser has no arity limit of its own
 (`parse_type_params_with_bounds` may represent `<T, U, ...>` and mixed
-bound combinations like `<T: Bound, U>` as raw AST, and does so
-deliberately, exactly as it does for the generic trait/impl syntax
-`build_trait_table`/`validate_trait_coherence` reject above); admission is
-enforced at `build_fn_table`, never by truncating to the first parameter or
-silently admitting the extras. Traits and impls already require zero type
-parameters under the stricter contracts described above, so an
-out-of-contract arity there was already rejected before this boundary
+bound combinations like `<T: Bound, U>` as raw AST, since `Function` has a
+`trait_bounds: Vec<TraitBound>` field to faithfully retain them); admission
+of the arity is enforced at `build_fn_table`, never by truncating to the
+first parameter or silently admitting the extras. Traits and impls already
+require zero type parameters under the stricter contracts described above,
+so an out-of-contract arity there was already rejected before this boundary
 existed; it is not a new restriction for those two families.
+
+Trait bounds on a *non-function* type parameter (`record`/`enum`/`trait`/
+`impl`) are a different case from bare arity, and are not admitted at the
+parser at all: `TraitDecl`/`ImplDecl`/`RecordDecl`/`AdtDecl` each carry only
+a bare `type_params: Vec<SymbolId>`, with nowhere to store a parsed
+`TraitBound`. Before SSF-07 #1633, `parse_type_params` (the thin wrapper
+these four declaration forms use, as opposed to `Function`'s
+`parse_type_params_with_bounds`) parsed and then silently discarded any
+bound on a non-function type parameter — the raw parser accepted
+`record R<T: SomeTrait> { ... }` and returned `Ok` with a `RecordDecl` whose
+`type_params` carried `T` but no trace that a bound was ever written, a
+recognized-then-erased-semantics defect independent of and prior to any
+later owner-layer rejection. `parse_type_params` now rejects deterministically
+whenever the parsed bound list is non-empty, for all four declaration forms,
+before returning to its caller. A **bare**, unbounded type-parameter list
+(`record R<T> { ... }`, `enum E<T> { ... }`, `trait Tr<T> { ... }`,
+`impl<T> Trait for X { ... }`) is unaffected and continues to parse as raw
+AST exactly as before — its later canonical zero-arity rejection remains the
+separate, later authority described above (`build_record_table`/
+`build_adt_table` for #1650, `build_trait_table` for #1635,
+`validate_trait_coherence` for #1668); #1633 only closes the parser-level
+gap where a *bound specifically* went from recognized to discarded to a
+successful, weaker AST.
 
 Records and ADTs are non-generic in the current Stable Foundation nominal
 type contract: `build_record_table`/`build_adt_table` require
