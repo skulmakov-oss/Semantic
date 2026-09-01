@@ -1775,8 +1775,8 @@ fn check_stmt(
             // M9.7: apply path-based state for each arm's moves/borrows to scrutinee.
             apply_plans_to_scrutinee(*scrutinee, &arm_plans, arena, env);
 
-            if default.is_empty() {
-                match missing_exhaustive_sum_variants(
+            match default {
+                None => match missing_exhaustive_sum_variants(
                     &st,
                     arms.iter().map(|arm| (&arm.pat, arm.guard)),
                     arena,
@@ -1792,24 +1792,25 @@ fn check_stmt(
                             message: "match requires default arm '_'".to_string(),
                         });
                     }
+                },
+                Some(default_body) => {
+                    let mut def_env = env.clone();
+                    def_env.push_scope();
+                    for s in default_body {
+                        check_stmt(
+                            *s,
+                            arena,
+                            &mut def_env,
+                            ret_ty.clone(),
+                            table,
+                            record_table,
+                            adt_table,
+                            loop_stack,
+                            impl_list,
+                        )?;
+                    }
+                    def_env.pop_scope();
                 }
-            } else {
-                let mut def_env = env.clone();
-                def_env.push_scope();
-                for s in default {
-                    check_stmt(
-                        *s,
-                        arena,
-                        &mut def_env,
-                        ret_ty.clone(),
-                        table,
-                        record_table,
-                        adt_table,
-                        loop_stack,
-                        impl_list,
-                    )?;
-                }
-                def_env.pop_scope();
             }
             Ok(())
         }
@@ -8501,6 +8502,138 @@ mod tests {
             .contains("non-exhaustive match expression for Option(T); missing variants: None"));
     }
 
+    // FA-02-007 / #1639: statement-form match presence-vs-emptiness matrix.
+    // These exercise the plain `Stmt::Match` handler (as opposed to the
+    // `Expr::Match`/value-producing-loop handlers above, which already used
+    // `Option<...>` and were unaffected).
+
+    #[test]
+    fn statement_match_quad_without_wildcard_rejects() {
+        let src = r#"
+            fn main() {
+                match T {
+                    T => { return; }
+                    F => { return; }
+                }
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("quad match statement with no `_` arm at all must reject");
+        assert!(
+            err.message.contains("match requires default arm '_'"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn statement_match_empty_and_nonempty_wildcard_satisfy_identical_quad_presence_requirement() {
+        // Item 4 of the FA-02-007 regression matrix: an empty `_ => {}` and a
+        // non-empty `_ => { ... }` must both satisfy the same "a wildcard is
+        // present" requirement -- neither is special-cased relative to the
+        // other, and in particular the empty one is never treated as if no
+        // wildcard were written at all.
+        let empty_src = r#"
+            fn main() {
+                match T {
+                    T => { return; }
+                    _ => { }
+                }
+                return;
+            }
+        "#;
+        let nonempty_src = r#"
+            fn main() {
+                match T {
+                    T => { return; }
+                    _ => { let _ = 0; }
+                }
+                return;
+            }
+        "#;
+
+        typecheck_source(empty_src).expect("empty wildcard must satisfy the presence requirement");
+        typecheck_source(nonempty_src)
+            .expect("non-empty wildcard must satisfy the presence requirement");
+    }
+
+    #[test]
+    fn statement_match_enum_present_empty_wildcard_admits_non_exhaustive_arms() {
+        // The exact bug reproduced pre-fix: non-exhaustive arms (only
+        // Flag::A covered out of three variants) plus an explicitly present,
+        // empty wildcard `_ => {}`. Before this fix, `default.is_empty()`
+        // could not distinguish this from "no wildcard at all" and rejected
+        // with a non-exhaustive-match error despite the real (if empty)
+        // catch-all in the source.
+        let src = r#"
+            enum Flag { A, B, C }
+
+            fn main() {
+                let f: Flag = Flag::A;
+                match f {
+                    Flag::A => { }
+                    _ => { }
+                }
+                return;
+            }
+        "#;
+
+        typecheck_source(src).expect(
+            "non-exhaustive arms plus a present (even empty) wildcard must typecheck, not \
+             reject as non-exhaustive",
+        );
+    }
+
+    #[test]
+    fn statement_match_enum_exhaustive_arms_may_still_omit_wildcard() {
+        // Item 6: guard against accidentally making the wildcard mandatory.
+        // A match family/form already allowed to omit `_` when arms are
+        // independently exhaustive must remain admitted after this fix.
+        let src = r#"
+            enum Flag { A, B }
+
+            fn main() {
+                let f: Flag = Flag::A;
+                match f {
+                    Flag::A => { }
+                    Flag::B => { }
+                }
+                return;
+            }
+        "#;
+
+        typecheck_source(src)
+            .expect("exhaustive enum match statement with no wildcard should still typecheck");
+    }
+
+    #[test]
+    fn statement_match_enum_non_exhaustive_arms_without_wildcard_still_rejects() {
+        // Item 5: a genuinely missing wildcard (no `_` arm at all, `None`)
+        // over non-exhaustive arms must still reject deterministically.
+        let src = r#"
+            enum Flag { A, B, C }
+
+            fn main() {
+                let f: Flag = Flag::A;
+                match f {
+                    Flag::A => { }
+                }
+                return;
+            }
+        "#;
+
+        let err = typecheck_source(src)
+            .expect_err("non-exhaustive enum match statement with no wildcard must reject");
+        assert!(
+            err.message
+                .contains("non-exhaustive match for enum 'Flag'; missing variants: B, C"),
+            "unexpected error: {}",
+            err.message
+        );
+    }
+
     #[test]
     fn result_pattern_family_must_match_result_scrutinee() {
         let src = r#"
@@ -11782,11 +11915,11 @@ fn check_loop_expr_stmt(
             // The per-arm loop (which rejects any or-pattern arm deterministically,
             // regardless of wildcard presence) must run before the default-arm
             // check below, mirroring the ordering used by the statement- and
-            // expression-form match handlers. Checking `default.is_empty()` first
-            // would let a naive "no `_` arm at all" rejection pre-empt the
-            // or-pattern diagnostic for an or-pattern match with no wildcard arm,
-            // breaking the promise that or-pattern rejection is uniform regardless
-            // of wildcard presence (SSF-07).
+            // expression-form match handlers. Checking `default`'s presence
+            // (`None` vs `Some`) first would let a naive "no `_` arm at all"
+            // rejection pre-empt the or-pattern diagnostic for an or-pattern
+            // match with no wildcard arm, breaking the promise that or-pattern
+            // rejection is uniform regardless of wildcard presence (SSF-07).
             let mut arm_plans: Vec<BindingPlan> = Vec::new();
             for arm in arms {
                 let (plan, mut arm_env) =
@@ -11822,50 +11955,56 @@ fn check_loop_expr_stmt(
             }
             apply_plans_to_scrutinee(*scrutinee, &arm_plans, arena, env);
 
-            if default.is_empty() {
-                // Mirror the plain statement-form match handler: an empty
-                // default arm is only a hard rejection when the covered sum-
-                // family variants aren't already exhaustive. A naive
-                // "default.is_empty() => reject" check here (as opposed to
-                // this exhaustiveness-aware one) would wrongly reject an
-                // exhaustive enum/Option/Result match with no wildcard arm
-                // inside a value-producing loop, even though the ordinary
-                // statement-form match already admits the identical program
-                // (SSF-07 review finding).
-                match missing_exhaustive_sum_variants(
-                    &st,
-                    arms.iter().map(|arm| (&arm.pat, arm.guard)),
-                    arena,
-                    adt_table,
-                )? {
-                    Some((family_label, missing)) if !missing.is_empty() => {
-                        return Err(non_exhaustive_match_error(&family_label, &missing, false)?)
-                    }
-                    Some(_) => {}
-                    None => {
-                        return Err(FrontendError {
-                            pos: 0,
-                            message: "match requires default arm '_'".to_string(),
-                        });
-                    }
-                }
-            } else {
-                let mut def_env = env.clone();
-                def_env.push_scope();
-                for stmt in default {
-                    check_loop_expr_stmt(
-                        *stmt,
+            match default {
+                None => {
+                    // Mirror the plain statement-form match handler: a truly
+                    // absent default arm is only a hard rejection when the
+                    // covered sum-family variants aren't already exhaustive.
+                    // A naive "no `_` arm at all => reject" check here (as
+                    // opposed to this exhaustiveness-aware one) would wrongly
+                    // reject an exhaustive enum/Option/Result match with no
+                    // wildcard arm inside a value-producing loop, even though
+                    // the ordinary statement-form match already admits the
+                    // identical program (SSF-07 review finding). An
+                    // explicitly present but empty wildcard (`_ => {}`) is
+                    // `Some(vec![])`, not `None`, and never reaches this
+                    // branch (FA-02-007 / #1639).
+                    match missing_exhaustive_sum_variants(
+                        &st,
+                        arms.iter().map(|arm| (&arm.pat, arm.guard)),
                         arena,
-                        &mut def_env,
-                        table,
-                        record_table,
                         adt_table,
-                        ret_ty.clone(),
-                        loop_stack,
-                        impl_list,
-                    )?;
+                    )? {
+                        Some((family_label, missing)) if !missing.is_empty() => {
+                            return Err(non_exhaustive_match_error(&family_label, &missing, false)?)
+                        }
+                        Some(_) => {}
+                        None => {
+                            return Err(FrontendError {
+                                pos: 0,
+                                message: "match requires default arm '_'".to_string(),
+                            });
+                        }
+                    }
                 }
-                def_env.pop_scope();
+                Some(default_body) => {
+                    let mut def_env = env.clone();
+                    def_env.push_scope();
+                    for stmt in default_body {
+                        check_loop_expr_stmt(
+                            *stmt,
+                            arena,
+                            &mut def_env,
+                            table,
+                            record_table,
+                            adt_table,
+                            ret_ty.clone(),
+                            loop_stack,
+                            impl_list,
+                        )?;
+                    }
+                    def_env.pop_scope();
+                }
             }
             Ok(())
         }
