@@ -331,18 +331,17 @@ impl<'a> Parser<'a> {
         let (params, bounds) = self.parse_type_params_with_bounds()?;
         if !bounds.is_empty() {
             // `parse_type_params_with_bounds` already pushed `params` onto
-            // `type_param_scope` and expects its caller to eventually pop
-            // them via `pop_type_param_scope` after parsing the declaration
-            // body. This early return skips that call, but it is safe: this
-            // `FrontendError` propagates via `?` all the way out of
-            // `parse_program`, which is always called on a freshly
-            // constructed `Parser` that is dropped immediately on any `Err`
-            // (see `parse_rustlike_with_profile`/`parse_logos_with_profile`)
-            // -- there is no error-recovery or speculative-parse path in
-            // this parser that would observe or reuse `type_param_scope`
-            // after this point.
+            // `type_param_scope`, and its caller normally pops exactly that
+            // many entries via `pop_type_param_scope` after parsing the
+            // declaration body. This early return skips that later call, so
+            // it must do the equivalent unwind itself here -- popping only
+            // the `params.len()` entries this call pushed, not the whole
+            // scope, so an outer caller's own entries (if any) are left
+            // untouched.
+            let pos = self.pos();
+            self.pop_type_param_scope(params.len());
             return Err(FrontendError {
-                pos: self.pos(),
+                pos,
                 message: format!(
                     "trait bounds on type parameters are not supported by {family} declarations"
                 ),
@@ -7012,43 +7011,40 @@ fn apply<T: Eq, U>(x: T, y: U) -> i32 {
     }
 
     #[test]
-    fn rejecting_a_bounded_declaration_leaves_one_unpopped_type_param_scope_entry_confined_to_a_dead_parser(
-    ) {
+    fn rejecting_a_bounded_declaration_restores_type_param_scope_to_its_pre_call_depth() {
         // G (scope-state integrity, direct proof): `parse_type_params_with_bounds`
         // pushes each parameter name onto `type_param_scope` *before* the
-        // caller learns whether bounds are present, so `parse_type_params`
-        // rejecting on a non-empty `bounds` list returns before its own
-        // caller's normal `pop_type_param_scope` call runs -- this directly
-        // inspects that a `Parser` instance's `type_param_scope` after
-        // rejection confirms one entry is genuinely left unpopped. That is
-        // safe, not corrupting, only because of the surrounding architecture
-        // (proven by the previous test and by inspection): `parse_program`
-        // has no recovery path that would resume parsing with this `Parser`
-        // after an `Err`, and every public entrypoint
-        // (`parse_rustlike_with_profile`) constructs a fresh `Parser` per
-        // call and drops it immediately on any `Err` -- so this leaked entry
-        // can never be observed by a later parse. No explicit unwind is
-        // added because the actual control flow never requires one; this
-        // test is the evidence for that claim, not just an assertion of it.
+        // caller learns whether bounds are present. `parse_type_params` now
+        // unwinds exactly those `params.len()` entries itself before
+        // returning the rejection, rather than leaving them for a
+        // `pop_type_param_scope` call it is about to skip. This constructs a
+        // `Parser` with one pre-existing "outer" scope entry already present
+        // (a sentinel, standing in for an enclosing scope this call did not
+        // introduce and must not touch) to prove the unwind pops only the
+        // entries *this* call pushed -- not the whole scope.
         let src = "record R<T: SomeTrait> { x: T }\n";
         let tokens = lex_tokens(src).expect("lex");
         let profile = ParserProfile::foundation_default();
+        let mut arena = AstArena::default();
+        let sentinel = arena.intern_symbol("OuterSentinel");
         let mut p = Parser {
             tokens,
             idx: 0,
             source: src.to_string(),
-            arena: AstArena::default(),
+            arena,
             policy: CompilePolicyView::new(&profile),
-            type_param_scope: Vec::new(),
+            type_param_scope: vec![sentinel],
             self_type_scope: None,
         };
+        assert_eq!(p.type_param_scope, vec![sentinel], "scope before the call");
         let result = p.parse_program();
         assert!(result.is_err(), "bound-bearing record must reject");
         assert_eq!(
-            p.type_param_scope.len(),
-            1,
-            "expected exactly the one parameter pushed by \
-             parse_type_params_with_bounds to remain unpopped"
+            p.type_param_scope,
+            vec![sentinel],
+            "type_param_scope must be restored to exactly its pre-call depth \
+             and contents -- only the entries this call pushed should be \
+             popped, leaving the pre-existing outer entry untouched"
         );
     }
 
