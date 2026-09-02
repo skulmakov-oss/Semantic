@@ -277,6 +277,17 @@ impl PatternPath {
         e.push(PatternPathElem::RecordField(name));
         Self { elems: e }
     }
+    /// SSF-08 Lane 1 (#1663): compose a base path (e.g. the path from a
+    /// scrutinee's own root to a projected field/index used as the
+    /// scrutinee expression) with a suffix path (e.g. a `BindingPlanItem`'s
+    /// path, relative to the scrutinee's own value) into the actual
+    /// ownership path affected by a pattern capture. `root.field` (base)
+    /// plus `.0` (suffix) yields `root.field.0`.
+    pub fn extend(&self, suffix: &PatternPath) -> Self {
+        let mut e = self.elems.clone();
+        e.extend(suffix.elems.iter().cloned());
+        Self { elems: e }
+    }
 }
 
 /// A single binding produced by a pattern, with its sub-value address.
