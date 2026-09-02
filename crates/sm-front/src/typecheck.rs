@@ -1648,7 +1648,7 @@ fn check_stmt(
                     resolve_symbol_name(arena, *name)?
                 ),
             })?;
-            if env.is_const(*name) {
+            if env.is_const_checked(*name)? {
                 return Err(FrontendError {
                     pos: 0,
                     message: format!(
@@ -1716,7 +1716,7 @@ fn check_stmt(
                         resolve_symbol_name(arena, *name)?
                     ),
                 })?;
-                if env.is_const(*name) {
+                if env.is_const_checked(*name)? {
                     return Err(FrontendError {
                         pos: 0,
                         message: format!(
@@ -2411,8 +2411,19 @@ fn infer_expr_type(
     // from this expression and verify it is available. Base expressions used
     // inside field/index helpers go through infer_expr_type_no_check, which
     // skips this guard for intermediate Var nodes.
+    //
+    // SSF-08 Lane 1 (#1664): `check_path_available` is REQUIRED_BINDING and
+    // fails closed on a missing root binding. The canonical source-level
+    // "unknown variable" diagnostic must come from this expression's own
+    // kind-specific resolution below (e.g. `Expr::Var`'s `env.get`), not
+    // from this ownership check -- so existence is proven here first via
+    // `env.get`, and the ownership check is skipped (never silently
+    // *passed*) when it is absent, letting the per-kind match below raise
+    // its own correct diagnostic instead of a duplicate/incorrect one.
     if let Some((name, path)) = expr_access_path(expr_id, arena) {
-        env.check_path_available(name, &path)?;
+        if env.get(name).is_some() {
+            env.check_path_available(name, &path)?;
+        }
     }
     let expr = arena.expr(expr_id);
     match expr {
@@ -11084,30 +11095,31 @@ mod tests {
     }
 
     #[test]
-    fn ssf08_known_defect_nested_projection_rereads_intermediate_base_as_whole_value() {
-        // NOT part of #1656-#1664, NOT fixed by this PR. Documents a
-        // pre-existing frontend defect found while writing the #1663
-        // regression suite (SSF-08 Lane 1): reading a two-level-nested
-        // field projection (`c.pair.b`) spuriously rejects if a *sibling*
-        // field of the intermediate base was moved (`c.pair.a`), because
-        // the intermediate base (`c.pair`) is independently re-checked as
-        // if it were being read as a whole value, not merely projected
-        // through. Isolated to a straight-line program with zero if/loop/
-        // match and zero Lane 1 join-model code involved at all -- the
-        // root cause is in `infer_expr_type_no_check`, which only skips
-        // its own path-availability re-check when the base expression is
-        // a bare `Expr::Var`; a `RecordField` base (as in `c.pair.b`,
-        // whose base `c.pair` is itself a `RecordField` access, not a
-        // `Var`) falls through to a second, independent, shorter-path
-        // check that the outer expression's own top-level check has
-        // already correctly subsumed. This is a read-path-checking gap
-        // orthogonal to control-flow/branch-joining (Lane 1's actual
-        // scope) -- it would misfire in a single straight-line function
-        // with no `if`/`loop`/`match` anywhere. Per the governing task's
-        // instruction to document rather than opportunistically repair an
-        // out-of-scope defect discovered in passing: this test pins the
-        // *current* (buggy) behavior so a future repair changes this
-        // assertion, rather than silently fixing it here.
+    fn fa02_039_known_defect_nested_projection_rereads_intermediate_base_as_whole_value() {
+        // Tracked as FA-02-039 (skulmakov-oss/Semantic#1881). NOT part of
+        // #1656-#1664, NOT fixed by this PR. Documents a pre-existing
+        // frontend defect found while writing the #1663 regression suite
+        // (SSF-08 Lane 1): reading a two-level-nested field projection
+        // (`c.pair.b`) spuriously rejects if a *sibling* field of the
+        // intermediate base was moved (`c.pair.a`), because the
+        // intermediate base (`c.pair`) is independently re-checked as if it
+        // were being read as a whole value, not merely projected through.
+        // Isolated to a straight-line program with zero if/loop/match and
+        // zero Lane 1 join-model code involved at all -- the root cause is
+        // in `infer_expr_type_no_check`, which only skips its own
+        // path-availability re-check when the base expression is a bare
+        // `Expr::Var`; a `RecordField` base (as in `c.pair.b`, whose base
+        // `c.pair` is itself a `RecordField` access, not a `Var`) falls
+        // through to a second, independent, shorter-path check that the
+        // outer expression's own top-level check has already correctly
+        // subsumed. This is a read-path-checking gap orthogonal to
+        // control-flow/branch-joining (Lane 1's actual scope) -- it would
+        // misfire in a single straight-line function with no
+        // `if`/`loop`/`match` anywhere. This test pins the *current*
+        // (buggy) behavior so it does not regress silently; when FA-02-039
+        // is repaired, this test must be replaced or inverted to assert
+        // success, not preserved as-is -- its continued `expect_err` after
+        // a fix would itself be a stale, incorrect assertion.
         let src = r#"
             record Pair { a: i32, b: i32 }
             record Container { pair: Pair, other: i32 }
@@ -11725,8 +11737,9 @@ mod tests {
         // usable after only `c.pair.a` was moved. (Deliberately uses a
         // one-level-nested sibling, not `c.pair.b`: reading a two-level
         // projection through an intermediate record-field base hits an
-        // unrelated, pre-existing defect --
-        // see `ssf08_known_defect_nested_projection_rereads_intermediate_base_as_whole_value`
+        // unrelated, pre-existing defect tracked as FA-02-039
+        // (skulmakov-oss/Semantic#1881) -- see
+        // `fa02_039_known_defect_nested_projection_rereads_intermediate_base_as_whole_value`
         // -- which this test must not exercise.)
         let src = r#"
             record Pair { a: i32, b: i32 }
@@ -11803,11 +11816,119 @@ mod tests {
     }
 
     #[test]
+    fn ssf08_1664_check_path_available_fails_closed_on_missing_binding() {
+        // check_path_available itself is REQUIRED_BINDING and fails closed;
+        // its one production call site (top of infer_expr_type) never lets
+        // this branch fire for a genuinely-unknown source variable because
+        // it existence-gates first -- see
+        // ssf08_1664_unknown_variable_diagnostic_remains_canonical below for
+        // that source-level proof. This test proves the API itself, in
+        // isolation, no longer treats "missing" as "available".
+        use crate::types::PatternPath;
+        let env = ScopeEnv::new();
+        let unknown = SymbolId(997);
+        let err = env
+            .check_path_available(unknown, &PatternPath::root())
+            .expect_err("check_path_available on a genuinely missing binding must fail closed");
+        assert!(
+            err.message.contains("internal ownership state"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_mark_consumed_fails_closed_on_missing_binding() {
+        let mut env = ScopeEnv::new();
+        let unknown = SymbolId(996);
+        let err = env
+            .mark_consumed(unknown)
+            .expect_err("mark_consumed on a genuinely missing binding must fail closed");
+        assert!(
+            err.message.contains("internal ownership state"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_is_consumed_fails_closed_on_missing_binding() {
+        let env = ScopeEnv::new();
+        let unknown = SymbolId(995);
+        let err = env
+            .is_consumed(unknown)
+            .expect_err("is_consumed on a genuinely missing binding must fail closed");
+        assert!(
+            err.message.contains("internal ownership state"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_is_mutable_fails_closed_on_missing_binding() {
+        // Zero call sites exist anywhere in the workspace for is_mutable,
+        // so this signature carries no external-crate compatibility burden
+        // (unlike is_const below) and could be changed directly.
+        let env = ScopeEnv::new();
+        let unknown = SymbolId(994);
+        let err = env
+            .is_mutable(unknown)
+            .expect_err("is_mutable on a genuinely missing binding must fail closed");
+        assert!(
+            err.message.contains("internal ownership state"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_is_const_checked_fails_closed_on_missing_binding() {
+        // is_const_checked is the fail-closed sibling used by every
+        // sm-front-internal call site (see is_const's own doc comment and
+        // the next test for why the original is_const symbol itself could
+        // not be changed in place).
+        let env = ScopeEnv::new();
+        let unknown = SymbolId(993);
+        let err = env
+            .is_const_checked(unknown)
+            .expect_err("is_const_checked on a genuinely missing binding must fail closed");
+        assert!(
+            err.message.contains("internal ownership state"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_is_const_legacy_bool_api_remains_fail_open_for_lane2_compat() {
+        // Deliberate, evidenced exception: `is_const`'s bool-returning shape
+        // has live production call sites in crates/sm-ir/src/
+        // legacy_lowering.rs (Lane 2), which SSF-08 Lane 1 is not permitted
+        // to modify. This pins that the old symbol still returns `false` on
+        // a missing binding -- not because it is correct, but because
+        // changing it would require editing a Lane 2 crate. Every
+        // sm-front-internal decision now goes through is_const_checked
+        // instead (see the prior test); this method must gain no new
+        // sm-front call sites.
+        let env = ScopeEnv::new();
+        let unknown = SymbolId(992);
+        assert!(
+            !env.is_const(unknown),
+            "legacy is_const must still fail open (false) on a missing binding -- this is the \
+             documented Lane 2 compatibility exception, not new behavior"
+        );
+    }
+
+    #[test]
     fn ssf08_1664_unknown_variable_diagnostic_remains_canonical() {
-        // check_path_available's own missing-binding case must remain
-        // benign at its one call site: a genuinely unknown variable still
-        // reports the ordinary "unknown variable" diagnostic, not an
-        // internal ownership-state error.
+        // check_path_available is REQUIRED_BINDING and fails closed (see
+        // ssf08_1664_check_path_available_fails_closed_on_missing_binding
+        // above), but its one production call site (top of infer_expr_type)
+        // existence-gates first via env.get, so a genuinely unknown source
+        // variable never reaches it -- it still reports the ordinary
+        // "unknown variable" diagnostic from Expr::Var's own resolution,
+        // not an internal ownership-state error.
         let src = r#"
             fn main() {
                 let z: i32 = totally_unknown_name;
@@ -11819,6 +11940,29 @@ mod tests {
         assert!(
             err.message.contains("unknown variable"),
             "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_const_initializer_unknown_variable_diagnostic_remains_canonical() {
+        // Genuine pre-existing bug fixed by this PR: ensure_const_initializer_safe
+        // runs before infer_expr_type_with_expected in the Stmt::Const path
+        // (see check_stmt), so its own Expr::Var arm could not rely on a
+        // prior existence check -- it used to call the fail-open is_const,
+        // silently reporting "'x' is not const" for a variable that does
+        // not exist at all. It now resolves existence itself first.
+        let src = r#"
+            fn main() {
+                const X: i32 = totally_unknown_name;
+                let _ = X;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("unknown variable must still be reported");
+        assert!(
+            err.message.contains("unknown variable"),
+            "unexpected diagnostic (must not be 'is not const'): {}",
             err.message
         );
     }
@@ -12094,7 +12238,8 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(4);
         env.insert(sym, Type::I32);
-        env.mark_consumed(sym);
+        env.mark_consumed(sym)
+            .expect("test-constructed binding must exist");
         let err = env
             .check_path_available(sym, &PatternPath::root())
             .expect_err("whole-consumed var must be blocked");
@@ -16061,7 +16206,20 @@ fn ensure_const_initializer_safe(
             Ok(())
         }
         Expr::Var(name) => {
-            if env.is_const(*name) {
+            // SSF-08 Lane 1 (#1664): existence must be resolved -- with the
+            // canonical "unknown variable" diagnostic on absence -- before
+            // querying const-ness; a missing binding is not evidence of
+            // "not const". This function is called before the caller's own
+            // `infer_expr_type` pass in `Stmt::Const` (see check_stmt), so
+            // that pass cannot be relied on to have already produced this
+            // diagnostic first.
+            if env.get(*name).is_none() {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: format!("unknown variable '{}'", resolve_symbol_name(arena, *name)?),
+                });
+            }
+            if env.is_const_checked(*name)? {
                 Ok(())
             } else {
                 Err(FrontendError {

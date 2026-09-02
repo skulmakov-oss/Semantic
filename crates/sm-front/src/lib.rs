@@ -260,18 +260,24 @@ impl ScopeEnv {
     }
 
     /// Mark a variable as consumed (moved out). Subsequent reads will be rejected.
-    pub fn mark_consumed(&mut self, name: SymbolId) {
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(binding) = scope.get_mut(&name) {
-                binding.consumed = true;
-                return;
-            }
-        }
+    ///
+    /// SSF-08 Lane 1 (#1664): REQUIRED_BINDING -- fails closed if `name` is
+    /// not a known binding, rather than silently no-op'ing. Zero production
+    /// call sites exist anywhere in the workspace today (whole-root
+    /// "consumed" is inert under Position A's frozen copy-by-value plain
+    /// root-rebinding semantics, see PR #1879); this PR adds none.
+    pub fn mark_consumed(&mut self, name: SymbolId) -> Result<(), crate::types::FrontendError> {
+        self.require_binding_mut(name)?.consumed = true;
+        Ok(())
     }
 
     /// Returns true if the variable has been moved and is no longer available.
-    pub fn is_consumed(&self, name: SymbolId) -> bool {
-        self.binding(name).map(|b| b.consumed).unwrap_or(false)
+    ///
+    /// SSF-08 Lane 1 (#1664): REQUIRED_BINDING -- fails closed if `name` is
+    /// not a known binding, rather than treating "missing" as "not
+    /// consumed". Zero call sites exist anywhere in the workspace today.
+    pub fn is_consumed(&self, name: SymbolId) -> Result<bool, crate::types::FrontendError> {
+        Ok(self.require_binding(name)?.consumed)
     }
 
     /// SSF-08 Lane 1: `true` if `a` denotes the same path as, or a path
@@ -381,6 +387,15 @@ impl ScopeEnv {
     ///
     /// Rejects if any stored path overlaps `access_path` with state `Moved`.
     /// Conservative: borrows are not currently enforced as blocking reads.
+    ///
+    /// SSF-08 Lane 1 (#1664): REQUIRED_BINDING -- fails closed if `name` is
+    /// not a known binding (via `require_binding`), rather than treating
+    /// "missing" as "available". `name` must already be established to
+    /// exist by the caller; the canonical source-level "unknown variable"
+    /// diagnostic must come from that caller's own resolution, not from
+    /// this ownership check -- see the call site in `infer_expr_type`
+    /// (`crates/sm-front/src/typecheck.rs`), which only calls this once
+    /// `env.get(name)` has already confirmed the binding exists.
     pub fn check_path_available(
         &self,
         name: SymbolId,
@@ -398,38 +413,37 @@ impl ScopeEnv {
             path_is_prefix(a, b) || path_is_prefix(b, a)
         }
 
-        if let Some(binding) = self.binding(name) {
-            // Whole-variable consumed takes priority.
-            if binding.consumed {
-                return Err(crate::types::FrontendError {
-                    pos: 0,
-                    message: format!("use of moved value '{}'", name.0),
-                });
-            }
-            for (stored_path, avail) in &binding.path_state {
-                if paths_overlap(stored_path, access_path) {
-                    if *avail == PathAvailability::Moved {
-                        // M9.9 Wave D: more precise diagnostic.
-                        // Distinguish "accessing moved path" from "accessing parent of moved child".
-                        let msg = if path_is_prefix(stored_path, access_path) {
-                            // stored = root.0, access = root.0 or root.0.x → moved path
-                            format!(
-                                "use of moved value: path was moved earlier (moved path {:?})",
-                                stored_path.elems
-                            )
-                        } else {
-                            // stored = root.0, access = root → whole-var after partial move
-                            format!(
-                                "use of partially moved value: cannot use whole variable because \
-                                 child path {:?} was moved",
-                                stored_path.elems
-                            )
-                        };
-                        return Err(crate::types::FrontendError {
-                            pos: 0,
-                            message: msg,
-                        });
-                    }
+        let binding = self.require_binding(name)?;
+        // Whole-variable consumed takes priority.
+        if binding.consumed {
+            return Err(crate::types::FrontendError {
+                pos: 0,
+                message: format!("use of moved value '{}'", name.0),
+            });
+        }
+        for (stored_path, avail) in &binding.path_state {
+            if paths_overlap(stored_path, access_path) {
+                if *avail == PathAvailability::Moved {
+                    // M9.9 Wave D: more precise diagnostic.
+                    // Distinguish "accessing moved path" from "accessing parent of moved child".
+                    let msg = if path_is_prefix(stored_path, access_path) {
+                        // stored = root.0, access = root.0 or root.0.x → moved path
+                        format!(
+                            "use of moved value: path was moved earlier (moved path {:?})",
+                            stored_path.elems
+                        )
+                    } else {
+                        // stored = root.0, access = root → whole-var after partial move
+                        format!(
+                            "use of partially moved value: cannot use whole variable because \
+                             child path {:?} was moved",
+                            stored_path.elems
+                        )
+                    };
+                    return Err(crate::types::FrontendError {
+                        pos: 0,
+                        message: msg,
+                    });
                 }
             }
         }
@@ -507,16 +521,39 @@ impl ScopeEnv {
         self.binding(name).map(|binding| binding.ty.clone())
     }
 
+    /// SSF-08 Lane 1 (#1664): kept fail-open (`false` on a missing binding)
+    /// -- unlike every other #1664 API, this exact bool-returning shape has
+    /// live production call sites in `crates/sm-ir/src/legacy_lowering.rs`,
+    /// a Lane 2 crate this PR is not permitted to modify (SSF-08 Lane 1's
+    /// scope is `crates/sm-front` only). Changing this signature would
+    /// break that crate's build. Every in-crate (`sm-front`) production
+    /// call site now uses the fail-closed `is_const_checked` below instead;
+    /// this method is retained solely for that external, out-of-scope
+    /// dependency and must gain no new call sites within `sm-front`.
     pub fn is_const(&self, name: SymbolId) -> bool {
         self.binding(name)
             .map(|binding| binding.is_const)
             .unwrap_or(false)
     }
 
-    pub fn is_mutable(&self, name: SymbolId) -> bool {
-        self.binding(name)
-            .map(|binding| binding.is_mutable)
-            .unwrap_or(false)
+    /// SSF-08 Lane 1 (#1664): fail-closed counterpart of `is_const`, used by
+    /// every `sm-front`-internal call site. See `is_const`'s doc comment
+    /// for why that original bool-returning method could not simply be
+    /// changed in place.
+    pub(crate) fn is_const_checked(
+        &self,
+        name: SymbolId,
+    ) -> Result<bool, crate::types::FrontendError> {
+        Ok(self.require_binding(name)?.is_const)
+    }
+
+    /// SSF-08 Lane 1 (#1664): REQUIRED_BINDING -- fails closed if `name` is
+    /// not a known binding, rather than treating "missing" as "not
+    /// mutable". Zero call sites exist anywhere in the workspace today, so
+    /// unlike `is_const` this signature carries no external Lane 2
+    /// dependency and can change freely.
+    pub fn is_mutable(&self, name: SymbolId) -> Result<bool, crate::types::FrontendError> {
+        Ok(self.require_binding(name)?.is_mutable)
     }
 
     fn binding(&self, name: SymbolId) -> Option<&ScopeBinding> {
@@ -576,11 +613,13 @@ impl ScopeEnv {
             }
         }
         for depth in 0..self.scopes.len() {
-            // Sorted so the (should-be-unreachable, invariant-defense-only)
-            // "missing from a branch successor" error below always names
-            // the same binding first, independent of this HashMap's
-            // iteration order -- no new diagnostic here may be
-            // hash-order-dependent.
+            // `scopes` is a `BTreeMap`, so `.keys()` is already sorted and
+            // this is a no-op today -- kept explicit (rather than relying
+            // on the underlying collection type) so the (should-be-
+            // unreachable, invariant-defense-only) "missing from a branch
+            // successor" error below always names the same binding first
+            // even if that collection type ever changes; no diagnostic
+            // here may be iteration-order-dependent.
             let mut names: Vec<SymbolId> = self.scopes[depth].keys().copied().collect();
             names.sort_unstable();
             for name in names {
