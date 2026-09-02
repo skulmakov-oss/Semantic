@@ -602,8 +602,8 @@ documents, not a different *kind* of ownership system.
 | Dimension | Position A | Position B |
 |---|---|---|
 | Public claim | Bounded, frame-local, deterministic path/value discipline over admitted paths | General systems-ownership model with borrow/lifetime/alias guarantees |
-| Current implementation fit | Strong for scalar/tuple/record; partial for Sequence/ADT; correctly absent for indirect/Map/schema | Not implemented at any layer; no lifetime/region/alias/release mechanism exists |
-| Missing implementation | Four named, bounded repairs (`#1709`, `#1718`, `#1725`, `#1726`) plus the whole-value `consumed` gap | Lifetime/region representation, alias model, release semantics, inter-frame rules, shared-value VM architecture — all from scratch |
+| Current implementation fit | Resolved for scalar; scope settled and golden-scenarios qualified but general case open for tuple/record (`#1709`/`#1725`/`#1726`); partial for Sequence/ADT; correctly absent for indirect/Map/schema | Not implemented at any layer; no lifetime/region/alias/release mechanism exists |
+| Missing implementation | Four named, bounded repairs (`#1709`, `#1718`, `#1725`, `#1726`) | Lifetime/region representation, alias model, release semantics, inter-frame rules, shared-value VM architecture — all from scratch |
 | Verifier impact | None required; structural admission already matches the claim | Full semantic-policy expansion (overlap, lifetime, release evaluation) |
 | VM impact | Close four named bugs within the existing frame-local model | New activation-timing model, partial release, inter-frame merge, shared-value representation |
 | SemCode/OWN0 impact | Promote or fail-closed-reject Sequence/ADT under an explicit capability (`#1718`); fix root identity (`#1725`) | New event kind (release), new path-identity contract, likely new header family |
@@ -747,8 +747,7 @@ path kind uniformly), so they do not strictly require `#1718` first:
 ```text
 Lane 1 (frontend, compile-time discipline):
   1. canonical ScopeEnv ownership-state transition + join model
-       (closes #1656-#1664 through one shared root; also touches the
-        whole-value `consumed` dead-code gap)
+       (closes #1656-#1664 through one shared root)
 
 Lane 2 (IR/transport, runtime-safety-relevant):
   2a. #1709 nested-lowering event preservation
@@ -780,6 +779,14 @@ Lane 5 (resource/failure, independent of ownership):
       block SSF-08's own full acceptance criteria, which also covers host
       and quota boundaries)
 ```
+
+`ScopeBinding.consumed`/`mark_consumed` is **not** a lane in this DAG. Per
+the Frontend State Model and Correction Log above, it is inert scaffolding
+for a whole-root move feature the current admitted contract does not
+promise (plain root rebinding is frozen as copy-by-value). It is not
+required implementation for SSF-08 Position A. Removing or repurposing it
+is optional future cleanup, tracked outside SSF-08's repair DAG, not a
+blocker for this phase's exit gate.
 
 ## Public Wording Rules
 
@@ -834,8 +841,9 @@ not authorize merging this PR.
 
 ## Correction Log
 
-Recorded per owner review of the initial revision (commit `3ac20fe7`),
-before merge, on this same PR:
+Recorded per owner review, before merge, on this same PR. Entries 1-2 are
+from the review of the initial revision (commit `3ac20fe7`); entry 3 is
+from a second review of that correction (commit `f3e172bc`):
 
 1. **Quota/taxonomy current-facing contradiction** — this decision record's
    own Resource/Failure Boundary evidence (`#1759`-`#1763`, confirmed still
@@ -866,8 +874,30 @@ before merge, on this same PR:
    `#1709`/`#1725`/`#1726` (which apply to every path kind, not only
    Sequence/ADT) — both rows now carry an explicit caveat rather than
    reading as unqualified endorsements.
+3. **Two residual echoes of the pre-Correction-2 model, plus the caveat from
+   Correction 2 left unresolved at the maturity-status level** — a second
+   owner review (commit `f3e172bc`) found: (a) the Decision Matrix's
+   "Missing implementation" cell and the Repair Dependency Order's Lane 1
+   description both still listed the whole-value `consumed` gap as
+   something to fix, contradicting Correction 2's own resolution that it is
+   inert, unpromised scaffolding — both references removed, with an
+   explicit note added stating `consumed`/`mark_consumed` is not part of
+   this DAG and is optional future cleanup, not an SSF-08 blocker; (b) more
+   substantively, `semantic_stable_foundation_matrix.md`'s "OWN0
+   tuple/direct-record paths" row still read **Landed and qualified on
+   `main`** — an unqualified maturity claim — even though this same record
+   proves `#1709` is a false-negative-direction bug inside that exact
+   frozen contract and `#1725`/`#1726` violate this record's own normative
+   Path-identity/Event-timing invariants for every path kind including
+   tuple/record. A routing-column caveat is not sufficient when the status
+   column itself is the overclaim. Corrected to **Landed but unqualified**,
+   preserving the D7/golden-scenario evidence in the evidence column and
+   naming `#1709`/`#1725`/`#1726` as the general-case blockers — the same
+   fix shape as Correction 1, applied to the row Correction 1 did not
+   touch. The Decision Matrix's "Current implementation fit" row was
+   tightened to match.
 
-Position A is unchanged by both corrections.
+Position A is unchanged by all three corrections.
 
 ## Evidence Index
 
