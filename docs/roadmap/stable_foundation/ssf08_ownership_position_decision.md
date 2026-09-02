@@ -80,7 +80,7 @@ Direct inspection of `crates/sm-front`, `crates/sm-ir`, `crates/sm-format`,
 `crates/sm-verify`, `crates/sm-vm`, `crates/sm-runtime-core`, and `prom-abi`
 at commit `5ddb703b19f6135aaa96e2cc8f1c7d4e8e6baafc`, cross-referenced
 against `docs/spec/runtime_ownership.md`, `docs/spec/semcode.md`,
-`docs/spec/verifier.md`, and the 20 GitHub issues named in the governing
+`docs/spec/verifier.md`, and the 24 GitHub issues named in the governing
 task (`#1656`-`#1664`, `#1709`, `#1718`, `#1724`-`#1726`, `#1759`-`#1763`,
 `#1770`, `#1771`, `#1773`, `#1775`, `#1778`), plus the repository's own
 end-to-end ownership test suite (`tests/runtime_ownership_e2e.rs`,
@@ -271,8 +271,8 @@ proof not yet reachable through the real compiler, verifier admission
 structurally weaker). Neither is promoted into the frozen contract by this
 PR (see Included/Deferred Ownership Surface below); both are classified
 **INCLUDED ONLY AFTER REQUIRED REPAIR**, precisely because of the specific,
-named gaps below (`#1709`, `#1718`, `#1725`, `#1726`), not because the
-surface is unproven in principle.
+named gaps below (`#1709`, `#1718`, `#1724`, `#1725`, `#1726`), not because
+the surface is unproven in principle.
 
 **`#1709`** (nested/value lowering can erase ownership events) — **confirmed,
 and it is a bug inside the tuple/record-only contract, not evidence for or
@@ -541,12 +541,12 @@ See "What Semantic Claims" / "Does Not Claim" above. Implementation fit:
 resolved for plain scalar/direct-root rebinding (confirmed copy-by-value,
 no open defect). Strong for the golden-covered scenarios in tuple paths and
 direct record-field paths (frozen, documented, D7-qualified positive and
-negative end-to-end evidence), with the caveat that `#1709`/`#1725`/`#1726`
-apply to these paths too and general-case correctness beyond the tested
-scenarios remains open (see Included Ownership Surface). Partial fit for
-Sequence static-index and ADT-payload paths (implemented and largely
-tested, but blocked from promotion by
-`#1709`/`#1718`/`#1725`/`#1726`). No fit claimed, and none needed, for
+negative end-to-end evidence), with the caveat that
+`#1709`/`#1724`/`#1725`/`#1726` apply to these paths too and general-case
+correctness beyond the tested scenarios remains open (see Included
+Ownership Surface). Partial fit for Sequence static-index and ADT-payload
+paths (implemented and largely tested, but blocked from promotion by
+`#1709`/`#1718`/`#1724`/`#1725`/`#1726`). No fit claimed, and none needed, for
 indirect/dynamic paths, Map paths, or schema paths — these are correctly
 absent end to end (frontend never produces a path for them;
 `expr_access_path`, `crates/sm-front/src/typecheck.rs:15453-15476`, only
@@ -602,10 +602,10 @@ documents, not a different *kind* of ownership system.
 | Dimension | Position A | Position B |
 |---|---|---|
 | Public claim | Bounded, frame-local, deterministic path/value discipline over admitted paths | General systems-ownership model with borrow/lifetime/alias guarantees |
-| Current implementation fit | Resolved for scalar; scope settled and golden-scenarios qualified but general case open for tuple/record (`#1709`/`#1725`/`#1726`); partial for Sequence/ADT; correctly absent for indirect/Map/schema | Not implemented at any layer; no lifetime/region/alias/release mechanism exists |
-| Missing implementation | Four named, bounded repairs (`#1709`, `#1718`, `#1725`, `#1726`) | Lifetime/region representation, alias model, release semantics, inter-frame rules, shared-value VM architecture — all from scratch |
+| Current implementation fit | Resolved for scalar; scope settled and golden-scenarios qualified but general case open for tuple/record (`#1709`/`#1724`/`#1725`/`#1726`); partial for Sequence/ADT; correctly absent for indirect/Map/schema | Not implemented at any layer; no lifetime/region/alias/release mechanism exists |
+| Missing implementation | Heterogeneous, bounded work across three layers, not a flat count — see Repair Dependency Order for the full DAG: **Frontend**, canonical `ScopeEnv` transition/join model closing `#1656`-`#1664`; **IR/transport**, `#1709` (event preservation), `#1724` (lexical binding identity), `#1725` (OWN0 root identity), `#1726` (OWN0 event timing); **Contour/version**, `#1718` (path-family capability alignment) | Lifetime/region representation, alias model, release semantics, inter-frame rules, shared-value VM architecture — all from scratch |
 | Verifier impact | None required; structural admission already matches the claim | Full semantic-policy expansion (overlap, lifetime, release evaluation) |
-| VM impact | Close four named bugs within the existing frame-local model | New activation-timing model, partial release, inter-frame merge, shared-value representation |
+| VM impact | Close the named IR/transport bugs within the existing frame-local model; `#1724`'s fix lives in IR lowering (name generation) rather than VM code proper, but must land before VM-observed local identity is trustworthy under shadowing | New activation-timing model, partial release, inter-frame merge, shared-value representation |
 | SemCode/OWN0 impact | Promote or fail-closed-reject Sequence/ADT under an explicit capability (`#1718`); fix root identity (`#1725`) | New event kind (release), new path-identity contract, likely new header family |
 | Frontend complexity | One join-model fix closes nine findings (`#1656`-`#1664`) | Same fix required, plus mutable-borrow/reborrow/partial-move source semantics (explicitly deferred by `CaptureMode`'s own doc comment) |
 | Aggregate/path requirements | Tuple, record field frozen; Sequence static-index and ADT payload gated behind named repairs | Indirect/dynamic paths, Map, schema — none representable without new frontend+IR+verifier work |
@@ -616,7 +616,7 @@ documents, not a different *kind* of ownership system.
 | Release semantics | Implicit, via frame-pop/Rust-drop; no explicit release event | Explicit release event kind, SemCode version-family change |
 | Determinism proof burden | Already carried by existing goldens + `runtime_ownership_e2e.rs` | Every new mechanism needs its own determinism proof from scratch |
 | Stable Foundation necessity | Sufficient for #1579's acceptance criteria (deterministic agreement, explicit taxonomy, no overclaim) | Not required by any current Stable Foundation target row |
-| Risk of false-ready claim | Low if `#1709`/`#1718`/`#1725`/`#1726` are closed before any promotion | High — no current evidence supports advertising it, and this audit found active correctness gaps even in the frozen tuple/record slice |
+| Risk of false-ready claim | Low if `#1709`/`#1718`/`#1724`/`#1725`/`#1726` are closed before any promotion | High — no current evidence supports advertising it, and this audit found active correctness gaps even in the frozen tuple/record slice |
 
 ## Selected Position
 
@@ -675,10 +675,10 @@ implementation, not positioning.)
 | Family | Classification |
 |---|---|
 | Scalar / direct root | INCLUDED IN SSF-08 — frozen as **copy-by-value** for plain (non-destructuring) root rebinding, confirmed by full-pipeline empirical reproduction (see Frontend State Model); no unresolved defect in this invariant. Pattern-based destructuring capture of a scalar (e.g. as an ADT/tuple/record payload item) is covered by the Tuple/Record/ADT rows below, not this row. |
-| Tuple | INCLUDED IN SSF-08 — scope is frozen and settled (unambiguous since before this decision); the golden-covered scenarios (sibling/same-path/parent-child/child-parent write, multi-frame cleanup) are D7-qualified and pass. **Caveat, not a scope question**: #1709 (nested `if`/`loop`-expression lowering can drop these exact events), #1725 (root-identity correctness), and #1726 (event-timing correctness) all apply to tuple paths too, not only Sequence/ADT — general-case correctness beyond the tested scenarios is not yet proven and requires those three repairs. |
-| Direct record field | INCLUDED IN SSF-08 — same scope and same caveat as Tuple: golden-covered scenarios (positive+negative E2E) pass; #1709/#1725/#1726 apply here too and must close before the guarantee generalizes beyond the tested cases. |
-| Sequence static index | INCLUDED ONLY AFTER REQUIRED REPAIR (`#1718` capability alignment, `#1725`, `#1726`; already has stronger E2E proof — including dynamic-vs-static interaction cases — than the frozen spec currently credits it for) |
-| ADT payload (fixed variant, single level) | INCLUDED ONLY AFTER REQUIRED REPAIR (`#1718`, `#1725`, `#1726`, plus closing the verifier's SymbolId bounds-check gap and reaching a genuine compiler-driven negative E2E test once the frontend supports mutable ADT-payload reassignment) |
+| Tuple | INCLUDED IN SSF-08 — scope is frozen and settled (unambiguous since before this decision); the golden-covered scenarios (sibling/same-path/parent-child/child-parent write, multi-frame cleanup) are D7-qualified and pass. **Caveat, not a scope question**: #1709 (nested `if`/`loop`-expression lowering can drop these exact events), #1724 (lexical binding identity — a shadowed tuple binding can resolve to the wrong runtime slot), #1725 (OWN0 root-identity correctness), and #1726 (event-timing correctness) all apply to tuple paths too, not only Sequence/ADT — general-case correctness beyond the tested scenarios is not yet proven and requires those four repairs. |
+| Direct record field | INCLUDED IN SSF-08 — same scope and same caveat as Tuple: golden-covered scenarios (positive+negative E2E) pass; #1709/#1724/#1725/#1726 apply here too and must close before the guarantee generalizes beyond the tested cases. |
+| Sequence static index | INCLUDED ONLY AFTER REQUIRED REPAIR (`#1718` capability alignment, `#1724`, `#1725`, `#1726`; already has stronger E2E proof — including dynamic-vs-static interaction cases — than the frozen spec currently credits it for) |
+| ADT payload (fixed variant, single level) | INCLUDED ONLY AFTER REQUIRED REPAIR (`#1718`, `#1724`, `#1725`, `#1726`, plus closing the verifier's SymbolId bounds-check gap and reaching a genuine compiler-driven negative E2E test once the frontend supports mutable ADT-payload reassignment) |
 
 ## Deferred Ownership Surface
 
@@ -729,6 +729,8 @@ governing task's hard scope.
    `#1725`: a name-collision/shadowing defect rather than a
    numbering-space mismatch, both under the general heading of "binding
    identity is not preserved uniformly across the frontend-to-VM boundary."
+   Routed to Repair Dependency Order Lane 2b, SSF-08-owned — see the
+   Blocker-To-Route Audit table below for the ownership reasoning.
 Item 7 in an earlier revision of this record ("whole-value `consumed`
 tracking is dead code") is **removed**, not renumbered away silently: it was
 investigated to completion (see Frontend State Model above) and resolved as
@@ -749,15 +751,40 @@ Lane 1 (frontend, compile-time discipline):
   1. canonical ScopeEnv ownership-state transition + join model
        (closes #1656-#1664 through one shared root)
 
-Lane 2 (IR/transport, runtime-safety-relevant):
+Lane 2 (IR / binding identity / transport, runtime-safety-relevant):
   2a. #1709 nested-lowering event preservation
         (independent of Lane 1; may proceed in parallel)
-  2b. #1725 OWN0 root-identity correctness
+  2b. #1724 lexical binding identity preservation
+        (preserve the outer/inner lexical binding distinction through IR
+         lowering and VM-local storage; independent of Lane 1's join model)
+  2c. #1725 OWN0 root-identity correctness
         (independent of #1718; establishes a trustworthy identity contract
          for every path kind, including the already-frozen tuple/record slice)
-  2c. #1726 OWN0 event timing
-        (depends on 2b: fixing activation timing for a symbol whose identity
+  2d. #1726 OWN0 event timing
+        (depends on 2c: fixing activation timing for a symbol whose identity
          is not yet trustworthy proves nothing)
+
+  2b/2c sequencing: #1724 and #1725 are analytically distinct bugs, not one
+  bug under two numbers — #1724 is lexical *binding* identity (a shadowed
+  inner `let x` can leak its value to an outer `LoadVar "x"` after scope
+  exit, because `IrInstr::StoreVar`/`LoadVar` key storage by bare textual
+  name, `legacy_lowering.rs:191-198`, with no per-scope mangling); #1725 is
+  ownership-*path-root* identity (the wire's global frontend `SymbolId` is
+  reinterpreted as a function-local string-table index at VM decode,
+  `semcode_vm.rs:1105-1109`). Their fixes touch different code: #1724's is a
+  frontend/IR lowering change (how names are generated before emission);
+  #1725's is a decode/remap change (how the wire's numeric id is resolved
+  at VM load). Neither implementation calls into the other, so **2b and 2c
+  may be implemented in parallel**. But #1725's fix can only be *validated*
+  as a general-case identity guarantee — not merely "the off-by-one mapping
+  bug is gone" — against a per-function local-identifier space that itself
+  does not conflate two different lexical bindings sharing a name. If #1724
+  is still open, a "correctly mapped" `#1725` fix can still resolve to the
+  wrong runtime slot under shadowing, because the underlying storage slot
+  is already ambiguous before OWN0 remapping ever runs. So: **#1724 should
+  close before #1725's general-case qualification evidence is trusted**,
+  even though the two may be coded in parallel — matching the 2b-before-2c
+  ordering above.
 
 Lane 3 (contour/versioning decision):
   3. #1718 path-family / SemCode capability alignment
@@ -787,6 +814,45 @@ promise (plain root rebinding is frozen as copy-by-value). It is not
 required implementation for SSF-08 Position A. Removing or repurposing it
 is optional future cleanup, tracked outside SSF-08's repair DAG, not a
 blocker for this phase's exit gate.
+
+### Blocker-To-Route Audit
+
+Every item this record investigated maps to exactly one route. No item may
+appear in Known Blocking Findings without a route, and no route may be
+assigned without the item appearing somewhere in this record's evidence.
+
+| Item | In Known Blocking Findings? | Route | Where |
+|---|---|---|---|
+| `#1656`-`#1664` | Yes | REPAIR LANE | Lane 1 |
+| `#1709` | Yes | REPAIR LANE | Lane 2a |
+| `#1724` | Yes | REPAIR LANE | Lane 2b |
+| `#1725` | Yes | REPAIR LANE | Lane 2c |
+| `#1726` | Yes | REPAIR LANE | Lane 2d |
+| `#1718` | Yes | REPAIR LANE | Lane 3 |
+| `#1770` | No | ALREADY CLOSED | Frame/Host Boundary — `RegisterSlot::Uninitialized` confirms the fix in code, not just issue state |
+| `#1771` | No | ALREADY CLOSED | Frame/Host Boundary — `MapGet`'s `?` propagation confirms the fix in code |
+| `#1773` | No | ALREADY CLOSED | Frame/Host Boundary — `validate_call_arguments` in `push_frame` confirms the fix in code |
+| `#1775` | No | ALREADY CLOSED | Frame/Host Boundary — `quad_from_abi`'s `0..=3` domain check confirms the fix in code |
+| `#1778` | No | INDEPENDENT SSF-08 TRACK | Lane 4 — host canonicality (`prom-abi`'s `AbiValue::Quad(u8)`), not ownership |
+| `#1759`-`#1763` | No | INDEPENDENT SSF-08 TRACK | Lane 5 — resource/failure boundary, not ownership (see Resource/Failure Boundary section) |
+| `consumed`/`mark_consumed` | No (removed, see Correction Log) | (not a GitHub issue; no route needed) | Resolved as inert, unpromised scaffolding — see Frontend State Model |
+
+`#1724` is classified **REPAIR LANE, SSF-08-owned (Option A)**, not RETURN.
+Reasoning: it is filed under `FA-04` (the `sm-ir` module), not `FA-02` (the
+`sm-front` module the completed SSF-07 exit reconciliation already
+triaged), so it was never in scope for that reconciliation to claim or
+release. It is not a source-language-contract question either — the
+completed SSF-01 contract already correctly *defines* lexical block scoping
+(`docs/spec/source_semantics.md`'s "Scope And Binding Rules"); `#1724` is an
+*implementation* defect in how `sm-ir` lowering honors that already-settled
+contract, cross-cutting frontend `ScopeEnv` → IR local storage → VM
+locals — squarely inside SSF-08's own "value paths, frames" ownership scope,
+which cannot make a trustworthy binding-identity promise while the
+underlying lexical-identity guarantee it depends on is unproven. This
+matches the working classification already recorded in prior SSF
+dependency-mapping conversation history (CROSS into `sm-ir`/OWN0/VM,
+alongside `#1709`/`#1718`/`#1725`/`#1726`), independently re-derived here
+from the code rather than assumed from that history.
 
 ## Public Wording Rules
 
@@ -836,14 +902,15 @@ plus: this record does not implement any repair; does not decide the
 `#1718` promote-vs-reject question (that is an implementation decision for
 the Lane 3 repair slice); does not touch production Rust in `sm-front`,
 `sm-ir`, `sm-format`, `sm-verify`, or `sm-vm`; does not open or close any of
-the 20 issues investigated; does not modify CI/workflow configuration; does
+the 24 issues investigated; does not modify CI/workflow configuration; does
 not authorize merging this PR.
 
 ## Correction Log
 
 Recorded per owner review, before merge, on this same PR. Entries 1-2 are
 from the review of the initial revision (commit `3ac20fe7`); entry 3 is
-from a second review of that correction (commit `f3e172bc`):
+from a second review of that correction (commit `f3e172bc`); entry 4 is
+from a third review of that correction (commit `3ad8507f`):
 
 1. **Quota/taxonomy current-facing contradiction** — this decision record's
    own Resource/Failure Boundary evidence (`#1759`-`#1763`, confirmed still
@@ -896,8 +963,27 @@ from a second review of that correction (commit `f3e172bc`):
    fix shape as Correction 1, applied to the row Correction 1 did not
    touch. The Decision Matrix's "Current implementation fit" row was
    tightened to match.
+4. **`#1724` declared blocking with no repair route** — a third owner
+   review found `#1724` listed in Known Blocking Findings while the Repair
+   Dependency Order contained no lane for it, an inconsistency with the
+   record's own classification. Resolved: `#1724` is a genuine SSF-08-owned
+   finding (Option A, not RETURN — see the Blocker-To-Route Audit's
+   reasoning), added to the DAG as Lane 2b, ahead of `#1725` (Lane 2c) —
+   implementable in parallel with `#1725`, but `#1725`'s general-case
+   (shadowing-inclusive) qualification evidence is only trustworthy once
+   `#1724` closes, since both bugs trace to the same root cause
+   (`sm-ir`'s per-function locals being identified by bare textual name).
+   The Decision Matrix's "Missing implementation" row, which the same
+   review correctly flagged as reducible to a misleading count even before
+   accounting for `#1724`, is now a heterogeneous three-layer breakdown
+   instead of a number. A Blocker-To-Route Audit table was added, covering
+   every one of the 24 investigated issues plus `consumed`/`mark_consumed`,
+   so no future revision can let a declared blocker silently lose its
+   route again. In the course of this pass, an unrelated miscount ("20
+   GitHub issues" where the cited list is 24) was also found and corrected
+   — not owner-flagged, caught during this same audit discipline.
 
-Position A is unchanged by all three corrections.
+Position A is unchanged by all four corrections.
 
 ## Evidence Index
 

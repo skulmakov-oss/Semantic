@@ -131,7 +131,7 @@ Andromeda, and broad permanent ABI/ISA promises.
 | Canonical manifest, project layout, discovery, and command shapes | SSF-05 | Resolved by `semantic.foundation.project/0.1`: `semantic.toml` is canonical; `Semantic.package` is an explicit compatibility/package input. |
 | Package identity, provenance, and lock record | SSF-06 | Resolved by `semantic.foundation.package/0.1`: local-only composition, pinned deterministic fingerprints, capability-request inventory, and a read-only provenance-equivalent record. |
 | Numeric, text, collection, closure, generic, trait, and pattern limits | SSF-07 | Prefer the smallest ordinary-program contour. |
-| Ownership Position A or B | SSF-08 | Position A selected (`docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md`); implementation repair (#1656-#1664, #1709, #1718, #1725, #1726) remains before qualification closes. |
+| Ownership Position A or B | SSF-08 | Position A selected (`docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md`); implementation repair (#1656-#1664, #1709, #1718, #1724, #1725, #1726) remains before qualification closes. |
 | Diagnostic schema, formatter, LSP, editor baseline | SSF-09 | `smc check` remains source of truth. |
 | Compatibility windows, migration, artifact trust, checksums/signing | SSF-10 | No stable publication is currently evidenced. |
 | Canonical application and onboarding proof | SSF-11 | Examples must declare maturity and remain executable. |
