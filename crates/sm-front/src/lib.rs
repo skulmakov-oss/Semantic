@@ -274,45 +274,107 @@ impl ScopeEnv {
         self.binding(name).map(|b| b.consumed).unwrap_or(false)
     }
 
-    /// M9.7: Record that `path` within variable `name` has been moved or borrowed.
+    /// SSF-08 Lane 1: `true` if `a` denotes the same path as, or a path
+    /// leading to, `b` (i.e. `a` is a prefix of `b`'s element list).
+    fn path_is_prefix(a: &crate::types::PatternPath, b: &crate::types::PatternPath) -> bool {
+        if a.elems.len() > b.elems.len() {
+            return false;
+        }
+        a.elems.iter().zip(&b.elems).all(|(x, y)| x == y)
+    }
+
+    /// SSF-08 Lane 1: shared normalisation core of `mark_path_state`, factored
+    /// out so the branch/loop/match join (`join_ownership_from`) can build a
+    /// joined `path_state` using the exact same compaction rules, rather than
+    /// re-deriving them.
+    ///
+    /// Rule 1 — new path subsumes longer existing entries of the same state:
+    ///   e.g. adding Moved(root) while Moved(root.0) exists → drop root.0.
+    /// Rule 2 — if an existing entry already covers the new path (same state,
+    ///   existing is a prefix of new path), the new entry is redundant.
+    ///
+    /// Deliberately does not merge across *different* states: `(p, Moved)`
+    /// and `(p, Borrowed)` may both be present at once. `check_path_available`
+    /// / `check_capture_allowed` treat that as "restricted under either
+    /// reading", which is exactly the conservative behavior a branch join
+    /// needs when one successor moved `p` and another only borrowed it.
+    fn push_path_state_normalized(
+        path_state: &mut Vec<(crate::types::PatternPath, crate::types::PathAvailability)>,
+        path: crate::types::PatternPath,
+        state: crate::types::PathAvailability,
+    ) {
+        path_state.retain(|(existing, existing_state)| {
+            if *existing_state != state {
+                return true;
+            }
+            !Self::path_is_prefix(&path, existing)
+        });
+        let redundant = path_state.iter().any(|(existing, existing_state)| {
+            *existing_state == state && Self::path_is_prefix(existing, &path)
+        });
+        if !redundant {
+            path_state.push((path, state));
+        }
+    }
+
+    /// SSF-08 Lane 1: look up a binding that the caller has already
+    /// established must exist (e.g. because an earlier, independently
+    /// successful lookup on the same `name` already proved it, or because
+    /// `name` is drawn from `self`'s own known binding set). Fails closed:
+    /// unlike `binding`, absence here is treated as an internal ownership
+    /// state invariant failure, not a legitimate "unknown variable" case.
+    /// This is deliberately a *different* error from the source-level
+    /// "unknown variable 'x'" diagnostic (see `Expr::Var` handling in
+    /// `typecheck.rs`) — callers that have not already independently
+    /// confirmed existence must not use this.
+    fn require_binding(
+        &self,
+        name: SymbolId,
+    ) -> Result<&ScopeBinding, crate::types::FrontendError> {
+        self.binding(name)
+            .ok_or_else(|| crate::types::FrontendError {
+                pos: 0,
+                message: format!(
+                    "internal ownership state: required binding {} is missing",
+                    name.0
+                ),
+            })
+    }
+
+    /// Mutable counterpart of `require_binding`. See its doc comment for the
+    /// fail-closed contract.
+    fn require_binding_mut(
+        &mut self,
+        name: SymbolId,
+    ) -> Result<&mut ScopeBinding, crate::types::FrontendError> {
+        for scope in self.scopes.iter_mut().rev() {
+            if scope.contains_key(&name) {
+                return Ok(scope.get_mut(&name).expect("just checked contains_key"));
+            }
+        }
+        Err(crate::types::FrontendError {
+            pos: 0,
+            message: format!(
+                "internal ownership state: required binding {} is missing",
+                name.0
+            ),
+        })
+    }
+
+    /// M9.7 / SSF-08 Lane 1: Record that `path` within variable `name` has
+    /// been moved or borrowed. `name` must already be a known binding —
+    /// callers that have not independently established this (e.g. a bare
+    /// source-level read where "unknown variable" must remain the reported
+    /// diagnostic) must not call this directly; see `require_binding_mut`.
     pub fn mark_path_state(
         &mut self,
         name: SymbolId,
         path: crate::types::PatternPath,
         state: crate::types::PathAvailability,
-    ) {
-        use crate::types::PatternPath;
-
-        fn path_is_prefix(a: &PatternPath, b: &PatternPath) -> bool {
-            if a.elems.len() > b.elems.len() {
-                return false;
-            }
-            a.elems.iter().zip(&b.elems).all(|(x, y)| x == y)
-        }
-
-        for scope in self.scopes.iter_mut().rev() {
-            if let Some(binding) = scope.get_mut(&name) {
-                // M9.9 Wave C: normalise path-state to keep it compact.
-                //
-                // Rule 1 — new path subsumes longer existing entries of the same state:
-                //   e.g. adding Moved(root) while Moved(root.0) exists → drop root.0.
-                binding.path_state.retain(|(existing, existing_state)| {
-                    if *existing_state != state {
-                        return true;
-                    }
-                    !path_is_prefix(&path, existing)
-                });
-                // Rule 2 — if an existing entry already covers the new path (same state,
-                //   existing is a prefix of new path), the new entry is redundant.
-                let redundant = binding.path_state.iter().any(|(existing, existing_state)| {
-                    *existing_state == state && path_is_prefix(existing, &path)
-                });
-                if !redundant {
-                    binding.path_state.push((path, state));
-                }
-                return;
-            }
-        }
+    ) -> Result<(), crate::types::FrontendError> {
+        let binding = self.require_binding_mut(name)?;
+        Self::push_path_state_normalized(&mut binding.path_state, path, state);
+        Ok(())
     }
 
     /// M9.7: Check that accessing `access_path` within `name` is allowed.
@@ -374,8 +436,13 @@ impl ScopeEnv {
         Ok(())
     }
 
-    /// M9.8: Check that a new capture of `path` with `capture` mode is compatible
-    /// with the existing path-state of variable `name`.
+    /// M9.8 / SSF-08 Lane 1: Check that a new capture of `path` with `capture`
+    /// mode is compatible with the existing path-state of variable `name`.
+    /// `name` must already be a known binding (see `require_binding`) — this
+    /// is a pattern-capture check, always run against a scrutinee whose own
+    /// existence was already independently confirmed by successfully
+    /// typechecking the scrutinee expression before any pattern plan is
+    /// built.
     ///
     /// Rules:
     ///   prior Borrowed + new Move   → error ("cannot move from borrowed value")
@@ -389,21 +456,13 @@ impl ScopeEnv {
         path: &crate::types::PatternPath,
         capture: crate::types::CaptureMode,
     ) -> Result<(), crate::types::FrontendError> {
-        use crate::types::{CaptureMode, PathAvailability, PatternPath};
+        use crate::types::{CaptureMode, PathAvailability};
 
-        fn path_is_prefix(a: &PatternPath, b: &PatternPath) -> bool {
-            if a.elems.len() > b.elems.len() {
-                return false;
-            }
-            a.elems.iter().zip(&b.elems).all(|(x, y)| x == y)
-        }
-        fn paths_overlap(a: &PatternPath, b: &PatternPath) -> bool {
-            path_is_prefix(a, b) || path_is_prefix(b, a)
+        fn paths_overlap(a: &crate::types::PatternPath, b: &crate::types::PatternPath) -> bool {
+            ScopeEnv::path_is_prefix(a, b) || ScopeEnv::path_is_prefix(b, a)
         }
 
-        let Some(binding) = self.binding(name) else {
-            return Ok(());
-        };
+        let binding = self.require_binding(name)?;
 
         if binding.consumed {
             return Err(crate::types::FrontendError {
@@ -467,6 +526,98 @@ impl ScopeEnv {
             }
         }
         None
+    }
+
+    /// SSF-08 Lane 1: the canonical ownership-state join. `self` is the
+    /// pre-branch/pre-loop-body environment; each entry in `successors` is a
+    /// state reached by fully checking one reachable alternative (an `if`
+    /// arm, a `match`/`if-let` arm or default, one loop-body pass), starting
+    /// from a clone of `self` with any of that alternative's own local
+    /// (branch-local / loop-local) scope already popped — so every successor
+    /// has exactly `self`'s own scope shape (same depth, same bindings at
+    /// each depth), just with pre-existing bindings' `consumed`/`path_state`
+    /// possibly more restricted.
+    ///
+    /// Conservative join law: a path may be claimed Available in the joined
+    /// result only if it is Available in *every* successor. Equivalently: a
+    /// restriction (`Moved`, `Borrowed`, or whole-binding `consumed`) that
+    /// holds in *any* successor is retained. Uncertainty never restores
+    /// availability — this is the invariant `#1656`-`#1664` violated by
+    /// discarding successor state entirely rather than joining it.
+    ///
+    /// `successors` being empty is a no-op (nothing reachable to join in;
+    /// `self` is left as the sole known state). A caller representing "this
+    /// alternative may run zero times" (a bare `if` with no `else`, a
+    /// `while`/`for` loop) must include an *unchanged clone of the pre-state*
+    /// as one of the successors itself — this function does not synthesize
+    /// that implicitly, so it stays correct for exhaustive constructs (a
+    /// `match` whose arms are already proven exhaustive) that must not gain
+    /// a spurious "or nothing happened" relaxation.
+    ///
+    /// Fails closed (`internal ownership state: ...`) if a successor's scope
+    /// shape doesn't match `self`'s, or if a name known to `self` at some
+    /// depth is missing from a successor at that same depth — both indicate
+    /// an internal invariant failure (mismatched push/pop, or a successor
+    /// built from something other than a clone of `self`), never a
+    /// legitimate "this binding doesn't apply here" case.
+    pub(crate) fn join_ownership_from(
+        &mut self,
+        successors: &[ScopeEnv],
+    ) -> Result<(), crate::types::FrontendError> {
+        if successors.is_empty() {
+            return Ok(());
+        }
+        for successor in successors {
+            if successor.scopes.len() != self.scopes.len() {
+                return Err(crate::types::FrontendError {
+                    pos: 0,
+                    message: "internal ownership state: branch successor scope depth does not match predecessor".to_string(),
+                });
+            }
+        }
+        for depth in 0..self.scopes.len() {
+            // Sorted so the (should-be-unreachable, invariant-defense-only)
+            // "missing from a branch successor" error below always names
+            // the same binding first, independent of this HashMap's
+            // iteration order -- no new diagnostic here may be
+            // hash-order-dependent.
+            let mut names: Vec<SymbolId> = self.scopes[depth].keys().copied().collect();
+            names.sort_unstable();
+            for name in names {
+                let mut joined_consumed = false;
+                let mut joined_path_state: Vec<(
+                    crate::types::PatternPath,
+                    crate::types::PathAvailability,
+                )> = Vec::new();
+                for successor in successors {
+                    let Some(binding) = successor.scopes[depth].get(&name) else {
+                        return Err(crate::types::FrontendError {
+                            pos: 0,
+                            message: format!(
+                                "internal ownership state: required binding {} is missing from a branch successor",
+                                name.0
+                            ),
+                        });
+                    };
+                    joined_consumed |= binding.consumed;
+                    for (path, state) in &binding.path_state {
+                        Self::push_path_state_normalized(
+                            &mut joined_path_state,
+                            path.clone(),
+                            *state,
+                        );
+                    }
+                }
+                // `name` was collected from `self.scopes[depth]` above, so
+                // this lookup cannot miss.
+                let binding = self.scopes[depth]
+                    .get_mut(&name)
+                    .expect("name was just read from this same scope map");
+                binding.consumed = joined_consumed;
+                binding.path_state = joined_path_state;
+            }
+        }
+        Ok(())
     }
 }
 

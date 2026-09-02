@@ -417,14 +417,14 @@ fn type_check_function_with_tables(
             ),
         )?;
     }
-    let empty_env = ScopeEnv::new();
+    let mut empty_env = ScopeEnv::new();
     let mut default_loop_stack = Vec::new();
     for ((name, ty), default_expr) in canonical_params.iter().zip(func.param_defaults.iter()) {
         if let Some(default_expr) = default_expr {
             let default_ty = infer_expr_type(
                 *default_expr,
                 arena,
-                &empty_env,
+                &mut empty_env,
                 table,
                 record_table,
                 adt_table,
@@ -432,7 +432,7 @@ fn type_check_function_with_tables(
                 &mut default_loop_stack,
                 impl_list,
             )?;
-            if let Err(err) = ensure_const_initializer_safe(*default_expr, arena, &empty_env) {
+            if let Err(err) = ensure_const_initializer_safe(*default_expr, arena, &mut empty_env) {
                 return Err(FrontendError {
                     pos: err.pos,
                     message: format!(
@@ -515,14 +515,14 @@ fn check_requires_clauses(
             ))
         })
         .collect::<Result<Vec<_>, FrontendError>>()?;
-    let env = ScopeEnv::with_params(&params);
+    let mut env = ScopeEnv::with_params(&params);
     let mut loop_stack = Vec::new();
     for condition in &func.requires {
         ensure_requires_expr_supported(*condition, arena)?;
         let condition_ty = infer_expr_type(
             *condition,
             arena,
-            &env,
+            &mut env,
             table,
             record_table,
             adt_table,
@@ -590,7 +590,7 @@ fn check_ensures_clauses(
         let condition_ty = infer_expr_type(
             *condition,
             arena,
-            &env,
+            &mut env,
             table,
             record_table,
             adt_table,
@@ -653,7 +653,7 @@ fn check_invariant_clauses(
         let condition_ty = infer_expr_type(
             *condition,
             arena,
-            &env,
+            &mut env,
             table,
             record_table,
             adt_table,
@@ -731,6 +731,392 @@ enum LoopTypeFrameKind {
 struct LoopTypeFrame {
     kind: LoopTypeFrameKind,
     break_ty: Option<Type>,
+}
+
+// ──────────────────────────────────────────────────────────────
+// SSF-08 Lane 1: canonical branch-join helpers.
+//
+// `check_stmt`'s `Stmt::If`/`Stmt::Match` and `check_loop_expr_stmt`'s
+// `Stmt::If`/`Stmt::Match` are, and were before this change, structurally
+// identical except for which function checks a body statement (the former
+// admits every statement form; the latter rejects `while`/`loop`/`for`/
+// `return`/`guard` inside a value-producing loop body). Rather than
+// hand-roll the same join logic twice -- the duplication #1656-#1664
+// diagnosed as the root failure mode -- both call these two functions,
+// parametrized by a `fn` pointer over which body-statement checker to use.
+// `ScopeEnv::join_ownership_from` (in `lib.rs`) is the actual join math;
+// these two only assemble the right set of successor environments to feed
+// it, per construct.
+// ──────────────────────────────────────────────────────────────
+
+/// Either `check_stmt` or `check_loop_expr_stmt` -- both already share this
+/// exact signature. A plain `fn` pointer (not a closure) so it can be
+/// threaded through recursive calls without borrow-checker friction against
+/// the `&mut Vec<LoopTypeFrame>`/`&mut ScopeEnv` parameters passed alongside it.
+type BodyStmtChecker = fn(
+    StmtId,
+    &AstArena,
+    &mut ScopeEnv,
+    Type,
+    &FnTable,
+    &RecordTable,
+    &AdtTable,
+    &mut Vec<LoopTypeFrame>,
+    &[ImplDecl],
+) -> Result<(), FrontendError>;
+
+/// Checks `if condition { then_block } else { else_block }` (statement
+/// form) through the canonical join: each branch is checked from its own
+/// clone of the pre-if `env`, with its own branch-local scope, then both
+/// resulting states are conservatively joined back into `env`. An empty
+/// `else_block` (no source-level `else`) naturally represents "0 statements
+/// ran", i.e. the unchanged pre-if state, without special-casing -- it is
+/// still one of the two joined successors.
+#[allow(clippy::too_many_arguments)]
+fn check_if_branches_joined(
+    condition: ExprId,
+    then_block: &[StmtId],
+    else_block: &[StmtId],
+    arena: &AstArena,
+    env: &mut ScopeEnv,
+    ret_ty: Type,
+    table: &FnTable,
+    record_table: &RecordTable,
+    adt_table: &AdtTable,
+    loop_stack: &mut Vec<LoopTypeFrame>,
+    impl_list: &[ImplDecl],
+    check_body_stmt: BodyStmtChecker,
+) -> Result<(), FrontendError> {
+    let ct = infer_expr_type(
+        condition,
+        arena,
+        env,
+        table,
+        record_table,
+        adt_table,
+        ret_ty.clone(),
+        loop_stack,
+        impl_list,
+    )?;
+    if ct != Type::Bool {
+        return Err(FrontendError {
+            pos: 0,
+            message: "if condition must be bool; explicit compare is required for quad".to_string(),
+        });
+    }
+
+    let mut then_env = env.clone();
+    then_env.push_scope();
+    for s in then_block {
+        check_body_stmt(
+            *s,
+            arena,
+            &mut then_env,
+            ret_ty.clone(),
+            table,
+            record_table,
+            adt_table,
+            loop_stack,
+            impl_list,
+        )?;
+    }
+    then_env.pop_scope();
+
+    let mut else_env = env.clone();
+    else_env.push_scope();
+    for s in else_block {
+        check_body_stmt(
+            *s,
+            arena,
+            &mut else_env,
+            ret_ty.clone(),
+            table,
+            record_table,
+            adt_table,
+            loop_stack,
+            impl_list,
+        )?;
+    }
+    else_env.pop_scope();
+
+    env.join_ownership_from(&[then_env, else_env])?;
+    Ok(())
+}
+
+/// SSF-08 Lane 1 (#1663): `true` if `expr_id` is *syntactically* attempting
+/// a static-path projection (`Expr::RecordField`/`Expr::SequenceIndex`),
+/// independent of whether `expr_access_path` can actually resolve it end to
+/// end. Used to distinguish the two reasons `expr_access_path` can return
+/// `None`: (a) the expression is a pure rvalue with no addressable identity
+/// at all (a call result, a literal, an arithmetic expression, ...) -- safe
+/// to skip ownership tracking, since nothing could read the same location
+/// again afterward; versus (b) the expression *is* a projection chain (the
+/// user wrote `.field`/`[index]`) but some link in it isn't representable
+/// (most commonly a dynamically-computed sequence index) -- in this case
+/// the same addressable expression *can* be read again later, so silently
+/// skipping tracking would let a move/borrow capture through unrecorded.
+fn expr_is_projection_shaped(expr_id: ExprId, arena: &AstArena) -> bool {
+    matches!(
+        arena.expr(expr_id),
+        Expr::RecordField(_) | Expr::SequenceIndex(_)
+    )
+}
+
+/// SSF-08 Lane 1 (#1661/#1663): apply one match/if-let arm's *own* pattern
+/// capture effect directly to `arm_env`, so it is visible to that arm's own
+/// guard/body -- not only unioned into the outer `env` after every arm has
+/// already been checked (the prior design's `apply_plans_to_scrutinee`,
+/// which meant an arm could not observe that its own pattern had just moved
+/// part of the scrutinee it is about to read again).
+///
+/// Uses `expr_access_path` to resolve the scrutinee expression to its own
+/// `(root, base_path)` rather than requiring it to be a bare `Expr::Var` --
+/// a projected scrutinee such as `match ctx.camera { ... }` composes the
+/// item's pattern-relative path onto `base_path` via `PatternPath::extend`,
+/// so a capture of `Pattern(x)` against scrutinee `ctx.camera` correctly
+/// targets `ctx.camera.<item path>`, not a bogus root-only path or a silent
+/// no-op.
+///
+/// If `expr_access_path` cannot resolve the scrutinee at all: a plan with
+/// no capture items (e.g. matching a bare quad literal or a no-payload enum
+/// variant) has nothing ownership-affecting to track regardless, so this is
+/// inert by construction. But if the plan *does* capture something and the
+/// scrutinee is projection-shaped (`expr_is_projection_shaped`) -- the user
+/// wrote a path-like expression that isn't fully representable, most often
+/// a dynamically-indexed sequence access -- this is exactly the "unsupported
+/// path form" case that must reject deterministically rather than silently
+/// downgrade to untracked. A non-projection-shaped, capturing scrutinee (a
+/// bare call result, say `match make_pair() { (x, y) => .. }`) is still
+/// safely inert: the matched value is a fresh temporary with no reachable
+/// name to observe an inconsistent state through afterward.
+fn apply_arm_pattern_capture(
+    scrutinee_expr: ExprId,
+    plan: &BindingPlan,
+    arena: &AstArena,
+    arm_env: &mut ScopeEnv,
+) -> Result<(), FrontendError> {
+    let Some((root, base_path)) = expr_access_path(scrutinee_expr, arena) else {
+        if !plan.items.is_empty() && expr_is_projection_shaped(scrutinee_expr, arena) {
+            return Err(FrontendError {
+                pos: 0,
+                message: "pattern capture against a projected scrutinee that is not an admitted static path (e.g. a dynamically-computed index) cannot be tracked; bind the scrutinee to a local first or use a supported static path".to_string(),
+            });
+        }
+        return Ok(());
+    };
+    for item in &plan.items {
+        let full_path = base_path.extend(&item.path);
+        arm_env.check_capture_allowed(root, &full_path, item.capture)?;
+        let avail = match item.capture {
+            CaptureMode::Move => PathAvailability::Moved,
+            CaptureMode::Borrow => PathAvailability::Borrowed,
+        };
+        arm_env.mark_path_state(root, full_path, avail)?;
+    }
+    Ok(())
+}
+
+/// Checks `match scrutinee { arms... default }` (statement form) through
+/// the canonical join. Each arm starts independently from its own clone of
+/// the pre-match `env` (never contaminated by a sibling arm's effects),
+/// gets its own pattern-bound names inserted and its own pattern-capture
+/// effect applied (visible to its own guard/body), is checked to
+/// completion, then all reachable successors (every arm, plus `default` if
+/// present) are conservatively joined back into `env`. Exhaustiveness (a
+/// `match` with no `default` arm) is unaffected -- when the scrutinee's
+/// variant coverage is already proven exhaustive, the arm successors alone
+/// are the complete reachable set; no implicit "no arm taken" successor is
+/// synthesized (unlike `if`'s empty-`else_block` case), since that would
+/// wrongly relax an exhaustive match.
+#[allow(clippy::too_many_arguments)]
+fn check_match_arms_joined(
+    scrutinee: ExprId,
+    arms: &[MatchArm],
+    default: &Option<Vec<StmtId>>,
+    arena: &AstArena,
+    env: &mut ScopeEnv,
+    ret_ty: Type,
+    table: &FnTable,
+    record_table: &RecordTable,
+    adt_table: &AdtTable,
+    loop_stack: &mut Vec<LoopTypeFrame>,
+    impl_list: &[ImplDecl],
+    check_body_stmt: BodyStmtChecker,
+) -> Result<(), FrontendError> {
+    let st = infer_expr_type(
+        scrutinee,
+        arena,
+        env,
+        table,
+        record_table,
+        adt_table,
+        ret_ty.clone(),
+        loop_stack,
+        impl_list,
+    )?;
+    if !matches!(
+        st,
+        Type::Quad | Type::Adt(_) | Type::Option(_) | Type::Result(_, _) | Type::I32 | Type::U32
+    ) {
+        return Err(FrontendError {
+            pos: 0,
+            message:
+                "match is allowed only for quad, enum, Option(T), Result(T, E), i32, or u32 scrutinee"
+                    .to_string(),
+        });
+    }
+
+    let mut successors: Vec<ScopeEnv> = Vec::new();
+    for arm in arms {
+        let mut arm_env = build_pattern_arm_env(scrutinee, &arm.pat, &st, arena, env, adt_table)?;
+
+        check_match_guard(
+            arm.guard,
+            arena,
+            &mut arm_env,
+            table,
+            record_table,
+            adt_table,
+            ret_ty.clone(),
+            loop_stack,
+            impl_list,
+        )?;
+        for s in &arm.block {
+            check_body_stmt(
+                *s,
+                arena,
+                &mut arm_env,
+                ret_ty.clone(),
+                table,
+                record_table,
+                adt_table,
+                loop_stack,
+                impl_list,
+            )?;
+        }
+        arm_env.pop_scope();
+        successors.push(arm_env);
+    }
+
+    match default {
+        None => match missing_exhaustive_sum_variants(
+            &st,
+            arms.iter().map(|arm| (&arm.pat, arm.guard)),
+            arena,
+            adt_table,
+        )? {
+            Some((family_label, missing)) if !missing.is_empty() => {
+                return Err(non_exhaustive_match_error(&family_label, &missing, false)?)
+            }
+            Some(_) => {}
+            None => {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "match requires default arm '_'".to_string(),
+                });
+            }
+        },
+        Some(default_body) => {
+            let mut def_env = env.clone();
+            def_env.push_scope();
+            for s in default_body {
+                check_body_stmt(
+                    *s,
+                    arena,
+                    &mut def_env,
+                    ret_ty.clone(),
+                    table,
+                    record_table,
+                    adt_table,
+                    loop_stack,
+                    impl_list,
+                )?;
+            }
+            def_env.pop_scope();
+            successors.push(def_env);
+        }
+    }
+
+    env.join_ownership_from(&successors)?;
+    Ok(())
+}
+
+/// SSF-08 Lane 1 (#1657/#1660): run a loop body against a monotonically
+/// growing candidate ownership state until a fixed point is reached, so a
+/// restriction one logical iteration creates is visible to (and can
+/// legitimately conflict with) the next. Concretely: `candidate` starts as
+/// an unchanged clone of the pre-loop `env`; each round clones `candidate`,
+/// pushes a fresh scope, installs the loop-local binding(s) via
+/// `insert_loop_locals`, checks `body` against it, pops the scope, and
+/// joins the result back onto `candidate`. Iterating stops once a round
+/// produces no new restriction (`ScopeEnv` derives `PartialEq`, so this is
+/// an exact equality check, not a heuristic). Because `path_state`
+/// accumulation is monotonic and bounded by the finite set of paths the
+/// loop body's own syntax can mention, this always converges -- in
+/// practice within 2 rounds (round 1 discovers what one pass does; round 2
+/// either finds nothing new, or the body's own re-check against its own
+/// round-1 output legitimately errors, e.g. "move from already-moved
+/// path", which is exactly the required "iteration N+1 cannot forget what
+/// iteration N did" property). `MAX_FIXED_POINT_ITERATIONS` is a defensive
+/// cap, not an expected case -- exceeding it means an invariant elsewhere
+/// is broken, so it fails closed rather than looping forever.
+///
+/// Per `ScopeEnv::join_ownership_from`'s conservative-join law, starting
+/// `candidate` from the *unchanged* pre-loop state and only ever adding
+/// restrictions is sound for both "the loop may run zero times"
+/// (`while`/`for`, where that baseline is a real possibility) and "the loop
+/// always runs at least once" (a bare `loop { .. }` statement, where it
+/// is not) -- a successor that happens to contribute no new restriction
+/// can never *remove* one found elsewhere, so including it is never
+/// unsound, only sometimes redundant.
+#[allow(clippy::too_many_arguments)]
+fn run_loop_body_to_fixed_point(
+    body: &[StmtId],
+    arena: &AstArena,
+    env: &mut ScopeEnv,
+    ret_ty: Type,
+    table: &FnTable,
+    record_table: &RecordTable,
+    adt_table: &AdtTable,
+    loop_stack: &mut Vec<LoopTypeFrame>,
+    impl_list: &[ImplDecl],
+    insert_loop_locals: impl Fn(&mut ScopeEnv),
+    check_body_stmt: BodyStmtChecker,
+) -> Result<(), FrontendError> {
+    const MAX_FIXED_POINT_ITERATIONS: usize = 64;
+    let mut candidate = env.clone();
+    for _ in 0..MAX_FIXED_POINT_ITERATIONS {
+        let mut body_env = candidate.clone();
+        body_env.push_scope();
+        insert_loop_locals(&mut body_env);
+        for stmt in body {
+            check_body_stmt(
+                *stmt,
+                arena,
+                &mut body_env,
+                ret_ty.clone(),
+                table,
+                record_table,
+                adt_table,
+                loop_stack,
+                impl_list,
+            )?;
+        }
+        body_env.pop_scope();
+        let mut next_candidate = candidate.clone();
+        next_candidate.join_ownership_from(&[body_env])?;
+        if next_candidate == candidate {
+            *env = candidate;
+            return Ok(());
+        }
+        candidate = next_candidate;
+    }
+    Err(FrontendError {
+        pos: 0,
+        message:
+            "internal ownership state: loop body ownership analysis did not reach a fixed point"
+                .to_string(),
+    })
 }
 
 fn check_stmt(
@@ -936,9 +1322,14 @@ fn check_stmt(
             let mut plan = BindingPlan::default();
             build_tuple_pattern_plan(items, &tuple_ty, &PatternPath::root(), &mut plan)?;
             validate_binding_plan_conflicts(&plan)?;
-            validate_plan_against_scrutinee_state(env, *value, arena, &plan)?;
             apply_binding_plan(env, &plan);
-            apply_plans_to_scrutinee(*value, &[plan], arena, env);
+            // SSF-08 Lane 1 (#1663): apply_arm_pattern_capture validates
+            // capture-compatibility and marks the source path in one pass,
+            // via canonical access-path extraction rather than a Var-only
+            // check -- so a projected source expression (e.g. a record
+            // field being destructured) is tracked correctly instead of
+            // silently bypassed.
+            apply_arm_pattern_capture(*value, &plan, arena, env)?;
             Ok(())
         }
         Stmt::LetRecord {
@@ -988,9 +1379,14 @@ fn check_stmt(
                 adt_table,
             )?;
             validate_binding_plan_conflicts(&plan)?;
-            validate_plan_against_scrutinee_state(env, *value, arena, &plan)?;
             apply_binding_plan(env, &plan);
-            apply_plans_to_scrutinee(*value, &[plan], arena, env);
+            // SSF-08 Lane 1 (#1663): apply_arm_pattern_capture validates
+            // capture-compatibility and marks the source path in one pass,
+            // via canonical access-path extraction rather than a Var-only
+            // check -- so a projected source expression (e.g. a record
+            // field being destructured) is tracked correctly instead of
+            // silently bypassed.
+            apply_arm_pattern_capture(*value, &plan, arena, env)?;
             Ok(())
         }
         Stmt::LetElseRecord {
@@ -1095,9 +1491,14 @@ fn check_stmt(
                 adt_table,
             )?;
             validate_binding_plan_conflicts(&plan)?;
-            validate_plan_against_scrutinee_state(env, *value, arena, &plan)?;
             apply_binding_plan(env, &plan);
-            apply_plans_to_scrutinee(*value, &[plan], arena, env);
+            // SSF-08 Lane 1 (#1663): apply_arm_pattern_capture validates
+            // capture-compatibility and marks the source path in one pass,
+            // via canonical access-path extraction rather than a Var-only
+            // check -- so a projected source expression (e.g. a record
+            // field being destructured) is tracked correctly instead of
+            // silently bypassed.
+            apply_arm_pattern_capture(*value, &plan, arena, env)?;
             Ok(())
         }
         Stmt::LetElseTuple {
@@ -1190,9 +1591,14 @@ fn check_stmt(
             let mut plan = BindingPlan::default();
             build_tuple_pattern_plan(items, &tuple_ty, &PatternPath::root(), &mut plan)?;
             validate_binding_plan_conflicts(&plan)?;
-            validate_plan_against_scrutinee_state(env, *value, arena, &plan)?;
             apply_binding_plan(env, &plan);
-            apply_plans_to_scrutinee(*value, &[plan], arena, env);
+            // SSF-08 Lane 1 (#1663): apply_arm_pattern_capture validates
+            // capture-compatibility and marks the source path in one pass,
+            // via canonical access-path extraction rather than a Var-only
+            // check -- so a projected source expression (e.g. a record
+            // field being destructured) is tracked correctly instead of
+            // silently bypassed.
+            apply_arm_pattern_capture(*value, &plan, arena, env)?;
             Ok(())
         }
         Stmt::Discard { ty, value } => {
@@ -1350,24 +1756,19 @@ fn check_stmt(
                     message: "for-range currently requires i32 range expression".to_string(),
                 });
             }
-            let mut body_env = env.clone();
-            body_env.push_scope();
-            body_env.insert_const(*name, Type::I32);
-            for stmt in body {
-                check_stmt(
-                    *stmt,
-                    arena,
-                    &mut body_env,
-                    ret_ty.clone(),
-                    table,
-                    record_table,
-                    adt_table,
-                    loop_stack,
-                    impl_list,
-                )?;
-            }
-            body_env.pop_scope();
-            Ok(())
+            run_loop_body_to_fixed_point(
+                body,
+                arena,
+                env,
+                ret_ty,
+                table,
+                record_table,
+                adt_table,
+                loop_stack,
+                impl_list,
+                |body_env| body_env.insert_const(*name, Type::I32),
+                check_stmt,
+            )
         }
         Stmt::While { condition, body } => {
             let condition_ty = infer_expr_type(
@@ -1388,52 +1789,46 @@ fn check_stmt(
                         .to_string(),
                 });
             }
-            let mut body_env = env.clone();
-            body_env.push_scope();
             loop_stack.push(LoopTypeFrame {
                 kind: LoopTypeFrameKind::Control,
                 break_ty: None,
             });
-            for stmt in body {
-                check_stmt(
-                    *stmt,
-                    arena,
-                    &mut body_env,
-                    ret_ty.clone(),
-                    table,
-                    record_table,
-                    adt_table,
-                    loop_stack,
-                    impl_list,
-                )?;
-            }
+            let result = run_loop_body_to_fixed_point(
+                body,
+                arena,
+                env,
+                ret_ty,
+                table,
+                record_table,
+                adt_table,
+                loop_stack,
+                impl_list,
+                |_| {},
+                check_stmt,
+            );
             let _ = loop_stack.pop().expect("control loop frame must exist");
-            body_env.pop_scope();
-            Ok(())
+            result
         }
         Stmt::Loop { body } => {
-            let mut body_env = env.clone();
-            body_env.push_scope();
             loop_stack.push(LoopTypeFrame {
                 kind: LoopTypeFrameKind::Control,
                 break_ty: None,
             });
-            for stmt in body {
-                check_stmt(
-                    *stmt,
-                    arena,
-                    &mut body_env,
-                    ret_ty.clone(),
-                    table,
-                    record_table,
-                    adt_table,
-                    loop_stack,
-                    impl_list,
-                )?;
-            }
+            let result = run_loop_body_to_fixed_point(
+                body,
+                arena,
+                env,
+                ret_ty,
+                table,
+                record_table,
+                adt_table,
+                loop_stack,
+                impl_list,
+                |_| {},
+                check_stmt,
+            );
             let _ = loop_stack.pop().expect("control loop frame must exist");
-            body_env.pop_scope();
-            Ok(())
+            result
         }
         Stmt::ForEach {
             name,
@@ -1453,44 +1848,35 @@ fn check_stmt(
                 impl_list,
             )?;
             if iterable_ty == Type::RangeI32 {
-                let mut body_env = env.clone();
-                body_env.push_scope();
-                body_env.insert_const(*name, Type::I32);
-                for stmt in body {
-                    check_stmt(
-                        *stmt,
-                        arena,
-                        &mut body_env,
-                        ret_ty.clone(),
-                        table,
-                        record_table,
-                        adt_table,
-                        loop_stack,
-                        impl_list,
-                    )?;
-                }
-                body_env.pop_scope();
-                return Ok(());
+                return run_loop_body_to_fixed_point(
+                    body,
+                    arena,
+                    env,
+                    ret_ty,
+                    table,
+                    record_table,
+                    adt_table,
+                    loop_stack,
+                    impl_list,
+                    |body_env| body_env.insert_const(*name, Type::I32),
+                    check_stmt,
+                );
             }
             if let Type::Sequence(sequence_ty) = &iterable_ty {
-                let mut body_env = env.clone();
-                body_env.push_scope();
-                body_env.insert_const(*name, sequence_ty.item.as_ref().clone());
-                for stmt in body {
-                    check_stmt(
-                        *stmt,
-                        arena,
-                        &mut body_env,
-                        ret_ty.clone(),
-                        table,
-                        record_table,
-                        adt_table,
-                        loop_stack,
-                        impl_list,
-                    )?;
-                }
-                body_env.pop_scope();
-                return Ok(());
+                let item_ty = sequence_ty.item.as_ref().clone();
+                return run_loop_body_to_fixed_point(
+                    body,
+                    arena,
+                    env,
+                    ret_ty,
+                    table,
+                    record_table,
+                    adt_table,
+                    loop_stack,
+                    impl_list,
+                    |body_env| body_env.insert_const(*name, item_ty.clone()),
+                    check_stmt,
+                );
             }
             if let Some(item_ty) = resolve_explicit_iterable_loop_item_type(
                 &iterable_ty,
@@ -1498,24 +1884,19 @@ fn check_stmt(
                 arena,
                 impl_list,
             )? {
-                let mut body_env = env.clone();
-                body_env.push_scope();
-                body_env.insert_const(*name, item_ty);
-                for stmt in body {
-                    check_stmt(
-                        *stmt,
-                        arena,
-                        &mut body_env,
-                        ret_ty.clone(),
-                        table,
-                        record_table,
-                        adt_table,
-                        loop_stack,
-                        impl_list,
-                    )?;
-                }
-                body_env.pop_scope();
-                return Ok(());
+                return run_loop_body_to_fixed_point(
+                    body,
+                    arena,
+                    env,
+                    ret_ty,
+                    table,
+                    record_table,
+                    adt_table,
+                    loop_stack,
+                    impl_list,
+                    |body_env| body_env.insert_const(*name, item_ty.clone()),
+                    check_stmt,
+                );
             }
             let detail = match &iterable_ty {
                 Type::Adt(_)
@@ -1649,171 +2030,38 @@ fn check_stmt(
             condition,
             then_block,
             else_block,
-        } => {
-            let ct = infer_expr_type(
-                *condition,
-                arena,
-                env,
-                table,
-                record_table,
-                adt_table,
-                ret_ty.clone(),
-                loop_stack,
-                impl_list,
-            )?;
-            if ct != Type::Bool {
-                return Err(FrontendError {
-                    pos: 0,
-                    message: "if condition must be bool; explicit compare is required for quad"
-                        .to_string(),
-                });
-            }
-
-            let mut then_env = env.clone();
-            then_env.push_scope();
-            for s in then_block {
-                check_stmt(
-                    *s,
-                    arena,
-                    &mut then_env,
-                    ret_ty.clone(),
-                    table,
-                    record_table,
-                    adt_table,
-                    loop_stack,
-                    impl_list,
-                )?;
-            }
-            then_env.pop_scope();
-
-            let mut else_env = env.clone();
-            else_env.push_scope();
-            for s in else_block {
-                check_stmt(
-                    *s,
-                    arena,
-                    &mut else_env,
-                    ret_ty.clone(),
-                    table,
-                    record_table,
-                    adt_table,
-                    loop_stack,
-                    impl_list,
-                )?;
-            }
-            else_env.pop_scope();
-            Ok(())
-        }
+        } => check_if_branches_joined(
+            *condition,
+            then_block,
+            else_block,
+            arena,
+            env,
+            ret_ty,
+            table,
+            record_table,
+            adt_table,
+            loop_stack,
+            impl_list,
+            check_stmt,
+        ),
         Stmt::Match {
             scrutinee,
             arms,
             default,
-        } => {
-            let st = infer_expr_type(
-                *scrutinee,
-                arena,
-                env,
-                table,
-                record_table,
-                adt_table,
-                ret_ty.clone(),
-                loop_stack,
-                impl_list,
-            )?;
-            // M9.4 Wave 3: widen to also allow i32/u32 (for int range patterns).
-            if !matches!(
-                st,
-                Type::Quad
-                    | Type::Adt(_)
-                    | Type::Option(_)
-                    | Type::Result(_, _)
-                    | Type::I32
-                    | Type::U32
-            ) {
-                return Err(FrontendError {
-                    pos: 0,
-                    message:
-                        "match is allowed only for quad, enum, Option(T), Result(T, E), i32, or u32 scrutinee"
-                            .to_string(),
-                });
-            }
-
-            // M9.5 Wave D / M9.7 / M9.8: BindingPlan pipeline + path-based ownership.
-            let mut arm_plans: Vec<BindingPlan> = Vec::new();
-            for arm in arms {
-                let (plan, mut arm_env) =
-                    build_and_apply_match_plan(&arm.pat, &st, env, arena, adt_table)?;
-                // M9.8: reject if new plan conflicts with prior path-state of scrutinee.
-                validate_plan_against_scrutinee_state(env, *scrutinee, arena, &plan)?;
-                arm_plans.push(plan);
-                check_match_guard(
-                    arm.guard,
-                    arena,
-                    &arm_env,
-                    table,
-                    record_table,
-                    adt_table,
-                    ret_ty.clone(),
-                    loop_stack,
-                    impl_list,
-                )?;
-                for s in &arm.block {
-                    check_stmt(
-                        *s,
-                        arena,
-                        &mut arm_env,
-                        ret_ty.clone(),
-                        table,
-                        record_table,
-                        adt_table,
-                        loop_stack,
-                        impl_list,
-                    )?;
-                }
-                arm_env.pop_scope();
-            }
-            // M9.7: apply path-based state for each arm's moves/borrows to scrutinee.
-            apply_plans_to_scrutinee(*scrutinee, &arm_plans, arena, env);
-
-            match default {
-                None => match missing_exhaustive_sum_variants(
-                    &st,
-                    arms.iter().map(|arm| (&arm.pat, arm.guard)),
-                    arena,
-                    adt_table,
-                )? {
-                    Some((family_label, missing)) if !missing.is_empty() => {
-                        return Err(non_exhaustive_match_error(&family_label, &missing, false)?)
-                    }
-                    Some(_) => {}
-                    None => {
-                        return Err(FrontendError {
-                            pos: 0,
-                            message: "match requires default arm '_'".to_string(),
-                        });
-                    }
-                },
-                Some(default_body) => {
-                    let mut def_env = env.clone();
-                    def_env.push_scope();
-                    for s in default_body {
-                        check_stmt(
-                            *s,
-                            arena,
-                            &mut def_env,
-                            ret_ty.clone(),
-                            table,
-                            record_table,
-                            adt_table,
-                            loop_stack,
-                            impl_list,
-                        )?;
-                    }
-                    def_env.pop_scope();
-                }
-            }
-            Ok(())
-        }
+        } => check_match_arms_joined(
+            *scrutinee,
+            arms,
+            default,
+            arena,
+            env,
+            ret_ty,
+            table,
+            record_table,
+            adt_table,
+            loop_stack,
+            impl_list,
+            check_stmt,
+        ),
         Stmt::Return(v) => check_return_payload(
             *v,
             arena,
@@ -2151,7 +2399,7 @@ fn concrete_type_matches_impl_for(concrete_ty: &Type, for_type: SymbolId) -> boo
 fn infer_expr_type(
     expr_id: ExprId,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -2324,17 +2572,24 @@ fn infer_expr_type(
                 message: format!("unknown variable '{}'", resolve_symbol_name(arena, *v)?),
             })
         }
-        Expr::Block(block) => infer_value_block_type(
-            block,
-            arena,
-            env,
-            table,
-            record_table,
-            adt_table,
-            ret_ty,
-            loop_stack,
-            impl_list,
-        ),
+        Expr::Block(block) => {
+            let (ty, result_env) = infer_value_block_type(
+                block,
+                arena,
+                env,
+                table,
+                record_table,
+                adt_table,
+                ret_ty,
+                loop_stack,
+                impl_list,
+            )?;
+            // SSF-08 Lane 1: a bare block has no sibling alternative -- this
+            // is a join over exactly one successor, which correctly just
+            // adopts that successor's restrictions onto `env`.
+            env.join_ownership_from(&[result_env])?;
+            Ok(ty)
+        }
         Expr::If(if_expr) => {
             let cond_ty = infer_expr_type(
                 if_expr.condition,
@@ -2355,7 +2610,11 @@ fn infer_expr_type(
                             .to_string(),
                 });
             }
-            let then_ty = infer_value_block_type(
+            // SSF-08 Lane 1 (#1659): both branches are checked from a clone
+            // of the pre-if env, and their resulting states are joined back
+            // -- `if` expression must obey the same ownership state machine
+            // as statement `if`, per the required expression/statement parity.
+            let (then_ty, then_result_env) = infer_value_block_type(
                 &if_expr.then_block,
                 arena,
                 env,
@@ -2366,7 +2625,7 @@ fn infer_expr_type(
                 loop_stack,
                 impl_list,
             )?;
-            let else_ty = infer_value_block_type(
+            let (else_ty, else_result_env) = infer_value_block_type(
                 &if_expr.else_block,
                 arena,
                 env,
@@ -2386,6 +2645,7 @@ fn infer_expr_type(
                     ),
                 });
             }
+            env.join_ownership_from(&[then_result_env, else_result_env])?;
             Ok(then_ty)
         }
         Expr::Match(match_expr) => infer_match_expr_type(
@@ -2426,29 +2686,22 @@ fn infer_expr_type(
                 loop_stack,
                 impl_list,
             )?;
-            // M9.5 Wave C: build binding plan, validate conflicts, apply to then-env.
-            let mut plan = BindingPlan::default();
-            build_match_pattern_plan(
+            // SSF-08 Lane 1 (#1662/#1663): build_pattern_arm_env applies this
+            // pattern's own scrutinee capture directly to then_env (visible
+            // to the then-block, and checked against the pre-if-let state),
+            // via the same canonical helper match-expression arms use.
+            let mut then_env = build_pattern_arm_env(
+                if_let.value,
                 &if_let.pattern,
                 &value_ty,
-                &PatternPath::root(),
-                &mut plan,
                 arena,
+                env,
                 adt_table,
             )?;
-            validate_binding_plan_conflicts(&plan)?;
-            // M9.8: reject if new plan conflicts with prior path-state of scrutinee.
-            validate_plan_against_scrutinee_state(env, if_let.value, arena, &plan)?;
-            // then-block sees the bindings.
-            let mut then_env = env.clone();
-            then_env.push_scope();
-            apply_binding_plan(&mut then_env, &plan);
-            // NOTE: scrutinee consumed-state is enforced at statement level only
-            // (infer_expr_type receives &ScopeEnv, which is immutable).
-            let then_ty = infer_value_block_type(
+            let (then_ty, mut then_result_env) = infer_value_block_type(
                 &if_let.then_block,
                 arena,
-                &then_env,
+                &mut then_env,
                 table,
                 record_table,
                 adt_table,
@@ -2456,8 +2709,11 @@ fn infer_expr_type(
                 loop_stack,
                 impl_list,
             )?;
-            // else-block uses original env (no bindings).
-            let else_ty = infer_value_block_type(
+            // Drop build_pattern_arm_env's own pushed (pattern-binding)
+            // scope so then_result_env is back at `env`'s depth for joining.
+            then_result_env.pop_scope();
+            // else-block uses original env (no bindings, no capture).
+            let (else_ty, else_result_env) = infer_value_block_type(
                 &if_let.else_block,
                 arena,
                 env,
@@ -2477,6 +2733,7 @@ fn infer_expr_type(
                     ),
                 });
             }
+            env.join_ownership_from(&[then_result_env, else_result_env])?;
             Ok(then_ty)
         }
         Expr::Call(name, args) => {
@@ -10804,6 +11061,865 @@ mod tests {
         typecheck_source(src).expect("move binding in match arm should typecheck");
     }
 
+    // ──────────────────────────────────────────────────────────────
+    // SSF-08 Lane 1 (#1656-#1664): canonical ScopeEnv ownership-state
+    // transition/join model. Each test proves, against the shared model,
+    // that a real regression exists on unpatched code (documented in the
+    // decision record's evidence and reproduced against origin/main before
+    // this PR) and is closed here.
+    // ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn ssf08_diag_minimal_record_destructure_bisect() {
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                let Point { x: moved, y: yv } = p;
+                let _ = moved;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("diag: minimal top-level record destructure");
+    }
+
+    #[test]
+    fn ssf08_known_defect_nested_projection_rereads_intermediate_base_as_whole_value() {
+        // NOT part of #1656-#1664, NOT fixed by this PR. Documents a
+        // pre-existing frontend defect found while writing the #1663
+        // regression suite (SSF-08 Lane 1): reading a two-level-nested
+        // field projection (`c.pair.b`) spuriously rejects if a *sibling*
+        // field of the intermediate base was moved (`c.pair.a`), because
+        // the intermediate base (`c.pair`) is independently re-checked as
+        // if it were being read as a whole value, not merely projected
+        // through. Isolated to a straight-line program with zero if/loop/
+        // match and zero Lane 1 join-model code involved at all -- the
+        // root cause is in `infer_expr_type_no_check`, which only skips
+        // its own path-availability re-check when the base expression is
+        // a bare `Expr::Var`; a `RecordField` base (as in `c.pair.b`,
+        // whose base `c.pair` is itself a `RecordField` access, not a
+        // `Var`) falls through to a second, independent, shorter-path
+        // check that the outer expression's own top-level check has
+        // already correctly subsumed. This is a read-path-checking gap
+        // orthogonal to control-flow/branch-joining (Lane 1's actual
+        // scope) -- it would misfire in a single straight-line function
+        // with no `if`/`loop`/`match` anywhere. Per the governing task's
+        // instruction to document rather than opportunistically repair an
+        // out-of-scope defect discovered in passing: this test pins the
+        // *current* (buggy) behavior so a future repair changes this
+        // assertion, rather than silently fixing it here.
+        let src = r#"
+            record Pair { a: i32, b: i32 }
+            record Container { pair: Pair, other: i32 }
+            fn main() {
+                let c: Container = Container { pair: Pair { a: 1, b: 2 }, other: 9 };
+                let Pair { a: moved, b: _ } = c.pair;
+                let _ = moved;
+                let z: i32 = c.pair.b;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "known pre-existing defect: reading a sibling field two levels deep spuriously rejects; see comment above",
+        );
+        assert!(
+            err.message.contains("partially moved"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    // #1656 -- statement `if`
+
+    #[test]
+    fn ssf08_1656_one_branch_move_persists_after_if() {
+        // Only the `then` branch moves p.x; a bare `if` with no matching
+        // restriction in `else` must still restrict p.x afterward, because
+        // the `then` branch is a reachable successor.
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                if (1 == 1) {
+                    let Point { x: moved, y: yv } = p;
+                    let _ = moved;
+                } else {
+                    let unused_v: i32 = 0;
+                }
+                let z: i32 = p.x;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("outer path moved in only the then-branch must reject after the if");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1656_both_branches_move_rejects_after() {
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                if (1 == 1) {
+                    let Point { x: moved, y: yv } = p;
+                    let _ = moved;
+                } else {
+                    let Point { x: moved2, y: y2v } = p;
+                    let _ = moved2;
+                }
+                let z: i32 = p.x;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("outer path moved in both branches must reject after the if");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1656_sibling_paths_across_branches_both_retained() {
+        // then moves p.x, else moves p.y -- since we don't know which branch
+        // ran, BOTH restrictions must be retained after the if (conservative
+        // join: a restriction present in *either* successor survives).
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                if (1 == 1) {
+                    let Point { x: moved, y: yv } = p;
+                    let _ = moved;
+                } else {
+                    let Point { x: x2v, y: moved2 } = p;
+                    let _ = moved2;
+                }
+                let zx: i32 = p.x;
+                let _ = zx;
+                return;
+            }
+        "#;
+        let err_x = typecheck_source(src).expect_err("p.x must reject: then-branch moved it");
+        assert!(
+            err_x.message.contains("moved"),
+            "unexpected: {}",
+            err_x.message
+        );
+
+        let src_y = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                if (1 == 1) {
+                    let Point { x: moved, y: yv } = p;
+                    let _ = moved;
+                } else {
+                    let Point { x: x2v, y: moved2 } = p;
+                    let _ = moved2;
+                }
+                let zy: i32 = p.y;
+                let _ = zy;
+                return;
+            }
+        "#;
+        let err_y = typecheck_source(src_y).expect_err("p.y must reject: else-branch moved it");
+        assert!(
+            err_y.message.contains("moved"),
+            "unexpected: {}",
+            err_y.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1656_branch_local_binding_does_not_leak() {
+        let src = r#"
+            fn main() {
+                if (1 == 1) {
+                    let leaked: i32 = 5;
+                    let _ = leaked;
+                } else {
+                }
+                let z: i32 = leaked;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("then-branch-local binding must not be visible after the if");
+        assert!(
+            err.message.contains("unknown variable"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1656_no_else_move_still_persists() {
+        // A bare `if` with an empty else_block: the then-branch is still a
+        // reachable successor, so its restriction must survive.
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                if (1 == 1) {
+                    let Point { x: moved, y: yv } = p;
+                    let _ = moved;
+                }
+                let z: i32 = p.x;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("no-else if that moves p.x in its only branch must reject after");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    // #1657 -- loop statements
+
+    #[test]
+    fn ssf08_1657_while_loop_move_persists_after_loop() {
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                let mut i: i32 = 0;
+                while i < 1 {
+                    let Point { x: moved, y: yv } = p;
+                    let _ = moved;
+                    i = i + 1;
+                }
+                let z: i32 = p.x;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("outer path moved inside a while body must reject after the loop");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1657_while_loop_repeated_move_of_same_path_rejects() {
+        // The fixed-point property: a body that unconditionally moves the
+        // same outer path every pass must reject, because a second logical
+        // pass would re-move an already-moved path -- a single-pass check
+        // (the pre-Lane-1 behavior) cannot see this, since it only ever
+        // checks the body once against the untouched pre-loop state.
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                let mut i: i32 = 0;
+                while i < 3 {
+                    let Point { x: moved, y: yv } = p;
+                    let _ = moved;
+                    i = i + 1;
+                }
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "loop body that unconditionally re-moves the same path every pass must reject",
+        );
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1657_for_range_loop_variable_does_not_leak() {
+        let src = r#"
+            fn main() {
+                for i in 0..3 {
+                    let _ = i;
+                }
+                let z: i32 = i;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("for-range loop variable must not be visible after the loop");
+        assert!(
+            err.message.contains("unknown variable"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_statement_loop_break_move_persists_after_loop() {
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                loop {
+                    let Point { x: moved, y: yv } = p;
+                    let _ = moved;
+                    break;
+                }
+                let z: i32 = p.x;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("outer path moved inside a statement-loop body must reject after break");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    // #1658 -- statement `match`
+
+    #[test]
+    fn ssf08_1658_arm_moves_unrelated_outer_binding_persists_after_match() {
+        let src = r#"
+            enum Wrap { Val(i32) }
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let w: Wrap = Wrap::Val(5);
+                let p: Point = Point { x: 1, y: 2 };
+                match w {
+                    Wrap::Val(v) => {
+                        let _ = v;
+                        let Point { x: moved, y: yv } = p;
+                        let _ = moved;
+                    }
+                }
+                let z: i32 = p.x;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("an arm moving an unrelated outer path must restrict it after the match");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1658_default_arm_included_in_join() {
+        let src = r#"
+            enum Wrap { A, B }
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let w: Wrap = Wrap::B;
+                let p: Point = Point { x: 1, y: 2 };
+                match w {
+                    Wrap::A => { let rv: i32 = 0; let _ = rv; }
+                    _ => {
+                        let Point { x: moved, y: yv } = p;
+                        let _ = moved;
+                    }
+                }
+                let z: i32 = p.x;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("a default arm moving an outer path must restrict it after the match");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1658_arm_local_binding_does_not_leak() {
+        let src = r#"
+            enum Wrap { Val(i32) }
+            fn main() {
+                match Wrap::Val(5) {
+                    Wrap::Val(v) => {
+                        let leaked: i32 = v;
+                        let _ = leaked;
+                    }
+                }
+                let z: i32 = leaked;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("match-arm-local binding must not be visible after the match");
+        assert!(
+            err.message.contains("unknown variable"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1658_sibling_arms_do_not_contaminate_each_other() {
+        // Arm A's own capture must not be visible while checking arm B's
+        // body -- each arm starts independently from the pre-match state.
+        let src = r#"
+            enum Wrap { A(i32), B(i32) }
+            fn main() {
+                match Wrap::A(1) {
+                    Wrap::A(x) => { let _ = x; }
+                    Wrap::B(y) => {
+                        let _ = y;
+                        let leaked: i32 = x;
+                        let _ = leaked;
+                    }
+                }
+                return;
+            }
+        "#;
+        let err =
+            typecheck_source(src).expect_err("arm B must not see arm A's own pattern-bound name");
+        assert!(
+            err.message.contains("unknown variable"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    // #1659 -- expression `if`
+
+    #[test]
+    fn ssf08_1659_expr_if_ownership_effect_survives() {
+        let src = r#"
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                let v: i32 = if (1 == 1) {
+                    let (moved, dummy) = pair;
+                    let _ = dummy;
+                    moved
+                } else {
+                    0
+                };
+                let _ = v;
+                let (checked, dummy2) = pair;
+                let _ = checked;
+                let _ = dummy2;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "value-producing if expression must propagate ownership state like statement if",
+        );
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1659_expr_if_result_type_still_correct_when_state_preserved() {
+        // The join must not corrupt the computed result type.
+        let src = r#"
+            fn main() {
+                let v: i32 = if (1 == 1) { 1 } else { 2 };
+                let _ = v;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("plain if-expression result typing must remain correct");
+    }
+
+    // #1660 -- loop expression
+
+    #[test]
+    fn ssf08_1660_loop_expr_outer_effect_survives() {
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                let v: i32 = loop {
+                    let Point { x: moved, y: yv } = p;
+                    break moved;
+                };
+                let _ = v;
+                let z: i32 = p.x;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("loop-expression body's ownership effect on an outer path must survive");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1660_loop_expr_break_type_still_correct() {
+        let src = r#"
+            fn main() {
+                let v: i32 = loop {
+                    break 7;
+                };
+                let _ = v;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("loop-expression break typing must remain correct");
+    }
+
+    // #1661 -- match expression
+
+    #[test]
+    fn ssf08_1661_match_expr_move_pattern_state_reaches_caller() {
+        let src = r#"
+            enum Wrap { Val(i32) }
+            fn main() {
+                let w: Wrap = Wrap::Val(5);
+                let pair: (i32, i32) = (1, 2);
+                let v: i32 = match w {
+                    Wrap::Val(x) => {
+                        let (moved, dummy) = pair;
+                        let _ = dummy;
+                        moved + x
+                    }
+                };
+                let _ = v;
+                let (checked, dummy2) = pair;
+                let _ = checked;
+                let _ = dummy2;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "match-expression arm's ownership effect on an outer path must reach the caller",
+        );
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1661_match_expr_alternatives_join_conservatively() {
+        let src = r#"
+            enum Wrap { A, B }
+            fn main() {
+                let w: Wrap = Wrap::A;
+                let pair: (i32, i32) = (1, 2);
+                let v: i32 = match w {
+                    Wrap::A => {
+                        let (moved, dummy) = pair;
+                        let _ = dummy;
+                        moved
+                    }
+                    Wrap::B => { 0 }
+                };
+                let _ = v;
+                let (checked, dummy2) = pair;
+                let _ = checked;
+                let _ = dummy2;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("one match-expression arm moving p.x must restrict it, even though the other arm doesn't");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    // #1662 -- if-let expression
+
+    #[test]
+    fn ssf08_1662_if_let_expr_success_move_reflected_after() {
+        let src = r#"
+            enum Wrap { Val(i32) }
+            fn main() {
+                let w: Wrap = Wrap::Val(5);
+                let pair: (i32, i32) = (1, 2);
+                let v: i32 = if let Wrap::Val(x) = w {
+                    let (moved, dummy) = pair;
+                    let _ = dummy;
+                    moved + x
+                } else {
+                    0
+                };
+                let _ = v;
+                let (checked, dummy2) = pair;
+                let _ = checked;
+                let _ = dummy2;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("if-let success branch's ownership effect on an outer path must survive");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1662_if_let_expr_else_branch_included_in_join() {
+        // The then-block's tail is `x + 0` rather than bare `x`: a bare
+        // single-identifier tail (`{ x }`) right after a bare-identifier
+        // scrutinee (`w`) is ambiguous with record-literal field-shorthand
+        // syntax (`w { x }` meaning "construct record w with field x"), a
+        // pre-existing parser ambiguity unrelated to Lane 1 (see the
+        // "TODO(M9.5): disambiguate expr parsing for scrutinee" comment on
+        // `Expr::IfLet` handling) -- worked around here, not fixed.
+        let src = r#"
+            enum Wrap { Val(i32) }
+            fn main() {
+                let w: Wrap = Wrap::Val(5);
+                let pair: (i32, i32) = (1, 2);
+                let v: i32 = if let Wrap::Val(x) = w {
+                    x + 0
+                } else {
+                    let (moved, dummy) = pair;
+                    let _ = dummy;
+                    moved
+                };
+                let _ = v;
+                let (checked, dummy2) = pair;
+                let _ = checked;
+                let _ = dummy2;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("if-let else branch's ownership effect on an outer path must survive");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1662_if_let_expr_pattern_binding_does_not_leak() {
+        let src = r#"
+            enum Wrap { Val(i32) }
+            fn main() {
+                let w: Wrap = Wrap::Val(5);
+                let v: i32 = if let Wrap::Val(x) = w { x + 0 } else { 0 };
+                let _ = v;
+                let leaked: i32 = x;
+                let _ = leaked;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("if-let pattern-bound name must not leak past the expression");
+        assert!(
+            err.message.contains("unknown variable"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    // #1663 -- projected scrutinee
+
+    #[test]
+    fn ssf08_1663_projected_record_field_scrutinee_move_is_tracked() {
+        // A destructuring bind whose value expression is a projected field
+        // (`c.pair`, not a bare variable) must restrict `c.pair.a` itself,
+        // not a bogus root-only `c` path or nothing at all. (`match` does
+        // not admit a record scrutinee at all -- source_semantics.md's
+        // `match` scrutinee families are quad/enum/Option/Result/i32/u32 --
+        // so this exercises the same `apply_arm_pattern_capture` machinery
+        // through the plain-destructuring-let call sites instead.)
+        let src = r#"
+            record Pair { a: i32, b: i32 }
+            record Container { pair: Pair, other: i32 }
+            fn main() {
+                let c: Container = Container { pair: Pair { a: 1, b: 2 }, other: 9 };
+                let Pair { a: moved, b: bv } = c.pair;
+                let _ = moved;
+                let _ = bv;
+                let z: i32 = c.pair.a;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("a move captured from a projected record-field scrutinee must be tracked on that exact path");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_1663_projected_record_field_scrutinee_sibling_field_still_usable() {
+        // Proves the tracked path is `c.pair.a` specifically, not a coarser
+        // `c` root -- a sibling field one level up, `c.other`, must remain
+        // usable after only `c.pair.a` was moved. (Deliberately uses a
+        // one-level-nested sibling, not `c.pair.b`: reading a two-level
+        // projection through an intermediate record-field base hits an
+        // unrelated, pre-existing defect --
+        // see `ssf08_known_defect_nested_projection_rereads_intermediate_base_as_whole_value`
+        // -- which this test must not exercise.)
+        let src = r#"
+            record Pair { a: i32, b: i32 }
+            record Container { pair: Pair, other: i32 }
+            fn main() {
+                let c: Container = Container { pair: Pair { a: 1, b: 2 }, other: 9 };
+                let Pair { a: moved, b: _ } = c.pair;
+                let _ = moved;
+                let z: i32 = c.other;
+                let _ = z;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("sibling field of a projected-scrutinee move must remain usable");
+    }
+
+    #[test]
+    fn ssf08_1663_dynamically_indexed_sequence_scrutinee_with_capture_rejects() {
+        // seq[i] with a non-literal index cannot be resolved to a static
+        // path by expr_access_path; since the pattern here captures a value
+        // from it, this must reject deterministically rather than silently
+        // skip ownership tracking.
+        let src = r#"
+            fn main() {
+                let seq: Sequence(i32) = [1, 2, 3];
+                let i: i32 = 1;
+                match seq[i] {
+                    v => { let _ = v; }
+                }
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "a capturing match against a dynamically-indexed sequence scrutinee must reject deterministically",
+        );
+        assert!(
+            !err.message.contains("unknown variable"),
+            "must be an explicit unsupported-path rejection, not an unrelated unknown-variable error: {}",
+            err.message
+        );
+    }
+
+    // #1664 -- missing binding fail-closed
+
+    #[test]
+    fn ssf08_1664_mark_path_state_fails_closed_on_missing_binding() {
+        use crate::types::{PathAvailability, PatternPath};
+        let mut env = ScopeEnv::new();
+        let unknown = SymbolId(999);
+        let err = env
+            .mark_path_state(unknown, PatternPath::root(), PathAvailability::Moved)
+            .expect_err("mark_path_state on a genuinely missing binding must fail closed");
+        assert!(
+            err.message.contains("internal ownership state"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_check_capture_allowed_fails_closed_on_missing_binding() {
+        use crate::types::{CaptureMode, PatternPath};
+        let env = ScopeEnv::new();
+        let unknown = SymbolId(998);
+        let err = env
+            .check_capture_allowed(unknown, &PatternPath::root(), CaptureMode::Move)
+            .expect_err("check_capture_allowed on a genuinely missing binding must fail closed");
+        assert!(
+            err.message.contains("internal ownership state"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_unknown_variable_diagnostic_remains_canonical() {
+        // check_path_available's own missing-binding case must remain
+        // benign at its one call site: a genuinely unknown variable still
+        // reports the ordinary "unknown variable" diagnostic, not an
+        // internal ownership-state error.
+        let src = r#"
+            fn main() {
+                let z: i32 = totally_unknown_name;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err("unknown variable must still be reported");
+        assert!(
+            err.message.contains("unknown variable"),
+            "unexpected: {}",
+            err.message
+        );
+    }
+
+    // #1656-#1664 cross-product: proving the model is genuinely shared, not
+    // duplicated per construct.
+
+    #[test]
+    fn ssf08_cross_product_match_arm_modifies_outer_tuple_inside_value_block() {
+        let src = r#"
+            enum Wrap { A, B }
+            fn main() {
+                let pair: (i32, i32) = (1, 2);
+                let v: i32 = match Wrap::A {
+                    Wrap::A => {
+                        let (ref moved, second_v) = pair;
+                        moved
+                    }
+                    Wrap::B => { 0 }
+                };
+                let _ = v;
+                let (first, sv) = pair;
+                let _ = first;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "match arm inside a value-producing context that moves an outer tuple path must restrict it afterward",
+        );
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_cross_product_if_let_on_projected_record_scrutinee_with_move_then_sibling() {
+        // if-let's own scrutinee (`c.flag`) is itself a projected field
+        // (#1663), and the then-branch separately moves a tuple field
+        // (destructuring bind is admitted inside a value-producing block;
+        // record destructuring bind is not, so the outer moved value uses a
+        // tuple here rather than a second record).
+        let src = r#"
+            record Container { pair: (i32, i32), flag: Wrap }
+            enum Wrap { Present(i32), Absent }
+            fn main() {
+                let c: Container = Container { pair: (1, 2), flag: Wrap::Present(9) };
+                let v: i32 = if let Wrap::Present(x) = c.flag {
+                    let (moved, dummy) = c.pair;
+                    let _ = dummy;
+                    moved + x
+                } else {
+                    0
+                };
+                let _ = v;
+                let (checked, dummy2) = c.pair;
+                let _ = checked;
+                let _ = dummy2;
+                return;
+            }
+        "#;
+        // The then-branch's plain tuple destructure moves both `c.pair.0`
+        // and `c.pair.1` (default capture is Move); re-destructuring
+        // `c.pair` again afterward must therefore still reject -- proving
+        // the projected-scrutinee if-let's own branch effect on an
+        // unrelated projected path correctly survives to after the whole
+        // if-let expression, not just to the end of its own branch.
+        let err = typecheck_source(src).expect_err(
+            "re-destructuring c.pair after the then-branch already moved both elements must reject",
+        );
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn ssf08_cross_product_loop_body_conditional_move_then_second_pass_conflict() {
+        // Loop body conditionally moves an outer path only when a runtime
+        // condition holds -- since the condition can't be proven false at
+        // compile time, the fixed point must still treat the path as
+        // restricted, and a second unconditional move attempt (outside the
+        // conditional) against the now-restricted state must reject.
+        let src = r#"
+            record Point { x: i32, y: i32 }
+            fn main() {
+                let p: Point = Point { x: 1, y: 2 };
+                let mut i: i32 = 0;
+                while i < 2 {
+                    if (1 == 1) {
+                        let Point { x: moved, y: yv } = p;
+                        let _ = moved;
+                    } else {
+                    }
+                    let Point { x: moved2, y: y2v } = p;
+                    let _ = moved2;
+                    i = i + 1;
+                }
+                return;
+            }
+        "#;
+        let err = typecheck_source(src).expect_err(
+            "an unconditional second move of a conditionally-already-moved outer path in the same loop body must reject",
+        );
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
     #[test]
     fn match_or_pattern_rejects_regardless_of_consistent_capture_modes() {
         // Or-pattern where all alternatives borrow the same way is still
@@ -10924,7 +12040,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         // Accessing root.1 (different sibling) should be allowed.
         env.check_path_available(sym, &PatternPath::root().tuple_index(1))
             .expect("sibling path of moved path should remain available");
@@ -10941,7 +12058,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         // Accessing root (the whole variable) overlaps with root.0 that was moved → reject.
         let err = env
             .check_path_available(sym, &PatternPath::root())
@@ -10961,7 +12079,8 @@ mod tests {
         let sym = SymbolId(3);
         env.insert(sym, Type::I32);
         let path = PatternPath::root().tuple_index(0);
-        env.mark_path_state(sym, path.clone(), PathAvailability::Moved);
+        env.mark_path_state(sym, path.clone(), PathAvailability::Moved)
+            .expect("test-constructed binding must exist");
         let err = env
             .check_path_available(sym, &path)
             .expect_err("re-use of moved child path must reject");
@@ -10993,7 +12112,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Borrowed,
-        );
+        )
+        .expect("test-constructed binding must exist");
         env.check_path_available(sym, &PatternPath::root().tuple_index(0))
             .expect("borrow-only path should not block reads");
     }
@@ -11011,7 +12131,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Borrowed,
-        );
+        )
+        .expect("test-constructed binding must exist");
         // Now try to move root.0 — must reject
         let err = env
             .check_capture_allowed(sym, &PatternPath::root().tuple_index(0), CaptureMode::Move)
@@ -11033,7 +12154,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         let err = env
             .check_capture_allowed(
                 sym,
@@ -11058,7 +12180,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Borrowed,
-        );
+        )
+        .expect("test-constructed binding must exist");
         env.check_capture_allowed(
             sym,
             &PatternPath::root().tuple_index(0),
@@ -11078,7 +12201,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Borrowed,
-        );
+        )
+        .expect("test-constructed binding must exist");
         env.check_capture_allowed(sym, &PatternPath::root().tuple_index(1), CaptureMode::Move)
             .expect("move of sibling of borrowed path must be ok");
     }
@@ -11278,14 +12402,17 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         env.mark_path_state(
             sym,
             PatternPath::root().tuple_index(1),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         // Now add root — should subsume both children.
-        env.mark_path_state(sym, PatternPath::root(), PathAvailability::Moved);
+        env.mark_path_state(sym, PatternPath::root(), PathAvailability::Moved)
+            .expect("test-constructed binding must exist");
         // Only one entry should remain: root.
         let binding = env.binding(sym).expect("binding must exist");
         assert_eq!(
@@ -11303,12 +12430,14 @@ mod tests {
         let mut env = ScopeEnv::new();
         let sym = SymbolId(51);
         env.insert(sym, Type::I32);
-        env.mark_path_state(sym, PatternPath::root(), PathAvailability::Moved);
+        env.mark_path_state(sym, PatternPath::root(), PathAvailability::Moved)
+            .expect("test-constructed binding must exist");
         env.mark_path_state(
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         let binding = env.binding(sym).expect("binding must exist");
         assert_eq!(
             binding.path_state.len(),
@@ -11328,7 +12457,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         env.check_path_available(sym, &PatternPath::root().tuple_index(1))
             .expect("sibling of moved path must be accessible");
     }
@@ -11344,7 +12474,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         let err = env
             .check_path_available(sym, &PatternPath::root())
             .expect_err("whole-var access after child move must be blocked");
@@ -11366,7 +12497,8 @@ mod tests {
             sym,
             PatternPath::root().tuple_index(0),
             PathAvailability::Moved,
-        );
+        )
+        .expect("test-constructed binding must exist");
         let err = env
             .check_path_available(sym, &PatternPath::root().tuple_index(0))
             .expect_err("access of moved path must be blocked");
@@ -11980,7 +13112,7 @@ fn is_builtin_assert_name(
 fn check_builtin_assert_stmt(
     expr_id: ExprId,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -12026,17 +13158,24 @@ fn check_builtin_assert_stmt(
     Ok(true)
 }
 
+/// SSF-08 Lane 1 (#1659/#1660/#1661/#1662): returns the block's tail type
+/// *and* the resulting ownership successor state (a clone of `env` with the
+/// block's own local scope already popped, but pre-existing bindings'
+/// ownership effects intact) so callers that check more than one
+/// alternative block (an `if`/`match`/`if-let` expression's branches) can
+/// collect these as `ScopeEnv::join_ownership_from` successors, instead of
+/// the caller-invisible ownership state a `Type`-only return produced.
 fn infer_value_block_type(
     block: &BlockExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
     ret_ty: Type,
     loop_stack: &mut Vec<LoopTypeFrame>,
     impl_list: &[ImplDecl],
-) -> Result<Type, FrontendError> {
+) -> Result<(Type, ScopeEnv), FrontendError> {
     let mut block_env = env.clone();
     block_env.push_scope();
     for stmt in &block.statements {
@@ -12069,7 +13208,7 @@ fn infer_value_block_type(
     let tail_ty = infer_expr_type(
         block.tail,
         arena,
-        &block_env,
+        &mut block_env,
         table,
         record_table,
         adt_table,
@@ -12078,13 +13217,57 @@ fn infer_value_block_type(
         impl_list,
     )?;
     block_env.pop_scope();
-    Ok(tail_ty)
+    Ok((tail_ty, block_env))
+}
+
+/// SSF-08 Lane 1 (#1661/#1662/#1663): build a fresh clone of `env` with
+/// `pattern`'s bound names inserted and this pattern's *own* scrutinee
+/// capture effect applied directly to it (via `apply_arm_pattern_capture`,
+/// so a subsequent guard/body check on the returned env sees its own
+/// capture, per #1663) -- one pushed scope deeper than `env`. The caller
+/// checks any guard and the arm/branch body against the returned env (a
+/// value-producing body should go through `infer_value_block_type`, which
+/// pushes and pops its own further-nested scope internally), then must
+/// `pop_scope()` once more on whatever successor state results, to drop
+/// this function's own pushed scope and bring the successor back to
+/// `env`'s original depth before it can be fed to
+/// `ScopeEnv::join_ownership_from`.
+fn build_pattern_arm_env(
+    scrutinee: ExprId,
+    pattern: &MatchPattern,
+    scrutinee_ty: &Type,
+    arena: &AstArena,
+    env: &mut ScopeEnv,
+    adt_table: &AdtTable,
+) -> Result<ScopeEnv, FrontendError> {
+    if matches!(pattern, MatchPattern::Or(_)) {
+        return Err(FrontendError {
+            pos: 0,
+            message: "or-pattern match arms ('A | B') are not supported; split into separate arms with identical bodies instead".to_string(),
+        });
+    }
+    let mut plan = BindingPlan::default();
+    build_match_pattern_plan(
+        pattern,
+        scrutinee_ty,
+        &PatternPath::root(),
+        &mut plan,
+        arena,
+        adt_table,
+    )?;
+    validate_binding_plan_conflicts(&plan)?;
+
+    let mut arm_env = env.clone();
+    arm_env.push_scope();
+    apply_binding_plan(&mut arm_env, &plan);
+    apply_arm_pattern_capture(scrutinee, &plan, arena, &mut arm_env)?;
+    Ok(arm_env)
 }
 
 fn infer_match_expr_type(
     match_expr: &MatchExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -12116,17 +13299,26 @@ fn infer_match_expr_type(
         });
     }
 
-    // M9.5 Wave D: migrate to BindingPlan ownership pipeline.
-    // NOTE: infer_match_expr_type receives &ScopeEnv (not mut), so consumed-state
-    // marking is skipped here; it is enforced at statement-level match sites instead.
+    // SSF-08 Lane 1 (#1661/#1663): each arm's pattern capture is now applied
+    // directly to its own arm_env (visible to its own guard/body), and every
+    // reachable successor -- every arm plus `default` if present -- is
+    // conservatively joined back into `env`, rather than skipped entirely as
+    // the prior `&ScopeEnv`-bound signature forced.
     let mut result_ty = None;
+    let mut successors: Vec<ScopeEnv> = Vec::new();
     for arm in &match_expr.arms {
-        let (_, arm_env) =
-            build_and_apply_match_plan(&arm.pat, &scrutinee_ty, env, arena, adt_table)?;
+        let mut arm_env = build_pattern_arm_env(
+            match_expr.scrutinee,
+            &arm.pat,
+            &scrutinee_ty,
+            arena,
+            env,
+            adt_table,
+        )?;
         check_match_guard(
             arm.guard,
             arena,
-            &arm_env,
+            &mut arm_env,
             table,
             record_table,
             adt_table,
@@ -12134,10 +13326,10 @@ fn infer_match_expr_type(
             loop_stack,
             impl_list,
         )?;
-        let arm_ty = infer_value_block_type(
+        let (arm_ty, mut result_env) = infer_value_block_type(
             &arm.block,
             arena,
-            &arm_env,
+            &mut arm_env,
             table,
             record_table,
             adt_table,
@@ -12145,6 +13337,8 @@ fn infer_match_expr_type(
             loop_stack,
             impl_list,
         )?;
+        result_env.pop_scope();
+        successors.push(result_env);
         if let Some(ref expected) = result_ty {
             if *expected != arm_ty {
                 return Err(FrontendError {
@@ -12160,8 +13354,8 @@ fn infer_match_expr_type(
         }
     }
 
-    if let Some(default) = match_expr.default.as_ref() {
-        let default_ty = infer_value_block_type(
+    let final_ty = if let Some(default) = match_expr.default.as_ref() {
+        let (default_ty, default_result_env) = infer_value_block_type(
             default,
             arena,
             env,
@@ -12172,6 +13366,7 @@ fn infer_match_expr_type(
             loop_stack,
             impl_list,
         )?;
+        successors.push(default_result_env);
         if let Some(expected) = result_ty {
             if expected != default_ty {
                 return Err(FrontendError {
@@ -12182,9 +13377,9 @@ fn infer_match_expr_type(
                     ),
                 });
             }
-            Ok(expected)
+            expected
         } else {
-            Ok(default_ty)
+            default_ty
         }
     } else {
         match missing_exhaustive_sum_variants(
@@ -12194,24 +13389,27 @@ fn infer_match_expr_type(
             adt_table,
         )? {
             Some((family_label, missing)) if !missing.is_empty() => {
-                Err(non_exhaustive_match_error(&family_label, &missing, true)?)
+                return Err(non_exhaustive_match_error(&family_label, &missing, true)?)
             }
             Some(_) => {
-                Ok(result_ty
-                    .expect("exhaustive enum match expression should have at least one arm"))
+                result_ty.expect("exhaustive enum match expression should have at least one arm")
             }
-            None => Err(FrontendError {
-                pos: 0,
-                message: "match expression requires default arm '_'".to_string(),
-            }),
+            None => {
+                return Err(FrontendError {
+                    pos: 0,
+                    message: "match expression requires default arm '_'".to_string(),
+                })
+            }
         }
-    }
+    };
+    env.join_ownership_from(&successors)?;
+    Ok(final_ty)
 }
 
 fn infer_loop_expr_type(
     loop_expr: &LoopExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -12219,27 +13417,31 @@ fn infer_loop_expr_type(
     loop_stack: &mut Vec<LoopTypeFrame>,
     impl_list: &[ImplDecl],
 ) -> Result<Type, FrontendError> {
-    let mut body_env = env.clone();
-    body_env.push_scope();
+    // SSF-08 Lane 1 (#1660): same fixed-point loop-carried ownership
+    // analysis as statement loops -- a value-producing `loop` body can also
+    // run more than once before `break`, so a restriction one logical pass
+    // creates must be visible to (and able to conflict with) the next, and
+    // any restriction that survives every pass must persist onto `env`
+    // after the loop, not be discarded with `body_env`.
     loop_stack.push(LoopTypeFrame {
         kind: LoopTypeFrameKind::Expression,
         break_ty: None,
     });
-    for stmt in &loop_expr.body {
-        check_loop_expr_stmt(
-            *stmt,
-            arena,
-            &mut body_env,
-            table,
-            record_table,
-            adt_table,
-            ret_ty.clone(),
-            loop_stack,
-            impl_list,
-        )?;
-    }
-    body_env.pop_scope();
+    let result = run_loop_body_to_fixed_point(
+        &loop_expr.body,
+        arena,
+        env,
+        ret_ty,
+        table,
+        record_table,
+        adt_table,
+        loop_stack,
+        impl_list,
+        |_| {},
+        check_loop_expr_stmt,
+    );
     let frame = loop_stack.pop().expect("loop frame must exist");
+    result?;
     frame.break_ty.ok_or(FrontendError {
         pos: 0,
         message: "loop expression requires at least one break value".to_string(),
@@ -12250,10 +13452,10 @@ fn check_loop_expr_stmt(
     stmt_id: StmtId,
     arena: &AstArena,
     env: &mut ScopeEnv,
+    ret_ty: Type,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
-    ret_ty: Type,
     loop_stack: &mut Vec<LoopTypeFrame>,
     impl_list: &[ImplDecl],
 ) -> Result<(), FrontendError> {
@@ -12287,191 +13489,38 @@ fn check_loop_expr_stmt(
             condition,
             then_block,
             else_block,
-        } => {
-            let cond_ty = infer_expr_type(
-                *condition,
-                arena,
-                env,
-                table,
-                record_table,
-                adt_table,
-                ret_ty.clone(),
-                loop_stack,
-                impl_list,
-            )?;
-            if cond_ty != Type::Bool {
-                return Err(FrontendError {
-                    pos: 0,
-                    message: "if condition must be bool; explicit compare is required for quad"
-                        .to_string(),
-                });
-            }
-
-            let mut then_env = env.clone();
-            then_env.push_scope();
-            for stmt in then_block {
-                check_loop_expr_stmt(
-                    *stmt,
-                    arena,
-                    &mut then_env,
-                    table,
-                    record_table,
-                    adt_table,
-                    ret_ty.clone(),
-                    loop_stack,
-                    impl_list,
-                )?;
-            }
-            then_env.pop_scope();
-
-            let mut else_env = env.clone();
-            else_env.push_scope();
-            for stmt in else_block {
-                check_loop_expr_stmt(
-                    *stmt,
-                    arena,
-                    &mut else_env,
-                    table,
-                    record_table,
-                    adt_table,
-                    ret_ty.clone(),
-                    loop_stack,
-                    impl_list,
-                )?;
-            }
-            else_env.pop_scope();
-            Ok(())
-        }
+        } => check_if_branches_joined(
+            *condition,
+            then_block,
+            else_block,
+            arena,
+            env,
+            ret_ty,
+            table,
+            record_table,
+            adt_table,
+            loop_stack,
+            impl_list,
+            check_loop_expr_stmt,
+        ),
         Stmt::Match {
             scrutinee,
             arms,
             default,
-        } => {
-            let st = infer_expr_type(
-                *scrutinee,
-                arena,
-                env,
-                table,
-                record_table,
-                adt_table,
-                ret_ty.clone(),
-                loop_stack,
-                impl_list,
-            )?;
-            // M9.4 Wave 3: widen to also allow i32/u32 (for int range patterns).
-            if !matches!(
-                st,
-                Type::Quad
-                    | Type::Adt(_)
-                    | Type::Option(_)
-                    | Type::Result(_, _)
-                    | Type::I32
-                    | Type::U32
-            ) {
-                return Err(FrontendError {
-                    pos: 0,
-                    message:
-                        "match is allowed only for quad, enum, Option(T), Result(T, E), i32, or u32 scrutinee"
-                            .to_string(),
-                });
-            }
-            // M9.5 Wave D / M9.7 / M9.8: BindingPlan pipeline + path-based ownership.
-            // The per-arm loop (which rejects any or-pattern arm deterministically,
-            // regardless of wildcard presence) must run before the default-arm
-            // check below, mirroring the ordering used by the statement- and
-            // expression-form match handlers. Checking `default`'s presence
-            // (`None` vs `Some`) first would let a naive "no `_` arm at all"
-            // rejection pre-empt the or-pattern diagnostic for an or-pattern
-            // match with no wildcard arm, breaking the promise that or-pattern
-            // rejection is uniform regardless of wildcard presence (SSF-07).
-            let mut arm_plans: Vec<BindingPlan> = Vec::new();
-            for arm in arms {
-                let (plan, mut arm_env) =
-                    build_and_apply_match_plan(&arm.pat, &st, env, arena, adt_table)?;
-                // M9.8: reject if new plan conflicts with prior path-state of scrutinee.
-                validate_plan_against_scrutinee_state(env, *scrutinee, arena, &plan)?;
-                arm_plans.push(plan);
-                check_match_guard(
-                    arm.guard,
-                    arena,
-                    &arm_env,
-                    table,
-                    record_table,
-                    adt_table,
-                    ret_ty.clone(),
-                    loop_stack,
-                    impl_list,
-                )?;
-                for stmt in &arm.block {
-                    check_loop_expr_stmt(
-                        *stmt,
-                        arena,
-                        &mut arm_env,
-                        table,
-                        record_table,
-                        adt_table,
-                        ret_ty.clone(),
-                        loop_stack,
-                        impl_list,
-                    )?;
-                }
-                arm_env.pop_scope();
-            }
-            apply_plans_to_scrutinee(*scrutinee, &arm_plans, arena, env);
-
-            match default {
-                None => {
-                    // Mirror the plain statement-form match handler: a truly
-                    // absent default arm is only a hard rejection when the
-                    // covered sum-family variants aren't already exhaustive.
-                    // A naive "no `_` arm at all => reject" check here (as
-                    // opposed to this exhaustiveness-aware one) would wrongly
-                    // reject an exhaustive enum/Option/Result match with no
-                    // wildcard arm inside a value-producing loop, even though
-                    // the ordinary statement-form match already admits the
-                    // identical program (SSF-07 review finding). An
-                    // explicitly present but empty wildcard (`_ => {}`) is
-                    // `Some(vec![])`, not `None`, and never reaches this
-                    // branch (FA-02-007 / #1639).
-                    match missing_exhaustive_sum_variants(
-                        &st,
-                        arms.iter().map(|arm| (&arm.pat, arm.guard)),
-                        arena,
-                        adt_table,
-                    )? {
-                        Some((family_label, missing)) if !missing.is_empty() => {
-                            return Err(non_exhaustive_match_error(&family_label, &missing, false)?)
-                        }
-                        Some(_) => {}
-                        None => {
-                            return Err(FrontendError {
-                                pos: 0,
-                                message: "match requires default arm '_'".to_string(),
-                            });
-                        }
-                    }
-                }
-                Some(default_body) => {
-                    let mut def_env = env.clone();
-                    def_env.push_scope();
-                    for stmt in default_body {
-                        check_loop_expr_stmt(
-                            *stmt,
-                            arena,
-                            &mut def_env,
-                            table,
-                            record_table,
-                            adt_table,
-                            ret_ty.clone(),
-                            loop_stack,
-                            impl_list,
-                        )?;
-                    }
-                    def_env.pop_scope();
-                }
-            }
-            Ok(())
-        }
+        } => check_match_arms_joined(
+            *scrutinee,
+            arms,
+            default,
+            arena,
+            env,
+            ret_ty,
+            table,
+            record_table,
+            adt_table,
+            loop_stack,
+            impl_list,
+            check_loop_expr_stmt,
+        ),
         _ => check_stmt(
             stmt_id,
             arena,
@@ -13877,7 +14926,7 @@ fn supports_stable_equality_type_inner(
 fn infer_record_literal_type(
     record_literal: &RecordLiteralExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -13964,7 +15013,7 @@ fn infer_record_literal_type(
 fn infer_record_field_access_type(
     field_expr: &RecordFieldExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14019,7 +15068,7 @@ fn infer_record_field_access_type(
 fn infer_sequence_index_type(
     index_expr: &SequenceIndexExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14074,7 +15123,7 @@ fn infer_sequence_index_type(
 fn infer_record_update_type(
     update_expr: &RecordUpdateExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14173,7 +15222,7 @@ fn infer_record_update_type(
 fn infer_adt_ctor_type(
     ctor_expr: &AdtCtorExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14266,7 +15315,7 @@ fn infer_adt_ctor_type(
 fn infer_expr_type_with_expected(
     expr_id: ExprId,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14423,7 +15472,7 @@ fn infer_expr_type_with_expected(
 fn infer_sequence_literal_type(
     sequence: &SequenceLiteral,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14522,7 +15571,7 @@ fn infer_sequence_literal_type(
 fn infer_closure_literal_type(
     closure: &ClosureLiteral,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14567,7 +15616,7 @@ fn infer_closure_literal_type(
     let body_ty = infer_expr_type_with_expected(
         closure.body,
         arena,
-        &closure_env,
+        &mut closure_env,
         table,
         record_table,
         adt_table,
@@ -14589,7 +15638,7 @@ fn infer_closure_literal_type(
 fn infer_std_form_ctor_type(
     ctor_expr: &AdtCtorExpr,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14877,7 +15926,7 @@ fn non_exhaustive_match_error(
 fn check_match_guard(
     guard: Option<ExprId>,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14912,7 +15961,7 @@ fn check_match_guard(
 fn check_return_payload(
     value: Option<ExprId>,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -14997,7 +16046,7 @@ fn ensure_binding_value_type(
 fn ensure_const_initializer_safe(
     expr_id: ExprId,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
 ) -> Result<(), FrontendError> {
     match arena.expr(expr_id) {
         Expr::QuadLiteral(_) | Expr::BoolLiteral(_) | Expr::NumericLiteral(_) => Ok(()),
@@ -15370,72 +16419,14 @@ pub(crate) fn build_match_pattern_plan(
     }
 }
 // ──────────────────────────────────────────────────────────────
-// M9.5 Wave D: match integration helpers
-// ──────────────────────────────────────────────────────────────
-
-/// Build a binding plan for one match arm pattern, validate conflicts,
-/// clone `env`, and apply the plan to the clone. Returns `(plan, arm_env)`.
-///
-/// NOTE (M9.5): PatternPath overlap (e.g., root vs root.0) is NOT checked yet.
-/// Only exact-path conflicts are validated.
-pub(crate) fn build_and_apply_match_plan(
-    pattern: &MatchPattern,
-    scrutinee_ty: &Type,
-    env: &ScopeEnv,
-    arena: &AstArena,
-    adt_table: &AdtTable,
-) -> Result<(BindingPlan, ScopeEnv), FrontendError> {
-    // SSF-07: or-pattern match arms (`A | B`) have no lowering implementation
-    // for any scrutinee family. Rather than let this typecheck successfully
-    // and fail later at the lowering phase with a family-specific diagnostic,
-    // reject deterministically here so `match` never accepts a form it cannot
-    // produce a runnable artifact for. `if let` is unaffected — it calls
-    // `build_match_pattern_plan` directly, not this match-arm entry point.
-    if matches!(pattern, MatchPattern::Or(_)) {
-        return Err(FrontendError {
-            pos: 0,
-            message: "or-pattern match arms ('A | B') are not supported; split into separate arms with identical bodies instead".to_string(),
-        });
-    }
-    let mut plan = BindingPlan::default();
-    build_match_pattern_plan(
-        pattern,
-        scrutinee_ty,
-        &PatternPath::root(),
-        &mut plan,
-        arena,
-        adt_table,
-    )?;
-    validate_binding_plan_conflicts(&plan)?;
-    let mut arm_env = env.clone();
-    arm_env.push_scope();
-    apply_binding_plan(&mut arm_env, &plan);
-    Ok((plan, arm_env))
-}
-
-/// M9.8: Validate that all items in `plan` are capture-compatible with the
-/// existing path-state of the scrutinee variable (if it is a plain Expr::Var).
-///
-/// Prevents: move after borrow, borrow after move, move after move on same/overlapping path.
-pub(crate) fn validate_plan_against_scrutinee_state(
-    env: &ScopeEnv,
-    scrutinee_expr: ExprId,
-    arena: &AstArena,
-    plan: &BindingPlan,
-) -> Result<(), FrontendError> {
-    let Expr::Var(name) = arena.expr(scrutinee_expr) else {
-        return Ok(());
-    };
-    for item in &plan.items {
-        env.check_capture_allowed(*name, &item.path, item.capture)?;
-    }
-    Ok(())
-}
-
-/// M9.7: For each arm plan, record the capture state of every binding path
-/// onto the scrutinee variable (if it is a plain Expr::Var).
-///
-/// Conservative: we union the paths across all arms. A path moved in any arm
+// SSF-08 Lane 1: `build_and_apply_match_plan`, `validate_plan_against_
+// scrutinee_state`, and `apply_plans_to_scrutinee` (the M9.5/M9.7/M9.8
+// match-integration helpers this section used to hold) are retired --
+// fully superseded by `build_pattern_arm_env` and
+// `apply_arm_pattern_capture` (defined near `check_match_arms_joined`),
+// which fold validate+apply into one canonical-access-path-aware pass used
+// uniformly by statement match, expression match, if-let, and plain
+// destructuring lets. Zero remaining call sites confirmed before removal.
 // ──────────────────────────────────────────────────────────────
 // M9.9 Wave A: path-aware expression access helpers
 // ──────────────────────────────────────────────────────────────
@@ -15488,7 +16479,7 @@ pub(crate) fn expr_access_path(
 fn infer_expr_type_no_check(
     expr_id: ExprId,
     arena: &AstArena,
-    env: &ScopeEnv,
+    env: &mut ScopeEnv,
     table: &FnTable,
     record_table: &RecordTable,
     adt_table: &AdtTable,
@@ -15516,26 +16507,5 @@ fn infer_expr_type_no_check(
             loop_stack,
             impl_list,
         ),
-    }
-}
-
-/// is considered moved after the match.
-pub(crate) fn apply_plans_to_scrutinee(
-    scrutinee_expr: ExprId,
-    plans: &[BindingPlan],
-    arena: &AstArena,
-    env: &mut ScopeEnv,
-) {
-    let Expr::Var(var_name) = arena.expr(scrutinee_expr) else {
-        return;
-    };
-    for plan in plans {
-        for item in &plan.items {
-            let avail = match item.capture {
-                CaptureMode::Move => PathAvailability::Moved,
-                CaptureMode::Borrow => PathAvailability::Borrowed,
-            };
-            env.mark_path_state(*var_name, item.path.clone(), avail);
-        }
     }
 }
