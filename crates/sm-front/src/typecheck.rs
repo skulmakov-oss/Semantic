@@ -11095,31 +11095,24 @@ mod tests {
     }
 
     #[test]
-    fn fa02_039_known_defect_nested_projection_rereads_intermediate_base_as_whole_value() {
-        // Tracked as FA-02-039 (skulmakov-oss/Semantic#1881). NOT part of
-        // #1656-#1664, NOT fixed by this PR. Documents a pre-existing
-        // frontend defect found while writing the #1663 regression suite
-        // (SSF-08 Lane 1): reading a two-level-nested field projection
-        // (`c.pair.b`) spuriously rejects if a *sibling* field of the
-        // intermediate base was moved (`c.pair.a`), because the
-        // intermediate base (`c.pair`) is independently re-checked as if it
-        // were being read as a whole value, not merely projected through.
-        // Isolated to a straight-line program with zero if/loop/match and
-        // zero Lane 1 join-model code involved at all -- the root cause is
-        // in `infer_expr_type_no_check`, which only skips its own
-        // path-availability re-check when the base expression is a bare
-        // `Expr::Var`; a `RecordField` base (as in `c.pair.b`, whose base
-        // `c.pair` is itself a `RecordField` access, not a `Var`) falls
-        // through to a second, independent, shorter-path check that the
-        // outer expression's own top-level check has already correctly
-        // subsumed. This is a read-path-checking gap orthogonal to
-        // control-flow/branch-joining (Lane 1's actual scope) -- it would
-        // misfire in a single straight-line function with no
-        // `if`/`loop`/`match` anywhere. This test pins the *current*
-        // (buggy) behavior so it does not regress silently; when FA-02-039
-        // is repaired, this test must be replaced or inverted to assert
-        // success, not preserved as-is -- its continued `expect_err` after
-        // a fix would itself be a stale, incorrect assertion.
+    fn fa02_039_nested_projection_sibling_read_remains_available() {
+        // Fixes FA-02-039 (skulmakov-oss/Semantic#1881). Not part of
+        // #1656-#1664 (SSF-08 Lane 1's own scope); this is a follow-up
+        // frontend read-path repair. Reading a two-level-nested field
+        // projection (`c.pair.b`) must succeed after only a *sibling*
+        // field of the intermediate base was moved (`c.pair.a`): `pair.a`
+        // and `pair.b` are sibling paths under `pair`, and neither is a
+        // prefix of the other. Root cause was `infer_expr_type_no_check`
+        // only preserving its no-ownership-recheck contract for a bare
+        // `Expr::Var` base; a `RecordField` base (as in `c.pair.b`, whose
+        // own base `c.pair` is itself a `RecordField` access) fell through
+        // to the fully-checked `infer_expr_type`, re-deriving and
+        // re-checking a shorter, synthetic `[pair]` path that the outer
+        // expression's own top-level `[pair, b]` check had already
+        // correctly subsumed. `infer_expr_type_no_check` now recurses
+        // through the same no-check-preserving field/index resolvers for
+        // any base `expr_access_path` itself recognizes as part of the
+        // admitted static path family, not only `Expr::Var`.
         let src = r#"
             record Pair { a: i32, b: i32 }
             record Container { pair: Pair, other: i32 }
@@ -11132,14 +11125,203 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src).expect_err(
-            "known pre-existing defect: reading a sibling field two levels deep spuriously rejects; see comment above",
-        );
+        typecheck_source(src)
+            .expect("sibling field two levels deep must remain readable after the fix");
+    }
+
+    #[test]
+    fn fa02_039_three_level_chain_sibling_read_remains_available() {
+        // Positive, deeper chain: move root.a.b.x, read root.a.b.y. The read
+        // expression's base chain is root.a.b (two levels of RecordField
+        // nesting below the outermost .y), exercising genuine multi-level
+        // recursion through infer_expr_type_no_check, not just one level.
+        let src = r#"
+            record Inner { x: i32, y: i32 }
+            record Middle { b: Inner, z: i32 }
+            record Outer { a: Middle, w: i32 }
+            fn main() {
+                let root: Outer = Outer { a: Middle { b: Inner { x: 1, y: 2 }, z: 3 }, w: 4 };
+                let Inner { x: moved, y: _ } = root.a.b;
+                let _ = moved;
+                let val: i32 = root.a.b.y;
+                let _ = val;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("sibling read three levels deep must remain available after the fix");
+    }
+
+    #[test]
+    fn fa02_039_disjoint_branch_under_common_ancestor_remains_available() {
+        // Positive: move root.a.x, read root.b.y -- entirely disjoint
+        // branches under a shared root, not even overlapping ancestors.
+        let src = r#"
+            record BranchA { x: i32 }
+            record BranchB { y: i32 }
+            record Root { a: BranchA, b: BranchB }
+            fn main() {
+                let root: Root = Root { a: BranchA { x: 1 }, b: BranchB { y: 2 } };
+                let BranchA { x: moved } = root.a;
+                let _ = moved;
+                let val: i32 = root.b.y;
+                let _ = val;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("disjoint branch under a common ancestor must remain readable");
+    }
+
+    #[test]
+    fn fa02_039_moved_ancestor_field_blocks_descendant_read() {
+        // Negative: move the whole c.pair field, then read c.pair.b -- the
+        // moved path IS an ancestor of the read path, so this must still
+        // reject. Proves the fix removed only the spurious *intermediate*
+        // re-check, not the genuine ancestor/descendant overlap rule.
+        let src = r#"
+            record Pair { a: i32, b: i32 }
+            record Container { pair: Pair, other: i32 }
+            fn main() {
+                let c: Container = Container { pair: Pair { a: 1, b: 2 }, other: 9 };
+                let Container { pair: moved, other: _ } = c;
+                let _ = moved;
+                let z: i32 = c.pair.b;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("reading through a moved ancestor field must still reject");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn fa02_039_move_then_reread_exact_path_still_rejects() {
+        // Negative: move c.pair.b, then read c.pair.b again (identical
+        // path) -- must still reject.
+        let src = r#"
+            record Pair { a: i32, b: i32 }
+            record Container { pair: Pair, other: i32 }
+            fn main() {
+                let c: Container = Container { pair: Pair { a: 1, b: 2 }, other: 9 };
+                let Pair { a: _, b: moved } = c.pair;
+                let _ = moved;
+                let z: i32 = c.pair.b;
+                let _ = z;
+                return;
+            }
+        "#;
+        let err =
+            typecheck_source(src).expect_err("re-reading the exact moved path must still reject");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn fa02_039_moved_child_still_blocks_genuine_whole_parent_read() {
+        // Negative, the critical boundary case: move c.pair.a, then read
+        // c.pair as an actual *whole-value* read (not merely an
+        // intermediate type-resolution step on the way to a sibling
+        // field). This is the exact partial-move rejection the fix must
+        // NOT weaken -- unlike `c.pair.b`, this expression's own top-level
+        // access path genuinely IS `[pair]`, evaluated directly (via
+        // infer_expr_type_with_expected's catch-all -> the real, checked
+        // infer_expr_type), never through infer_expr_type_no_check at all.
+        let src = r#"
+            record Pair { a: i32, b: i32 }
+            record Container { pair: Pair, other: i32 }
+            fn main() {
+                let c: Container = Container { pair: Pair { a: 1, b: 2 }, other: 9 };
+                let Pair { a: moved, b: _ } = c.pair;
+                let _ = moved;
+                let whole: Pair = c.pair;
+                let _ = whole;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("reading c.pair as a genuine whole value after .a was moved must reject");
         assert!(
             err.message.contains("partially moved"),
             "unexpected: {}",
             err.message
         );
+    }
+
+    #[test]
+    fn fa02_039_moved_mid_level_ancestor_blocks_deep_descendant_read() {
+        // Negative, deeper ancestor/descendant overlap: move the whole
+        // root.a field (a Middle), then read the deep descendant
+        // root.a.b.x -- must still reject, stress-testing the ancestor
+        // rule at the same recursion depth the positive three-level test
+        // above proves succeeds for a non-overlapping sibling.
+        let src = r#"
+            record Inner { x: i32, y: i32 }
+            record Middle { b: Inner, z: i32 }
+            record Outer { a: Middle, w: i32 }
+            fn main() {
+                let root: Outer = Outer { a: Middle { b: Inner { x: 1, y: 2 }, z: 3 }, w: 4 };
+                let Outer { a: moved, w: _ } = root;
+                let _ = moved;
+                let val: i32 = root.a.b.x;
+                let _ = val;
+                return;
+            }
+        "#;
+        let err = typecheck_source(src)
+            .expect_err("reading a deep descendant of a moved mid-level ancestor must reject");
+        assert!(err.message.contains("moved"), "unexpected: {}", err.message);
+    }
+
+    #[test]
+    fn fa02_039_mixed_record_sequence_record_chain_type_resolves() {
+        // Positive, mixed projection families: record.field[literal_index].child
+        // must type-check via the same recursive no-check traversal,
+        // proving it is not special-cased to RecordField-only chains.
+        // Sequence-element ownership tracking has no admitted move syntax
+        // under the current language surface (match/if-let patterns admit
+        // only Quad/enum/wildcard/int-range forms, never a bare bind
+        // against a non-enum scrutinee -- confirmed empirically while
+        // auditing this issue, reported separately, not fixed here), so
+        // this is a type-resolution-only proof with no move involved.
+        let src = r#"
+            record Item { value: i32, label: i32 }
+            record Holder { items: Sequence(Item) }
+            fn main() {
+                let holder: Holder = Holder { items: [Item { value: 1, label: 2 }] };
+                let z: i32 = holder.items[0].label;
+                let _ = z;
+                return;
+            }
+        "#;
+        typecheck_source(src)
+            .expect("mixed record/sequence/record projection chain must type-check");
+    }
+
+    #[test]
+    fn fa02_039_dynamic_sequence_index_base_still_type_checks() {
+        // Positive: a dynamic (non-literal) index base inside a larger
+        // read chain is structurally excluded from the new no-check
+        // routing by construction -- expr_access_path returns None for a
+        // non-literal index, so the guard condition
+        // `expr_access_path(expr_id, arena).is_some()` is always false
+        // here and this always falls through to the normal, fully-checked
+        // infer_expr_type, exactly as before the fix. This proves that
+        // fallthrough still produces a correct, successful type for the
+        // ordinary case (no regression), complementing
+        // ssf08_1663_dynamically_indexed_sequence_scrutinee_with_capture_rejects's
+        // coverage of the rejecting case.
+        let src = r#"
+            record Item { value: i32 }
+            fn main() {
+                let items: Sequence(Item) = [Item { value: 1 }, Item { value: 2 }];
+                let i: i32 = 1;
+                let z: i32 = items[i].value;
+                let _ = z;
+                return;
+            }
+        "#;
+        typecheck_source(src).expect("dynamically-indexed base read must still type-check");
     }
 
     // #1656 -- statement `if`
@@ -11734,13 +11916,14 @@ mod tests {
     fn ssf08_1663_projected_record_field_scrutinee_sibling_field_still_usable() {
         // Proves the tracked path is `c.pair.a` specifically, not a coarser
         // `c` root -- a sibling field one level up, `c.other`, must remain
-        // usable after only `c.pair.a` was moved. (Deliberately uses a
-        // one-level-nested sibling, not `c.pair.b`: reading a two-level
-        // projection through an intermediate record-field base hits an
-        // unrelated, pre-existing defect tracked as FA-02-039
-        // (skulmakov-oss/Semantic#1881) -- see
-        // `fa02_039_known_defect_nested_projection_rereads_intermediate_base_as_whole_value`
-        // -- which this test must not exercise.)
+        // usable after only `c.pair.a` was moved. (Originally used a
+        // one-level-nested sibling rather than `c.pair.b` specifically to
+        // avoid FA-02-039 (skulmakov-oss/Semantic#1881), a since-fixed
+        // unrelated defect in reading a two-level projection through an
+        // intermediate record-field base -- see
+        // `fa02_039_nested_projection_sibling_read_remains_available`. Left
+        // as-is here since it independently proves path-precision at a
+        // different nesting depth, not because `c.pair.b` is unsafe now.)
         let src = r#"
             record Pair { a: i32, b: i32 }
             record Container { pair: Pair, other: i32 }
@@ -16632,8 +16815,24 @@ pub(crate) fn expr_access_path(
 /// check from M9.9.  Used internally when `expr_id` is the *base* of a field or
 /// index access whose **caller** has already verified the full access path.
 ///
-/// Only skips the path check for `Expr::Var`; all other expressions fall through
-/// to the normal `infer_expr_type` (which includes their own path check).
+/// SSF-08 (#1881 / FA-02-039): recursively preserves this no-check contract
+/// across any expression `expr_access_path` itself recognizes as part of an
+/// admitted static path chain (`Expr::Var`, `Expr::RecordField`,
+/// `Expr::SequenceIndex` with a literal non-negative index) -- not only a
+/// bare `Expr::Var` base. A multi-level projection base (e.g. the `c.pair`
+/// in `c.pair.b`) is itself such a chain segment: its own full path was
+/// already validated by the true top-level caller (the outermost
+/// `expr_access_path`/`check_path_available` pair in `infer_expr_type`), so
+/// re-deriving and re-checking *its own*, shorter, synthetic path here would
+/// incorrectly treat an intermediate type-resolution step as an independent
+/// whole-value read of a path the program never actually reads as such.
+///
+/// Anything **not** recognized by `expr_access_path` -- i.e. not provably
+/// part of the same checked static chain -- still falls through to the
+/// normal, fully-checked `infer_expr_type` below. This must never become
+/// "skip the check when unsure": an unprovable or dynamic path shape (e.g.
+/// a non-literal sequence index) stays fail-closed via the ordinary checked
+/// path, exactly as before.
 fn infer_expr_type_no_check(
     expr_id: ExprId,
     arena: &AstArena,
@@ -16653,6 +16852,35 @@ fn infer_expr_type_no_check(
                 pos: 0,
                 message: format!("unknown variable '{}'", resolve_symbol_name(arena, *v)?),
             })
+        }
+        Expr::RecordField(field_expr) if expr_access_path(expr_id, arena).is_some() => {
+            // Same no-check contract as the Var case above, recursed one
+            // level: reuse the existing field-resolution logic, which
+            // itself calls infer_expr_type_no_check on *its* base.
+            infer_record_field_access_type(
+                field_expr,
+                arena,
+                env,
+                table,
+                record_table,
+                adt_table,
+                ret_ty,
+                loop_stack,
+                impl_list,
+            )
+        }
+        Expr::SequenceIndex(index_expr) if expr_access_path(expr_id, arena).is_some() => {
+            infer_sequence_index_type(
+                index_expr,
+                arena,
+                env,
+                table,
+                record_table,
+                adt_table,
+                ret_ty,
+                loop_stack,
+                impl_list,
+            )
         }
         _ => infer_expr_type(
             expr_id,
