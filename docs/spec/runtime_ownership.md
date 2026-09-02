@@ -25,6 +25,19 @@ Current supported slice:
 
 This document does not claim a general runtime borrow checker.
 
+## Public Position
+
+SSF-08 (`docs/roadmap/stable_foundation/ssf08_ownership_position_decision.md`)
+formally selects **Position A — bounded deterministic VM language** as the
+public ownership/memory claim for Semantic: ownership protects admitted
+value paths and runtime invariants inside this bounded, frame-local model.
+Semantic does not claim Rust-equivalent lifetime inference, region
+inference, general borrow checking, unrestricted alias analysis, or
+systems-language memory-safety equivalence. The decision record also names
+known implementation gaps inside this frozen tuple/record slice (OWN0 root
+identity and event-timing correctness) that remain open repair work, not
+positioning questions.
+
 ## Layer Separation
 
 The current ownership pipeline is intentionally split:
