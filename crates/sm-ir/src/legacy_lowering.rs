@@ -2509,6 +2509,14 @@ fn lower_closure_literal_expr(
         src: param_reg,
     });
 
+    // #1709 corrective: `append_record_update_write_events_from_expr`
+    // treats `Expr::Closure` as a deliberate leaf, so no enclosing
+    // statement-level scan ever reaches into a closure body - the body is
+    // its own function's root, and needs its own root-level prescan the
+    // same way a top-level `lower_stmt` arm prescans its own statement's
+    // expression before lowering it. Writes into the child's own sink, not
+    // the parent's - the closure body is a new function boundary.
+    append_record_update_write_events_from_expr(closure.body, arena, &mut lifted_ownership_events);
     let (body_reg, body_ty) = lower_expr_with_expected(
         closure.body,
         arena,
@@ -6337,6 +6345,7 @@ fn lower_stmt(
                     frame.result_ty.clone(),
                 )
             };
+            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
             let (reg, break_ty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -7181,6 +7190,11 @@ fn lower_value_block_expr(
                 });
             }
             Stmt::Discard { ty, value } => {
+                // #1709 corrective (exact-head review of 17e89f63): mirrors
+                // `lower_stmt`'s `Stmt::Discard` arm, which prescans before
+                // lowering. This nested arm had the correct sink but was
+                // never wired to the producer authority itself.
+                append_record_update_write_events_from_expr(*value, arena, ownership_events);
                 let _ = lower_expr_with_expected(
                     *value,
                     arena,
@@ -7198,6 +7212,8 @@ fn lower_value_block_expr(
                 )?;
             }
             Stmt::Expr(expr) => {
+                // #1709 corrective: mirrors `lower_stmt`'s `Stmt::Expr` arm.
+                append_record_update_write_events_from_expr(*expr, arena, ownership_events);
                 lower_expr_stmt_with_parts(
                     *expr,
                     arena,
@@ -8285,6 +8301,12 @@ fn lower_loop_expr_stmt(
             then_block,
             else_block,
         } => {
+            // #1709 corrective: mirrors `lower_stmt`'s `Stmt::If` arm, which
+            // prescans `condition` before lowering it. This dedicated
+            // loop-expression `If` implementation does not delegate to
+            // `lower_stmt` (unlike everything reaching the `_` fallback
+            // below), so it needs the same call independently.
+            append_record_update_write_events_from_expr(*condition, arena, ownership_events);
             let (cond_reg, cond_ty) = lower_expr(
                 *condition,
                 arena,
@@ -8375,6 +8397,11 @@ fn lower_loop_expr_stmt(
             arms,
             default,
         } => {
+            // #1709 corrective: mirrors `lower_stmt`'s `Stmt::Match` arm,
+            // which prescans `scrutinee` before lowering it. This dedicated
+            // loop-expression `Match` implementation does not delegate to
+            // `lower_stmt`, so it needs the same call independently.
+            append_record_update_write_events_from_expr(*scrutinee, arena, ownership_events);
             let (scr_reg, scr_ty) = lower_expr(
                 *scrutinee,
                 arena,
@@ -14271,6 +14298,286 @@ mod opt_tests {
         assert!(
             !lowered.primary.ownership_events.contains(&expected_event),
             "closure-body-local ownership event must not leak into the parent function"
+        );
+    }
+
+    // #1709 corrective round (exact-head review of 17e89f63): the sink was
+    // correctly threaded everywhere, but several admitted nested roots
+    // still never *called* `append_record_update_write_events_from_expr` -
+    // the producer authority - even though they had the right place to put
+    // its output. These regressions pin each of those roots independently.
+
+    #[test]
+    fn ssf08_1709_value_block_discard_write_event_preserved() {
+        // `lower_value_block_expr`'s `Stmt::Discard` arm had the sink but
+        // never called the producer authority, unlike `lower_stmt`'s twin.
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let total: f64 = {
+                    let _ = ctx with { quality: 1.0 };
+                    ctx.quality
+                };
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                path: AccessPath::new(*ctx_name).field(quality_field),
+            }]
+        );
+    }
+
+    #[test]
+    fn ssf08_1709_value_block_expr_statement_write_event_preserved() {
+        // `lower_value_block_expr`'s `Stmt::Expr` arm had the sink but
+        // never called the producer authority, unlike `lower_stmt`'s twin.
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn sink(x: DecisionContext) {
+                return;
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let total: f64 = {
+                    sink(ctx with { quality: 1.0 });
+                    ctx.quality
+                };
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                path: AccessPath::new(*ctx_name).field(quality_field),
+            }]
+        );
+    }
+
+    #[test]
+    fn ssf08_1709_loop_expr_special_if_condition_write_event_preserved() {
+        // `lower_loop_expr_stmt`'s dedicated `Stmt::If` arm does not
+        // delegate to `lower_stmt` (unlike everything reaching its `_`
+        // fallback), so it needs its own call to the producer authority on
+        // `condition`, mirroring `lower_stmt`'s `Stmt::If` arm exactly.
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn ready(ctx: DecisionContext) -> bool = ctx.camera == T;
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let total: i32 = loop {
+                    if ready(ctx with { quality: 1.0 }) {
+                        break 1;
+                    } else {
+                        break 2;
+                    }
+                };
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                path: AccessPath::new(*ctx_name).field(quality_field),
+            }]
+        );
+    }
+
+    #[test]
+    fn ssf08_1709_loop_expr_special_match_scrutinee_write_event_preserved() {
+        // `lower_loop_expr_stmt`'s dedicated `Stmt::Match` arm does not
+        // delegate to `lower_stmt`, so it needs its own call to the
+        // producer authority on `scrutinee`, mirroring `lower_stmt`'s
+        // `Stmt::Match` arm exactly.
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn tag_of(ctx: DecisionContext) -> i32 = 1;
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let total: i32 = loop {
+                    match tag_of(ctx with { quality: 1.0 }) {
+                        1 => { break 10; }
+                        _ => { break 20; }
+                    }
+                };
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                path: AccessPath::new(*ctx_name).field(quality_field),
+            }]
+        );
+    }
+
+    #[test]
+    fn ssf08_1709_loop_expr_break_value_write_event_preserved() {
+        // Canonical `lower_stmt`'s `Stmt::Break(Some(value))` arm itself
+        // never called the producer authority on the break payload, unlike
+        // its `Stmt::Return(Some(value))` sibling. `break value;` is only
+        // ever reachable nested inside a loop expression, so this is
+        // squarely within #1709's contour, not a separate top-level defect.
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let total: DecisionContext = loop {
+                    break ctx with { quality: 1.0 };
+                };
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                path: AccessPath::new(*ctx_name).field(quality_field),
+            }]
+        );
+    }
+
+    #[test]
+    fn ssf08_1709_closure_body_write_event_owned_by_lifted_helper() {
+        // `append_record_update_write_events_from_expr` treats
+        // `Expr::Closure` as a deliberate leaf, so no enclosing scan ever
+        // reaches `closure.body`. `lower_closure_literal_expr` must
+        // therefore prescan the body itself, into the child's own sink.
+        let src = r#"
+            record R {
+                x: i32,
+            }
+
+            fn main() {
+                let r: R = R { x: 1 };
+                let f: Closure(i32 -> R) = (n => r with { x: n });
+                let total: R = f(5);
+                return;
+            }
+        "#;
+
+        let program = parse_program(src).expect("program should parse");
+        let fn_table = build_fn_table(&program).expect("function table should build");
+        let record_table = build_record_table(&program).expect("record table should build");
+        let adt_table = build_adt_table(&program).expect("adt table should build");
+        type_check_program(&program).expect("program should type-check");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn should exist");
+        let lowered = lower_function_to_ir_with_tables(
+            main_fn,
+            &program.arena,
+            &fn_table,
+            &record_table,
+            &adt_table,
+            &program.impls,
+        )
+        .expect("main should lower");
+
+        let Stmt::Let { name: r_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected r binding");
+        };
+        let x_field = program.records[0].fields[0].name;
+        let expected_event = OwnershipPathEvent {
+            kind: OwnershipPathEventKind::Write,
+            path: AccessPath::new(*r_name).field(x_field),
+        };
+
+        let lifted = lowered
+            .lifted
+            .iter()
+            .find(|func| func.name.starts_with("__closure_main_"))
+            .expect("closure lowering should produce a lifted helper");
+        assert_eq!(lifted.ownership_events, vec![expected_event.clone()]);
+        assert!(
+            !lowered.primary.ownership_events.contains(&expected_event),
+            "closure-body-local write event must not leak into the parent function"
         );
     }
 }
