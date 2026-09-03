@@ -11940,12 +11940,116 @@ mod tests {
             .expect("sibling field of a projected-scrutinee move must remain usable");
     }
 
+    /// FA-02-040 (#1883): parse and typecheck as two explicit,
+    /// separately-observable steps, so a test using this can prove *which*
+    /// layer a rejection came from -- unlike `typecheck_source`, which
+    /// collapses both into one `Result` and cannot distinguish a parser
+    /// rejection from a semantic/ownership one. The internal `.expect()` on
+    /// the parse step is a deliberate guard: if a test using this helper
+    /// ever starts failing to parse, it panics with an explicit message
+    /// naming the parse failure, instead of silently "passing" for the
+    /// wrong reason against a weaker downstream assertion -- the exact
+    /// failure mode FA-02-040 found in the regression this helper now
+    /// backs.
+    fn parse_then_typecheck(src: &str) -> Result<(), FrontendError> {
+        let program = parse_program(src)
+            .expect("FA-02-040 test helper: source must parse for this test to prove anything about the ownership layer");
+        type_check_program(&program)
+    }
+
     #[test]
     fn ssf08_1663_dynamically_indexed_sequence_scrutinee_with_capture_rejects() {
-        // seq[i] with a non-literal index cannot be resolved to a static
-        // path by expr_access_path; since the pattern here captures a value
-        // from it, this must reject deterministically rather than silently
-        // skip ownership tracking.
+        // FA-02-040 (#1883) corrective round: the original form of this
+        // test used a bare-identifier match-arm pattern (`v => {...}`),
+        // which is not admitted syntax at all -- `MatchPattern` (types.rs)
+        // has no bind-by-name variant, only `Quad`/`Adt`/`Wildcard`/
+        // `IntRange`/`Or` -- so it failed at the *parser*, before the
+        // ownership layer ever ran. The old assertion
+        // (`!message.contains("unknown variable")`) could not distinguish
+        // a parser rejection from a semantic one, so this test reported
+        // green while proving nothing about the ownership invariant its
+        // name claims. Confirmed via temporary instrumentation (since
+        // reverted): `parse_program` itself returned
+        // `"expected '::' in enum match pattern"`; `apply_arm_pattern_capture`
+        // was never entered.
+        //
+        // Fixed to use a valid `Adt` match pattern (`Flag::A(x)`) instead,
+        // which parses and reaches `apply_arm_pattern_capture` with a
+        // genuine consuming `BindingPlan` and an unrepresentable
+        // (dynamically-indexed) scrutinee -- confirmed via the same
+        // temporary instrumentation to actually enter that function before
+        // this test's rejection fires -- proving the real semantic
+        // boundary #1663 claims to guarantee. See
+        // `fa02_040_lettuple_dynamically_indexed_sequence_scrutinee_with_capture_rejects`
+        // below for an independent proof via a different call site, and
+        // `fa02_040_bare_identifier_match_pattern_is_not_admitted_syntax`
+        // for honest coverage of the parser behavior this test used to
+        // (accidentally) rely on.
+        let src = r#"
+            enum Flag { A(i32), B }
+            fn main() {
+                let seq: Sequence(Flag) = [Flag::A(1), Flag::B];
+                let i: i32 = 0;
+                match seq[i] {
+                    Flag::A(x) => { let _ = x; }
+                    Flag::B => {}
+                }
+                return;
+            }
+        "#;
+        let err = parse_then_typecheck(src).expect_err(
+            "a capturing match against a dynamically-indexed sequence scrutinee must reject deterministically at the ownership layer",
+        );
+        assert!(
+            err.message.contains(
+                "pattern capture against a projected scrutinee that is not an admitted static path"
+            ),
+            "must be the canonical unrepresentable-scrutinee rejection, not a different error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn fa02_040_lettuple_dynamically_indexed_sequence_scrutinee_with_capture_rejects() {
+        // Complementary to the match-based regression above: proves the
+        // same canonical `apply_arm_pattern_capture` authority rejects an
+        // unrepresentable, dynamically-indexed scrutinee identically when
+        // reached via plain tuple-destructuring-let (a different one of
+        // `apply_arm_pattern_capture`'s five production call sites), not
+        // only via `match` -- one semantic authority, not a
+        // construct-specific special case.
+        let src = r#"
+            fn main() {
+                let seq: Sequence((i32, i32)) = [(1, 2), (3, 4)];
+                let i: i32 = 1;
+                let (a, b) = seq[i];
+                let _ = a;
+                let _ = b;
+                return;
+            }
+        "#;
+        let err = parse_then_typecheck(src).expect_err(
+            "tuple-destructuring a dynamically-indexed sequence scrutinee must reject deterministically at the ownership layer",
+        );
+        assert!(
+            err.message.contains(
+                "pattern capture against a projected scrutinee that is not an admitted static path"
+            ),
+            "must be the canonical unrepresentable-scrutinee rejection, not a different error: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn fa02_040_bare_identifier_match_pattern_is_not_admitted_syntax() {
+        // Honest parser-surface coverage, NOT ownership evidence (see
+        // FA-02-040 / #1883). Pins that a bare identifier (no enum-variant
+        // `::` prefix) is not valid match-arm pattern syntax --
+        // `MatchPattern` has no bind-by-name variant at all, so this fails
+        // to parse regardless of scrutinee shape, static or dynamic. This
+        // is the parser behavior the original,
+        // misleadingly-named-as-ownership-proof regression above used to
+        // (accidentally) exercise before this corrective round.
         let src = r#"
             fn main() {
                 let seq: Sequence(i32) = [1, 2, 3];
@@ -11956,12 +12060,10 @@ mod tests {
                 return;
             }
         "#;
-        let err = typecheck_source(src).expect_err(
-            "a capturing match against a dynamically-indexed sequence scrutinee must reject deterministically",
-        );
+        let err = parse_program(src).expect_err("bare-identifier match pattern must fail to parse");
         assert!(
-            !err.message.contains("unknown variable"),
-            "must be an explicit unsupported-path rejection, not an unrelated unknown-variable error: {}",
+            err.message.contains("expected '::' in enum match pattern"),
+            "unexpected parser diagnostic: {}",
             err.message
         );
     }
