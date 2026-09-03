@@ -1648,7 +1648,7 @@ fn check_stmt(
                     resolve_symbol_name(arena, *name)?
                 ),
             })?;
-            if env.is_const_checked(*name)? {
+            if env.is_const(*name)? {
                 return Err(FrontendError {
                     pos: 0,
                     message: format!(
@@ -1716,7 +1716,7 @@ fn check_stmt(
                         resolve_symbol_name(arena, *name)?
                     ),
                 })?;
-                if env.is_const_checked(*name)? {
+                if env.is_const(*name)? {
                     return Err(FrontendError {
                         pos: 0,
                         message: format!(
@@ -12168,16 +12168,16 @@ mod tests {
     }
 
     #[test]
-    fn ssf08_1664_is_const_checked_fails_closed_on_missing_binding() {
-        // is_const_checked is the fail-closed sibling used by every
-        // sm-front-internal call site (see is_const's own doc comment and
-        // the next test for why the original is_const symbol itself could
-        // not be changed in place).
+    fn ssf08_1664_is_const_fails_closed_on_missing_binding() {
+        // #1664 completion: is_const is now the single, canonical
+        // fail-closed authority (the is_const_checked/is_const split has
+        // been retired -- see is_const's own doc comment for why the old
+        // bool-returning shape could finally be changed in place).
         let env = ScopeEnv::new();
         let unknown = SymbolId(993);
         let err = env
-            .is_const_checked(unknown)
-            .expect_err("is_const_checked on a genuinely missing binding must fail closed");
+            .is_const(unknown)
+            .expect_err("is_const on a genuinely missing binding must fail closed");
         assert!(
             err.message.contains("internal ownership state"),
             "unexpected: {}",
@@ -12186,22 +12186,38 @@ mod tests {
     }
 
     #[test]
-    fn ssf08_1664_is_const_legacy_bool_api_remains_fail_open_for_lane2_compat() {
-        // Deliberate, evidenced exception: `is_const`'s bool-returning shape
-        // has live production call sites in crates/sm-ir/src/
-        // legacy_lowering.rs (Lane 2), which SSF-08 Lane 1 is not permitted
-        // to modify. This pins that the old symbol still returns `false` on
-        // a missing binding -- not because it is correct, but because
-        // changing it would require editing a Lane 2 crate. Every
-        // sm-front-internal decision now goes through is_const_checked
-        // instead (see the prior test); this method must gain no new
-        // sm-front call sites.
-        let env = ScopeEnv::new();
-        let unknown = SymbolId(992);
-        assert!(
-            !env.is_const(unknown),
-            "legacy is_const must still fail open (false) on a missing binding -- this is the \
-             documented Lane 2 compatibility exception, not new behavior"
+    fn ssf08_1664_is_const_known_const_binding_is_ok_true() {
+        let mut env = ScopeEnv::new();
+        let sym = SymbolId(991);
+        env.insert_const(sym, Type::I32);
+        assert_eq!(
+            env.is_const(sym),
+            Ok(true),
+            "a known const binding must report Ok(true)"
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_is_const_known_ordinary_binding_is_ok_false() {
+        let mut env = ScopeEnv::new();
+        let sym = SymbolId(990);
+        env.insert(sym, Type::I32);
+        assert_eq!(
+            env.is_const(sym),
+            Ok(false),
+            "a known ordinary (non-const, non-mutable) binding must report Ok(false)"
+        );
+    }
+
+    #[test]
+    fn ssf08_1664_is_const_known_mutable_binding_is_ok_false() {
+        let mut env = ScopeEnv::new();
+        let sym = SymbolId(989);
+        env.insert_mut(sym, Type::I32);
+        assert_eq!(
+            env.is_const(sym),
+            Ok(false),
+            "a known mutable binding must report Ok(false) -- mutable and const are exclusive"
         );
     }
 
@@ -16504,7 +16520,7 @@ fn ensure_const_initializer_safe(
                     message: format!("unknown variable '{}'", resolve_symbol_name(arena, *name)?),
                 });
             }
-            if env.is_const_checked(*name)? {
+            if env.is_const(*name)? {
                 Ok(())
             } else {
                 Err(FrontendError {

@@ -521,29 +521,25 @@ impl ScopeEnv {
         self.binding(name).map(|binding| binding.ty.clone())
     }
 
-    /// SSF-08 Lane 1 (#1664): kept fail-open (`false` on a missing binding)
-    /// -- unlike every other #1664 API, this exact bool-returning shape has
-    /// live production call sites in `crates/sm-ir/src/legacy_lowering.rs`,
-    /// a Lane 2 crate this PR is not permitted to modify (SSF-08 Lane 1's
-    /// scope is `crates/sm-front` only). Changing this signature would
-    /// break that crate's build. Every in-crate (`sm-front`) production
-    /// call site now uses the fail-closed `is_const_checked` below instead;
-    /// this method is retained solely for that external, out-of-scope
-    /// dependency and must gain no new call sites within `sm-front`.
-    pub fn is_const(&self, name: SymbolId) -> bool {
-        self.binding(name)
-            .map(|binding| binding.is_const)
-            .unwrap_or(false)
-    }
-
-    /// SSF-08 Lane 1 (#1664): fail-closed counterpart of `is_const`, used by
-    /// every `sm-front`-internal call site. See `is_const`'s doc comment
-    /// for why that original bool-returning method could not simply be
-    /// changed in place.
-    pub(crate) fn is_const_checked(
-        &self,
-        name: SymbolId,
-    ) -> Result<bool, crate::types::FrontendError> {
+    /// SSF-08 (#1664 completion): REQUIRED_BINDING -- fails closed if
+    /// `name` is not a known binding, rather than treating "missing" as
+    /// "not const". This is a semantic property query against a binding
+    /// the caller has already established must exist -- every current
+    /// call site (`crates/sm-front/src/typecheck.rs`'s assignment/const-
+    /// initializer checks, and `crates/sm-ir/src/legacy_lowering.rs`'s
+    /// closure-capture/tuple-assignment/ordinary-assignment lowering)
+    /// resolves the binding via `env.get(name)` -- reporting the
+    /// canonical source-level "unknown ..." diagnostic on absence -- and
+    /// only queries constness once that has already succeeded, so this
+    /// `Err` path represents an internal invariant failure (the identity
+    /// disappeared after being proven to exist), never an ordinary source
+    /// mistake. This was the last of #1664's seven APIs to be converted;
+    /// it originally stayed fail-open because `crates/sm-ir` (Lane 2) had
+    /// live consumers of the old bool-returning shape and Lane 1's scope
+    /// was frontend-only -- SSF-08's #1664 completion slice explicitly
+    /// authorized migrating those three call sites so this contract
+    /// correction could land.
+    pub fn is_const(&self, name: SymbolId) -> Result<bool, crate::types::FrontendError> {
         Ok(self.require_binding(name)?.is_const)
     }
 
