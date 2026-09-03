@@ -680,6 +680,13 @@ pub fn lower_expr_to_ir(
     for (name, ty) in var_types {
         env.insert(*name, ty.clone());
     }
+    // #1709: this entry point has no owning `IrFunction` (it lowers a bare
+    // expression, not a compiled function - see the `lifted_funcs` rejection
+    // below), so there is no retained sink for these events to preserve
+    // into; a local, discarded `Vec` here is not the same defect class as a
+    // same-function nested lowering path silently dropping its parent
+    // function's events.
+    let mut ownership_events = Vec::new();
     let _ = lower_expr(
         expr,
         arena,
@@ -692,6 +699,7 @@ pub fn lower_expr_to_ir(
         &empty_adts,
         Type::Unit,
         &mut closure_state,
+        &mut ownership_events,
     )?;
     if !closure_state.lifted_funcs.is_empty() {
         return Err(FrontendError {
@@ -810,6 +818,7 @@ fn lower_function_to_ir_with_tables(
             adt_table,
             canonical_ret.clone(),
             &mut ctx.closure_state,
+            &mut ctx.ownership_events,
         )?;
         if cond_ty != Type::Bool {
             return Err(FrontendError {
@@ -837,6 +846,7 @@ fn lower_function_to_ir_with_tables(
         adt_table,
         func.ret.clone(),
         &mut ctx.closure_state,
+        &mut ctx.ownership_events,
     )?;
     for stmt in &func.body {
         lower_stmt(
@@ -867,6 +877,7 @@ fn lower_function_to_ir_with_tables(
                 adt_table,
                 func.ret.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             lower_invariant_clauses(
                 &ctx.invariants,
@@ -883,6 +894,7 @@ fn lower_function_to_ir_with_tables(
                 adt_table,
                 func.ret.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             ctx.instrs.push(IrInstr::Ret { src: None });
         } else {
@@ -2447,6 +2459,14 @@ fn lower_closure_literal_expr(
         message: "closure parameter/capture count exceeds register space".to_string(),
     })?;
     let mut local_loop_stack = Vec::new();
+    // #1709: the lifted helper is a new `IrFunction`, hence a new
+    // function-owned ownership-event sink (§25/§26) - it must NOT share the
+    // parent's `ownership_events` sink (that would leak the closure body's
+    // own Borrow/Write events into the parent frame's event stream, which
+    // later has to line up with the parent's own instruction/frame
+    // boundaries) and must NOT be discarded as `Vec::new()` at construction
+    // (that was the original #1709 defect for this call site).
+    let mut lifted_ownership_events: Vec<OwnershipPathEvent> = Vec::new();
     // #1773 (FA-09-005): the lifted helper's real invocation convention is
     // captures first (r0..captures.len()-1), then the closure's own param
     // (r{captures.len()}) - built here from the exact same `capture_ty`/
@@ -2502,6 +2522,7 @@ fn lower_closure_literal_expr(
         Some(expected_closure.ret.as_ref().clone()),
         expected_closure.ret.as_ref().clone(),
         closure_state,
+        &mut lifted_ownership_events,
     )?;
     if body_ty != expected_closure.ret.as_ref().clone() {
         return Err(FrontendError {
@@ -2518,7 +2539,7 @@ fn lower_closure_literal_expr(
     closure_state.lifted_funcs.push(IrFunction {
         name: helper_name.clone(),
         instrs: lifted_instrs,
-        ownership_events: Vec::new(),
+        ownership_events: lifted_ownership_events,
         params: lifted_signature_params,
     });
 
@@ -2554,6 +2575,7 @@ fn lower_direct_closure_call_expr(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(u16, Type), FrontendError> {
     if closure_ty.family != ClosureValueFamily::UnaryDirect
         || closure_ty.capture != ClosureCapturePolicy::Immutable
@@ -2601,6 +2623,7 @@ fn lower_direct_closure_call_expr(
         Some(closure_ty.param.as_ref().clone()),
         ret_ty,
         closure_state,
+        ownership_events,
     )?;
     if arg_ty != closure_ty.param.as_ref().clone() {
         return Err(FrontendError {
@@ -2636,6 +2659,7 @@ fn lower_direct_closure_call_stmt(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(), FrontendError> {
     if closure_ty.family != ClosureValueFamily::UnaryDirect
         || closure_ty.capture != ClosureCapturePolicy::Immutable
@@ -2673,6 +2697,7 @@ fn lower_direct_closure_call_stmt(
         Some(closure_ty.param.as_ref().clone()),
         ret_ty,
         closure_state,
+        ownership_events,
     )?;
     if arg_ty != closure_ty.param.as_ref().clone() {
         return Err(FrontendError {
@@ -2710,6 +2735,7 @@ fn lower_expr(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(u16, Type), FrontendError> {
     lower_expr_with_expected(
         expr_id,
@@ -2724,6 +2750,7 @@ fn lower_expr(
         None,
         ret_ty,
         closure_state,
+        ownership_events,
     )
 }
 
@@ -2740,6 +2767,7 @@ fn lower_expr_with_expected(
     expected: Option<Type>,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(u16, Type), FrontendError> {
     match arena.expr(expr_id) {
         Expr::QuadLiteral(v) => {
@@ -2789,6 +2817,7 @@ fn lower_expr_with_expected(
                     item_ty.clone(),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 if let Some(expected_item_ty) = item_ty.as_ref() {
                     if *expected_item_ty != actual_ty {
@@ -2848,6 +2877,7 @@ fn lower_expr_with_expected(
                 Some(Type::I32),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             if start_ty != Type::I32 {
                 return Err(FrontendError {
@@ -2871,6 +2901,7 @@ fn lower_expr_with_expected(
                 Some(Type::I32),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             if end_ty != Type::I32 {
                 return Err(FrontendError {
@@ -2927,6 +2958,7 @@ fn lower_expr_with_expected(
                     item_expected,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 regs.push(reg);
                 tys.push(ty);
@@ -2973,6 +3005,7 @@ fn lower_expr_with_expected(
                     Some(expected_field_ty),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 lowered_fields.insert(field.name, reg);
             }
@@ -3012,6 +3045,7 @@ fn lower_expr_with_expected(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let Type::Record(record_name) = base_ty else {
                 return Err(FrontendError {
@@ -3068,6 +3102,7 @@ fn lower_expr_with_expected(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let Type::Sequence(sequence_ty) = base_ty else {
                 return Err(FrontendError {
@@ -3091,6 +3126,7 @@ fn lower_expr_with_expected(
                 Some(Type::I32),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             if index_ty != Type::I32 {
                 return Err(FrontendError {
@@ -3122,6 +3158,7 @@ fn lower_expr_with_expected(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let Type::Record(record_name) = base_ty else {
                 return Err(FrontendError {
@@ -3174,6 +3211,7 @@ fn lower_expr_with_expected(
                     Some(expected_field_ty),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 if lowered_overrides.insert(field.name, reg).is_some() {
                     return Err(FrontendError {
@@ -3225,6 +3263,7 @@ fn lower_expr_with_expected(
             expected,
             ret_ty,
             closure_state,
+            ownership_events,
         ),
         Expr::NumericLiteral(NumericLiteral::I32(n)) => {
             let r = alloc(next);
@@ -3328,6 +3367,7 @@ fn lower_expr_with_expected(
             expected,
             ret_ty,
             closure_state,
+            ownership_events,
         ),
         Expr::If(if_expr) => {
             let (cond_reg, cond_ty) = lower_expr(
@@ -3342,6 +3382,7 @@ fn lower_expr_with_expected(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -3378,6 +3419,7 @@ fn lower_expr_with_expected(
                 expected.clone(),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             out.push(IrInstr::StoreVar {
                 name: result_name.clone(),
@@ -3401,6 +3443,7 @@ fn lower_expr_with_expected(
                 expected.clone(),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             if then_ty != else_ty {
                 return Err(FrontendError {
@@ -3440,6 +3483,7 @@ fn lower_expr_with_expected(
             expected,
             ret_ty,
             closure_state,
+            ownership_events,
         ),
         Expr::Match(match_expr) => lower_match_expr(
             match_expr,
@@ -3454,6 +3498,7 @@ fn lower_expr_with_expected(
             expected,
             ret_ty,
             closure_state,
+            ownership_events,
         ),
         Expr::Call(name, args) => {
             if is_builtin_assert_name(*name, arena, fn_table)? {
@@ -3485,6 +3530,7 @@ fn lower_expr_with_expected(
                     None,
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
@@ -3523,6 +3569,7 @@ fn lower_expr_with_expected(
                     None,
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
@@ -3563,6 +3610,7 @@ fn lower_expr_with_expected(
                     None,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let Type::Sequence(seq_type) = &seq_ty else {
                     return Err(FrontendError {
@@ -3587,6 +3635,7 @@ fn lower_expr_with_expected(
                     Some(elem_ty.clone()),
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 if val_ty != elem_ty {
                     return Err(FrontendError {
@@ -3628,6 +3677,7 @@ fn lower_expr_with_expected(
                     None,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let Type::Sequence(seq_type) = &seq_ty else {
                     return Err(FrontendError {
@@ -3652,6 +3702,7 @@ fn lower_expr_with_expected(
                     Some(elem_ty.clone()),
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 if val_ty != elem_ty {
                     return Err(FrontendError {
@@ -3687,6 +3738,7 @@ fn lower_expr_with_expected(
                     None,
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
@@ -3761,6 +3813,7 @@ fn lower_expr_with_expected(
                     None,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
@@ -3785,6 +3838,7 @@ fn lower_expr_with_expected(
                     Some(key_ty),
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::MapContains {
@@ -3816,6 +3870,7 @@ fn lower_expr_with_expected(
                     None,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
@@ -3841,6 +3896,7 @@ fn lower_expr_with_expected(
                     Some(key_ty),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let (default_reg, _) = lower_expr_with_expected(
                     args[2].value,
@@ -3855,6 +3911,7 @@ fn lower_expr_with_expected(
                     Some(val_ty.clone()),
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::MapGet {
@@ -3887,6 +3944,7 @@ fn lower_expr_with_expected(
                     None,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
@@ -3912,6 +3970,7 @@ fn lower_expr_with_expected(
                     Some(key_ty),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let (val_reg, _) = lower_expr_with_expected(
                     args[2].value,
@@ -3926,6 +3985,7 @@ fn lower_expr_with_expected(
                     Some(val_ty),
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 let dst = alloc(next);
                 let ret_map_ty = map_ty.clone();
@@ -3961,6 +4021,7 @@ fn lower_expr_with_expected(
                     adt_table,
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::Call {
@@ -3990,6 +4051,7 @@ fn lower_expr_with_expected(
                     adt_table,
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::Call {
@@ -4029,6 +4091,7 @@ fn lower_expr_with_expected(
                         Some(Type::Quad),
                         ret_ty.clone(),
                         closure_state,
+                        ownership_events,
                     )?;
                     if arg_ty != Type::Quad {
                         return Err(FrontendError {
@@ -4084,6 +4147,7 @@ fn lower_expr_with_expected(
                     Some(Type::I32),
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::RngSeed {
@@ -4115,6 +4179,7 @@ fn lower_expr_with_expected(
                     Some(Type::I32),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let (hi_reg, _) = lower_expr_with_expected(
                     args[1].value,
@@ -4129,6 +4194,7 @@ fn lower_expr_with_expected(
                     Some(Type::I32),
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::RngNextI32 {
@@ -4157,6 +4223,7 @@ fn lower_expr_with_expected(
                     adt_table,
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 );
             } else {
                 return Err(FrontendError {
@@ -4187,6 +4254,7 @@ fn lower_expr_with_expected(
                     Some(expected_arg_ty.clone()),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 if t != expected_arg_ty {
                     return Err(FrontendError {
@@ -4245,6 +4313,7 @@ fn lower_expr_with_expected(
                 expected,
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             match op {
                 UnaryOp::Not => {
@@ -4341,6 +4410,7 @@ fn lower_expr_with_expected(
                 expected.clone(),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let (rr, rt) = lower_expr_with_expected(
                 *right,
@@ -4355,6 +4425,7 @@ fn lower_expr_with_expected(
                 expected,
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             if lt != rt {
                 return Err(FrontendError {
@@ -4947,6 +5018,7 @@ fn bind_let_else_record_items(
                     adt_table,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 out.push(IrInstr::Label {
                     name: continue_label,
@@ -5232,6 +5304,7 @@ fn lower_for_range_stmt(
         Some(Type::RangeI32),
         ret_ty.clone(),
         &mut ctx.closure_state,
+        &mut ctx.ownership_events,
     )?;
     if range_ty != Type::RangeI32 {
         return Err(FrontendError {
@@ -5294,6 +5367,7 @@ fn lower_while_stmt(
         adt_table,
         ret_ty.clone(),
         &mut ctx.closure_state,
+        &mut ctx.ownership_events,
     )?;
     if cond_ty != Type::Bool {
         return Err(FrontendError {
@@ -5402,6 +5476,7 @@ fn lower_for_each_stmt(
         adt_table,
         ret_ty.clone(),
         &mut ctx.closure_state,
+        &mut ctx.ownership_events,
     )?;
     if iterable_ty == Type::RangeI32 {
         return lower_for_range_stmt_from_reg(
@@ -5791,6 +5866,7 @@ fn bind_let_else_tuple_items(
                     adt_table,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 out.push(IrInstr::Label {
                     name: continue_label,
@@ -5862,6 +5938,7 @@ fn lower_stmt(
                 ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             let final_ty = if let Some(ann) = ty {
                 canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -5895,6 +5972,7 @@ fn lower_stmt(
                 ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             let final_ty = if let Some(ann) = ty {
                 canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -5928,6 +6006,7 @@ fn lower_stmt(
                 ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             let final_ty = if let Some(ann) = ty {
                 canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -5966,6 +6045,7 @@ fn lower_stmt(
                 Some(Type::Record(*record_name)),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             bind_record_items(
                 *record_name,
@@ -6003,6 +6083,7 @@ fn lower_stmt(
                 Some(Type::Record(*record_name)),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             bind_let_else_record_items(
                 *record_name,
@@ -6049,6 +6130,7 @@ fn lower_stmt(
                 ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             let final_ty = if let Some(ann) = ty {
                 canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -6093,6 +6175,7 @@ fn lower_stmt(
                 ty.clone(),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             Ok(())
         }
@@ -6127,6 +6210,7 @@ fn lower_stmt(
                 Some(target_ty),
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             ctx.instrs.push(IrInstr::StoreVar {
                 name: resolve_symbol_name(arena, *name)?.to_string(),
@@ -6152,6 +6236,7 @@ fn lower_stmt(
                 adt_table,
                 ret_ty,
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             assign_tuple_items(
                 items,
@@ -6265,6 +6350,7 @@ fn lower_stmt(
                 expected_break,
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             if let Some(expected_ty) = &prior_result_ty {
                 if *expected_ty != break_ty {
@@ -6328,6 +6414,7 @@ fn lower_stmt(
                 adt_table,
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -6358,6 +6445,7 @@ fn lower_stmt(
                 adt_table,
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             ctx.instrs.push(IrInstr::Label {
                 name: continue_label,
@@ -6402,6 +6490,7 @@ fn lower_stmt(
                 adt_table,
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )
         }
         Stmt::If {
@@ -6426,6 +6515,7 @@ fn lower_stmt(
                 adt_table,
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -6512,6 +6602,7 @@ fn lower_stmt(
                 adt_table,
                 ret_ty.clone(),
                 &mut ctx.closure_state,
+                &mut ctx.ownership_events,
             )?;
             if !matches!(
                 scr_ty,
@@ -6653,6 +6744,7 @@ fn lower_stmt(
                             adt_table,
                             ret_ty.clone(),
                             &mut ctx.closure_state,
+                            &mut ctx.ownership_events,
                         )? {
                             let guarded_body_label = format!("match_{}_body_{}", mid, i);
                             ctx.instrs.push(IrInstr::JmpIf {
@@ -6735,6 +6827,7 @@ fn lower_stmt(
                             adt_table,
                             ret_ty.clone(),
                             &mut ctx.closure_state,
+                            &mut ctx.ownership_events,
                         )? {
                             let guarded_body_label = format!("match_{}_body_{}", mid, i);
                             ctx.instrs.push(IrInstr::JmpIf {
@@ -6841,6 +6934,7 @@ fn lower_stmt(
                             adt_table,
                             ret_ty.clone(),
                             &mut ctx.closure_state,
+                            &mut ctx.ownership_events,
                         )? {
                             let guarded_body_label = format!("match_{}_body_{}", mid, i);
                             ctx.instrs.push(IrInstr::JmpIf {
@@ -6926,12 +7020,19 @@ fn lower_value_block_expr(
     expected: Option<Type>,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(u16, Type), FrontendError> {
     let mut block_env = env.clone();
     block_env.push_scope();
     for stmt in &block.statements {
         match arena.stmt(*stmt) {
             Stmt::Const { name, ty, value } => {
+                // #1709: mirrors `lower_stmt`'s `Stmt::Const` arm - this
+                // statement's own value has not been scanned by any
+                // enclosing authority (the pre-scan that reaches nested
+                // blocks only follows a block's `tail`, never its
+                // `statements`), so this call is required, not a duplicate.
+                append_record_update_write_events_from_expr(*value, arena, ownership_events);
                 let (reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -6945,6 +7046,7 @@ fn lower_value_block_expr(
                     ty.clone(),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let final_ty = if let Some(ann) = ty {
                     canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -6963,6 +7065,7 @@ fn lower_value_block_expr(
                 ty,
                 value,
             } => {
+                append_record_update_write_events_from_expr(*value, arena, ownership_events);
                 let (reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -6976,6 +7079,7 @@ fn lower_value_block_expr(
                     ty.clone(),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let final_ty = if let Some(ann) = ty {
                     canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -6993,6 +7097,13 @@ fn lower_value_block_expr(
                 });
             }
             Stmt::LetTuple { items, ty, value } => {
+                append_record_update_write_events_from_expr(*value, arena, ownership_events);
+                // #1709: derive the same canonical `AccessPath` the
+                // top-level `lower_stmt` arm derives - previously hardcoded
+                // to `None` here, which meant `bind_tuple_items` could never
+                // emit a Borrow event for this call site regardless of the
+                // sink, since it only pushes when a path is present.
+                let sequence_path = sequence_access_path_from_expr(*value, arena);
                 let (tuple_reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -7006,6 +7117,7 @@ fn lower_value_block_expr(
                     ty.clone(),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 let final_ty = if let Some(ann) = ty {
                     canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -7016,11 +7128,11 @@ fn lower_value_block_expr(
                     items,
                     tuple_reg,
                     &final_ty,
-                    None,
+                    sequence_path.as_ref(),
                     arena,
                     next,
                     out,
-                    &mut Vec::new(),
+                    ownership_events,
                     &mut block_env,
                 )?;
             }
@@ -7029,6 +7141,8 @@ fn lower_value_block_expr(
                 items,
                 value,
             } => {
+                append_record_update_write_events_from_expr(*value, arena, ownership_events);
+                let record_path = direct_record_access_path_from_expr(*value, arena);
                 let (record_reg, record_ty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -7042,17 +7156,18 @@ fn lower_value_block_expr(
                     Some(Type::Record(*record_name)),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 bind_record_items(
                     *record_name,
                     items,
                     record_reg,
                     &record_ty,
-                    None,
+                    record_path.as_ref(),
                     arena,
                     next,
                     out,
-                    &mut Vec::new(),
+                    ownership_events,
                     &mut block_env,
                     record_table,
                     adt_table,
@@ -7079,6 +7194,7 @@ fn lower_value_block_expr(
                     ty.clone(),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
             }
             Stmt::Expr(expr) => {
@@ -7094,6 +7210,7 @@ fn lower_value_block_expr(
                     adt_table,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
             }
             _ => {
@@ -7117,6 +7234,7 @@ fn lower_value_block_expr(
         expected,
         ret_ty,
         closure_state,
+        ownership_events,
     )?;
     block_env.pop_scope();
     Ok(tail)
@@ -7135,6 +7253,7 @@ fn lower_adt_ctor_expr(
     expected: Option<Type>,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(u16, Type), FrontendError> {
     if let Some(lowered) = lower_std_form_ctor_expr(
         ctor_expr,
@@ -7149,6 +7268,7 @@ fn lower_adt_ctor_expr(
         expected.clone(),
         ret_ty.clone(),
         closure_state,
+        ownership_events,
     )? {
         return Ok(lowered);
     }
@@ -7202,6 +7322,7 @@ fn lower_adt_ctor_expr(
             Some(expected_ty.clone()),
             ret_ty.clone(),
             closure_state,
+            ownership_events,
         )?;
         if actual_ty != expected_ty {
             return Err(FrontendError {
@@ -7245,6 +7366,7 @@ fn lower_std_form_ctor_expr(
     expected: Option<Type>,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<Option<(u16, Type)>, FrontendError> {
     let type_name = resolve_symbol_name(arena, ctor_expr.adt_name)?;
     let variant_name = resolve_symbol_name(arena, ctor_expr.variant_name)?;
@@ -7276,6 +7398,7 @@ fn lower_std_form_ctor_expr(
                     item_expected.clone(),
                     ret_ty,
                     closure_state,
+                    ownership_events,
                 )?;
                 if let Some(expected_item) = item_expected {
                     if item_ty != expected_item {
@@ -7375,6 +7498,7 @@ fn lower_std_form_ctor_expr(
             Some(payload_expected.clone()),
             ret_ty,
             closure_state,
+            ownership_events,
         )?;
         if payload_ty != payload_expected {
             return Err(FrontendError {
@@ -7741,6 +7865,7 @@ fn lower_match_guard(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<Option<u16>, FrontendError> {
     let Some(guard_expr) = guard else {
         return Ok(None);
@@ -7757,6 +7882,7 @@ fn lower_match_guard(
         adt_table,
         ret_ty,
         closure_state,
+        ownership_events,
     )?;
     if guard_ty != Type::Bool {
         return Err(FrontendError {
@@ -7781,6 +7907,7 @@ fn lower_ensures_clauses(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(), FrontendError> {
     if contract_ensures.is_empty() {
         return Ok(());
@@ -7812,6 +7939,7 @@ fn lower_ensures_clauses(
             adt_table,
             ret_ty.clone(),
             closure_state,
+            ownership_events,
         )?;
         if cond_ty != Type::Bool {
             return Err(FrontendError {
@@ -7849,6 +7977,7 @@ fn lower_invariant_clauses(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(), FrontendError> {
     if contract_invariants.is_empty() {
         return Ok(());
@@ -7889,6 +8018,7 @@ fn lower_invariant_clauses(
             adt_table,
             ret_ty.clone(),
             closure_state,
+            ownership_events,
         )?;
         if cond_ty != Type::Bool {
             return Err(FrontendError {
@@ -7921,6 +8051,7 @@ fn lower_return_payload(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(), FrontendError> {
     match value {
         Some(expr_id) => {
@@ -7937,6 +8068,7 @@ fn lower_return_payload(
                 Some(ret_ty.clone()),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             if ty != ret_ty {
                 return Err(FrontendError {
@@ -7961,6 +8093,7 @@ fn lower_return_payload(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             lower_invariant_clauses(
                 contract_invariants,
@@ -7977,6 +8110,7 @@ fn lower_return_payload(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             out.push(IrInstr::Ret { src: Some(reg) });
             Ok(())
@@ -8002,6 +8136,7 @@ fn lower_return_payload(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             lower_invariant_clauses(
                 contract_invariants,
@@ -8018,6 +8153,7 @@ fn lower_return_payload(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             out.push(IrInstr::Ret { src: None });
             Ok(())
@@ -8038,6 +8174,7 @@ fn lower_loop_expr(
     expected: Option<Type>,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(u16, Type), FrontendError> {
     let id = alloc_loop_expr_id(next);
     let start_label = format!("loop_expr_{}_start", id);
@@ -8072,6 +8209,7 @@ fn lower_loop_expr(
             adt_table,
             ret_ty.clone(),
             closure_state,
+            ownership_events,
         )?;
     }
     body_env.pop_scope();
@@ -8114,6 +8252,7 @@ fn lower_loop_expr_stmt(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(), FrontendError> {
     match arena.stmt(stmt_id) {
         Stmt::LetElseTuple { .. } | Stmt::LetElseRecord { .. } => Err(FrontendError {
@@ -8158,6 +8297,7 @@ fn lower_loop_expr_stmt(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -8195,6 +8335,7 @@ fn lower_loop_expr_stmt(
                     adt_table,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
             }
             then_env.pop_scope();
@@ -8218,6 +8359,7 @@ fn lower_loop_expr_stmt(
                     adt_table,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
             }
             else_env.pop_scope();
@@ -8245,6 +8387,7 @@ fn lower_loop_expr_stmt(
                 adt_table,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             if !matches!(
                 scr_ty,
@@ -8341,6 +8484,7 @@ fn lower_loop_expr_stmt(
                             adt_table,
                             ret_ty.clone(),
                             closure_state,
+                            ownership_events,
                         )? {
                             let guarded_body_label = format!("loop_match_{}_body_{}", id, i);
                             out.push(IrInstr::JmpIf {
@@ -8365,6 +8509,7 @@ fn lower_loop_expr_stmt(
                                 adt_table,
                                 ret_ty.clone(),
                                 closure_state,
+                                ownership_events,
                             )?;
                         }
                         arm_env.pop_scope();
@@ -8426,6 +8571,7 @@ fn lower_loop_expr_stmt(
                             adt_table,
                             ret_ty.clone(),
                             closure_state,
+                            ownership_events,
                         )? {
                             let guarded_body_label = format!("loop_match_{}_body_{}", id, i);
                             out.push(IrInstr::JmpIf {
@@ -8450,6 +8596,7 @@ fn lower_loop_expr_stmt(
                                 adt_table,
                                 ret_ty.clone(),
                                 closure_state,
+                                ownership_events,
                             )?;
                         }
                         arm_env.pop_scope();
@@ -8536,6 +8683,7 @@ fn lower_loop_expr_stmt(
                             adt_table,
                             ret_ty.clone(),
                             closure_state,
+                            ownership_events,
                         )? {
                             let guarded_body_label = format!("loop_match_{}_body_{}", id, i);
                             out.push(IrInstr::JmpIf {
@@ -8560,6 +8708,7 @@ fn lower_loop_expr_stmt(
                                 adt_table,
                                 ret_ty.clone(),
                                 closure_state,
+                                ownership_events,
                             )?;
                         }
                         arm_env.pop_scope();
@@ -8600,6 +8749,7 @@ fn lower_loop_expr_stmt(
                         adt_table,
                         ret_ty.clone(),
                         closure_state,
+                        ownership_events,
                     )?;
                 }
                 def_env.pop_scope();
@@ -8611,6 +8761,14 @@ fn lower_loop_expr_stmt(
             Ok(())
         }
         _ => {
+            // #1709 (FA-04-003): `ownership_events` is moved into `ctx` (not
+            // reset to a fresh `Vec::new()`) and moved back out below, on the
+            // same `core::mem::take`/restore pattern already used here for
+            // `closure_state` - a statement lowered through this fallback can
+            // itself generate real ownership events (e.g. a tuple/record
+            // destructuring bind), and this is the one function-owned sink
+            // for the enclosing loop expression; a fresh temporary here would
+            // silently discard them.
             let mut ctx = LoweringCtx {
                 next_reg: *next,
                 next_label_id: out.len() as u32,
@@ -8621,7 +8779,7 @@ fn lower_loop_expr_stmt(
                 invariants: Vec::new(),
                 invariants_result_symbol: None,
                 instrs: core::mem::take(out),
-                ownership_events: Vec::new(),
+                ownership_events: core::mem::take(ownership_events),
                 impls: Vec::new(),
             };
             let result = lower_stmt(
@@ -8638,6 +8796,7 @@ fn lower_loop_expr_stmt(
             *out = ctx.instrs;
             *loop_stack = ctx.loop_stack;
             *closure_state = ctx.closure_state;
+            *ownership_events = ctx.ownership_events;
             result
         }
     }
@@ -8656,6 +8815,7 @@ fn lower_match_expr(
     expected: Option<Type>,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(u16, Type), FrontendError> {
     let (scr_reg, scr_ty) = lower_expr(
         match_expr.scrutinee,
@@ -8669,6 +8829,7 @@ fn lower_match_expr(
         adt_table,
         ret_ty.clone(),
         closure_state,
+        ownership_events,
     )?;
     if !matches!(
         scr_ty,
@@ -8763,6 +8924,7 @@ fn lower_match_expr(
                     adt_table,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )? {
                     let guarded_body_label = format!("match_expr_{}_body_{}", id, i);
                     out.push(IrInstr::JmpIf {
@@ -8787,6 +8949,7 @@ fn lower_match_expr(
                     expected.clone(),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 arm_env.pop_scope();
                 if let Some(ref expected_ty) = result_ty {
@@ -8860,6 +9023,7 @@ fn lower_match_expr(
                     adt_table,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )? {
                     let guarded_body_label = format!("match_expr_{}_body_{}", id, i);
                     out.push(IrInstr::JmpIf {
@@ -8884,6 +9048,7 @@ fn lower_match_expr(
                     expected.clone(),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 arm_env.pop_scope();
                 if let Some(ref expected_ty) = result_ty {
@@ -8987,6 +9152,7 @@ fn lower_match_expr(
                     adt_table,
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )? {
                     let guarded_body_label = format!("match_expr_{}_body_{}", id, i);
                     out.push(IrInstr::JmpIf {
@@ -9011,6 +9177,7 @@ fn lower_match_expr(
                     expected.clone(),
                     ret_ty.clone(),
                     closure_state,
+                    ownership_events,
                 )?;
                 arm_env.pop_scope();
                 if let Some(ref expected_ty) = result_ty {
@@ -9061,6 +9228,7 @@ fn lower_match_expr(
             expected,
             ret_ty,
             closure_state,
+            ownership_events,
         )?;
         if let Some(ref expected_ty) = result_ty {
             if *expected_ty != default_ty {
@@ -9118,6 +9286,7 @@ fn lower_expr_stmt(
         adt_table,
         ret_ty,
         &mut ctx.closure_state,
+        &mut ctx.ownership_events,
     )
 }
 
@@ -9151,6 +9320,7 @@ fn lower_expr_stmt_with_parts(
     adt_table: &AdtTable,
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
+    ownership_events: &mut Vec<OwnershipPathEvent>,
 ) -> Result<(), FrontendError> {
     let expr = arena.expr(expr_id);
     if let Expr::Call(name, args) = expr {
@@ -9180,6 +9350,7 @@ fn lower_expr_stmt_with_parts(
                 Some(Type::Bool),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -9211,6 +9382,7 @@ fn lower_expr_stmt_with_parts(
                 None,
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
@@ -9248,6 +9420,7 @@ fn lower_expr_stmt_with_parts(
                 None,
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
@@ -9288,6 +9461,7 @@ fn lower_expr_stmt_with_parts(
                 None,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let Type::Sequence(seq_type) = &seq_ty else {
                 return Err(FrontendError {
@@ -9312,6 +9486,7 @@ fn lower_expr_stmt_with_parts(
                 Some(elem_ty.clone()),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             if val_ty != elem_ty {
                 return Err(FrontendError {
@@ -9353,6 +9528,7 @@ fn lower_expr_stmt_with_parts(
                 None,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let Type::Sequence(seq_type) = &seq_ty else {
                 return Err(FrontendError {
@@ -9377,6 +9553,7 @@ fn lower_expr_stmt_with_parts(
                 Some(elem_ty.clone()),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             if val_ty != elem_ty {
                 return Err(FrontendError {
@@ -9412,6 +9589,7 @@ fn lower_expr_stmt_with_parts(
                 None,
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
@@ -9459,6 +9637,7 @@ fn lower_expr_stmt_with_parts(
                 None,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
@@ -9483,6 +9662,7 @@ fn lower_expr_stmt_with_parts(
                 Some(key_ty),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::MapContains {
@@ -9514,6 +9694,7 @@ fn lower_expr_stmt_with_parts(
                 None,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
@@ -9539,6 +9720,7 @@ fn lower_expr_stmt_with_parts(
                 Some(key_ty),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let (default_reg, _) = lower_expr_with_expected(
                 args[2].value,
@@ -9553,6 +9735,7 @@ fn lower_expr_stmt_with_parts(
                 Some(val_ty),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::MapGet {
@@ -9585,6 +9768,7 @@ fn lower_expr_stmt_with_parts(
                 None,
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
@@ -9610,6 +9794,7 @@ fn lower_expr_stmt_with_parts(
                 Some(key_ty),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let (val_reg, _) = lower_expr_with_expected(
                 args[2].value,
@@ -9624,6 +9809,7 @@ fn lower_expr_stmt_with_parts(
                 Some(val_ty),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::MapSet {
@@ -9655,6 +9841,7 @@ fn lower_expr_stmt_with_parts(
                 adt_table,
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             out.push(IrInstr::Call {
                 dst: None,
@@ -9686,6 +9873,7 @@ fn lower_expr_stmt_with_parts(
                 Some(Type::I32),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::RngSeed {
@@ -9717,6 +9905,7 @@ fn lower_expr_stmt_with_parts(
                 Some(Type::I32),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             let (hi_reg, _) = lower_expr_with_expected(
                 args[1].value,
@@ -9731,6 +9920,7 @@ fn lower_expr_stmt_with_parts(
                 Some(Type::I32),
                 ret_ty,
                 closure_state,
+                ownership_events,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::RngNextI32 {
@@ -9759,6 +9949,7 @@ fn lower_expr_stmt_with_parts(
                 adt_table,
                 ret_ty,
                 closure_state,
+                ownership_events,
             );
         } else {
             return Err(FrontendError {
@@ -9785,6 +9976,7 @@ fn lower_expr_stmt_with_parts(
                 Some(sig.params[slot].clone()),
                 ret_ty.clone(),
                 closure_state,
+                ownership_events,
             )?;
             if t != sig.params[slot] {
                 return Err(FrontendError {
@@ -9824,6 +10016,7 @@ fn lower_expr_stmt_with_parts(
         adt_table,
         ret_ty,
         closure_state,
+        ownership_events,
     )?;
     Ok(())
 }
@@ -13862,5 +14055,222 @@ mod opt_tests {
             }
         "#;
         assert!(compile_program_to_ir(named_args).is_err());
+    }
+
+    // #1709 (FA-04-003): nested value/loop-expression lowering can erase
+    // frozen ownership events. Each test below pins one previously-lost
+    // event through its specific loss path (§10-13 of the governing spec),
+    // asserting exact event *count* (not mere containment) to catch both
+    // event loss and event duplication in the same assertion.
+
+    #[test]
+    fn ssf08_1709_nested_value_block_tuple_borrow_preserves_ownership_event() {
+        // Baseline defect: `lower_value_block_expr`'s `LetTuple` arm passed
+        // `&mut Vec::new()` to `bind_tuple_items` *and* hardcoded the
+        // source `AccessPath` to `None` - so the Borrow event was both
+        // unretained and never generated at this call site. Fixed: this
+        // nested `let (ref .., ..)` inside a value-producing block derives
+        // the same canonical path `lower_stmt`'s top-level twin derives,
+        // and writes into the enclosing function's one retained sink.
+        let src = r#"
+            fn pair() -> (i32, i32) = (1, 2);
+
+            fn main() {
+                let source: (i32, i32) = pair();
+                let total: i32 = {
+                    let (ref a, b): (i32, i32) = source;
+                    a
+                };
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let {
+            name: source_name, ..
+        } = program.arena.stmt(main_fn.body[0])
+        else {
+            panic!("expected source binding");
+        };
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(*source_name).tuple_index(0),
+            }]
+        );
+    }
+
+    // No `ssf08_1709_nested_value_block_record_borrow_preserves_ownership_event`
+    // test exists here. `sm-front::typecheck::infer_value_block_type`'s
+    // statement whitelist for any value-producing block (closure bodies,
+    // if/match arm bodies) is exactly `Const | Let | LetTuple | Discard |
+    // Expr(_)` (confirmed by direct inspection) - `LetRecord` is not
+    // admitted there at all, so `lower_value_block_expr`'s own `LetRecord`
+    // arm (fixed alongside `LetTuple`'s for the same #1709 defect: real
+    // `AccessPath` derivation instead of `None`, the real retained sink
+    // instead of `&mut Vec::new()`) is currently unreachable through the
+    // standard `parse -> typecheck -> lower` pipeline. This mirrors the
+    // #1664 closure-capture-constness precedent: the repair is real and
+    // architecturally required (the same producer/consumer pair the
+    // admitted `LetTuple` case already proves correct), but no admitted
+    // source can independently exercise it, and adding one would require
+    // widening frontend syntax, which is explicitly out of #1709's scope.
+    // The `LetTuple` regression above proves the shared mechanism.
+
+    #[test]
+    fn ssf08_1709_nested_value_block_record_update_write_event_preserved() {
+        // Baseline defect: `lower_value_block_expr`'s `Stmt::Let` arm never
+        // called `append_record_update_write_events_from_expr` at all (its
+        // top-level `lower_stmt` twin calls it as the first line of every
+        // relevant arm) - so a record-update write nested inside a value
+        // block produced zero events regardless of the sink.
+        let src = r#"
+            record DecisionContext {
+                camera: quad,
+                quality: f64,
+            }
+
+            fn main() {
+                let ctx: DecisionContext = DecisionContext { camera: T, quality: 0.75 };
+                let total: f64 = {
+                    let patched: DecisionContext = ctx with { quality: 1.0 };
+                    patched.quality
+                };
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
+            panic!("expected ctx binding");
+        };
+        let quality_field = program.records[0].fields[1].name;
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                path: AccessPath::new(*ctx_name).field(quality_field),
+            }]
+        );
+    }
+
+    #[test]
+    fn ssf08_1709_loop_expr_fallback_preserves_ownership_event() {
+        // Baseline defect: `lower_loop_expr_stmt`'s `_` fallback arm built a
+        // temporary `LoweringCtx` with `ownership_events: Vec::new()`,
+        // delegated to `lower_stmt`, and copied back every piece of state
+        // except `ownership_events` - so a `LetTuple` reaching this
+        // fallback (it is not one of the `If`/`Match` special-cased forms)
+        // emitted a real Borrow event into a channel that was then
+        // silently dropped when the temporary `ctx` went out of scope.
+        let src = r#"
+            fn pair() -> (i32, i32) = (1, 2);
+
+            fn main() {
+                let source: (i32, i32) = pair();
+                let total: i32 = loop {
+                    let (ref a, _): (i32, i32) = source;
+                    break a;
+                };
+                return;
+            }
+        "#;
+
+        let (program, main) = lower_single_function_with_program(src, "main");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn");
+        let Stmt::Let {
+            name: source_name, ..
+        } = program.arena.stmt(main_fn.body[0])
+        else {
+            panic!("expected source binding");
+        };
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Borrow,
+                path: AccessPath::new(*source_name).tuple_index(0),
+            }]
+        );
+    }
+
+    #[test]
+    fn ssf08_1709_lifted_closure_owns_body_ownership_event_not_parent() {
+        // #1709 is not solved if the event is merely moved into the parent
+        // function (§13/§26): a lifted closure is a new `IrFunction`, hence
+        // a new function-owned event sink. The closure body here contains
+        // the same ref-capture tuple destructuring as the other #1709
+        // regressions; the resulting Borrow event must land on the lifted
+        // helper's own `ownership_events`, and must be absent from the
+        // parent (`main`) function's event stream.
+        let src = r#"
+            fn pair() -> (i32, i32) = (1, 2);
+
+            fn main() {
+                let source: (i32, i32) = pair();
+                let f: Closure(i32 -> i32) = (x => {
+                    let (ref a, b): (i32, i32) = source;
+                    a + x
+                });
+                let total: i32 = f(10);
+                return;
+            }
+        "#;
+
+        let program = parse_program(src).expect("program should parse");
+        let fn_table = build_fn_table(&program).expect("function table should build");
+        let record_table = build_record_table(&program).expect("record table should build");
+        let adt_table = build_adt_table(&program).expect("adt table should build");
+        type_check_program(&program).expect("program should type-check");
+        let main_fn = program
+            .functions
+            .iter()
+            .find(|func| program.arena.symbol_name(func.name) == "main")
+            .expect("main fn should exist");
+        let lowered = lower_function_to_ir_with_tables(
+            main_fn,
+            &program.arena,
+            &fn_table,
+            &record_table,
+            &adt_table,
+            &program.impls,
+        )
+        .expect("main should lower");
+
+        let Stmt::Let {
+            name: source_name, ..
+        } = program.arena.stmt(main_fn.body[0])
+        else {
+            panic!("expected source binding");
+        };
+        let expected_event = OwnershipPathEvent {
+            kind: OwnershipPathEventKind::Borrow,
+            path: AccessPath::new(*source_name).tuple_index(0),
+        };
+
+        let lifted = lowered
+            .lifted
+            .iter()
+            .find(|func| func.name.starts_with("__closure_main_"))
+            .expect("closure lowering should produce a lifted helper");
+        assert_eq!(lifted.ownership_events, vec![expected_event.clone()]);
+        assert!(
+            !lowered.primary.ownership_events.contains(&expected_event),
+            "closure-body-local ownership event must not leak into the parent function"
+        );
     }
 }
