@@ -11305,13 +11305,36 @@ mod opt_tests {
     }
 
     #[test]
-    fn lowering_preserves_const_capture_in_closure() {
-        // #1664 completion: proves the closure-capture call site's
-        // is_const(*capture)? migration still lowers a const capture
-        // successfully -- this is the one of the three migrated call
-        // sites with no sm-front-level equivalent check (capture
-        // constness preservation into the lifted helper's own
-        // environment is purely an sm-ir lowering concern).
+    fn lowering_succeeds_for_closure_capturing_const_binding() {
+        // #1664 completion. What this proves: the closure-capture call
+        // site's is_const(*capture)? migration (bool -> Result) does not
+        // regress the ordinary case -- a closure capturing a const
+        // binding still lowers successfully and emits its lifted helper.
+        //
+        // What this does NOT prove: that the captured binding was
+        // actually inserted into the lifted helper's own environment via
+        // lifted_env.insert_const(...) rather than lifted_env.insert(...)
+        // -- i.e. this does not independently verify constness
+        // preservation *within* the lifted environment.
+        //
+        // That could not be observed directly without architectural
+        // distortion. The only operation whose outcome differs between
+        // insert_const and insert is an assignment to the captured name
+        // rejecting as const -- and a closure body is a value-producing
+        // block (`infer_value_block_type` in
+        // crates/sm-front/src/typecheck.rs), which admits only
+        // `Stmt::Const | Let | LetTuple | Discard | Expr(_)`; `Stmt::Assign`
+        // is categorically not admitted inside any value-producing block,
+        // closure bodies included (confirmed by direct inspection, and
+        // empirically: `(x => { offset = 2.0; x })` fails to parse with
+        // "expected '}' after value-producing block", independent of
+        // constness). No admitted source can place a reassignment inside
+        // a closure body at all, so no admitted source can make lowering
+        // outcome differ based on which of the two `lifted_env` calls
+        // fired. Exposing `lifted_env` itself from
+        // `lower_closure_literal_expr` for direct inspection would be a
+        // production hook added solely for this test, which is exactly
+        // what this migration must not do.
         let src = r#"
             fn main() {
                 const offset: f64 = 1.0;
