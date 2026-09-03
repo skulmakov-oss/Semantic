@@ -2464,7 +2464,7 @@ fn lower_closure_literal_expr(
             ),
         })?;
         lifted_signature_params.push(callable_family_for_type(&capture_ty)?);
-        if env.is_const(*capture) {
+        if env.is_const(*capture)? {
             lifted_env.insert_const(*capture, capture_ty.clone());
         } else {
             lifted_env.insert(*capture, capture_ty.clone());
@@ -5008,7 +5008,7 @@ fn assign_tuple_items(
                 resolve_symbol_name(arena, *name)?
             ),
         })?;
-        if env.is_const(*name) {
+        if env.is_const(*name)? {
             return Err(FrontendError {
                 pos: 0,
                 message: format!(
@@ -6104,7 +6104,7 @@ fn lower_stmt(
                     resolve_symbol_name(arena, *name)?
                 ),
             })?;
-            if env.is_const(*name) {
+            if env.is_const(*name)? {
                 return Err(FrontendError {
                     pos: 0,
                     message: format!(
@@ -11279,6 +11279,53 @@ mod opt_tests {
         assert!(err
             .message
             .contains("cannot assign to const binding 'total'"));
+    }
+
+    #[test]
+    fn lowering_rejects_tuple_assignment_to_const_binding() {
+        // #1664 completion: is_const's fail-closed migration (bool -> ?)
+        // must not disturb this rejection for the tuple-destructuring
+        // assignment call site.
+        let src = r#"
+            fn pair(flag: bool) -> (i32, bool) = (1, flag);
+
+            fn main() {
+                const count: i32 = 0;
+                let ready: bool = false;
+                (count, ready) = pair(true);
+                return;
+            }
+        "#;
+
+        let err =
+            compile_program_to_ir(src).expect_err("tuple assignment to const target must reject");
+        assert!(err
+            .message
+            .contains("cannot assign to const binding 'count'"));
+    }
+
+    #[test]
+    fn lowering_preserves_const_capture_in_closure() {
+        // #1664 completion: proves the closure-capture call site's
+        // is_const(*capture)? migration still lowers a const capture
+        // successfully -- this is the one of the three migrated call
+        // sites with no sm-front-level equivalent check (capture
+        // constness preservation into the lifted helper's own
+        // environment is purely an sm-ir lowering concern).
+        let src = r#"
+            fn main() {
+                const offset: f64 = 1.0;
+                let add: Closure(f64 -> f64) = (x => x + offset);
+                let total: f64 = add(2.0);
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src)
+            .expect("closure capturing a const binding should lower successfully");
+        assert!(ir
+            .iter()
+            .any(|func| func.name.starts_with("__closure_main_")));
     }
 
     #[test]

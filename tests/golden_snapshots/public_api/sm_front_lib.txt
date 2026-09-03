@@ -1,16 +1,20 @@
 source: crates/sm-front/src/lib.rs
 #[cfg(any(feature = "alloc", feature = "std"))]
+pub mod hello_parser;
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub mod hello_sema;
+#[cfg(any(feature = "alloc", feature = "std"))]
 pub mod types;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use types::{
-#[cfg(any(feature = "alloc", feature = "std"))]
 pub use sm_profile::{CompatibilityMode, ParserProfile};
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub use types::{ AdtCtorExpr, AdtDecl, AdtVariant, AstArena, BinaryOp, BlockExpr, CallArg, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily, Expr, ExprId, FrontendError, FrontendErrorKind, Function, IfExpr, ImplDecl, IterableLoopDesugaring, LogosEntity, LogosEntityField, LogosEntityFieldKind, LogosLaw, LogosProgram, LogosSystem, LogosWhen, LoopExpr, MapType, MatchArm, MatchExpr, MatchExprArm, PathAvailability, PatternPath, Program, QuadVal, RecordDecl, RecordField, RecordFieldExpr, RecordInitField, RecordLiteralExpr, RecordUpdateExpr, SchemaDecl, SchemaField, SchemaRole, SchemaShape, SchemaVariant, SchemaVersion, SequenceCollectionFamily, SequenceIndexExpr, SequenceLiteral, SequenceType, Stmt, StmtId, SymbolId, TextLiteral, TextLiteralFamily, Token, TokenKind, TraitBound, TraitDecl, TraitMethodSig, TuplePatternItem, Type, UnaryOp, ValidationCheck, ValidationFieldPlan, ValidationPlan, ValidationShapePlan, ValidationVariantPlan, };
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod lexer;
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub mod parser;
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub use typecheck::{
+pub use typecheck::{ derive_validation_plan_table, type_check_function, type_check_function_with_table, type_check_program, };
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FnSig {
@@ -50,14 +54,15 @@ pub fn pop_scope(&mut self) {
 pub fn insert(&mut self, name: SymbolId, ty: Type) {
 pub fn insert_mut(&mut self, name: SymbolId, ty: Type) {
 pub fn insert_const(&mut self, name: SymbolId, ty: Type) {
-pub fn mark_consumed(&mut self, name: SymbolId) {
-pub fn is_consumed(&self, name: SymbolId) -> bool {
-pub fn mark_path_state(
-pub fn check_path_available(
-pub fn check_capture_allowed(
+pub fn mark_consumed(&mut self, name: SymbolId) -> Result<(), crate::types::FrontendError> {
+pub fn is_consumed(&self, name: SymbolId) -> Result<bool, crate::types::FrontendError> {
+pub fn mark_path_state( &mut self, name: SymbolId, path: crate::types::PatternPath, state: crate::types::PathAvailability, ) -> Result<(), crate::types::FrontendError> {
+pub fn check_path_available( &self, name: SymbolId, access_path: &crate::types::PatternPath, ) -> Result<(), crate::types::FrontendError> {
+pub fn check_capture_allowed( &self, name: SymbolId, path: &crate::types::PatternPath, capture: crate::types::CaptureMode, ) -> Result<(), crate::types::FrontendError> {
 pub fn get(&self, name: SymbolId) -> Option<Type> {
-pub fn is_const(&self, name: SymbolId) -> bool {
-pub fn is_mutable(&self, name: SymbolId) -> bool {
+pub fn is_const(&self, name: SymbolId) -> Result<bool, crate::types::FrontendError> {
+pub fn is_mutable(&self, name: SymbolId) -> Result<bool, crate::types::FrontendError> {
+pub(crate) fn join_ownership_from( &mut self, successors: &[ScopeEnv], ) -> Result<(), crate::types::FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn build_fn_table(program: &Program) -> Result<FnTable, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
@@ -69,18 +74,25 @@ pub fn build_trait_table(program: &Program) -> Result<TraitTable, FrontendError>
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn build_schema_table(program: &Program) -> Result<SchemaTable, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn canonicalize_declared_type(
+pub fn canonicalize_declared_type( ty: &Type, record_table: &RecordTable, adt_table: &AdtTable, arena: &AstArena, ) -> Result<Type, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn canonicalize_declared_type_generic(
+pub fn canonicalize_declared_type_generic( ty: &Type, record_table: &RecordTable, adt_table: &AdtTable, arena: &AstArena, type_params: &[SymbolId], ) -> Result<Type, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn builtin_sig(name: &str) -> Option<FnSig> {
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn reorder_call_args(
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OrderedCallArgs {
+pub slots: Vec<ExprId>,
+pub eval_order: Vec<usize>,
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn resolve_symbol_name<'a>(arena: &'a AstArena, id: SymbolId) -> Result<&'a str, FrontendError> {
+pub fn reorder_call_args( call_name: SymbolId, args: &[CallArg], sig: &FnSig, arena: &AstArena, ) -> Result<OrderedCallArgs, FrontendError> {
+#[cfg(any(feature = "alloc", feature = "std"))]
+pub fn resolve_symbol_name<'a>( arena: &'a AstArena, id: SymbolId, ) -> Result<&'a str, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstBundle {
+RustLike(Program),
+Logos(LogosProgram),
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, Copy)]
 pub struct CompilePolicyView<'a> {
@@ -89,24 +101,29 @@ pub const fn new(profile: &'a ParserProfile) -> Self {
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn parse_rustlike(input: &str) -> Result<AstBundle, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn parse_rustlike_with_profile(
+pub fn parse_rustlike_with_profile( input: &str, profile: &ParserProfile, ) -> Result<AstBundle, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn parse_logos(input: &str) -> Result<AstBundle, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn parse_logos_with_profile(
+pub fn parse_logos_with_profile( input: &str, profile: &ParserProfile, ) -> Result<AstBundle, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn parse_program(input: &str) -> Result<Program, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn parse_program_with_profile(
+pub fn parse_program_with_profile( input: &str, profile: &ParserProfile, ) -> Result<Program, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn parse_logos_program(input: &str) -> Result<LogosProgram, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
-pub fn parse_logos_program_with_profile(
+pub fn parse_logos_program_with_profile( input: &str, profile: &ParserProfile, ) -> Result<LogosProgram, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
 pub fn lex(input: &str) -> Result<Vec<Token>, FrontendError> {
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompileProfile {
+Auto,
+RustLike,
+Logos,
 #[cfg(any(feature = "alloc", feature = "std"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OptLevel {
+O0,
+O1,
