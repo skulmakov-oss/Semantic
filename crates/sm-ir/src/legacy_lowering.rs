@@ -8385,6 +8385,16 @@ fn lower_loop_expr(
 
     let mut body_env = env.clone();
     body_env.push_scope();
+    // #1724 corrective (exact-head review): this scope boundary mirrors
+    // `body_env`'s own lexical scope, exactly like every other construct in
+    // this function's `lower_loop_expr_stmt` (If/Match arms below already
+    // pair `push_scope`/`pop_scope` on both `ScopeEnv` and `LoweredLocalEnv`)
+    // - without it, a `let` directly in a loop-expression body binds into
+    // the enclosing scope frame instead of a fresh one, so it silently
+    // overwrites (rather than shadows) a same-spelling outer binding's
+    // lowered-local key, and that overwrite survives after the loop
+    // expression exits.
+    lowered_locals.push_scope();
     for stmt in &loop_expr.body {
         lower_loop_expr_stmt(
             *stmt,
@@ -8403,6 +8413,7 @@ fn lower_loop_expr(
         )?;
     }
     body_env.pop_scope();
+    lowered_locals.pop_scope();
     out.push(IrInstr::Jmp { label: start_label });
     out.push(IrInstr::Label { name: end_label });
 
@@ -15035,6 +15046,93 @@ mod opt_tests {
         assert_eq!(
             store_keys[0], store_keys[1],
             "reassignment to an existing binding must reuse its exact lowered key, not mint a new one"
+        );
+    }
+
+    #[test]
+    fn ssf08_1724_loop_expression_shadow_uses_distinct_lowered_local_keys_and_restores_outer_after_exit(
+    ) {
+        // Corrective regression (exact-head review on PR #1889): IR-structural
+        // companion to `loop_expression_body_shadow_restores_outer_binding_after_loop_exits`
+        // in `tests/lexical_binding_identity_e2e.rs`. `lower_loop_expr` (the
+        // value-position `Expr::Loop` path) pushed a `ScopeEnv` scope for its
+        // body without a matching `LoweredLocalEnv` scope, so a `let` inside
+        // the loop body bound into the enclosing scope frame and overwrote
+        // the outer binding's key outright instead of shadowing it.
+        let src = r#"
+            fn main() {
+                let x: i32 = 1;
+
+                let y: i32 = loop {
+                    let x: i32 = 2;
+                    assert(x == 2);
+                    break x;
+                };
+
+                assert(y == 2);
+                assert(x == 1);
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src).expect("loop-expr shadow should lower");
+        let main = &ir[0];
+
+        let x_store_keys: Vec<&str> = main
+            .instrs
+            .iter()
+            .filter_map(|instr| match instr {
+                IrInstr::StoreVar { name, .. } if name.ends_with("_x") => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            x_store_keys.len(),
+            2,
+            "expected exactly the outer declaration and the loop-body declaration, got {x_store_keys:?}"
+        );
+        let outer_x_key = x_store_keys[0];
+        let inner_loop_x_key = x_store_keys[1];
+        assert_ne!(
+            outer_x_key, inner_loop_x_key,
+            "outer 'x' and the loop-expression body's shadowing 'x' must lower to distinct runtime-local keys"
+        );
+
+        // `break x;` must resolve to the *inner* (loop-body) key: the
+        // LoadVar immediately preceding the synthetic `__loop_expr_*_result`
+        // StoreVar that carries the break value out of the loop.
+        let break_store_pos = main
+            .instrs
+            .iter()
+            .position(|instr| {
+                matches!(instr, IrInstr::StoreVar { name, .. }
+                    if name.starts_with("__loop_expr_") && name.ends_with("_result"))
+            })
+            .expect("loop-expression result StoreVar must exist");
+        let break_value_key = match &main.instrs[break_store_pos - 1] {
+            IrInstr::LoadVar { name, .. } => name.as_str(),
+            other => panic!("expected LoadVar feeding the loop-expression result, got {other:?}"),
+        };
+        assert_eq!(
+            break_value_key, inner_loop_x_key,
+            "'break x' inside the loop body must read the loop-body binding's exact key"
+        );
+
+        // After the loop expression exits, the *last* use of 'x' (the final
+        // `assert(x == 1);`) must resolve back to the outer binding's exact
+        // key, not the loop-body binding's.
+        let post_loop_x_key = main
+            .instrs
+            .iter()
+            .rev()
+            .find_map(|instr| match instr {
+                IrInstr::LoadVar { name, .. } if name.ends_with("_x") => Some(name.as_str()),
+                _ => None,
+            })
+            .expect("a post-loop LoadVar for 'x' must exist");
+        assert_eq!(
+            post_loop_x_key, outer_x_key,
+            "use of 'x' after the loop expression exits must resolve to the outer binding's exact key"
         );
     }
 }

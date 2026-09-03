@@ -176,6 +176,36 @@ fn nested_value_block_shadow_does_not_fight_ownership_event_channel_threading() 
 }
 
 #[test]
+fn loop_expression_body_shadow_restores_outer_binding_after_loop_exits() {
+    // Corrective regression (exact-head review on PR #1889): `lower_loop_expr`
+    // (the value-position `Expr::Loop` path, distinct from the statement-loop
+    // path already covered by `statement_loop_body_shadow_restores_outer_binding_after_loop`
+    // above) pushed a fresh `ScopeEnv` scope for its body but did not push a
+    // matching `LoweredLocalEnv` scope. A `let` directly in the loop-expression
+    // body therefore bound into the *enclosing* scope frame and, since
+    // `SymbolId` is spelling-interned, silently overwrote the outer binding's
+    // lowered-local key - so the outer binding would incorrectly resolve to
+    // the loop's own value after the loop expression exited.
+    run_source(
+        r#"
+        fn main() {
+            let x: i32 = 1;
+
+            let y: i32 = loop {
+                let x: i32 = 2;
+                assert(x == 2);
+                break x;
+            };
+
+            assert(y == 2);
+            assert(x == 1);
+            return;
+        }
+        "#,
+    );
+}
+
+#[test]
 fn reassignment_targets_the_same_binding_not_a_fresh_one() {
     // Negative control (#1724 spec, required regression): a plain
     // reassignment to an existing mutable binding must resolve to that
