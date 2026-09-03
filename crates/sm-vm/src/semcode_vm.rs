@@ -4023,22 +4023,22 @@ mod tests {
                 (
                     "qtruth_and",
                     "fn main() { let result: quad = qtruth_and(T, F); return; }",
-                    "return=Unit; locals=[result=Quad(F)]",
+                    "return=Unit; locals=[__sm_local_0_result=Quad(F)]",
                 ),
                 (
                     "qtruth_or",
                     "fn main() { let result: quad = qtruth_or(T, F); return; }",
-                    "return=Unit; locals=[result=Quad(T)]",
+                    "return=Unit; locals=[__sm_local_0_result=Quad(T)]",
                 ),
                 (
                     "qtruth_not",
                     "fn main() { let result: quad = qtruth_not(T); return; }",
-                    "return=Unit; locals=[result=Quad(F)]",
+                    "return=Unit; locals=[__sm_local_0_result=Quad(F)]",
                 ),
                 (
                     "qtruth_impl",
                     "fn main() { let result: quad = qtruth_impl(T, F); return; }",
-                    "return=Unit; locals=[result=Quad(F)]",
+                    "return=Unit; locals=[__sm_local_0_result=Quad(F)]",
                 ),
             ];
 
@@ -7015,6 +7015,54 @@ mod tests {
         compile_program_to_semcode(src).expect("compile")
     }
 
+    // #1724 (FA-04-018): lowering now assigns each lexical binding its own
+    // `__sm_local_<id>_<source_name>` runtime-local key instead of reusing
+    // the raw source spelling, so these ownership-overlap fixtures can no
+    // longer find their synthetic root by matching the raw name in the
+    // string table. This resolver is fail-closed (0 or >1 matches panics)
+    // for the same reason `tests/runtime_ownership_e2e.rs`'s resolver is:
+    // silently falling back to "first match" would hide a real ambiguity.
+    fn resolve_unique_lowered_local_key(strings: &[String], source_name: &str) -> u32 {
+        let matches: Vec<usize> = strings
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| is_lowered_local_key_for(candidate, source_name))
+            .map(|(index, _)| index)
+            .collect();
+        match matches.as_slice() {
+            [] => panic!(
+                "no lowered runtime-local key found for source root '{source_name}' - \
+                 looked for '__sm_local_<id>_{source_name}' in the function's string \
+                 table {strings:?}"
+            ),
+            [single] => *single as u32,
+            multiple => panic!(
+                "ambiguous lowered runtime-local key for source root '{source_name}': \
+                 indexes {multiple:?} all match - the test must disambiguate which \
+                 binding it means"
+            ),
+        }
+    }
+
+    fn is_lowered_local_key_for(candidate: &str, source_name: &str) -> bool {
+        let Some(rest) = candidate.strip_prefix("__sm_local_") else {
+            return false;
+        };
+        let digits_end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if digits_end == 0 {
+            return false;
+        }
+        let Some(after_digits) = rest.get(digits_end..) else {
+            return false;
+        };
+        let Some(spelling) = after_digits.strip_prefix('_') else {
+            return false;
+        };
+        spelling == source_name
+    }
+
     fn adt_payload_write_overlap_bytes(
         borrowed_adt: Option<(u32, u16)>,
         write_adt: Option<(u32, u16)>,
@@ -7060,7 +7108,7 @@ mod tests {
             .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
             .unwrap_or(0);
         let own0_end = instr_start - sig0_len;
-        let e_root = strings.iter().position(|s| s == "e").expect("e root index") as u32;
+        let e_root = resolve_unique_lowered_local_key(&strings, "e");
         let ownership_start = code[..own0_end]
             .windows(OWNERSHIP_SECTION_TAG.len())
             .position(|window| window == OWNERSHIP_SECTION_TAG)
@@ -7201,10 +7249,7 @@ mod tests {
             .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
             .unwrap_or(0);
         let own0_end = instr_start - sig0_len;
-        let ctx_root = strings
-            .iter()
-            .position(|s| s == "ctx")
-            .expect("ctx root index") as u32;
+        let ctx_root = resolve_unique_lowered_local_key(&strings, "ctx");
         let ownership_start = code[..own0_end]
             .windows(OWNERSHIP_SECTION_TAG.len())
             .position(|window| window == OWNERSHIP_SECTION_TAG)
@@ -7266,10 +7311,12 @@ mod tests {
             Some(field_name) => {
                 out.extend_from_slice(&1u16.to_le_bytes());
                 out.push(OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL);
-                let field_symbol = strings
-                    .iter()
-                    .position(|s| s == field_name)
-                    .expect("field symbol") as u32;
+                // This fixture's "field" names (`camera`/`quality`) are
+                // actually plain local-variable declarations in the
+                // synthetic source above, not real record-type fields, so
+                // they go through the same lowered-local mangling as any
+                // other local under #1724 and need the same resolver.
+                let field_symbol = resolve_unique_lowered_local_key(strings, field_name);
                 out.extend_from_slice(&field_symbol.to_le_bytes());
             }
             None => out.extend_from_slice(&0u16.to_le_bytes()),
@@ -7323,10 +7370,7 @@ mod tests {
             .map(|sig| SIGNATURE_SECTION_TAG.len() + 2 + sig.families.len())
             .unwrap_or(0);
         let own0_end = instr_start - sig0_len;
-        let total_root = strings
-            .iter()
-            .position(|s| s == "total")
-            .expect("total root index") as u32;
+        let total_root = resolve_unique_lowered_local_key(&strings, "total");
         let ownership_start = code[..own0_end]
             .windows(OWNERSHIP_SECTION_TAG.len())
             .position(|window| window == OWNERSHIP_SECTION_TAG)

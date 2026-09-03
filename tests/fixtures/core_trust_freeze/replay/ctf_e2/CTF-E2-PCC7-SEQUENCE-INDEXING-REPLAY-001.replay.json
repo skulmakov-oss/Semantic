@@ -7,7 +7,7 @@
   "replay_count": 5,
   "expected_status": "accept",
   "source_hash": "2881ddd5433113ef",
-  "summary_hash": "7e740b5173b9bfa6",
+  "summary_hash": "05ff01ea5d66c00f",
   "verifier_status": "accept",
   "vm_status": "ok",
   "all_runs_equal": true,
@@ -18,7 +18,7 @@
     "check_status": "accept",
     "source_hash": "2881ddd5433113ef",
     "ir_shape_hash": "60b2c1f62a42b3e7",
-    "semcode_hash": "f580dbc21cb7c4e2",
+    "semcode_hash": "700ec2041ce5562f",
     "verifier_status": "accept",
     "vm_status": "ok"
   },
@@ -27,7 +27,7 @@
     "check_status": "accept",
     "source_hash": "2881ddd5433113ef",
     "ir_shape_hash": "60b2c1f62a42b3e7",
-    "semcode_hash": "f580dbc21cb7c4e2",
+    "semcode_hash": "700ec2041ce5562f",
     "verifier_status": "accept",
     "vm_status": "ok"
   },
@@ -36,7 +36,7 @@
     "check_status": "accept",
     "source_hash": "2881ddd5433113ef",
     "ir_shape_hash": "60b2c1f62a42b3e7",
-    "semcode_hash": "f580dbc21cb7c4e2",
+    "semcode_hash": "700ec2041ce5562f",
     "verifier_status": "accept",
     "vm_status": "ok"
   },
@@ -45,7 +45,7 @@
     "check_status": "accept",
     "source_hash": "2881ddd5433113ef",
     "ir_shape_hash": "60b2c1f62a42b3e7",
-    "semcode_hash": "f580dbc21cb7c4e2",
+    "semcode_hash": "700ec2041ce5562f",
     "verifier_status": "accept",
     "vm_status": "ok"
   },
@@ -54,7 +54,7 @@
     "check_status": "accept",
     "source_hash": "2881ddd5433113ef",
     "ir_shape_hash": "60b2c1f62a42b3e7",
-    "semcode_hash": "f580dbc21cb7c4e2",
+    "semcode_hash": "700ec2041ce5562f",
     "verifier_status": "accept",
     "vm_status": "ok"
   }

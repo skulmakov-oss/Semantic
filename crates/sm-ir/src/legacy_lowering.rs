@@ -15,7 +15,7 @@ use sm_front::types::{
     SequenceType,
 };
 use sm_front::{CallArg, LoopExpr, TuplePatternItem};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum IrInstr {
@@ -677,8 +677,16 @@ pub fn lower_expr_to_ir(
     };
     let empty_records = RecordTable::new();
     let empty_adts = AdtTable::new();
+    // #1724 (FA-04-018): mirrors `ownership_events` below - no owning
+    // `IrFunction`, so a local instance is not the same defect class as a
+    // same-function nested path losing its parent's state. `var_types`
+    // entries are pre-existing frame locals supplied by the caller under
+    // their raw spelling (`bind_raw`), not fresh declarations this
+    // function lowers itself - there is nothing to shadow-mangle here.
+    let mut lowered_locals = LoweredLocalEnv::new();
     for (name, ty) in var_types {
         env.insert(*name, ty.clone());
+        lowered_locals.bind_raw(arena, *name)?;
     }
     // #1709: this entry point has no owning `IrFunction` (it lowers a bare
     // expression, not a compiled function - see the `lifted_funcs` rejection
@@ -700,6 +708,7 @@ pub fn lower_expr_to_ir(
         Type::Unit,
         &mut closure_state,
         &mut ownership_events,
+        &mut lowered_locals,
     )?;
     if !closure_state.lifted_funcs.is_empty() {
         return Err(FrontendError {
@@ -801,7 +810,7 @@ fn lower_function_to_ir_with_tables(
     })?;
     for (idx, (name, _)) in func.params.iter().enumerate() {
         ctx.instrs.push(IrInstr::StoreVar {
-            name: resolve_symbol_name(arena, *name)?.to_string(),
+            name: ctx.lowered_locals.bind(arena, *name)?,
             src: idx as u16,
         });
     }
@@ -819,6 +828,7 @@ fn lower_function_to_ir_with_tables(
             canonical_ret.clone(),
             &mut ctx.closure_state,
             &mut ctx.ownership_events,
+            &mut ctx.lowered_locals,
         )?;
         if cond_ty != Type::Bool {
             return Err(FrontendError {
@@ -847,6 +857,7 @@ fn lower_function_to_ir_with_tables(
         func.ret.clone(),
         &mut ctx.closure_state,
         &mut ctx.ownership_events,
+        &mut ctx.lowered_locals,
     )?;
     for stmt in &func.body {
         lower_stmt(
@@ -878,6 +889,7 @@ fn lower_function_to_ir_with_tables(
                 func.ret.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             lower_invariant_clauses(
                 &ctx.invariants,
@@ -895,6 +907,7 @@ fn lower_function_to_ir_with_tables(
                 func.ret.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             ctx.instrs.push(IrInstr::Ret { src: None });
         } else {
@@ -2431,6 +2444,7 @@ fn lower_closure_literal_expr(
     adt_table: &AdtTable,
     expected: Option<&Type>,
     closure_state: &mut ClosureLoweringState,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(u16, Type), FrontendError> {
     let Some(Type::Closure(expected_closure)) = expected else {
         return Err(FrontendError {
@@ -2467,6 +2481,13 @@ fn lower_closure_literal_expr(
     // boundaries) and must NOT be discarded as `Vec::new()` at construction
     // (that was the original #1709 defect for this call site).
     let mut lifted_ownership_events: Vec<OwnershipPathEvent> = Vec::new();
+    // #1724 (FA-04-018): same reasoning as `lifted_ownership_events` above,
+    // for lexical binding identity instead of ownership events - the
+    // lifted helper is a new `IrFunction`, hence its own fresh runtime-local
+    // namespace. A capture's parent-side key and its child-side key are
+    // deliberately different authorities/values (§11): the child must not
+    // resolve captures against the parent's frame.
+    let mut lifted_lowered_locals = LoweredLocalEnv::new();
     // #1773 (FA-09-005): the lifted helper's real invocation convention is
     // captures first (r0..captures.len()-1), then the closure's own param
     // (r{captures.len()}) - built here from the exact same `capture_ty`/
@@ -2490,7 +2511,7 @@ fn lower_closure_literal_expr(
             lifted_env.insert(*capture, capture_ty.clone());
         }
         lifted_instrs.push(IrInstr::StoreVar {
-            name: resolve_symbol_name(arena, *capture)?.to_string(),
+            name: lifted_lowered_locals.bind(arena, *capture)?,
             src: u16::try_from(index).map_err(|_| FrontendError {
                 pos: 0,
                 message: "closure capture index exceeds v0 limit".to_string(),
@@ -2505,7 +2526,7 @@ fn lower_closure_literal_expr(
     lifted_signature_params.push(callable_family_for_type(expected_closure.param.as_ref())?);
     lifted_env.insert(closure.param, expected_closure.param.as_ref().clone());
     lifted_instrs.push(IrInstr::StoreVar {
-        name: resolve_symbol_name(arena, closure.param)?.to_string(),
+        name: lifted_lowered_locals.bind(arena, closure.param)?,
         src: param_reg,
     });
 
@@ -2531,6 +2552,7 @@ fn lower_closure_literal_expr(
         expected_closure.ret.as_ref().clone(),
         closure_state,
         &mut lifted_ownership_events,
+        &mut lifted_lowered_locals,
     )?;
     if body_ty != expected_closure.ret.as_ref().clone() {
         return Err(FrontendError {
@@ -2556,7 +2578,7 @@ fn lower_closure_literal_expr(
         let capture_reg = alloc(next);
         out.push(IrInstr::LoadVar {
             dst: capture_reg,
-            name: resolve_symbol_name(arena, *capture)?.to_string(),
+            name: lowered_locals.resolve(arena, *capture)?,
         });
         capture_regs.push(capture_reg);
     }
@@ -2584,6 +2606,7 @@ fn lower_direct_closure_call_expr(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(u16, Type), FrontendError> {
     if closure_ty.family != ClosureValueFamily::UnaryDirect
         || closure_ty.capture != ClosureCapturePolicy::Immutable
@@ -2616,7 +2639,7 @@ fn lower_direct_closure_call_expr(
     let closure_reg = alloc(next);
     out.push(IrInstr::LoadVar {
         dst: closure_reg,
-        name: resolve_symbol_name(arena, name)?.to_string(),
+        name: lowered_locals.resolve(arena, name)?,
     });
     let (arg_reg, arg_ty) = lower_expr_with_expected(
         args[0].value,
@@ -2632,6 +2655,7 @@ fn lower_direct_closure_call_expr(
         ret_ty,
         closure_state,
         ownership_events,
+        lowered_locals,
     )?;
     if arg_ty != closure_ty.param.as_ref().clone() {
         return Err(FrontendError {
@@ -2668,6 +2692,7 @@ fn lower_direct_closure_call_stmt(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(), FrontendError> {
     if closure_ty.family != ClosureValueFamily::UnaryDirect
         || closure_ty.capture != ClosureCapturePolicy::Immutable
@@ -2690,7 +2715,7 @@ fn lower_direct_closure_call_stmt(
     let closure_reg = alloc(next);
     out.push(IrInstr::LoadVar {
         dst: closure_reg,
-        name: resolve_symbol_name(arena, name)?.to_string(),
+        name: lowered_locals.resolve(arena, name)?,
     });
     let (arg_reg, arg_ty) = lower_expr_with_expected(
         args[0].value,
@@ -2706,6 +2731,7 @@ fn lower_direct_closure_call_stmt(
         ret_ty,
         closure_state,
         ownership_events,
+        lowered_locals,
     )?;
     if arg_ty != closure_ty.param.as_ref().clone() {
         return Err(FrontendError {
@@ -2744,6 +2770,7 @@ fn lower_expr(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(u16, Type), FrontendError> {
     lower_expr_with_expected(
         expr_id,
@@ -2759,6 +2786,7 @@ fn lower_expr(
         ret_ty,
         closure_state,
         ownership_events,
+        lowered_locals,
     )
 }
 
@@ -2776,6 +2804,7 @@ fn lower_expr_with_expected(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(u16, Type), FrontendError> {
     match arena.expr(expr_id) {
         Expr::QuadLiteral(v) => {
@@ -2826,6 +2855,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 if let Some(expected_item_ty) = item_ty.as_ref() {
                     if *expected_item_ty != actual_ty {
@@ -2870,6 +2900,7 @@ fn lower_expr_with_expected(
             adt_table,
             expected.as_ref(),
             closure_state,
+            lowered_locals,
         ),
         Expr::Range(range_expr) => {
             let (start_reg, start_ty) = lower_expr_with_expected(
@@ -2886,6 +2917,7 @@ fn lower_expr_with_expected(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if start_ty != Type::I32 {
                 return Err(FrontendError {
@@ -2910,6 +2942,7 @@ fn lower_expr_with_expected(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if end_ty != Type::I32 {
                 return Err(FrontendError {
@@ -2967,6 +3000,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 regs.push(reg);
                 tys.push(ty);
@@ -3014,6 +3048,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 lowered_fields.insert(field.name, reg);
             }
@@ -3054,6 +3089,7 @@ fn lower_expr_with_expected(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let Type::Record(record_name) = base_ty else {
                 return Err(FrontendError {
@@ -3111,6 +3147,7 @@ fn lower_expr_with_expected(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let Type::Sequence(sequence_ty) = base_ty else {
                 return Err(FrontendError {
@@ -3135,6 +3172,7 @@ fn lower_expr_with_expected(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if index_ty != Type::I32 {
                 return Err(FrontendError {
@@ -3167,6 +3205,7 @@ fn lower_expr_with_expected(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let Type::Record(record_name) = base_ty else {
                 return Err(FrontendError {
@@ -3220,6 +3259,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 if lowered_overrides.insert(field.name, reg).is_some() {
                     return Err(FrontendError {
@@ -3272,6 +3312,7 @@ fn lower_expr_with_expected(
             ret_ty,
             closure_state,
             ownership_events,
+            lowered_locals,
         ),
         Expr::NumericLiteral(NumericLiteral::I32(n)) => {
             let r = alloc(next);
@@ -3358,7 +3399,7 @@ fn lower_expr_with_expected(
             let r = alloc(next);
             out.push(IrInstr::LoadVar {
                 dst: r,
-                name: resolve_symbol_name(arena, *name)?.to_string(),
+                name: lowered_locals.resolve(arena, *name)?,
             });
             Ok((r, ty))
         }
@@ -3376,6 +3417,7 @@ fn lower_expr_with_expected(
             ret_ty,
             closure_state,
             ownership_events,
+            lowered_locals,
         ),
         Expr::If(if_expr) => {
             let (cond_reg, cond_ty) = lower_expr(
@@ -3391,6 +3433,7 @@ fn lower_expr_with_expected(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -3428,6 +3471,7 @@ fn lower_expr_with_expected(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             out.push(IrInstr::StoreVar {
                 name: result_name.clone(),
@@ -3452,6 +3496,7 @@ fn lower_expr_with_expected(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if then_ty != else_ty {
                 return Err(FrontendError {
@@ -3492,6 +3537,7 @@ fn lower_expr_with_expected(
             ret_ty,
             closure_state,
             ownership_events,
+            lowered_locals,
         ),
         Expr::Match(match_expr) => lower_match_expr(
             match_expr,
@@ -3507,6 +3553,7 @@ fn lower_expr_with_expected(
             ret_ty,
             closure_state,
             ownership_events,
+            lowered_locals,
         ),
         Expr::Call(name, args) => {
             if is_builtin_assert_name(*name, arena, fn_table)? {
@@ -3539,6 +3586,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
@@ -3578,6 +3626,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
@@ -3619,6 +3668,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let Type::Sequence(seq_type) = &seq_ty else {
                     return Err(FrontendError {
@@ -3644,6 +3694,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 if val_ty != elem_ty {
                     return Err(FrontendError {
@@ -3686,6 +3737,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let Type::Sequence(seq_type) = &seq_ty else {
                     return Err(FrontendError {
@@ -3711,6 +3763,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 if val_ty != elem_ty {
                     return Err(FrontendError {
@@ -3747,6 +3800,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 return match &arg_ty {
                     Type::Sequence(_) => {
@@ -3822,6 +3876,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
@@ -3847,6 +3902,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::MapContains {
@@ -3879,6 +3935,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
@@ -3905,6 +3962,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let (default_reg, _) = lower_expr_with_expected(
                     args[2].value,
@@ -3920,6 +3978,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::MapGet {
@@ -3953,6 +4012,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let Type::Map(ref map_type) = map_ty else {
                     return Err(FrontendError {
@@ -3979,6 +4039,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let (val_reg, _) = lower_expr_with_expected(
                     args[2].value,
@@ -3994,6 +4055,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let dst = alloc(next);
                 let ret_map_ty = map_ty.clone();
@@ -4030,6 +4092,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::Call {
@@ -4060,6 +4123,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::Call {
@@ -4100,6 +4164,7 @@ fn lower_expr_with_expected(
                         ret_ty.clone(),
                         closure_state,
                         ownership_events,
+                        lowered_locals,
                     )?;
                     if arg_ty != Type::Quad {
                         return Err(FrontendError {
@@ -4156,6 +4221,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::RngSeed {
@@ -4188,6 +4254,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let (hi_reg, _) = lower_expr_with_expected(
                     args[1].value,
@@ -4203,6 +4270,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let dst = alloc(next);
                 out.push(IrInstr::RngNextI32 {
@@ -4232,6 +4300,7 @@ fn lower_expr_with_expected(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 );
             } else {
                 return Err(FrontendError {
@@ -4263,6 +4332,7 @@ fn lower_expr_with_expected(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 if t != expected_arg_ty {
                     return Err(FrontendError {
@@ -4322,6 +4392,7 @@ fn lower_expr_with_expected(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             match op {
                 UnaryOp::Not => {
@@ -4419,6 +4490,7 @@ fn lower_expr_with_expected(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let (rr, rt) = lower_expr_with_expected(
                 *right,
@@ -4434,6 +4506,7 @@ fn lower_expr_with_expected(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if lt != rt {
                 return Err(FrontendError {
@@ -4732,6 +4805,7 @@ fn bind_tuple_items(
     next: &mut u16,
     out: &mut Vec<IrInstr>,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
     env: &mut ScopeEnv,
 ) -> Result<(), FrontendError> {
     let Type::Tuple(item_tys) = tuple_ty else {
@@ -4785,7 +4859,7 @@ fn bind_tuple_items(
         });
         env.insert(name, item_ty.clone());
         out.push(IrInstr::StoreVar {
-            name: resolve_symbol_name(arena, name)?.to_string(),
+            name: lowered_locals.bind(arena, name)?,
             src: reg,
         });
         if capture == sm_front::types::CaptureMode::Borrow {
@@ -4820,6 +4894,7 @@ fn bind_record_items(
     next: &mut u16,
     out: &mut Vec<IrInstr>,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
     env: &mut ScopeEnv,
     record_table: &RecordTable,
     _adt_table: &AdtTable,
@@ -4873,7 +4948,7 @@ fn bind_record_items(
             } => {
                 env.insert(target, field.ty.clone());
                 out.push(IrInstr::StoreVar {
-                    name: resolve_symbol_name(arena, target)?.to_string(),
+                    name: lowered_locals.bind(arena, target)?,
                     src: reg,
                 });
                 if capture == sm_front::types::CaptureMode::Borrow {
@@ -4914,6 +4989,7 @@ fn bind_let_else_record_items(
     next: &mut u16,
     out: &mut Vec<IrInstr>,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
     env: &mut ScopeEnv,
     loop_stack: &mut Vec<LoopLoweringFrame>,
     fn_table: &FnTable,
@@ -5027,6 +5103,7 @@ fn bind_let_else_record_items(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 out.push(IrInstr::Label {
                     name: continue_label,
@@ -5044,7 +5121,7 @@ fn bind_let_else_record_items(
     for (name, reg, item_ty) in deferred_binds {
         env.insert(name, item_ty);
         out.push(IrInstr::StoreVar {
-            name: resolve_symbol_name(arena, name)?.to_string(),
+            name: lowered_locals.bind(arena, name)?,
             src: reg,
         });
     }
@@ -5059,6 +5136,7 @@ fn assign_tuple_items(
     next: &mut u16,
     out: &mut Vec<IrInstr>,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
     env: &ScopeEnv,
 ) -> Result<(), FrontendError> {
     let Type::Tuple(item_tys) = tuple_ty else {
@@ -5119,7 +5197,7 @@ fn assign_tuple_items(
             index,
         });
         out.push(IrInstr::StoreVar {
-            name: resolve_symbol_name(arena, *name)?.to_string(),
+            name: lowered_locals.resolve(arena, *name)?,
             src: reg,
         });
         ownership_events.push(OwnershipPathEvent {
@@ -5181,7 +5259,6 @@ fn lower_for_range_stmt_from_reg(
     let exclusive_label = format!("for_range_{}_exclusive", id);
     let body_label = format!("for_range_{}_body", id);
     let end_label = format!("for_range_{}_end", id);
-    let loop_name = resolve_symbol_name(arena, name)?.to_string();
 
     ctx.instrs.push(IrInstr::Label {
         name: test_label.clone(),
@@ -5235,6 +5312,8 @@ fn lower_for_range_stmt_from_reg(
     let mut body_env = env.clone();
     body_env.push_scope();
     body_env.insert_const(name, Type::I32);
+    ctx.lowered_locals.push_scope();
+    let loop_name = ctx.lowered_locals.bind(arena, name)?;
     ctx.instrs.push(IrInstr::StoreVar {
         name: loop_name,
         src: current_reg,
@@ -5252,6 +5331,7 @@ fn lower_for_range_stmt_from_reg(
         )?;
     }
     body_env.pop_scope();
+    ctx.lowered_locals.pop_scope();
 
     let reload_reg = alloc(&mut ctx.next_reg);
     let next_reg = alloc(&mut ctx.next_reg);
@@ -5313,6 +5393,7 @@ fn lower_for_range_stmt(
         ret_ty.clone(),
         &mut ctx.closure_state,
         &mut ctx.ownership_events,
+        &mut ctx.lowered_locals,
     )?;
     if range_ty != Type::RangeI32 {
         return Err(FrontendError {
@@ -5376,6 +5457,7 @@ fn lower_while_stmt(
         ret_ty.clone(),
         &mut ctx.closure_state,
         &mut ctx.ownership_events,
+        &mut ctx.lowered_locals,
     )?;
     if cond_ty != Type::Bool {
         return Err(FrontendError {
@@ -5395,6 +5477,7 @@ fn lower_while_stmt(
     ctx.instrs.push(IrInstr::Label { name: body_label });
     let mut body_env = env.clone();
     body_env.push_scope();
+    ctx.lowered_locals.push_scope();
     for stmt in body {
         lower_stmt(
             *stmt,
@@ -5408,6 +5491,7 @@ fn lower_while_stmt(
         )?;
     }
     body_env.pop_scope();
+    ctx.lowered_locals.pop_scope();
     let _ = ctx.loop_stack.pop().expect("control loop frame must exist");
     ctx.instrs.push(IrInstr::Jmp { label: test_label });
     ctx.instrs.push(IrInstr::Label { name: end_label });
@@ -5440,6 +5524,7 @@ fn lower_statement_loop(
     });
     let mut body_env = env.clone();
     body_env.push_scope();
+    ctx.lowered_locals.push_scope();
     for stmt in body {
         lower_stmt(
             *stmt,
@@ -5453,6 +5538,7 @@ fn lower_statement_loop(
         )?;
     }
     body_env.pop_scope();
+    ctx.lowered_locals.pop_scope();
     let _ = ctx.loop_stack.pop().expect("control loop frame must exist");
     ctx.instrs.push(IrInstr::Jmp { label: start_label });
     ctx.instrs.push(IrInstr::Label { name: end_label });
@@ -5485,6 +5571,7 @@ fn lower_for_each_stmt(
         ret_ty.clone(),
         &mut ctx.closure_state,
         &mut ctx.ownership_events,
+        &mut ctx.lowered_locals,
     )?;
     if iterable_ty == Type::RangeI32 {
         return lower_for_range_stmt_from_reg(
@@ -5558,7 +5645,6 @@ fn lower_for_sequence_stmt_from_reg(
 ) -> Result<(), FrontendError> {
     let id = ctx.next_if_id();
     let index_name = format!("__for_each_seq_{}_index", id);
-    let loop_name = resolve_symbol_name(arena, name)?.to_string();
 
     let zero_reg = alloc(&mut ctx.next_reg);
     let one_reg = alloc(&mut ctx.next_reg);
@@ -5618,6 +5704,8 @@ fn lower_for_sequence_stmt_from_reg(
     let mut body_env = env.clone();
     body_env.push_scope();
     body_env.insert_const(name, item_ty);
+    ctx.lowered_locals.push_scope();
+    let loop_name = ctx.lowered_locals.bind(arena, name)?;
     ctx.instrs.push(IrInstr::StoreVar {
         name: loop_name,
         src: item_reg,
@@ -5635,6 +5723,7 @@ fn lower_for_sequence_stmt_from_reg(
         )?;
     }
     body_env.pop_scope();
+    ctx.lowered_locals.pop_scope();
 
     ctx.instrs.push(IrInstr::LoadVar {
         dst: index_reg,
@@ -5670,7 +5759,6 @@ fn lower_for_explicit_iterable_stmt_from_reg(
 ) -> Result<(), FrontendError> {
     let id = ctx.next_if_id();
     let index_name = format!("__for_each_iter_{}_index", id);
-    let loop_name = resolve_symbol_name(arena, name)?.to_string();
 
     let zero_reg = alloc(&mut ctx.next_reg);
     let one_reg = alloc(&mut ctx.next_reg);
@@ -5738,6 +5826,8 @@ fn lower_for_explicit_iterable_stmt_from_reg(
     let mut body_env = env.clone();
     body_env.push_scope();
     body_env.insert_const(name, item_ty);
+    ctx.lowered_locals.push_scope();
+    let loop_name = ctx.lowered_locals.bind(arena, name)?;
     ctx.instrs.push(IrInstr::StoreVar {
         name: loop_name,
         src: item_reg,
@@ -5755,6 +5845,7 @@ fn lower_for_explicit_iterable_stmt_from_reg(
         )?;
     }
     body_env.pop_scope();
+    ctx.lowered_locals.pop_scope();
 
     ctx.instrs.push(IrInstr::LoadVar {
         dst: index_reg,
@@ -5788,6 +5879,7 @@ fn bind_let_else_tuple_items(
     next: &mut u16,
     out: &mut Vec<IrInstr>,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
     env: &mut ScopeEnv,
     loop_stack: &mut Vec<LoopLoweringFrame>,
     fn_table: &FnTable,
@@ -5875,6 +5967,7 @@ fn bind_let_else_tuple_items(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 out.push(IrInstr::Label {
                     name: continue_label,
@@ -5894,7 +5987,7 @@ fn bind_let_else_tuple_items(
     for (name, capture, reg, item_ty, index) in deferred_binds {
         env.insert(name, item_ty);
         out.push(IrInstr::StoreVar {
-            name: resolve_symbol_name(arena, name)?.to_string(),
+            name: lowered_locals.bind(arena, name)?,
             src: reg,
         });
         if capture == sm_front::types::CaptureMode::Borrow {
@@ -5947,6 +6040,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             let final_ty = if let Some(ann) = ty {
                 canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -5955,7 +6049,7 @@ fn lower_stmt(
             };
             env.insert_const(*name, final_ty);
             ctx.instrs.push(IrInstr::StoreVar {
-                name: resolve_symbol_name(arena, *name)?.to_string(),
+                name: ctx.lowered_locals.bind(arena, *name)?,
                 src: reg,
             });
             Ok(())
@@ -5981,6 +6075,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             let final_ty = if let Some(ann) = ty {
                 canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -5993,7 +6088,7 @@ fn lower_stmt(
                 env.insert(*name, final_ty);
             }
             ctx.instrs.push(IrInstr::StoreVar {
-                name: resolve_symbol_name(arena, *name)?.to_string(),
+                name: ctx.lowered_locals.bind(arena, *name)?,
                 src: reg,
             });
             Ok(())
@@ -6015,6 +6110,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             let final_ty = if let Some(ann) = ty {
                 canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -6030,6 +6126,7 @@ fn lower_stmt(
                 &mut ctx.next_reg,
                 &mut ctx.instrs,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
                 env,
             )
         }
@@ -6054,6 +6151,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             bind_record_items(
                 *record_name,
@@ -6065,6 +6163,7 @@ fn lower_stmt(
                 &mut ctx.next_reg,
                 &mut ctx.instrs,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
                 env,
                 record_table,
                 adt_table,
@@ -6092,6 +6191,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             bind_let_else_record_items(
                 *record_name,
@@ -6108,6 +6208,7 @@ fn lower_stmt(
                 &mut ctx.next_reg,
                 &mut ctx.instrs,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
                 env,
                 &mut ctx.loop_stack,
                 fn_table,
@@ -6139,6 +6240,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             let final_ty = if let Some(ann) = ty {
                 canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -6159,6 +6261,7 @@ fn lower_stmt(
                 &mut ctx.next_reg,
                 &mut ctx.instrs,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
                 env,
                 &mut ctx.loop_stack,
                 fn_table,
@@ -6184,6 +6287,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             Ok(())
         }
@@ -6219,9 +6323,10 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             ctx.instrs.push(IrInstr::StoreVar {
-                name: resolve_symbol_name(arena, *name)?.to_string(),
+                name: ctx.lowered_locals.resolve(arena, *name)?,
                 src: reg,
             });
             ctx.ownership_events.push(OwnershipPathEvent {
@@ -6245,6 +6350,7 @@ fn lower_stmt(
                 ret_ty,
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             assign_tuple_items(
                 items,
@@ -6254,6 +6360,7 @@ fn lower_stmt(
                 &mut ctx.next_reg,
                 &mut ctx.instrs,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
                 env,
             )
         }
@@ -6360,6 +6467,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             if let Some(expected_ty) = &prior_result_ty {
                 if *expected_ty != break_ty {
@@ -6424,6 +6532,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -6455,6 +6564,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             ctx.instrs.push(IrInstr::Label {
                 name: continue_label,
@@ -6500,6 +6610,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )
         }
         Stmt::If {
@@ -6525,6 +6636,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -6549,6 +6661,7 @@ fn lower_stmt(
             ctx.instrs.push(IrInstr::Label { name: then_label });
             let mut then_env = env.clone();
             then_env.push_scope();
+            ctx.lowered_locals.push_scope();
             for s in then_block {
                 lower_stmt(
                     *s,
@@ -6562,6 +6675,7 @@ fn lower_stmt(
                 )?;
             }
             then_env.pop_scope();
+            ctx.lowered_locals.pop_scope();
             ctx.instrs.push(IrInstr::Jmp {
                 label: end_label.clone(),
             });
@@ -6569,6 +6683,7 @@ fn lower_stmt(
             ctx.instrs.push(IrInstr::Label { name: else_label });
             let mut else_env = env.clone();
             else_env.push_scope();
+            ctx.lowered_locals.push_scope();
             for s in else_block {
                 lower_stmt(
                     *s,
@@ -6582,6 +6697,7 @@ fn lower_stmt(
                 )?;
             }
             else_env.pop_scope();
+            ctx.lowered_locals.pop_scope();
             ctx.instrs.push(IrInstr::Jmp {
                 label: end_label.clone(),
             });
@@ -6612,6 +6728,7 @@ fn lower_stmt(
                 ret_ty.clone(),
                 &mut ctx.closure_state,
                 &mut ctx.ownership_events,
+                &mut ctx.lowered_locals,
             )?;
             if !matches!(
                 scr_ty,
@@ -6686,6 +6803,7 @@ fn lower_stmt(
                         });
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
+                        ctx.lowered_locals.push_scope();
                         for s in &arm.block {
                             lower_stmt(
                                 *s,
@@ -6699,6 +6817,7 @@ fn lower_stmt(
                             )?;
                         }
                         arm_env.pop_scope();
+                        ctx.lowered_locals.pop_scope();
                         ctx.instrs.push(IrInstr::Jmp {
                             label: end_label.clone(),
                         });
@@ -6741,6 +6860,7 @@ fn lower_stmt(
                         });
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
+                        ctx.lowered_locals.push_scope();
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -6754,6 +6874,7 @@ fn lower_stmt(
                             ret_ty.clone(),
                             &mut ctx.closure_state,
                             &mut ctx.ownership_events,
+                            &mut ctx.lowered_locals,
                         )? {
                             let guarded_body_label = format!("match_{}_body_{}", mid, i);
                             ctx.instrs.push(IrInstr::JmpIf {
@@ -6778,6 +6899,7 @@ fn lower_stmt(
                             )?;
                         }
                         arm_env.pop_scope();
+                        ctx.lowered_locals.pop_scope();
                         ctx.instrs.push(IrInstr::Jmp {
                             label: end_label.clone(),
                         });
@@ -6824,6 +6946,7 @@ fn lower_stmt(
                         });
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
+                        ctx.lowered_locals.push_scope();
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -6837,6 +6960,7 @@ fn lower_stmt(
                             ret_ty.clone(),
                             &mut ctx.closure_state,
                             &mut ctx.ownership_events,
+                            &mut ctx.lowered_locals,
                         )? {
                             let guarded_body_label = format!("match_{}_body_{}", mid, i);
                             ctx.instrs.push(IrInstr::JmpIf {
@@ -6861,6 +6985,7 @@ fn lower_stmt(
                             )?;
                         }
                         arm_env.pop_scope();
+                        ctx.lowered_locals.pop_scope();
                         ctx.instrs.push(IrInstr::Jmp {
                             label: end_label.clone(),
                         });
@@ -6923,6 +7048,7 @@ fn lower_stmt(
                         });
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
+                        ctx.lowered_locals.push_scope();
                         lower_adt_match_bindings(
                             &resolved_patterns[i],
                             scr_reg,
@@ -6930,6 +7056,7 @@ fn lower_stmt(
                             &mut ctx.instrs,
                             &mut arm_env,
                             arena,
+                            &mut ctx.lowered_locals,
                         )?;
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
@@ -6944,6 +7071,7 @@ fn lower_stmt(
                             ret_ty.clone(),
                             &mut ctx.closure_state,
                             &mut ctx.ownership_events,
+                            &mut ctx.lowered_locals,
                         )? {
                             let guarded_body_label = format!("match_{}_body_{}", mid, i);
                             ctx.instrs.push(IrInstr::JmpIf {
@@ -6968,6 +7096,7 @@ fn lower_stmt(
                             )?;
                         }
                         arm_env.pop_scope();
+                        ctx.lowered_locals.pop_scope();
                         ctx.instrs.push(IrInstr::Jmp {
                             label: end_label.clone(),
                         });
@@ -6992,6 +7121,7 @@ fn lower_stmt(
                     .expect("non-exhaustive match statement requires explicit default in lowering");
                 let mut def_env = env.clone();
                 def_env.push_scope();
+                ctx.lowered_locals.push_scope();
                 for s in default {
                     lower_stmt(
                         *s,
@@ -7005,6 +7135,7 @@ fn lower_stmt(
                     )?;
                 }
                 def_env.pop_scope();
+                ctx.lowered_locals.pop_scope();
             }
             ctx.instrs.push(IrInstr::Jmp {
                 label: end_label.clone(),
@@ -7030,9 +7161,11 @@ fn lower_value_block_expr(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(u16, Type), FrontendError> {
     let mut block_env = env.clone();
     block_env.push_scope();
+    lowered_locals.push_scope();
     for stmt in &block.statements {
         match arena.stmt(*stmt) {
             Stmt::Const { name, ty, value } => {
@@ -7056,6 +7189,7 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let final_ty = if let Some(ann) = ty {
                     canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -7064,7 +7198,7 @@ fn lower_value_block_expr(
                 };
                 block_env.insert_const(*name, final_ty);
                 out.push(IrInstr::StoreVar {
-                    name: resolve_symbol_name(arena, *name)?.to_string(),
+                    name: lowered_locals.bind(arena, *name)?,
                     src: reg,
                 });
             }
@@ -7089,6 +7223,7 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let final_ty = if let Some(ann) = ty {
                     canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -7101,7 +7236,7 @@ fn lower_value_block_expr(
                     block_env.insert(*name, final_ty);
                 }
                 out.push(IrInstr::StoreVar {
-                    name: resolve_symbol_name(arena, *name)?.to_string(),
+                    name: lowered_locals.bind(arena, *name)?,
                     src: reg,
                 });
             }
@@ -7127,6 +7262,7 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 let final_ty = if let Some(ann) = ty {
                     canonicalize_declared_type(ann, record_table, adt_table, arena)?
@@ -7142,6 +7278,7 @@ fn lower_value_block_expr(
                     next,
                     out,
                     ownership_events,
+                    lowered_locals,
                     &mut block_env,
                 )?;
             }
@@ -7166,6 +7303,7 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 bind_record_items(
                     *record_name,
@@ -7177,6 +7315,7 @@ fn lower_value_block_expr(
                     next,
                     out,
                     ownership_events,
+                    lowered_locals,
                     &mut block_env,
                     record_table,
                     adt_table,
@@ -7209,6 +7348,7 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
             }
             Stmt::Expr(expr) => {
@@ -7227,6 +7367,7 @@ fn lower_value_block_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
             }
             _ => {
@@ -7251,8 +7392,10 @@ fn lower_value_block_expr(
         ret_ty,
         closure_state,
         ownership_events,
+        lowered_locals,
     )?;
     block_env.pop_scope();
+    lowered_locals.pop_scope();
     Ok(tail)
 }
 
@@ -7270,6 +7413,7 @@ fn lower_adt_ctor_expr(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(u16, Type), FrontendError> {
     if let Some(lowered) = lower_std_form_ctor_expr(
         ctor_expr,
@@ -7285,6 +7429,7 @@ fn lower_adt_ctor_expr(
         ret_ty.clone(),
         closure_state,
         ownership_events,
+        lowered_locals,
     )? {
         return Ok(lowered);
     }
@@ -7339,6 +7484,7 @@ fn lower_adt_ctor_expr(
             ret_ty.clone(),
             closure_state,
             ownership_events,
+            lowered_locals,
         )?;
         if actual_ty != expected_ty {
             return Err(FrontendError {
@@ -7383,6 +7529,7 @@ fn lower_std_form_ctor_expr(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<Option<(u16, Type)>, FrontendError> {
     let type_name = resolve_symbol_name(arena, ctor_expr.adt_name)?;
     let variant_name = resolve_symbol_name(arena, ctor_expr.variant_name)?;
@@ -7415,6 +7562,7 @@ fn lower_std_form_ctor_expr(
                     ret_ty,
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 if let Some(expected_item) = item_expected {
                     if item_ty != expected_item {
@@ -7515,6 +7663,7 @@ fn lower_std_form_ctor_expr(
             ret_ty,
             closure_state,
             ownership_events,
+            lowered_locals,
         )?;
         if payload_ty != payload_expected {
             return Err(FrontendError {
@@ -7792,6 +7941,7 @@ fn lower_adt_match_bindings(
     out: &mut Vec<IrInstr>,
     env: &mut ScopeEnv,
     arena: &AstArena,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(), FrontendError> {
     for binding in &pattern.bindings {
         let reg = alloc(next);
@@ -7802,7 +7952,7 @@ fn lower_adt_match_bindings(
             index: binding.index,
         });
         out.push(IrInstr::StoreVar {
-            name: resolve_symbol_name(arena, binding.name)?.to_string(),
+            name: lowered_locals.bind(arena, binding.name)?,
             src: reg,
         });
         env.insert(binding.name, binding.ty.clone());
@@ -7882,6 +8032,7 @@ fn lower_match_guard(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<Option<u16>, FrontendError> {
     let Some(guard_expr) = guard else {
         return Ok(None);
@@ -7899,6 +8050,7 @@ fn lower_match_guard(
         ret_ty,
         closure_state,
         ownership_events,
+        lowered_locals,
     )?;
     if guard_ty != Type::Bool {
         return Err(FrontendError {
@@ -7924,6 +8076,7 @@ fn lower_ensures_clauses(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(), FrontendError> {
     if contract_ensures.is_empty() {
         return Ok(());
@@ -7936,6 +8089,13 @@ fn lower_ensures_clauses(
             message: "ensures clause referencing result requires explicit return value".to_string(),
         })?;
         contract_env.insert_const(result_symbol, result_ty);
+        // #1724 (FA-04-018): `result` is a synthetic single-use contract
+        // slot, not a genuine source declaration - it can never be
+        // shadowed (fresh `contract_env` per clause activation, never
+        // nested). `bind_raw` keeps this binding's key identical to the
+        // literal "result" text the StoreVar below already uses, so any
+        // `Expr::Var` reference to it inside the clause resolves correctly.
+        lowered_locals.bind_raw(arena, result_symbol)?;
         out.push(IrInstr::StoreVar {
             name: "result".to_string(),
             src: result_reg,
@@ -7956,6 +8116,7 @@ fn lower_ensures_clauses(
             ret_ty.clone(),
             closure_state,
             ownership_events,
+            lowered_locals,
         )?;
         if cond_ty != Type::Bool {
             return Err(FrontendError {
@@ -7994,6 +8155,7 @@ fn lower_invariant_clauses(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(), FrontendError> {
     if contract_invariants.is_empty() {
         return Ok(());
@@ -8003,6 +8165,9 @@ fn lower_invariant_clauses(
     if let Some(result_symbol) = contract_result_symbol {
         if let Some((result_reg, result_ty)) = result_value.clone() {
             contract_env.insert_const(result_symbol, result_ty);
+            // #1724 (FA-04-018): see the matching comment in
+            // `lower_ensures_clauses`.
+            lowered_locals.bind_raw(arena, result_symbol)?;
             out.push(IrInstr::StoreVar {
                 name: "result".to_string(),
                 src: result_reg,
@@ -8035,6 +8200,7 @@ fn lower_invariant_clauses(
             ret_ty.clone(),
             closure_state,
             ownership_events,
+            lowered_locals,
         )?;
         if cond_ty != Type::Bool {
             return Err(FrontendError {
@@ -8068,6 +8234,7 @@ fn lower_return_payload(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(), FrontendError> {
     match value {
         Some(expr_id) => {
@@ -8085,6 +8252,7 @@ fn lower_return_payload(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if ty != ret_ty {
                 return Err(FrontendError {
@@ -8110,6 +8278,7 @@ fn lower_return_payload(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             lower_invariant_clauses(
                 contract_invariants,
@@ -8127,6 +8296,7 @@ fn lower_return_payload(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             out.push(IrInstr::Ret { src: Some(reg) });
             Ok(())
@@ -8153,6 +8323,7 @@ fn lower_return_payload(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             lower_invariant_clauses(
                 contract_invariants,
@@ -8170,6 +8341,7 @@ fn lower_return_payload(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             out.push(IrInstr::Ret { src: None });
             Ok(())
@@ -8191,6 +8363,7 @@ fn lower_loop_expr(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(u16, Type), FrontendError> {
     let id = alloc_loop_expr_id(next);
     let start_label = format!("loop_expr_{}_start", id);
@@ -8226,6 +8399,7 @@ fn lower_loop_expr(
             ret_ty.clone(),
             closure_state,
             ownership_events,
+            lowered_locals,
         )?;
     }
     body_env.pop_scope();
@@ -8269,6 +8443,7 @@ fn lower_loop_expr_stmt(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(), FrontendError> {
     match arena.stmt(stmt_id) {
         Stmt::LetElseTuple { .. } | Stmt::LetElseRecord { .. } => Err(FrontendError {
@@ -8320,6 +8495,7 @@ fn lower_loop_expr_stmt(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -8344,6 +8520,7 @@ fn lower_loop_expr_stmt(
             out.push(IrInstr::Label { name: then_label });
             let mut then_env = env.clone();
             then_env.push_scope();
+            lowered_locals.push_scope();
             for stmt in then_block {
                 lower_loop_expr_stmt(
                     *stmt,
@@ -8358,9 +8535,11 @@ fn lower_loop_expr_stmt(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
             }
             then_env.pop_scope();
+            lowered_locals.pop_scope();
             out.push(IrInstr::Jmp {
                 label: end_label.clone(),
             });
@@ -8368,6 +8547,7 @@ fn lower_loop_expr_stmt(
             out.push(IrInstr::Label { name: else_label });
             let mut else_env = env.clone();
             else_env.push_scope();
+            lowered_locals.push_scope();
             for stmt in else_block {
                 lower_loop_expr_stmt(
                     *stmt,
@@ -8382,9 +8562,11 @@ fn lower_loop_expr_stmt(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
             }
             else_env.pop_scope();
+            lowered_locals.pop_scope();
             out.push(IrInstr::Jmp {
                 label: end_label.clone(),
             });
@@ -8415,6 +8597,7 @@ fn lower_loop_expr_stmt(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if !matches!(
                 scr_ty,
@@ -8499,6 +8682,7 @@ fn lower_loop_expr_stmt(
                         });
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
+                        lowered_locals.push_scope();
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -8512,6 +8696,7 @@ fn lower_loop_expr_stmt(
                             ret_ty.clone(),
                             closure_state,
                             ownership_events,
+                            lowered_locals,
                         )? {
                             let guarded_body_label = format!("loop_match_{}_body_{}", id, i);
                             out.push(IrInstr::JmpIf {
@@ -8537,9 +8722,11 @@ fn lower_loop_expr_stmt(
                                 ret_ty.clone(),
                                 closure_state,
                                 ownership_events,
+                                lowered_locals,
                             )?;
                         }
                         arm_env.pop_scope();
+                        lowered_locals.pop_scope();
                         out.push(IrInstr::Jmp {
                             label: end_label.clone(),
                         });
@@ -8586,6 +8773,7 @@ fn lower_loop_expr_stmt(
                         });
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
+                        lowered_locals.push_scope();
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
                             arena,
@@ -8599,6 +8787,7 @@ fn lower_loop_expr_stmt(
                             ret_ty.clone(),
                             closure_state,
                             ownership_events,
+                            lowered_locals,
                         )? {
                             let guarded_body_label = format!("loop_match_{}_body_{}", id, i);
                             out.push(IrInstr::JmpIf {
@@ -8624,9 +8813,11 @@ fn lower_loop_expr_stmt(
                                 ret_ty.clone(),
                                 closure_state,
                                 ownership_events,
+                                lowered_locals,
                             )?;
                         }
                         arm_env.pop_scope();
+                        lowered_locals.pop_scope();
                         out.push(IrInstr::Jmp {
                             label: end_label.clone(),
                         });
@@ -8690,6 +8881,7 @@ fn lower_loop_expr_stmt(
                         });
                         let mut arm_env = env.clone();
                         arm_env.push_scope();
+                        lowered_locals.push_scope();
                         lower_adt_match_bindings(
                             &resolved_patterns[i],
                             scr_reg,
@@ -8697,6 +8889,7 @@ fn lower_loop_expr_stmt(
                             out,
                             &mut arm_env,
                             arena,
+                            lowered_locals,
                         )?;
                         if let Some(guard_reg) = lower_match_guard(
                             arm.guard,
@@ -8711,6 +8904,7 @@ fn lower_loop_expr_stmt(
                             ret_ty.clone(),
                             closure_state,
                             ownership_events,
+                            lowered_locals,
                         )? {
                             let guarded_body_label = format!("loop_match_{}_body_{}", id, i);
                             out.push(IrInstr::JmpIf {
@@ -8736,9 +8930,11 @@ fn lower_loop_expr_stmt(
                                 ret_ty.clone(),
                                 closure_state,
                                 ownership_events,
+                                lowered_locals,
                             )?;
                         }
                         arm_env.pop_scope();
+                        lowered_locals.pop_scope();
                         out.push(IrInstr::Jmp {
                             label: end_label.clone(),
                         });
@@ -8763,6 +8959,7 @@ fn lower_loop_expr_stmt(
                     .expect("non-exhaustive match statement requires explicit default in lowering");
                 let mut def_env = env.clone();
                 def_env.push_scope();
+                lowered_locals.push_scope();
                 for stmt in default {
                     lower_loop_expr_stmt(
                         *stmt,
@@ -8777,9 +8974,11 @@ fn lower_loop_expr_stmt(
                         ret_ty.clone(),
                         closure_state,
                         ownership_events,
+                        lowered_locals,
                     )?;
                 }
                 def_env.pop_scope();
+                lowered_locals.pop_scope();
                 out.push(IrInstr::Jmp {
                     label: end_label.clone(),
                 });
@@ -8808,6 +9007,16 @@ fn lower_loop_expr_stmt(
                 instrs: core::mem::take(out),
                 ownership_events: core::mem::take(ownership_events),
                 impls: Vec::new(),
+                // #1724 (FA-04-018): same reasoning and pattern as
+                // `ownership_events` immediately above - a statement
+                // lowered through this fallback can introduce or resolve
+                // real lexical bindings (e.g. `let x = ...;`), and this is
+                // the one function-owned scope stack for the enclosing
+                // loop expression; a fresh temporary here would silently
+                // lose every binding introduced inside the fallback,
+                // making later sibling statements in the same loop body
+                // unable to resolve them.
+                lowered_locals: core::mem::take(lowered_locals),
             };
             let result = lower_stmt(
                 stmt_id,
@@ -8824,6 +9033,7 @@ fn lower_loop_expr_stmt(
             *loop_stack = ctx.loop_stack;
             *closure_state = ctx.closure_state;
             *ownership_events = ctx.ownership_events;
+            *lowered_locals = ctx.lowered_locals;
             result
         }
     }
@@ -8843,6 +9053,7 @@ fn lower_match_expr(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(u16, Type), FrontendError> {
     let (scr_reg, scr_ty) = lower_expr(
         match_expr.scrutinee,
@@ -8857,6 +9068,7 @@ fn lower_match_expr(
         ret_ty.clone(),
         closure_state,
         ownership_events,
+        lowered_locals,
     )?;
     if !matches!(
         scr_ty,
@@ -8939,6 +9151,7 @@ fn lower_match_expr(
                 });
                 let mut arm_env = env.clone();
                 arm_env.push_scope();
+                lowered_locals.push_scope();
                 if let Some(guard_reg) = lower_match_guard(
                     arm.guard,
                     arena,
@@ -8952,6 +9165,7 @@ fn lower_match_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )? {
                     let guarded_body_label = format!("match_expr_{}_body_{}", id, i);
                     out.push(IrInstr::JmpIf {
@@ -8977,8 +9191,10 @@ fn lower_match_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 arm_env.pop_scope();
+                lowered_locals.pop_scope();
                 if let Some(ref expected_ty) = result_ty {
                     if *expected_ty != arm_ty {
                         return Err(FrontendError {
@@ -9038,6 +9254,7 @@ fn lower_match_expr(
                 });
                 let mut arm_env = env.clone();
                 arm_env.push_scope();
+                lowered_locals.push_scope();
                 if let Some(guard_reg) = lower_match_guard(
                     arm.guard,
                     arena,
@@ -9051,6 +9268,7 @@ fn lower_match_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )? {
                     let guarded_body_label = format!("match_expr_{}_body_{}", id, i);
                     out.push(IrInstr::JmpIf {
@@ -9076,8 +9294,10 @@ fn lower_match_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 arm_env.pop_scope();
+                lowered_locals.pop_scope();
                 if let Some(ref expected_ty) = result_ty {
                     if *expected_ty != arm_ty {
                         return Err(FrontendError {
@@ -9159,6 +9379,7 @@ fn lower_match_expr(
                 });
                 let mut arm_env = env.clone();
                 arm_env.push_scope();
+                lowered_locals.push_scope();
                 lower_adt_match_bindings(
                     &resolved_patterns[i],
                     scr_reg,
@@ -9166,6 +9387,7 @@ fn lower_match_expr(
                     out,
                     &mut arm_env,
                     arena,
+                    lowered_locals,
                 )?;
                 if let Some(guard_reg) = lower_match_guard(
                     arm.guard,
@@ -9180,6 +9402,7 @@ fn lower_match_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )? {
                     let guarded_body_label = format!("match_expr_{}_body_{}", id, i);
                     out.push(IrInstr::JmpIf {
@@ -9205,8 +9428,10 @@ fn lower_match_expr(
                     ret_ty.clone(),
                     closure_state,
                     ownership_events,
+                    lowered_locals,
                 )?;
                 arm_env.pop_scope();
+                lowered_locals.pop_scope();
                 if let Some(ref expected_ty) = result_ty {
                     if *expected_ty != arm_ty {
                         return Err(FrontendError {
@@ -9256,6 +9481,7 @@ fn lower_match_expr(
             ret_ty,
             closure_state,
             ownership_events,
+            lowered_locals,
         )?;
         if let Some(ref expected_ty) = result_ty {
             if *expected_ty != default_ty {
@@ -9314,6 +9540,7 @@ fn lower_expr_stmt(
         ret_ty,
         &mut ctx.closure_state,
         &mut ctx.ownership_events,
+        &mut ctx.lowered_locals,
     )
 }
 
@@ -9348,6 +9575,7 @@ fn lower_expr_stmt_with_parts(
     ret_ty: Type,
     closure_state: &mut ClosureLoweringState,
     ownership_events: &mut Vec<OwnershipPathEvent>,
+    lowered_locals: &mut LoweredLocalEnv,
 ) -> Result<(), FrontendError> {
     let expr = arena.expr(expr_id);
     if let Expr::Call(name, args) = expr {
@@ -9378,6 +9606,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if cond_ty != Type::Bool {
                 return Err(FrontendError {
@@ -9410,6 +9639,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
@@ -9448,6 +9678,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
@@ -9489,6 +9720,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let Type::Sequence(seq_type) = &seq_ty else {
                 return Err(FrontendError {
@@ -9514,6 +9746,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if val_ty != elem_ty {
                 return Err(FrontendError {
@@ -9556,6 +9789,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let Type::Sequence(seq_type) = &seq_ty else {
                 return Err(FrontendError {
@@ -9581,6 +9815,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if val_ty != elem_ty {
                 return Err(FrontendError {
@@ -9617,6 +9852,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             return match &arg_ty {
                 Type::Sequence(_) => {
@@ -9665,6 +9901,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
@@ -9690,6 +9927,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::MapContains {
@@ -9722,6 +9960,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
@@ -9748,6 +9987,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let (default_reg, _) = lower_expr_with_expected(
                 args[2].value,
@@ -9763,6 +10003,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::MapGet {
@@ -9796,6 +10037,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let Type::Map(ref map_type) = map_ty else {
                 return Err(FrontendError {
@@ -9822,6 +10064,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let (val_reg, _) = lower_expr_with_expected(
                 args[2].value,
@@ -9837,6 +10080,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::MapSet {
@@ -9869,6 +10113,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             out.push(IrInstr::Call {
                 dst: None,
@@ -9901,6 +10146,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::RngSeed {
@@ -9933,6 +10179,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let (hi_reg, _) = lower_expr_with_expected(
                 args[1].value,
@@ -9948,6 +10195,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             let dst = alloc(next);
             out.push(IrInstr::RngNextI32 {
@@ -9977,6 +10225,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty,
                 closure_state,
                 ownership_events,
+                lowered_locals,
             );
         } else {
             return Err(FrontendError {
@@ -10004,6 +10253,7 @@ fn lower_expr_stmt_with_parts(
                 ret_ty.clone(),
                 closure_state,
                 ownership_events,
+                lowered_locals,
             )?;
             if t != sig.params[slot] {
                 return Err(FrontendError {
@@ -10044,8 +10294,111 @@ fn lower_expr_stmt_with_parts(
         ret_ty,
         closure_state,
         ownership_events,
+        lowered_locals,
     )?;
     Ok(())
+}
+
+/// #1724 (FA-04-018): the canonical authority mapping a lexical source
+/// binding to its lowered runtime-local key. `SymbolId` is a pure
+/// spelling-interned identity (`AstArena::intern_symbol` is a
+/// `BTreeMap<String, SymbolId>` keyed only by text - confirmed by direct
+/// inspection and empirically: `let x = 1; if true { let x = 2; ... }`
+/// gives the outer declaration, the inner declaration, and every use the
+/// exact same `SymbolId`) - it is not declaration-unique, so it cannot be
+/// used directly as a runtime-local key, and neither can
+/// `format!("__local_{}", symbol_id.0)`, since two shadowed declarations
+/// can share it. Only this scope stack (deliberately mirroring
+/// `ScopeEnv`'s own scope push/pop shape) distinguishes them. Knows as
+/// little as possible: scope, source symbol, lowered local key - it
+/// duplicates none of `ScopeEnv`'s type/mutability/constness/ownership
+/// state. One `LoweredLocalEnv` per `IrFunction`: same-function nested
+/// lowering shares it; a lifted closure child gets its own fresh instance,
+/// the same as `ownership_events` (#1709) and `local_next`/
+/// `local_loop_stack` already do at that exact boundary.
+#[derive(Debug, Default)]
+struct LoweredLocalEnv {
+    scopes: Vec<BTreeMap<SymbolId, String>>,
+    next_id: u32,
+}
+
+impl LoweredLocalEnv {
+    fn new() -> Self {
+        Self {
+            scopes: vec![BTreeMap::new()],
+            next_id: 0,
+        }
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(BTreeMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        if self.scopes.len() > 1 {
+            self.scopes.pop();
+        }
+    }
+
+    /// Introduces a fresh lexical binding for `symbol` in the current
+    /// (innermost) scope, allocating a new, deterministic,
+    /// source-unreachable runtime-local key (`is_ascii_alphabetic()` gates
+    /// every admitted identifier's first character - confirmed by direct
+    /// lexer inspection - so no admitted source identifier can ever begin
+    /// with `_`, making the `__sm_local_` prefix collision-safe). Must be
+    /// called exactly once per lexical declaration (`let`/`const`/
+    /// parameter/pattern binding/loop variable) - never for a use or an
+    /// assignment to an already-existing binding.
+    fn bind(&mut self, arena: &AstArena, symbol: SymbolId) -> Result<String, FrontendError> {
+        let spelling = resolve_symbol_name(arena, symbol)?;
+        let id = self.next_id;
+        self.next_id += 1;
+        let key = format!("__sm_local_{}_{}", id, spelling);
+        self.scopes
+            .last_mut()
+            .expect("LoweredLocalEnv always has at least one scope")
+            .insert(symbol, key.clone());
+        Ok(key)
+    }
+
+    /// Resolves a use (read) or an assignment target (an existing binding,
+    /// not a new declaration) to the runtime-local key of the exact
+    /// binding currently selected by lexical scope - the innermost scope
+    /// that has one. Fails closed: no fallback to the raw source spelling
+    /// on a missing mapping (#1724 §16) - that would reintroduce exactly
+    /// the identity collapse this authority exists to repair.
+    fn resolve(&self, arena: &AstArena, symbol: SymbolId) -> Result<String, FrontendError> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(key) = scope.get(&symbol) {
+                return Ok(key.clone());
+            }
+        }
+        Err(FrontendError {
+            pos: 0,
+            message: format!(
+                "cannot resolve lexical binding '{}' during lowering",
+                resolve_symbol_name(arena, symbol)?
+            ),
+        })
+    }
+
+    /// Seeds a binding using the *exact* source spelling as its own
+    /// lowered key, bypassing the mangled/counter-based scheme `bind`
+    /// uses. Reserved for `lower_expr_to_ir`'s pre-populated `var_types`
+    /// map: those symbols name pre-existing VM frame locals supplied by
+    /// the caller under their raw source spelling, not a fresh lexical
+    /// declaration this function itself lowers - there is no
+    /// corresponding `StoreVar` to mangle, and no possibility of
+    /// shadowing in a flat, statement-free `HashMap<SymbolId, Type>`.
+    /// Must not be used anywhere lexical scoping/shadowing applies.
+    fn bind_raw(&mut self, arena: &AstArena, symbol: SymbolId) -> Result<(), FrontendError> {
+        let spelling = resolve_symbol_name(arena, symbol)?.to_string();
+        self.scopes
+            .last_mut()
+            .expect("LoweredLocalEnv always has at least one scope")
+            .insert(symbol, spelling);
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -10068,6 +10421,7 @@ struct LoweringCtx {
     instrs: Vec<IrInstr>,
     ownership_events: Vec<OwnershipPathEvent>,
     impls: Vec<sm_front::ImplDecl>,
+    lowered_locals: LoweredLocalEnv,
 }
 
 #[derive(Debug, Clone)]
@@ -10111,6 +10465,7 @@ impl LoweringCtx {
             instrs: Vec::new(),
             ownership_events: Vec::new(),
             impls: impl_list.to_vec(),
+            lowered_locals: LoweredLocalEnv::new(),
         }
     }
 
@@ -10933,11 +11288,11 @@ mod opt_tests {
         let main = &ir[0];
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "base"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_base")
         )));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "total"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_total")
         )));
         assert!(main
             .instrs
@@ -11428,7 +11783,7 @@ mod opt_tests {
         assert!(main
             .instrs
             .iter()
-            .any(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name == "x")));
+            .any(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_x"))));
         assert!(main
             .instrs
             .iter()
@@ -11453,7 +11808,7 @@ mod opt_tests {
         assert!(main
             .instrs
             .iter()
-            .any(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name == "x")));
+            .any(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_x"))));
         assert!(main
             .instrs
             .iter()
@@ -11479,10 +11834,9 @@ mod opt_tests {
             .instrs
             .iter()
             .any(|instr| matches!(instr, IrInstr::AddF64 { .. })));
-        assert!(main
-            .instrs
-            .iter()
-            .any(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name == "total")));
+        assert!(main.instrs.iter().any(
+            |instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_total"))
+        ));
     }
 
     #[test]
@@ -11898,10 +12252,9 @@ mod opt_tests {
 
         let ir = compile_program_to_ir(src).expect("compound assignment should lower");
         let main = &ir[0];
-        assert!(main
-            .instrs
-            .iter()
-            .any(|instr| matches!(instr, IrInstr::LoadVar { name, .. } if name == "total")));
+        assert!(main.instrs.iter().any(
+            |instr| matches!(instr, IrInstr::LoadVar { name, .. } if name.ends_with("_total"))
+        ));
         assert!(main
             .instrs
             .iter()
@@ -11909,7 +12262,7 @@ mod opt_tests {
         assert!(
             main.instrs
                 .iter()
-                .filter(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name == "total"))
+                .filter(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_total")))
                 .count()
                 >= 2
         );
@@ -11930,7 +12283,7 @@ mod opt_tests {
         assert!(
             main.instrs
                 .iter()
-                .filter(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name == "score"))
+                .filter(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_score")))
                 .count()
                 >= 2
         );
@@ -11951,7 +12304,7 @@ mod opt_tests {
         assert!(
             main.instrs
                 .iter()
-                .filter(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name == "score"))
+                .filter(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_score")))
                 .count()
                 >= 2
         );
@@ -12030,7 +12383,9 @@ mod opt_tests {
         let param_store = decide
             .instrs
             .iter()
-            .position(|instr| matches!(instr, IrInstr::StoreVar { name, .. } if name == "ctx"))
+            .position(
+                |instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_ctx")),
+            )
             .expect("parameter store should exist");
         assert!(param_store < first_assert);
         let assert_count = decide
@@ -12532,7 +12887,7 @@ mod opt_tests {
         );
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "count"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_count")
         )));
     }
 
@@ -12558,15 +12913,15 @@ mod opt_tests {
             .expect("magnitude_sq fn");
         assert!(func.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "xx"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_xx")
         )));
         assert!(func.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "yy"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_yy")
         )));
         assert!(func.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "total"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_total")
         )));
     }
 
@@ -12599,7 +12954,7 @@ mod opt_tests {
         )));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "interval"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_interval")
         )));
     }
 
@@ -12630,7 +12985,7 @@ mod opt_tests {
             .any(|instr| matches!(instr, IrInstr::AddI32 { .. })));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "i"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_i")
         )));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
@@ -12652,10 +13007,9 @@ mod opt_tests {
 
         let ir = compile_program_to_ir(src).expect("range-valued variable loop should still lower");
         let main = ir.iter().find(|func| func.name == "main").expect("main fn");
-        assert!(main
-            .instrs
-            .iter()
-            .any(|instr| matches!(instr, IrInstr::LoadVar { name, .. } if name == "window")));
+        assert!(main.instrs.iter().any(
+            |instr| matches!(instr, IrInstr::LoadVar { name, .. } if name.ends_with("_window"))
+        ));
         assert!(main
             .instrs
             .iter()
@@ -12710,7 +13064,7 @@ mod opt_tests {
             .any(|instr| matches!(instr, IrInstr::SequenceGet { .. })));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "item"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_item")
         )));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
@@ -12906,7 +13260,7 @@ mod opt_tests {
         )));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "ctx"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_ctx")
         )));
     }
 
@@ -13184,7 +13538,7 @@ mod opt_tests {
         )));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "patched"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_patched")
         )));
     }
 
@@ -13246,7 +13600,7 @@ mod opt_tests {
         )));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "seen_camera"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_seen_camera")
         )));
     }
 
@@ -13562,7 +13916,7 @@ mod opt_tests {
         )));
         assert!(main.instrs.iter().any(|instr| matches!(
             instr,
-            IrInstr::StoreVar { name, .. } if name == "score"
+            IrInstr::StoreVar { name, .. } if name.ends_with("_score")
         )));
     }
 
@@ -14578,6 +14932,109 @@ mod opt_tests {
         assert!(
             !lowered.primary.ownership_events.contains(&expected_event),
             "closure-body-local write event must not leak into the parent function"
+        );
+    }
+
+    // SSF-08 Lane 2b (#1724 / FA-04-018): IR-structural companion to the
+    // VM-behavioral proofs in `tests/lexical_binding_identity_e2e.rs`.
+    // Deliberately uses relational assertions (distinctness, adjacency),
+    // not the exact generated key text - the mangled format is an
+    // implementation detail of `LoweredLocalEnv`, not part of #1724's
+    // contract.
+
+    #[test]
+    fn ssf08_1724_if_branch_shadow_uses_distinct_lowered_local_keys() {
+        let src = r#"
+            fn main() {
+                let x: i32 = 1;
+                if true {
+                    let x: i32 = 2;
+                    let y: i32 = x;
+                    let _ = y;
+                }
+                let z: i32 = x;
+                let _ = z;
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src).expect("if-branch shadow should lower");
+        let main = &ir[0];
+
+        let outer_x_key = main
+            .instrs
+            .iter()
+            .find_map(|instr| match instr {
+                IrInstr::StoreVar { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .expect("outer x StoreVar must exist as the function's first StoreVar");
+
+        // The LoadVar immediately preceding the `y` StoreVar must resolve
+        // to a *different* key than the outer binding's - the inner `x`.
+        let y_store_pos = main
+            .instrs
+            .iter()
+            .position(
+                |instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_y")),
+            )
+            .expect("y StoreVar must exist");
+        let inner_x_key = match &main.instrs[y_store_pos - 1] {
+            IrInstr::LoadVar { name, .. } => name.clone(),
+            other => panic!("expected LoadVar feeding y, got {other:?}"),
+        };
+        assert_ne!(
+            outer_x_key, inner_x_key,
+            "outer and inner 'x' must lower to distinct runtime-local keys"
+        );
+
+        // The LoadVar immediately preceding the post-if `z` StoreVar must
+        // resolve back to the *outer* binding's exact key.
+        let z_store_pos = main
+            .instrs
+            .iter()
+            .position(
+                |instr| matches!(instr, IrInstr::StoreVar { name, .. } if name.ends_with("_z")),
+            )
+            .expect("z StoreVar must exist");
+        let post_scope_x_key = match &main.instrs[z_store_pos - 1] {
+            IrInstr::LoadVar { name, .. } => name.clone(),
+            other => panic!("expected LoadVar feeding z, got {other:?}"),
+        };
+        assert_eq!(
+            post_scope_x_key, outer_x_key,
+            "use of 'x' after the if block must resolve to the outer binding's exact key"
+        );
+    }
+
+    #[test]
+    fn ssf08_1724_reassignment_reuses_existing_lowered_local_key() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 1;
+                x = 2;
+                return;
+            }
+        "#;
+
+        let ir = compile_program_to_ir(src).expect("reassignment should lower");
+        let main = &ir[0];
+        let store_keys: Vec<&str> = main
+            .instrs
+            .iter()
+            .filter_map(|instr| match instr {
+                IrInstr::StoreVar { name, .. } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            store_keys.len(),
+            2,
+            "expected exactly the declaration StoreVar and the reassignment StoreVar, got {store_keys:?}"
+        );
+        assert_eq!(
+            store_keys[0], store_keys[1],
+            "reassignment to an existing binding must reuse its exact lowered key, not mint a new one"
         );
     }
 }
