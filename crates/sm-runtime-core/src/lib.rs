@@ -98,6 +98,23 @@ impl AccessPath {
     }
 }
 
+/// #1725 (FA-04-019) follow-up finding, verified by direct inspection of
+/// every consumer in `sm-vm`: `Field`'s and `AdtPayload::variant`'s
+/// `SymbolId` are used *exclusively* as opaque, root-gated equality keys
+/// inside `access_paths_overlap` (`lhs.components == rhs.components` after
+/// `lhs.root == rhs.root` already holds) - unlike `AccessPath.root`
+/// pre-#1725, they are never resolved through `RuntimeSymbolTable`/
+/// `vm.symbols`, never used as an index into any table, and never
+/// displayed. Because the overlap check is root-gated first, a field or
+/// variant spelling colliding with an unrelated one on a *different* root
+/// (e.g. two distinct record types both declaring a `value` field) can
+/// never produce a false conflict - only same-root component paths are
+/// ever compared, and within one root's own record/ADT type every field or
+/// variant spelling is unique by construction. This is a materially
+/// different, already-sound property from root identity, which #1725
+/// repairs because roots *are* resolved through a table. See
+/// `field_symbol_collision_across_unrelated_record_types_does_not_false_conflict`
+/// in `tests/own0_root_identity_e2e.rs` for the proof.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PathComponent {
     TupleIndex(u16),

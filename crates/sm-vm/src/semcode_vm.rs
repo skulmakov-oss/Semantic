@@ -1102,11 +1102,26 @@ fn build_vm_program_view_from_decoded(
             paths
                 .iter()
                 .map(|path| {
+                    // #1725 (FA-04-019): `root_symbol_id` is an index into
+                    // this function's own string table (`symbol_ids`, built
+                    // just above from `strings` in table order) - the
+                    // producer (`emit_ownership_events`) now writes that
+                    // index rather than a raw frontend SymbolId, so a
+                    // lookup miss here means the artifact's OWN0 section
+                    // references a local this function's string table
+                    // never declared. Fails closed: no fallback to
+                    // reinterpreting the raw wire number as if it were
+                    // already a valid runtime SymbolId - that fallback is
+                    // exactly the identity confusion #1725 exists to fix.
                     let local_root = path.root_symbol_id as usize;
-                    let root = symbol_ids
-                        .get(local_root)
-                        .copied()
-                        .unwrap_or(SymbolId(path.root_symbol_id));
+                    let root = symbol_ids.get(local_root).copied().ok_or_else(|| {
+                        RuntimeError::BadFormat(format!(
+                            "ownership path root index {} out of bounds for function '{}' string table (len {})",
+                            local_root,
+                            name,
+                            symbol_ids.len()
+                        ))
+                    })?;
                     let mut p = AccessPath::new(root);
                     for c in &path.components {
                         match c {
@@ -4946,9 +4961,17 @@ mod tests {
             frame.borrowed_paths[0].components,
             vec![PathComponent::TupleIndex(0)]
         );
+        // #1725 (FA-04-019): before this fix, `root_symbol_id` was a raw
+        // frontend SymbolId, out of bounds for this function's own string
+        // table, so the (now-removed) fail-open fallback treated it as an
+        // already-valid *global* runtime SymbolId - which happened to
+        // resolve to "pair" only by coincidence (the call `pair(true)`
+        // interns that exact raw string as a Call target elsewhere in the
+        // artifact). The correct identity is the local binding's own
+        // lowered key, not that unrelated string.
         assert_eq!(
             vm.symbols.resolve(frame.borrowed_paths[0].root),
-            Some("pair")
+            Some("__sm_local_0_pair")
         );
     }
 
