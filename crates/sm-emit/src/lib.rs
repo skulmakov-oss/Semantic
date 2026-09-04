@@ -47,6 +47,25 @@ mod tests {
         cursor
     }
 
+    // #1725 (FA-04-019): OWN0's wire `root` field is now the *index* of the
+    // lowered-local key in this same table, not a raw frontend SymbolId, so
+    // asserting its value requires decoding the actual strings to find that
+    // index - unlike `skip_string_table`, which only needs their lengths.
+    fn read_string_table(code: &[u8]) -> (Vec<String>, usize) {
+        let mut cursor = 0usize;
+        let count = read_u16_le(code, &mut cursor).expect("string count") as usize;
+        let mut strings = Vec::with_capacity(count);
+        for _ in 0..count {
+            let len = read_u16_le(code, &mut cursor).expect("string length") as usize;
+            let s = std::str::from_utf8(&code[cursor..cursor + len])
+                .expect("utf8 string")
+                .to_string();
+            cursor += len;
+            strings.push(s);
+        }
+        (strings, cursor)
+    }
+
     fn skip_optional_ownership_section(code: &[u8], mut cursor: usize) -> usize {
         if !code[cursor..].starts_with(&OWNERSHIP_SECTION_TAG) {
             return cursor;
@@ -175,7 +194,12 @@ mod tests {
         assert_ne!(spec.capabilities & CAP_OWNERSHIP_FIELD_PATHS, 0);
 
         let code = function_code(&bytes, "main");
-        let mut cursor = skip_string_table(code);
+        let (strings, mut cursor) = read_string_table(code);
+        let root_index = strings
+            .iter()
+            .position(|s| s == &borrow.path.root)
+            .expect("lowered-local root key interned in this function's string table")
+            as u32;
         assert_eq!(&code[cursor..cursor + 4], &OWNERSHIP_SECTION_TAG);
         cursor += 4;
         assert_eq!(read_u16_le(code, &mut cursor).expect("event count"), 1);
@@ -183,10 +207,7 @@ mod tests {
             read_u8(code, &mut cursor).expect("event kind"),
             OWNERSHIP_EVENT_KIND_BORROW
         );
-        assert_eq!(
-            read_u32_le(code, &mut cursor).expect("root"),
-            borrow.path.root.0
-        );
+        assert_eq!(read_u32_le(code, &mut cursor).expect("root"), root_index);
         assert_eq!(read_u16_le(code, &mut cursor).expect("component count"), 1);
         assert_eq!(
             read_u8(code, &mut cursor).expect("component kind"),

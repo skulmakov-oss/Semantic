@@ -363,14 +363,26 @@ pub enum IrInstr {
 /// Canonical execution-layer access path for ownership transport.
 ///
 /// This is intentionally IR-owned and append-only.
+///
+/// #1725 (FA-04-019): `root` is the *lowered runtime-local key* - the same
+/// `__sm_local_<id>_<spelling>` string a matching `StoreVar`/`LoadVar` for
+/// that exact binding carries (see `LoweredLocalEnv::resolve`) - not a raw
+/// frontend `SymbolId`. OWN0 emission (`emit_ownership_events`) resolves
+/// this string against the function's own `StringInterner` (the same table
+/// `LoadVar`/`StoreVar` operands are interned into) to get the artifact-
+/// local index the VM already expects on load (`build_vm_program_view_from_decoded`'s
+/// `remap_paths`). Before #1725 this field held the raw frontend `SymbolId`
+/// number directly, which the VM's *consumer* code already (silently,
+/// incorrectly) treated as a string-table index - the producer and
+/// consumer were never speaking the same identity domain.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccessPath {
-    pub root: SymbolId,
+    pub root: String,
     pub components: Vec<PathComponent>,
 }
 
 impl AccessPath {
-    pub fn new(root: SymbolId) -> Self {
+    pub fn new(root: String) -> Self {
         Self {
             root,
             components: Vec::new(),
@@ -381,7 +393,7 @@ impl AccessPath {
         let mut components = self.components.clone();
         components.push(PathComponent::TupleIndex(index));
         Self {
-            root: self.root,
+            root: self.root.clone(),
             components,
         }
     }
@@ -390,7 +402,7 @@ impl AccessPath {
         let mut components = self.components.clone();
         components.push(PathComponent::SequenceIndexStatic(index));
         Self {
-            root: self.root,
+            root: self.root.clone(),
             components,
         }
     }
@@ -399,7 +411,7 @@ impl AccessPath {
         let mut components = self.components.clone();
         components.push(PathComponent::Field(name));
         Self {
-            root: self.root,
+            root: self.root.clone(),
             components,
         }
     }
@@ -408,7 +420,7 @@ impl AccessPath {
         let mut components = self.components.clone();
         components.push(PathComponent::AdtPayload { variant, index });
         Self {
-            root: self.root,
+            root: self.root.clone(),
             components,
         }
     }
@@ -1540,7 +1552,12 @@ fn emit_semcode_function(
             write_u16_le(&mut code, col);
         }
     }
-    emit_ownership_events(&f.ownership_events, require_ownership_section, &mut code)?;
+    emit_ownership_events(
+        &f.ownership_events,
+        require_ownership_section,
+        &interner,
+        &mut code,
+    )?;
     // #1773 (FA-09-005): unconditional, never a per-function/emission-time
     // choice like `debug_symbols` - every function gets a SIG0 section once
     // the chosen header can carry one, so `sm-format`'s decoder can expect
@@ -2280,6 +2297,7 @@ fn has_v12_record_field_ownership_events(funcs: &[IrFunction]) -> bool {
 fn emit_ownership_events(
     ownership_events: &[OwnershipPathEvent],
     require_section: bool,
+    interner: &StringInterner,
     out: &mut Vec<u8>,
 ) -> Result<(), FrontendError> {
     if ownership_events.is_empty() {
@@ -2305,7 +2323,16 @@ fn emit_ownership_events(
             OwnershipPathEventKind::Borrow => OWNERSHIP_EVENT_KIND_BORROW,
             OwnershipPathEventKind::Write => OWNERSHIP_EVENT_KIND_WRITE,
         });
-        write_u32_le(out, event.path.root.0);
+        // #1725 (FA-04-019): resolve the lowered-local key against this
+        // function's own string table - the same one LoadVar/StoreVar
+        // operands for this exact binding are interned into - instead of
+        // writing a raw frontend SymbolId the VM has no way to correctly
+        // interpret. Fails closed (`StringInterner::lookup`) rather than
+        // guessing: every root reaching this point was produced by
+        // `LoweredLocalEnv::resolve`, so a lookup miss here means the
+        // events walk visited a binding no StoreVar/LoadVar ever recorded -
+        // a producer bug, not a case to paper over.
+        write_u32_le(out, u32::from(interner.lookup(&event.path.root)?));
         write_u16_le(
             out,
             u16::try_from(event.path.components.len()).map_err(|_| FrontendError {
@@ -2537,7 +2564,12 @@ fn lower_closure_literal_expr(
     // same way a top-level `lower_stmt` arm prescans its own statement's
     // expression before lowering it. Writes into the child's own sink, not
     // the parent's - the closure body is a new function boundary.
-    append_record_update_write_events_from_expr(closure.body, arena, &mut lifted_ownership_events);
+    append_record_update_write_events_from_expr(
+        closure.body,
+        arena,
+        &mut lifted_ownership_events,
+        lowered_locals,
+    )?;
     let (body_reg, body_ty) = lower_expr_with_expected(
         closure.body,
         arena,
@@ -5202,7 +5234,7 @@ fn assign_tuple_items(
         });
         ownership_events.push(OwnershipPathEvent {
             kind: OwnershipPathEventKind::Write,
-            path: AccessPath::new(*name),
+            path: AccessPath::new(lowered_locals.resolve(arena, *name)?),
         });
     }
     Ok(())
@@ -5426,7 +5458,12 @@ fn lower_while_stmt(
     record_table: &RecordTable,
     adt_table: &AdtTable,
 ) -> Result<(), FrontendError> {
-    append_record_update_write_events_from_expr(condition, arena, &mut ctx.ownership_events);
+    append_record_update_write_events_from_expr(
+        condition,
+        arena,
+        &mut ctx.ownership_events,
+        &ctx.lowered_locals,
+    )?;
     let id = ctx.next_if_id();
     let test_label = format!("while_{}_test", id);
     let body_label = format!("while_{}_body", id);
@@ -6025,7 +6062,12 @@ fn lower_stmt(
     let stmt = arena.stmt(stmt_id);
     match stmt {
         Stmt::Const { name, ty, value } => {
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
             let (reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6060,7 +6102,12 @@ fn lower_stmt(
             ty,
             value,
         } => {
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
             let (reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6094,8 +6141,13 @@ fn lower_stmt(
             Ok(())
         }
         Stmt::LetTuple { items, ty, value } => {
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
-            let sequence_path = sequence_access_path_from_expr(*value, arena);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
+            let sequence_path = sequence_access_path_from_expr(*value, arena, &ctx.lowered_locals)?;
             let (tuple_reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6135,8 +6187,14 @@ fn lower_stmt(
             items,
             value,
         } => {
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
-            let record_path = direct_record_access_path_from_expr(*value, arena);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
+            let record_path =
+                direct_record_access_path_from_expr(*value, arena, &ctx.lowered_locals)?;
             let (record_reg, record_ty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6175,8 +6233,14 @@ fn lower_stmt(
             value,
             else_return,
         } => {
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
-            let record_path = direct_record_access_path_from_expr(*value, arena);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
+            let record_path =
+                direct_record_access_path_from_expr(*value, arena, &ctx.lowered_locals)?;
             let (record_reg, record_ty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6224,8 +6288,13 @@ fn lower_stmt(
             value,
             else_return,
         } => {
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
-            let sequence_path = sequence_access_path_from_expr(*value, arena);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
+            let sequence_path = sequence_access_path_from_expr(*value, arena, &ctx.lowered_locals)?;
             let (tuple_reg, vty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6272,7 +6341,12 @@ fn lower_stmt(
             )
         }
         Stmt::Discard { ty, value } => {
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
             let _ = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6308,7 +6382,12 @@ fn lower_stmt(
                     ),
                 });
             }
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
             let (reg, _) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6331,12 +6410,17 @@ fn lower_stmt(
             });
             ctx.ownership_events.push(OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
-                path: AccessPath::new(*name),
+                path: AccessPath::new(ctx.lowered_locals.resolve(arena, *name)?),
             });
             Ok(())
         }
         Stmt::AssignTuple { items, value } => {
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
             let (tuple_reg, tuple_ty) = lower_expr(
                 *value,
                 arena,
@@ -6452,7 +6536,12 @@ fn lower_stmt(
                     frame.result_ty.clone(),
                 )
             };
-            append_record_update_write_events_from_expr(*value, arena, &mut ctx.ownership_events);
+            append_record_update_write_events_from_expr(
+                *value,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
             let (reg, break_ty) = lower_expr_with_expected(
                 *value,
                 arena,
@@ -6518,7 +6607,8 @@ fn lower_stmt(
                 *condition,
                 arena,
                 &mut ctx.ownership_events,
-            );
+                &ctx.lowered_locals,
+            )?;
             let (cond_reg, cond_ty) = lower_expr(
                 *condition,
                 arena,
@@ -6572,7 +6662,12 @@ fn lower_stmt(
             Ok(())
         }
         Stmt::Expr(expr) => {
-            append_record_update_write_events_from_expr(*expr, arena, &mut ctx.ownership_events);
+            append_record_update_write_events_from_expr(
+                *expr,
+                arena,
+                &mut ctx.ownership_events,
+                &ctx.lowered_locals,
+            )?;
             lower_expr_stmt(
                 *expr,
                 arena,
@@ -6591,7 +6686,8 @@ fn lower_stmt(
                     value,
                     arena,
                     &mut ctx.ownership_events,
-                );
+                    &ctx.lowered_locals,
+                )?;
             }
             lower_return_payload(
                 *v,
@@ -6622,7 +6718,8 @@ fn lower_stmt(
                 *condition,
                 arena,
                 &mut ctx.ownership_events,
-            );
+                &ctx.lowered_locals,
+            )?;
             let (cond_reg, cond_ty) = lower_expr(
                 *condition,
                 arena,
@@ -6714,7 +6811,8 @@ fn lower_stmt(
                 *scrutinee,
                 arena,
                 &mut ctx.ownership_events,
-            );
+                &ctx.lowered_locals,
+            )?;
             let (scr_reg, scr_ty) = lower_expr(
                 *scrutinee,
                 arena,
@@ -7174,7 +7272,12 @@ fn lower_value_block_expr(
                 // enclosing authority (the pre-scan that reaches nested
                 // blocks only follows a block's `tail`, never its
                 // `statements`), so this call is required, not a duplicate.
-                append_record_update_write_events_from_expr(*value, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    *value,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
                 let (reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -7208,7 +7311,12 @@ fn lower_value_block_expr(
                 ty,
                 value,
             } => {
-                append_record_update_write_events_from_expr(*value, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    *value,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
                 let (reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -7241,13 +7349,18 @@ fn lower_value_block_expr(
                 });
             }
             Stmt::LetTuple { items, ty, value } => {
-                append_record_update_write_events_from_expr(*value, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    *value,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
                 // #1709: derive the same canonical `AccessPath` the
                 // top-level `lower_stmt` arm derives - previously hardcoded
                 // to `None` here, which meant `bind_tuple_items` could never
                 // emit a Borrow event for this call site regardless of the
                 // sink, since it only pushes when a path is present.
-                let sequence_path = sequence_access_path_from_expr(*value, arena);
+                let sequence_path = sequence_access_path_from_expr(*value, arena, lowered_locals)?;
                 let (tuple_reg, vty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -7287,8 +7400,14 @@ fn lower_value_block_expr(
                 items,
                 value,
             } => {
-                append_record_update_write_events_from_expr(*value, arena, ownership_events);
-                let record_path = direct_record_access_path_from_expr(*value, arena);
+                append_record_update_write_events_from_expr(
+                    *value,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
+                let record_path =
+                    direct_record_access_path_from_expr(*value, arena, lowered_locals)?;
                 let (record_reg, record_ty) = lower_expr_with_expected(
                     *value,
                     arena,
@@ -7333,7 +7452,12 @@ fn lower_value_block_expr(
                 // `lower_stmt`'s `Stmt::Discard` arm, which prescans before
                 // lowering. This nested arm had the correct sink but was
                 // never wired to the producer authority itself.
-                append_record_update_write_events_from_expr(*value, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    *value,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
                 let _ = lower_expr_with_expected(
                     *value,
                     arena,
@@ -7353,7 +7477,12 @@ fn lower_value_block_expr(
             }
             Stmt::Expr(expr) => {
                 // #1709 corrective: mirrors `lower_stmt`'s `Stmt::Expr` arm.
-                append_record_update_write_events_from_expr(*expr, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    *expr,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
                 lower_expr_stmt_with_parts(
                     *expr,
                     arena,
@@ -8492,7 +8621,12 @@ fn lower_loop_expr_stmt(
             // loop-expression `If` implementation does not delegate to
             // `lower_stmt` (unlike everything reaching the `_` fallback
             // below), so it needs the same call independently.
-            append_record_update_write_events_from_expr(*condition, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                *condition,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
             let (cond_reg, cond_ty) = lower_expr(
                 *condition,
                 arena,
@@ -8594,7 +8728,12 @@ fn lower_loop_expr_stmt(
             // which prescans `scrutinee` before lowering it. This dedicated
             // loop-expression `Match` implementation does not delegate to
             // `lower_stmt`, so it needs the same call independently.
-            append_record_update_write_events_from_expr(*scrutinee, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                *scrutinee,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
             let (scr_reg, scr_ty) = lower_expr(
                 *scrutinee,
                 arena,
@@ -10543,75 +10682,149 @@ fn find_named_var_symbol(
     }
 }
 
+// #1725 (FA-04-018/019): both of these resolve their `Expr::Var` root
+// through `LoweredLocalEnv`, the same scope-aware authority `StoreVar`/
+// `LoadVar` resolve through, so the `AccessPath` they hand back carries the
+// exact lowered runtime-local key for the binding *currently* selected by
+// lexical scope at this call site - not a raw, scope-blind frontend
+// `SymbolId`. `resolve` fails closed (no fallback to raw spelling); that
+// failure propagates as `Err` here rather than collapsing to `None`; a
+// resolve miss on an already-typechecked `Expr::Var` means a producer bug
+// upstream, not a legitimate "no path" case indistinguishable from e.g. a
+// numeric literal.
 fn sequence_access_path_from_expr(
     expr_id: ExprId,
     arena: &AstArena,
-) -> Option<SequenceOwnershipPath> {
+    lowered_locals: &LoweredLocalEnv,
+) -> Result<Option<SequenceOwnershipPath>, FrontendError> {
     match arena.expr(expr_id) {
-        Expr::Var(name) => Some(SequenceOwnershipPath::Exact(AccessPath::new(*name))),
+        Expr::Var(name) => Ok(Some(SequenceOwnershipPath::Exact(AccessPath::new(
+            lowered_locals.resolve(arena, *name)?,
+        )))),
         Expr::SequenceIndex(index_expr) => {
-            let base = sequence_access_path_from_expr(index_expr.base, arena)?;
+            let Some(base) =
+                sequence_access_path_from_expr(index_expr.base, arena, lowered_locals)?
+            else {
+                return Ok(None);
+            };
             let base_path = base.as_path().clone();
             if base.is_dynamic_fallback() {
-                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
+                return Ok(Some(SequenceOwnershipPath::DynamicFallback(base_path)));
             }
             let Expr::NumericLiteral(NumericLiteral::I32(index)) = arena.expr(index_expr.index)
             else {
-                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
+                return Ok(Some(SequenceOwnershipPath::DynamicFallback(base_path)));
             };
             if *index < 0 {
-                return Some(SequenceOwnershipPath::DynamicFallback(base_path));
+                return Ok(Some(SequenceOwnershipPath::DynamicFallback(base_path)));
             }
-            let index = u32::try_from(*index).ok()?;
-            Some(SequenceOwnershipPath::Exact(
+            let Some(index) = u32::try_from(*index).ok() else {
+                return Ok(None);
+            };
+            Ok(Some(SequenceOwnershipPath::Exact(
                 base_path.sequence_index_static(index),
-            ))
+            )))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
-fn direct_record_access_path_from_expr(expr_id: ExprId, arena: &AstArena) -> Option<AccessPath> {
+fn direct_record_access_path_from_expr(
+    expr_id: ExprId,
+    arena: &AstArena,
+    lowered_locals: &LoweredLocalEnv,
+) -> Result<Option<AccessPath>, FrontendError> {
     match arena.expr(expr_id) {
-        Expr::Var(name) => Some(AccessPath::new(*name)),
-        _ => None,
+        Expr::Var(name) => Ok(Some(AccessPath::new(lowered_locals.resolve(arena, *name)?))),
+        _ => Ok(None),
     }
 }
 
+// #1725 (FA-04-019): threads `lowered_locals` (read-only) through this
+// producer so `direct_record_access_path_from_expr`/
+// `sequence_access_path_from_expr` resolve their `AccessPath` roots through
+// the same scope-aware `LoweredLocalEnv` authority `StoreVar`/`LoadVar` do,
+// at the exact lowering-walk position this producer is called from (every
+// call site already has `lowered_locals` live in scope for the surrounding
+// `lower_expr`/`lower_stmt` call, so this mirrors the current scope state
+// exactly). Returns `Result` now (was `()`) purely to propagate a resolve
+// failure fail-closed instead of a silent fallback.
 fn append_record_update_write_events_from_expr(
     expr_id: ExprId,
     arena: &AstArena,
     ownership_events: &mut Vec<OwnershipPathEvent>,
-) {
+    lowered_locals: &LoweredLocalEnv,
+) -> Result<(), FrontendError> {
     match arena.expr(expr_id) {
         Expr::Tuple(items) => {
             for item in items {
-                append_record_update_write_events_from_expr(*item, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    *item,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
             }
         }
         Expr::RecordLiteral(record_literal) => {
             for field in &record_literal.fields {
-                append_record_update_write_events_from_expr(field.value, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    field.value,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
             }
         }
         Expr::RecordField(field_expr) => {
-            append_record_update_write_events_from_expr(field_expr.base, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                field_expr.base,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
         }
         Expr::SequenceLiteral(sequence) => {
             for item in &sequence.items {
-                append_record_update_write_events_from_expr(*item, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    *item,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
             }
         }
         Expr::SequenceIndex(index_expr) => {
-            append_record_update_write_events_from_expr(index_expr.base, arena, ownership_events);
-            append_record_update_write_events_from_expr(index_expr.index, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                index_expr.base,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
+            append_record_update_write_events_from_expr(
+                index_expr.index,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
         }
         Expr::RecordUpdate(update_expr) => {
-            append_record_update_write_events_from_expr(update_expr.base, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                update_expr.base,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
             for field in &update_expr.fields {
-                append_record_update_write_events_from_expr(field.value, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    field.value,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
             }
-            if let Some(record_path) = direct_record_access_path_from_expr(update_expr.base, arena)
+            if let Some(record_path) =
+                direct_record_access_path_from_expr(update_expr.base, arena, lowered_locals)?
             {
                 for field in &update_expr.fields {
                     ownership_events.push(OwnershipPathEvent {
@@ -10623,57 +10836,133 @@ fn append_record_update_write_events_from_expr(
         }
         Expr::Call(_, args) => {
             for arg in args {
-                append_record_update_write_events_from_expr(arg.value, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    arg.value,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
             }
         }
         Expr::Unary(_, inner) => {
-            append_record_update_write_events_from_expr(*inner, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                *inner,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
         }
         Expr::Binary(lhs, _, rhs) => {
-            append_record_update_write_events_from_expr(*lhs, arena, ownership_events);
-            append_record_update_write_events_from_expr(*rhs, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                *lhs,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
+            append_record_update_write_events_from_expr(
+                *rhs,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
         }
         Expr::Range(range) => {
-            append_record_update_write_events_from_expr(range.start, arena, ownership_events);
-            append_record_update_write_events_from_expr(range.end, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                range.start,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
+            append_record_update_write_events_from_expr(
+                range.end,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
         }
         Expr::If(if_expr) => {
-            append_record_update_write_events_from_expr(if_expr.condition, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                if_expr.condition,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
             append_record_update_write_events_from_expr(
                 if_expr.then_block.tail,
                 arena,
                 ownership_events,
-            );
+                lowered_locals,
+            )?;
             append_record_update_write_events_from_expr(
                 if_expr.else_block.tail,
                 arena,
                 ownership_events,
-            );
+                lowered_locals,
+            )?;
         }
         Expr::IfLet(if_let_expr) => {
-            append_record_update_write_events_from_expr(if_let_expr.value, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                if_let_expr.value,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
             append_record_update_write_events_from_expr(
                 if_let_expr.then_block.tail,
                 arena,
                 ownership_events,
-            );
+                lowered_locals,
+            )?;
             append_record_update_write_events_from_expr(
                 if_let_expr.else_block.tail,
                 arena,
                 ownership_events,
-            );
+                lowered_locals,
+            )?;
         }
         Expr::Block(block) => {
-            append_record_update_write_events_from_expr(block.tail, arena, ownership_events);
+            append_record_update_write_events_from_expr(
+                block.tail,
+                arena,
+                ownership_events,
+                lowered_locals,
+            )?;
         }
         Expr::Match(match_expr) => {
             append_record_update_write_events_from_expr(
                 match_expr.scrutinee,
                 arena,
                 ownership_events,
-            );
+                lowered_locals,
+            )?;
 
-            let scrutinee_path = sequence_access_path_from_expr(match_expr.scrutinee, arena);
+            // #1725 corrective: only attempt to resolve the scrutinee's
+            // ownership path if some arm's pattern actually needs it (a
+            // real Borrow-mode ADT payload capture below) - the scrutinee
+            // may be a variable bound by an *enclosing* match/if-let arm's
+            // own pattern within this same prescan tree (e.g.
+            // `Option::Some(dir) => { match dir { ... } }`), which
+            // genuinely has no `LoweredLocalEnv` entry yet at prescan time
+            // (real binding only happens later, during that arm's own real
+            // lowering). Gating on actual need means the common case - no
+            // Borrow capture anywhere in this match - never attempts a
+            // resolve that would otherwise fail closed for no reason.
+            let any_arm_borrows_adt_payload = match_expr.arms.iter().any(|arm| {
+                matches!(&arm.pat, sm_front::types::MatchPattern::Adt(adt_pat) if adt_pat.items.iter().any(|item| {
+                    matches!(
+                        item,
+                        sm_front::types::AdtPatternItem::Bind {
+                            capture: sm_front::types::CaptureMode::Borrow,
+                            ..
+                        }
+                    )
+                }))
+            });
+            let scrutinee_path = if any_arm_borrows_adt_payload {
+                sequence_access_path_from_expr(match_expr.scrutinee, arena, lowered_locals)?
+            } else {
+                None
+            };
             let mut borrowed_dynamic_scrutinee_root = false;
             for arm in &match_expr.arms {
                 if let sm_front::types::MatchPattern::Adt(adt_pat) = &arm.pat {
@@ -10715,16 +11004,27 @@ fn append_record_update_write_events_from_expr(
                 }
 
                 if let Some(guard) = arm.guard {
-                    append_record_update_write_events_from_expr(guard, arena, ownership_events);
+                    append_record_update_write_events_from_expr(
+                        guard,
+                        arena,
+                        ownership_events,
+                        lowered_locals,
+                    )?;
                 }
                 append_record_update_write_events_from_expr(
                     arm.block.tail,
                     arena,
                     ownership_events,
-                );
+                    lowered_locals,
+                )?;
             }
             if let Some(default) = &match_expr.default {
-                append_record_update_write_events_from_expr(default.tail, arena, ownership_events);
+                append_record_update_write_events_from_expr(
+                    default.tail,
+                    arena,
+                    ownership_events,
+                    lowered_locals,
+                )?;
             }
         }
         Expr::QuadLiteral(_)
@@ -10736,6 +11036,7 @@ fn append_record_update_write_events_from_expr(
         | Expr::Var(_)
         | Expr::Loop(_) => {}
     }
+    Ok(())
 }
 
 #[inline]
@@ -11209,15 +11510,17 @@ mod opt_tests {
 
     #[test]
     fn access_path_root_starts_with_empty_component_list() {
-        let path = AccessPath::new(SymbolId(7));
-        assert_eq!(path.root, SymbolId(7));
+        let path = AccessPath::new("__sm_local_7_x".to_string());
+        assert_eq!(path.root, "__sm_local_7_x");
         assert!(path.components.is_empty());
     }
 
     #[test]
     fn access_path_tuple_indices_preserve_append_order() {
-        let path = AccessPath::new(SymbolId(3)).tuple_index(1).tuple_index(4);
-        assert_eq!(path.root, SymbolId(3));
+        let path = AccessPath::new("__sm_local_3_x".to_string())
+            .tuple_index(1)
+            .tuple_index(4);
+        assert_eq!(path.root, "__sm_local_3_x");
         assert_eq!(
             path.components,
             vec![PathComponent::TupleIndex(1), PathComponent::TupleIndex(4)]
@@ -11227,17 +11530,17 @@ mod opt_tests {
     #[test]
     fn access_path_record_field_can_be_represented() {
         let camera = SymbolId(11);
-        let path = AccessPath::new(SymbolId(3)).field(camera);
-        assert_eq!(path.root, SymbolId(3));
+        let path = AccessPath::new("__sm_local_3_x".to_string()).field(camera);
+        assert_eq!(path.root, "__sm_local_3_x");
         assert_eq!(path.components, vec![PathComponent::Field(camera)]);
     }
 
     #[test]
     fn access_path_sequence_index_static_can_be_represented() {
-        let path = AccessPath::new(SymbolId(3))
+        let path = AccessPath::new("__sm_local_3_x".to_string())
             .sequence_index_static(2)
             .sequence_index_static(4);
-        assert_eq!(path.root, SymbolId(3));
+        assert_eq!(path.root, "__sm_local_3_x");
         assert_eq!(
             path.components,
             vec![
@@ -11250,9 +11553,15 @@ mod opt_tests {
     #[test]
     fn access_path_component_order_is_deterministic() {
         let field = SymbolId(12);
-        let left = AccessPath::new(SymbolId(9)).tuple_index(0).field(field);
-        let right = AccessPath::new(SymbolId(9)).tuple_index(0).field(field);
-        let different = AccessPath::new(SymbolId(9)).field(field).tuple_index(0);
+        let left = AccessPath::new("__sm_local_9_x".to_string())
+            .tuple_index(0)
+            .field(field);
+        let right = AccessPath::new("__sm_local_9_x".to_string())
+            .tuple_index(0)
+            .field(field);
+        let different = AccessPath::new("__sm_local_9_x".to_string())
+            .field(field)
+            .tuple_index(0);
         assert_eq!(left, right);
         assert_ne!(left, different);
     }
@@ -11281,6 +11590,56 @@ mod opt_tests {
         )
         .expect("function should lower");
         (program, lowered.primary)
+    }
+
+    // #1725 (FA-04-019): `AccessPath.root` now carries the resolved lowered
+    // runtime-local key, not a raw frontend `SymbolId` - these pre-existing
+    // tests compared `ownership_events` against a hand-built `AccessPath`
+    // whose root was the raw `SymbolId`. Rather than hand-computing the
+    // exact `__sm_local_<id>_<spelling>` text (an implementation detail;
+    // see the identical rationale on `ssf08_1724_*` above), this looks up
+    // the actual key a StoreVar/LoadVar for that source spelling carries in
+    // the lowered function - fail-closed on 0 or >1 distinct matches, the
+    // same discipline as `LoweredLocalEnv::resolve` itself.
+    fn is_lowered_local_key_for(candidate: &str, source_name: &str) -> bool {
+        let Some(rest) = candidate.strip_prefix("__sm_local_") else {
+            return false;
+        };
+        let digits_end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if digits_end == 0 {
+            return false;
+        }
+        let Some(after_digits) = rest.get(digits_end..) else {
+            return false;
+        };
+        let Some(spelling) = after_digits.strip_prefix('_') else {
+            return false;
+        };
+        spelling == source_name
+    }
+
+    fn lowered_local_key_for(func: &IrFunction, source_name: &str) -> String {
+        let matches: BTreeSet<&str> = func
+            .instrs
+            .iter()
+            .filter_map(|instr| match instr {
+                IrInstr::StoreVar { name, .. } | IrInstr::LoadVar { name, .. } => {
+                    Some(name.as_str())
+                }
+                _ => None,
+            })
+            .filter(|name| is_lowered_local_key_for(name, source_name))
+            .collect();
+        match matches.len() {
+            0 => panic!(
+                "no lowered local key found for '{source_name}' in function '{}' instrs {:?}",
+                func.name, func.instrs
+            ),
+            1 => matches.into_iter().next().unwrap().to_string(),
+            _ => panic!("ambiguous lowered local key for '{source_name}': {matches:?}"),
+        }
     }
 
     #[test]
@@ -12561,12 +12920,6 @@ mod opt_tests {
         "#;
 
         let (program, func) = lower_single_function_with_program(src, "use_e");
-        let use_e_func = program
-            .functions
-            .iter()
-            .find(|f| program.arena.symbol_name(f.name) == "use_e")
-            .unwrap();
-        let e_name = use_e_func.params[0].0;
 
         let adt = program
             .adts
@@ -12583,7 +12936,8 @@ mod opt_tests {
             func.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(e_name).adt_payload(variant.name, 0),
+                path: AccessPath::new(lowered_local_key_for(&func, "e"))
+                    .adt_payload(variant.name, 0),
             }]
         );
     }
@@ -12625,14 +12979,14 @@ mod opt_tests {
 
         let (mut program, func) = lower_single_function_with_program(src, "use_opt");
 
-        let opt_name = program.arena.intern_symbol("opt");
         let some_name = program.arena.intern_symbol("Some");
 
         assert_eq!(
             func.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(opt_name).adt_payload(some_name, 0),
+                path: AccessPath::new(lowered_local_key_for(&func, "opt"))
+                    .adt_payload(some_name, 0),
             }]
         );
     }
@@ -12670,14 +13024,13 @@ mod opt_tests {
 
         let (mut program, func) = lower_single_function_with_program(src, "use_result");
 
-        let res_name = program.arena.intern_symbol("res");
         let ok_name = program.arena.intern_symbol("Ok");
 
         assert_eq!(
             func.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(res_name).adt_payload(ok_name, 0),
+                path: AccessPath::new(lowered_local_key_for(&func, "res")).adt_payload(ok_name, 0),
             }]
         );
     }
@@ -12697,14 +13050,13 @@ mod opt_tests {
 
         let (mut program, func) = lower_single_function_with_program(src, "use_result");
 
-        let res_name = program.arena.intern_symbol("res");
         let err_name = program.arena.intern_symbol("Err");
 
         assert_eq!(
             func.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(res_name).adt_payload(err_name, 0),
+                path: AccessPath::new(lowered_local_key_for(&func, "res")).adt_payload(err_name, 0),
             }]
         );
     }
@@ -12721,23 +13073,12 @@ mod opt_tests {
             }
         "#;
 
-        let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let {
-            name: pair_name, ..
-        } = program.arena.stmt(main_fn.body[0])
-        else {
-            panic!("expected pair binding");
-        };
+        let (_, main) = lower_single_function_with_program(src, "main");
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(*pair_name).tuple_index(0),
+                path: AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(0),
             }]
         );
     }
@@ -12754,28 +13095,17 @@ mod opt_tests {
             }
         "#;
 
-        let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let {
-            name: pair_name, ..
-        } = program.arena.stmt(main_fn.body[0])
-        else {
-            panic!("expected pair binding");
-        };
+        let (_, main) = lower_single_function_with_program(src, "main");
         assert_eq!(
             main.ownership_events,
             vec![
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*pair_name).tuple_index(0),
+                    path: AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(0),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*pair_name).tuple_index(1),
+                    path: AccessPath::new(lowered_local_key_for(&main, "pair")).tuple_index(1),
                 },
             ]
         );
@@ -12819,34 +13149,17 @@ mod opt_tests {
             }
         "#;
 
-        let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let {
-            name: count_name, ..
-        } = program.arena.stmt(main_fn.body[0])
-        else {
-            panic!("expected count binding");
-        };
-        let Stmt::Let {
-            name: ready_name, ..
-        } = program.arena.stmt(main_fn.body[1])
-        else {
-            panic!("expected ready binding");
-        };
+        let (_, main) = lower_single_function_with_program(src, "main");
         assert_eq!(
             main.ownership_events,
             vec![
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
-                    path: AccessPath::new(*count_name),
+                    path: AccessPath::new(lowered_local_key_for(&main, "count")),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
-                    path: AccessPath::new(*ready_name),
+                    path: AccessPath::new(lowered_local_key_for(&main, "ready")),
                 },
             ]
         );
@@ -13631,20 +13944,12 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let camera_field = program.records[0].fields[0].name;
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(*ctx_name).field(camera_field),
+                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field),
             }]
         );
     }
@@ -13666,20 +13971,12 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
-                path: AccessPath::new(*ctx_name).field(quality_field),
+                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
     }
@@ -13700,14 +13997,6 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let camera_field = program.records[0].fields[0].name;
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
@@ -13715,11 +14004,11 @@ mod opt_tests {
             vec![
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*ctx_name).field(camera_field),
+                    path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*ctx_name).field(quality_field),
+                    path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
                 },
             ]
         );
@@ -13742,14 +14031,6 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let camera_field = program.records[0].fields[0].name;
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
@@ -13757,11 +14038,11 @@ mod opt_tests {
             vec![
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
-                    path: AccessPath::new(*ctx_name).field(quality_field),
+                    path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
-                    path: AccessPath::new(*ctx_name).field(camera_field),
+                    path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field),
                 },
             ]
         );
@@ -13777,27 +14058,19 @@ mod opt_tests {
             }
         "#;
 
-        let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: seq_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected sequence binding");
-        };
+        let (_, main) = lower_single_function_with_program(src, "main");
         assert_eq!(
             main.ownership_events,
             vec![
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*seq_name)
+                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
                         .sequence_index_static(0)
                         .tuple_index(0),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*seq_name)
+                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
                         .sequence_index_static(0)
                         .tuple_index(1),
                 },
@@ -13851,39 +14124,31 @@ mod opt_tests {
             }
         "#;
 
-        let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: seq_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected sequence binding");
-        };
+        let (_, main) = lower_single_function_with_program(src, "main");
         assert_eq!(
             main.ownership_events,
             vec![
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*seq_name)
+                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
                         .sequence_index_static(0)
                         .tuple_index(0),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*seq_name)
+                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
                         .sequence_index_static(0)
                         .tuple_index(1),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*seq_name)
+                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
                         .sequence_index_static(1)
                         .tuple_index(0),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Borrow,
-                    path: AccessPath::new(*seq_name)
+                    path: AccessPath::new(lowered_local_key_for(&main, "seq"))
                         .sequence_index_static(1)
                         .tuple_index(1),
                 },
@@ -14477,23 +14742,12 @@ mod opt_tests {
             }
         "#;
 
-        let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let {
-            name: source_name, ..
-        } = program.arena.stmt(main_fn.body[0])
-        else {
-            panic!("expected source binding");
-        };
+        let (_, main) = lower_single_function_with_program(src, "main");
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(*source_name).tuple_index(0),
+                path: AccessPath::new(lowered_local_key_for(&main, "source")).tuple_index(0),
             }]
         );
     }
@@ -14539,20 +14793,12 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
-                path: AccessPath::new(*ctx_name).field(quality_field),
+                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
     }
@@ -14579,23 +14825,12 @@ mod opt_tests {
             }
         "#;
 
-        let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let {
-            name: source_name, ..
-        } = program.arena.stmt(main_fn.body[0])
-        else {
-            panic!("expected source binding");
-        };
+        let (_, main) = lower_single_function_with_program(src, "main");
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Borrow,
-                path: AccessPath::new(*source_name).tuple_index(0),
+                path: AccessPath::new(lowered_local_key_for(&main, "source")).tuple_index(0),
             }]
         );
     }
@@ -14643,22 +14878,15 @@ mod opt_tests {
         )
         .expect("main should lower");
 
-        let Stmt::Let {
-            name: source_name, ..
-        } = program.arena.stmt(main_fn.body[0])
-        else {
-            panic!("expected source binding");
-        };
-        let expected_event = OwnershipPathEvent {
-            kind: OwnershipPathEventKind::Borrow,
-            path: AccessPath::new(*source_name).tuple_index(0),
-        };
-
         let lifted = lowered
             .lifted
             .iter()
             .find(|func| func.name.starts_with("__closure_main_"))
             .expect("closure lowering should produce a lifted helper");
+        let expected_event = OwnershipPathEvent {
+            kind: OwnershipPathEventKind::Borrow,
+            path: AccessPath::new(lowered_local_key_for(lifted, "source")).tuple_index(0),
+        };
         assert_eq!(lifted.ownership_events, vec![expected_event.clone()]);
         assert!(
             !lowered.primary.ownership_events.contains(&expected_event),
@@ -14693,20 +14921,12 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
-                path: AccessPath::new(*ctx_name).field(quality_field),
+                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
     }
@@ -14736,20 +14956,12 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
-                path: AccessPath::new(*ctx_name).field(quality_field),
+                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
     }
@@ -14782,20 +14994,12 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
-                path: AccessPath::new(*ctx_name).field(quality_field),
+                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
     }
@@ -14827,20 +15031,12 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
-                path: AccessPath::new(*ctx_name).field(quality_field),
+                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
     }
@@ -14868,20 +15064,12 @@ mod opt_tests {
         "#;
 
         let (program, main) = lower_single_function_with_program(src, "main");
-        let main_fn = program
-            .functions
-            .iter()
-            .find(|func| program.arena.symbol_name(func.name) == "main")
-            .expect("main fn");
-        let Stmt::Let { name: ctx_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected ctx binding");
-        };
         let quality_field = program.records[0].fields[1].name;
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
-                path: AccessPath::new(*ctx_name).field(quality_field),
+                path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
             }]
         );
     }
@@ -14925,20 +15113,16 @@ mod opt_tests {
         )
         .expect("main should lower");
 
-        let Stmt::Let { name: r_name, .. } = program.arena.stmt(main_fn.body[0]) else {
-            panic!("expected r binding");
-        };
         let x_field = program.records[0].fields[0].name;
-        let expected_event = OwnershipPathEvent {
-            kind: OwnershipPathEventKind::Write,
-            path: AccessPath::new(*r_name).field(x_field),
-        };
-
         let lifted = lowered
             .lifted
             .iter()
             .find(|func| func.name.starts_with("__closure_main_"))
             .expect("closure lowering should produce a lifted helper");
+        let expected_event = OwnershipPathEvent {
+            kind: OwnershipPathEventKind::Write,
+            path: AccessPath::new(lowered_local_key_for(lifted, "r")).field(x_field),
+        };
         assert_eq!(lifted.ownership_events, vec![expected_event.clone()]);
         assert!(
             !lowered.primary.ownership_events.contains(&expected_event),
@@ -15133,6 +15317,56 @@ mod opt_tests {
         assert_eq!(
             post_loop_x_key, outer_x_key,
             "use of 'x' after the loop expression exits must resolve to the outer binding's exact key"
+        );
+    }
+
+    #[test]
+    fn ssf08_1725_nested_match_on_arm_pattern_bound_scrutinee_does_not_fail_closed_when_unneeded() {
+        // Corrective regression (#1725 / FA-04-019, found via the real
+        // qualification fixture examples/qualification/match_surface/
+        // positive_nested_match/src/main.sm): #1709's prescan producer
+        // (`append_record_update_write_events_from_expr`) walks the AST
+        // strictly ahead of and separately from real lowering, which is
+        // what actually calls `LoweredLocalEnv::bind`. When prescan
+        // recurses into a match arm's own body and that body's inner match
+        // scrutinizes a variable bound by *that same arm's own pattern*
+        // (`dir` below, bound by `Option::Some(dir)`), the variable
+        // genuinely has no `LoweredLocalEnv` entry yet - real binding only
+        // happens later, during that arm's own real lowering. Since this
+        // inner match has no Borrow-mode ADT payload capture anywhere, the
+        // (never-needed) scrutinee path must never be resolved at all, and
+        // lowering must succeed.
+        let src = r#"
+            enum Direction {
+                Up,
+                Right,
+                Down,
+                Left,
+            }
+
+            fn describe(opt: Option(Direction)) -> text {
+                let out: text = match opt {
+                    Option::Some(dir) => {
+                        match dir {
+                            Direction::Up => { "up" }
+                            Direction::Right => { "right" }
+                            Direction::Down => { "down" }
+                            Direction::Left => { "left" }
+                        }
+                    }
+                    Option::None => { "none" }
+                };
+                return out;
+            }
+
+            fn main() { return; }
+        "#;
+
+        let (_, func) = lower_single_function_with_program(src, "describe");
+        assert_eq!(
+            func.ownership_events,
+            vec![],
+            "no Borrow-mode ADT payload capture exists anywhere in this program, so no ownership event should be produced"
         );
     }
 }
