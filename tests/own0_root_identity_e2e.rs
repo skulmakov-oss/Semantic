@@ -253,3 +253,74 @@ fn corrupted_own0_root_index_rejects_deterministically_on_load() {
         "expected a deterministic BadFormat rejection, got {err:?}"
     );
 }
+
+// #1725 review follow-up: the fix left `PathComponent::Field`'s and
+// `AdtPayload::variant`'s raw frontend `SymbolId` unresolved (see the doc
+// comments on `PathComponent` in both crates/sm-runtime-core/src/lib.rs and
+// crates/sm-ir/src/legacy_lowering.rs). This is a *narrower, already-sound*
+// property than root identity, not the same defect: `access_paths_overlap`
+// compares these values purely structurally, root-gated first
+// (`lhs.root == rhs.root`, then component-prefix equality) - never through
+// `RuntimeSymbolTable`/`vm.symbols`, verified by exhaustive inspection of
+// every consumer. The pair below proves this exactly: two *unrelated*
+// record types sharing a field spelling (so their raw `SymbolId`s for
+// `value` are the identical number, since `SymbolId` is spelling-interned
+// program-wide) must not be confused by the checker, because the check is
+// root-gated first - while a genuine same-root, same-field conflict must
+// still be caught. Both use `x = x with { field: v }` (self-update
+// reassignment), the shape that actually round-trips through a field-level
+// `Write` `AccessPath` the VM's StoreVar-time checker evaluates - a
+// `with`-update into a *new* variable never reaches that check at all (see
+// `Stmt::Assign`'s StoreVar-time `ensure_write_path_allowed`, which only
+// fires when the reassigned symbol already exists as a local).
+
+#[test]
+fn field_symbol_collision_across_unrelated_record_types_does_not_false_conflict() {
+    let src = r#"
+        record Meter {
+            value: f64,
+        }
+        record Counter {
+            value: i32,
+        }
+
+        fn main() {
+            let m: Meter = Meter { value: 1.0 };
+            let Meter { value: ref mv } = m;
+            let mut c: Counter = Counter { value: 2 };
+            c = c with { value: 99 };
+            assert(mv == 1.0);
+            return;
+        }
+    "#;
+    run_source(src).expect(
+        "an unrelated record type's same-spelled field write must not conflict with the outer borrow",
+    );
+}
+
+#[test]
+fn field_symbol_same_root_same_field_still_conflicts() {
+    // Negative control for the test above: with the same field on the same
+    // root (no unrelated type involved), the self-update reassignment must
+    // still be rejected - proving the checker's root-gating isn't hiding a
+    // genuine field-level conflict, only correctly ignoring an unrelated one.
+    let src = r#"
+        record Meter {
+            value: f64,
+        }
+
+        fn main() {
+            let mut m: Meter = Meter { value: 1.0 };
+            let Meter { value: ref mv } = m;
+            m = m with { value: 99.0 };
+            assert(mv == 1.0);
+            return;
+        }
+    "#;
+    let err =
+        run_source(src).expect_err("same-root same-field self-update reassignment must conflict");
+    assert!(
+        matches!(err, RuntimeError::Trap(RuntimeTrap::BorrowWriteConflict)),
+        "expected a borrow/write conflict trap, got {err:?}"
+    );
+}

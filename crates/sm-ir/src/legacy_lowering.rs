@@ -444,6 +444,13 @@ impl SequenceOwnershipPath {
     }
 }
 
+/// #1725 (FA-04-019) follow-up finding: `Field`'s and `AdtPayload::variant`'s
+/// raw `SymbolId` are deliberately left unresolved here, unlike
+/// `AccessPath.root`. Verified by exhaustive inspection of every consumer
+/// in `sm-vm` (`crates/sm-runtime-core/src/lib.rs`'s `PathComponent` carries
+/// the full rationale): they are used exclusively as opaque, root-gated
+/// equality keys, never resolved through a runtime symbol table - a
+/// materially different, already-sound property from root identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathComponent {
     TupleIndex(u16),
