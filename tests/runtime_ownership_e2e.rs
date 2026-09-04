@@ -1021,7 +1021,7 @@ fn rewrite_function_code(code: &[u8], events: &[OwnershipEventSpec<'_>]) -> Vec<
     let ownership_start = layout.ownership_start.expect("OWN0 section");
     let mut out = Vec::with_capacity(code.len());
     out.extend_from_slice(&code[..ownership_start]);
-    out.extend_from_slice(&ownership_section_bytes(&layout.strings, events));
+    out.extend_from_slice(&ownership_section_bytes(&layout, events));
     // #1773 (FA-09-005): preserve the real SIG0 section verbatim - only
     // OWN0 is being replaced here, not the range through `instr_start`,
     // which would silently drop SIG0 along with it.
@@ -1029,18 +1029,131 @@ fn rewrite_function_code(code: &[u8], events: &[OwnershipEventSpec<'_>]) -> Vec<
     out
 }
 
-fn ownership_section_bytes(strings: &[String], events: &[OwnershipEventSpec<'_>]) -> Vec<u8> {
+// #1724 (FA-04-018): `layout.strings` is the compiled function's own
+// local StoreVar/LoadVar/Call operand string table. Before #1724, a
+// lexical binding's StoreVar/LoadVar key was identical to its source
+// spelling, so this harness could look a root up by raw name directly.
+// #1724 intentionally removes that representation coincidence - every
+// lexical binding now gets a scope-aware, deterministic, mangled key of
+// the form `__sm_local_<id>_<source_name>` (see `LoweredLocalEnv` in
+// `crates/sm-ir/src/legacy_lowering.rs`), so shadowed bindings with the
+// same spelling no longer collide on one runtime-local identity.
+//
+// This resolver finds the *single* lowered key whose mangled suffix
+// matches `source_name` exactly. It fails closed on both "not found" and
+// "ambiguous" (more than one lowered key for that spelling, e.g. a
+// shadowed variable): no raw-spelling fallback, no first-match
+// heuristic. Either of those would silently reintroduce, at this
+// test-harness boundary, the exact identity-collapse #1724's production
+// fix exists to repair - and specifically for #1724's own shadowing
+// regressions, a "pick any match" resolver would hide the very bug this
+// suite exists to catch instead of surfacing it as an ambiguous lookup.
+fn resolve_unique_lowered_local_key(layout: &FunctionLayout, source_name: &str) -> String {
+    let matches: Vec<&String> = layout
+        .strings
+        .iter()
+        .filter(|candidate| is_lowered_local_key_for(candidate, source_name))
+        .collect();
+    match matches.as_slice() {
+        [] => panic!(
+            "no lowered runtime-local key found for source root '{source_name}' - \
+             looked for '__sm_local_<id>_{source_name}' in the function's string \
+             table {:?}",
+            layout.strings
+        ),
+        [single] => (*single).clone(),
+        multiple => panic!(
+            "ambiguous lowered runtime-local key for source root '{source_name}': \
+             {multiple:?} all match - the test must disambiguate which binding it means"
+        ),
+    }
+}
+
+/// Exact-shape check for `__sm_local_<digits>_<source_name>`: strips the
+/// reserved prefix, consumes a non-empty run of ASCII digits as the
+/// counter, requires exactly one `_` separator, then compares the
+/// remainder to `source_name` verbatim (not merely as a suffix - a bare
+/// suffix check could be fooled by a source name that itself contains a
+/// leading-underscore-adjacent substring of another binding's spelling).
+fn is_lowered_local_key_for(candidate: &str, source_name: &str) -> bool {
+    let Some(rest) = candidate.strip_prefix("__sm_local_") else {
+        return false;
+    };
+    let digits_end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    if digits_end == 0 {
+        return false;
+    }
+    let Some(after_digits) = rest.get(digits_end..) else {
+        return false;
+    };
+    let Some(spelling) = after_digits.strip_prefix('_') else {
+        return false;
+    };
+    spelling == source_name
+}
+
+fn ownership_section_bytes(layout: &FunctionLayout, events: &[OwnershipEventSpec<'_>]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&OWNERSHIP_SECTION_TAG);
     out.extend_from_slice(&(events.len() as u16).to_le_bytes());
     for event in events {
-        let root = strings
+        let lowered_key = resolve_unique_lowered_local_key(layout, event.root);
+        let root = layout
+            .strings
             .iter()
-            .position(|name| name == event.root)
-            .unwrap_or_else(|| panic!("missing root '{}'", event.root)) as u32;
+            .position(|name| *name == lowered_key)
+            .expect("resolved lowered key must be present in the string table it was resolved from")
+            as u32;
         append_ownership_event(&mut out, event.kind, root, event.components);
     }
     out
+}
+
+// #1724 (FA-04-018): proves `resolve_unique_lowered_local_key` cannot be
+// fooled by shadowing - the exact scenario #1724's production fix exists
+// to repair. Two distinct lexical bindings spelled "x" now lower to two
+// distinct keys (`__sm_local_<id>_x`) in the same function's string
+// table; asking for "x" without further disambiguation must fail closed
+// rather than silently picking either one.
+#[test]
+#[should_panic(expected = "ambiguous")]
+fn resolve_unique_lowered_local_key_fails_closed_on_shadowed_spelling() {
+    let src = r#"
+        fn main() {
+            let x: i32 = 1;
+            if true {
+                let x: i32 = 2;
+                let y: i32 = x;
+                let _ = y;
+            }
+            let z: i32 = x;
+            let _ = z;
+            return;
+        }
+    "#;
+    let semcode = compile_program_to_semcode(src).expect("compile");
+    let (_, code, _) = find_function(&semcode, "main");
+    let layout = parse_function_layout(code);
+    let _ = resolve_unique_lowered_local_key(&layout, "x");
+}
+
+#[test]
+fn resolve_unique_lowered_local_key_resolves_single_binding() {
+    let src = r#"
+        fn main() {
+            let total: i32 = 1;
+            let _ = total;
+            return;
+        }
+    "#;
+    let semcode = compile_program_to_semcode(src).expect("compile");
+    let (_, code, _) = find_function(&semcode, "main");
+    let layout = parse_function_layout(code);
+    let key = resolve_unique_lowered_local_key(&layout, "total");
+    assert!(is_lowered_local_key_for(&key, "total"));
+    assert!(layout.strings.contains(&key));
 }
 
 fn append_ownership_event(

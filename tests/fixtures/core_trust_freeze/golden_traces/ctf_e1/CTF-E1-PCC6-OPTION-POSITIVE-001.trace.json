@@ -9,10 +9,10 @@
   "expected_status": "accept",
   "source_hash": "86a1c92a6678acca",
   "ir_hash": "60b5c1f62a44e9be",
-  "semcode_hash": "5646b761e7f2131b",
+  "semcode_hash": "541d4f34f5e66bb1",
   "verifier_status": "accept",
   "vm_status": "ok",
   "runtime_config": "default",
-  "expected_output_hash": "68bb59091e0aa66f",
+  "expected_output_hash": "30dfd44b2193c025",
   "notes": "Selected standard-form Option trace only; Result remains covered by later evidence if needed."
 }
