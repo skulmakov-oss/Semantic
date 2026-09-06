@@ -1,4 +1,4 @@
-use crate::legacy_lowering::{IrFunction, IrInstr, OwnershipPathEventKind};
+use crate::legacy_lowering::{IrFunction, IrInstr, OwnershipPathEventKind, WriteSiteId};
 
 pub mod cleanup;
 pub mod crystalfold;
@@ -114,6 +114,97 @@ pub fn validate_activation_sites(func: &IrFunction) -> Result<(), OptError> {
             event_sites.len()
         )));
     }
+    Ok(())
+}
+
+/// #1891 Checkpoint W2A: fail-closed validator for the `WriteSiteId`
+/// pairing between write-capable IR instructions (`StoreVar`, `MakeRecord`)
+/// and `OwnershipPathEvent::Write` events. Mirrors `validate_activation_sites`'
+/// discipline for Borrow, but enforces a deliberately different cardinality:
+/// a `StoreVar` site (producers A/`assign_tuple_items` and B/`Stmt::Assign`)
+/// pairs with exactly one Write event; a `MakeRecord` site (producer C,
+/// `Expr::RecordUpdate`) may legitimately pair with one or more Write
+/// events, since one RecordUpdate's N overridden fields share one
+/// `WriteSiteId`. Never infers the opcode class from an event's
+/// `AccessPath` shape and never silently discards or clears orphan
+/// metadata on either side - every mismatch fails closed.
+pub fn validate_write_sites(func: &IrFunction) -> Result<(), OptError> {
+    use std::collections::HashMap;
+
+    #[derive(Clone, Copy)]
+    enum SiteInstr {
+        StoreVar,
+        MakeRecord,
+    }
+
+    let mut instr_sites: HashMap<WriteSiteId, SiteInstr> = HashMap::new();
+    for instr in &func.instrs {
+        let (site, kind) = match instr {
+            IrInstr::StoreVar {
+                write_site: Some(site),
+                ..
+            } => (*site, SiteInstr::StoreVar),
+            IrInstr::MakeRecord {
+                write_site: Some(site),
+                ..
+            } => (*site, SiteInstr::MakeRecord),
+            _ => continue,
+        };
+        if instr_sites.insert(site, kind).is_some() {
+            return Err(OptError(format!(
+                "function `{}`: WriteSiteId({}) annotated on more than one write-capable instruction",
+                func.name, site.0
+            )));
+        }
+    }
+
+    let mut event_counts: HashMap<WriteSiteId, usize> = HashMap::new();
+    for event in &func.ownership_events {
+        match (event.kind, event.write_site) {
+            (OwnershipPathEventKind::Borrow, Some(site)) => {
+                return Err(OptError(format!(
+                    "function `{}`: Borrow event must never carry a write site, found WriteSiteId({})",
+                    func.name, site.0
+                )));
+            }
+            (OwnershipPathEventKind::Write, Some(site)) => {
+                *event_counts.entry(site).or_insert(0) += 1;
+            }
+            (OwnershipPathEventKind::Write, None) => {
+                return Err(OptError(format!(
+                    "function `{}`: Write event has no WriteSiteId",
+                    func.name
+                )));
+            }
+            (OwnershipPathEventKind::Borrow, None) => {}
+        }
+    }
+
+    for (site, kind) in &instr_sites {
+        let count = event_counts.get(site).copied().unwrap_or(0);
+        if count == 0 {
+            return Err(OptError(format!(
+                "function `{}`: WriteSiteId({}) is annotated on an instruction but claimed by no Write event",
+                func.name, site.0
+            )));
+        }
+        if matches!(kind, SiteInstr::StoreVar) && count != 1 {
+            return Err(OptError(format!(
+                "function `{}`: WriteSiteId({}) is a StoreVar site but is claimed by {} Write event(s), expected exactly 1",
+                func.name, site.0, count
+            )));
+        }
+    }
+
+    for site in event_counts.keys() {
+        if !instr_sites.contains_key(site) {
+            return Err(OptError(format!(
+                "function `{}`: WriteSiteId({}) is claimed by a Write event but is not annotated on any instruction",
+                func.name, site.0
+            )));
+        }
+    }
+
     Ok(())
 }
 
