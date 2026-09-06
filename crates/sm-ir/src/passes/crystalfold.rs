@@ -188,9 +188,19 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                 cst.remove(&dst);
                 out.push(IrInstr::MakeTuple { dst, items });
             }
-            IrInstr::MakeRecord { dst, name, items } => {
+            IrInstr::MakeRecord {
+                dst,
+                name,
+                items,
+                write_site,
+            } => {
                 cst.remove(&dst);
-                out.push(IrInstr::MakeRecord { dst, name, items });
+                out.push(IrInstr::MakeRecord {
+                    dst,
+                    name,
+                    items,
+                    write_site,
+                });
             }
             IrInstr::MakeAdt {
                 dst,
@@ -318,11 +328,13 @@ fn fold_constants_and_identities(instrs: &mut Vec<IrInstr>) -> u32 {
                 name,
                 src,
                 activation_site,
+                write_site,
             } => {
                 out.push(IrInstr::StoreVar {
                     name,
                     src,
                     activation_site,
+                    write_site,
                 });
             }
             IrInstr::BoolNot { dst, src } => {

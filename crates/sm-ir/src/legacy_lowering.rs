@@ -159,6 +159,13 @@ pub enum IrInstr {
         dst: u16,
         name: String,
         items: Vec<u16>,
+        /// #1891 Checkpoint W2A: `Some` iff this exact `MakeRecord`
+        /// materializes a source `Expr::RecordUpdate`'s result - the sole
+        /// executable effect one or more of that expression's `Write(Field)`
+        /// ownership events may be attached to. `None` for a plain
+        /// `RecordLiteral` construction, which carries no ownership Write
+        /// effect at all.
+        write_site: Option<WriteSiteId>,
     },
     MakeAdt {
         dst: u16,
@@ -197,6 +204,15 @@ pub enum IrInstr {
         name: String,
         src: u16,
         activation_site: Option<ActivationSiteId>,
+        /// #1891 Checkpoint W2A: `Some` iff this exact `StoreVar` is a
+        /// producer-A (`assign_tuple_items`) or producer-B (`Stmt::Assign`)
+        /// write-effect site - the exact instruction a Write ownership
+        /// event's overlap check must run against, before this instruction
+        /// commits. Independent of `activation_site`: a real StoreVar is
+        /// never both today (introductions and reassignments are disjoint
+        /// producers), but the two fields carry unrelated authorities and
+        /// must not be assumed mutually exclusive as a type-level invariant.
+        write_site: Option<WriteSiteId>,
     },
     QAnd {
         dst: u16,
@@ -475,6 +491,26 @@ pub enum OwnershipPathEventKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ActivationSiteId(pub u32);
 
+/// #1891 Checkpoint W2A: compiler-internal IR authority for a Write
+/// ownership effect's exact execution instruction, mirroring
+/// `ActivationSiteId`'s role for Borrow but never reusing that type - the
+/// two represent different runtime authorities and must not be conflated:
+/// `ActivationSiteId` means "successful execution of this exact instruction
+/// activates a Borrow once, consumed"; `WriteSiteId` means "every execution
+/// of this exact instruction requires re-checking one or more Write paths
+/// against the currently active Borrows, before the instruction commits,
+/// never consumed." Allocated from a separate function-local monotonic
+/// counter (`LoweredLocalEnv::fresh_write_site`), never derived from or
+/// compared against an `ActivationSiteId`. Only `IrInstr::StoreVar` (the
+/// exact assignment instruction, producers A/`assign_tuple_items` and
+/// B/`Stmt::Assign`) and `IrInstr::MakeRecord` (the exact instruction
+/// materializing a `RecordUpdate` expression's result, producer C) may ever
+/// carry one - see each producer's own site-minting code for the proof
+/// that this is the correct, sole executable effect. Never a runtime
+/// address; never serialized as though it were one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WriteSiteId(pub u32);
+
 /// #1726 Checkpoint D1: the exact emitted-instruction-stream identity the VM
 /// can actually visit — a byte offset relative to the function's
 /// `instr_start`, identical in domain to `Frame.pc`/`DebugSymbol.pc` in
@@ -506,7 +542,15 @@ pub enum BorrowActivationResolved {
 pub struct OwnershipPathEvent {
     pub kind: OwnershipPathEventKind,
     pub path: AccessPath,
+    /// Borrow-only. `write_site` is Write-only. Never both `Some` on the
+    /// same event - `validate_write_sites` (#1891 Checkpoint W2A) fails
+    /// closed on a Borrow event carrying a `write_site`, mirroring
+    /// `validate_activation_sites`'s existing symmetric check for a Write
+    /// event carrying an `activation_site`.
     pub activation_site: Option<ActivationSiteId>,
+    /// Write-only. See `WriteSiteId`'s own doc comment for the authority
+    /// this represents and why it is never `ActivationSiteId`.
+    pub write_site: Option<WriteSiteId>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -870,6 +914,7 @@ fn lower_function_to_ir_with_tables(
             name: ctx.lowered_locals.bind(arena, *name)?,
             src: idx as u16,
             activation_site: None,
+            write_site: None,
         });
     }
     for condition in &func.requires {
@@ -1484,6 +1529,11 @@ fn emit_semcode_function(
         pos: 0,
         message: e.0,
     })?;
+    // #1891 Checkpoint W2A: same reasoning, for the `WriteSiteId` pairing.
+    crate::passes::validate_write_sites(f).map_err(|e| FrontendError {
+        pos: 0,
+        message: e.0,
+    })?;
     let mut interner = StringInterner::new();
     for instr in &f.instrs {
         match instr {
@@ -1991,7 +2041,12 @@ fn emit_instr(
                 write_u16_le(out, *item);
             }
         }
-        IrInstr::MakeRecord { dst, name, items } => {
+        IrInstr::MakeRecord {
+            dst,
+            name,
+            items,
+            write_site: _,
+        } => {
             out.push(Opcode::MakeRecord.byte());
             write_u16_le(out, *dst);
             write_u16_le(out, interner.lookup(name)?);
@@ -2708,6 +2763,7 @@ fn lower_closure_literal_expr(
                 message: "closure capture index exceeds v0 limit".to_string(),
             })?,
             activation_site: None,
+            write_site: None,
         });
     }
 
@@ -2721,6 +2777,7 @@ fn lower_closure_literal_expr(
         name: lifted_lowered_locals.bind(arena, closure.param)?,
         src: param_reg,
         activation_site: None,
+        write_site: None,
     });
 
     // #1709 corrective: `append_record_update_write_events_from_expr`
@@ -3270,6 +3327,7 @@ fn lower_expr_with_expected(
                 dst,
                 name: resolve_symbol_name(arena, record_literal.name)?.to_string(),
                 items: ordered_regs,
+                write_site: None,
             });
             Ok((dst, Type::Record(record_literal.name)))
         }
@@ -3488,11 +3546,41 @@ fn lower_expr_with_expected(
                 });
                 ordered_regs.push(reg);
             }
+            // #1891 Checkpoint W2A, producer C: this exact `MakeRecord` is
+            // this `RecordUpdate` expression's own commit point (proven by
+            // Checkpoint W1.5 - the base is never mutated; this instruction
+            // is the sole executable effect the ownership model already
+            // normatively treats as the RecordUpdate's Write effect). Mint
+            // one fresh `WriteSiteId` here, where the events and the
+            // `MakeRecord` genuinely coexist in the same lowering step -
+            // never recovered afterward by instruction order, event order,
+            // or a second traversal. Every overridden field's own `Write`
+            // event carries this same `w`; `write_site` on `MakeRecord`
+            // stays `None` when there is no resolvable `record_path` (base
+            // is not a bare variable), exactly mirroring when the old
+            // prescan emitted no events at all for this update.
+            let write_site = if let Some(record_path) =
+                direct_record_access_path_from_expr(update_expr.base, arena, lowered_locals)?
+            {
+                let w = lowered_locals.fresh_write_site()?;
+                for field in &update_expr.fields {
+                    ownership_events.push(OwnershipPathEvent {
+                        kind: OwnershipPathEventKind::Write,
+                        path: record_path.field(field.name),
+                        activation_site: None,
+                        write_site: Some(w),
+                    });
+                }
+                Some(w)
+            } else {
+                None
+            };
             let dst = alloc(next);
             out.push(IrInstr::MakeRecord {
                 dst,
                 name: resolve_symbol_name(arena, record_name)?.to_string(),
                 items: ordered_regs,
+                write_site,
             });
             Ok((dst, Type::Record(record_name)))
         }
@@ -3675,6 +3763,7 @@ fn lower_expr_with_expected(
                 name: result_name.clone(),
                 src: then_reg,
                 activation_site: None,
+                write_site: None,
             });
             out.push(IrInstr::Jmp {
                 label: end_label.clone(),
@@ -3710,6 +3799,7 @@ fn lower_expr_with_expected(
                 name: result_name.clone(),
                 src: else_reg,
                 activation_site: None,
+                write_site: None,
             });
             out.push(IrInstr::Jmp {
                 label: end_label.clone(),
@@ -5070,6 +5160,7 @@ fn bind_tuple_items(
             name: lowered_locals.bind(arena, name)?,
             src: reg,
             activation_site,
+            write_site: None,
         });
         if capture == sm_front::types::CaptureMode::Borrow {
             if let Some(tuple_path) = tuple_path {
@@ -5079,6 +5170,7 @@ fn bind_tuple_items(
                             kind: OwnershipPathEventKind::Borrow,
                             path: tuple_path.as_path().clone(),
                             activation_site,
+                            write_site: None,
                         });
                         emitted_dynamic_root = true;
                     }
@@ -5087,6 +5179,7 @@ fn bind_tuple_items(
                         kind: OwnershipPathEventKind::Borrow,
                         path: tuple_path.as_path().tuple_index(index),
                         activation_site,
+                        write_site: None,
                     });
                 }
             }
@@ -5168,6 +5261,7 @@ fn bind_record_items(
                     name: lowered_locals.bind(arena, target)?,
                     src: reg,
                     activation_site,
+                    write_site: None,
                 });
                 if capture == sm_front::types::CaptureMode::Borrow {
                     if let Some(record_path) = record_path {
@@ -5175,6 +5269,7 @@ fn bind_record_items(
                             kind: OwnershipPathEventKind::Borrow,
                             path: record_path.field(item.field),
                             activation_site,
+                            write_site: None,
                         });
                     }
                 }
@@ -5280,6 +5375,7 @@ fn bind_let_else_record_items(
                             kind: OwnershipPathEventKind::Borrow,
                             path: record_path.field(item.field),
                             activation_site,
+                            write_site: None,
                         });
                     }
                 }
@@ -5350,6 +5446,7 @@ fn bind_let_else_record_items(
             name: lowered_locals.bind(arena, name)?,
             src: reg,
             activation_site,
+            write_site: None,
         });
     }
     Ok(())
@@ -5423,15 +5520,24 @@ fn assign_tuple_items(
             src: tuple_reg,
             index,
         });
+        // #1891 Checkpoint W2A, producer A: mint one fresh `WriteSiteId` per
+        // non-discarded item, attached directly (same `w`) to this exact
+        // `StoreVar` and its paired `Write` event - never correlated later
+        // by binding/root identity, which item 3 of #1726's own audit
+        // already proved insufficient (the same binding may have multiple
+        // StoreVars).
+        let w = lowered_locals.fresh_write_site()?;
         out.push(IrInstr::StoreVar {
             name: lowered_locals.resolve(arena, *name)?,
             src: reg,
             activation_site: None,
+            write_site: Some(w),
         });
         ownership_events.push(OwnershipPathEvent {
             kind: OwnershipPathEventKind::Write,
             path: AccessPath::new(lowered_locals.resolve(arena, *name)?),
             activation_site: None,
+            write_site: Some(w),
         });
     }
     Ok(())
@@ -5482,6 +5588,7 @@ fn lower_for_range_stmt_from_reg(
         name: current_name.clone(),
         src: start_reg,
         activation_site: None,
+        write_site: None,
     });
 
     let test_label = format!("for_range_{}_test", id);
@@ -5548,6 +5655,7 @@ fn lower_for_range_stmt_from_reg(
         name: loop_name,
         src: current_reg,
         activation_site: None,
+        write_site: None,
     });
     for stmt in body {
         lower_stmt(
@@ -5593,6 +5701,7 @@ fn lower_for_range_stmt_from_reg(
         name: current_name,
         src: next_reg,
         activation_site: None,
+        write_site: None,
     });
     ctx.instrs.push(IrInstr::Jmp { label: test_label });
     ctx.instrs.push(IrInstr::Label { name: end_label });
@@ -5903,6 +6012,7 @@ fn lower_for_sequence_stmt_from_reg(
         name: index_name.clone(),
         src: zero_reg,
         activation_site: None,
+        write_site: None,
     });
     ctx.instrs.push(IrInstr::SequenceLen {
         dst: len_reg,
@@ -5948,6 +6058,7 @@ fn lower_for_sequence_stmt_from_reg(
         name: loop_name,
         src: item_reg,
         activation_site: None,
+        write_site: None,
     });
     for stmt in body {
         lower_stmt(
@@ -5977,6 +6088,7 @@ fn lower_for_sequence_stmt_from_reg(
         name: index_name,
         src: next_reg,
         activation_site: None,
+        write_site: None,
     });
     ctx.instrs.push(IrInstr::Jmp { label: test_label });
     ctx.instrs.push(IrInstr::Label { name: end_label });
@@ -6021,6 +6133,7 @@ fn lower_for_explicit_iterable_stmt_from_reg(
         name: index_name.clone(),
         src: zero_reg,
         activation_site: None,
+        write_site: None,
     });
 
     let test_label = format!("for_each_iter_{}_test", id);
@@ -6073,6 +6186,7 @@ fn lower_for_explicit_iterable_stmt_from_reg(
         name: loop_name,
         src: item_reg,
         activation_site: None,
+        write_site: None,
     });
     for stmt in body {
         lower_stmt(
@@ -6102,6 +6216,7 @@ fn lower_for_explicit_iterable_stmt_from_reg(
         name: index_name,
         src: next_index_reg,
         activation_site: None,
+        write_site: None,
     });
     ctx.instrs.push(IrInstr::Jmp { label: test_label });
     ctx.instrs.push(IrInstr::Label { name: end_label });
@@ -6254,6 +6369,7 @@ fn bind_let_else_tuple_items(
             name: lowered_locals.bind(arena, name)?,
             src: reg,
             activation_site,
+            write_site: None,
         });
         if capture == sm_front::types::CaptureMode::Borrow {
             if let Some(tuple_path) = tuple_path {
@@ -6263,6 +6379,7 @@ fn bind_let_else_tuple_items(
                             kind: OwnershipPathEventKind::Borrow,
                             path: tuple_path.as_path().clone(),
                             activation_site: Some(activation_site),
+                            write_site: None,
                         });
                     }
                 } else {
@@ -6270,6 +6387,7 @@ fn bind_let_else_tuple_items(
                         kind: OwnershipPathEventKind::Borrow,
                         path: tuple_path.as_path().tuple_index(index),
                         activation_site,
+                        write_site: None,
                     });
                 }
             }
@@ -6323,6 +6441,7 @@ fn lower_stmt(
                 name: ctx.lowered_locals.bind(arena, *name)?,
                 src: reg,
                 activation_site: None,
+                write_site: None,
             });
             Ok(())
         }
@@ -6368,6 +6487,7 @@ fn lower_stmt(
                 name: ctx.lowered_locals.bind(arena, *name)?,
                 src: reg,
                 activation_site: None,
+                write_site: None,
             });
             Ok(())
         }
@@ -6635,15 +6755,25 @@ fn lower_stmt(
                 &mut ctx.ownership_events,
                 &mut ctx.lowered_locals,
             )?;
+            // #1891 Checkpoint W2A, producer B: mint one fresh `WriteSiteId`
+            // per assignment statement, attached directly (same `w`) to this
+            // exact `StoreVar` and its paired `Write` event. Repeated
+            // assignments to the same binding (`x = 1; x = 2;`) each go
+            // through this arm independently, so each gets its own distinct
+            // `w` from `fresh_write_site` - binding identity is not
+            // execution-site identity (item 5 of the W2A brief).
+            let w = ctx.lowered_locals.fresh_write_site()?;
             ctx.instrs.push(IrInstr::StoreVar {
                 name: ctx.lowered_locals.resolve(arena, *name)?,
                 src: reg,
                 activation_site: None,
+                write_site: Some(w),
             });
             ctx.ownership_events.push(OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
                 path: AccessPath::new(ctx.lowered_locals.resolve(arena, *name)?),
                 activation_site: None,
+                write_site: Some(w),
             });
             Ok(())
         }
@@ -6813,6 +6943,7 @@ fn lower_stmt(
                 name: result_name,
                 src: reg,
                 activation_site: None,
+                write_site: None,
             });
             ctx.instrs.push(IrInstr::Jmp { label: end_label });
             Ok(())
@@ -7538,6 +7669,7 @@ fn lower_value_block_expr(
                     name: lowered_locals.bind(arena, *name)?,
                     src: reg,
                     activation_site: None,
+                    write_site: None,
                 });
             }
             Stmt::Let {
@@ -7582,6 +7714,7 @@ fn lower_value_block_expr(
                     name: lowered_locals.bind(arena, *name)?,
                     src: reg,
                     activation_site: None,
+                    write_site: None,
                 });
             }
             Stmt::LetTuple { items, ty, value } => {
@@ -8320,6 +8453,7 @@ fn lower_adt_match_bindings(
             name: lowered_locals.bind(arena, binding.name)?,
             src: reg,
             activation_site: None,
+            write_site: None,
         });
         env.insert(binding.name, binding.ty.clone());
     }
@@ -8466,6 +8600,7 @@ fn lower_ensures_clauses(
             name: "result".to_string(),
             src: result_reg,
             activation_site: None,
+            write_site: None,
         });
     }
 
@@ -8539,6 +8674,7 @@ fn lower_invariant_clauses(
                 name: "result".to_string(),
                 src: result_reg,
                 activation_site: None,
+                write_site: None,
             });
         }
     }
@@ -9601,6 +9737,7 @@ fn lower_match_expr(
                     name: result_name.clone(),
                     src: arm_reg,
                     activation_site: None,
+                    write_site: None,
                 });
                 out.push(IrInstr::Jmp {
                     label: end_label.clone(),
@@ -9705,6 +9842,7 @@ fn lower_match_expr(
                     name: result_name.clone(),
                     src: arm_reg,
                     activation_site: None,
+                    write_site: None,
                 });
                 out.push(IrInstr::Jmp {
                     label: end_label.clone(),
@@ -9840,6 +9978,7 @@ fn lower_match_expr(
                     name: result_name.clone(),
                     src: arm_reg,
                     activation_site: None,
+                    write_site: None,
                 });
                 out.push(IrInstr::Jmp {
                     label: end_label.clone(),
@@ -9892,6 +10031,7 @@ fn lower_match_expr(
             name: result_name.clone(),
             src: default_reg,
             activation_site: None,
+            write_site: None,
         });
         out.push(IrInstr::Jmp {
             label: end_label.clone(),
@@ -10714,6 +10854,12 @@ struct LoweredLocalEnv {
     scopes: Vec<BTreeMap<SymbolId, String>>,
     next_id: u32,
     next_activation_site: u32,
+    /// #1891 Checkpoint W2A: separate monotonic counter from
+    /// `next_activation_site` - `WriteSiteId` and `ActivationSiteId` are
+    /// different authorities (see `WriteSiteId`'s own doc comment) and must
+    /// never share, derive from, or be compared against one another's
+    /// numbering.
+    next_write_site: u32,
 }
 
 impl LoweredLocalEnv {
@@ -10722,6 +10868,7 @@ impl LoweredLocalEnv {
             scopes: vec![BTreeMap::new()],
             next_id: 0,
             next_activation_site: 0,
+            next_write_site: 0,
         }
     }
 
@@ -10735,6 +10882,20 @@ impl LoweredLocalEnv {
                     message: "activation site id exceeds v0 limit".to_string(),
                 })?;
         Ok(ActivationSiteId(id))
+    }
+
+    /// #1891 Checkpoint W2A: mints a fresh, function-local `WriteSiteId`.
+    /// Every call returns a distinct id - repeated assignments to the same
+    /// lowered binding (`x = 1; x = 2;`) must each get their own site,
+    /// since binding identity is not execution-site identity (item 5 of the
+    /// W2A brief).
+    fn fresh_write_site(&mut self) -> Result<WriteSiteId, FrontendError> {
+        let id = self.next_write_site;
+        self.next_write_site = self.next_write_site.checked_add(1).ok_or(FrontendError {
+            pos: 0,
+            message: "write site id exceeds v0 limit".to_string(),
+        })?;
+        Ok(WriteSiteId(id))
     }
 
     fn push_scope(&mut self) {
@@ -11066,6 +11227,17 @@ fn append_record_update_write_events_from_expr(
             )?;
         }
         Expr::RecordUpdate(update_expr) => {
+            // #1891 Checkpoint W2A: this RecordUpdate's own `Write(Field)`
+            // events are no longer produced here. They are minted directly
+            // inside `lower_expr_with_expected`'s own `Expr::RecordUpdate`
+            // arm, at the exact point that expression's real `MakeRecord`
+            // is emitted, so the same `WriteSiteId` can be attached to both
+            // without any later, positional, or ordinal correlation (see
+            // that arm's own comment for the full proof). This prescan
+            // still recurses into `base` and each field's value expression
+            // below - unchanged - since either may itself contain a nested
+            // RecordUpdate, assignment, or other ownership-event-producing
+            // construct this prescan is still the authority for.
             append_record_update_write_events_from_expr(
                 update_expr.base,
                 arena,
@@ -11079,17 +11251,6 @@ fn append_record_update_write_events_from_expr(
                     ownership_events,
                     lowered_locals,
                 )?;
-            }
-            if let Some(record_path) =
-                direct_record_access_path_from_expr(update_expr.base, arena, lowered_locals)?
-            {
-                for field in &update_expr.fields {
-                    ownership_events.push(OwnershipPathEvent {
-                        kind: OwnershipPathEventKind::Write,
-                        path: record_path.field(field.name),
-                        activation_site: None,
-                    });
-                }
             }
         }
         Expr::Call(_, args) => {
@@ -11240,6 +11401,7 @@ fn append_record_update_write_events_from_expr(
                                     kind: OwnershipPathEventKind::Borrow,
                                     path: path.as_path().clone(),
                                     activation_site: None,
+                                    write_site: None,
                                 });
                                 borrowed_dynamic_scrutinee_root = true;
                             }
@@ -11256,6 +11418,7 @@ fn append_record_update_write_events_from_expr(
                                             .as_path()
                                             .adt_payload(adt_pat.variant_name, idx as u16),
                                         activation_site: None,
+                                        write_site: None,
                                     });
                                 }
                             }
@@ -13788,6 +13951,7 @@ mod opt_tests {
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&func, "e"))
                     .adt_payload(variant.name, 0),
+                write_site: None,
             }]
         );
     }
@@ -13838,6 +14002,7 @@ mod opt_tests {
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&func, "opt"))
                     .adt_payload(some_name, 0),
+                write_site: None,
             }]
         );
     }
@@ -13883,6 +14048,7 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Borrow,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&func, "res")).adt_payload(ok_name, 0),
+                write_site: None,
             }]
         );
     }
@@ -13910,6 +14076,7 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Borrow,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&func, "res")).adt_payload(err_name, 0),
+                write_site: None,
             }]
         );
     }
@@ -13996,6 +14163,8 @@ mod opt_tests {
         "#;
 
         let (_, main) = lower_single_function_with_program(src, "main");
+        // #1891 Checkpoint W2A: producer A mints one fresh `WriteSiteId` per
+        // non-discarded item - distinct per item, never `None`.
         assert_eq!(
             main.ownership_events,
             vec![
@@ -14003,11 +14172,13 @@ mod opt_tests {
                     kind: OwnershipPathEventKind::Write,
                     activation_site: None,
                     path: AccessPath::new(lowered_local_key_for(&main, "count")),
+                    write_site: Some(WriteSiteId(0)),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
                     activation_site: None,
                     path: AccessPath::new(lowered_local_key_for(&main, "ready")),
+                    write_site: Some(WriteSiteId(1)),
                 },
             ]
         );
@@ -14818,13 +14989,29 @@ mod opt_tests {
 
         let (program, main) = lower_single_function_with_program(src, "main");
         let quality_field = program.records[0].fields[1].name;
+        // #1891 Checkpoint W2A: producer C mints one fresh `WriteSiteId` for
+        // this RecordUpdate, attached to its own `Write` event(s) and to its
+        // exact `MakeRecord` (verified separately below).
         assert_eq!(
             main.ownership_events,
             vec![OwnershipPathEvent {
                 kind: OwnershipPathEventKind::Write,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+                write_site: Some(WriteSiteId(0)),
             }]
+        );
+        assert!(
+            main.instrs.iter().any(|i| matches!(
+                i,
+                IrInstr::MakeRecord {
+                    write_site: Some(WriteSiteId(0)),
+                    ..
+                }
+            )),
+            "the RecordUpdate's own MakeRecord must carry the same WriteSiteId \
+             as its Write event: {:?}",
+            main.instrs
         );
     }
 
@@ -14875,6 +15062,10 @@ mod opt_tests {
         let (program, main) = lower_single_function_with_program(src, "main");
         let camera_field = program.records[0].fields[0].name;
         let quality_field = program.records[0].fields[1].name;
+        // #1891 Checkpoint W2A: N Write events for ONE RecordUpdate share
+        // exactly ONE WriteSiteId - the normative cardinality for producer
+        // C (never "duplicate anchor forbidden", which is a Borrow-only
+        // rule).
         assert_eq!(
             main.ownership_events,
             vec![
@@ -14882,13 +15073,413 @@ mod opt_tests {
                     kind: OwnershipPathEventKind::Write,
                     activation_site: None,
                     path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+                    write_site: Some(WriteSiteId(0)),
                 },
                 OwnershipPathEvent {
                     kind: OwnershipPathEventKind::Write,
                     activation_site: None,
                     path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(camera_field),
+                    write_site: Some(WriteSiteId(0)),
                 },
             ]
+        );
+        assert!(
+            main.instrs.iter().any(|i| matches!(
+                i,
+                IrInstr::MakeRecord {
+                    write_site: Some(WriteSiteId(0)),
+                    ..
+                }
+            )),
+            "both Write events must share the same MakeRecord's WriteSiteId: {:?}",
+            main.instrs
+        );
+    }
+
+    // #1891 Checkpoint W2A required tests (item 12). `lower_tuple_assignment_records_write_path_events`
+    // above already covers "AssignTuple with two bindings -> two distinct
+    // sites"; `lower_record_copy_with_emits_field_write_events` and
+    // `lower_record_copy_with_emits_distinct_field_write_events` above
+    // already cover "RecordUpdate one/multiple fields -> one MakeRecord,
+    // same site". The remaining required cases follow.
+
+    fn write_site_of_store_var(main: &IrFunction, source_name: &str) -> WriteSiteId {
+        main.instrs
+            .iter()
+            .find_map(|i| match i {
+                IrInstr::StoreVar {
+                    name,
+                    write_site: Some(w),
+                    ..
+                } if is_lowered_local_key_for(name, source_name) => Some(*w),
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                panic!("expected a write-site-annotated StoreVar for '{source_name}'")
+            })
+    }
+
+    #[test]
+    fn w2a_plain_assign_write_site_matches_exact_store_var() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 1;
+                x = 2;
+                return;
+            }
+        "#;
+        let (_, main) = lower_single_function_with_program(src, "main");
+        let store_site = write_site_of_store_var(&main, "x");
+        assert_eq!(
+            main.ownership_events,
+            vec![OwnershipPathEvent {
+                kind: OwnershipPathEventKind::Write,
+                activation_site: None,
+                path: AccessPath::new(lowered_local_key_for(&main, "x")),
+                write_site: Some(store_site),
+            }],
+            "the Write event must carry the exact same WriteSiteId as the \
+             assignment's own StoreVar, not merely a matching root"
+        );
+    }
+
+    #[test]
+    fn w2a_repeated_assign_to_same_root_gets_distinct_write_sites() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 0;
+                x = 1;
+                x = 2;
+                x = 3;
+                return;
+            }
+        "#;
+        let (_, main) = lower_single_function_with_program(src, "main");
+        let sites: Vec<WriteSiteId> = main
+            .instrs
+            .iter()
+            .filter_map(|i| match i {
+                IrInstr::StoreVar {
+                    name,
+                    write_site: Some(w),
+                    ..
+                } if is_lowered_local_key_for(name, "x") => Some(*w),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            sites.len(),
+            3,
+            "expected one write-annotated StoreVar per assignment"
+        );
+        let unique: BTreeSet<WriteSiteId> = sites.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            3,
+            "binding identity is not execution-site identity - each of the three \
+             assignments to `x` must get its own distinct WriteSiteId: {sites:?}"
+        );
+    }
+
+    #[test]
+    fn w2a_shadowed_bindings_get_distinct_write_sites() {
+        let src = r#"
+            fn main() {
+                let mut x: i32 = 1;
+                x = 9;
+                if true {
+                    let mut x: i32 = 2;
+                    x = 8;
+                }
+                return;
+            }
+        "#;
+        let (_, main) = lower_single_function_with_program(src, "main");
+        let sites: Vec<WriteSiteId> = main
+            .instrs
+            .iter()
+            .filter_map(|i| match i {
+                IrInstr::StoreVar {
+                    write_site: Some(w),
+                    ..
+                } => Some(*w),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sites.len(), 2, "one assignment per shadowed scope");
+        assert_ne!(
+            sites[0], sites[1],
+            "shadowed same-spelling bindings' own reassignments must not share a \
+             WriteSiteId: {sites:?}"
+        );
+    }
+
+    #[test]
+    fn w2a_record_update_every_field_overridden_still_one_site() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let fresh: R = base with { a: 9, b: 8 };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let (_, main) = lower_single_function_with_program(src, "main");
+        let write_events: Vec<_> = main
+            .ownership_events
+            .iter()
+            .filter(|e| e.kind == OwnershipPathEventKind::Write)
+            .collect();
+        assert_eq!(write_events.len(), 2, "one event per overridden field");
+        let site = write_events[0].write_site.expect("write site");
+        assert!(
+            write_events.iter().all(|e| e.write_site == Some(site)),
+            "every field's Write event must share the one MakeRecord's site: {write_events:?}"
+        );
+        assert_eq!(
+            main.instrs
+                .iter()
+                .filter(
+                    |i| matches!(i, IrInstr::MakeRecord { write_site: Some(w), .. } if *w == site)
+                )
+                .count(),
+            1,
+            "still exactly one MakeRecord carrying that site, even with every field overridden"
+        );
+    }
+
+    #[test]
+    fn w2a_nested_record_update_each_occurrence_has_distinct_site() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let inner: R = R { a: 5, b: 6 };
+                let fresh: R = base with { a: (inner with { b: 9 }).a };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let (_, main) = lower_single_function_with_program(src, "main");
+        let sites: Vec<WriteSiteId> = main
+            .ownership_events
+            .iter()
+            .filter_map(|e| {
+                if e.kind == OwnershipPathEventKind::Write {
+                    e.write_site
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            sites.len(),
+            2,
+            "one write event per update (outer, nested inner)"
+        );
+        assert_ne!(
+            sites[0], sites[1],
+            "the outer and the nested inner RecordUpdate must not share a site: {sites:?}"
+        );
+        let make_record_sites: BTreeSet<WriteSiteId> = main
+            .instrs
+            .iter()
+            .filter_map(|i| match i {
+                IrInstr::MakeRecord {
+                    write_site: Some(w),
+                    ..
+                } => Some(*w),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            make_record_sites,
+            sites.iter().copied().collect::<BTreeSet<_>>(),
+            "each event's site must resolve to its own distinct MakeRecord"
+        );
+    }
+
+    #[test]
+    fn w2a_record_update_in_branch_one_static_site_per_branch() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let cond: bool = true;
+                let fresh: R = if cond {
+                    base with { a: 9 }
+                } else {
+                    base with { b: 8 }
+                };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let (_, main) = lower_single_function_with_program(src, "main");
+        let sites: Vec<WriteSiteId> = main
+            .ownership_events
+            .iter()
+            .filter_map(|e| {
+                if e.kind == OwnershipPathEventKind::Write {
+                    e.write_site
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            sites.len(),
+            2,
+            "one static write event per branch's own update"
+        );
+        assert_ne!(
+            sites[0], sites[1],
+            "each branch's own update keeps its own site: {sites:?}"
+        );
+    }
+
+    #[test]
+    fn w2a_record_update_in_loop_one_static_site_not_one_per_iteration() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let mut i: i32 = 0;
+                let mut last: R = base;
+                while i < 3 {
+                    last = base with { a: i };
+                    i = i + 1;
+                }
+                let _ = last;
+                return;
+            }
+        "#;
+        let (_, main) = lower_single_function_with_program(src, "main");
+        // Exactly one RecordUpdate Write event exists STATICALLY (the loop
+        // body's own `base with { a: i }` is one IR-level occurrence,
+        // regardless of how many times it executes at runtime) - identified
+        // here by its Field-component path, to isolate it from `last`'s and
+        // `i`'s own whole-value producer-B write events in this same
+        // function.
+        let record_update_events: Vec<_> = main
+            .ownership_events
+            .iter()
+            .filter(|e| {
+                e.kind == OwnershipPathEventKind::Write
+                    && e.path
+                        .components
+                        .iter()
+                        .any(|c| matches!(c, PathComponent::Field(_)))
+            })
+            .collect();
+        assert_eq!(
+            record_update_events.len(),
+            1,
+            "one static Write event for the loop body's update"
+        );
+        let site = record_update_events[0].write_site.expect("write site");
+        assert_eq!(
+            main.instrs
+                .iter()
+                .filter(
+                    |i| matches!(i, IrInstr::MakeRecord { write_site: Some(w), .. } if *w == site)
+                )
+                .count(),
+            1,
+            "one static MakeRecord, not one per runtime loop iteration"
+        );
+    }
+
+    #[test]
+    fn w2a_record_update_as_call_argument_direct_correspondence() {
+        let src = r#"
+            record R { a: i32, b: i32 }
+            fn sink(x: R) -> i32 = x.a;
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let out: i32 = sink(base with { a: 9 });
+                let _ = out;
+                return;
+            }
+        "#;
+        let (_, main) = lower_single_function_with_program(src, "main");
+        let write_events: Vec<_> = main
+            .ownership_events
+            .iter()
+            .filter(|e| e.kind == OwnershipPathEventKind::Write)
+            .collect();
+        assert_eq!(write_events.len(), 1);
+        let site = write_events[0].write_site.expect("write site");
+        assert_eq!(
+            main.instrs
+                .iter()
+                .filter(
+                    |i| matches!(i, IrInstr::MakeRecord { write_site: Some(w), .. } if *w == site)
+                )
+                .count(),
+            1,
+            "a RecordUpdate used directly as a call argument still gets its own \
+             exact MakeRecord correspondence"
+        );
+    }
+
+    #[test]
+    fn w2a_record_update_site_belongs_to_make_record_not_destination_store_var() {
+        // Fresh-binding case: `fresh` is a brand-new introduction, so its own
+        // StoreVar carries no write_site at all (it is not a write-effect
+        // site by producer A/B's own rules - introductions never are).
+        let fresh_src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let fresh: R = base with { a: 9 };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let (_, fresh_main) = lower_single_function_with_program(fresh_src, "main");
+        assert!(
+            !fresh_main.instrs.iter().any(
+                |i| matches!(i, IrInstr::StoreVar { name, write_site: Some(_), .. } if is_lowered_local_key_for(name, "fresh"))
+            ),
+            "the destination binding's own StoreVar must never carry the \
+             RecordUpdate's write_site - only its MakeRecord may"
+        );
+
+        // Reassignment case: `fresh` already exists, so `fresh = base with
+        // {..}` is producer B's own reassignment (its own, separate
+        // WriteSiteId) *and* producer C's RecordUpdate (a second, distinct
+        // WriteSiteId on the MakeRecord) - two different sites for two
+        // different effects at the same statement, never conflated.
+        let reassign_src = r#"
+            record R { a: i32, b: i32 }
+            fn main() {
+                let base: R = R { a: 1, b: 2 };
+                let mut fresh: R = base;
+                fresh = base with { a: 9 };
+                let _ = fresh;
+                return;
+            }
+        "#;
+        let (_, reassign_main) = lower_single_function_with_program(reassign_src, "main");
+        let store_var_site = write_site_of_store_var(&reassign_main, "fresh");
+        let make_record_site = reassign_main
+            .instrs
+            .iter()
+            .find_map(|i| match i {
+                IrInstr::MakeRecord {
+                    write_site: Some(w),
+                    ..
+                } => Some(*w),
+                _ => None,
+            })
+            .expect("MakeRecord write site");
+        assert_ne!(
+            store_var_site, make_record_site,
+            "the reassignment's own StoreVar site and the RecordUpdate's own \
+             MakeRecord site must remain two distinct WriteSiteIds, never merged \
+             into one just because they occur in the same statement"
         );
     }
 
@@ -15634,6 +16225,7 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Write,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+                write_site: Some(WriteSiteId(0)),
             }]
         );
     }
@@ -15768,6 +16360,7 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Write,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+                write_site: Some(WriteSiteId(0)),
             }]
         );
     }
@@ -15805,6 +16398,7 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Write,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+                write_site: Some(WriteSiteId(0)),
             }]
         );
     }
@@ -15845,6 +16439,7 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Write,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+                write_site: Some(WriteSiteId(0)),
             }]
         );
     }
@@ -15884,6 +16479,7 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Write,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+                write_site: Some(WriteSiteId(0)),
             }]
         );
     }
@@ -15919,6 +16515,7 @@ mod opt_tests {
                 kind: OwnershipPathEventKind::Write,
                 activation_site: None,
                 path: AccessPath::new(lowered_local_key_for(&main, "ctx")).field(quality_field),
+                write_site: Some(WriteSiteId(0)),
             }]
         );
     }
@@ -15978,6 +16575,7 @@ mod opt_tests {
             kind: OwnershipPathEventKind::Write,
             activation_site: None,
             path: AccessPath::new(lowered_local_key_for(lifted, "r")).field(x_field),
+            write_site: Some(WriteSiteId(0)),
         };
         assert_eq!(lifted.ownership_events, vec![expected_event.clone()]);
         assert!(
