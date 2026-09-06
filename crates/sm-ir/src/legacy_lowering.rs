@@ -8,7 +8,8 @@ use crate::semcode_format::{
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
     OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
     OWNERSHIP_SECTION_TAG, SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, SEMCODE_SIGNATURE_MIN_REVISION,
-    SIGNATURE_SECTION_TAG,
+    SIGNATURE_SECTION_TAG, WRITE_EXECUTION_MODE_MAKE_RECORD_SITE,
+    WRITE_EXECUTION_MODE_STORE_VAR_SITE,
 };
 use sm_front::types::{
     AdtCtorExpr, ClosureCapturePolicy, ClosureLiteral, ClosureType, ClosureValueFamily,
@@ -1828,6 +1829,7 @@ fn emit_semcode_function(
         &interner,
         chosen_header_rev,
         &resolved_borrow_activations,
+        &resolved_write_execution,
         &mut code,
     )?;
     // #1773 (FA-09-005): unconditional, never a per-function/emission-time
@@ -2581,10 +2583,19 @@ fn has_v12_record_field_ownership_events(funcs: &[IrFunction]) -> bool {
 // for the frozen Tuple/Record producers) - the ADT/Option/Result producer
 // never sets `activation_site`, so it never triggers this promotion on its
 // own, matching the design's `FrameEntry`-only treatment for that producer.
+// #1891 Checkpoint W2D: extends #1726 Checkpoint D2a's floor to Write's own
+// execution-anchor transport - an artifact containing a site-backed Write
+// event (produced whether or not it also has an anchored Borrow) requires
+// exactly the same rev21 grammar, composed monotonically with every other
+// existing floor below via the same rev-number `if opcode_driven_header.rev
+// < SEMCODE_SIGNATURE_MIN_REVISION` comparison Checkpoint D1.5 already
+// proved correct (see that checkpoint's test and doc comment) - no separate
+// Write-specific floor branch or capability bit is needed.
 fn has_v20_ownership_execution_anchor(funcs: &[IrFunction]) -> bool {
     funcs.iter().any(|f| {
         f.ownership_events.iter().any(|event| {
-            event.kind == OwnershipPathEventKind::Borrow && event.activation_site.is_some()
+            (event.kind == OwnershipPathEventKind::Borrow && event.activation_site.is_some())
+                || (event.kind == OwnershipPathEventKind::Write && event.write_site.is_some())
         })
     })
 }
@@ -2595,6 +2606,7 @@ fn emit_ownership_events(
     interner: &StringInterner,
     chosen_header_rev: u16,
     resolved_borrow_activations: &[BorrowActivationResolved],
+    resolved_write_execution: &[WriteExecutionResolved],
     out: &mut Vec<u8>,
 ) -> Result<(), FrontendError> {
     if ownership_events.is_empty() {
@@ -2620,26 +2632,54 @@ fn emit_ownership_events(
     // stream (Checkpoint D1) - this function only serializes that resolution,
     // it never recomputes or guesses a `StoreVarSite` anchor.
     let mut resolved_borrow_iter = resolved_borrow_activations.iter();
+    // #1891 Checkpoint W2D: `resolved_write_execution` was already computed
+    // by `emit_semcode_function` from the real, already-emitted instruction
+    // stream (Checkpoint W2C) - this function only serializes that
+    // resolution, it never recomputes or correlates an anchor to an event
+    // again. Mirrors `resolved_borrow_iter` immediately above, as a second,
+    // independent iterator - never the same one, never conflated.
+    let mut resolved_write_iter = resolved_write_execution.iter();
     for event in ownership_events {
         out.push(match event.kind {
             OwnershipPathEventKind::Borrow => OWNERSHIP_EVENT_KIND_BORROW,
             OwnershipPathEventKind::Write => OWNERSHIP_EVENT_KIND_WRITE,
         });
-        if event.kind == OwnershipPathEventKind::Borrow
-            && chosen_header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
-        {
-            let resolved = resolved_borrow_iter.next().ok_or_else(|| FrontendError {
-                pos: 0,
-                message: "internal error: fewer resolved Borrow activations than Borrow events"
-                    .to_string(),
-            })?;
-            match resolved {
-                BorrowActivationResolved::FrameEntry => {
-                    out.push(ACTIVATION_MODE_FRAME_ENTRY);
+        if chosen_header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+            match event.kind {
+                OwnershipPathEventKind::Borrow => {
+                    let resolved = resolved_borrow_iter.next().ok_or_else(|| FrontendError {
+                        pos: 0,
+                        message:
+                            "internal error: fewer resolved Borrow activations than Borrow events"
+                                .to_string(),
+                    })?;
+                    match resolved {
+                        BorrowActivationResolved::FrameEntry => {
+                            out.push(ACTIVATION_MODE_FRAME_ENTRY);
+                        }
+                        BorrowActivationResolved::StoreVarSite(anchor) => {
+                            out.push(ACTIVATION_MODE_STORE_VAR_SITE);
+                            write_u32_le(out, anchor.0);
+                        }
+                    }
                 }
-                BorrowActivationResolved::StoreVarSite(anchor) => {
-                    out.push(ACTIVATION_MODE_STORE_VAR_SITE);
-                    write_u32_le(out, anchor.0);
+                OwnershipPathEventKind::Write => {
+                    let resolved = resolved_write_iter.next().ok_or_else(|| FrontendError {
+                        pos: 0,
+                        message:
+                            "internal error: fewer resolved Write executions than Write events"
+                                .to_string(),
+                    })?;
+                    match resolved {
+                        WriteExecutionResolved::StoreVarSite(anchor) => {
+                            out.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
+                            write_u32_le(out, anchor.0);
+                        }
+                        WriteExecutionResolved::MakeRecordSite(anchor) => {
+                            out.push(WRITE_EXECUTION_MODE_MAKE_RECORD_SITE);
+                            write_u32_le(out, anchor.0);
+                        }
+                    }
                 }
             }
         }
@@ -16016,17 +16056,18 @@ mod opt_tests {
         let _ = &mut main;
     }
 
-    // Item 10: confirms this checkpoint's resolution work is purely internal
-    // - the existing rev21 Write layout (kind tag, then straight to the
-    // path, no anchor bytes, regardless of header revision) is byte-for-byte
-    // unchanged. A RecordUpdate program is used because it is the shape most
-    // at risk of an accidental wire change (its MakeRecord site now has a
-    // real internal resolution computed, unlike before W2C).
+    // #1891 Checkpoint W2D, item 14: proves the full round trip -
+    // IR WriteSiteId -> resolved WriteExecutionResolved -> rev21 wire mode +
+    // anchor -> sm-format's decoder -> an identical execution-site class,
+    // anchor, and path - for both producer kinds (StoreVar and MakeRecord)
+    // in one real emitted artifact.
     #[test]
-    fn ssf08_1891_checkpoint_w2c_write_event_wire_bytes_remain_byte_for_byte_unchanged() {
+    fn ssf08_1891_checkpoint_w2d_resolution_and_decoder_agree_on_class_anchor_and_path() {
         let src = r#"
             record R { a: i32, b: i32 }
             fn main() {
+                let mut x: i32 = 0;
+                x = 5;
                 let base: R = R { a: 1, b: 2 };
                 let fresh: R = base with { a: 9 };
                 let _ = fresh;
@@ -16035,40 +16076,47 @@ mod opt_tests {
         "#;
         let ir = compile_program_to_ir_with_options(src, CompileProfile::RustLike, OptLevel::O0)
             .expect("compiles");
+        let main = ir.iter().find(|f| f.name == "main").expect("main");
+        let (_, _, _, resolved_write) =
+            emit_semcode_function(main, false, false, 19).expect("emit resolves write anchors");
+        assert_eq!(
+            resolved_write.len(),
+            2,
+            "one StoreVar write, one MakeRecord write"
+        );
+
         let bytes = emit_ir_to_semcode(&ir, false).expect("emit full artifact");
         let (_, decoded) = crate::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
         let decoded_main = decoded.iter().find(|f| f.name == "main").expect("main");
-        // `write_paths` is populated purely positionally from the OWN0 bytes
-        // (kind tag, root u32, component count u16, components...) with no
-        // activation-mode/anchor byte ever read for a Write kind (see
-        // sm-format's decoder, unchanged by this checkpoint). If W2C had
-        // accidentally emitted an extra byte for the Write event, every
-        // subsequent field here would misdecode or the whole section would
-        // fail to parse - this succeeding, with the exact expected shape, is
-        // itself the byte-for-byte-unchanged proof.
-        assert_eq!(
-            decoded_main.write_paths.len(),
-            1,
-            "exactly one Write path (the RecordUpdate's field override), as before W2C"
-        );
-        assert_eq!(
-            decoded_main.write_paths[0].components.len(),
-            1,
-            "the RecordUpdate's Write path still carries exactly one Field component"
-        );
-        assert!(
-            matches!(
-                decoded_main.write_paths[0].components[0],
-                crate::semcode_decode::DecodedAccessPathComponent::FieldSymbol(_)
-            ),
-            "the sole component must still decode as a FieldSymbol, unchanged: {:?}",
-            decoded_main.write_paths[0]
-        );
-        assert_eq!(
-            decoded_main.write_paths[0].activation, None,
-            "a Write path must never carry a decoded activation - the rev21 legacy Write layout \
-             reserves that field for Borrow only, and W2C's resolution is purely internal"
-        );
+        assert_eq!(decoded_main.write_paths.len(), 2);
+
+        for (resolved, decoded_path) in resolved_write.iter().zip(decoded_main.write_paths.iter()) {
+            let (expected_decoded, expected_opcode) = match resolved {
+                WriteExecutionResolved::StoreVarSite(anchor) => (
+                    crate::semcode_decode::DecodedWriteExecution::StoreVarSite(anchor.0),
+                    Opcode::StoreVar,
+                ),
+                WriteExecutionResolved::MakeRecordSite(anchor) => (
+                    crate::semcode_decode::DecodedWriteExecution::MakeRecordSite(anchor.0),
+                    Opcode::MakeRecord,
+                ),
+            };
+            assert_eq!(
+                decoded_path.write_execution,
+                Some(expected_decoded),
+                "the decoder must reproduce the exact same execution-site class and anchor \
+                 the compiler resolved, for {decoded_path:?}"
+            );
+            let anchor = match resolved {
+                WriteExecutionResolved::StoreVarSite(a)
+                | WriteExecutionResolved::MakeRecordSite(a) => *a,
+            };
+            assert_eq!(
+                opcode_byte_at_anchor(decoded_main, anchor),
+                expected_opcode.byte(),
+                "the decoded anchor must still point at the real opcode byte matching its class"
+            );
+        }
     }
 
     #[test]

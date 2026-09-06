@@ -13,7 +13,7 @@
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
     read_u16_le, read_u32_le, read_u8, read_utf8, ACTIVATION_MODE_STORE_VAR_SITE,
-    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+    OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
 };
@@ -139,12 +139,20 @@ fn shadowed_binding_borrow_and_write_decode_to_distinct_string_table_roots() {
             // carries a resolved ActivationSiteId, promoting the artifact to
             // SEMCOD20/rev21, so every Borrow event carries an activation
             // tag (+ a 4-byte executable anchor for StoreVarSite) before its
-            // own root - the Write event (the shadowed reassignment) is
-            // unaffected and carries no such prefix, at any revision.
+            // own root.
             let mode = read_u8(code, &mut cursor).expect("activation mode");
             if mode == ACTIVATION_MODE_STORE_VAR_SITE {
                 let _anchor = read_u32_le(code, &mut cursor).expect("executable anchor");
             }
+        } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
+            // #1891 Checkpoint W2D: the shadowed reassignment's Write event
+            // now carries its own execution-mode tag + a 4-byte executable
+            // anchor before its root, at the identical rev21 gate as Borrow's
+            // prefix above (this program is already promoted to rev21 by its
+            // Borrow event, independent of this Write event's own promotion
+            // rule).
+            let _mode = read_u8(code, &mut cursor).expect("write execution mode");
+            let _anchor = read_u32_le(code, &mut cursor).expect("write executable anchor");
         }
         let root = read_u32_le(code, &mut cursor).expect("root") as usize;
         let component_count = read_u16_le(code, &mut cursor).expect("component count");

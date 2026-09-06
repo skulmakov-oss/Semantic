@@ -402,6 +402,25 @@ pub const SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION: u16 = HEADER_V20.rev;
 pub const ACTIVATION_MODE_FRAME_ENTRY: u8 = 0;
 pub const ACTIVATION_MODE_STORE_VAR_SITE: u8 = 1;
 
+/// #1891 Checkpoint W2D: OWN0 Write-event execution-mode tag, revision-gated
+/// at the same `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION` as Borrow's
+/// `ACTIVATION_MODE_*` above, occupying the identical wire position (right
+/// after the event's `kind` byte, before its path). Below this revision,
+/// OWN0's Write-event layout is unchanged from every prior revision and
+/// carries no execution-mode tag at all. At or above it, every Write event
+/// carries exactly one of these two tags, mirroring `ActivationSiteId`'s
+/// pairing discipline for the two valid Write producer instruction kinds
+/// (W1.5/W2A: `StoreVar` for producers A/B, `MakeRecord` for producer C).
+/// Deliberately a SEPARATE type/value space from `ACTIVATION_MODE_*` even
+/// though the numeric tags happen to overlap (0/1) - Borrow's activation
+/// authority and Write's execution-site class are different domains and must
+/// never be coupled just because they share a wire position and a revision
+/// gate. An unrecognized tag byte is a hard structural rejection
+/// (`DecodeError::InvalidOwnershipSection`) - never treated as either known
+/// mode by default, and never inferred from the path or from opcode bytes.
+pub const WRITE_EXECUTION_MODE_STORE_VAR_SITE: u8 = 0;
+pub const WRITE_EXECUTION_MODE_MAKE_RECORD_SITE: u8 = 1;
+
 pub const HEADER_V20: SemcodeHeaderSpec = SemcodeHeaderSpec {
     magic: MAGIC20,
     epoch: 0,

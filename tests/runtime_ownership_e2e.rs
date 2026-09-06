@@ -2,11 +2,11 @@
 use sm_emit::compile_program_to_semcode;
 use sm_ir::semcode_format::{
     header_spec_from_magic, read_u16_le, read_u32_le, read_u8, read_utf8,
-    ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE, MAGIC19, MAGIC20,
+    ACTIVATION_MODE_FRAME_ENTRY, ACTIVATION_MODE_STORE_VAR_SITE, MAGIC20,
     OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
     OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
     OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
-    SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION,
+    SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, WRITE_EXECUTION_MODE_STORE_VAR_SITE,
 };
 
 // #1726 Checkpoint D2a: a Tuple/Record Borrow event now always carries a
@@ -25,15 +25,24 @@ fn header_rev_of(bytes: &[u8]) -> u16 {
         .rev
 }
 
-/// Reads a Borrow event's activation-mode prefix if the header revision
-/// requires one, positioning `cursor` at the start of the event's `root`
-/// field either way. Write events never carry this prefix, at any revision.
+/// Reads a Borrow event's activation-mode prefix or a Write event's
+/// execution-mode prefix, whichever the event's own `kind` and the header
+/// revision require (#1891 Checkpoint W2D: Write gained the identical wire
+/// position as Borrow's existing activation-mode prefix, at the same
+/// revision gate), positioning `cursor` at the start of the event's `root`
+/// field either way.
 fn skip_borrow_activation_prefix(code: &[u8], cursor: &mut usize, kind: u8, header_rev: u16) {
-    if kind == OWNERSHIP_EVENT_KIND_BORROW && header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+    if header_rev < SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+        return;
+    }
+    if kind == OWNERSHIP_EVENT_KIND_BORROW {
         let mode = read_u8(code, cursor).expect("activation mode");
         if mode == ACTIVATION_MODE_STORE_VAR_SITE {
             let _ = read_u32_le(code, cursor).expect("executable anchor");
         }
+    } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
+        let _mode = read_u8(code, cursor).expect("write execution mode");
+        let _ = read_u32_le(code, cursor).expect("write executable anchor");
     }
 }
 use sm_runtime_core::RuntimeTrap;
@@ -75,7 +84,11 @@ const DETERMINISTIC_RUNS: usize = 8;
 #[test]
 fn runtime_ownership_sibling_write_passes_on_verified_path() {
     let bytes = compile_program_to_semcode(tuple_assignment_source()).expect("compile");
-    assert_eq!(&bytes[..8], &MAGIC19);
+    // #1891 Checkpoint W2D: the tuple-destructuring assignment's Write
+    // events now always carry a resolved WriteSiteId (Checkpoint W2C),
+    // promoting this artifact to SEMCOD20/rev21 - was SEMCOD19/rev20 before
+    // this checkpoint.
+    assert_eq!(&bytes[..8], &MAGIC20);
 
     let rewritten = rewrite_function_ownership_events(
         &bytes,
@@ -1149,18 +1162,28 @@ fn ownership_section_bytes(
             .position(|name| *name == lowered_key)
             .expect("resolved lowered key must be present in the string table it was resolved from")
             as u32;
-        // #1726 Checkpoint D2a: these are synthetic events, not resolved
-        // from a real compile, so there is no real ActivationSiteId/anchor
-        // to encode. `FrameEntry` is correct either way: sm-vm does not
-        // consult the wire activation tag at all yet (Checkpoint D3), so
-        // this only needs to satisfy the rev21 structural grammar, not
-        // express any particular activation semantics.
-        if event.kind == OWNERSHIP_EVENT_KIND_BORROW
-            && header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION
-        {
-            out.push(ACTIVATION_MODE_FRAME_ENTRY);
+        // #1726 Checkpoint D2a / #1891 Checkpoint W2D: these are synthetic
+        // events, not resolved from a real compile, so there is no real
+        // ActivationSiteId/WriteSiteId/anchor to encode. `FrameEntry` and
+        // `StoreVarSite(0)` are correct either way: sm-vm does not consult
+        // either wire mode tag's anchor yet (Borrow: Checkpoint D3, Write:
+        // Checkpoint W2E+), so this only needs to satisfy the rev21
+        // structural grammar, not express any particular activation/
+        // execution semantics. This prefix must land AFTER `kind` and
+        // BEFORE `root` on the wire, so it is passed into
+        // `append_ownership_event` rather than pushed directly onto `out`
+        // here - `out`'s very next byte is still `kind`, written first by
+        // that function.
+        let mut mode_prefix = Vec::new();
+        if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+            if event.kind == OWNERSHIP_EVENT_KIND_BORROW {
+                mode_prefix.push(ACTIVATION_MODE_FRAME_ENTRY);
+            } else if event.kind == OWNERSHIP_EVENT_KIND_WRITE {
+                mode_prefix.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
+                mode_prefix.extend_from_slice(&0u32.to_le_bytes());
+            }
         }
-        append_ownership_event(&mut out, event.kind, root, event.components);
+        append_ownership_event(&mut out, event.kind, &mode_prefix, root, event.components);
     }
     out
 }
@@ -1213,10 +1236,12 @@ fn resolve_unique_lowered_local_key_resolves_single_binding() {
 fn append_ownership_event(
     out: &mut Vec<u8>,
     kind: u8,
+    mode_prefix: &[u8],
     root: u32,
     components: &[OwnershipPathComponentSpec],
 ) {
     out.push(kind);
+    out.extend_from_slice(mode_prefix);
     out.extend_from_slice(&root.to_le_bytes());
     out.extend_from_slice(&(components.len() as u16).to_le_bytes());
     for component in components {

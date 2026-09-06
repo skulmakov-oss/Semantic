@@ -4012,9 +4012,11 @@ mod tests {
     use crate::semcode_format::read_utf8;
     use sm_emit::{
         compile_program_to_semcode, compile_program_to_semcode_with_options, CompileProfile,
-        OptLevel, OWNERSHIP_EVENT_KIND_BORROW, OWNERSHIP_EVENT_KIND_WRITE,
-        OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
-        OWNERSHIP_SECTION_TAG, SIGNATURE_SECTION_TAG,
+        OptLevel, ACTIVATION_MODE_FRAME_ENTRY, OWNERSHIP_EVENT_KIND_BORROW,
+        OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
+        OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX, OWNERSHIP_SECTION_TAG,
+        SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION, SIGNATURE_SECTION_TAG,
+        WRITE_EXECUTION_MODE_STORE_VAR_SITE,
     };
     use sm_ir::{emit_ir_to_semcode, IrFunction, IrInstr};
     use sm_runtime_core::{
@@ -7256,8 +7258,9 @@ mod tests {
         let code_start = cursor;
         let code_end = code_start + code_len;
         let code = &bytes[code_start..code_end];
-        let (_, mut decoded_functions) =
+        let (header, mut decoded_functions) =
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let header_rev = header.rev;
         let env = decoded_functions.remove(0);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
@@ -7287,12 +7290,14 @@ mod tests {
             OWNERSHIP_EVENT_KIND_BORROW,
             e_root,
             borrowed_adt,
+            header_rev,
         );
         append_adt_payload_ownership_event(
             &mut out_ownership,
             OWNERSHIP_EVENT_KIND_WRITE,
             e_root,
             write_adt,
+            header_rev,
         );
 
         new_code.extend_from_slice(&out_ownership);
@@ -7311,8 +7316,23 @@ mod tests {
         kind: u8,
         root: u32,
         adt: Option<(u32, u16)>,
+        header_rev: u16,
     ) {
         out.push(kind);
+        // #1891 Checkpoint W2D: these are synthetic events, not resolved
+        // from a real compile, so there is no real anchor to encode -
+        // mirrors `ownership_section_bytes` in tests/runtime_ownership_e2e.rs.
+        // sm-vm does not consult either mode tag's anchor yet, so any valid
+        // tag satisfies the rev21 structural grammar without expressing a
+        // particular activation/execution semantic.
+        if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+            if kind == OWNERSHIP_EVENT_KIND_BORROW {
+                out.push(ACTIVATION_MODE_FRAME_ENTRY);
+            } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
+                out.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
+                out.extend_from_slice(&0u32.to_le_bytes());
+            }
+        }
         out.extend_from_slice(&root.to_le_bytes());
         match adt {
             Some((variant, index)) => {
@@ -7399,8 +7419,9 @@ mod tests {
         let code_start = cursor;
         let code_end = code_start + code_len;
         let code = &bytes[code_start..code_end];
-        let (_, mut decoded_functions) =
+        let (header, mut decoded_functions) =
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let header_rev = header.rev;
         let env = decoded_functions.remove(0);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
@@ -7424,6 +7445,7 @@ mod tests {
             &strings,
             borrowed_field,
             write_field,
+            header_rev,
         ));
         new_code.extend_from_slice(&code[own0_end..]);
 
@@ -7440,6 +7462,7 @@ mod tests {
         strings: &[String],
         borrowed_field: Option<&str>,
         write_field: Option<&str>,
+        header_rev: u16,
     ) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&OWNERSHIP_SECTION_TAG);
@@ -7450,6 +7473,7 @@ mod tests {
             root,
             strings,
             borrowed_field,
+            header_rev,
         );
         append_record_field_ownership_event(
             &mut out,
@@ -7457,6 +7481,7 @@ mod tests {
             root,
             strings,
             write_field,
+            header_rev,
         );
         out
     }
@@ -7467,8 +7492,19 @@ mod tests {
         root: u32,
         strings: &[String],
         field: Option<&str>,
+        header_rev: u16,
     ) {
         out.push(kind);
+        // #1891 Checkpoint W2D: see `append_adt_payload_ownership_event`'s
+        // identical rationale above.
+        if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+            if kind == OWNERSHIP_EVENT_KIND_BORROW {
+                out.push(ACTIVATION_MODE_FRAME_ENTRY);
+            } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
+                out.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
+                out.extend_from_slice(&0u32.to_le_bytes());
+            }
+        }
         out.extend_from_slice(&root.to_le_bytes());
         match field {
             Some(field_name) => {
@@ -7515,8 +7551,9 @@ mod tests {
         let code_start = cursor;
         let code_end = code_start + code_len;
         let code = &bytes[code_start..code_end];
-        let (_, mut decoded_functions) =
+        let (header, mut decoded_functions) =
             sm_format::semcode_decode::decode_semcode_envelope(&bytes).expect("decode");
+        let header_rev = header.rev;
         let env = decoded_functions.remove(0);
         let strings = env.strings;
         let instr_start = env.instr_start_offset;
@@ -7544,6 +7581,7 @@ mod tests {
             total_root,
             borrowed_components,
             write_components,
+            header_rev,
         ));
         new_code.extend_from_slice(&code[own0_end..]);
 
@@ -7559,6 +7597,7 @@ mod tests {
         root: u32,
         borrowed_components: &[u16],
         write_components: &[u16],
+        header_rev: u16,
     ) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(&OWNERSHIP_SECTION_TAG);
@@ -7568,13 +7607,36 @@ mod tests {
             OWNERSHIP_EVENT_KIND_BORROW,
             root,
             borrowed_components,
+            header_rev,
         );
-        append_ownership_event(&mut out, OWNERSHIP_EVENT_KIND_WRITE, root, write_components);
+        append_ownership_event(
+            &mut out,
+            OWNERSHIP_EVENT_KIND_WRITE,
+            root,
+            write_components,
+            header_rev,
+        );
         out
     }
 
-    fn append_ownership_event(out: &mut Vec<u8>, kind: u8, root: u32, components: &[u16]) {
+    fn append_ownership_event(
+        out: &mut Vec<u8>,
+        kind: u8,
+        root: u32,
+        components: &[u16],
+        header_rev: u16,
+    ) {
         out.push(kind);
+        // #1891 Checkpoint W2D: see `append_adt_payload_ownership_event`'s
+        // identical rationale above.
+        if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+            if kind == OWNERSHIP_EVENT_KIND_BORROW {
+                out.push(ACTIVATION_MODE_FRAME_ENTRY);
+            } else if kind == OWNERSHIP_EVENT_KIND_WRITE {
+                out.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
+                out.extend_from_slice(&0u32.to_le_bytes());
+            }
+        }
         out.extend_from_slice(&root.to_le_bytes());
         out.extend_from_slice(&(components.len() as u16).to_le_bytes());
         for index in components {

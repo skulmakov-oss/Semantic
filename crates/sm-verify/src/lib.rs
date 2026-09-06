@@ -4089,8 +4089,8 @@ fn diag(
 mod tests {
     use super::*;
     use sm_format::semcode_format::{
-        read_u16_le, read_u32_le, CallableValueFamily, MAGIC0, MAGIC10, MAGIC11, MAGIC18, MAGIC19,
-        MAGIC20, MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG,
+        read_u16_le, read_u32_le, CallableValueFamily, MAGIC0, MAGIC10, MAGIC11, MAGIC18, MAGIC20,
+        MAGIC3, MAGIC4, MAGIC5, MAGIC6, MAGIC7, OWNERSHIP_SECTION_TAG,
     };
     use sm_ir::{
         compile_program_to_semcode, compile_program_to_semcode_with_options_debug,
@@ -5242,9 +5242,13 @@ mod tests {
     #[test]
     fn verifier_accepts_record_field_write_ownership_semcode() {
         let bytes = record_field_write_semcode_bytes();
-        assert_eq!(&bytes[..MAGIC19.len()], &MAGIC19);
+        // #1891 Checkpoint W2D: this RecordUpdate's Write event now always
+        // carries a resolved WriteSiteId (Checkpoint W2C), promoting this
+        // artifact to SEMCOD20/rev21 - was SEMCOD19/rev20 before this
+        // checkpoint.
+        assert_eq!(&bytes[..MAGIC20.len()], &MAGIC20);
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 21);
         assert_eq!(verified.functions.len(), 1);
     }
 
@@ -5269,9 +5273,13 @@ mod tests {
             }
         "#;
         let bytes = compile_program_to_semcode(src).expect("compile");
-        assert_eq!(&bytes[..MAGIC19.len()], b"SEMCOD19");
+        // #1891 Checkpoint W2D: `found ||= true;` is a plain reassignment
+        // (producer B), which now always carries a resolved WriteSiteId
+        // (Checkpoint W2C), promoting this artifact to SEMCOD20/rev21 - was
+        // SEMCOD19/rev20 (the SIG0 floor) before this checkpoint.
+        assert_eq!(&bytes[..MAGIC20.len()], b"SEMCOD20");
         let verified = verify_semcode(&bytes).expect("verify");
-        assert_eq!(verified.header.rev, 20);
+        assert_eq!(verified.header.rev, 21);
         assert_eq!(verified.functions.len(), 2);
     }
 
@@ -10424,8 +10432,9 @@ mod tests {
     fn store_var_site_anchor_field_offsets(code: &[u8]) -> Vec<usize> {
         use sm_format::semcode_format::{
             ACTIVATION_MODE_STORE_VAR_SITE, OWNERSHIP_EVENT_KIND_BORROW,
-            OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD, OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL,
-            OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX, OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
+            OWNERSHIP_EVENT_KIND_WRITE, OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+            OWNERSHIP_PATH_COMPONENT_FIELD_SYMBOL, OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+            OWNERSHIP_PATH_COMPONENT_TUPLE_INDEX,
         };
         let section_offset = ownership_section_offset(code);
         let mut cursor = section_offset + OWNERSHIP_SECTION_TAG.len();
@@ -10436,17 +10445,25 @@ mod tests {
             let kind = code[cursor];
             cursor += 1;
             // Mirrors `sm_format::semcode_decode`'s own gate exactly: the
-            // activation-mode byte exists ONLY for Borrow-kind events. A
-            // Write event has no mode byte at all, at any revision - reading
-            // one unconditionally here (as an earlier version of this
-            // helper did) silently misparses the very next event's own
-            // `root_symbol_id` byte as a "mode", corrupting every offset
-            // after it.
+            // activation-mode byte exists for Borrow-kind events, and (as of
+            // #1891 Checkpoint W2D) an execution-mode byte exists for
+            // Write-kind events too - both at the same wire position, both
+            // gated at the same revision. This function only cares about
+            // Borrow/StoreVarSite anchor offsets, but it must still correctly
+            // skip a Write event's own mode(+anchor) bytes to keep the
+            // cursor aligned for every event after it; reading neither (as
+            // an earlier version of this helper did for Write) silently
+            // misparses the very next event's own `root_symbol_id` byte,
+            // corrupting every offset after it.
             let is_store_var_site = if kind == OWNERSHIP_EVENT_KIND_BORROW {
                 let mode = code[cursor];
                 cursor += 1;
                 mode == ACTIVATION_MODE_STORE_VAR_SITE
             } else {
+                if kind == OWNERSHIP_EVENT_KIND_WRITE {
+                    cursor += 1; // write execution mode
+                    cursor += 4; // write executable anchor
+                }
                 false
             };
             if is_store_var_site {
