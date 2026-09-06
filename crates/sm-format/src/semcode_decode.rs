@@ -505,6 +505,28 @@ fn parse_string_table_debug_and_ownership(
                         components.push(DecodedAccessPathComponent::FieldSymbol(field));
                     }
                     OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD => {
+                        // #1718: `Write(AdtPayload)` is not an admitted
+                        // SemCode ownership path under any header revision,
+                        // current or future, without a separate, explicitly
+                        // authorized contract change - see
+                        // `CAP_OWNERSHIP_ADT_BORROW_PATHS`'s doc comment.
+                        // Checked before `Borrow`'s revision floor below so
+                        // the rejection reason is unambiguous even at/above
+                        // `SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION`.
+                        if kind == OWNERSHIP_EVENT_KIND_WRITE {
+                            return Err(DecodeError::InvalidOwnershipSection {
+                                offset: diag_offset(base_offset, cursor),
+                                msg: "Write(AdtPayload) is not an admitted ownership path \
+                                      under any header revision",
+                            });
+                        }
+                        if header_rev < SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION {
+                            return Err(DecodeError::InvalidOwnershipSection {
+                                offset: diag_offset(base_offset, cursor),
+                                msg: "Borrow(AdtPayload) requires a header at or above \
+                                      SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION",
+                            });
+                        }
                         let variant = read_u32_le(code, &mut cursor).map_err(|_| {
                             DecodeError::InvalidOwnershipSection {
                                 offset: diag_offset(base_offset, cursor),
@@ -520,6 +542,16 @@ fn parse_string_table_debug_and_ownership(
                         components.push(DecodedAccessPathComponent::AdtPayload { variant, index });
                     }
                     OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX => {
+                        // #1718: admitted for both Borrow and Write, but only
+                        // at or above the header revision that carries
+                        // explicit Sequence ownership capability authority.
+                        if header_rev < SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION {
+                            return Err(DecodeError::InvalidOwnershipSection {
+                                offset: diag_offset(base_offset, cursor),
+                                msg: "SequenceIndexStatic requires a header at or above \
+                                      SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION",
+                            });
+                        }
                         let index = read_u32_le(code, &mut cursor).map_err(|_| {
                             DecodeError::InvalidOwnershipSection {
                                 offset: diag_offset(base_offset, cursor),
@@ -663,7 +695,7 @@ fn parse_string_table_debug_and_ownership(
 mod tests {
     use super::*;
 
-    fn sequence_ownership_semcode_bytes(index: u32) -> Vec<u8> {
+    fn sequence_ownership_code_bytes(index: u32) -> Vec<u8> {
         let mut code = Vec::new();
         code.extend_from_slice(&0u16.to_le_bytes());
         code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
@@ -673,11 +705,20 @@ mod tests {
         code.extend_from_slice(&1u16.to_le_bytes());
         code.push(OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX);
         code.extend_from_slice(&index.to_le_bytes());
+        code
+    }
 
+    // #1718: retained under its original (pre-#1718) name and shape - this
+    // helper predates the path-family capability gate and was the fixture
+    // `decode_sequence_index_static_ownership_component` used to prove
+    // successful decode under `MAGIC11`. It now proves the opposite (legacy
+    // rejection); see that test below.
+    fn sequence_ownership_semcode_bytes(index: u32) -> Vec<u8> {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&MAGIC11);
         bytes.extend_from_slice(&4u16.to_le_bytes());
         bytes.extend_from_slice(b"main");
+        let code = sequence_ownership_code_bytes(index);
         bytes.extend_from_slice(&(code.len() as u32).to_le_bytes());
         bytes.extend_from_slice(&code);
         bytes
@@ -816,16 +857,186 @@ mod tests {
         assert_eq!(checked_end(97, 4, 100), None);
     }
 
+    // #1718: header-grammar-aware ownership-event fixture builders. Unlike
+    // `sequence_ownership_code_bytes` above (frozen at MAGIC11's pre-rev21
+    // grammar on purpose, for the legacy-rejection test that reuses it),
+    // these build a well-formed event for *any* header revision under test -
+    // at/above `SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION` (21) every event
+    // carries a mode/execution byte (see `decode_rev21_header_borrow_frame_entry_round_trips`
+    // and `decode_rev21_header_write_event_store_var_site_round_trips` above),
+    // and at/above `SEMCODE_SIGNATURE_MIN_REVISION` (20) every function
+    // envelope carries a `SIG0` section. Getting this wrong would make a
+    // rejection test pass for the wrong reason (malformed bytes) instead of
+    // the reason under test (missing path-family capability authority).
+    fn ownership_borrow_event_bytes(
+        header_rev: u16,
+        component_kind: u8,
+        component_payload: &[u8],
+    ) -> Vec<u8> {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes()); // empty string table
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes()); // 1 ownership event
+        code.push(OWNERSHIP_EVENT_KIND_BORROW);
+        if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+            code.push(ACTIVATION_MODE_FRAME_ENTRY);
+        }
+        code.extend_from_slice(&0u32.to_le_bytes()); // root_symbol_id
+        code.extend_from_slice(&1u16.to_le_bytes()); // 1 component
+        code.push(component_kind);
+        code.extend_from_slice(component_payload);
+        if header_rev >= SEMCODE_SIGNATURE_MIN_REVISION {
+            code.extend_from_slice(&empty_sig0());
+        }
+        code
+    }
+
+    fn ownership_write_event_bytes(
+        header_rev: u16,
+        component_kind: u8,
+        component_payload: &[u8],
+    ) -> Vec<u8> {
+        let mut code = Vec::new();
+        code.extend_from_slice(&0u16.to_le_bytes());
+        code.extend_from_slice(&OWNERSHIP_SECTION_TAG);
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(OWNERSHIP_EVENT_KIND_WRITE);
+        if header_rev >= SEMCODE_OWNERSHIP_ANCHOR_MIN_REVISION {
+            code.push(WRITE_EXECUTION_MODE_STORE_VAR_SITE);
+            code.extend_from_slice(&0u32.to_le_bytes()); // executable anchor
+        }
+        code.extend_from_slice(&0u32.to_le_bytes()); // root_symbol_id
+        code.extend_from_slice(&1u16.to_le_bytes());
+        code.push(component_kind);
+        code.extend_from_slice(component_payload);
+        if header_rev >= SEMCODE_SIGNATURE_MIN_REVISION {
+            code.extend_from_slice(&empty_sig0());
+        }
+        code
+    }
+
+    fn magic_rev(magic: [u8; 8]) -> u16 {
+        header_spec_from_magic(&magic).expect("known magic").rev
+    }
+
+    // #1718: before the path-family capability gate, `MAGIC11` (bare
+    // `CAP_OWNERSHIP_PATHS`, tuple-only per `docs/spec/semcode.md`) admitted
+    // a `SequenceIndexStatic` component with no contract authority for it at
+    // all - the exact gap the frozen decision (PR #1895) requires closed.
+    // This is now a legacy fail-closed rejection test, not a positive one.
     #[test]
-    fn decode_sequence_index_static_ownership_component() {
+    fn decode_sequence_index_static_ownership_component_rejected_under_legacy_header() {
         let bytes = sequence_ownership_semcode_bytes(7);
-        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode");
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject under MAGIC11");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    #[test]
+    fn decode_sequence_index_static_ownership_component_admitted_under_v21() {
+        let code = ownership_borrow_event_bytes(
+            magic_rev(MAGIC21),
+            OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+            &7u32.to_le_bytes(),
+        );
+        let bytes = function_bytes_with_header(MAGIC21, "main", &code);
+        let (header, functions) = decode_semcode_envelope(&bytes).expect("decode under V21");
+        assert_eq!(header.rev, SEMCODE_SEQUENCE_OWNERSHIP_MIN_REVISION);
         let env = &functions[0];
         assert_eq!(env.borrowed_paths.len(), 1);
         assert_eq!(
             env.borrowed_paths[0].components,
             vec![DecodedAccessPathComponent::SequenceIndexStatic(7)]
         );
+    }
+
+    #[test]
+    fn decode_sequence_write_rejected_under_legacy_header() {
+        let code = ownership_write_event_bytes(
+            magic_rev(MAGIC20),
+            OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+            &3u32.to_le_bytes(),
+        );
+        let bytes = function_bytes_with_header(MAGIC20, "main", &code);
+        let err = decode_semcode_envelope(&bytes).expect_err("must reject under MAGIC20");
+        assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+    }
+
+    #[test]
+    fn decode_sequence_write_admitted_under_v21() {
+        let code = ownership_write_event_bytes(
+            magic_rev(MAGIC21),
+            OWNERSHIP_PATH_COMPONENT_SEQUENCE_INDEX,
+            &3u32.to_le_bytes(),
+        );
+        let bytes = function_bytes_with_header(MAGIC21, "main", &code);
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode under V21");
+        assert_eq!(functions[0].write_paths.len(), 1);
+        assert_eq!(
+            functions[0].write_paths[0].components,
+            vec![DecodedAccessPathComponent::SequenceIndexStatic(3)]
+        );
+    }
+
+    fn adt_payload_bytes(variant: u32, index: u16) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&variant.to_le_bytes());
+        payload.extend_from_slice(&index.to_le_bytes());
+        payload
+    }
+
+    #[test]
+    fn decode_adt_borrow_rejected_under_legacy_header() {
+        for magic in [MAGIC11, MAGIC12, MAGIC20] {
+            let code = ownership_borrow_event_bytes(
+                magic_rev(magic),
+                OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+                &adt_payload_bytes(9, 1),
+            );
+            let bytes = function_bytes_with_header(magic, "main", &code);
+            let err = decode_semcode_envelope(&bytes).expect_err(
+                "Borrow(AdtPayload) must reject below SEMCODE_ADT_BORROW_OWNERSHIP_MIN_REVISION",
+            );
+            assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+        }
+    }
+
+    #[test]
+    fn decode_adt_borrow_admitted_under_v21() {
+        let code = ownership_borrow_event_bytes(
+            magic_rev(MAGIC21),
+            OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+            &adt_payload_bytes(9, 1),
+        );
+        let bytes = function_bytes_with_header(MAGIC21, "main", &code);
+        let (_, functions) = decode_semcode_envelope(&bytes).expect("decode under V21");
+        assert_eq!(functions[0].borrowed_paths.len(), 1);
+        assert_eq!(
+            functions[0].borrowed_paths[0].components,
+            vec![DecodedAccessPathComponent::AdtPayload {
+                variant: 9,
+                index: 1
+            }]
+        );
+    }
+
+    // #1718: `Write(AdtPayload)` is unconditionally rejected - not merely
+    // "not yet promoted" - under every header, including V21, which DOES
+    // carry `CAP_OWNERSHIP_ADT_BORROW_PATHS`. The frozen contract (PR #1895)
+    // admits ADT Borrow only; Write is a distinct, independently-decided
+    // admission domain.
+    #[test]
+    fn decode_adt_write_rejected_under_every_header_including_v21() {
+        for magic in [MAGIC11, MAGIC12, MAGIC20, MAGIC21] {
+            let code = ownership_write_event_bytes(
+                magic_rev(magic),
+                OWNERSHIP_PATH_COMPONENT_ADT_PAYLOAD,
+                &adt_payload_bytes(9, 1),
+            );
+            let bytes = function_bytes_with_header(magic, "main", &code);
+            let err = decode_semcode_envelope(&bytes)
+                .expect_err("Write(AdtPayload) must reject under every header");
+            assert!(matches!(err, DecodeError::InvalidOwnershipSection { .. }));
+        }
     }
 
     // #1773 (FA-09-005) format tests: the SIG0 section.
